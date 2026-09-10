@@ -44,6 +44,15 @@ function runLangGraphAguiModelProbe(
       [
         "import json",
         "import os",
+        "import sys",
+        "from types import ModuleType",
+        "from ag_ui_langgraph import LangGraphAgent",
+        // This probe tests provider configuration without framework dependencies.
+        // Real tool execution is covered by the Python protocol regressions.
+        "tools = ModuleType('src.tool_runtime')",
+        "tools.ToolAwareAgent = LangGraphAgent",
+        "tools.bind_tools = tools.execute_tools = tools.next_step = lambda *args: None",
+        "sys.modules['src.tool_runtime'] = tools",
         "from src import main",
         "chosen = main._model()",
         "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), **chosen}))",
@@ -103,6 +112,8 @@ function runLangGraphAguiModelProbe(
         "        pass",
         "    def add_edge(self, *_args, **_kwargs):",
         "        pass",
+        "    def add_conditional_edges(self, *_args, **_kwargs):",
+        "        pass",
         "    def compile(self, **_kwargs):",
         "        return object()",
         "",
@@ -121,6 +132,7 @@ function runLangGraphAguiModelProbe(
       OPENAI_API_KEY: options.openaiApiKey ?? "sk-test",
       PYTHONPATH: `${dir}:${join(import.meta.dir, "..", "agent-langgraph-agui")}`,
     };
+    delete env.CHATGPT_AUTH_FILE;
     if (options.botProvider !== undefined) {
       env.BOT_PROVIDER = options.botProvider;
     } else {
@@ -396,4 +408,17 @@ test("carries per-Bot egress into the computer and the supervisor", () => {
 
   // Optional, because a deployment with no proxy is the ordinary case and must still start.
   expect(compose).toContain("required: false");
+});
+
+test("gives the selected harness the same governed callback as the framework Bot", () => {
+  const config = runComposeConfig({
+    OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
+    AGENT_TOOL_TOKEN: "synthetic-callback-token",
+  });
+  for (const service of ["agent-harness", "agent-langgraph"]) {
+    expect(config.services[service].environment).toMatchObject({
+      OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
+      AGENT_TOOL_TOKEN: "synthetic-callback-token",
+    });
+  }
 });

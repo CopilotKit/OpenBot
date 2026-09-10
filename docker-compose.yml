@@ -311,6 +311,9 @@ services:
     environment:
       # Every harness refuses without this; it is what makes the endpoint the server's alone.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      # Deployment-owned tools use the same signed callback as agent-langgraph.
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
       # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
       # rest, and the ones the choice did not imply are written empty rather than left stale: see
       # `ModelCredential`.

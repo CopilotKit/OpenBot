@@ -8,12 +8,14 @@ package the AG-UI project maintains, so the protocol stops being ours to keep wo
 import os
 from pathlib import Path
 
-from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
+from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph import START, MessagesState, StateGraph
+
+from .tool_runtime import ToolAwareAgent, bind_tools, execute_tools, next_step
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -151,13 +153,15 @@ def _model():
 
 
 async def answer(state: MessagesState):
-    return {"messages": [await _model().ainvoke(state["messages"])]}
+    return {"messages": [await bind_tools(_model()).ainvoke(state["messages"])]}
 
 
 builder = StateGraph(MessagesState)
 builder.add_node("answer", answer)
 builder.add_edge(START, "answer")
-builder.add_edge("answer", END)
+builder.add_node("tools", execute_tools)
+builder.add_conditional_edges("answer", next_step)
+builder.add_edge("tools", "answer")
 # A checkpointer, because the AG-UI integration resumes a thread by id and LangGraph refuses to
 # without one. In memory rather than in Postgres: OpenBot's database is where a conversation lives,
 # and two stores remembering the same thread is how they come to disagree.
@@ -183,6 +187,8 @@ async def health():
 
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=LangGraphAgent(name="openbot", graph=graph),
+    agent=ToolAwareAgent(
+        name="openbot", graph=graph, config={"recursion_limit": 25}
+    ),
     path="/",
 )
