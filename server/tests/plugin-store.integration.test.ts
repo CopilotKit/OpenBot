@@ -3896,10 +3896,18 @@ test("a version a model supplied cannot stand in for an action with none recorde
   // vendor, rather than failing on a boolean that names nothing.
   expect(calls).toEqual([]);
 
-  // The transport's refusal, which is the advertised answer for an action with no recorded version —
-  // and an operator's one-click fix, rather than a call against a revision a model named.
+  // The transport's refusal, which is the advertised answer for an action with no recorded version,
+  // rather than a call against a revision a model named. The sentence offers a refresh CONDITIONALLY
+  // — it recovers the action only where Composio publishes a version for it — because where the
+  // vendor publishes none, no number of refreshes will make the action callable, and promising a
+  // one-click fix that cannot work sends an operator round a loop.
   expect(result.isError).toBe(true);
-  expect(result.text).toMatch(/Refresh this app's tools on its Plugins page/);
+  expect(result.text).toMatch(
+    /Refreshing this app's tools on its Plugins page recovers it only if/,
+  );
+  expect(result.text).toMatch(
+    /Where Composio publishes none, no refresh will make it callable/,
+  );
 });
 
 /*
