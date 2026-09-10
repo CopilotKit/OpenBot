@@ -1239,14 +1239,24 @@ describe("refresh token rotation", () => {
     sent.length = 0;
   }
 
-  let notionWasAlreadyConfigured = false;
+  /**
+   * Whether THIS RUN is what put the `notion` row there, and so is what should take it away.
+   *
+   * Counting creations rather than absences, the same way round as {@link suiteCreatedServerRow} and
+   * for the same reason: `afterAll` runs even when the `beforeAll` below it has thrown, and a flag
+   * still sitting at its initialiser then authorised the delete. Only a capture that ran and found
+   * the row missing can write the value the delete needs.
+   */
+  let suiteCreatedNotionRow = false;
   /**
    * The OAuth client this deployment had before the suite ran, restored afterwards.
    *
-   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restored
-   * unconditionally, because the delete below removes the row it would otherwise still address.
+   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. `undefined` is
+   * "nobody looked", which is what the value is until the capture below runs and is what it is still
+   * sitting at if that `beforeAll` threw first — and a restore that treated it as `null` would not be
+   * restoring anything, it would be blanking a real deployment's client on the way out.
    */
-  let clientBefore: string | null = null;
+  let clientBefore: string | null | undefined;
 
   beforeAll(async () => {
     await database
@@ -1272,7 +1282,7 @@ describe("refresh token rotation", () => {
       .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
       .from(mcpServers)
       .where(eq(mcpServers.id, rotationServerId));
-    notionWasAlreadyConfigured = existing !== undefined;
+    suiteCreatedNotionRow = existing === undefined;
     clientBefore = existing?.credentialId ?? null;
 
     // Written directly, so the test needs no vendor to be reachable. What is under test is which
@@ -1314,11 +1324,15 @@ describe("refresh token rotation", () => {
           eq(mcpUserCredentials.userId, rotationUserId),
         ),
       );
-    // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, rotationServerId));
+    // Before the deletes, because the column addresses one of the rows they remove. Only when the
+    // capture actually ran: `undefined` is nobody having looked, and writing that back as null is
+    // not a restore.
+    if (clientBefore !== undefined) {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: clientBefore })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
     for (const id of vaultRows) {
       await database.delete(credentials).where(eq(credentials.id, id));
     }
@@ -1339,7 +1353,7 @@ describe("refresh token rotation", () => {
         ),
       );
     // A server row is deployment configuration, so it goes only if this suite is what added it.
-    if (!notionWasAlreadyConfigured) {
+    if (suiteCreatedNotionRow) {
       await database
         .delete(mcpTools)
         .where(eq(mcpTools.serverId, rotationServerId));
@@ -1868,7 +1882,15 @@ describe("a dynamic client the vendor has evicted", () => {
    *
    * Genuine rather than stubbed, because what this suite asserts is that a re-registered client is
    * KEPT — which is a write and a read back through the encryption, not a call that was made. The
-   * one wrapper is the bookkeeping that lets the cleanup take exactly this suite's rows.
+   * wrappers are the bookkeeping that lets the cleanup take exactly this suite's rows.
+   *
+   * BOTH ways a row is minted, not just the first. `create` is the vault's answer when the key holds
+   * no live row; `rotate` is its answer when one does, and `recordConnection` and `storeOAuthClient`
+   * each pick between them on exactly that. So every reconnect after the first and every
+   * re-registration after the first went through `rotate` — which the spread handed straight to the
+   * real vault, unrecorded. This suite reconnects and re-registers repeatedly, and each run left
+   * thirteen `notion` credential rows nothing would ever remove, the last of them LIVE: an
+   * `mcp_user_token` for a person, unrevoked and referenced by nothing.
    */
   const realVault = createCredentialStore(database);
   const vault = {
@@ -1887,6 +1909,15 @@ describe("a dynamic client the vendor has evicted", () => {
       executor?: Parameters<typeof realVault.create>[1],
     ) => {
       const row = await realVault.create(value, executor);
+      vaultRows.push(row.id);
+      return row;
+    },
+    /** The same forwarding, for the same reason: `rotate` runs inside the caller's transaction too. */
+    rotate: async (
+      value: Parameters<typeof realVault.rotate>[0],
+      executor?: Parameters<typeof realVault.rotate>[1],
+    ) => {
+      const row = await realVault.rotate(value, executor);
       vaultRows.push(row.id);
       return row;
     },
@@ -2098,9 +2129,15 @@ describe("a dynamic client the vendor has evicted", () => {
       actorId: dynamicUserId,
     });
 
-  let notionWasAlreadyConfigured = false;
-  /** This deployment's own client, restored afterwards: the column is live configuration. */
-  let clientBefore: string | null = null;
+  /** Whether THIS RUN put the `notion` row there. Counted, never inferred from an absence. */
+  let suiteCreatedNotionRow = false;
+  /**
+   * This deployment's own client, restored afterwards: the column is live configuration.
+   *
+   * `undefined` until the capture runs, so a `beforeAll` that dies before it leaves a teardown that
+   * knows it has nothing to put back rather than one that writes null over somebody's client.
+   */
+  let clientBefore: string | null | undefined;
 
   // The vendor refuses the ordinary way unless a test says otherwise, so a test that varies the
   // refusal cannot leave the next one asserting against somebody else's setup.
@@ -2132,7 +2169,7 @@ describe("a dynamic client the vendor has evicted", () => {
       .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
       .from(mcpServers)
       .where(eq(mcpServers.id, dynamicServerId));
-    notionWasAlreadyConfigured = existing !== undefined;
+    suiteCreatedNotionRow = existing === undefined;
     clientBefore = existing?.credentialId ?? null;
 
     await database
@@ -2170,11 +2207,14 @@ describe("a dynamic client the vendor has evicted", () => {
           eq(mcpUserCredentials.userId, dynamicUserId),
         ),
       );
-    // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, dynamicServerId));
+    // Before the deletes, because the column addresses one of the rows they remove. Skipped
+    // entirely when no capture ran, for the reason on {@link clientBefore}.
+    if (clientBefore !== undefined) {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: clientBefore })
+        .where(eq(mcpServers.id, dynamicServerId));
+    }
     for (const id of vaultRows) {
       await database.delete(credentials).where(eq(credentials.id, id));
     }
@@ -2194,7 +2234,7 @@ describe("a dynamic client the vendor has evicted", () => {
           eq(mcpTools.name, dynamicToolName),
         ),
       );
-    if (!notionWasAlreadyConfigured) {
+    if (suiteCreatedNotionRow) {
       await database
         .delete(mcpTools)
         .where(eq(mcpTools.serverId, dynamicServerId));
@@ -3074,12 +3114,16 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     await database
       .delete(mcpServers)
       .where(like(mcpServers.id, `${customServerId}%`));
+    // Every id the `beforeAll` above minted, which is the list this one has to match. The upsert's
+    // own token was missing from it, so each run left one live `mcp` credential behind for a server
+    // that no longer exists — a secret in the vault reachable from nothing.
     await database
       .delete(credentialRows)
       .where(
         inArray(credentialRows.id, [
           deploymentCredentialId,
           personalCredentialId,
+          upsertCredentialId,
           oauthClientCredentialId,
         ]),
       );
@@ -3574,9 +3618,9 @@ afterEach(() => useComposioClient(null));
  * {@link freshDatabase} cleans BEFORE each test, so without this the final test's rows are
  * permanent: a `notion` server row and a `notion-fetch` action nobody configured, which makes
  * whatever database this ran against advertise a connector nobody set up. Worse on the next run —
- * the rotation and dynamic-registration suites above capture `notionWasAlreadyConfigured` from the
- * leak, correctly decline to clean what looks like the deployment's own row, and leave the
- * unconditional delete as the only thing that removes it.
+ * the rotation and dynamic-registration suites above read the leak as a row they did not create,
+ * correctly decline to clean what looks like the deployment's own, and leave this delete as the only
+ * thing that removes it.
  *
  * Exactly what this file created, and only when the guard cleared the run to own these ids.
  */
