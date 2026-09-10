@@ -5291,21 +5291,47 @@ fn main() {
     let mode = &args[2];
     let statuses: Vec<&str> = mode.split(',').collect();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    std::fs::write(format!("{name}.port"), listener.local_addr().unwrap().port().to_string()).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut listeners = vec![listener];
+    // An unbound IPv6 fallback takes about two seconds to refuse on Windows. Serve the
+    // same status on both loopbacks so the regression tests HTTP state, not that delay.
+    match std::net::TcpListener::bind(("::1", port)) {
+        Ok(listener) => listeners.push(listener),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported) => {}
+        Err(error) => panic!("could not bind fixture IPv6 loopback: {}", error),
+    }
+    for listener in &listeners { listener.set_nonblocking(true).unwrap(); }
     let mut requests = std::fs::File::create(format!("{name}.requests")).unwrap();
-    for (index, stream) in listener.incoming().enumerate() {
-        let mut stream = stream.unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
-        let mut request = Vec::new();
-        while !request.ends_with(b"\r\n\r\n") {
-            let mut byte = [0];
-            if stream.read(&mut byte).unwrap() == 0 { break; }
-            request.push(byte[0]);
+    std::fs::write(format!("{name}.port"), port.to_string()).unwrap();
+    let mut ipv4_requests = 0_usize;
+    loop {
+        for listener in &listeners {
+            let (mut stream, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(error) => panic!("could not accept fixture request: {}", error),
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                if stream.read(&mut byte).unwrap() == 0 { break; }
+                request.push(byte[0]);
+            }
+            // answering_at tries IPv4 first. Its IPv6 fallback belongs to that same poll,
+            // and must not advance the scripted response to the next service state.
+            let index = if listener.local_addr().unwrap().is_ipv4() {
+                let index = ipv4_requests;
+                ipv4_requests += 1;
+                index
+            } else { ipv4_requests.saturating_sub(1) };
+            let status = if mode == "exit" { "503" } else { statuses[index.min(statuses.len() - 1)] };
+            writeln!(requests, "{status} {}", String::from_utf8_lossy(&request).lines().next().unwrap()).unwrap();
+            write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            if mode == "exit" { std::process::exit(17); }
         }
-        let status = if mode == "exit" { "503" } else { statuses[index.min(statuses.len() - 1)] };
-        writeln!(requests, "{status} {}", String::from_utf8_lossy(&request).lines().next().unwrap()).unwrap();
-        write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-        if mode == "exit" { std::process::exit(17); }
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 "#,
