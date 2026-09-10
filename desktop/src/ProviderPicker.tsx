@@ -38,7 +38,9 @@ export type SavedConfiguration = {
     | "compatible-endpoint"
     | null;
   intelligenceApiKey?: boolean | null;
-  modelApiKeys?: Partial<Record<"openai" | "anthropic", boolean | null>>;
+  modelApiKeys?: Partial<
+    Record<"openai" | "anthropic" | "compatible", boolean | null>
+  >;
   modelSessions?: Partial<Record<"openai" | "anthropic", boolean | null>>;
 };
 
@@ -49,13 +51,12 @@ export type HeldConfiguration = {
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_BASE_URL?: string;
+  BOT_MODEL?: string;
   saved?: SavedConfiguration;
 };
 
-function recordedModel(
-  saved: SavedConfiguration | undefined,
-): ModelChoice | null {
-  switch (saved?.model) {
+function recordedModel(held: HeldConfiguration): ModelChoice | null {
+  switch (held.saved?.model) {
     case "open-ai-api-key":
       return { provider: "openai", login: "api-key", saved: true };
     case "anthropic-api-key":
@@ -65,7 +66,13 @@ function recordedModel(
     case "chat-gpt-plan":
       return { provider: "openai", login: "plan", saved: true };
     case "compatible-endpoint":
-      return { provider: "openai-compatible", login: "endpoint" };
+      return {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl: held.OPENAI_BASE_URL,
+        model: held.BOT_MODEL,
+        saved: held.saved.modelApiKeys?.compatible === true,
+      };
     default:
       return null;
   }
@@ -101,7 +108,7 @@ export function ProviderPicker({
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
 }) {
-  const initialChoice = chosen ?? recordedModel(held.saved);
+  const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
     initialChoice?.saved
       ? { provider: initialChoice.provider, login: initialChoice.login }
@@ -117,6 +124,10 @@ export function ProviderPicker({
   const [apiKey, setApiKey] = useState(initialChoice?.apiKey ?? "");
   const [baseUrl, setBaseUrl] = useState(initialChoice?.baseUrl ?? "");
   const [model, setModel] = useState(initialChoice?.model ?? "");
+  const [reuseEndpointKey, setReuseEndpointKey] = useState(
+    initialChoice?.provider === "openai-compatible" &&
+      initialChoice.saved === true,
+  );
   /*
    * The sign-in, mid-flight.
    *
@@ -256,6 +267,11 @@ export function ProviderPicker({
       ? held.saved?.modelApiKeys?.[row.id] === true ||
         (reuse?.provider === row.id && reuse.login === "api-key")
       : false;
+  const savedEndpointKey =
+    row?.id === "openai-compatible" &&
+    reuseEndpointKey &&
+    held.saved?.modelApiKeys?.compatible === true &&
+    baseUrl.trim() === held.OPENAI_BASE_URL?.trim();
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
@@ -286,7 +302,8 @@ export function ProviderPicker({
         : {}),
       ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
       ...((login === "plan" && !trimmedToken && savedPlan) ||
-      (login === "api-key" && !trimmedApiKey && savedApiKey)
+      (login === "api-key" && !trimmedApiKey && savedApiKey) ||
+      (login === "endpoint" && !trimmedApiKey && savedEndpointKey)
         ? { saved: true }
         : {}),
       ...(trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
@@ -336,8 +353,13 @@ export function ProviderPicker({
                       ? held.ANTHROPIC_API_KEY
                       : undefined;
                 setApiKey(kept ?? "");
+                setReuseEndpointKey(
+                  r.id === "openai-compatible" &&
+                    held.saved?.modelApiKeys?.compatible === true,
+                );
                 if (r.id === "openai-compatible" && held.OPENAI_BASE_URL) {
                   setBaseUrl(held.OPENAI_BASE_URL);
+                  setModel(held.BOT_MODEL ?? "");
                 }
               }}
             />
@@ -505,6 +527,18 @@ export function ProviderPicker({
 
           {login === "endpoint" && (
             <>
+              {savedEndpointKey && !apiKey && (
+                <p className="lede">
+                  A saved API key for this endpoint will be used.{" "}
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => setReuseEndpointKey(false)}
+                  >
+                    Continue without the saved key
+                  </button>
+                </p>
+              )}
               <div className="field">
                 <label htmlFor="base">Base URL</label>
                 <input

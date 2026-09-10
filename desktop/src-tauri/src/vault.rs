@@ -44,6 +44,7 @@ pub fn is_secret(key: &str) -> bool {
             | "SUPERVISOR_TOKEN"
             | "WORKER_SHARED_SECRET"
             | "KEY_ENCRYPTION_KEY"
+            | crate::saved_intent::COMPATIBLE_CREDENTIAL
     )
 }
 

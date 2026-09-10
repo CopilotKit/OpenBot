@@ -74,6 +74,7 @@ struct Progress {
 struct SavedModelApiKeys {
     openai: Option<bool>,
     anthropic: Option<bool>,
+    compatible: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -499,9 +500,21 @@ impl ChosenModel {
                 if model.is_empty() {
                     return Err("Enter the model name your endpoint serves.".into());
                 }
+                let api_key = if saved {
+                    use openbot_desktop_lib::saved_intent::{
+                        compatible_key_from_record, SavedIntent, COMPATIBLE_CREDENTIAL,
+                    };
+                    if !SavedIntent::read(root).has_compatible_key_for(&base_url) {
+                        return Err("That saved endpoint key does not belong to this address. Enter its API key again.".into());
+                    }
+                    let record = saved_secret(root, COMPATIBLE_CREDENTIAL)?;
+                    compatible_key_from_record(&base_url, &record)?
+                } else {
+                    given(self.api_key)
+                };
                 Ok(openbot_env::ModelCredential::Compatible {
                     base_url,
-                    api_key: given(self.api_key),
+                    api_key,
                     model,
                 })
             }
@@ -1456,6 +1469,7 @@ fn already_configured(root: String) -> AlreadyConfigured {
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "OPENAI_BASE_URL",
+            "BOT_MODEL",
             "CLAUDE_CODE_OAUTH_TOKEN",
         ],
     );
@@ -1481,6 +1495,10 @@ fn already_configured(root: String) -> AlreadyConfigured {
                     Category::AnthropicApiKey,
                     values.contains_key("ANTHROPIC_API_KEY"),
                 ),
+                compatible: values
+                    .get("OPENAI_BASE_URL")
+                    .is_some_and(|url| intent.has_compatible_key_for(url))
+                    .then_some(true),
             },
             model_sessions: SavedModelSessions {
                 openai: hint(
@@ -2760,6 +2778,116 @@ mod tests {
             token: None,
             saved: None,
         }
+    }
+
+    fn persist_endpoint_fixture(root: &Path, credential: &openbot_env::ModelCredential) {
+        let settings = openbot_env::compose(
+            &openbot_env::Intelligence {
+                api_url: "https://api.example.test".into(),
+                gateway_ws_url: "wss://api.example.test".into(),
+                api_key: "synthetic-intelligence".into(),
+            },
+            &openbot_env::Model {
+                credential: credential.clone(),
+            },
+            &engine::EngineStatus {
+                engine: None,
+                address: None,
+                responding: false,
+                engine_socket: None,
+                detail: "synthetic".into(),
+            },
+            &openbot_env::Ports::default(),
+            &[],
+            None,
+            &Default::default(),
+        );
+        let (public, secrets) = openbot_desktop_lib::vault::split(settings);
+        openbot_desktop_lib::saved_intent::persist_configuration(
+            root, &public, &secrets, &secrets, credential,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn saved_compatible_endpoint_roundtrips_public_settings_and_scoped_key() {
+        let root = temp_root("compatible-roundtrip");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut chosen = compatible_choice(Some("https://models.example/v1"), Some("local-model"));
+        chosen.api_key = Some("synthetic-endpoint-key".into());
+        let credential = chosen.into_credential(&root).unwrap();
+        persist_endpoint_fixture(&root, &credential);
+        let configured = already_configured(root.to_string_lossy().into_owned());
+        assert_eq!(
+            configured.values.get("BOT_MODEL").map(String::as_str),
+            Some("local-model")
+        );
+        assert_eq!(configured.saved.model_api_keys.compatible, Some(true));
+        assert_eq!(configured.saved.model_api_keys.openai, None);
+        assert!(!serde_json::to_string(&configured)
+            .unwrap()
+            .contains("synthetic-endpoint-key"));
+        let mut reopened = compatible_choice(
+            configured.values.get("OPENAI_BASE_URL").map(String::as_str),
+            configured.values.get("BOT_MODEL").map(String::as_str),
+        );
+        reopened.saved = Some(true);
+        assert_eq!(reopened.into_credential(&root).unwrap(), credential);
+
+        for url in [
+            "https://other.example/v1",
+            "https://models.example/v2",
+            "https://models.example:8443/v1",
+        ] {
+            let mut changed = compatible_choice(Some(url), Some("local-model"));
+            changed.saved = Some(true);
+            assert!(changed
+                .into_credential_with(&root, |_, _| panic!(
+                    "different endpoint must not read a credential"
+                ))
+                .is_err());
+        }
+        let other = root.join("other-root");
+        let mut changed_root =
+            compatible_choice(Some("https://models.example/v1"), Some("local-model"));
+        changed_root.saved = Some(true);
+        assert!(changed_root
+            .into_credential_with(&other, |_, _| panic!(
+                "different root must not read a credential"
+            ))
+            .is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stale_endpoint_hint_cannot_relabel_another_endpoints_stored_key() {
+        let root = temp_root("compatible-stale-record");
+        std::fs::create_dir_all(&root).unwrap();
+        let credential = openbot_env::ModelCredential::Compatible {
+            base_url: "https://models.example/v1".into(),
+            api_key: "synthetic-old-key".into(),
+            model: "model".into(),
+        };
+        persist_endpoint_fixture(&root, &credential);
+        let mut choice = compatible_choice(Some("https://models.example/v1"), Some("model"));
+        choice.saved = Some(true);
+        let mut reads = 0;
+        let error = choice
+            .into_credential_with(&root, |_, key| {
+                reads += 1;
+                assert_eq!(
+                    key,
+                    openbot_desktop_lib::saved_intent::COMPATIBLE_CREDENTIAL
+                );
+                Ok(
+                    r#"{"base_url":"https://other.example/v1","api_key":"synthetic-other-key"}"#
+                        .into(),
+                )
+            })
+            .unwrap_err();
+        assert_eq!(reads, 1);
+        assert!(!error.said.contains("synthetic-other-key"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

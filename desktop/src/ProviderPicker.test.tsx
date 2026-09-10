@@ -541,3 +541,134 @@ test("recorded Claude plan intent survives reopening beside an unrelated saved A
     view.getByRole("button", { name: "Sign in again with Anthropic" }),
   ).toBeTruthy();
 });
+
+test("a saved compatible endpoint restores public fields and requests its scoped key", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected protected command ${command}`);
+  };
+  const user = userEvent.setup({ document });
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(
+    {
+      OPENAI_BASE_URL: "https://models.example/v1",
+      BOT_MODEL: "local-model",
+      saved: {
+        model: "compatible-endpoint",
+        modelApiKeys: { compatible: true },
+      },
+    },
+    (choice) => choices.push(choice),
+  );
+  expect(await view.findByLabelText("Base URL")).toHaveProperty(
+    "value",
+    "https://models.example/v1",
+  );
+  expect(view.getByLabelText("Model name")).toHaveProperty(
+    "value",
+    "local-model",
+  );
+  expect(
+    view.getByLabelText("API key, if the endpoint needs one"),
+  ).toHaveProperty("value", "");
+  expect(view.getByText(/A saved API key for this endpoint/)).toBeTruthy();
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://models.example/v1",
+      model: "local-model",
+      saved: true,
+    },
+  ]);
+  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+
+  await user.clear(view.getByLabelText("Base URL"));
+  await user.type(view.getByLabelText("Base URL"), "https://other.example/v1");
+  expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices[1]).toEqual({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "https://other.example/v1",
+    model: "local-model",
+  });
+});
+
+test("saved endpoint key can be explicitly replaced or omitted", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected protected command ${command}`);
+  };
+  const user = userEvent.setup({ document });
+  const choices: unknown[] = [];
+  const held: HeldConfiguration = {
+    OPENAI_BASE_URL: "https://models.example/v1",
+    BOT_MODEL: "local-model",
+    saved: {
+      model: "compatible-endpoint",
+      modelApiKeys: { compatible: true },
+    },
+  };
+  const view = await renderPickerWithHeld(held, (choice) =>
+    choices.push(choice),
+  );
+  await view.findByLabelText("Base URL");
+  await user.type(
+    view.getByLabelText("API key, if the endpoint needs one"),
+    "synthetic-new-key",
+  );
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices[0]).toEqual({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+    apiKey: "synthetic-new-key",
+  });
+  view.unmount();
+  const reopened = await renderPickerWithHeld(held, (choice) =>
+    choices.push(choice),
+  );
+  await user.click(
+    await reopened.findByRole("button", {
+      name: "Continue without the saved key",
+    }),
+  );
+  await user.click(reopened.getByRole("button", { name: "Continue" }));
+  expect(choices[1]).toEqual({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+  });
+});
+
+test("a saved keyless endpoint never requests a saved first-party key", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected protected command ${command}`);
+  };
+  const user = userEvent.setup({ document });
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(
+    {
+      OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
+      BOT_MODEL: "local-model",
+      saved: { model: "compatible-endpoint", modelApiKeys: { openai: true } },
+    },
+    (choice) => choices.push(choice),
+  );
+  await view.findByLabelText("Base URL");
+  expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
+  await user.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      model: "local-model",
+    },
+  ]);
+});

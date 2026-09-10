@@ -18,6 +18,7 @@ pub enum Category {
     AnthropicApiKey,
     ClaudePlan,
     ChatGptPlan,
+    CompatibleEndpointApiKey,
 }
 
 // A closed enum intentionally cannot contain fields from the secret-bearing ChosenModel request.
@@ -37,6 +38,8 @@ pub struct SavedIntent {
     version: u8,
     pub categories: BTreeSet<Category>,
     pub model: Option<ModelIntent>,
+    #[serde(default)]
+    pub compatible_endpoint: Option<String>,
 }
 
 impl Default for SavedIntent {
@@ -45,11 +48,20 @@ impl Default for SavedIntent {
             version: 1,
             categories: BTreeSet::new(),
             model: None,
+            compatible_endpoint: None,
         }
     }
 }
 
 impl SavedIntent {
+    pub fn has_compatible_key_for(&self, base_url: &str) -> bool {
+        self.model == Some(ModelIntent::CompatibleEndpoint)
+            && self
+                .categories
+                .contains(&Category::CompatibleEndpointApiKey)
+            && self.compatible_endpoint.as_deref() == Some(base_url.trim())
+    }
+
     /// Missing, unreadable and invalid records are unknown. Never discover or migrate secrets here.
     pub fn read(root: &Path) -> Self {
         std::fs::read(root.join(FILE))
@@ -76,8 +88,17 @@ impl SavedIntent {
         }
         // Compatible endpoints share the legacy OPENAI_API_KEY slot, but that key was not
         // established for the OpenAI provider. Keep its recorded hint out of that provider's UI.
-        if matches!(credential, ModelCredential::Compatible { .. }) {
+        self.categories.remove(&Category::CompatibleEndpointApiKey);
+        self.compatible_endpoint = None;
+        if let ModelCredential::Compatible {
+            base_url, api_key, ..
+        } = credential
+        {
             self.categories.remove(&Category::OpenAiApiKey);
+            if has_endpoint_key(api_key) {
+                self.categories.insert(Category::CompatibleEndpointApiKey);
+                self.compatible_endpoint = Some(base_url.trim().to_string());
+            }
         }
         // write_plan_store persists the selected plan, and clears it for other selections.
         self.categories.remove(&Category::ChatGptPlan);
@@ -102,6 +123,33 @@ impl SavedIntent {
 
     fn write(&self, root: &Path) -> std::io::Result<()> {
         crate::env::write_private_file(&root.join(FILE), &serde_json::to_vec(self)?)
+    }
+}
+
+// The runtime OPENAI_API_KEY slot is shared with first-party OpenAI. Keep the endpoint binding
+// and its key together, so a later partially persisted provider change cannot relabel that key.
+pub const COMPATIBLE_CREDENTIAL: &str = "OPENAI_COMPATIBLE_CREDENTIAL";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompatibleCredential {
+    base_url: String,
+    api_key: String,
+}
+
+fn has_endpoint_key(api_key: &str) -> bool {
+    !api_key.trim().is_empty() && api_key.trim() != crate::env::NO_KEY_NEEDED
+}
+
+pub fn compatible_key_from_record(base_url: &str, record: &str) -> Result<String, Problem> {
+    let saved = serde_json::from_str::<CompatibleCredential>(record).ok();
+    match saved {
+        Some(saved) if saved.base_url == base_url.trim() && has_endpoint_key(&saved.api_key) => {
+            Ok(saved.api_key)
+        }
+        _ => Err(Problem::plain(
+            "That saved endpoint key is unavailable for this address. Enter its API key again.",
+        )),
     }
 }
 
@@ -132,7 +180,31 @@ fn persist_configuration_with(
     credential: &ModelCredential,
     remember: impl FnOnce(&Path, &BTreeMap<String, String>) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
-    remember(root, secrets)?;
+    let mut scoped_secrets = secrets.clone();
+    let record = match credential {
+        ModelCredential::Compatible {
+            base_url, api_key, ..
+        } if has_endpoint_key(api_key) => Some(
+            serde_json::to_string(&CompatibleCredential {
+                base_url: base_url.trim().to_string(),
+                api_key: api_key.trim().to_string(),
+            })
+            .map_err(|_| {
+                Problem::plain("OpenBot could not prepare the endpoint key for saving.")
+            })?,
+        ),
+        _ if SavedIntent::read(root)
+            .categories
+            .contains(&Category::CompatibleEndpointApiKey) =>
+        {
+            Some(String::new())
+        }
+        _ => None,
+    };
+    if let Some(record) = record {
+        scoped_secrets.insert(COMPATIBLE_CREDENTIAL.into(), record);
+    }
+    remember(root, &scoped_secrets)?;
     crate::env::write_plan_store(root, credential).map_err(|error| {
         Problem::with(
             "OpenBot could not save the model sign-in. Try Start again.",
@@ -533,7 +605,74 @@ mod tests {
         let recorded = SavedIntent::read(&root);
         assert_eq!(recorded.model, Some(ModelIntent::CompatibleEndpoint));
         assert!(!recorded.categories.contains(&Category::OpenAiApiKey));
+        assert!(recorded.has_compatible_key_for("https://synthetic-model.example"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_partial_first_party_write_cannot_relabel_the_saved_endpoint_key() {
+        let (root, mut secrets, _) = fixture("endpoint-partial-provider-switch");
+        let endpoint = ModelCredential::Compatible {
+            base_url: "https://model.example/v1".into(),
+            api_key: "synthetic-endpoint-key".into(),
+            model: "model".into(),
+        };
+        persist_configuration(&root, &BTreeMap::new(), &secrets, &secrets, &endpoint).unwrap();
+        secrets.insert("OPENAI_API_KEY".into(), "synthetic-first-party".into());
+        let failure = persist_configuration_with(
+            &root,
+            &BTreeMap::new(),
+            &secrets,
+            &secrets,
+            &ModelCredential::OpenAi {
+                api_key: "synthetic-first-party".into(),
+            },
+            |root, _| {
+                crate::vault::remember(root, "OPENAI_API_KEY", "synthetic-first-party")?;
+                Err(Problem::plain("synthetic interrupted persistence"))
+            },
+        );
+        assert!(failure.is_err());
+        assert!(SavedIntent::read(&root).has_compatible_key_for("https://model.example/v1"));
+        let record = crate::vault::recall(&root, COMPATIBLE_CREDENTIAL)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            compatible_key_from_record("https://model.example/v1", &record).unwrap(),
+            "synthetic-endpoint-key"
+        );
+        assert!(compatible_key_from_record("https://other.example/v1", &record).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keyless_and_first_party_choices_retire_the_endpoint_key_hint_and_record() {
+        for credential in [
+            ModelCredential::Compatible {
+                base_url: "https://model.example/v1".into(),
+                api_key: String::new(),
+                model: "model".into(),
+            },
+            ModelCredential::OpenAi {
+                api_key: "synthetic-first-party".into(),
+            },
+            ModelCredential::None,
+        ] {
+            let (root, secrets, _) = fixture("endpoint-retire");
+            let endpoint = ModelCredential::Compatible {
+                base_url: "https://model.example/v1".into(),
+                api_key: "synthetic-endpoint-key".into(),
+                model: "model".into(),
+            };
+            persist_configuration(&root, &BTreeMap::new(), &secrets, &secrets, &endpoint).unwrap();
+            persist_configuration(&root, &BTreeMap::new(), &secrets, &secrets, &credential)
+                .unwrap();
+            assert!(!SavedIntent::read(&root).has_compatible_key_for("https://model.example/v1"));
+            assert!(crate::vault::recall(&root, COMPATIBLE_CREDENTIAL)
+                .unwrap()
+                .is_none());
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
