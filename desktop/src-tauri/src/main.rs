@@ -911,13 +911,22 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 /// right to call that a bug.
 fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
-    remember_selected_root(&shell, fallback_root);
-    stop_everything_with(&shell, fallback_root, stack::stop_processes_under, |root| {
-        match engine::detect().address {
+    let root = root_for_stop(&shell, fallback_root);
+    stop_everything_with(
+        &shell,
+        &root,
+        stack::stop_processes_under,
+        |root| match engine::detect().address {
             Some(found) => stack::down(&found, root),
             None => Ok(()),
-        }
-    })
+        },
+    )
+}
+
+fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
+    let root = cleanup_root(shell, fallback_root);
+    remember_selected_root(shell, &root);
+    root
 }
 
 fn stop_everything_with<C, D>(
@@ -2967,6 +2976,58 @@ mod tests {
         );
         assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&active));
         let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn production_stop_root_selection_retains_resolved_root_not_menu_fallback() {
+        let selected = temp_root("openbot-production-stop-selected-root");
+        let fallback = temp_root("openbot-production-stop-default-root");
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(selected.clone());
+        remember_selected_root(&shell, &fallback);
+
+        let stop_root = root_for_stop(&shell, &fallback);
+
+        assert_eq!(stop_root, selected);
+        assert_eq!(
+            shell.selected_root.lock().unwrap().as_ref(),
+            Some(&selected)
+        );
+        let _ = std::fs::remove_dir_all(selected);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn production_stop_root_selection_retains_stopped_selected_root_not_menu_fallback() {
+        let selected = temp_root("openbot-production-stop-stopped-selected-root");
+        let fallback = temp_root("openbot-production-stop-stopped-default-root");
+        let shell = Shell::default();
+        remember_selected_root(&shell, &selected);
+
+        let stop_root = root_for_stop(&shell, &fallback);
+
+        assert_eq!(stop_root, selected);
+        assert_eq!(
+            shell.selected_root.lock().unwrap().as_ref(),
+            Some(&selected)
+        );
+        let _ = std::fs::remove_dir_all(selected);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn production_stop_root_selection_uses_menu_fallback_when_no_root_is_known() {
+        let fallback = temp_root("openbot-production-stop-only-default-root");
+        let shell = Shell::default();
+
+        let stop_root = root_for_stop(&shell, &fallback);
+
+        assert_eq!(stop_root, fallback);
+        assert_eq!(
+            shell.selected_root.lock().unwrap().as_ref(),
+            Some(&fallback)
+        );
         let _ = std::fs::remove_dir_all(fallback);
     }
 
