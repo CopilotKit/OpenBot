@@ -105,9 +105,103 @@ export const mcpTools = pgTable(
     description: text("description").notNull().default(""),
     /** The tool's own JSON Schema, passed to the model unchanged. */
     inputSchema: jsonb("input_schema").notNull().default({}),
+    /**
+     * What this action does, as the vendor itself described it, or null when nothing said.
+     *
+     * Recorded here rather than derived per call because the source is the listing: Composio labels
+     * every action, and those labels arrive with the tool list and nowhere else. A hand-written write
+     * list per app — which is what {@link CatalogueEntry.writeTools} is — cannot be kept for a
+     * catalogue of several hundred apps that changes weekly, and a list naming only the actions
+     * somebody thought of reads as a guard while behaving like a gap.
+     *
+     * PLAIN TEXT RATHER THAN AN ENUM, deliberately. The value is somebody else's vocabulary, so a
+     * database enum would need a migration every time a vendor invents a label, and the migration
+     * would be the thing standing between a refresh and a correct classification. `classifyTool`
+     * defends instead: only the exact string `read` produces a read, so an unrecognised value fails
+     * closed. Same reasoning as `mcp_servers.provenance`, which is text for the same reason.
+     *
+     * NULLABLE, AND NOT DEFAULTED TO "write". Every row that already exists was listed before this
+     * column did, and a default would reclassify every Notion read as a write when the migration ran.
+     * Null means "nothing said", and the classifier decides that means write.
+     */
+    effect: text("effect"),
+    /**
+     * Whether the vendor marked this action as destroying something.
+     *
+     * Separate from {@link mcpTools.effect} rather than a third value in it, so the rule engine keeps
+     * the two values every existing policy is written against and nobody's rules need migrating. It
+     * is recorded now because the confirmation card is what needs it, and re-listing every app later
+     * to backfill a column is worse than carrying it from the start.
+     *
+     * `false` for an action nothing said about — the same fail-closed direction as `effect` without
+     * claiming a vendor said something it did not. An unclassified action is already gated as a
+     * write; marking it destructive as well would paint every ordinary write as dangerous and teach
+     * an approver to click through the colour.
+     */
+    destructive: boolean("destructive").notNull().default(false),
+    /**
+     * The vendor's version for this action, as the listing gave it — `20260903_00` and the like.
+     *
+     * NOT OPTIONAL BOOKKEEPING. Composio refuses to execute an action without a specific version,
+     * and refuses the word `latest` too, so this column is what makes a call possible at all. It is
+     * stored rather than fetched per call because it arrives free with the listing and fetching it
+     * would be a second round trip on every single call.
+     *
+     * Null for every other transport, which publishes no such thing, and for rows listed before this
+     * column existed. The Composio transport treats a missing version as a reason to refuse rather
+     * than a reason to guess — a guessed version is a call against an action's other behaviour.
+     */
+    version: text("version"),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.serverId, table.name] })],
+);
+
+/**
+ * One person's Composio connection to one app.
+ *
+ * WHY THIS IS NOT `mcp_user_credentials`. That table's whole guarantee is that a row means real held
+ * access: it points at a vault row, not-null, and the vault is what offboarding scans. Composio holds
+ * the account, so there is no secret to point at and none to scan for — and `retireConnectionsFor`
+ * deliberately reads the VAULT rather than the join table, because the join row is deleted along with
+ * the person while the vault row survives. Putting a Composio connection there would mean removing
+ * somebody deletes the only record of it, leaving their mailbox connected at Composio with nothing
+ * left to revoke it by, while an administrator has been told they removed it.
+ *
+ * So `user_id` is plain text with NO foreign key and no cascade. The row outliving the person is the
+ * point, not an oversight: it is the only thing that lets offboarding say "this person had Gmail
+ * connected, tell Composio to drop it". A scope column would be a lie — Composio returns no scope we
+ * see, and the column on the other table exists precisely to record what the vendor said it granted —
+ * so there is none.
+ *
+ * A CACHE, NOT THE TRUTH. Composio is authoritative about whether a connection is live; this row
+ * exists so the settings page can be drawn without a network call per row, and so offboarding has
+ * something to iterate. A call against an app the person never connected fails at Composio, and that
+ * refusal is the answer rather than this table's absence.
+ */
+export const composioConnections = pgTable(
+  "composio_connections",
+  {
+    /** The Composio app slug, lower case, as their directory spells it: `gmail`, `slack`. */
+    toolkit: text("toolkit").notNull(),
+    /**
+     * The person, as `users.id`.
+     *
+     * The same value sent to Composio as the identity a call runs under, so the two cannot drift:
+     * what this row says somebody connected is what a call will act as.
+     */
+    userId: text("user_id").notNull(),
+    /** When they connected, shown on their own settings page. */
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.toolkit, table.userId] }),
+    // "What has this person connected" is the settings page's only query, and offboarding's.
+    index("composio_connections_user_idx").on(table.userId),
+  ],
 );
 
 /**

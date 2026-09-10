@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 /**
  * The only place in this deployment that speaks MCP to somebody else's server.
@@ -83,6 +84,33 @@ export type McpTool = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+};
+
+/**
+ * A tool as a transport listed it, including anything that transport happens to know about it.
+ *
+ * Three optional fields rather than a separate type per transport, so `refreshTools` reads
+ * `tool.effect` with no cast and no `"effect" in tool` sniffing. Optional because a transport may
+ * know none of it for a given tool, and a field always left undefined would be an invitation to
+ * read it as meaning something.
+ *
+ * AN MCP SERVER CAN PUBLISH AN EFFECT, and this docblock used to say it could not. That sentence
+ * was not a stale comment, it was load bearing: the argument that surfacing a recorded effect could
+ * not disturb any existing curated read rested on MCP listings never carrying one, which was true
+ * only because {@link listTools} was discarding `annotations`. The specification defines
+ * `annotations.destructiveHint`, servers publish it, and a tool a vendor declared destructive was
+ * classifying as a read for any curated entry whose hand-written `writeTools` happened to omit the
+ * name. Version is the field MCP genuinely has no concept of; effect and destructive are not.
+ *
+ * `McpTool` stays exactly what a `tools/list` answer contains, because that is what it is for.
+ */
+export type ListedTool = McpTool & {
+  /** What the vendor said this action does, when it said anything. */
+  effect?: "read" | "write";
+  /** Whether the vendor marked it as destroying something. */
+  destructive?: boolean;
+  /** The vendor's version string, when calling the action requires one. */
+  version?: string;
 };
 
 export class McpServerError extends Error {
@@ -255,8 +283,43 @@ async function withClient<T>(
  */
 export const listNeedsCredential = true;
 
+/**
+ * ONLY THE HINT THAT NARROWS IS BELIEVED, and the omission of the other one is the decision here.
+ *
+ * The SDK declares four hints on `annotations` — `readOnlyHint`, `destructiveHint`,
+ * `idempotentHint`, `openWorldHint` — and warns in the same place that a client should never make
+ * tool use decisions from annotations a server it does not trust supplied. That warning is the
+ * whole design of this function. `destructiveHint` can only ever move an action from read to write,
+ * so a server that lies with it can restrict itself and nothing else. `readOnlyHint` moves an
+ * action the other way, and `classifyTool` exists to make sure nothing but review can do that.
+ *
+ * WHAT HONOURING `readOnlyHint` WOULD ACTUALLY BUY, which is the reason withholding it costs
+ * nothing. For a curated vendor it changes no answer: an advertised name absent from the reviewed
+ * `writeTools` already classifies as a read, so recording `read` for it lands on the same result by
+ * a worse route. For a name the reviewed list DOES hold, `classifyTool` consults review first and
+ * ignores the column, so the hint would be discarded anyway. The single case where it would change
+ * an answer is a server an administrator added by URL, which has no reviewed list behind it and
+ * whose every tool is a write for exactly that reason — and there, believing it means letting an
+ * arbitrary server declare its own tools harmless and be believed. Zero accuracy gained, one
+ * fail-open introduced, so it is not read at all.
+ *
+ * `destructiveHint` is taken on presence of `true` only, never inverted. The specification gives it
+ * a default of true when a tool is not read-only, and applying that default would reclassify every
+ * unannotated action of every MCP vendor as a write — correct by the letter and a mass revocation
+ * of grants people already hold. An absent hint stays absent, which leaves the reviewed list
+ * deciding exactly as it did before, and only an explicit declaration narrows anything.
+ *
+ * A server that sets both hints is contradicting itself, and is read as destructive. The
+ * specification says `destructiveHint` is meaningless while `readOnlyHint` is true, but resolving
+ * an incoherent listing towards the permissive reading is the one direction that could hurt.
+ */
+function declaredEffect(annotations: ToolAnnotations | undefined) {
+  if (annotations?.destructiveHint !== true) return {};
+  return { effect: "write", destructive: true } as const;
+}
+
 /** What this server says it offers, right now. */
-export async function listTools(connection: Connection): Promise<McpTool[]> {
+export async function listTools(connection: Connection): Promise<ListedTool[]> {
   return withClient(connection, async (client) => {
     const result = await client.listTools(undefined, {
       timeout: LIST_TIMEOUT_MS,
@@ -265,6 +328,7 @@ export async function listTools(connection: Connection): Promise<McpTool[]> {
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: (tool.inputSchema ?? {}) as Record<string, unknown>,
+      ...declaredEffect(tool.annotations),
     }));
   });
 }

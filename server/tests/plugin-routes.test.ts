@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
+import { ServerRowAmbiguousError } from "../src/plugins/access";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  PluginInvariantError,
 } from "../src/plugins/store";
 import { testEnvironment } from "./support/environment";
 
@@ -84,6 +86,29 @@ describe("adding a curated server", () => {
     expect((await request({ key: "nope" })).status).toBe(400);
   });
 
+  test("a row the deployment cannot resolve comes back with its sentence", async () => {
+    /*
+     * ADDING REFRESHES, which is what puts this fault on this route.
+     *
+     * `addServer` asks the vendor what it offers before it answers — deliberately, so a bad
+     * credential is reported now rather than the first time a Bot uses one — so everything
+     * `refreshTools` raises arrives here as well: a vendor listing one action twice, a query of
+     * ours failing, a row whose two columns contradict each other. Unmapped, all of it left the
+     * route on the default path and the admin page said "That did not work", while the SAME fault
+     * on the refresh button said which row and what to do about it.
+     */
+    const sentence =
+      "notion: the actions this app listed were not stored, so what it already had is unchanged.";
+    const request = appWith(async () => {
+      throw new PluginInvariantError(sentence);
+    });
+
+    const response = await request({ key: "notion" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: sentence });
+  });
+
   test("a failure that is not a refusal is not dressed up as one", async () => {
     // The must-not case. Mapping every throw to 400 would tell an administrator to correct their
     // input when the database is down, and would hide a real fault behind a message about
@@ -101,6 +126,125 @@ describe("adding a curated server", () => {
     }, "user");
 
     expect((await request({ key: "google-drive" })).status).toBe(403);
+  });
+});
+
+/**
+ * What a refresh that cannot be resolved at all looks like to the administrator who pressed it.
+ *
+ * CRITERION. A contradiction between two of this deployment's own columns comes back with a body
+ * that names the row and says what to correct, on this route and only on this route.
+ *
+ * REASON. `ServerRowAmbiguousError` was mapped nowhere, so it left the route on the framework's
+ * default path: a 500 whose body is not JSON, which the admin client turns into its fallback
+ * sentence — "That did not work" — having found no `error` field to read. The one refusal that
+ * names exactly which row is wrong was the one an operator could not see, while the same sentence
+ * was reaching a model on the tool-call path. This route is admin-gated, which is what makes
+ * showing it here the right answer and showing it anywhere else the wrong one.
+ */
+function refreshApp(
+  refreshTools: () => Promise<never>,
+  role: "admin" | "user" = "admin",
+) {
+  const store = {
+    refreshTools,
+    // Every read the plugins surface makes on its way to the route under test.
+    listServers: async () => [],
+    listSkills: async () => [],
+    listGrants: async () => [],
+  };
+
+  const app = createApp(
+    loadConfig(testEnvironment()),
+    {
+      handler: () => new Response(null, { status: 204 }),
+      api: { getSession: async () => ({ user: ADMIN }) },
+    } as never,
+    { rolesForUser: async () => [role] },
+    // Positions 4-14 are the other stores; `store` is 15, pluginStore.
+    ...(Array.from({ length: 11 }) as never[]),
+    store as never,
+  );
+
+  return () =>
+    app.request("http://openbot.test/api/plugins/servers/notion/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+}
+
+describe("refreshing a server that cannot be resolved", () => {
+  test("the administrator is told which row and what to do about it", async () => {
+    const sentence =
+      "notion is a server this deployment ships an entry for, and a row with that id says its " +
+      "provenance is composio. Rename it, or correct its provenance.";
+    const request = refreshApp(async () => {
+      throw new ServerRowAmbiguousError(sentence);
+    });
+
+    const response = await request();
+
+    // 409 rather than 500: nothing broke and nothing about the request was malformed. Two rows
+    // disagree, and the request cannot be answered until one of them changes.
+    expect(response.status).toBe(409);
+    // A body at all is the fix. Unmapped, this was a 500 carrying no JSON, and the page said
+    // "That did not work" because that is what it says when it finds no message.
+    expect(await response.json()).toEqual({ error: sentence });
+  });
+
+  test("a failed query comes back as the reason, never as the statement", async () => {
+    /*
+     * The shape drizzle throws: `Failed query:` plus the whole statement, then `params:` and every
+     * value bound to it, with the driver's own error on `cause`. It is on the same shelf as the
+     * refusals above — not a vendor's doing, not the asker's to act on — so this route is where an
+     * operator is told about it, and it is the one member of that shelf whose `message` must not be
+     * what they are told.
+     */
+    const request = refreshApp(async () => {
+      throw Object.assign(
+        new Error(
+          'Failed query: select "credential_id" from "mcp_user_credentials" where "user_id" = $1 params: someone',
+        ),
+        {
+          query: 'select "credential_id" from "mcp_user_credentials"',
+          params: ["someone"],
+          cause: new Error("canceling statement due to statement timeout"),
+        },
+      );
+    });
+
+    const response = await request();
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error?: string };
+    // The reason, which is what an administrator can act on.
+    expect(body.error).toContain(
+      "canceling statement due to statement timeout",
+    );
+    // And none of the query. This route answers an administrator, but the browser it answers is
+    // still on somebody's laptop and the sentence still ends up in a screenshot and a ticket.
+    expect(body.error).not.toContain("Failed query");
+    expect(body.error).not.toContain("params:");
+    expect(body.error).not.toContain("mcp_user_credentials");
+  });
+
+  test("a failure that is not one of ours is still not dressed up as one", async () => {
+    // The must-not case, the same one the add route above carries: a database that is down is not
+    // a row an administrator can go and correct, and answering 409 would send them to do it.
+    const request = refreshApp(async () => {
+      throw new Error("the database is unreachable");
+    });
+
+    expect((await request()).status).toBe(500);
+  });
+
+  test("somebody who is not an administrator cannot press it at all", async () => {
+    const request = refreshApp(async () => {
+      throw new Error("the store must not be reached");
+    }, "user");
+
+    // Which is what makes showing the sentence above safe: nobody else reaches this route.
+    expect((await request()).status).toBe(403);
   });
 });
 

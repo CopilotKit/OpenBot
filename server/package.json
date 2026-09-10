@@ -28,6 +28,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@composio/core": "^0.18.1",
     "@copilotkit/aimock": "1.39.0",
     "drizzle-kit": "^0.31.10",
     "eventsource": "3.0.7"

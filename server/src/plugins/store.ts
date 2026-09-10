@@ -21,6 +21,7 @@ import type { Database } from "../db/client";
 import {
   agentProfiles,
   agents,
+  composioConnections,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -32,6 +33,11 @@ import {
   skillTools,
 } from "../db/schema";
 import {
+  accessFor,
+  type ServerAccess,
+  ServerUnresolvableError,
+} from "./access";
+import {
   type CatalogueEntry,
   catalogueEntry,
   classifyTool,
@@ -39,8 +45,9 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
+import { VERSION_ARG } from "./composio";
 import { inspectToolArguments } from "./content-governance";
-import { McpServerError } from "./mcp";
+import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
 
@@ -222,6 +229,237 @@ export class CustomServerRefusedError extends Error {
 }
 
 /**
+ * A state this deployment's own code says cannot exist, found existing.
+ *
+ * CRITERION. Nothing here is a vendor's doing, a credential's doing or anything a person asking can
+ * act on, so no path may record one of these as though a vendor had misbehaved.
+ *
+ * REASON. `refreshTools` wrapped the listing, the replace and both audit writes in one `catch` that
+ * copied every message into `lastError` and answered `{ tools: 0 }`. A plain `Error` is what the
+ * narrowing throws in {@link createPluginStore}'s `connectionTokenFor` raise, so a row that resolved
+ * to a brokered credential with no app in its url — or to a per-person credential with no
+ * `user-oauth` entry — came out on the Plugins page as a sentence about the vendor, next to a
+ * refresh that looked like it had merely failed. An operator reading that is sent to somebody else's
+ * status page over a contradiction in our own tables.
+ *
+ * A class rather than a message, because telling these apart by prose is telling them apart by a
+ * substring that a reword would silently change. Distinct from {@link PluginRefusedError}, which is
+ * a refusal somebody CAN act on and which does belong in `lastError` — an administrator who has not
+ * connected their account is the honest reason a listing did not happen.
+ */
+export class PluginInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PluginInvariantError";
+  }
+}
+
+/**
+ * Whether a throw is this deployment contradicting itself, rather than anything anybody asked for.
+ *
+ * CRITERION. Every audience boundary asks THIS instead of listing classes of its own. A fault it
+ * answers true for reaches an operator as its own sentence, on a surface only an operator can
+ * reach, and reaches everybody else as the fact that the call did not happen — no message, no
+ * column names, no instruction about a row.
+ *
+ * REASON. The distinction already existed and was drawn by hand, once, in each place that
+ * remembered to draw it: {@link PluginRefusedError} is relayed verbatim because it is a refusal
+ * the asker can act on, and everything else fell into a branch that copies `error.message`
+ * onwards. {@link ServerUnresolvableError} was caught by none of them — the refresh route rethrew
+ * it into the framework's default handler, which answers a bodiless 500, so the admin page said
+ * "That did not work" and named nothing; `grantedTools` put its message in a model's context,
+ * where a sentence telling an operator to correct a provenance column became a Bot's explanation
+ * to an end user of why their tool failed. Two audiences, one refusal, neither served.
+ *
+ * {@link PluginInvariantError} is on the same shelf and answers true for the same reason: it is
+ * this deployment finding a state its own code says cannot exist. That is not a vendor
+ * misbehaving and not a person's to act on mid-call, and its own docblock has said so since it
+ * was written — what it lacked was anywhere that asked.
+ *
+ * A PREDICATE RATHER THAN A SHARED BASE CLASS, because the two live in different modules and must
+ * keep doing so: `access.ts` is a leaf that `store.ts` imports, so the shelf cannot be declared
+ * once without one of them importing the other back.
+ */
+/**
+ * The one character no PostgreSQL `text` or `jsonb` value can hold, whatever the vendor sent.
+ *
+ * Not a length limit and not an encoding preference: the server rejects the statement outright,
+ * mid-transaction, and the rejection arrives as a query error rather than as anything about the
+ * value.
+ */
+const NUL = "\u0000";
+
+/**
+ * Whether a throw is a query failure carrying the statement and the values bound to it.
+ *
+ * CRITERION. Anything this answers true for has a message that must never be relayed — not to a
+ * model, not to a browser, not into a column an operator reads.
+ *
+ * REASON. drizzle wraps every failure as a `DrizzleQueryError` and puts `Failed query: <the whole
+ * statement>` and `params: <every bound value>` in its `message`. Along the tool-call path those
+ * values are credential ids, user ids and server ids; along the refresh path they are the vendor's
+ * entire tool list.
+ *
+ * BY SHAPE, NOT BY CLASS, and that is the one place this file departs from its own "tell them apart
+ * by a class, never by prose" rule. The class is drizzle's, reachable only through a deep import
+ * that is not part of its published surface, so an `instanceof` here would pin this deployment to
+ * an internal path a minor release may move. `query` and `params` as own properties on an `Error`
+ * is not prose — it is the shape the constructor assigns, it is what makes the message dangerous,
+ * and anything else carrying both fields is a query failure too.
+ */
+function isQueryFailure(
+  error: unknown,
+): error is Error & { query: unknown; params: unknown } {
+  return (
+    error instanceof Error &&
+    Object.hasOwn(error, "query") &&
+    Object.hasOwn(error, "params")
+  );
+}
+
+/**
+ * As much of a failure as may be shown to whoever is entitled to see it.
+ *
+ * CRITERION. Every place that copies a message out of a caught error asks this instead of reading
+ * `.message`. What comes back never contains a statement or a bound value.
+ *
+ * REASON. The message is the useful thing for a vendor's refusal, a person's missing connection or
+ * an invariant of ours — that is why those paths quote it, and they should go on quoting it. It is
+ * the wrong thing for exactly one kind of error, and that kind announces itself by shape. Asking
+ * here rather than at each site means a new audience cannot be added without the question already
+ * answered for it.
+ */
+function withoutStatement(error: Error): string {
+  return isQueryFailure(error) ? databaseComplaint(error) : error.message;
+}
+
+/**
+ * The driver's own complaint about a query, without the query.
+ *
+ * CRITERION. What this returns never contains the statement or the values bound to it.
+ *
+ * REASON. drizzle's `DrizzleQueryError` puts both in its own `message` and hangs the driver's
+ * error off `cause`. The driver's message is the useful half — `duplicate key value violates
+ * unique constraint`, `invalid byte sequence`, `canceling statement due to statement timeout` —
+ * and it is the half that names nothing anybody sent. An error shaped differently gets a fixed
+ * sentence rather than its own message, because the reason this exists is that a message from an
+ * unexamined shape is exactly what leaked the last one.
+ *
+ * Capped where every other quoted failure in this file is capped, for the same reason: parts of
+ * it come from somewhere else and none of it is a promise about length.
+ */
+function databaseComplaint(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return cause instanceof Error
+    ? cause.message.slice(0, 400)
+    : "The database gave no reason this deployment can quote.";
+}
+
+/**
+ * What a vendor listed, as rows this database will actually take.
+ *
+ * CRITERION ONE. No two rows carry the same name, whatever the vendor listed.
+ *
+ * CRITERION TWO. No string reaching the insert contains U+0000, in a column or inside a schema.
+ *
+ * REASON. Both of these used to abort the replace from INSIDE the transaction and OUTSIDE the
+ * vendor `try` above it, so they came out of `refreshTools` as a raw `DrizzleQueryError` — whose
+ * message is `Failed query: <the whole statement>` followed by `params:` and every value bound to
+ * it. That reached an operator's page and the logs as a SQL dump, which is the same disclosure
+ * shape as a leaked credential one layer out, and it left `lastError` holding whatever was there
+ * before: stale, or null, on a refresh that had in fact failed.
+ *
+ * FIXED BY NOT REACHING THE DATABASE WITH IT, rather than by catching it better. A vendor that
+ * names one action twice is answering about one action — `mcp_tools`' `(server_id, name)` primary
+ * key says so, and the first listing is as good an answer as the second, so the duplicate is
+ * dropped rather than made into an error somebody has to act on. A control character in a
+ * description is not content anybody wants to keep either. What is left after this is a
+ * transaction that fails for reasons that are genuinely not the vendor's, which is what the
+ * comment on the replace has always claimed.
+ *
+ * FIRST OCCURRENCE WINS, and the order is the vendor's own. Anything else needs a rule for which
+ * of two identical names is the real one, and there is no such rule.
+ */
+function storableTools(serverId: string, listed: ListedTool[]) {
+  const byName = new Map<
+    string,
+    {
+      serverId: string;
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+      effect: "read" | "write" | null;
+      destructive: boolean;
+      version: string | null;
+    }
+  >();
+
+  for (const tool of listed) {
+    const name = tool.name.replaceAll(NUL, "");
+    if (byName.has(name)) continue;
+    byName.set(name, {
+      serverId,
+      name,
+      /*
+       * Defaulted where the COLUMN has a default, because that is what the previous mapping leaned
+       * on: it passed these two straight through, so a transport handing back undefined got the
+       * `""` and `{}` the schema declares. Reading a method off the value instead would turn the
+       * same absence into a TypeError thrown from outside the vendor `try`. Both fields are
+       * required by `McpTool` and supplied by every transport here; this keeps the tolerance the
+       * insert already had rather than adding a new answer.
+       */
+      description: (tool.description ?? "").replaceAll(NUL, ""),
+      /*
+       * Through JSON rather than by walking the object, because the escape is what has to go and
+       * the schema is JSON by definition — it is stored in a `jsonb` column and came off the wire
+       * as JSON. `JSON.stringify` writes a literal U+0000 as the six characters `\u0000`, so that
+       * is the sequence removed here; a schema with none is rebuilt identical.
+       */
+      inputSchema: JSON.parse(
+        JSON.stringify(tool.inputSchema ?? {}).replaceAll("\\u0000", ""),
+      ),
+      /*
+       * What the vendor said, when the vendor said anything.
+       *
+       * Only Composio publishes an effect and a version, and an MCP server publishes a
+       * destructive hint — see `mcp.ts`. All three stay null or false for a transport that says
+       * nothing, and `classifyTool` reads null as silence rather than as a value, which is what
+       * leaves Notion and Drive classified by their reviewed write list exactly as they were.
+       */
+      effect: tool.effect ?? null,
+      destructive: tool.destructive ?? false,
+      version: tool.version?.replaceAll(NUL, "") ?? null,
+    });
+  }
+
+  return [...byName.values()];
+}
+
+export function isDeploymentFault(error: unknown): error is Error {
+  return (
+    error instanceof ServerUnresolvableError ||
+    error instanceof PluginInvariantError ||
+    /*
+     * A query this database refused is on the shelf for the reason the other two are: it is not a
+     * vendor's doing, it is not the asker's to act on, and its message is the one thing here that
+     * must not travel. The replace in `refreshTools` was fixed at its own site; every other query
+     * on the call path — the advertised-tool read, the connection gate, the vault read, the locked
+     * credential swap — throws the same shape into a `catch` that copies `error.message` onward,
+     * so answering it here is what makes the four audiences agree without four more branches.
+     *
+     * Callers that SHOW the sentence to an operator must still ask {@link withoutStatement} for
+     * it rather than reading `.message`; this predicate settles who may be told, not what.
+     */
+    isQueryFailure(error)
+  );
+}
+
+/** The operator-facing sentence for a fault on that shelf, with no statement in it. */
+export function deploymentFaultSentence(error: Error): string {
+  return withoutStatement(error);
+}
+
+/**
  * The vendor's `error` code, when a token endpoint refuses an exchange.
  *
  * {@link INVALID_CLIENT} is the one code this module ACTS on rather than reports, so it has to
@@ -291,8 +529,11 @@ export function refFromToolName(toolName: string): string | null {
  * the vendor. Naming those would be noise in front of the one case that has no second barrier at all
  * — Notion, whose access is per-page on a consent screen and whose `scopes` are therefore empty.
  *
- * A server with no catalogue entry is not reconciled either, and for the opposite reason: nothing
- * reviewed says any tool of theirs only reads, so all of them are already writes.
+ * A server with no catalogue entry is not reconciled either, and the two shapes that reach here do
+ * so for different reasons. A brokered app's actions are classified from the vendor's own
+ * per-action label rather than from a list here, so there is no hand-written under-inclusion to
+ * find. A server an administrator added by URL has neither a label nor a list, so every tool it
+ * offers is already a write and there is no wrongly-permitted read to reconcile.
  *
  * Sorted, so two readings of the same listing produce the same row.
  */
@@ -312,21 +553,56 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
 /**
- * Whose credential reaches this server, as the trail names it.
+ * The two things an actor field says when the actor is not a person, and they are not the same
+ * thing.
  *
- * One definition, because this was two: `connectionTokenFor` returned it and the audit payload
- * recomputed the same condition a few lines later. Two expressions for one fact can disagree, and
- * the one place that would show is an audit row claiming a call ran as somebody it did not — which is
- * the row a per-person connector exists to be able to trust.
+ * CRITERION. A field whose purpose is to name who did something must never be written as the empty
+ * string. An absent field reads as absent; `""` reads as a value, so a reader grouping the trail by
+ * actor gets a person called nothing, and every count of "acts by X" is quietly wrong about them.
  *
- * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
- * `builtin` is the third case and the only one with no credential at all — the actor is not whose
- * token was used, it is whose rows were touched.
+ * `deployment` is a positive answer: nobody was asking because the deployment itself acted — a
+ * shared credential, a public endpoint, a refresh it ran on its own behalf immediately after an app
+ * was added. `unattributed` is the opposite, and the distinction is the whole point of having two:
+ * something happened that SHOULD have had a person behind it and this deployment could not say who.
+ * `identifyActor` answers `{ id: "" }` for exactly that, and the run is then refused — which is
+ * precisely the moment the trail is worth reading, so it must not be the moment it goes blank.
+ *
+ * Neither is an address, so neither can collide with a user id: every actor written here otherwise
+ * is `users.id` or the email a session resolved to.
+ *
+ * NOT THE SAME AXIS AS `initiator_kind`, and a row carrying both is not contradicting itself.
+ * `initiator_kind` answers what set a run in motion; this field answers whose account it reached
+ * and who can be named for it. So `initiator_kind: "person"` beside `actor: "unattributed"` reads
+ * correctly as a person-initiated request whose person this deployment could not identify. That is
+ * the honest reading, and it is the reason this is NOT recorded as `deployment`: that would assert
+ * the call went out on the deployment's own credential, and it did not go out at all.
+ *
+ * `DEPLOYMENT_INITIATOR`'s own doc claims the case of "refusing a caller it could not identify",
+ * which overlaps this one and would answer it the other way. Nothing sends it there — the tool path
+ * defaults its initiator to person and `identifyActor` returns an empty id rather than a deployment
+ * — so the overlap is in the prose, not in the behaviour. It is left alone deliberately rather than
+ * resolved by widening either vocabulary unilaterally; whoever owns that constant should narrow its
+ * sentence, or a third initiator kind should exist, and neither is this branch's call to make.
  */
-const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
-    ? actorId
-    : "deployment";
+const DEPLOYMENT_ACTOR = "deployment";
+const UNATTRIBUTED_ACTOR = "unattributed";
+
+/**
+ * Whose account this call went out as, for the trail.
+ *
+ * Reads the resolved descriptor rather than re-deriving from the entry's auth kind. That derivation
+ * had no answer for a Composio app — the entry is null, so it fell through to `deployment` for a call
+ * that ran in one person's own mailbox, which is the trail being wrong about the one thing a
+ * per-person connector exists for.
+ *
+ * A person-reached server with no actor is `unattributed` and never `deployment`: the call did not
+ * go out on a shared credential, it did not go out at all, and naming the deployment would assert
+ * an attribution that never happened. See {@link DEPLOYMENT_ACTOR}.
+ */
+const reachedAsFor = (access: ServerAccess, actorId: string): string =>
+  access.reachedAs === "person"
+    ? actorId || UNATTRIBUTED_ACTOR
+    : DEPLOYMENT_ACTOR;
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -752,28 +1028,121 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   /**
-   * The token one call goes out with, and whose it is.
+   * The token one call goes out with, and whose it is — decided from `access.credential`, so that
+   * this function and the audit row cannot disagree about whose account a call ran in.
    *
-   * For a `deployment-bearer` server this is what it always was: the one credential an administrator
-   * gave the server, used for everybody.
+   * For a `deployment-token` server this is what it always was: the one credential an administrator
+   * gave the server, used for everybody. A `none` server reaches the same branch and finds nothing
+   * to decrypt, which is the right answer for an endpoint that takes no credential at all.
    *
-   * For a `user-oauth` server it is the asker's own, and every branch that cannot prove it has the
+   * For a `brokered` server there is no token here AT ALL. The deployment's one key belongs to the
+   * transport and never travels through this function, so nothing here can leak it into a connection
+   * object, an error or an audit row. What this function contributes instead is the two refusals
+   * that have to happen before a call is spent at the broker: a run nobody is attributed for, and an
+   * asker who has not connected the app — so a person is told their own next step rather than shown
+   * the broker's error about an account it cannot find. A third refusal sits between those two, for
+   * a brokered row whose url names no Composio app; nothing in the product creates such a row, so no
+   * person's situation reaches it.
+   *
+   * For a `person-oauth` server it is the asker's own, and every branch that cannot prove it has the
    * asker's grant refuses. There is deliberately no fallback. A fallback is the one bug this design
    * exists to make impossible: answering out of whatever the deployment, or the last person to
    * connect, happened to be able to see — which returns a confident answer assembled from documents
    * the person asking cannot open, and looks exactly like a correct answer.
    *
-   * Nothing is cached. The refresh token is exchanged for an access token per call and the access
-   * token is thrown away, so there is no stored copy of anybody's access for a disconnect to have to
-   * find. That costs a round trip to the vendor's token endpoint on every call, which is the price
-   * of revocation being complete by construction rather than by cleanup.
+   * Nothing is cached on any path, and only on the `person-oauth` one is that a decision. There, the
+   * refresh token is exchanged for an access token per call and the access token is thrown away, so
+   * there is no stored copy of anybody's access for a disconnect to have to find. That costs a round
+   * trip to the vendor's token endpoint on every call, which is the price of revocation being
+   * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
+   * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
+   * here at all.
    */
   async function connectionTokenFor(
-    row: { id: string; url: string; credentialId: string | null },
+    row: { id: string; title: string; credentialId: string | null },
     entry: CatalogueEntry | null,
     actorId: string,
+    access: ServerAccess,
   ): Promise<{ token?: string }> {
-    if (entry?.auth.kind !== "user-oauth") {
+    /*
+     * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
+     *
+     * Refused HERE rather than in the transport, for the two reasons the `user-oauth` branch below
+     * is: a person gets a sentence naming the step they can take, and no call is spent at the
+     * vendor finding out. The transport refuses an unattributed run again as a last line, so
+     * deleting either that guard or this one has to turn a test red. The unconnected case has no
+     * such twin: the transport has no notion of a connection at all, so the last line there is
+     * Composio itself — which is what refusing locally earns its place for, since it turns the
+     * broker's error about an account it cannot find into a sentence naming the person's own next
+     * step.
+     *
+     * The throw between the two is a third refusal, but not one anybody can act on: it fires only
+     * for a brokered row whose url names no Composio app, which nothing in the product can create.
+     * It is what keeps this gate keyed on the app the url names, and its own comment says why
+     * neither fallback is available.
+     *
+     * There is no token. The key belongs to the transport and never travels through this function, so
+     * nothing here can leak it into a connection object, an error or an audit row.
+     */
+    if (access.credential === "brokered") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+
+      /*
+       * Narrowing, and a refusal that is genuinely reachable.
+       *
+       * `access.toolkit` is the app slug read off this row's url in `access.ts`, and it is NULL
+       * whenever that url does not name a Composio app — `accessFor` still answers `brokered` for
+       * any row whose provenance column says composio, so `{ credential: "brokered", toolkit: null }`
+       * is a state a hand-edited or restored row really produces. The test beside `accessFor`
+       * asserts it, and `plugin-store.integration.test.ts` gates this branch end to end.
+       *
+       * A throw rather than a fallback, for the reason the `user-oauth` narrowing below throws: both
+       * alternatives fail open. Falling back to `row.id` checks the connection against a spelling
+       * nothing dials, and skipping the gate spends the deployment's shared key on a connector whose
+       * whole purpose is to keep one person's account out of another's. The compiler forces SOME
+       * narrowing here — drizzle's `eq` will not take `string | null` — but only the test named
+       * above stops that narrowing from being the fallback.
+       */
+      if (!access.toolkit) {
+        throw new PluginInvariantError(
+          `${row.id} resolves to a brokered credential with no Composio app in its url.`,
+        );
+      }
+
+      /*
+       * Keyed on the app the call will run in, which is the one the url names.
+       *
+       * `row.id` is a display key and nothing holds it equal to the slug in the url, so a row named
+       * `gmail` at `composio://slack` passed this gate on a Gmail connection and then ran a Slack
+       * action — the person having connected an app they were never asked about.
+       */
+      const [connected] = await database
+        .select({ toolkit: composioConnections.toolkit })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, access.toolkit),
+            eq(composioConnections.userId, actorId),
+          ),
+        )
+        .limit(1);
+
+      if (!connected) {
+        throw new PluginRefusedError(
+          `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+          null,
+        );
+      }
+
+      return {};
+    }
+
+    if (access.credential !== "person-oauth") {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
@@ -781,6 +1150,24 @@ export function createPluginStore(options: PluginStoreOptions) {
           )
         : undefined;
       return { token };
+    }
+
+    /*
+     * Narrowing, not a second decision.
+     *
+     * `access.credential === "person-oauth"` is derived in `access.ts` from exactly this auth kind,
+     * so the branch above has already established it — but the derivation runs through a lookup
+     * table the compiler cannot follow back to `entry`. Nothing below re-decides whether this is a
+     * per-person server; it only reads the OAuth details that kind carries.
+     *
+     * A throw rather than a fallback. If the descriptor and the entry ever did disagree, answering
+     * out of the deployment's own credential is precisely the failure the comment above this function
+     * says must be impossible.
+     */
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new PluginInvariantError(
+        `${row.id} resolves to a per-person credential with no user-oauth catalogue entry.`,
+      );
     }
 
     /*
@@ -1585,6 +1972,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       .limit(1);
     if (!row) throw new CatalogueEntryUnknownError(serverId);
 
+    // Null for a custom server, and every caller handles that by assuming the worst about it.
     const entry = catalogueEntry(row.id);
     if (row.provenance === "first-party" && !entry) {
       // The row outlived its catalogue entry, which means a build removed a vendor while a
@@ -1593,8 +1981,14 @@ export function createPluginStore(options: PluginStoreOptions) {
       // is one we agreed to talk to.
       throw new CatalogueEntryUnknownError(row.id);
     }
-    // Null for a custom server, and every caller handles that by assuming the worst about it.
-    return { row, entry };
+    /*
+     * Resolved here so every caller reads the same answer.
+     *
+     * Three call sites used to derive their own — the transport, the credential and the audit row —
+     * and a Composio app made all three of them wrong at once. One derivation means they cannot
+     * disagree, and `access.ts` is the only place a new kind of server has to be taught about.
+     */
+    return { row, entry, access: accessFor(row, entry) };
   }
 
   return {
@@ -1862,6 +2256,12 @@ export function createPluginStore(options: PluginStoreOptions) {
      *
      * Revoked rather than deleted, because the vault keeps revoked rows for audit.
      *
+     * A THIRD KIND OF ACCESS THAT IS NOT A SECRET. A brokered app holds no per-person secret at all
+     * — Composio keeps the accounts and the deployment sends a user id — so the only thing standing
+     * between a person and their mailbox is a `composio_connections` row, and that table references
+     * nothing that would cascade it. Removing the app therefore left every one of them behind, and
+     * adding the app back turned them live again without anybody being asked. That row goes too.
+     *
      * The revokes go first. These are writes on two tables and the store exposes no transaction that
      * spans both, so the order decides what a failure between them leaves: revoke-then-delete leaves
      * a server whose secrets no longer work and which removing again will finish off, while
@@ -1869,7 +2269,13 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async removeServer(serverId: string, by: string): Promise<void> {
       const [existing] = await database
-        .select({ credentialId: mcpServers.credentialId })
+        .select({
+          credentialId: mcpServers.credentialId,
+          // Read so the brokered connections below can be keyed on the app the url names, which is
+          // the same key the call gate uses. See there for why the row id will not do.
+          provenance: mcpServers.provenance,
+          url: mcpServers.url,
+        })
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId));
 
@@ -1953,6 +2359,89 @@ export function createPluginStore(options: PluginStoreOptions) {
         });
       }
 
+      /*
+       * The third kind of access, which is not a secret at all: everybody's brokered connection.
+       *
+       * CRITERION. Removing an app must leave nobody holding brokered access to it, so that adding
+       * it back again grants nothing until each person has consented afresh.
+       *
+       * REASON. `composio_connections` is the whole gate on a brokered call and it references
+       * nothing — not `mcp_servers`, not `users` — so nothing cascaded it and removing the app left
+       * every row standing. Two ordinary administrative acts, remove and add back, then restored
+       * everybody's access at a url the second act chose, with nobody asked again and no screen
+       * saying it had happened. Consent that reattaches by itself is not consent.
+       *
+       * KEYED ON THE APP THE URL NAMES, exactly as `connectionTokenFor` keys the gate. `row.id` is a
+       * display key and nothing holds it equal to the slug in the url, so a delete by id would clear
+       * some other app's connections, or none, for the very row shape that gate already refuses to
+       * trust. `accessFor` is asked rather than the url parsed here, so this cannot drift from it.
+       *
+       * ASKED WITH NO ENTRY, deliberately, and that is not the entry-wins order being dodged. An
+       * entry can only ever SUPPRESS this answer — `accessFor` returns a null toolkit for every row
+       * that has one — so passing the entry a colliding id looks up would hide the brokered state of
+       * the one row most in need of clearing, and would now refuse outright the very row this method
+       * exists to get rid of, leaving the collision unremovable. Nothing is dialled here, so there is
+       * no vendor for an entry to protect; the only question is which app's consent rows this row's
+       * own url stands for.
+       *
+       * Before the server row goes, for the reason the revokes above are: what a failure between
+       * two writes leaves has to be the recoverable half. A connection cleared with the app still
+       * present is fixed by removing it again; an app deleted with the connections standing is
+       * reachable by no operation at all, because the toolkit was only ever readable off its url.
+       */
+      const toolkit = existing ? accessFor(existing, null).toolkit : null;
+
+      if (toolkit) {
+        const connected = await database
+          .delete(composioConnections)
+          .where(eq(composioConnections.toolkit, toolkit))
+          .returning({ userId: composioConnections.userId });
+
+        // Sorted, so two removals of the same app write their rows in the same order.
+        for (const connection of connected.sort((left, right) =>
+          left.userId.localeCompare(right.userId),
+        )) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.account_disconnected",
+            targetType: "mcp_server",
+            /*
+             * THE APP, not this row's id, and the same key `retireConnectionsFor` files under.
+             *
+             * CRITERION. Every `mcp.account_disconnected` row a brokered connection produces is
+             * keyed on the app at the broker, whichever act produced it, so one query answers
+             * what happened to one person's brokered access.
+             *
+             * REASON. The two acts that can end such a connection were keyed differently: this
+             * one on `mcp_servers.id`, offboarding on `composio_connections.toolkit` — which is
+             * all that row records and all that is left once the server row is gone. Nothing
+             * holds the two strings equal, so on any renamed row half the trail is filed under a
+             * name the other half never mentions, and the disagreement is invisible everywhere
+             * they happen to match.
+             *
+             * THE APP IS WHAT WAS CONSENTED TO. The gate is `(toolkit, user_id)`, the delete
+             * above is by toolkit, and the row outlives the server row entirely; the id is a
+             * display key that may not exist by the time somebody asks. Which server row was
+             * removed is not lost — the `configuration.changed` row written below names it.
+             */
+            targetId: toolkit,
+            payload: {
+              actor: by,
+              server: toolkit,
+              owner: connection.userId,
+              // The same three-way distinction the vault loop above draws, and the same answer: an
+              // administrator took the whole app away and the person did nothing.
+              reason: "mcp_server_removed",
+              /*
+               * False, and said out loud. This closed the gate this deployment owns; the account
+               * the person connected is still connected at Composio, and only they or an operator
+               * of that broker can end it. A row implying otherwise would be worse than no row.
+               */
+              vendorRevoked: false,
+            },
+          });
+        }
+      }
+
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -1986,12 +2475,73 @@ export function createPluginStore(options: PluginStoreOptions) {
       serverId: string,
       actorId = "",
     ): Promise<{ tools: number }> {
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
+      /*
+       * Who the trail says asked for this listing, which is not the same value as who to list AS.
+       *
+       * CRITERION. The two audit rows below must never name an actor of `""`.
+       *
+       * REASON. `actorId` does double duty: it selects the person's credential where listing needs
+       * one, and it is copied into those rows. The add paths pass neither, deliberately — nobody can
+       * have connected an app in the second it is added, and the comment above this method says why
+       * requiring one there was wrong. So the absence is permanent and correct for the credential,
+       * and meaningless for the trail, which was left writing `actor: ""` on every row an add
+       * produced. The deployment refreshing on its own behalf is a real answer and `reachedAs`
+       * already spells it that way; see {@link DEPLOYMENT_ACTOR}. Held separately rather than
+       * defaulting the parameter, because defaulting it would hand `connectionTokenFor` a person
+       * called "deployment" to look a grant up by.
+       */
+      const auditActor = actorId || DEPLOYMENT_ACTOR;
+
+      // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
+      // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
+      const transport = transportFor(access.transport);
+
+      /*
+       * A brokered row with no app in its url has nobody to ask, and saying so is not the transport's
+       * job.
+       *
+       * CRITERION. A listing this deployment could not even attempt must not be committed as a
+       * refresh, and must not be written down as a vendor's answer.
+       *
+       * REASON. `accessFor` answers `brokered` for every row whose provenance column says so, and
+       * reads the app slug off the url — so `{ credential: "brokered", toolkit: null }` is a real
+       * state, which a hand edit or a restored backup produces and nothing in the product does.
+       * `connectionTokenFor` already refuses it, but only where listing needs a credential, and a
+       * brokered listing needs none: the broker publishes an action's schema to anybody. So the gate
+       * was skipped on exactly the path that reaches the vendor with no app named, and the transport
+       * answered `[]` — indistinguishable, one line later, from an app that advertises nothing.
+       *
+       * READ AS FIELDS, not as a transport. `credential` and `toolkit` are both resolved in
+       * `access.ts` and this asks nothing about which protocol is underneath: any broker reached
+       * without an app named is unroutable, which is the property `toolkit` is documented to carry.
+       * A `transport === "composio"` test here would put back the per-call-site derivation that
+       * module exists to have removed.
+       */
+      if (access.credential === "brokered" && !access.toolkit) {
+        throw new PluginInvariantError(
+          `${row.id} resolves to a brokered credential with no app in its url, so there is nothing to ask what it offers.`,
+        );
+      }
+
+      /*
+       * ASKING THE VENDOR, and the only part of this method whose failure is a vendor's.
+       *
+       * CRITERION. What lands in `lastError` must be something a vendor, a credential or a person
+       * could have caused. An invariant this deployment violated and a fault in its own database must
+       * not read as a vendor misbehaving.
+       *
+       * REASON. This used to be one `try` around everything below as well — the wholesale replace,
+       * the server-row update and both audit writes — with a `catch` that copied any message into
+       * `lastError` and answered `{ tools: 0 }`. So a statement timeout, a duplicate-key refusal or an
+       * `audit_events` insert that would not go in all reported a vendor that had in fact answered
+       * correctly, and reported it beside actions the refresh had already committed. Narrowing that
+       * by error class would be narrowing by prose; narrowing it by SHAPE is what this split does, so
+       * a line added below cannot quietly acquire a vendor's excuse.
+       */
+      let listed: ListedTool[];
       try {
-        // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
-        const transport = transportFor(entry);
-
         /*
          * A credential only when listing actually needs one.
          *
@@ -2008,120 +2558,44 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a function that discards it. The gate outlived the reason for it.
          */
         const token = transport.listNeedsCredential
-          ? (await connectionTokenFor(row, entry, actorId)).token
+          ? (await connectionTokenFor(row, entry, actorId, access)).token
           : undefined;
 
-        const tools = await transport.listTools({
+        listed = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
         });
-
-        /*
-         * ONE STEP, because the catch below promises that it is one.
-         *
-         * "The tools already held are left alone" is only true while nothing has been written yet.
-         * As two auto-committed statements the delete landed on its own whenever the insert did not:
-         * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
-         * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
-         * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
-         * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
-         * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
-         * connector kept every grant an administrator had made and offered none of them, and
-         * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
-         *
-         * Rolled back together, the vendor's bad answer is recorded in `lastError` and the Bots go
-         * on using what they were granted, which is what the comment said all along.
-         */
-        await database.transaction(async (transaction) => {
-          await transaction
-            .delete(mcpTools)
-            .where(eq(mcpTools.serverId, serverId));
-          if (tools.length > 0) {
-            await transaction.insert(mcpTools).values(
-              tools.map((tool) => ({
-                serverId,
-                name: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-              })),
-            );
-          }
-        });
-
-        await database
-          .update(mcpServers)
-          .set({
-            toolsRefreshedAt: new Date(),
-            lastError: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(mcpServers.id, serverId));
-
-        /*
-         * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
-         * nothing.
-         *
-         * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
-         * This answers "when did it stop being offered, and what was holding it" — the question asked
-         * after a transport is swapped back and a name starts resolving again. Without the row, the
-         * only record of the gap is its absence.
-         *
-         * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
-         * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
-         * what it names is what is actually left over.
-         */
-        const advertised = new Set(tools.map((tool) => tool.name));
-        const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
-          .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
-          .sort(([left], [right]) => left.localeCompare(right));
-
-        if (stranded.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "grants_not_advertised",
-              server: serverId,
-              // The refs, because that is what a grant is keyed on and what an administrator revokes.
-              refs: stranded.map(([ref]) => ref),
-              bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
-              note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
-            },
-          });
-        }
-
-        /*
-         * Tools the vendor advertises that this deployment's write list does not name.
-         *
-         * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
-         * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
-         * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
-         * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
-         *
-         * `configuration.changed` rather than a type of its own, the same as the stranded grants
-         * above and for the same reason: nothing was denied and the refresh succeeded. What changed
-         * is that the deployment now knows a name it had not classified.
-         */
-        const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
-        if (unlisted.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "unlisted_tools_advertised",
-              server: serverId,
-              tools: unlisted,
-              note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
-            },
-          });
-        }
-
-        return { tools: tools.length };
       } catch (error) {
+        /*
+         * Ours rather than a vendor's, asked as one question about the whole shelf.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf is written into `lastError`, and
+         * nothing raised from here carries a statement or a bound value.
+         *
+         * WHAT THIS USED TO BE, and why the difference is not cosmetic. It read `error instanceof
+         * PluginInvariantError` — which was DEAD, and its own comment named two throws that cannot
+         * arrive here: `connectionTokenFor` is only called when `transport.listNeedsCredential`,
+         * which is false for `composio`, the only brokered transport, so the brokered narrowing
+         * cannot fire inside this `try`; and the `person-oauth` narrowing is unreachable because
+         * `accessFor` answers that credential only for a `user-oauth` entry. So the line could be
+         * deleted with every test still green while the arrival it should have been catching —
+         * a query of ours failing — went straight past it into the column below.
+         *
+         * A QUERY FAILURE IS THE REACHABLE ONE. `connectionTokenFor`'s vault read, its connection
+         * lookup and its locked credential swap all run inside this `try` for an MCP listing, and
+         * each throws a `DrizzleQueryError` whose message is the statement plus every value bound
+         * to it. Recorded, that put a SQL dump in the column the Plugins page draws, under a
+         * heading that says a vendor said it. Raised as an invariant of ours, with the driver's
+         * complaint and none of the query.
+         */
+        if (isDeploymentFault(error)) {
+          throw isQueryFailure(error)
+            ? new PluginInvariantError(
+                `${row.id}: asking this app what it offers failed on a query of this deployment's own, so nothing about the app was learned and nothing it holds was changed. ${databaseComplaint(error)}`,
+              )
+            : error;
+        }
+
         const message =
           error instanceof McpServerError || error instanceof Error
             ? error.message
@@ -2146,6 +2620,211 @@ export function createPluginStore(options: PluginStoreOptions) {
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
       }
+
+      /*
+       * An empty listing never destroys what a real listing recorded.
+       *
+       * CRITERION ONE. An empty answer must not be committed as a healthy refresh where doing so
+       * would delete actions this deployment holds, and must not clear `lastError`.
+       *
+       * CRITERION TWO. "This app advertises nothing" stays recordable: an app with nothing held has
+       * nothing to lose, so the empty answer falls through to the replace below and commits — a
+       * refresh stamp, no error, no actions.
+       *
+       * REASON. The replace below is a delete and an insert, so an empty answer committed here
+       * deletes every `mcp_tools` row for the server, taking the recorded `effect`, `destructive`
+       * and `version` with it. `version` is the one that cannot be reconstructed: `callTool` refuses
+       * an action without it, so a refresh that reported success broke every subsequent call, and
+       * the grants survived pointing at rows that no longer existed — absent from `listServers`, and
+       * revived only by a later refresh that worked.
+       *
+       * WHAT USED TO REACH THIS LINE, and no longer does. `composio.listTools` once answered `[]`
+       * for a url naming no app and for a deployment with no Composio client installed, neither of
+       * which is a vendor's answer, and the second of those is the state of every real deployment.
+       * Both throw now, so that particular arrival is closed at the seam rather than here. The guard
+       * stays because its argument never depended on who sent the empty answer.
+       *
+       * KEPT RATHER THAN TRUSTED, and that asymmetry is the whole argument. Holding actions the vendor
+       * has withdrawn is visible and reversible: the next listing replaces them. Deleting actions the
+       * vendor never withdrew is neither — `mcp_tools` is shared, so it is every replica at once, and
+       * only a refresh from a deployment that can actually reach the vendor puts it back. That holds
+       * for any vendor that suddenly lists nothing, whatever made it do so, which is why removing
+       * this would reopen the same data loss for a different reason.
+       *
+       * THE SEAM REQUIREMENT this leans on, and it is satisfied: a transport that could not ask
+       * anybody must THROW rather than return `[]`. `composio.listTools` opens with two throws that
+       * say which of the two it is — no app in the url, no client installed — and no transport has
+       * an early `return []` left in it at all: `builtin-routines` answers a static list, and `mcp`
+       * and `google-drive-rest` hand back only what a request returned. So an empty listing reaching
+       * this line is a vendor's own answer, which is what the sentence below says. Nothing here asks
+       * which transport it is talking to, and nothing has to: the requirement is met at each seam
+       * rather than branched on here.
+       */
+      if (listed.length === 0) {
+        const held = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+
+        if (held.length > 0) {
+          await database
+            .update(mcpServers)
+            .set({
+              // Named as the state it is, because "listed nothing" and "would not answer" send an
+              // operator to different places, and reaching this line settles which one it was: a
+              // listing that could not be made throws and lands in the `catch` above instead. So
+              // this sentence must not send anybody to check their configuration — that is the
+              // other state's sentence, written by the transport that refused. No
+              // `toolsRefreshedAt`: that column says when this deployment last learned what the app
+              // offers, and it did not learn it here.
+              lastError: `This app was asked and answered with no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check whether it still publishes them, then refresh again.`,
+              updatedAt: new Date(),
+            })
+            .where(eq(mcpServers.id, serverId));
+          // What the app advertises, which is what it advertised before: the honest count, because
+          // nothing was replaced.
+          return { tools: held.length };
+        }
+      }
+
+      /*
+       * COMMITTING WHAT THE VENDOR SAID. Nothing from here down is a vendor's doing, so nothing from
+       * here down is caught — see the criterion on the `try` above.
+       *
+       * ONE STEP, because the paragraph above promises the held actions are left alone.
+       *
+       * "The tools already held are left alone" is only true while nothing has been written yet.
+       * As two auto-committed statements the delete landed on its own whenever the insert did not:
+       * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
+       * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
+       * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
+       * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
+       * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
+       * connector kept every grant an administrator had made and offered none of them, and
+       * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
+       *
+       * Rolled back together, the Bots go on using what they were granted — and the fault raises
+       * rather than being copied into `lastError`, because a transaction this database would not take
+       * is not something the vendor did.
+       */
+      // Names deduplicated and vendor text made storable before a transaction is opened on any of
+      // it, because both failures used to abort the replace from inside one. See
+      // {@link storableTools}.
+      const storable = storableTools(serverId, listed);
+
+      try {
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(mcpTools)
+            .where(eq(mcpTools.serverId, serverId));
+          if (storable.length > 0) {
+            await transaction.insert(mcpTools).values(storable);
+          }
+        });
+      } catch (error) {
+        /*
+         * A database failure, with the statement and its parameters left behind.
+         *
+         * CRITERION. Nothing raised from here carries the SQL or the values bound to it.
+         *
+         * REASON. drizzle wraps every failure as a `DrizzleQueryError`, whose message is
+         * `Failed query:` followed by the whole statement and then every parameter — here, the
+         * vendor's entire tool list. That message is what an unhandled throw puts in the logs and
+         * what any caller that prints an error puts on a screen. A SQL dump on an error path is
+         * the same disclosure shape as a credential leak one layer out, and it is gratuitous: the
+         * driver's own complaint says what went wrong without any of it.
+         *
+         * RAISED, NOT RECORDED, which is what the paragraph above this transaction argues for and
+         * is now true rather than merely intended: with duplicate names and unstorable text
+         * removed before the statement is built, what is left is this database refusing something
+         * this deployment's own schema says it will take, and `lastError` is where a VENDOR's
+         * answer goes.
+         */
+        throw new PluginInvariantError(
+          `${row.id}: the actions this app listed were not stored, so what it already had is unchanged. ${databaseComplaint(error)}`,
+        );
+      }
+
+      await database
+        .update(mcpServers)
+        .set({
+          toolsRefreshedAt: new Date(),
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(mcpServers.id, serverId));
+
+      /*
+       * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
+       * nothing.
+       *
+       * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
+       * This answers "when did it stop being offered, and what was holding it" — the question asked
+       * after a transport is swapped back and a name starts resolving again. Without the row, the
+       * only record of the gap is its absence.
+       *
+       * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
+       * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
+       * what it names is what is actually left over — and only ever after a listing that was
+       * committed, because the guard above returns before this on an empty answer that would have
+       * named every grant the app holds.
+       */
+      // The names as STORED, so a grant is compared against a row that exists: a duplicate the
+      // vendor listed twice is one row, and a name is spelled here the way the insert spelled it.
+      const advertised = new Set(storable.map((tool) => tool.name));
+      const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
+        .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
+        .sort(([left], [right]) => left.localeCompare(right));
+
+      if (stranded.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: auditActor,
+            change: "grants_not_advertised",
+            server: serverId,
+            // The refs, because that is what a grant is keyed on and what an administrator revokes.
+            refs: stranded.map(([ref]) => ref),
+            bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
+            note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
+          },
+        });
+      }
+
+      /*
+       * Tools the vendor advertises that this deployment's write list does not name.
+       *
+       * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
+       * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+       * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
+       * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
+       *
+       * `configuration.changed` rather than a type of its own, the same as the stranded grants
+       * above and for the same reason: nothing was denied and the refresh succeeded. What changed
+       * is that the deployment now knows a name it had not classified.
+       */
+      const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
+      if (unlisted.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: auditActor,
+            change: "unlisted_tools_advertised",
+            server: serverId,
+            tools: unlisted,
+            note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
+          },
+        });
+      }
+
+      // What was recorded, which is what "this app offers N actions" means on the page. Counting
+      // the listing instead reported a duplicate the vendor named twice as two actions the
+      // deployment holds, when `mcp_tools` holds one row for it.
+      return { tools: storable.length };
     },
 
     async listServers(): Promise<ServerRecord[]> {
@@ -2203,7 +2882,7 @@ export function createPluginStore(options: PluginStoreOptions) {
                 description: tool.description,
                 inputSchema: tool.inputSchema as Record<string, unknown>,
                 ref,
-                effect: classifyTool(entry, tool.name, true),
+                effect: classifyTool(entry, tool.name, true, tool.effect),
                 grantedTo: grants.get(ref) ?? [],
               };
             }),
@@ -2772,6 +3451,11 @@ export function createPluginStore(options: PluginStoreOptions) {
      * The join rows go too, so the account pages stop claiming a connection this deployment can no
      * longer use.
      *
+     * AND THE BROKERED CONNECTIONS, which are neither a credential nor a join row. Composio holds
+     * the account, so there is no secret in the vault to find and the `composio_connections` row is
+     * itself the permission — the only thing deciding whether a call may go out as this person.
+     * Sweeping the vault alone therefore left that gate passing for somebody who had been removed.
+     *
      * NOT vendor-side revocation. That needs the OAuth client and the vendor's revoke endpoint, and
      * it belongs with disconnect. This is the half that stops us holding the secret; the grant at
      * Google outlives it until somebody revokes it there. Said plainly rather than implied, because
@@ -2827,6 +3511,62 @@ export function createPluginStore(options: PluginStoreOptions) {
       await database
         .delete(mcpUserCredentials)
         .where(eq(mcpUserCredentials.userId, userId));
+
+      /*
+       * Every app this person connected at the broker, where there is no secret to scan the vault
+       * for.
+       *
+       * CRITERION. After this returns, no brokered call may go out on this person's behalf.
+       *
+       * REASON. A brokered connection is not a credential: Composio holds the account and this
+       * deployment sends a user id, so the vault sweep above finds nothing and `composio_connections`
+       * is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
+       * connector was brokered, reported that as a retirement, and left the `(toolkit, user_id)` gate
+       * passing for a person who no longer exists — their access outliving them, which is the first
+       * thing anybody asks about a per-person connector. The table's own docblock justifies its shape
+       * by this path, so the shape was carrying a promise nothing kept.
+       *
+       * FOUND HERE AND NOWHERE ELSE, which is what the missing foreign key buys. The row survives the
+       * `users` row precisely so this can still name what the person had after they are gone — the
+       * same argument the vault lookup above makes, from the side that has no vault row. It is also
+       * why the guard at the top of this method is load-bearing rather than defensive: `not null`
+       * admits the empty string, so a row at `(toolkit, "")` is legal, and retiring "nobody" must not
+       * be what deletes it.
+       *
+       * COUNTED, because the number is what "we removed their access" claims. Retiring twice stays
+       * quiet on its own: the rows are gone, so the second call deletes none.
+       */
+      const brokered = await database
+        .delete(composioConnections)
+        .where(eq(composioConnections.userId, userId))
+        .returning({ toolkit: composioConnections.toolkit });
+
+      // Sorted, so two retirements of the same person write their rows in the same order.
+      for (const connection of brokered.sort((left, right) =>
+        left.toolkit.localeCompare(right.toolkit),
+      )) {
+        retired += 1;
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          // The app, which for a brokered connection is all the row records. The `mcp_servers` row
+          // it belongs to may have been removed already, and the connection outlives that too.
+          targetId: connection.toolkit,
+          payload: {
+            actor: by,
+            server: connection.toolkit,
+            owner: userId,
+            reason: "person_removed",
+            /*
+             * False here for a different reason than above. There, the grant at Google outlives our
+             * copy of the secret. Here there is no secret of ours at all: the account stays
+             * connected at Composio until somebody ends it there, and what this did was shut the
+             * only gate this deployment owns.
+             */
+            vendorRevoked: false,
+          },
+        });
+      }
 
       return { retired };
     },
@@ -2887,6 +3627,17 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(`${input.ref} is not a tool.`, null);
       }
 
+      /*
+       * Who the trail says made this call, which is not what the call is made AS.
+       *
+       * `input.actorId` stays the value every gate is decided on, and the empty string must go on
+       * matching no grant and no connection anywhere. This is only what the row says: a run nobody
+       * could be attributed to is `unattributed` rather than blank, on the criterion at
+       * {@link DEPLOYMENT_ACTOR}, and never `deployment` — a run this deployment could not put a
+       * name to is not the deployment having acted.
+       */
+      const auditActor = input.actorId || UNATTRIBUTED_ACTOR;
+
       const decision = await this.decide("mcp", input.ref, input.botId);
       if (!decision.allowed) {
         await recordAuditEvent(auditStore, {
@@ -2895,7 +3646,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetId: input.ref,
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
-            actor: input.actorId,
+            actor: auditActor,
             bot: input.botId,
             server: serverId,
             tool: toolName,
@@ -2906,22 +3657,58 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(decision.reason, null);
       }
 
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
       const advertised = await database
-        .select({ name: mcpTools.name, inputSchema: mcpTools.inputSchema })
+        .select({
+          name: mcpTools.name,
+          inputSchema: mcpTools.inputSchema,
+          effect: mcpTools.effect,
+          destructive: mcpTools.destructive,
+          version: mcpTools.version,
+        })
         .from(mcpTools)
         .where(
           and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
         )
         .limit(1);
 
-      const effect = classifyTool(entry, toolName, advertised.length > 0);
+      const effect = classifyTool(
+        entry,
+        toolName,
+        advertised.length > 0,
+        advertised[0]?.effect,
+      );
 
       const args = withoutEmptyOptionals(
         input.args,
         advertised[0]?.inputSchema as Record<string, unknown> | undefined,
       );
+
+      /*
+       * The version this action was listed at, handed to the transport that needs one.
+       *
+       * Under a reserved key rather than as a parameter on the shared signature, because that
+       * signature is MCP's and three other transports implement it. The Composio transport strips
+       * the key before anything reaches the vendor, and asserts that it did.
+       *
+       * A `__version` in the model's own arguments is not an argument: it is this key, and no
+       * vendor publishes it. So it is stripped unconditionally, whatever its value, and that strip
+       * is the whole protection. The recorded version is then merged into arguments that provably
+       * cannot carry the key, which makes both spread orders identical: the merge order has no
+       * reachable failure mode. Do not read the strip as belt-and-braces on top of an ordering
+       * guarantee — the ordering is the redundant half, and removing the strip is what would let a
+       * model choose which revision of an action runs.
+       *
+       * Absent when the app has not been refreshed since the column existed, and because the key
+       * was stripped there is then no version at all for the transport to read, which is what makes
+       * its refusal hold rather than guessing — a guessed version is a call against an action's
+       * other behaviour.
+       */
+      const { [VERSION_ARG]: _dropped, ...modelArgs } = args;
+      const vendorArgs = advertised[0]?.version
+        ? { ...modelArgs, [VERSION_ARG]: advertised[0].version }
+        : modelArgs;
 
       /**
        * The same policy the computer actions are judged by, asked about a tool call.
@@ -2966,7 +3753,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * the row goes down once, after the outcome exists.
        */
       const decided = {
-        actor: input.actorId,
+        actor: auditActor,
         bot: input.botId,
         server: serverId,
         tool: toolName,
@@ -2978,7 +3765,7 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a per-person connector raises — two rows for the same tool and the same Bot can legitimately
          * have seen entirely different documents, and nothing else in the row says why.
          */
-        reachedAs: reachedAsFor(entry, input.actorId),
+        reachedAs: reachedAsFor(access, input.actorId),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,
@@ -3066,8 +3853,14 @@ export function createPluginStore(options: PluginStoreOptions) {
        * it did.
        */
       try {
-        const { token } = await connectionTokenFor(row, entry, input.actorId);
-        const vendor = injectedVendor ?? transportFor(entry).callTool;
+        const { token } = await connectionTokenFor(
+          row,
+          entry,
+          input.actorId,
+          access,
+        );
+        const vendor =
+          injectedVendor ?? transportFor(access.transport).callTool;
         const result = await vendor(
           {
             url: effectiveUrl(row, entry),
@@ -3076,7 +3869,7 @@ export function createPluginStore(options: PluginStoreOptions) {
             botId: input.botId,
           },
           toolName,
-          args,
+          vendorArgs,
         );
         await recordAuditEvent(auditStore, {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
@@ -3121,8 +3914,18 @@ export function createPluginStore(options: PluginStoreOptions) {
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
             ...decided,
+            /*
+             * Asked through {@link withoutStatement}, because not every throw in this block is a
+             * vendor's sentence.
+             *
+             * The vendor's own words are what this field is for and are kept. But every query on
+             * the way here throws a `DrizzleQueryError` whose message is our statement and its
+             * bound values — credential ids, user ids, server ids — and `audit_events` is read by
+             * an operator and exported. A dump in the row that records a failed call is the same
+             * disclosure the tool-list replace was fixed for, in the trail rather than on a page.
+             */
             failure: (error instanceof Error
-              ? error.message
+              ? withoutStatement(error)
               : String(error)
             ).slice(0, 400),
           },

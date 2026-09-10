@@ -17,6 +17,8 @@ import {
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  deploymentFaultSentence,
+  isDeploymentFault,
   type OAuthClient,
   type PluginKind,
   PluginRefusedError,
@@ -211,6 +213,23 @@ export function createPluginRoutes(
       ) {
         return context.json({ error: error.message }, 400);
       }
+      /*
+       * The same mapping the refresh route makes, on the routes that call the same method.
+       *
+       * CRITERION. Every admin route whose store call can reach a fault on the
+       * `isDeploymentFault` shelf answers with the sentence rather than leaving it to the default
+       * handler.
+       *
+       * REASON. Adding a server REFRESHES it before answering — deliberately, so a bad credential
+       * is reported now rather than the first time a Bot uses it — so every fault `refreshTools`
+       * raises arrives here too, and a vendor listing one action twice or a query of ours failing
+       * is exactly that. Mapped on one route and not on its siblings, the same fault is a named
+       * sentence or "That did not work" depending on which button was pressed, which is the shape
+       * that made this class hard to see the first time.
+       */
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
+      }
       throw error;
     }
   });
@@ -254,6 +273,11 @@ export function createPluginRoutes(
         error instanceof CatalogueEntryUnknownError
       ) {
         return context.json({ error: error.message }, 400);
+      }
+      // As on the curated add above, and for the same reason: this path refreshes before it
+      // answers.
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
       }
       throw error;
     }
@@ -299,6 +323,11 @@ export function createPluginRoutes(
       ) {
         return context.json({ error: error.message }, 400);
       }
+      // Registering a client resolves the row first, so a row this deployment cannot say how to
+      // reach refuses here as well.
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
+      }
       throw error;
     }
   });
@@ -329,6 +358,29 @@ export function createPluginRoutes(
     } catch (error) {
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json({ error: error.message }, 404);
+      }
+      /*
+       * The one audience the sentence was written for, and the only route that may show it.
+       *
+       * CRITERION. A contradiction between this deployment's own columns comes back to an
+       * administrator as itself: a body, naming the row and what to do about it.
+       *
+       * REASON. Unmapped, it reached the framework's default handler — a 500 with no JSON at all,
+       * which the admin page reads as "That did not work", the fallback it uses when a response
+       * carries no message. So the one refusal that names exactly which row is wrong and how to
+       * correct it was the one an operator could not see, while the same sentence WAS reaching a
+       * model on the tool-call path. This route is `requireAdmin`, which is what makes showing it
+       * here safe and showing it anywhere else not.
+       *
+       * 409 rather than 500: nothing broke, and nothing about the request was malformed. Two rows
+       * of ours disagree, and the request cannot be answered until one of them changes — which is
+       * what the sentence tells the reader to go and do.
+       */
+      if (isDeploymentFault(error)) {
+        // `deploymentFaultSentence` rather than `error.message`: the shelf now includes a query
+        // this database refused, and that one's message is the statement and every value bound to
+        // it. An administrator is entitled to the reason, not to the dump.
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
       }
       throw error;
     }
@@ -878,6 +930,28 @@ export function createPluginRoutes(
       }
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json({ error: error.message }, 404);
+      }
+      /*
+       * Ours, and so neither the vendor's fault nor this caller's business.
+       *
+       * CRITERION. A fault on the `isDeploymentFault` shelf is not reported through the branch
+       * below, and its sentence does not leave this process by this route.
+       *
+       * REASON. Two things would be wrong at once. `failed: true` and 502 say somebody else's
+       * software did not answer, which is a false statement about a call that never went out —
+       * and this route is `requireUser`, not `requireAdmin`, so the sentence naming our columns
+       * and the correction to make would be readable by anybody with a session. The operator who
+       * can act on it reads it on the refresh route above, which is admin-gated; here the honest
+       * answer is that the deployment cannot make this call as it stands.
+       */
+      if (isDeploymentFault(error)) {
+        return context.json(
+          {
+            error:
+              "That tool is not configured in a way this deployment can act on. An administrator has to look at the server it belongs to.",
+          },
+          500,
+        );
       }
       // A server that failed is not a refusal, and saying so matters: one means the deployment
       // decided against it, the other means somebody else's software did not answer.
