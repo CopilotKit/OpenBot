@@ -331,10 +331,19 @@ $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'Curre
 [Text.Encoding]::UTF8.GetString($bytes)
 "#;
     let path = vault_dir(root)?.join(format!("{name}.dpapi"));
-    let Ok(sealed) = std::fs::read_to_string(path) else {
+    let Some(sealed) = read_dpapi_store_file(&path)? else {
         return Ok(None);
     };
     powershell(UNPROTECT, Some(&sealed)).map(|plain| Some(plain.trim().to_string()))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn read_dpapi_store_file(path: &Path) -> Result<Option<String>, Problem> {
+    match std::fs::read_to_string(path) {
+        Ok(sealed) => Ok(Some(sealed)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(dpapi_problem(format!("{}: {error}", path.display()))),
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -417,7 +426,7 @@ fn dpapi_problem(detail: String) -> Problem {
 mod dpapi_tests {
     #[cfg(unix)]
     use super::dpapi_output;
-    use super::{remember_cached, write_dpapi_stdin};
+    use super::{read_dpapi_store_file, remember_cached, write_dpapi_stdin};
     use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
     use std::io::{self, Write};
@@ -529,6 +538,38 @@ mod dpapi_tests {
             assert!(closed.get());
         }
         assert_eq!(write_dpapi_stdin(None::<StdinWriter>, None), Ok(()));
+    }
+
+    #[test]
+    fn dpapi_store_file_read_reports_unreadable_or_corrupt_files_as_protected_store_errors() {
+        let root = crate::test_support::temp_root("dpapi-read-errors");
+        let vault = root.join(".dpapi");
+        std::fs::create_dir_all(&vault).unwrap();
+        let missing = vault.join("OPENAI_API_KEY.dpapi");
+        assert_eq!(read_dpapi_store_file(&missing).unwrap(), None);
+
+        let unreadable = vault.join("ANTHROPIC_API_KEY.dpapi");
+        std::fs::create_dir(&unreadable).unwrap();
+        let problem = read_dpapi_store_file(&unreadable)
+            .expect_err("an existing unreadable DPAPI blob is not absence");
+        assert_eq!(
+            problem.said,
+            "OpenBot could not save your sign-in details to this computer's protected storage."
+        );
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains(&unreadable.display().to_string()),
+            "{detail}"
+        );
+
+        let corrupt = vault.join("COMPATIBLE_API_KEY.dpapi");
+        std::fs::write(&corrupt, b"\xff").unwrap();
+        let problem = read_dpapi_store_file(&corrupt)
+            .expect_err("invalid UTF-8 in an existing DPAPI blob is not absence");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains(&corrupt.display().to_string()), "{detail}");
+        assert!(!detail.contains("\\xff"), "{detail}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
