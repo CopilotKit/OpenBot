@@ -9,6 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { and, asc, eq, gte, inArray, like, or, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
@@ -1843,7 +1844,16 @@ describe("refresh token rotation", () => {
  */
 async function withMockedNotionListing(
   notionServerId: string,
-  tools: MCPToolDefinition[],
+  /*
+   * The mock's own tool shape, plus the annotations a real server publishes.
+   *
+   * `MCPToolDefinition` names only name, description and schema, and the mock hands whatever it was
+   * given straight back in its `tools/list` answer — so an annotation travels at runtime and is
+   * simply unspellable in the type. Widened here rather than cast at each fixture, because the
+   * hints are what `listTools` reads to decide an action's recorded effect, and a test about that
+   * decision should not be the one place a cast hides a shape drifting.
+   */
+  tools: (MCPToolDefinition & { annotations?: ToolAnnotations })[],
   body: () => Promise<void>,
 ) {
   const mock = new MCPMock();
@@ -2804,8 +2814,11 @@ describe("a dynamic client the vendor has evicted", () => {
   /**
    * The classification an MCP server has always had, over a real listing that really happened.
    *
-   * The three columns the refresh now writes are Composio's, and every other transport has to keep
-   * coming out of that insert as null and false. `classifyTool` consults the reviewed `writeTools`
+   * The three columns the refresh writes are the transports' to fill in, and an MCP server that
+   * annotates nothing fills in none of them — which is what every fixture in THIS test does, and
+   * so what it is about. It is no longer true of the transport in general: `listTools` reads
+   * `annotations.destructiveHint` and writes both `effect` and `destructive` from it, which the
+   * test below this one covers. `classifyTool` consults the reviewed `writeTools`
    * list BEFORE the recorded `effect` column, on the criterion that a recorded value may narrow what
    * a Bot is allowed and may never widen it — so a name the list covers stays a write whatever the
    * column says, and a value appearing here can no longer turn one of Notion's reviewed writes into a
@@ -2885,6 +2898,106 @@ describe("a dynamic client the vendor has evicted", () => {
           })),
         ).toEqual([
           { name: "notion-create-pages", effect: "write" },
+          { name: "notion-fetch", effect: "read" },
+        ]);
+      },
+    );
+  });
+
+  /**
+   * The one annotation this deployment believes, and the two it declines to.
+   *
+   * CRITERION. `destructiveHint === true` is recorded as `effect: "write"` and `destructive: true`.
+   * `readOnlyHint` is recorded as NOTHING AT ALL — not as `read`, not as a value overridden further
+   * down — whether or not the reviewed write list already covers the name.
+   *
+   * REASON. The SDK warns where it declares these hints that a client must not make tool-use
+   * decisions from annotations an untrusted server supplied, and the two hints are not symmetrical
+   * against that warning. `destructiveHint` can only move an action from read to write, so a server
+   * that lies with it restricts itself. `readOnlyHint` moves an action the other way, and it would
+   * buy nothing in the two curated cases — a name on `writeTools` never reaches the column, and a
+   * name absent from it already reads as a read — while opening the third: a server an
+   * administrator added by URL has no reviewed list, and `classifyTool` returns on the recorded
+   * column BEFORE its `if (!entry) return "write"`, so believing the hint would let an arbitrary
+   * server declare its whole surface harmless and turn "no reviewed list means everything is a
+   * write" into an opt-out.
+   *
+   * WHY NULL IS THE ASSERTION rather than a classification. Both `readOnlyHint` fixtures come out
+   * of `listServers` correctly whatever the column holds — one is on the write list, the other is
+   * not — so a classification assertion alone would pass with the hint written down and overruled
+   * downstream. NULL in the column is what says it was never read.
+   */
+  test("a refresh records the effect an MCP server declares, and only the narrowing one", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    /** Suite-scoped, so it is not a name Notion really advertises nor one `writeTools` covers. */
+    const destructiveName = `notion-destroy-${suite}`;
+
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion-fetch",
+          description:
+            "A read no write list names, declaring itself read-only.",
+          inputSchema: { type: "object", properties: {} },
+          annotations: { readOnlyHint: true },
+        },
+        {
+          name: "notion-create-pages",
+          description: "A reviewed write, declaring itself read-only.",
+          inputSchema: { type: "object", properties: {} },
+          annotations: { readOnlyHint: true },
+        },
+        {
+          name: destructiveName,
+          description: "Advertised, on no write list, declared destructive.",
+          inputSchema: { type: "object", properties: {} },
+          annotations: { destructiveHint: true },
+        },
+      ],
+      async () => {
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 3 });
+
+        const rows = await database
+          .select({
+            name: mcpTools.name,
+            effect: mcpTools.effect,
+            destructive: mcpTools.destructive,
+          })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId))
+          .orderBy(asc(mcpTools.name));
+
+        expect(rows).toEqual([
+          // The reviewed write, which said it was read-only. Nothing recorded, so nothing to
+          // overrule: the write list is still the only thing that answers for this name.
+          { name: "notion-create-pages", effect: null, destructive: false },
+          // The declaration that narrows, taken at its word.
+          { name: destructiveName, effect: "write", destructive: true },
+          // The unreviewed read, which also said it was read-only, and is believed about nothing.
+          { name: "notion-fetch", effect: null, destructive: false },
+        ]);
+
+        const listed = (await dynamicStore.listServers()).find(
+          (server) => server.id === dynamicServerId,
+        );
+
+        // What the Plugins page derives, which is what an administrator actually reads: the
+        // reviewed name is a write because review says so, the declared one is a write because the
+        // vendor narrowed it, and the third is the read it was already classified as.
+        expect(
+          listed?.tools.map((tool) => ({
+            name: tool.name,
+            effect: tool.effect,
+          })),
+        ).toEqual([
+          { name: "notion-create-pages", effect: "write" },
+          { name: destructiveName, effect: "write" },
           { name: "notion-fetch", effect: "read" },
         ]);
       },
