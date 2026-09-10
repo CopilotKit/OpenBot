@@ -8,7 +8,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
-import { defer, from, switchMap } from "rxjs";
+import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
 import { z } from "zod";
 import {
   COMPUTER_GUIDANCE,
@@ -528,15 +528,20 @@ async function buildAgent(
   };
 
   /** Pass one and pass two, for one run. Shared by both agent kinds; each applies it differently. */
-  const offeredFor = async (input: RunAgentInput): Promise<GrantedTool[]> => {
+  const offeredFor = async (
+    input: RunAgentInput,
+    signal?: AbortSignal,
+  ): Promise<GrantedTool[]> => {
     if (!narrowing) return granted;
     const chosen = await selectTools({
       tools: granted,
       skills,
       text: latestUserText(input.messages),
       choose: narrowing.choose,
+      signal,
       ...(narrowing.floor === undefined ? {} : { floor: narrowing.floor }),
     });
+    signal?.throwIfAborted();
     // Awaited, so the row is on record before the model is handed the tools it names. A discovery
     // written afterwards would sit in the trail after the calls it explains.
     await narrowing.record?.(agent.id, chosen).catch(() => {
@@ -604,8 +609,9 @@ async function buildAgent(
   return new RunBuiltAgent(
     { agentId: agent.id, description: agent.name },
     whole,
-    async (input) => {
-      const offered = narrowing ? await offeredFor(input) : granted;
+    async (input, signal) => {
+      const offered = narrowing ? await offeredFor(input, signal) : granted;
+      signal.throwIfAborted();
       /*
        * The tool for handing work to another Bot is made per run, not per request.
        *
@@ -615,6 +621,7 @@ async function buildAgent(
        * than a run and knows neither.
        */
       const passing = (await handoff?.(agent.id, input)) ?? [];
+      signal.throwIfAborted();
       const tools = passing.length > 0 ? [...offered, ...passing] : offered;
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
@@ -653,8 +660,8 @@ export type HandoffForRun = (
 export type ToolSelection = {
   /** What this Bot's granted skills declare. Failure is diagnosed and treated as "no skills". */
   loadSkills: (botId: string) => Promise<SelectableSkill[]>;
-  /** Pass one. Returns the model's raw answer; throwing means the narrowing is skipped. */
-  choose: (prompt: string) => Promise<string | null>;
+  /** Pass one. Ordinary failures skip narrowing; cancellation stops the run. */
+  choose: (prompt: string, signal?: AbortSignal) => Promise<string | null>;
   /** Writes the discovery row. Never allowed to fail a run. */
   record?: (botId: string, selection: Selection<GrantedTool>) => Promise<void>;
   /** Overrides the default catalogue size below which nothing is narrowed. */
@@ -1159,21 +1166,24 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
  */
 class RunBuiltAgent extends AbstractAgent {
   /**
-   * The agent this run turned into, once there is one.
-   *
-   * Held only so `abortRun` can reach it. Without this, pressing stop aborts a wrapper that is not
-   * doing anything and leaves the model call underneath it running to completion, spending the
-   * deployment's money on an answer nobody will see.
+   * Stop must reach the pending build as well as the eventual model. Keep both in one per-run
+   * record so a late build or teardown cannot replace the next run's cancellation target.
    */
-  private inner?: AbstractAgent;
+  private active?: { controller: AbortController; inner?: AbstractAgent };
   /** The same Bot with nothing narrowed, kept to answer questions that are not about one run. */
   private whole: AbstractAgent;
-  private build: (input: RunAgentInput) => Promise<AbstractAgent>;
+  private build: (
+    input: RunAgentInput,
+    signal: AbortSignal,
+  ) => Promise<AbstractAgent>;
 
   constructor(
     identity: { agentId: string; description: string },
     whole: AbstractAgent,
-    build: (input: RunAgentInput) => Promise<AbstractAgent>,
+    build: (
+      input: RunAgentInput,
+      signal: AbortSignal,
+    ) => Promise<AbstractAgent>,
   ) {
     super(identity);
     this.whole = whole;
@@ -1181,14 +1191,26 @@ class RunBuiltAgent extends AbstractAgent {
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
-    return defer(() =>
-      from(this.build(input)).pipe(
+    return defer(() => {
+      const active: NonNullable<RunBuiltAgent["active"]> = {
+        controller: new AbortController(),
+      };
+      this.active = active;
+      const { signal } = active.controller;
+      return defer(() => this.build(input, signal)).pipe(
         switchMap((agent) => {
-          this.inner = agent;
+          signal.throwIfAborted();
+          active.inner = agent;
           return agent.run(input);
         }),
-      ),
-    );
+        // Settle Stop even if a collaborator ignores the signal or rejects after cancellation.
+        takeUntil(fromEvent(signal, "abort")),
+        finalize(() => {
+          if (this.active === active) this.active = undefined;
+          active.controller.abort();
+        }),
+      );
+    });
   }
 
   /**
@@ -1215,14 +1237,15 @@ class RunBuiltAgent extends AbstractAgent {
     const cloned = super.clone() as RunBuiltAgent;
     cloned.whole = this.whole;
     cloned.build = this.build;
-    // Deliberately not the inner agent. A clone is a new run, and inheriting the last run's agent
-    // would point `abortRun` at something already finished.
-    cloned.inner = undefined;
+    // A clone owns its cancellation state, including while its build is pending.
+    cloned.active = undefined;
     return cloned;
   }
 
   abortRun(): void {
-    this.inner?.abortRun();
+    const active = this.active;
+    active?.controller.abort();
+    active?.inner?.abortRun();
     super.abortRun();
   }
 }
