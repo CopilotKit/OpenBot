@@ -323,11 +323,26 @@ fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, S
 /// leaves it running: an idle Ubuntu container per Bot, with the application gone and nothing on
 /// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
 /// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
+/// Quiesce the supervisor before listing so in-flight creates and restarts are included.
 /// Returns false only when the selected root has no installed deployment to take down.
 pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
     let Some(namespace) = computer_namespace(engine, root)? else {
         return Ok(false);
     };
+    // Validate ownership before stopping anything, then wait for the creator to exit. A list taken
+    // while the supervisor is active can miss a new computer or one it restarts after being stopped.
+    let supervisor = compose_command(engine, root, &Secrets::new())
+        .args(["-f", "docker-compose.yml", "stop", "supervisor"])
+        .output()
+        .map_err(|error| format!("could not stop the supervisor: {error}"))?;
+    if !supervisor.status.success() {
+        return Err(format!(
+            "could not stop the supervisor ({}): {}",
+            supervisor.status,
+            command_said(&supervisor.stderr)
+        ));
+    }
+
     let namespace_filter = format!("label=openbot.namespace={namespace}");
     let listed = engine
         .command()
@@ -366,8 +381,7 @@ pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
 }
 
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
-    // Before Compose, because the supervisor is what would otherwise start another one while this
-    // is happening.
+    // Stop the supervisor and its runtime-created computers before removing the Compose stack.
     if !stop_computers(engine, root)? {
         return Ok(());
     }
@@ -3193,6 +3207,8 @@ fn main() {
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
     if scenario == "computer-stop" {
+        let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
+        let race = root.join(".fixture-race").exists();
         let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
         let without_file;
         let actual = if actual.get(1).map(String::as_str) == Some("-f") {
@@ -3204,25 +3220,60 @@ fn main() {
                 if std::path::Path::new(".fixture-config-failure").exists() { std::process::exit(17); }
                 print!("{}", std::fs::read_to_string(".fixture-config").unwrap());
             }
+            Some("compose") if actual == ["compose", "stop", "supervisor"] => {
+                if root.join(".fixture-supervisor-stop-failure").exists() {
+                    eprintln!("fixture supervisor stop refused");
+                    std::process::exit(17);
+                }
+                if race {
+                    // An in-flight create/restart completes before the supervisor exits.
+                    std::fs::write(root.join("late.running"), "").unwrap();
+                    std::fs::write(root.join("restarted.running"), "").unwrap();
+                    std::fs::write(root.join("supervisor.stopped"), "").unwrap();
+                }
+            }
             Some("ps") => {
                 // Model the engine's AND-label filtering over owned, other-namespace, and
                 // non-supervisor rows. The connected proof separately exercises the real daemon.
-                let labels = [
+                let mut labels = vec![
                     ("current", "true", "fixture-selected"),
                     ("other", "true", "fixture-other"),
                     ("unowned", "false", "fixture-selected"),
                     ("default", "true", "openbot"),
                 ];
+                if race {
+                    labels.extend([("late", "true", "fixture-selected"), ("restarted", "true", "fixture-selected")]);
+                }
                 for (id, supervisor, namespace) in labels {
                     let matches = actual.windows(2).filter(|pair| pair[0] == "--filter").all(|pair| {
                         pair[1] == format!("label=openbot.supervisor={supervisor}")
                             || pair[1] == format!("label=openbot.namespace={namespace}")
                     });
-                    if matches { println!("{id}"); }
+                    if matches && (!race || root.join(format!("{id}.running")).exists()) { println!("{id}"); }
+                }
+                if race && !root.join("supervisor.stopped").exists() {
+                    // The list is already fixed when the active supervisor creates these.
+                    std::fs::write(root.join("late.running"), "").unwrap();
+                    std::fs::write(root.join("restarted.running"), "").unwrap();
                 }
             }
-            Some("stop") => {}
-            Some("compose") if actual == ["compose", "--profile", "harness", "down"] => {}
+            Some("stop") => {
+                if race {
+                    for id in &actual[1..] {
+                        std::fs::remove_file(root.join(format!("{id}.running"))).unwrap();
+                    }
+                    if !root.join("supervisor.stopped").exists() {
+                        // A still-active supervisor can also restart an existing computer.
+                        std::fs::write(root.join("current.running"), "").unwrap();
+                    }
+                }
+            }
+            Some("compose") if actual == ["compose", "--profile", "harness", "down"] => {
+                if race {
+                    std::fs::write(root.join("supervisor.stopped"), "").unwrap();
+                    std::fs::write(root.join("stack.down"), "").unwrap();
+                }
+            }
             _ => std::process::exit(2),
         }
         return;
@@ -4925,30 +4976,137 @@ fn main() {
         serde_json::json!({"services":{"supervisor":{"environment":{"COMPUTER_NAMESPACE":namespace}}}}).to_string()
     }
 
-    #[test]
-    fn computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine() {
-        if crate::test_support::isolated_process("stack::tests::computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine") { return; }
-        let path = PathFixture::with_fake_engine("computer-stop");
+    fn computer_stop_addresses(path: &PathFixture) -> [Address; 2] {
         let suffix = if cfg!(windows) { ".exe" } else { "" };
         std::fs::copy(
             path.bin.join(format!("docker{suffix}")),
             path.bin.join(format!("podman{suffix}")),
         )
         .unwrap();
-        for (engine, connection, prefix) in [
-            (crate::engine::Engine::Docker, None, ""),
-            (
+        [
+            Address::new(crate::engine::Engine::Docker, None),
+            Address::new(
                 crate::engine::Engine::Podman,
                 Some("fixture-machine".into()),
-                "--connection fixture-machine ",
             ),
-        ] {
+        ]
+    }
+
+    fn computer_shutdown_race_root(path: &PathFixture, label: &str) -> (PathBuf, PathBuf) {
+        let (root, record) =
+            computer_stop_root(path, label, &resolved_namespace_fixture("fixture-selected"));
+        std::fs::write(root.join(".fixture-race"), "").unwrap();
+        for id in ["current", "other", "unowned"] {
+            std::fs::write(root.join(format!("{id}.running")), "").unwrap();
+        }
+        for id in ["current", "late", "restarted", "other", "unowned"] {
+            std::fs::write(root.join(format!("{id}.volume")), id).unwrap();
+        }
+        (root, record)
+    }
+
+    fn assert_computer_shutdown_preserves_foreign_and_volumes(root: &Path) {
+        let surviving: Vec<_> = ["current", "late", "restarted"]
+            .into_iter()
+            .filter(|id| root.join(format!("{id}.running")).exists())
+            .collect();
+        assert!(
+            surviving.is_empty(),
+            "computers survived shutdown: {surviving:?}"
+        );
+        for id in ["other", "unowned"] {
+            assert!(
+                root.join(format!("{id}.running")).exists(),
+                "{id} was stopped"
+            );
+        }
+        for id in ["current", "late", "restarted", "other", "unowned"] {
+            assert_eq!(
+                std::fs::read_to_string(root.join(format!("{id}.volume"))).unwrap(),
+                id
+            );
+        }
+        assert!(root.join("supervisor.stopped").exists());
+        assert!(root.join("stack.down").exists());
+    }
+
+    #[test]
+    fn computer_stop_quiesces_supervisor_before_final_snapshot_and_preserves_other_computers() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_quiesces_supervisor_before_final_snapshot_and_preserves_other_computers") { return; }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            down(&address, &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            println!("{} shutdown trace:\n{log}", address.engine.binary());
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            let config = log.find("config --format json").unwrap();
+            let supervisor = log
+                .find("compose -f docker-compose.yml stop supervisor")
+                .unwrap();
+            let snapshot = log.find("ps --quiet").unwrap();
+            let computers = log.find("stop current late restarted").unwrap();
+            let teardown = log.find("--profile harness down").unwrap();
+            assert!(
+                config < supervisor
+                    && supervisor < snapshot
+                    && snapshot < computers
+                    && computers < teardown,
+                "{log}"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_stop_supervisor_failure_prevents_snapshot_and_is_retryable() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_supervisor_failure_prevents_snapshot_and_is_retryable",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            let failure = root.join(".fixture-supervisor-stop-failure");
+            std::fs::write(&failure, "").unwrap();
+            let error = down(&address, &root).unwrap_err();
+            assert!(
+                error.contains("supervisor") && error.contains("fixture supervisor stop refused"),
+                "{error}"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            assert_eq!(log.lines().count(), 2, "{log}");
+            assert!(
+                !log.contains("ps --quiet") && !log.contains("harness down"),
+                "{log}"
+            );
+            assert!(root.join("current.running").exists());
+            assert!(!root.join("supervisor.stopped").exists());
+            assert!(!root.join("stack.down").exists());
+            std::fs::remove_file(failure).unwrap();
+            down(&address, &root).unwrap();
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+        }
+    }
+
+    #[test]
+    fn computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine") { return; }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let prefix = if address.connection.is_some() {
+                "--connection fixture-machine "
+            } else {
+                ""
+            };
             let (root, record) = computer_stop_root(
                 &path,
-                &format!("root-{}", engine.binary()),
+                &format!("root-{}", address.engine.binary()),
                 &resolved_namespace_fixture("fixture-selected"),
             );
-            down(&Address::new(engine, connection), &root).unwrap();
+            down(&address, &root).unwrap();
             let log = std::fs::read_to_string(record).unwrap();
             assert!(
                 log.contains(&format!(
@@ -5041,10 +5199,7 @@ fn main() {
                 down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap_err();
             assert!(error.contains("namespace"), "{error}");
             let log = std::fs::read_to_string(record).unwrap();
-            assert!(
-                !log.contains("\tps ") && !log.contains("\tstop ") && !log.contains("harness down"),
-                "{log}"
-            );
+            assert!(log.lines().count() == 1, "{log}");
         }
         let (root, record) = computer_stop_root(&path, "provider-failure", "{}");
         std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
