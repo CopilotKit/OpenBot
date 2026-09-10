@@ -1,8 +1,21 @@
 use std::io::{Read, Write};
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Production Start pins a global runtime selector before any Compose commands.
+    if args
+        .first()
+        .is_some_and(|arg| ["--context", "--host", "--connection", "--url"].contains(&arg.as_str()))
+    {
+        args.drain(..2);
+    } else if args.first().map(String::as_str) == Some("--remote=false") {
+        args.remove(0);
+    }
     let joined = args.join(" ");
+    if joined == "context show" {
+        println!("fixture");
+        return;
+    }
     if let Some(path) = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD") {
         let cwd = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
         let mut log = std::fs::OpenOptions::new()

@@ -30,6 +30,10 @@ mod stop_ipc {
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .unwrap();
             *app.state::<Shell>().root.lock().unwrap() = Some(root.clone());
+            *app.state::<Shell>().containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.clone(),
+                address: engine::Address::new(engine::Engine::Docker, None),
+            });
             let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
                 .build()
                 .unwrap();

@@ -26,7 +26,7 @@
 //! whoever made it. A person with a stopped machine of their own gets `Cannot connect to Podman`
 //! from a machine of ours that is running perfectly well, which reads as our bug and is unfixable
 //! from the error. So the engine is carried as an `Address` and every invocation names its
-//! connection. Docker has one daemon and needs none of this.
+//! connection. Managed Docker runs likewise pin their effective context or host before Compose up.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -63,13 +63,123 @@ impl Engine {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Address {
     pub engine: Engine,
-    /// A Podman machine by name. `None` means the default connection is already the right one.
+    /// A Podman connection by name. Unpinned detection may leave this unset.
     pub connection: Option<String>,
+    /// Internal run affinity, deliberately absent from the setup/status IPC representation.
+    #[serde(skip)]
+    selector: Option<RuntimeSelector>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RuntimeSelector {
+    DockerContext(String),
+    DockerHost(String),
+    PodmanUrl(String),
+    PodmanLocal,
 }
 
 impl Address {
     pub fn new(engine: Engine, connection: Option<String>) -> Self {
-        Self { engine, connection }
+        Self {
+            engine,
+            connection,
+            selector: None,
+        }
+    }
+
+    /// Freeze the supported nonsecret selector before a managed run can create containers.
+    /// Query only names/remote mode, never context exports, TLS material or credential config.
+    pub fn pin(&self) -> Result<Self, String> {
+        if self.selector.is_some() || (self.engine == Engine::Podman && self.connection.is_some()) {
+            return Ok(self.clone());
+        }
+        let mut pinned = self.clone();
+        let env = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+        match self.engine {
+            Engine::Docker => {
+                pinned.selector = Some(if let Some(context) = env("DOCKER_CONTEXT") {
+                    self.docker_context_selector(context)?
+                } else if let Some(host) = env("DOCKER_HOST") {
+                    RuntimeSelector::DockerHost(nonsecret_endpoint(host)?)
+                } else {
+                    self.docker_context_selector(self.selector_output(&["context", "show"])?)?
+                });
+            }
+            Engine::Podman => {
+                if let Some(connection) = env("CONTAINER_CONNECTION") {
+                    pinned.connection = Some(connection);
+                } else if let Some(host) = env("CONTAINER_HOST") {
+                    pinned.selector = Some(RuntimeSelector::PodmanUrl(nonsecret_endpoint(host)?));
+                } else if cfg!(target_os = "linux")
+                    && self.selector_output(&["info", "--format", "{{.Host.ServiceIsRemote}}"])?
+                        == "false"
+                {
+                    pinned.selector = Some(RuntimeSelector::PodmanLocal);
+                } else {
+                    pinned.connection = Some(self.selector_output(&[
+                        "system",
+                        "connection",
+                        "list",
+                        "--format",
+                        "{{if .Default}}{{.Name}}{{end}}",
+                    ])?);
+                }
+            }
+        }
+        Ok(pinned)
+    }
+
+    fn docker_context_selector(&self, context: String) -> Result<RuntimeSelector, String> {
+        if context == "default" {
+            // Docker's virtual default context still derives its endpoint from DOCKER_HOST.
+            // Retain that endpoint so even this context cannot be retargeted by the environment.
+            Ok(RuntimeSelector::DockerHost(nonsecret_endpoint(
+                self.selector_output(&[
+                    "context",
+                    "inspect",
+                    "default",
+                    "--format",
+                    "{{.Endpoints.docker.Host}}",
+                ])?,
+            )?))
+        } else {
+            Ok(RuntimeSelector::DockerContext(context))
+        }
+    }
+
+    fn selector_output(&self, args: &[&str]) -> Result<String, String> {
+        let output = self
+            .command()
+            .args(args)
+            .output()
+            .map_err(|error| format!("Could not identify the container runtime: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("Could not identify the {} runtime selector ({}). Choose an explicit context or connection and try again.", self.engine.binary(), output.status));
+        }
+        let value = String::from_utf8(output.stdout)
+            .map_err(|_| "The container runtime returned an invalid selector.".to_string())?;
+        let names: Vec<_> = value
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        match names.as_slice() {
+            [name] => Ok((*name).to_string()),
+            _ => Err("The container runtime did not identify one connection. Choose an explicit context or connection and try again.".into()),
+        }
+    }
+
+    /// Probe this retained runtime without detecting a replacement engine.
+    pub fn status(&self) -> EngineStatus {
+        let mut status = answering(self.clone());
+        status.responding = self.responds();
+        if !status.responding {
+            status.detail = format!(
+                "The original {} runtime is not answering. Start it and try again.",
+                self.engine.binary()
+            );
+        }
+        status
     }
 
     /// The binary and the arguments that name this engine, and the one place that decides them.
@@ -86,6 +196,18 @@ impl Address {
         if let Some(connection) = &self.connection {
             arguments.push("--connection".to_string());
             arguments.push(connection.clone());
+        }
+        if let Some(selector) = &self.selector {
+            match selector {
+                RuntimeSelector::DockerContext(context) => {
+                    arguments.extend(["--context".into(), context.clone()])
+                }
+                RuntimeSelector::DockerHost(host) => {
+                    arguments.extend(["--host".into(), host.clone()])
+                }
+                RuntimeSelector::PodmanUrl(url) => arguments.extend(["--url".into(), url.clone()]),
+                RuntimeSelector::PodmanLocal => arguments.push("--remote=false".into()),
+            }
         }
         (
             program(self.engine).unwrap_or_else(|| PathBuf::from(self.engine.binary())),
@@ -130,6 +252,16 @@ impl Address {
             .map(|out| out.status.success() && !out.stdout.is_empty())
             .unwrap_or(false)
     }
+}
+
+fn nonsecret_endpoint(value: String) -> Result<String, String> {
+    let parsed = reqwest::Url::parse(&value).map_err(|_| {
+        "Use a named container context or connection for this endpoint.".to_string()
+    })?;
+    if parsed.password().is_some() || parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("Use a named container context or connection; credentials cannot be retained in an endpoint selector.".into());
+    }
+    Ok(value)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -395,6 +527,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_selectors_keep_the_existing_status_wire_shape() {
+        let mut address = Address::new(Engine::Docker, None);
+        address.selector = Some(RuntimeSelector::DockerContext("owned".into()));
+        assert_eq!(
+            serde_json::to_value(&address).unwrap(),
+            serde_json::json!({"engine":"docker","connection":null})
+        );
+        assert_eq!(address.parts().1, ["--context", "owned"]);
+        address.selector = Some(RuntimeSelector::PodmanLocal);
+        address.engine = Engine::Podman;
+        assert_eq!(address.parts().1, ["--remote=false"]);
+    }
+
+    #[test]
+    fn endpoint_affinity_never_retains_embedded_credentials() {
+        assert!(
+            nonsecret_endpoint("ssh://user:synthetic-password@example.test/socket".into()).is_err()
+        );
+        assert!(nonsecret_endpoint("tcp://example.test:1234?token=synthetic".into()).is_err());
+        assert!(nonsecret_endpoint("unix:///owned.sock".into()).is_ok());
+    }
+
+    #[test]
     fn docker_never_overrides_the_socket_because_it_owns_the_default_path() {
         assert_eq!(socket_override(Engine::Docker), None);
     }
@@ -428,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn docker_is_addressed_with_no_connection_because_it_has_one_daemon() {
+    fn unpinned_docker_detection_uses_the_ambient_selector() {
         let command = Address::new(Engine::Docker, None).command();
         assert_eq!(command.get_args().count(), 0);
     }

@@ -50,6 +50,8 @@ struct Shell {
     root: Mutex<Option<PathBuf>>,
     /// Containers may outlive a failed Start before any host root is published.
     containers: Mutex<Option<ContainerDeployment>>,
+    /// A verified down allows a following Stop/Quit to be an idempotent no-op.
+    stopped_container_root: Mutex<Option<PathBuf>>,
     /// An Intelligence sign-in waiting for its loopback callback.
     signing_in_to_intelligence:
         Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
@@ -77,6 +79,7 @@ struct Shell {
 /// it in one record lets shutdown carry further deployment identity without changing host state.
 struct ContainerDeployment {
     root: PathBuf,
+    address: engine::Address,
 }
 
 /// One ticket spans the whole initial Start, including deployment and dependency preparation.
@@ -787,10 +790,20 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(problem.into());
         }
 
-        let status = engine::detect();
+        let owned_address = shell
+            .containers
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|owned| owned.address.clone());
+        let status = match owned_address {
+            Some(address) => address.status(),
+            None => engine::detect(),
+        };
         let Some(found) = status.address.clone().filter(|_| status.responding) else {
             return Err(status.detail.into());
         };
+        let found = found.pin()?;
 
         // Checked here as well as in the health gate, because the gate only runs when an engine had to
         // be installed. A machine that already had Podman skips all of that and arrives at Compose,
@@ -910,7 +923,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
         let bundled_bots = stack::BundledBots::for_credential(&credential);
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
-        *shell.containers.lock().unwrap() = Some(ContainerDeployment { root: root.clone() });
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: found.clone(),
+        });
         let requested_services =
             stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
         report(&app, "services", true, "containers up");
@@ -1044,15 +1060,9 @@ fn stop_everything<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let shell = app.state::<Shell>();
     let root = root_for_stop(&shell, fallback_root);
-    stop_everything_with(
-        &shell,
-        &root,
-        stack::stop_processes_under,
-        |root| match engine::detect().address {
-            Some(found) => stack::down(&found, root),
-            None => Ok(()),
-        },
-    )
+    stop_everything_with(&shell, &root, stack::stop_processes_under, |root| {
+        down_owned_containers(&shell, root)
+    })
 }
 
 fn root_for_stop(shell: &Shell, fallback_root: &Path) -> PathBuf {
@@ -1101,14 +1111,32 @@ fn down_containers_with<D>(shell: &Shell, fallback_root: &Path, down: D) -> Resu
 where
     D: FnOnce(&Path) -> Result<(), String>,
 {
-    let mut containers = shell.containers.lock().unwrap();
-    let root = containers
+    let root = shell
+        .containers
+        .lock()
+        .unwrap()
         .as_ref()
-        .map(|owned| owned.root.as_path())
-        .unwrap_or(fallback_root);
-    down(root)?;
-    *containers = None;
+        .map(|owned| owned.root.clone())
+        .unwrap_or_else(|| fallback_root.to_path_buf());
+    down(&root)?;
+    if shell.containers.lock().unwrap().take().is_some() {
+        *shell.stopped_container_root.lock().unwrap() = Some(root);
+    }
     Ok(())
+}
+
+/// Production Stop/Quit adapter. Called under startup, so the root and address stay paired
+/// until down reports success. Unknown legacy ownership cannot authorize another runtime.
+fn down_owned_containers(shell: &Shell, root: &Path) -> Result<(), String> {
+    let containers = shell.containers.lock().unwrap();
+    match containers.as_ref() {
+        Some(owned) => stack::down(&owned.address, root),
+        None if shell.stopped_container_root.lock().unwrap().as_deref() == Some(root) => Ok(()),
+        None if root.join("docker-compose.yml").exists() => Err(
+            "OpenBot has no runtime ownership for this installation. Stop its containers using the original engine and context before starting OpenBot again.".into(),
+        ),
+        None => Ok(()),
+    }
 }
 
 /// Reclaim held replacements before consulting durable inventory. Keep the handles and pidfile
@@ -2568,10 +2596,7 @@ fn main() {
                                 &shell,
                                 &stack::default_root(),
                                 stack::stop_processes_under,
-                                |root| match engine::detect().address {
-                                    Some(found) => stack::down(&found, root),
-                                    None => Ok(()),
-                                },
+                                |root| down_owned_containers(&shell, root),
                             )
                         },
                         |failure| eprintln!("{failure}"),
@@ -4067,18 +4092,39 @@ mod tests {
                 std::fs::write(&source, r#"
 use std::{env,fs,io::Write,path::PathBuf};
 fn main() {
-    let args:Vec<String>=env::args().skip(1).collect();
+    let original:Vec<String>=env::args().skip(1).collect();
+    let mut args=original.clone();
     let cwd=env::current_dir().unwrap();
     let record=PathBuf::from(env::var_os("OPENBOT_TEST_ENGINE_RECORD").unwrap());
-    let mut log=fs::OpenOptions::new().create(true).append(true).open(record).unwrap();
+    let base=record.parent().unwrap();
+    let engine=PathBuf::from(env::args().next().unwrap()).file_name().unwrap().to_string_lossy().into_owned();
+    let default=if engine=="docker" {"docker-context"} else {"podman-connection"};
+    let mut target=fs::read_to_string(base.join(default)).unwrap();
+    if args.first().is_some_and(|a| ["--context","--host","--connection","--url"].contains(&a.as_str())) {
+        target=args[1].clone(); args.drain(..2);
+    } else if engine=="docker" {
+        target=env::var("DOCKER_CONTEXT").ok().filter(|s|!s.is_empty())
+            .or_else(||env::var("DOCKER_HOST").ok().filter(|s|!s.is_empty())).unwrap_or(target);
+    } else {
+        target=env::var("CONTAINER_CONNECTION").ok().filter(|s|!s.is_empty()).unwrap_or(target);
+    }
+    let identity=format!("{engine}:{target}");
+    let mut trace=fs::OpenOptions::new().create(true).append(true).open(base.join("affinity.log")).unwrap();
+    writeln!(trace,"{}\t{}",identity,original.join(" ")).unwrap();
+    let mut log=fs::OpenOptions::new().create(true).append(true).open(&record).unwrap();
     writeln!(log,"{}\t{}",cwd.display(),args.join(" ")).unwrap();
     let words:Vec<&str>=args.iter().map(String::as_str).collect();
+    if words==["context","show"] { println!("{target}"); return; }
+    if words.starts_with(&["context","inspect"]) { println!("unix:///owned-default.sock"); return; }
+    if words.first()==Some(&"system") { println!("{target}"); return; }
+    if words.first()==Some(&"machine") { println!("[]"); return; }
+    if !base.join(format!("{engine}-ready")).exists() { eprintln!("synthetic original runtime unavailable"); std::process::exit(74); }
     match words.as_slice() {
         ["version","--format",_] => println!("1.44"),
         ["compose","version"] => println!("Synthetic Compose"),
         ["compose","ps","--format",_] => (),
         ["compose","up",..] => {
-            fs::write(cwd.join("fixture-containers-running"),"owned by up").unwrap();
+            fs::write(cwd.join("fixture-containers-running"),&identity).unwrap();
             if cwd.join("fail-up").exists() { eprintln!("synthetic partial up failure");std::process::exit(71); }
         }
         ["compose","run","--rm","migrate"] => { eprintln!("synthetic migration barrier");std::process::exit(72); }
@@ -4087,14 +4133,25 @@ fn main() {
         ["ps","--quiet","--filter",_,"--filter",_] => (),
         ["compose","-f","docker-compose.yml","--profile","harness","down"] => {
             if cwd.join("fail-down").exists() { eprintln!("synthetic down refusal");std::process::exit(73); }
-            match fs::remove_file(cwd.join("fixture-containers-running")) {
-                Ok(()) => (), Err(e) if e.kind()==std::io::ErrorKind::NotFound => (), Err(e)=>panic!("{e}"),
+            if fs::read_to_string(cwd.join("fixture-containers-running")).ok().as_deref()==Some(&identity) {
+                fs::remove_file(cwd.join("fixture-containers-running")).unwrap();
             }
         }
         _ => { eprintln!("unexpected fixture command: {args:?}");std::process::exit(99); }
     }
 }
 "#).unwrap();
+                for name in [
+                    "DOCKER_CONTEXT",
+                    "DOCKER_HOST",
+                    "CONTAINER_CONNECTION",
+                    "CONTAINER_HOST",
+                ] {
+                    std::env::remove_var(name);
+                }
+                std::fs::write(base.join("docker-ready"), "").unwrap();
+                std::fs::write(base.join("docker-context"), "alpha").unwrap();
+                std::fs::write(base.join("podman-connection"), "alpha").unwrap();
                 crate::test_support::compile_fixture(&source, &path.bin().join("docker"));
                 std::fs::copy(path.bin().join("docker"), path.bin().join("podman")).unwrap();
                 std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", base.join("commands.log"));
@@ -4171,10 +4228,7 @@ fn main() {
                             &app.state::<Shell>(),
                             &fallback,
                             stack::stop_processes_under,
-                            |root| match engine::detect().address {
-                                Some(found) => stack::down(&found, root),
-                                None => Ok(()),
-                            },
+                            |root| down_owned_containers(&app.state::<Shell>(), root),
                         )
                     },
                     |error| panic!("Quit cleanup failed: {error}"),
@@ -4212,7 +4266,7 @@ fn main() {
             fn drop(&mut self) {
                 println!(
                     "CONTAINER_CLEANUP={}",
-                    serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"persistentFixtureProcesses":0})
+                    serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"affinity":std::fs::read_to_string(self.base.join("affinity.log")).unwrap_or_default(),"persistentFixtureProcesses":0})
                 );
                 std::fs::remove_dir_all(&self.base).expect("independent private fixture cleanup");
                 std::fs::remove_dir_all(self.path.bin())
@@ -4220,6 +4274,235 @@ fn main() {
                 assert!(!self.base.exists());
                 assert!(!self.path.bin().exists());
             }
+        }
+
+        fn runtime_affinity(case: &str) {
+            let fixture = Fixture::new();
+            let podman = case.starts_with("podman");
+            if podman {
+                std::fs::remove_file(fixture.base.join("docker-ready")).unwrap();
+                std::fs::write(fixture.base.join("podman-ready"), "").unwrap();
+            }
+            if case.contains("named") {
+                std::env::set_var("CONTAINER_CONNECTION", "named-owned");
+            }
+            if case.contains("host") {
+                std::env::set_var("DOCKER_HOST", "unix:///owned-alpha.sock");
+            }
+            if case.contains("default") {
+                std::fs::write(fixture.base.join("docker-context"), "default").unwrap();
+            }
+            if case.contains("partial") {
+                std::fs::write(fixture.a.join("fail-up"), "").unwrap();
+            }
+            fixture.start(&fixture.a, false);
+            let owner =
+                std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap();
+            std::fs::write(fixture.base.join("docker-ready"), "").unwrap();
+            std::fs::write(fixture.base.join("docker-context"), "beta").unwrap();
+            std::fs::write(fixture.base.join("podman-connection"), "beta").unwrap();
+            if case.contains("host") {
+                std::env::set_var("DOCKER_HOST", "unix:///unrelated-beta.sock");
+            }
+            if case.contains("named") {
+                std::env::set_var("CONTAINER_CONNECTION", "unrelated-named");
+            }
+            if case.contains("default") {
+                std::env::set_var("DOCKER_HOST", "unix:///unrelated-beta.sock");
+            }
+            if case.contains("retry") {
+                std::fs::write(fixture.a.join("fail-down"), "").unwrap();
+                assert!(fixture.stop().is_err());
+                assert!(fixture.a.join("fixture-containers-running").exists());
+                std::fs::remove_file(fixture.a.join("fail-down")).unwrap();
+                fixture.start(&fixture.a, false);
+                assert_eq!(
+                    std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap(),
+                    owner
+                );
+            }
+            if case.ends_with("quit") {
+                fixture.quit();
+            } else {
+                fixture.stop().unwrap();
+            }
+            let trace = std::fs::read_to_string(fixture.base.join("affinity.log")).unwrap();
+            println!(
+                "AFFINITY_PROOF={}",
+                serde_json::json!({"case":case,"owner":owner,"trace":trace,"originalStillLive":fixture.a.join("fixture-containers-running").exists()})
+            );
+            assert!(
+                !fixture.a.join("fixture-containers-running").exists(),
+                "original runtime still owns containers"
+            );
+            for line in trace
+                .lines()
+                .filter(|line| line.contains(" down") || line.contains("stop supervisor"))
+            {
+                assert!(
+                    line.starts_with(&format!("{owner}\t")),
+                    "destructive command addressed unrelated runtime: {line}"
+                );
+            }
+            assert!(fixture
+                .app
+                .state::<Shell>()
+                .containers
+                .lock()
+                .unwrap()
+                .is_none());
+        }
+
+        #[test]
+        fn runtime_affinity_podman_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_podman_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("podman_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_podman_quit() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_podman_quit",
+            ) {
+                return;
+            }
+            runtime_affinity("podman_quit");
+        }
+
+        #[test]
+        fn runtime_affinity_docker_context_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_docker_context_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("docker_context_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_docker_context_quit() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_docker_context_quit",
+            ) {
+                return;
+            }
+            runtime_affinity("docker_context_quit");
+        }
+
+        #[test]
+        fn runtime_affinity_podman_named_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_podman_named_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("podman_named_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_docker_host_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_docker_host_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("docker_host_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_podman_partial_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_podman_partial_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("podman_partial_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_podman_retry_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_podman_retry_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("podman_retry_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_docker_default_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_docker_default_stop",
+            ) {
+                return;
+            }
+            runtime_affinity("docker_default_stop");
+        }
+
+        #[test]
+        fn runtime_affinity_unknown_legacy_and_repeated_cleanup() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::runtime_affinity_unknown_legacy_and_repeated_cleanup",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            remember_selected_root(&fixture.app.state::<Shell>(), &fixture.a);
+            assert!(fixture
+                .stop()
+                .unwrap_err()
+                .as_str()
+                .unwrap()
+                .contains("no runtime ownership"));
+            assert!(fixture.commands().is_empty());
+            fixture.start(&fixture.a, false);
+            fixture.stop().unwrap();
+            let commands = fixture.commands();
+            fixture.stop().unwrap();
+            fixture.quit();
+            assert_eq!(
+                fixture.commands(),
+                commands,
+                "verified down needs no further engine selection"
+            );
+        }
+
+        #[test]
+        fn runtime_affinity_unavailable_owner_retains_retry_without_fallback() {
+            if crate::test_support::isolated_process("tests::container_root::runtime_affinity_unavailable_owner_retains_retry_without_fallback") { return; }
+            let fixture = Fixture::new();
+            std::fs::remove_file(fixture.base.join("docker-ready")).unwrap();
+            std::fs::write(fixture.base.join("podman-ready"), "").unwrap();
+            fixture.start(&fixture.a, false);
+            std::fs::remove_file(fixture.base.join("podman-ready")).unwrap();
+            std::fs::write(fixture.base.join("docker-ready"), "").unwrap();
+            let error = fixture.stop().unwrap_err();
+            assert!(
+                error
+                    .as_str()
+                    .unwrap()
+                    .contains("Compose configuration failed"),
+                "{error}"
+            );
+            assert!(fixture
+                .app
+                .state::<Shell>()
+                .containers
+                .lock()
+                .unwrap()
+                .is_some());
+            assert!(fixture.a.join("fixture-containers-running").exists());
+            let trace = std::fs::read_to_string(fixture.base.join("affinity.log")).unwrap();
+            assert!(!trace
+                .lines()
+                .any(|line| line.starts_with("docker:") && line.contains("compose")));
+            std::fs::write(fixture.base.join("podman-ready"), "").unwrap();
+            fixture.stop().unwrap();
+            fixture.assert_stopped();
         }
 
         fn failed_retry(quit: bool, partial_up: bool) {
