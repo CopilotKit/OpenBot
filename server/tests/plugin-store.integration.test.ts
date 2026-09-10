@@ -195,13 +195,25 @@ let ownsFixtureIds = false;
  * from any screen and invisible to `retireConnectionsFor`, which exists to stop exactly that state.
  * Removing a real Bot takes six tables: its channel memberships, its agent profile, everyone's
  * preferences for it, its routines and all of their run history, its component exclusions and its
- * plugin grants. The fixtures then re-insert byte-identical look-alikes, so nothing on screen would
- * say it happened.
+ * plugin grants. Removing a real PERSON takes ten: their sign-in accounts and live sessions, their
+ * roles, their channel memberships and intelligence mappings, their per-Bot preferences and written
+ * instructions, their skills, their routines, and every per-user connector credential they hold —
+ * and nulls the owner off their agent profiles and SSO provider besides. The fixtures then re-insert
+ * byte-identical look-alikes, so nothing on screen would say it happened.
  *
- * So the deletes in {@link freshDatabase} are unconditional and this is what makes them safe.
+ * The list below is every table this file deletes from at an id it did not invent — an id spelled
+ * the way production spells it, so a row already sitting at it belongs to somebody else. Each of
+ * `mcp_servers`, `agents`, `composio_connections` and `users` is asked about here, and nothing else
+ * needs to be: `mcp_tools` and `plugin_grants` are the two remaining unconditional deletes and both
+ * are reached only by a key that references one of these four, so a row at either could not exist
+ * without the guard having already refused over its parent. Every other delete in this file names
+ * an id carrying {@link suite}.
+ *
+ * So the deletes in {@link freshDatabase} are authorised by {@link ownsFixtureIds} and this is what
+ * makes them safe.
  */
 beforeAll(async () => {
-  const [configuredServers, existingBots, existingConnections] =
+  const [configuredServers, existingBots, existingConnections, existingPeople] =
     await Promise.all([
       database
         .select({ id: mcpServers.id })
@@ -217,6 +229,17 @@ beforeAll(async () => {
         .where(
           inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
         ),
+      /*
+       * The person, who was missing from this guard entirely.
+       *
+       * `user_leaver` is inserted at and deleted at by the Composio fixtures, and the delete used to
+       * run whatever the guard had decided — so a real row at that id was removed, with the ten
+       * cascades above behind it, on a run the guard had already refused.
+       */
+      database
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, "user_leaver")),
     ]);
 
   const found = [
@@ -225,15 +248,16 @@ beforeAll(async () => {
     ...existingConnections.map(
       (row) => `the composio_connections row for '${row.userId}'`,
     ),
+    ...existingPeople.map((row) => `the person '${row.id}'`),
   ];
 
   if (found.length > 0) {
     throw new Error(
       `This suite owns ${found.join(", ")} outright — it inserts at those exact ids and deletes ` +
         "them before every test — and refuses to run against a database that already has them, " +
-        "because deleting a real server row takes every person's per-user credentials with it and " +
-        "deleting a real Bot takes the six tables behind it. Point DATABASE_URL at a scratch " +
-        "database.",
+        "because deleting a real server row takes every person's per-user credentials with it, " +
+        "deleting a real Bot takes the six tables behind it, and deleting a real person takes the " +
+        "ten behind them. Point DATABASE_URL at a scratch database.",
     );
   }
 
@@ -3363,14 +3387,32 @@ describe("a vendor reply that is not a token", () => {
  * `bot_helper` and `user_asker` name them in every assertion.
  *
  * What replaces the suffix is the guard at the top of this file, not the ordering below. The deletes
- * here are unconditional and would be indefensible on their own — a real `notion` row cascades into
- * every person's per-user credentials, a real Bot into the six tables behind it. They are safe only
- * because nothing gets this far unless the guard has already established that no row at any of these
- * ids exists, which makes every row they remove one of this file's own. Cleaning before each test
- * rather than after is then just so a run that dies halfway leaves the next one nothing to trip over;
- * the `afterAll` below is what stops the last test's fixtures from outliving the run.
+ * here would be indefensible on their own — a real `notion` row cascades into every person's per-user
+ * credentials, a real Bot into the six tables behind it, a real person into the ten behind them. They
+ * are safe only because the guard has established that no row at any of these ids exists, which makes
+ * every row they remove one of this file's own, and the first thing below is the check that it did.
+ * Cleaning before each test rather than after is then just so a run that dies halfway leaves the next
+ * one nothing to trip over; the `afterAll` below is what stops the last test's fixtures from outliving
+ * the run.
  */
 async function freshDatabase(): Promise<Database> {
+  /*
+   * The guard's answer, asked again rather than assumed.
+   *
+   * "Nothing gets this far unless the guard has established the ids are free" was the whole
+   * justification for the deletes below, and it was an assumption about the runner: a `beforeAll`
+   * that throws is supposed to stop every test under it. The rest of this file already declines to
+   * rely on that — `afterAll` is documented as running anyway, which is why {@link ownsFixtureIds}
+   * exists at all — and a delete cascading through a real person is not a thing to leave resting on
+   * the difference. So the same positive evidence the teardown waits for authorises these too, and
+   * a run that never got it fails loudly here instead of quietly emptying rows.
+   */
+  if (!ownsFixtureIds) {
+    throw new Error(
+      "the ownership guard has not cleared this run to own 'gmail', 'notion', 'bot_helper', " +
+        "'user_asker' and 'user_leaver', so nothing may be deleted at those ids",
+    );
+  }
   /*
    * The Bot's own grants, never a delete by ref.
    *
@@ -3397,6 +3439,9 @@ async function freshDatabase(): Promise<Database> {
   await database
     .delete(composioConnections)
     .where(inArray(composioConnections.userId, ["user_asker", "user_leaver"]));
+  // The person the connection outlives, who is a row in `users` like anybody else. Reached only
+  // through the check at the top of this function, because there is no suffix on this id to tell a
+  // fixture apart from somebody's account and ten cascades sit behind the difference.
   await database.delete(users).where(eq(users.id, "user_leaver"));
   return database;
 }
