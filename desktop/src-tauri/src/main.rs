@@ -29,6 +29,8 @@ struct Shell {
     /// alive beside the new one, both answering the same death, and a process restarted twice is
     /// one process and one orphan holding a port.
     generation: std::sync::atomic::AtomicU64,
+    /// Quit keeps the event loop alive until one background cleanup attempt finishes.
+    quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
     ///
     /// Going back to the setup screen is a navigation, and a navigation is a fresh page: React
@@ -1242,6 +1244,66 @@ where
     }
 }
 
+#[derive(Default)]
+struct QuitState {
+    phase: Mutex<QuitPhase>,
+}
+
+#[derive(Default)]
+enum QuitPhase {
+    #[default]
+    Idle,
+    Cleaning,
+    Complete(i32),
+}
+
+type QuitWork = Box<dyn FnOnce() + Send + 'static>;
+
+fn request_quit_with<C, D, E, S>(
+    state: std::sync::Arc<QuitState>,
+    code: Option<i32>,
+    prevent_exit: impl FnOnce(),
+    cleanup: C,
+    mut diagnostic: D,
+    exit: E,
+    spawn: S,
+) -> std::io::Result<()>
+where
+    C: FnOnce() -> Vec<String> + Send + 'static,
+    D: FnMut(&str) + Send + 'static,
+    E: FnOnce(i32) + Send + 'static,
+    S: FnOnce(QuitWork) -> std::io::Result<()>,
+{
+    let start = {
+        let mut phase = state.phase.lock().unwrap();
+        match *phase {
+            QuitPhase::Complete(saved) if code == Some(saved) => return Ok(()),
+            QuitPhase::Idle => {
+                *phase = QuitPhase::Cleaning;
+                true
+            }
+            _ => false,
+        }
+    };
+    // Prevent synchronously, before the event callback returns or a worker can request exit.
+    prevent_exit();
+    if !start {
+        return Ok(());
+    }
+    let completing = std::sync::Arc::clone(&state);
+    let code = code.unwrap_or(0);
+    let work = Box::new(move || {
+        report_exit_cleanup_failures(cleanup(), &mut diagnostic);
+        *completing.phase.lock().unwrap() = QuitPhase::Complete(code);
+        exit(code);
+    });
+    if let Err(error) = spawn(work) {
+        *state.phase.lock().unwrap() = QuitPhase::Idle;
+        return Err(error);
+    }
+    Ok(())
+}
+
 /// Show OpenBot itself in this window.
 ///
 /// The point of a desktop application is that it is the application. A window that sets things up
@@ -2195,31 +2257,45 @@ fn main() {
                 tauri::RunEvent::Reopen { .. } => {
                     show_whichever_applies(app);
                 }
-                tauri::RunEvent::Exit => {
-                    // Nothing this started may outlive it.
-                    //
-                    // A child that survives the window is the failure Tauri has a standing issue about: an
-                    // orphaned server keeps port 3001, the next launch cannot bind it, and nothing on
-                    // screen says why. Asked to stop first, then made to, because a server given a moment
-                    // closes its database connections and one that is shot does not.
-                    // `Exit` only. `ExitRequested` fires first and for the same quit, and running this
-                    // twice means a second SIGTERM to a process that has already gone and another wait
-                    // nobody is watching.
-                    let shell = app.state::<Shell>();
-                    let default = PathBuf::from(default_root());
-
-                    // The containers too. Leaving five of them running behind an application that is
-                    // no longer on screen is the one outcome nobody can act on: there is no window to
-                    // stop them from and nothing to say they are there.
-                    report_exit_cleanup_failures(
-                        exit_cleanup_with(&shell, &default, stack::stop_processes_under, |root| {
-                            match engine::detect().address {
-                                Some(found) => stack::down(&found, root),
-                                None => Ok(()),
-                            }
-                        }),
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    // Exit runs on the event-loop thread. Waiting there for Windows process
+                    // inventory or Compose made Quit show "Not Responding". Keep the loop alive
+                    // until cleanup finishes, then allow its final exit without repeating work.
+                    let cleaning_app = app.clone();
+                    let exiting_app = app.clone();
+                    if let Err(error) = request_quit_with(
+                        std::sync::Arc::clone(&app.state::<Shell>().quit),
+                        code,
+                        || api.prevent_exit(),
+                        move || {
+                            let shell = cleaning_app.state::<Shell>();
+                            exit_cleanup_with(
+                                &shell,
+                                &stack::default_root(),
+                                stack::stop_processes_under,
+                                |root| match engine::detect().address {
+                                    Some(found) => stack::down(&found, root),
+                                    None => Ok(()),
+                                },
+                            )
+                        },
                         |failure| eprintln!("{failure}"),
-                    );
+                        move |code| exiting_app.exit(code),
+                        |work| {
+                            std::thread::Builder::new()
+                                .name("openbot-quit-cleanup".into())
+                                .spawn(work)
+                                .map(|_| ())
+                        },
+                    ) {
+                        eprintln!("[exit] could not start cleanup: {error}");
+                        report(
+                            app,
+                            "quit",
+                            false,
+                            "OpenBot could not start shutting down. Try Quit again.",
+                        );
+                    }
                 }
                 _ => {}
             }
@@ -2230,6 +2306,214 @@ fn main() {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn responsive_quit_returns_while_cleanup_is_blocked_then_exits_in_order() {
+        use std::sync::{mpsc, Arc};
+        let state = Arc::new(QuitState::default());
+        let (entered, cleanup_started) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let (returned, handler_returned) = mpsc::channel();
+        let (exiting, exit_requested) = mpsc::channel();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let dispatch = {
+            let state = state.clone();
+            let before = events.clone();
+            let during = events.clone();
+            let after = events.clone();
+            std::thread::spawn(move || {
+                let result = request_quit_with(
+                    state,
+                    Some(37),
+                    move || before.lock().unwrap().push("prevent"),
+                    move || {
+                        during.lock().unwrap().push("cleanup-started");
+                        entered.send(()).unwrap();
+                        released.recv().unwrap();
+                        during.lock().unwrap().push("cleanup-finished");
+                        Vec::new()
+                    },
+                    |_| panic!("successful cleanup must not report a failure"),
+                    move |code| {
+                        after.lock().unwrap().push("exit");
+                        exiting.send(code).unwrap();
+                    },
+                    |work| std::thread::Builder::new().spawn(work).map(|_| ()),
+                );
+                returned.send(result).unwrap();
+            })
+        };
+        cleanup_started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let returned_before_cleanup =
+            handler_returned.recv_timeout(std::time::Duration::from_millis(200));
+        let exit_before_cleanup = exit_requested.try_recv();
+        // Always release and join before asserting, including against the synchronous regression.
+        release.send(()).unwrap();
+        dispatch.join().unwrap();
+        let exit_code = exit_requested
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(
+            returned_before_cleanup.is_ok(),
+            "Quit's event handler blocked waiting for cleanup"
+        );
+        returned_before_cleanup.unwrap().unwrap();
+        assert!(matches!(
+            exit_before_cleanup,
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert_eq!(exit_code, 37);
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["prevent", "cleanup-started", "cleanup-finished", "exit"]
+        );
+        request_quit_with(
+            state,
+            Some(37),
+            || panic!("completed Quit must allow its final exit request"),
+            || panic!("final exit must not repeat cleanup"),
+            |_| panic!("final exit must not repeat diagnostics"),
+            |_| panic!("final exit must not request another exit"),
+            |_| panic!("final exit must not launch another worker"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn responsive_quit_coalesces_duplicates_and_preserves_the_first_exit_code() {
+        use std::sync::Arc;
+        let state = Arc::new(QuitState::default());
+        let work = std::cell::RefCell::new(None);
+        let prevented = std::cell::Cell::new(0);
+        let (exiting, exited) = std::sync::mpsc::channel();
+        request_quit_with(
+            state.clone(),
+            Some(23),
+            || prevented.set(prevented.get() + 1),
+            Vec::new,
+            |_| panic!("no cleanup failure"),
+            move |code| exiting.send(code).unwrap(),
+            |task| {
+                *work.borrow_mut() = Some(task);
+                Ok(())
+            },
+        )
+        .unwrap();
+        request_quit_with(
+            state.clone(),
+            Some(0),
+            || prevented.set(prevented.get() + 1),
+            || panic!("duplicate Quit must not run cleanup"),
+            |_| panic!("duplicate Quit must not report"),
+            |_| panic!("duplicate Quit must not replace the saved exit code"),
+            |_| panic!("duplicate Quit must not launch another worker"),
+        )
+        .unwrap();
+        assert_eq!(prevented.get(), 2);
+        assert!(matches!(
+            exited.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        work.into_inner().expect("one cleanup worker")();
+        assert_eq!(exited.recv().unwrap(), 23);
+        request_quit_with(
+            state,
+            None,
+            || prevented.set(prevented.get() + 1),
+            || panic!("a late Quit must not repeat cleanup"),
+            |_| panic!("a late Quit must not report"),
+            |_| panic!("a late Quit must not replace the saved exit code"),
+            |_| panic!("a late Quit must not launch another worker"),
+        )
+        .unwrap();
+        assert_eq!(prevented.get(), 3);
+    }
+
+    #[test]
+    fn responsive_quit_reports_cleanup_failures_before_requesting_exit() {
+        use std::sync::Arc;
+        let state = Arc::new(QuitState::default());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let diagnostics = events.clone();
+        let exiting = events.clone();
+        let work = std::cell::RefCell::new(None);
+        request_quit_with(
+            state,
+            None,
+            || {},
+            || {
+                vec![
+                    "host cleanup refused".into(),
+                    "Compose down failed: synthetic".into(),
+                ]
+            },
+            move |line| diagnostics.lock().unwrap().push(line.to_string()),
+            move |code| exiting.lock().unwrap().push(format!("exit:{code}")),
+            |task| {
+                *work.borrow_mut() = Some(task);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            events.lock().unwrap().is_empty(),
+            "cleanup ran on the requesting thread"
+        );
+        work.into_inner().expect("cleanup worker")();
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "[exit] cleanup failed: host cleanup refused",
+                "[exit] cleanup failed: Compose down failed: synthetic",
+                "exit:0"
+            ]
+        );
+    }
+
+    #[test]
+    fn responsive_quit_launch_failure_preserves_the_app_and_allows_retry() {
+        use std::sync::Arc;
+        let state = Arc::new(QuitState::default());
+        let prevented = std::cell::Cell::new(0);
+        let result = request_quit_with(
+            state.clone(),
+            Some(7),
+            || prevented.set(prevented.get() + 1),
+            || panic!("failed launch must not run cleanup"),
+            |_| panic!("failed launch must not report cleanup errors"),
+            |_| panic!("failed launch must not exit"),
+            |_| Err(std::io::Error::other("synthetic worker launch failure")),
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "synthetic worker launch failure"
+        );
+        assert_eq!(prevented.get(), 1);
+        let work = std::cell::RefCell::new(None);
+        let (exiting, exited) = std::sync::mpsc::channel();
+        request_quit_with(
+            state,
+            Some(9),
+            || prevented.set(prevented.get() + 1),
+            Vec::new,
+            |_| panic!("retry cleanup succeeded"),
+            move |code| exiting.send(code).unwrap(),
+            |task| {
+                *work.borrow_mut() = Some(task);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(prevented.get(), 2);
+        assert!(matches!(
+            exited.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        work.into_inner().expect("retry launches a worker")();
+        assert_eq!(exited.recv().unwrap(), 9);
+    }
     #[test]
     fn ask_transport_regressions_do_not_load_from_the_vault() {
         let source = include_str!("main.rs");
