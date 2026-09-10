@@ -129,9 +129,9 @@ fn persist_configuration_with(
     secrets: &BTreeMap<String, String>,
     purge: &BTreeMap<String, String>,
     credential: &ModelCredential,
-    remember: impl FnOnce(&BTreeMap<String, String>) -> Result<(), Problem>,
+    remember: impl FnOnce(&Path, &BTreeMap<String, String>) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
-    remember(secrets)?;
+    remember(root, secrets)?;
     crate::env::write_plan_store(root, credential).map_err(|error| {
         Problem::with(
             "OpenBot could not save the model sign-in. Try Start again.",
@@ -213,10 +213,13 @@ mod tests {
                 &secrets,
                 &secrets,
                 &credential,
-                |all| {
+                |seen_root, all| {
+                    assert_eq!(seen_root, root);
                     crate::vault::remember_all_with(
+                        seen_root,
                         all,
-                        &mut |key, value| {
+                        &mut |store_root, key, value| {
+                            assert_eq!(store_root, root);
                             attempts += 1;
                             if (failure == "first-store" && attempts == 1)
                                 || (failure == "later-store" && attempts == 2)
@@ -226,7 +229,7 @@ mod tests {
                             persisted.insert(key.to_string(), value.to_string());
                             Ok(())
                         },
-                        &mut |_| panic!("fixture has no deletions"),
+                        &mut |_, _| panic!("fixture has no deletions"),
                     )
                 },
             )
@@ -249,7 +252,8 @@ mod tests {
                 &secrets,
                 &secrets,
                 &credential,
-                |all| {
+                |seen_root, all| {
+                    assert_eq!(seen_root, root);
                     persisted.extend(all.clone());
                     Ok(())
                 },
@@ -291,10 +295,13 @@ mod tests {
                 &secrets,
                 &secrets,
                 &credential,
-                |all| {
+                |seen_root, all| {
+                    assert_eq!(seen_root, root);
                     crate::vault::remember_all_with(
+                        seen_root,
                         all,
-                        &mut |_, _| {
+                        &mut |store_root, _, _| {
+                            assert_eq!(store_root, root);
                             attempts += 1;
                             if failure == "first-save"
                                 || failure == "restore-policy"
@@ -305,7 +312,10 @@ mod tests {
                                 Ok(())
                             }
                         },
-                        &mut |_| Err(Problem::plain("synthetic delete refusal")),
+                        &mut |store_root, _| {
+                            assert_eq!(store_root, root);
+                            Err(Problem::plain("synthetic delete refusal"))
+                        },
                     )
                 },
             );
@@ -321,6 +331,34 @@ mod tests {
             );
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn persist_configuration_remembers_secrets_under_the_selected_root() {
+        let (root, secrets, _) = fixture("selected-root-persist");
+        let credential = ModelCredential::OpenAi {
+            api_key: "synthetic-openai".into(),
+        };
+        let mut remembered_root = None;
+        let mut remembered = BTreeMap::new();
+
+        persist_configuration_with(
+            &root,
+            &BTreeMap::new(),
+            &secrets,
+            &secrets,
+            &credential,
+            |seen_root, seen_secrets| {
+                remembered_root = Some(seen_root.to_path_buf());
+                remembered = seen_secrets.clone();
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(remembered_root.as_deref(), Some(root.as_path()));
+        assert_eq!(remembered, secrets);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -374,7 +412,10 @@ mod tests {
                 &secrets,
                 &secrets,
                 &credential,
-                |_| Ok(()),
+                |seen_root, _| {
+                    assert_eq!(seen_root, root);
+                    Ok(())
+                },
             )
             .unwrap();
             let reopened = SavedIntent::read(&root);
@@ -428,7 +469,10 @@ mod tests {
             &secrets,
             &secrets,
             &credential,
-            |_| Ok(()),
+            |seen_root, _| {
+                assert_eq!(seen_root, root);
+                Ok(())
+            },
         )
         .unwrap();
         let recorded = SavedIntent::read(&root);
@@ -452,7 +496,10 @@ mod tests {
             &secrets,
             &secrets,
             &credential,
-            |_| Ok(()),
+            |seen_root, _| {
+                assert_eq!(seen_root, root);
+                Ok(())
+            },
         )
         .unwrap_err();
         assert_eq!(problem.said, "OpenBot could not write its settings.");

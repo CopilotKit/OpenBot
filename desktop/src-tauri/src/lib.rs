@@ -20,5 +20,3 @@ pub mod windows;
 
 #[cfg(test)]
 pub(crate) mod test_support;
-
-pub mod recovery;

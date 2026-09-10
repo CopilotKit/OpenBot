@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  asProblem,
-  Failure,
-  useCredentialRecovery,
-  type Problem,
-} from "./Problem";
+import { asProblem, Failure, type Problem } from "./Problem";
 
 /**
  * The last screen: a question, an answer, and only then the handover.
@@ -42,22 +37,18 @@ export function Ask({
    * built to replace, on the screen built to replace it.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
-  const recovery = useCredentialRecovery(failure, setFailure, "Ask");
 
   async function ask() {
-    const attempt = recovery.begin();
-    if (attempt === null) return;
     setAsking(true);
     setFailure(null);
     setAnswer(null);
     try {
       const answer = await onAsk(question);
-      if (recovery.current(attempt)) setAnswer(answer);
+      setAnswer(answer);
     } catch (error) {
-      if (recovery.current(attempt)) setFailure(asProblem(error));
+      setFailure(asProblem(error));
     } finally {
-      recovery.finish(attempt);
-      if (recovery.current(attempt)) setAsking(false);
+      setAsking(false);
     }
   }
 
@@ -75,20 +66,18 @@ export function Ask({
           id="question"
           value={question}
           onChange={(event) => {
-            recovery.abandon();
             setQuestion(event.target.value);
           }}
-          disabled={asking || recovery.busy}
+          disabled={asking}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !asking && !recovery.busy) {
+            if (event.key === "Enter" && !asking) {
               ask();
             }
           }}
         />
       </div>
 
-      {failure && <Failure problem={failure} recovery={recovery} />}
-      {recovery.message && <p role="status">{recovery.message}</p>}
+      {failure && <Failure problem={failure} />}
 
       {answer !== null && (
         <div className="answer">
@@ -102,7 +91,7 @@ export function Ask({
           <button
             type="button"
             onClick={ask}
-            disabled={asking || recovery.busy}
+            disabled={asking}
           >
             {asking ? "Asking…" : "Ask"}
           </button>
@@ -120,9 +109,8 @@ export function Ask({
           <button
             type="button"
             className="quiet"
-            disabled={asking || recovery.busy}
+            disabled={asking}
             onClick={() => {
-              recovery.abandon();
               onBack();
             }}
           >
@@ -134,7 +122,7 @@ export function Ask({
             type="button"
             className="quiet"
             onClick={ask}
-            disabled={asking || recovery.busy}
+            disabled={asking}
           >
             Ask again
           </button>

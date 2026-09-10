@@ -21,7 +21,6 @@ use tauri::{Emitter, Manager};
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
-    recovery: openbot_desktop_lib::recovery::Recovery,
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
     /// Which run is the current one.
@@ -36,6 +35,7 @@ struct Shell {
     /// remounts with no progress and the sentence explaining what happened is lost at the one
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
+    selected_root: Mutex<Option<PathBuf>>,
     root: Mutex<Option<PathBuf>>,
     /// An Intelligence sign-in waiting for its loopback callback.
     signing_in_to_intelligence:
@@ -159,6 +159,20 @@ fn report<R: tauri::Runtime>(
     );
 }
 
+fn remember_selected_root(shell: &Shell, root: &Path) {
+    *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
+}
+
+fn cleanup_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
+    shell
+        .root
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(|| shell.selected_root.lock().unwrap().clone())
+        .unwrap_or_else(|| fallback_root.to_path_buf())
+}
+
 #[tauri::command]
 fn detect_engine() -> engine::EngineStatus {
     engine::detect()
@@ -180,7 +194,6 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
 /// nothing moving in it reads as a hang.
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
-    app.state::<Shell>().recovery.cancel(None)?;
     engine_ready(&app).await?;
     Ok(engine::detect())
 }
@@ -340,10 +353,21 @@ async fn deployment_ready<R: tauri::Runtime>(
 /// The deployment first, because the manifest that names the image is part of it. A sign-in on a
 /// machine that has never started the stack has no manifest yet, and building a name instead is
 /// what sent Podman to Docker Hub.
-async fn sign_in_image(app: &tauri::AppHandle, published: &str) -> Result<String, Problem> {
-    let root = stack::default_root();
-    deployment_ready(app, &root).await?;
-    deployment::reference(&root, published).map_err(|error| {
+async fn sign_in_image(
+    app: &tauri::AppHandle,
+    root: &Path,
+    published: &str,
+) -> Result<String, Problem> {
+    deployment_ready(app, root).await?;
+    sign_in_reference(root, published, deployment::reference)
+}
+
+fn sign_in_reference(
+    root: &Path,
+    published: &str,
+    reference: impl FnOnce(&Path, &str) -> Result<String, String>,
+) -> Result<String, Problem> {
+    reference(root, published).map_err(|error| {
         Problem::with(
             "This version of OpenBot cannot sign in to that plan. Use an API key instead, or \
              update OpenBot.",
@@ -486,7 +510,7 @@ fn start_stack_credential_with(
 }
 
 fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
-    openbot_desktop_lib::vault::already_given_no_ui(&root.join(".env"), &[key])
+    openbot_desktop_lib::vault::already_given_no_ui(root, &root.join(".env"), &[key])
         .map(|found| found.get(key).cloned().unwrap_or_default())
 }
 
@@ -527,20 +551,6 @@ fn require_existing_encryption_key(
     Ok(())
 }
 
-/// Bind recovery and the operation to one deployment path before either can access settings.
-fn begin_credential_action(
-    typed_root: &str,
-    action: openbot_desktop_lib::recovery::Action,
-    begin: impl FnOnce(
-        &Path,
-        openbot_desktop_lib::recovery::Action,
-    ) -> Result<openbot_desktop_lib::recovery::Attempt, Problem>,
-) -> Result<(PathBuf, openbot_desktop_lib::recovery::Attempt), Problem> {
-    let root = stack::root_from(typed_root);
-    let attempt = begin(&root, action)?;
-    Ok((root, attempt))
-}
-
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
 async fn start_stack<R: tauri::Runtime>(
@@ -555,15 +565,9 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
-    let recovery = app.state::<Shell>().recovery.clone();
-    let (root, attempt) = begin_credential_action(
-        &root,
-        openbot_desktop_lib::recovery::Action::Start,
-        |root, action| recovery.begin(root, action),
-    )?;
-    let result =
-        start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await;
-    recovery.finish(attempt, result)
+    let root = stack::root_from(&root);
+    remember_selected_root(&app.state::<Shell>(), &root);
+    start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await
 }
 
 async fn start_stack_inner<R: tauri::Runtime>(
@@ -657,6 +661,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
 
     let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
     let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
+        &root,
         &root.join(".env"),
         &openbot_env::MINTED[..],
     )?;
@@ -858,28 +863,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
 }
 
 /// This dedicated command accepts no setting, value, root or policy from the webview.
-#[tauri::command]
-async fn recover_credential<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    ticket: String,
-) -> Result<(), Problem> {
-    let recovery = app.state::<Shell>().recovery.clone();
-    tauri::async_runtime::spawn_blocking(move || recovery.recover(&ticket))
-        .await
-        .map_err(|_| {
-            Problem::plain(
-                "Credential recovery stopped unexpectedly. Restart OpenBot before trying again.",
-            )
-        })?
-}
-#[tauri::command]
-fn cancel_credential_recovery<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    ticket: Option<String>,
-) -> Result<(), Problem> {
-    app.state::<Shell>().recovery.cancel(ticket.as_deref())
-}
-
 /// Stop what this started, and only what this started.
 ///
 /// A Bot's computer belongs to the supervisor rather than to Compose and is deliberately left
@@ -895,6 +878,7 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
     let mut active = shell.root.lock().unwrap();
     let root = active
         .clone()
+        .or_else(|| shell.selected_root.lock().unwrap().clone())
         .unwrap_or_else(|| fallback_root.to_path_buf());
     *active = None;
     root
@@ -907,6 +891,7 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 /// right to call that a bug.
 fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
+    remember_selected_root(&shell, fallback_root);
     stop_everything_with(&shell, fallback_root, stack::stop_processes_under, |root| {
         match engine::detect().address {
             Some(found) => stack::down(&found, root),
@@ -925,13 +910,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
-    shell.recovery.stop();
-    let root = shell
-        .root
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| fallback_root.to_path_buf());
+    let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
     if let Err(problem) = retire_host_processes(shell, &root, cleanup) {
         failures.push(problem_detail(problem));
@@ -1061,13 +1040,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
-    shell.recovery.stop();
-    let root = shell
-        .root
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| fallback_root.to_path_buf());
+    let root = cleanup_root(shell, fallback_root);
     let mut failures = Vec::new();
     if let Err(problem) = retire_host_processes(shell, &root, cleanup) {
         failures.push(problem_detail(problem));
@@ -1195,6 +1168,16 @@ fn default_root() -> String {
     stack::default_root().to_string_lossy().into_owned()
 }
 
+#[tauri::command]
+fn selected_root(app: tauri::AppHandle) -> Option<String> {
+    app.state::<Shell>()
+        .selected_root
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|root| root.to_string_lossy().into_owned())
+}
+
 /**
 Put the wizard's last question to the Bot, and hand back what it said.
 
@@ -1207,24 +1190,23 @@ facts about the deployment, and a window carrying them would be a second copy to
 */
 #[tauri::command]
 async fn ask_the_bot<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
+    _app: tauri::AppHandle<R>,
     root: String,
     question: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    let recovery = app.state::<Shell>().recovery.clone();
-    let (root, attempt) = begin_credential_action(
-        &root,
-        openbot_desktop_lib::recovery::Action::Ask,
-        |root, action| recovery.begin(root, action),
-    )?;
-    let result = ask_the_bot_inner(root, question).await;
-    recovery.finish(attempt, result)
+    ask_the_bot_inner(stack::root_from(&root), question).await
 }
 
 async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Problem> {
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
-    let settings = openbot_desktop_lib::vault::already_given_no_ui(
+    let settings = ask_saved_settings(&root)?;
+    ask_the_bot_with_settings(root, question, settings).await
+}
+
+fn ask_saved_settings(root: &Path) -> Result<std::collections::BTreeMap<String, String>, Problem> {
+    openbot_desktop_lib::vault::already_given_no_ui(
+        root,
         &root.join(".env"),
         &[
             "PICKED_HARNESS_URL",
@@ -1233,8 +1215,7 @@ async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Pr
             "MANAGED_AGENT_AG_UI_URL",
             "MANAGED_AGENT_TOKEN",
         ],
-    )?;
-    ask_the_bot_with_settings(root, question, settings).await
+    )
 }
 
 async fn ask_the_bot_with_settings(
@@ -1393,8 +1374,9 @@ fn harnesses() -> Vec<harness::Harness> {
 /// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
 /// that on the UI thread is a window that stops repainting mid-setup.
 #[tauri::command]
-async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, Problem> {
-    app.state::<Shell>().recovery.cancel(None)?;
+async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<String, Problem> {
+    let root = stack::root_from(&root);
+    remember_selected_root(&app.state::<Shell>(), &root);
     /*
      * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
      * harness the person picked. It is not being used as a Bot: it is the container that happens to
@@ -1405,7 +1387,7 @@ async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, Problem> 
     // Start needs and the same deployment Start needs, and on a first run nothing has fetched or
     // installed either yet.
     let address = engine_ready(&app).await?;
-    let image = sign_in_image(&app, openbot_desktop_lib::plan::SIGN_IN_IMAGE).await?;
+    let image = sign_in_image(&app, &root, openbot_desktop_lib::plan::SIGN_IN_IMAGE).await?;
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::plan::SigningIn::begin(&address, &image)
     })
@@ -1455,11 +1437,18 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 #[tauri::command]
 async fn begin_chatgpt_sign_in(
     app: tauri::AppHandle,
+    root: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    app.state::<Shell>().recovery.cancel(None)?;
+    let root = stack::root_from(&root);
+    remember_selected_root(&app.state::<Shell>(), &root);
     // Set up rather than refused: see `engine_ready`.
     let address = engine_ready(&app).await?;
-    let image = sign_in_image(&app, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE).await?;
+    let image = sign_in_image(
+        &app,
+        &root,
+        openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+    )
+    .await?;
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
@@ -1498,10 +1487,6 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
 /// Start signing in to Intelligence and return the address a browser has to open.
 #[tauri::command]
 async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    app.state::<Shell>()
-        .recovery
-        .cancel(None)
-        .map_err(|p| p.said)?;
     let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
     *app.state::<Shell>()
         .signing_in_to_intelligence
@@ -1548,7 +1533,6 @@ async fn intelligence_key_for(
     app: tauri::AppHandle,
     project: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    app.state::<Shell>().recovery.cancel(None)?;
     let credential = app
         .state::<Shell>()
         .intelligence_credential
@@ -1832,7 +1816,6 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
-            app.state::<Shell>().recovery.stop();
             app.exit(0);
         }
         _ => {}
@@ -1856,14 +1839,13 @@ fn main() {
             windows_blocker_instruction,
             prepare_engine,
             start_stack,
-            recover_credential,
-            cancel_credential_recovery,
             stop_stack,
             show_openbot,
             show_setup,
             already_running,
             last_failure,
             default_root,
+            selected_root,
             harnesses,
             providers,
             already_configured,
@@ -2035,59 +2017,8 @@ mod tests {
         );
     }
 
-    // Final native symbols replace every store operation in this test executable. They never
-    // forward to Security.framework, including when the public command regresses.
-    #[cfg(target_os = "macos")]
-    mod protected_store_trap {
-        use std::ffi::c_void;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        pub static CALLS: AtomicUsize = AtomicUsize::new(0);
-        pub fn keep_all_operations_linked() {
-            // Keep even currently unused write/delete traps in the executable for nm inspection.
-            std::hint::black_box([
-                SecItemCopyMatching as *const (),
-                SecItemAdd as *const (),
-                SecItemUpdate as *const (),
-                SecItemDelete as *const (),
-                SecKeychainGetUserInteractionAllowed as *const (),
-                SecKeychainSetUserInteractionAllowed as *const (),
-            ]);
-        }
-
-        fn refused() -> i32 {
-            CALLS.fetch_add(1, Ordering::SeqCst);
-            -25293
-        }
-        #[no_mangle]
-        extern "C" fn SecKeychainGetUserInteractionAllowed(_: *mut u8) -> i32 {
-            refused()
-        }
-        #[no_mangle]
-        extern "C" fn SecKeychainSetUserInteractionAllowed(_: u8) -> i32 {
-            refused()
-        }
-        #[no_mangle]
-        extern "C" fn SecItemCopyMatching(_: *const c_void, _: *mut *const c_void) -> i32 {
-            refused()
-        }
-        #[no_mangle]
-        extern "C" fn SecItemAdd(_: *const c_void, _: *mut *const c_void) -> i32 {
-            refused()
-        }
-        #[no_mangle]
-        extern "C" fn SecItemUpdate(_: *const c_void, _: *const c_void) -> i32 {
-            refused()
-        }
-        #[no_mangle]
-        extern "C" fn SecItemDelete(_: *const c_void) -> i32 {
-            refused()
-        }
-    }
-
-    #[cfg(target_os = "macos")]
     #[test]
-    fn public_already_configured_never_calls_protected_storage() {
-        protected_store_trap::keep_all_operations_linked();
+    fn public_already_configured_reads_only_passive_files() {
         let root = temp_root("public-passive-boundary");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
@@ -2095,7 +2026,6 @@ mod tests {
             "INTELLIGENCE_API_URL=https://synthetic.example\n",
         )
         .unwrap();
-        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
         for metadata in [
             None,
             Some("malformed"),
@@ -2113,49 +2043,84 @@ mod tests {
                 let configured = already_configured(root.to_string_lossy().into_owned());
                 assert_eq!(configured.values["INTELLIGENCE_API_URL"], "https://synthetic.example");
                 assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
-                assert_eq!(protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst), before,
-                    "passive public wrapper attempted protected storage");
             }
         }
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn start_and_ask_bind_recovery_and_work_to_the_same_pasted_deployment() {
-        use openbot_desktop_lib::recovery::{Action, Recovery};
+    fn plan_sign_in_reference_uses_the_selected_root() {
+        let default = temp_root("signin-default-root");
+        let selected = temp_root("signin-selected-root");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::create_dir_all(&selected).unwrap();
+        std::fs::write(default.join("manifest.json"), "poisoned-default").unwrap();
+        let mut seen = None;
+
+        let image = sign_in_reference(
+            &selected,
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+            |root, published| {
+                seen = Some((root.to_path_buf(), published.to_string()));
+                Ok(format!("{}@{}", published, root.display()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            seen,
+            Some((
+                selected.clone(),
+                openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE.to_string()
+            ))
+        );
+        assert!(image.contains(&selected.to_string_lossy().to_string()));
+        assert!(!image.contains(&default.to_string_lossy().to_string()));
+        assert_eq!(
+            std::fs::read_to_string(default.join("manifest.json")).unwrap(),
+            "poisoned-default"
+        );
+        let _ = std::fs::remove_dir_all(default);
+        let _ = std::fs::remove_dir_all(selected);
+    }
+
+    #[test]
+    fn command_roots_trim_paste_padding_and_preserve_interior_spaces() {
         let root = temp_root("openbot-command-root My Files");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("settings-marker"), "this deployment").unwrap();
-        for action in [Action::Start, Action::Ask] {
-            for typed in [
-                root.display().to_string(),
-                format!(" \n{}\t ", root.display()),
-            ] {
-                let recovery = Recovery::default();
-                let (work_root, attempt) =
-                    begin_credential_action(&typed, action, |ticket_root, seen_action| {
-                        assert_eq!(seen_action, action);
-                        assert_eq!(
-                            std::fs::read_to_string(ticket_root.join("settings-marker")).unwrap(),
-                            "this deployment"
-                        );
-                        recovery.begin(ticket_root, seen_action)
-                    })
-                    .unwrap();
-                let read = std::fs::read_to_string(work_root.join("settings-marker")).unwrap();
-                assert_eq!(
-                    recovery.finish(attempt, Ok(read)).unwrap(),
-                    "this deployment"
-                );
-                let (_, cancelled) = begin_credential_action(&typed, action, |path, action| {
-                    recovery.begin(path, action)
-                })
-                .unwrap();
-                recovery.stop();
-                assert!(recovery.finish(cancelled, Ok(())).is_err());
-            }
+        for typed in [
+            root.display().to_string(),
+            format!(" \n{}\t ", root.display()),
+        ] {
+            let work_root = stack::root_from(&typed);
+            assert_eq!(
+                std::fs::read_to_string(work_root.join("settings-marker")).unwrap(),
+                "this deployment"
+            );
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn credential_restore_commands_are_not_registered() {
+        let source = include_str!("main.rs");
+        let handlers = source
+            .split("tauri::generate_handler![")
+            .nth(1)
+            .expect("handler list exists")
+            .split("])")
+            .next()
+            .expect("handler list closes");
+        for command in [
+            ["reco", "ver", "_credential"].concat(),
+            ["cancel", "_credential", "_reco", "very"].concat(),
+        ] {
+            assert!(
+                !handlers.contains(&command),
+                "{command} is still registered"
+            );
+        }
     }
 
     #[test]
@@ -2374,13 +2339,70 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn saved_api_key_start_reports_unreadable_env_before_protected_storage() {
-        protected_store_trap::keep_all_operations_linked();
+    fn start_and_ask_resolve_saved_secrets_from_the_selected_root() {
+        let root_a = temp_root("selected-saved-root-a");
+        let root_b = temp_root("selected-saved-root-b");
+        for (root, label) in [(&root_a, "a"), (&root_b, "b")] {
+            std::fs::create_dir_all(root).unwrap();
+            std::fs::write(
+                root.join(".env"),
+                format!("MANAGED_AGENT_AG_UI_URL=https://agent-{label}.example\n"),
+            )
+            .unwrap();
+            openbot_desktop_lib::vault::remember(
+                root,
+                "OPENAI_API_KEY",
+                &format!("openai-{label}"),
+            )
+            .unwrap();
+            openbot_desktop_lib::vault::remember(
+                root,
+                "MANAGED_AGENT_TOKEN",
+                &format!("agent-{label}"),
+            )
+            .unwrap();
+        }
+
+        let credential = start_stack_credential_with(
+            &root_b,
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: None,
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(true),
+            },
+            saved_secret,
+        )
+        .unwrap();
+        assert_eq!(
+            credential,
+            openbot_env::ModelCredential::OpenAi {
+                api_key: "openai-b".into()
+            }
+        );
+
+        let settings = ask_saved_settings(&root_b).unwrap();
+        assert_eq!(
+            settings.get("MANAGED_AGENT_AG_UI_URL").map(String::as_str),
+            Some("https://agent-b.example")
+        );
+        assert_eq!(
+            settings.get("MANAGED_AGENT_TOKEN").map(String::as_str),
+            Some("agent-b")
+        );
+
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn saved_api_key_start_reports_unreadable_env_before_store_resolution() {
         let root = temp_root("start-unreadable-env");
         std::fs::create_dir_all(root.join(".env")).unwrap();
-        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
         let problem = start_stack_credential(
             &root,
@@ -2404,22 +2426,14 @@ mod tests {
                 .is_some_and(|detail| detail.contains(root.join(".env").to_string_lossy().as_ref())),
             "{problem:?}"
         );
-        assert_eq!(
-            protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst),
-            before,
-            "Start reached protected storage after unreadable .env"
-        );
         assert!(root.join(".env").is_dir());
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn ask_reports_unreadable_env_before_protected_storage_or_http() {
-        protected_store_trap::keep_all_operations_linked();
+    fn ask_reports_unreadable_env_before_store_resolution_or_http() {
         let root = temp_root("ask-unreadable-env");
         std::fs::create_dir_all(root.join(".env")).unwrap();
-        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
         let problem =
             tauri::async_runtime::block_on(ask_the_bot_inner(root.clone(), "hello".into()))
@@ -2432,11 +2446,6 @@ mod tests {
                 .as_deref()
                 .is_some_and(|detail| detail.contains(root.join(".env").to_string_lossy().as_ref())),
             "{problem:?}"
-        );
-        assert_eq!(
-            protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst),
-            before,
-            "Ask reached protected storage after unreadable .env"
         );
         assert!(root.join(".env").is_dir());
         std::fs::remove_dir_all(root).unwrap();
@@ -2489,7 +2498,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_existing_encryption_key_and_fresh_installation_are_allowed() {
+    fn configured_root_without_original_key_is_rejected_but_fresh_root_is_allowed() {
         let root = temp_root("valid-existing-encryption-key");
         std::fs::create_dir_all(&root).unwrap();
         assert!(require_existing_encryption_key(&root, &std::collections::BTreeMap::new()).is_ok());
@@ -2932,6 +2941,72 @@ mod tests {
         );
         assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&active));
         let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn successful_stop_then_exit_uses_the_retained_selected_root_not_default() {
+        let selected = temp_root("openbot-selected-stop-exit");
+        let fallback = temp_root("openbot-default-stop-exit");
+        std::fs::create_dir_all(&selected).unwrap();
+        std::fs::create_dir_all(&fallback).unwrap();
+        std::fs::write(fallback.join("sentinel"), "default-root-untouched").unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(selected.clone());
+        remember_selected_root(&shell, &selected);
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        stop_everything_with(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("stop-cleanup:{}", root.display()));
+                Ok(0)
+            },
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("stop-down:{}", root.display()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(shell.root.lock().unwrap().is_none());
+
+        let failures = exit_cleanup_with(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("exit-cleanup:{}", root.display()));
+                Ok(0)
+            },
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("exit-down:{}", root.display()));
+                Ok(())
+            },
+        );
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(
+            phases.into_inner(),
+            vec![
+                format!("stop-cleanup:{}", selected.display()),
+                format!("stop-down:{}", selected.display()),
+                format!("exit-cleanup:{}", selected.display()),
+                format!("exit-down:{}", selected.display()),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(fallback.join("sentinel")).unwrap(),
+            "default-root-untouched"
+        );
+        let _ = std::fs::remove_dir_all(selected);
         let _ = std::fs::remove_dir_all(fallback);
     }
 

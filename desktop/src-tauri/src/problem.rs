@@ -22,12 +22,6 @@ pub struct Problem {
     /// `None` where the plain sentence IS the whole truth — a refusal this deployment decided, with
     /// no underlying output behind it.
     pub detail: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recovery: Option<Box<crate::recovery::Offer>>,
-    #[serde(skip)]
-    pub(crate) refused: Option<Box<crate::recovery::RefusedOperation>>,
-    #[serde(skip)]
-    pub(crate) item: Option<Box<crate::recovery::ItemFailure>>,
 }
 
 impl Problem {
@@ -36,9 +30,6 @@ impl Problem {
         Self {
             said: said.into(),
             detail: None,
-            recovery: None,
-            refused: None,
-            item: None,
         }
     }
 
@@ -48,9 +39,6 @@ impl Problem {
         Self {
             said: said.into(),
             detail: (!detail.trim().is_empty()).then_some(detail),
-            recovery: None,
-            refused: None,
-            item: None,
         }
     }
 }
@@ -80,7 +68,7 @@ A sentence for engine output, chosen by what the output actually says.
 
 Pure and tested, because these are the failures a first run hits and the sentence is the only part
 the person reads. Anything unrecognised keeps a general sentence rather than a guess: being vague is
-recoverable, and being confidently wrong about somebody's machine is not.
+fixable, and being confidently wrong about somebody's machine is not.
 */
 pub fn said_about(output: &str) -> String {
     let lower = output.to_lowercase();

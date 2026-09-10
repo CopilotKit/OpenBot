@@ -81,6 +81,7 @@ async function renderPicker(onChoose: (choice: unknown) => void = () => {}) {
       <ProviderPicker
         chosen={null}
         held={{}}
+        root=" /tmp/openbot-provider-root "
         onBack={() => {}}
         onChoose={onChoose}
       />,
@@ -101,6 +102,7 @@ async function renderPickerWithHeld(
       <ProviderPicker
         chosen={null}
         held={held}
+        root=" /tmp/openbot-provider-root "
         onBack={() => {}}
         onChoose={onChoose}
       />,
@@ -112,9 +114,12 @@ async function renderPickerWithHeld(
 
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];
-  invokeHandler = async (command) => {
+  invokeHandler = async (command, args) => {
     if (command === "providers") return providers;
-    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "begin_chatgpt_sign_in") {
+      expect(args).toEqual({ root: "/tmp/openbot-provider-root" });
+      return "https://chatgpt.test";
+    }
     if (command === "finish_chatgpt_sign_in") return "chatgpt-token";
     throw new Error(`unexpected command ${command}`);
   };
@@ -143,7 +148,9 @@ test("a pending plan sign-in completion is ignored after switching provider rows
   const choices: unknown[] = [];
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
-    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    if (command === "begin_chatgpt_sign_in") {
+      return "https://chatgpt.test";
+    }
     if (command === "finish_chatgpt_sign_in") return chatgpt.promise;
     throw new Error(`unexpected command ${command}`);
   };
@@ -213,12 +220,14 @@ for (const provider of providers) {
     async (session) => {
       const choices: unknown[] = [];
       const planToken = `synthetic-${provider.id}-plan-token`;
-      invokeHandler = async (command) => {
+      invokeHandler = async (command, args) => {
         if (command === "providers") return providers;
         if (session === "fresh") {
           const signIn = provider.id === "openai" ? "chatgpt" : "claude";
-          if (command === `begin_${signIn}_sign_in`)
+          if (command === `begin_${signIn}_sign_in`) {
+            expect(args).toEqual({ root: "/tmp/openbot-provider-root" });
             return "https://sign-in.example";
+          }
           if (command === `finish_${signIn}_sign_in`) return planToken;
         }
         throw new Error(`unexpected command ${command}`);

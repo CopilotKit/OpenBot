@@ -85,6 +85,7 @@ function recordedModel(
 export function ProviderPicker({
   chosen,
   held,
+  root,
   onChoose,
   onBack,
 }: {
@@ -96,6 +97,7 @@ export function ProviderPicker({
    * before is not sent to find a key they already produced. Their own file, on their own machine.
    */
   held: HeldConfiguration;
+  root: string;
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
 }) {
@@ -172,7 +174,7 @@ export function ProviderPicker({
         providerId === "anthropic"
           ? "begin_claude_sign_in"
           : "begin_chatgpt_sign_in";
-      const nextSignInUrl = await invoke<string>(start);
+      const nextSignInUrl = await invoke<string>(start, { root: root.trim() });
       if (!stillCurrent()) return;
       setSignInUrl(nextSignInUrl);
       // ChatGPT needs no code, so the wait starts straight away.

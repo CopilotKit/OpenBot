@@ -7,12 +7,7 @@ import {
   type HarnessChoice,
   HarnessPicker,
 } from "./HarnessPicker";
-import {
-  asProblem,
-  Failure,
-  useCredentialRecovery,
-  type Problem,
-} from "./Problem";
+import { asProblem, Failure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
@@ -101,7 +96,6 @@ export function App() {
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
 
   async function signInToCopilotKit() {
-    recovery.abandon();
     setSigningIn(true);
     setFailure(null);
     setSignInUrl(null);
@@ -121,7 +115,6 @@ export function App() {
   }
 
   async function pickProject(id: string) {
-    recovery.abandon();
     setSigningIn(true);
     setFailure(null);
     try {
@@ -153,7 +146,6 @@ export function App() {
    * headline on a setup screen. See `problem.rs`.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
-  const recovery = useCredentialRecovery(failure, setFailure, "Start");
   const credentialContext = useRef([
     root,
     model,
@@ -179,7 +171,7 @@ export function App() {
       next.some((value, index) => value !== credentialContext.current[index])
     ) {
       credentialContext.current = next;
-      recovery.abandon();
+      setFailure(null);
     }
   }, [
     root,
@@ -190,7 +182,6 @@ export function App() {
     harness,
     step,
     reuseIntelligence,
-    recovery.abandon,
   ]);
 
   const clearRootScopedSavedState = useCallback(() => {
@@ -232,8 +223,12 @@ export function App() {
     invoke<EngineStatus>("detect_engine")
       .then(setEngine)
       .catch(() => undefined);
-    invoke<string>("default_root")
-      .then(async (found) => {
+    Promise.all([
+      invoke<string | null>("selected_root").catch(() => null),
+      invoke<string>("default_root"),
+    ])
+      .then(async ([selected, fallback]) => {
+        const found = selected || fallback;
         setRoot(found);
         /*
          * Arrive filled in when a previous run already wrote these.
@@ -295,14 +290,11 @@ export function App() {
   }, [loadConfiguredRoot]);
 
   async function start() {
-    const attempt = recovery.begin();
-    if (attempt === null) return;
     setBusy(true);
     setFailure(null);
     setSteps([]);
     try {
       await invoke("prepare_engine");
-      if (!recovery.current(attempt)) return;
       await invoke("start_stack", {
         root,
         apiUrl,
@@ -316,7 +308,6 @@ export function App() {
         // the window carrying them would be a second list to keep in step with the catalogue.
         harness,
       });
-      if (!recovery.current(attempt)) return;
       setRunning(true);
       /*
        * One screen short of the handover, on purpose.
@@ -329,10 +320,9 @@ export function App() {
        */
       setStep("ask");
     } catch (error) {
-      if (recovery.current(attempt)) setFailure(asProblem(error));
+      setFailure(asProblem(error));
     } finally {
-      recovery.finish(attempt);
-      if (recovery.current(attempt)) setBusy(false);
+      setBusy(false);
       invoke<EngineStatus>("detect_engine")
         .then(setEngine)
         .catch(() => undefined);
@@ -451,8 +441,7 @@ export function App() {
           }}
           onBack={changeModelAfterAskFailure}
         />
-        {failure && <Failure problem={failure} recovery={recovery} />}
-        {recovery.message && <p role="status">{recovery.message}</p>}
+        {failure && <Failure problem={failure} />}
       </main>
     );
   }
@@ -462,6 +451,7 @@ export function App() {
       <main>
         <ProviderPicker
           held={alreadyHeld}
+          root={root}
           chosen={model}
           onChoose={(choice) => {
             setModel(choice);
@@ -500,7 +490,7 @@ export function App() {
 
       {!running && (
         <fieldset
-          disabled={busy || recovery.busy}
+          disabled={busy}
           style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
         >
           {/*
@@ -610,7 +600,7 @@ export function App() {
             <label htmlFor="root">Where OpenBot lives</label>
             <input
               id="root"
-              disabled={busy || recovery.busy}
+              disabled={busy}
               value={root}
               onChange={(event) => {
                 // Invalidate pending loads before blur starts one for this edit.
@@ -683,14 +673,13 @@ export function App() {
         </div>
       )}
 
-      {failure && <Failure problem={failure} recovery={recovery} />}
-      {recovery.message && <p role="status">{recovery.message}</p>}
+      {failure && <Failure problem={failure} />}
 
       {!running && (
         <button
           type="button"
           className="quiet"
-          disabled={busy || recovery.busy}
+          disabled={busy}
           onClick={() => setStep("model")}
         >
           Change AI connection
@@ -722,7 +711,7 @@ export function App() {
               type="button"
               className="quiet"
               onClick={stop}
-              disabled={busy || recovery.busy}
+              disabled={busy}
             >
               Stop OpenBot
             </button>
@@ -735,7 +724,6 @@ export function App() {
             // answered at all, not that some field on this screen is non-empty.
             disabled={
               busy ||
-              recovery.busy ||
               (apiKey.trim() === "" &&
                 !alreadyHeld.saved?.intelligenceApiKey &&
                 !reuseIntelligence) ||

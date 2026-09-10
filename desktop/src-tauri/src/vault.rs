@@ -1,46 +1,22 @@
 /*!
 Where a secret lives, which is not the `.env`.
 
-WHY NOT THE FILE. Everything OpenBot needs to run is settings, and settings belong in a file
-somebody can read. A model key, a plan token and the generated tokens the services authenticate to
-each other with are not settings: they are credentials, and a credential in a dotfile is one
-`cat`, one screen-share or one support ticket away from being somewhere else. This machine has a
-place for them already, so they go there and the file keeps the settings.
-
 WHAT EACH PLATFORM ACTUALLY GETS.
 
-- **macOS: the login Keychain**, through the Security framework rather than the `security` command,
-  which truncates at 128 bytes without saying so. One generic-password item per setting, so a
-  person can see and revoke them one at a time in Keychain Access.
+- **macOS and Linux: an owner-only file** under the selected deployment root.
 - **Windows: DPAPI**, through PowerShell's `ProtectedData`, encrypting to the signed-in user so the
   ciphertext is useless to any other account on the machine, and to anybody who copies the file off
   it.
-- **Linux: an owner-only file**, and said out loud rather than pretended otherwise. There is no
-  keystore a desktop Linux install can be assumed to have: Secret Service needs a session daemon
-  that a headless or minimal machine does not run, and failing to save a credential because
-  `gnome-keyring` is absent would be a worse product than a 0600 file.
 
-THE VALUE NEVER GOES ON A COMMAND LINE. `ps` is readable by every process the person runs. macOS
-hands the bytes to the framework directly; Windows writes over stdin, since PowerShell reading the
-console to the end has no buffer limit of its own.
+THE VALUE NEVER GOES ON A COMMAND LINE. `ps` is readable by every process the person runs. Windows
+writes over stdin, since PowerShell reading the console to the end has no buffer limit of its own.
 */
 
 use std::collections::BTreeMap;
-// Windows hands values to a child over stdin; tests exercise that pipe without a real store.
-#[cfg(any(target_os = "windows", test))]
-use std::io::Write;
-#[cfg(not(target_os = "macos"))]
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use crate::problem::Problem;
-
-/// What the Keychain files these under.
-///
-/// macOS only, because only the Keychain has a service name: Windows keys DPAPI blobs by filename
-/// and the Linux fallback is a file in the config directory. Left unscoped it is dead code
-/// everywhere else, and CI runs clippy with `-D warnings`, so a Linux build failed on it.
-#[cfg(target_os = "macos")]
-const SERVICE: &str = "OpenBot";
 
 /**
 Whether a setting is a credential.
@@ -93,43 +69,46 @@ Put every secret away, and take each one out of the file it used to be written t
 Both halves matter. Storing without clearing would leave the old copy behind on every machine that
 has run an earlier version, which is the same credential in the same file for no benefit at all.
 */
-pub fn remember_all(secrets: &BTreeMap<String, String>) -> Result<(), Problem> {
-    remember_all_with(secrets, &mut remember, &mut forget)
+pub fn remember_all(root: &Path, secrets: &BTreeMap<String, String>) -> Result<(), Problem> {
+    remember_all_with(root, secrets, &mut remember, &mut forget)
 }
 
 pub fn write_env_after_remembering(
-    path: &std::path::Path,
+    root: &Path,
+    path: &Path,
     settings: &BTreeMap<String, String>,
     secrets: &BTreeMap<String, String>,
     purge: &BTreeMap<String, String>,
 ) -> Result<(), Problem> {
-    write_env_after_remembering_with(path, settings, secrets, purge, remember, forget)
+    write_env_after_remembering_with(root, path, settings, secrets, purge, remember, forget)
 }
 
 fn write_env_after_remembering_with(
-    path: &std::path::Path,
+    root: &Path,
+    path: &Path,
     settings: &BTreeMap<String, String>,
     secrets: &BTreeMap<String, String>,
     purge: &BTreeMap<String, String>,
-    mut remember_one: impl FnMut(&str, &str) -> Result<(), Problem>,
-    mut forget_one: impl FnMut(&str) -> Result<(), Problem>,
+    mut remember_one: impl FnMut(&Path, &str, &str) -> Result<(), Problem>,
+    mut forget_one: impl FnMut(&Path, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
-    remember_all_with(secrets, &mut remember_one, &mut forget_one)?;
+    remember_all_with(root, secrets, &mut remember_one, &mut forget_one)?;
     crate::env::write(path, settings, purge)
         .map_err(|e| format!("could not write .env: {e}").into())
 }
 
 pub(crate) fn remember_all_with(
+    root: &Path,
     secrets: &BTreeMap<String, String>,
-    remember_one: &mut impl FnMut(&str, &str) -> Result<(), Problem>,
-    forget_one: &mut impl FnMut(&str) -> Result<(), Problem>,
+    remember_one: &mut impl FnMut(&Path, &str, &str) -> Result<(), Problem>,
+    forget_one: &mut impl FnMut(&Path, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     for (key, value) in secrets {
         if value.trim().is_empty() {
-            forget_one(key)?;
+            forget_one(root, key)?;
             continue;
         }
-        remember_one(key, value)?;
+        remember_one(root, key, value)?;
     }
     Ok(())
 }
@@ -150,18 +129,20 @@ The file path is always read first because legacy `.env` credentials must still 
 storage is layered on top only for Start and Ask, without authorization UI. Refusal is an error. Passive saved hints come from local nonsecret intent metadata.
 */
 pub fn already_given_with_policy(
-    env_file: &std::path::Path,
+    root: &Path,
+    env_file: &Path,
     keys: &[&str],
     policy: ReadPolicy,
 ) -> Result<BTreeMap<String, String>, Problem> {
-    already_given_with_reader(env_file, keys, policy, recall_no_ui)
+    already_given_with_reader(root, env_file, keys, policy, recall_no_ui)
 }
 
 fn already_given_with_reader(
-    env_file: &std::path::Path,
+    root: &Path,
+    env_file: &Path,
     keys: &[&str],
     policy: ReadPolicy,
-    mut read: impl FnMut(&str) -> Result<Option<String>, Problem>,
+    mut read: impl FnMut(&Path, &str) -> Result<Option<String>, Problem>,
 ) -> Result<BTreeMap<String, String>, Problem> {
     let mut found = match policy {
         ReadPolicy::FileOnly => crate::env::already_set(env_file, keys),
@@ -179,7 +160,7 @@ fn already_given_with_reader(
     for key in keys.iter().copied().filter(|key| is_secret(key)) {
         let value = match policy {
             ReadPolicy::FileOnly => None,
-            ReadPolicy::NoUi => read(key)?,
+            ReadPolicy::NoUi => read(root, key)?,
         };
         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
             found.insert(key.to_string(), value);
@@ -189,39 +170,43 @@ fn already_given_with_reader(
 }
 
 /// Passive startup hydration. It never asks protected storage for a raw secret.
-pub fn already_given_file_only(
-    env_file: &std::path::Path,
-    keys: &[&str],
-) -> BTreeMap<String, String> {
-    already_given_with_policy(env_file, keys, ReadPolicy::FileOnly).unwrap_or_default()
+pub fn already_given_file_only(env_file: &Path, keys: &[&str]) -> BTreeMap<String, String> {
+    crate::env::already_set(env_file, keys)
 }
 
 /// Protected retrieval for a user-triggered action.
 pub fn already_given_no_ui(
-    env_file: &std::path::Path,
+    root: &Path,
+    env_file: &Path,
     keys: &[&str],
 ) -> Result<BTreeMap<String, String>, Problem> {
-    already_given_with_policy(env_file, keys, ReadPolicy::NoUi)
+    already_given_with_policy(root, env_file, keys, ReadPolicy::NoUi)
 }
 
-// Cache only successfully retrieved credentials. Absence and refusal must be rechecked after
-// deliberate recovery. Hold the cache lock across store access so a late read cannot overwrite
-// a newer write/delete. Passive hydration never enters this cache.
+// Cache only successfully retrieved credentials. Absence and refusal must be rechecked on the next
+// attempt. Hold the cache lock across store access so a late read cannot overwrite a newer
+// write/delete. Passive hydration never enters this cache.
 type CachedRead = Result<Option<String>, Problem>;
 
-static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, CachedRead>>> =
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CacheKey {
+    root: PathBuf,
+    name: String,
+}
+
+static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<CacheKey, CachedRead>>> =
     std::sync::OnceLock::new();
 
-fn cache() -> &'static std::sync::Mutex<BTreeMap<String, CachedRead>> {
+fn cache() -> &'static std::sync::Mutex<BTreeMap<CacheKey, CachedRead>> {
     REMEMBERED.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
 }
 
-pub fn recall(name: &str) -> Result<Option<String>, Problem> {
-    recall_no_ui(name)
+pub fn recall(root: &Path, name: &str) -> Result<Option<String>, Problem> {
+    recall_no_ui(root, name)
 }
 
-fn recall_no_ui(name: &str) -> Result<Option<String>, Problem> {
-    recall_no_ui_cached(name, cache(), recall_from_store)
+fn recall_no_ui(root: &Path, name: &str) -> Result<Option<String>, Problem> {
+    recall_no_ui_cached(root, name, cache(), recall_from_store)
 }
 
 fn cache_problem() -> Problem {
@@ -229,271 +214,88 @@ fn cache_problem() -> Problem {
 }
 
 fn recall_no_ui_cached(
+    root: &Path,
     name: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
-    recall_one: impl FnOnce(&str) -> Result<Option<String>, Problem>,
+    cache: &std::sync::Mutex<BTreeMap<CacheKey, CachedRead>>,
+    recall_one: impl FnOnce(&Path, &str) -> Result<Option<String>, Problem>,
 ) -> Result<Option<String>, Problem> {
     let mut held = cache.lock().map_err(|_| cache_problem())?;
-    if let Some(known) = held.get(name) {
+    let key = CacheKey {
+        root: root.to_path_buf(),
+        name: name.to_string(),
+    };
+    if let Some(known) = held.get(&key) {
         return known.clone();
     }
-    let found = recall_one(name);
+    let found = recall_one(root, name);
     if matches!(&found, Ok(Some(_))) {
-        held.insert(name.to_string(), found.clone());
+        held.insert(key, found.clone());
     }
     found
 }
 
 /// Store a secret, and keep the cache in step so the next read does not ask again.
-pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
-    remember_cached(name, value, cache(), remember_in_store)
+pub fn remember(root: &Path, name: &str, value: &str) -> Result<(), Problem> {
+    remember_cached(root, name, value, cache(), remember_in_store)
 }
 
 fn remember_cached(
+    root: &Path,
     name: &str,
     value: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
-    remember_one: impl FnOnce(&str, &str) -> Result<(), Problem>,
+    cache: &std::sync::Mutex<BTreeMap<CacheKey, CachedRead>>,
+    remember_one: impl FnOnce(&Path, &str, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     let mut held = cache.lock().map_err(|_| cache_problem())?;
+    let key = CacheKey {
+        root: root.to_path_buf(),
+        name: name.to_string(),
+    };
     // A successful store read/write confirms these exact bytes for this process. In particular,
     // do not repeat a just-authorized write on the person's explicit ordinary Start retry.
     if held
-        .get(name)
+        .get(&key)
         .is_some_and(|known| matches!(known, Ok(Some(saved)) if saved == value))
     {
         return Ok(());
     }
     // A failed restoration can follow a successful OS write. Discard any stale cache entry.
-    held.remove(name);
-    remember_one(name, value)?;
-    held.insert(name.to_string(), Ok(Some(value.to_string())));
+    held.remove(&key);
+    remember_one(root, name, value)?;
+    held.insert(key, Ok(Some(value.to_string())));
     Ok(())
 }
 
 /// Drop a secret from the store. Refusal must not be published as absence.
-pub fn forget(name: &str) -> Result<(), Problem> {
-    forget_cached(name, cache(), forget_in_store)
+pub fn forget(root: &Path, name: &str) -> Result<(), Problem> {
+    forget_cached(root, name, cache(), forget_in_store)
 }
 
 fn forget_cached(
+    root: &Path,
     name: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
-    forget_one: impl FnOnce(&str) -> Result<(), Problem>,
+    cache: &std::sync::Mutex<BTreeMap<CacheKey, CachedRead>>,
+    forget_one: impl FnOnce(&Path, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     let mut held = cache.lock().map_err(|_| cache_problem())?;
-    held.remove(name);
-    forget_one(name)
+    held.remove(&CacheKey {
+        root: root.to_path_buf(),
+        name: name.to_string(),
+    });
+    forget_one(root, name)
 }
 
 /// Read back what was stored, preserving protected-store failures.
-pub fn recall_all(keys: &[&str]) -> Result<BTreeMap<String, String>, Problem> {
+pub fn recall_all(root: &Path, keys: &[&str]) -> Result<BTreeMap<String, String>, Problem> {
     let mut found = BTreeMap::new();
     for key in keys {
-        if let Some(value) = recall(key)? {
+        if let Some(value) = recall(root, key)? {
             if !value.trim().is_empty() {
                 found.insert((*key).to_string(), value);
             }
         }
     }
     Ok(found)
-}
-
-/*
- * The Keychain through the framework, NOT through the `security` command.
- *
- * MEASURED, AND IT SILENTLY CORRUPTS KEYS. `security add-generic-password` takes its password
- * through a password prompt whose buffer is 128 bytes, and anything longer is cut off with no
- * error and an exit status of zero. Probed one length at a time: 128 stores 128, 129 stores 128,
- * 200 stores 128. An OpenAI project key is 164 characters, so every one of them would have been
- * saved broken and read back broken on the next run, while the run that saved it worked fine
- * because the value it used came straight from the window. No flag raises that buffer, and the
- * only ways past the prompt put the credential on a command line where `ps` can read it. This
- * path has neither a length limit nor an argv.
- */
-#[cfg(target_os = "macos")]
-#[path = "vault/keychain.rs"]
-mod keychain;
-
-#[cfg(target_os = "macos")]
-fn mutate_primitive(
-    primitive: crate::recovery::Primitive,
-    name: &str,
-    value: Option<&str>,
-) -> Result<(), Problem> {
-    use crate::recovery::Primitive;
-    use core_foundation::string::CFString;
-    use core_foundation::{base::TCFType, data::CFData, dictionary::CFDictionary};
-    use security_framework_sys::item::{
-        kSecAttrAccount, kSecAttrService, kSecClass, kSecClassGenericPassword,
-    };
-    use security_framework_sys::{
-        item::kSecValueData,
-        keychain_item::{SecItemAdd, SecItemUpdate},
-    };
-    // Exactly the legacy generic-password selector used by security-framework, with no new
-    // access-group, ACL, access-control or data-protection attributes.
-    let mut pairs = unsafe {
-        vec![
-            (
-                CFString::wrap_under_get_rule(kSecClass),
-                CFString::wrap_under_get_rule(kSecClassGenericPassword).as_CFType(),
-            ),
-            (
-                CFString::wrap_under_get_rule(kSecAttrService),
-                CFString::new(SERVICE).as_CFType(),
-            ),
-            (
-                CFString::wrap_under_get_rule(kSecAttrAccount),
-                CFString::new(name).as_CFType(),
-            ),
-        ]
-    };
-    let status = match primitive {
-        Primitive::Add => {
-            pairs.push((
-                unsafe { CFString::wrap_under_get_rule(kSecValueData) },
-                CFData::from_buffer(value.ok_or_else(|| Problem::plain("The captured credential mutation has no value. Start this step again."))?.as_bytes()).as_CFType(),
-            ));
-            let query = CFDictionary::from_CFType_pairs(&pairs);
-            unsafe { SecItemAdd(query.as_concrete_TypeRef(), std::ptr::null_mut()) }
-        }
-        Primitive::Update => {
-            let query = CFDictionary::from_CFType_pairs(&pairs);
-            let data = CFData::from_buffer(
-                value
-                    .ok_or_else(|| {
-                        Problem::plain(
-                            "The captured credential mutation has no value. Start this step again.",
-                        )
-                    })?
-                    .as_bytes(),
-            );
-            let attributes = CFDictionary::from_CFType_pairs(&[(
-                unsafe { core_foundation::string::CFString::wrap_under_get_rule(kSecValueData) }
-                    .as_CFType(),
-                data.as_CFType(),
-            )]);
-            unsafe {
-                SecItemUpdate(
-                    query.as_concrete_TypeRef(),
-                    attributes.as_concrete_TypeRef(),
-                )
-            }
-        }
-        Primitive::Delete => {
-            match security_framework::passwords::delete_generic_password(SERVICE, name) {
-                Ok(()) => 0,
-                Err(error) => error.code(),
-            }
-        }
-        Primitive::Read => return Err(Problem::plain("A read is not a credential mutation.")),
-    };
-    if status == 0 || (primitive == Primitive::Delete && status == -25300) {
-        Ok(())
-    } else {
-        Err(keychain::item_problem(primitive, name, status, value))
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
-    use crate::recovery::Primitive;
-    keychain::without_ui("save", name, || {
-        match mutate_primitive(Primitive::Add, name, Some(value)) {
-            // A duplicate may update only on the ordinary no-UI path. The interactive command
-            // calls exactly its captured primitive and cannot enter this branch.
-            Err(error)
-                if error
-                    .item
-                    .as_ref()
-                    .is_some_and(|item| item.status == -25299) =>
-            {
-                mutate_primitive(Primitive::Update, name, Some(value))
-            }
-            result => result,
-        }
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn read_primitive(name: &str) -> Result<Option<String>, Problem> {
-    match security_framework::passwords::get_generic_password(SERVICE, name) {
-        Ok(raw) => String::from_utf8(raw)
-            .map(Some)
-            .map_err(|_| keychain::problem("read", name, "invalid-utf8", None)),
-        Err(error) if error.code() == -25300 => Ok(None),
-        Err(error) => Err(keychain::item_problem(
-            crate::recovery::Primitive::Read,
-            name,
-            error.code(),
-            None,
-        )),
-    }
-}
-#[cfg(target_os = "macos")]
-fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
-    keychain::without_ui("read", name, || read_primitive(name))
-}
-#[cfg(target_os = "macos")]
-fn forget_in_store(name: &str) -> Result<(), Problem> {
-    keychain::without_ui("delete", name, || {
-        mutate_primitive(crate::recovery::Primitive::Delete, name, None)
-    })
-}
-
-pub(crate) fn recover_claimed(
-    state: &crate::recovery::Recovery,
-    claimed: crate::recovery::Claimed,
-) -> Result<(), Problem> {
-    // Preserve cache -> policy-gate order. No native state lock is held while waiting for macOS.
-    let mut held = match cache().lock() {
-        Ok(held) => held,
-        Err(_) => return state.complete(claimed, Err::<(), _>(cache_problem()), |_| {}),
-    };
-    let name = claimed.operation.setting.clone();
-    let result = state.dispatch(&claimed).and_then(|()| {
-        // A mutation may reach the OS before restoration fails. Invalidate before dispatch;
-        // no late success or cancellation is permitted to publish new cache bytes.
-        if claimed.operation.primitive != crate::recovery::Primitive::Read {
-            held.remove(&name);
-        }
-        recover_one(&claimed.operation)
-    });
-    state.complete(claimed, result, |value| {
-        held.remove(&name);
-        if let Some(value) = value {
-            held.insert(name, Ok(Some(value)));
-        }
-    })
-}
-#[cfg(target_os = "macos")]
-fn recover_one(operation: &crate::recovery::RefusedOperation) -> Result<Option<String>, Problem> {
-    use crate::recovery::Primitive;
-    keychain::with_ui(operation.primitive.name(), &operation.setting, || {
-        if operation.primitive == Primitive::Read {
-            let value = read_primitive(&operation.setting)?.filter(|value| !value.trim().is_empty()).ok_or_else(|| Problem::plain("That saved credential is missing or empty. Authorization cannot recreate it."))?;
-            if operation.setting == "KEY_ENCRYPTION_KEY"
-                && !crate::env::usable_encryption_key(&value)
-            {
-                return Err(Problem::plain("This installation's original saved encryption key is invalid or public. Restore its original private key; authorization cannot recreate it."));
-            }
-            Ok(Some(value))
-        } else {
-            mutate_primitive(
-                operation.primitive,
-                &operation.setting,
-                operation.value.as_deref(),
-            )?;
-            Ok(operation.value.clone())
-        }
-    })
-}
-#[cfg(not(target_os = "macos"))]
-fn recover_one(_: &crate::recovery::RefusedOperation) -> Result<Option<String>, Problem> {
-    Err(Problem::plain(
-        "macOS credential authorization is unavailable on this platform.",
-    ))
 }
 
 /*
@@ -504,7 +306,7 @@ fn recover_one(_: &crate::recovery::RefusedOperation) -> Result<Option<String>, 
  * and the ciphertext leaves on stdout, so neither is ever an argument.
  */
 #[cfg(target_os = "windows")]
-fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
+fn remember_in_store(root: &Path, name: &str, value: &str) -> Result<(), Problem> {
     const PROTECT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $plain = [Console]::In.ReadToEnd()
@@ -514,13 +316,13 @@ $sealed = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'Current
 [Convert]::ToBase64String($sealed)
 "#;
     let sealed = powershell(PROTECT, Some(value))?;
-    let path = vault_dir()?.join(format!("{name}.dpapi"));
+    let path = vault_dir(root)?.join(format!("{name}.dpapi"));
     std::fs::write(&path, sealed.trim())
         .map_err(|error| dpapi_problem(format!("{}: {error}", path.display())))
 }
 
 #[cfg(target_os = "windows")]
-fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
+fn recall_from_store(root: &Path, name: &str) -> Result<Option<String>, Problem> {
     const UNPROTECT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $sealed = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())
@@ -528,7 +330,7 @@ Add-Type -AssemblyName System.Security
 $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'CurrentUser')
 [Text.Encoding]::UTF8.GetString($bytes)
 "#;
-    let path = vault_dir()?.join(format!("{name}.dpapi"));
+    let path = vault_dir(root)?.join(format!("{name}.dpapi"));
     let Ok(sealed) = std::fs::read_to_string(path) else {
         return Ok(None);
     };
@@ -536,8 +338,8 @@ $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'Curre
 }
 
 #[cfg(target_os = "windows")]
-fn forget_in_store(name: &str) -> Result<(), Problem> {
-    remove_secret_file(&vault_dir()?.join(format!("{name}.dpapi")))
+fn forget_in_store(root: &Path, name: &str) -> Result<(), Problem> {
+    remove_secret_file(&vault_dir(root)?.join(format!("{name}.dpapi")))
 }
 
 #[cfg(target_os = "windows")]
@@ -731,12 +533,15 @@ mod dpapi_tests {
 
     #[test]
     fn failed_stdin_delivery_does_not_populate_the_success_cache() {
+        let root = crate::test_support::temp_root("dpapi-cache-root");
+        std::fs::create_dir_all(&root).unwrap();
         let cache = Mutex::new(BTreeMap::new());
         let result = remember_cached(
+            &root,
             "SYNTHETIC_TEST",
             "synthetic-stdin-value",
             &cache,
-            |_, value| {
+            |_, _, value| {
                 write_dpapi_stdin(
                     Some(StdinWriter {
                         bytes: Rc::new(RefCell::new(Vec::new())),
@@ -749,6 +554,7 @@ mod dpapi_tests {
         );
         assert!(result.is_err());
         assert!(cache.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -767,74 +573,133 @@ mod dpapi_tests {
     }
 }
 
-/*
- * Linux, where there is nothing to be assumed.
- *
- * Not a lesser fallback pretending to be a keystore: an owner-only file, in the same place the app
- * keeps its own state, and named as what it is. Secret Service would be better on a desktop that
- * runs it and is simply absent on one that does not, and refusing to save a credential because a
- * daemon is missing would fail more people than the file protects.
- */
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
-    use std::io::Write;
+#[cfg(not(target_os = "windows"))]
+fn remember_in_store(root: &Path, name: &str, value: &str) -> Result<(), Problem> {
+    let path = vault_dir(root)?.join(format!("{name}.secret"));
+    write_secret_file(&path, value)
+}
 
-    let path = vault_dir()?.join(format!("{name}.secret"));
-    let mut file = open_secret_file(&path)?;
-    file.set_len(0)
-        .and_then(|()| file.write_all(value.as_bytes()))
+#[cfg(not(target_os = "windows"))]
+fn write_secret_file(path: &Path, value: &str) -> Result<(), Problem> {
+    write_secret_file_with(path, value, |tmp, value| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(tmp)?;
+        file.write_all(value.as_bytes())?;
+        file.sync_all()
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn write_secret_file_with(
+    path: &Path,
+    value: &str,
+    write_tmp: impl FnOnce(&Path, &str) -> std::io::Result<()>,
+) -> Result<(), Problem> {
+    reject_unsafe_final(path)?;
+    let tmp = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("credential"),
+        std::process::id()
+    ));
+    let result = write_tmp(&tmp, value)
+        .and_then(|()| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+            }
+            std::fs::rename(&tmp, path)
+        })
         .map_err(|error| {
             Problem::with(
                 "OpenBot could not save your sign-in details on this computer.",
                 format!("{}: {error}", path.display()),
             )
-        })
-}
-
-/// Create privately, and secure existing files before truncating or writing any credential bytes.
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn open_secret_file(path: &std::path::Path) -> Result<std::fs::File, Problem> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    let file = options.open(path).map_err(|error| {
-        Problem::with(
-            "OpenBot could not save your sign-in details on this computer.",
-            format!("{}: {error}", path.display()),
-        )
-    })?;
-    owner_only(path)?;
-    Ok(file)
+    result
 }
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
-    recall_secret_file(&vault_dir()?.join(format!("{name}.secret")))
-}
-
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn recall_secret_file(path: &std::path::Path) -> Result<Option<String>, Problem> {
-    match std::fs::read_to_string(path) {
-        Ok(value) => Ok(Some(value.trim().to_string())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+#[cfg(not(target_os = "windows"))]
+fn reject_unsafe_final(path: &Path) -> Result<(), Problem> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_file() => {
+            Err(Problem::with(
+                "OpenBot could not save your sign-in details on this computer.",
+                format!("{}: credential path is not a regular file", path.display()),
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(Problem::with(
-            "OpenBot could not read your saved sign-in details on this computer.",
+            "OpenBot could not save your sign-in details on this computer.",
             format!("{}: {error}", path.display()),
         )),
     }
 }
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn forget_in_store(name: &str) -> Result<(), Problem> {
-    remove_secret_file(&vault_dir()?.join(format!("{name}.secret")))
+#[cfg(not(target_os = "windows"))]
+fn recall_from_store(root: &Path, name: &str) -> Result<Option<String>, Problem> {
+    recall_secret_file(&vault_dir(root)?.join(format!("{name}.secret")))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn remove_secret_file(path: &std::path::Path) -> Result<(), Problem> {
+#[cfg(not(target_os = "windows"))]
+fn recall_secret_file(path: &Path) -> Result<Option<String>, Problem> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_file() => {
+            return Err(Problem::with(
+                "OpenBot could not read your saved sign-in details on this computer.",
+                format!("{}: credential path is not a regular file", path.display()),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not read your saved sign-in details on this computer.",
+                format!("{}: {error}", path.display()),
+            ));
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        Problem::with(
+            "OpenBot could not read your saved sign-in details on this computer.",
+            format!("{}: {error}", path.display()),
+        )
+    })?;
+    let mut value = String::new();
+    file.read_to_string(&mut value).map_err(|error| {
+        Problem::with(
+            "OpenBot could not read your saved sign-in details on this computer.",
+            format!("{}: {error}", path.display()),
+        )
+    })?;
+    Ok(Some(value.trim().to_string()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn forget_in_store(root: &Path, name: &str) -> Result<(), Problem> {
+    remove_secret_file(&vault_dir(root)?.join(format!("{name}.secret")))
+}
+
+fn remove_secret_file(path: &Path) -> Result<(), Problem> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -846,9 +711,8 @@ fn remove_secret_file(path: &std::path::Path) -> Result<(), Problem> {
 }
 
 /// Where the platforms that keep a file keep it. Created owner-only, not merely written so.
-#[cfg(not(target_os = "macos"))]
-fn vault_dir() -> Result<PathBuf, Problem> {
-    let dir = crate::stack::default_root().join(".secrets");
+pub(crate) fn vault_dir(root: &Path) -> Result<PathBuf, Problem> {
+    let dir = root.join(".secrets");
     std::fs::create_dir_all(&dir).map_err(|error| {
         Problem::with(
             "OpenBot could not create the place it keeps your sign-in details.",
@@ -861,9 +725,9 @@ fn vault_dir() -> Result<PathBuf, Problem> {
 
 /// Owner-only where the platform has the notion, and a no-op where it does not.
 ///
-/// Only where a file is kept. The Keychain owns its own protection and has no path to set.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn owner_only(path: &std::path::Path) -> Result<(), Problem> {
+/// Only where a file is kept; the Windows store path uses its platform protection separately.
+#[cfg(unix)]
+fn owner_only(path: &Path) -> Result<(), Problem> {
     use std::os::unix::fs::PermissionsExt;
     let mode = if path.is_dir() { 0o700 } else { 0o600 };
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(|error| {
@@ -874,129 +738,146 @@ fn owner_only(path: &std::path::Path) -> Result<(), Problem> {
     })
 }
 
-#[cfg(all(not(unix), not(target_os = "macos")))]
-fn owner_only(_path: &std::path::Path) -> Result<(), Problem> {
+#[cfg(not(unix))]
+fn owner_only(_path: &Path) -> Result<(), Problem> {
     Ok(())
 }
 
-#[cfg(all(test, unix, not(target_os = "macos")))]
-mod file_permissions_tests {
-    use super::{open_secret_file, owner_only, recall_secret_file};
+#[cfg(all(test, not(target_os = "windows")))]
+mod file_store_tests {
+    use super::{recall_secret_file, remove_secret_file, vault_dir, write_secret_file_with};
     use crate::test_support::temp_root;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn a_secret_file_is_private_before_writing_any_bytes() {
-        let root = temp_root("vault-file-mode");
+    fn secret_directory_is_owner_only() {
+        let root = temp_root("vault-dir-mode");
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("synthetic.secret");
+        let dir = vault_dir(&root).unwrap();
 
-        let file = open_secret_file(&path).unwrap();
-        let metadata = file.metadata().unwrap();
-        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
-        assert_eq!(metadata.len(), 0);
-
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn an_existing_file_is_secured_without_truncating_its_value() {
-        let root = temp_root("vault-existing-mode");
+    fn secret_file_is_owner_only_before_bytes() {
+        let root = temp_root("vault-file-mode");
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("synthetic.secret");
-        std::fs::write(&path, "previous-synthetic-value").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        super::remember(&root, "OPENAI_API_KEY", "synthetic-secret").unwrap();
+        let path = root.join(".secrets/OPENAI_API_KEY.secret");
 
-        let file = open_secret_file(&path).unwrap();
-        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            super::recall(&root, "OPENAI_API_KEY").unwrap().as_deref(),
+            Some("synthetic-secret")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_secret_write_preserves_existing_value() {
+        let root = temp_root("vault-failed-write");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = vault_dir(&root).unwrap().join("OPENAI_API_KEY.secret");
+        std::fs::write(&path, "previous-synthetic-value").unwrap();
+
+        let problem = write_secret_file_with(&path, "new-secret-value", |_, _| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .expect_err("failed write must be reported");
+
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "previous-synthetic-value"
         );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
+        assert!(!detail.contains("new-secret-value"), "{detail}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
+    #[cfg(unix)]
+    #[test]
+    fn secret_write_rejects_symlink_target() {
+        let root = temp_root("vault-symlink-target");
+        let outside = temp_root("vault-symlink-outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("outside.secret");
+        std::fs::write(&outside_file, "outside-original").unwrap();
+        let path = vault_dir(&root).unwrap().join("OPENAI_API_KEY.secret");
+        std::os::unix::fs::symlink(&outside_file, &path).unwrap();
+
+        let problem = super::remember(&root, "OPENAI_API_KEY", "new-secret-value")
+            .expect_err("symlink targets must be refused");
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_file).unwrap(),
+            "outside-original"
+        );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
+        assert!(!detail.contains("new-secret-value"), "{detail}");
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn secret_read_rejects_nonregular_path() {
+        let root = temp_root("vault-directory-secret");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = vault_dir(&root).unwrap().join("OPENAI_API_KEY.secret");
+        std::fs::create_dir(&path).unwrap();
+
+        let problem = recall_secret_file(&path).expect_err("directories are unreadable secrets");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not read your saved sign-in details on this computer."
+        );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
+        assert!(detail.contains("regular file"), "{detail}");
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn a_permission_failure_keeps_the_path_and_os_error() {
-        let path = temp_root("vault-missing-permissions");
-        let expected =
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap_err();
-
-        let problem = owner_only(&path).unwrap_err();
-
-        assert_eq!(
-            problem.detail,
-            Some(format!("{}: {expected}", path.display()))
-        );
-    }
-
-    #[test]
-    fn missing_secret_file_is_absent() {
-        let root = temp_root("vault-missing-secret");
+    fn secret_forget_reports_non_not_found_remove_errors() {
+        let root = temp_root("vault-forget-directory");
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("OPENAI_API_KEY.secret");
-
-        assert_eq!(recall_secret_file(&path), Ok(None));
-
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn readable_secret_file_trims_surrounding_whitespace() {
-        let root = temp_root("vault-readable-secret");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("OPENAI_API_KEY.secret");
-        std::fs::write(&path, "\n  synthetic-secret-value  \n").unwrap();
-
-        assert_eq!(
-            recall_secret_file(&path),
-            Ok(Some("synthetic-secret-value".to_string()))
-        );
-
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn directory_secret_path_reports_the_path_and_os_error() {
-        let root = temp_root("vault-directory-secret");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("OPENAI_API_KEY.secret");
+        let path = vault_dir(&root).unwrap().join("OPENAI_API_KEY.secret");
         std::fs::create_dir(&path).unwrap();
 
-        let problem = recall_secret_file(&path).expect_err("directories are unreadable secrets");
-        assert_eq!(
-            problem.said,
-            "OpenBot could not read your saved sign-in details on this computer."
-        );
+        let problem = remove_secret_file(&path).expect_err("directory removal must be reported");
         let detail = problem.detail.unwrap();
         assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
-        assert!(detail.contains("directory"), "{detail}");
-
-        std::fs::remove_dir_all(root).ok();
+        remove_secret_file(&path.join("missing")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn invalid_utf8_secret_file_reports_the_path_and_os_error_without_bytes() {
-        let root = temp_root("vault-invalid-utf8-secret");
+    fn macos_backend_round_trips_without_restore_offer() {
+        let root = temp_root("vault-no-restore-offer");
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("OPENAI_API_KEY.secret");
-        std::fs::write(&path, b"synthetic-prefix-\xff-secret").unwrap();
 
-        let problem = recall_secret_file(&path).expect_err("invalid UTF-8 is unreadable");
+        super::remember(&root, "OPENAI_API_KEY", "synthetic-secret").unwrap();
         assert_eq!(
-            problem.said,
-            "OpenBot could not read your saved sign-in details on this computer."
+            super::recall(&root, "OPENAI_API_KEY").unwrap().as_deref(),
+            Some("synthetic-secret")
         );
-        let detail = problem.detail.unwrap();
-        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
-        assert!(
-            detail.contains("stream did not contain valid UTF-8"),
-            "{detail}"
-        );
-        assert!(!detail.contains("synthetic-prefix"), "{detail}");
-
-        std::fs::remove_dir_all(root).ok();
+        let problem = recall_secret_file(&root.join(".secrets"))
+            .expect_err("directories must be ordinary file errors");
+        assert!(!problem.said.contains("macOS"), "{problem:?}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -1007,140 +888,227 @@ mod cache_tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn unignored_tests_do_not_call_real_store_entrypoints() {
-        let source = include_str!("vault.rs");
-        let mut pending_test = false;
-        let mut ignored = false;
-        let mut in_body = false;
-        let mut braces = 0isize;
-        let mut name = String::new();
-        let mut body = String::new();
-
-        for line in source.lines() {
-            let trimmed = line.trim();
-            if !in_body {
-                if trimmed.starts_with("#[ignore") {
-                    ignored = true;
-                } else if trimmed == "#[test]" {
-                    pending_test = true;
-                } else if pending_test && trimmed.starts_with("fn ") {
-                    name = trimmed
-                        .trim_start_matches("fn ")
-                        .split('(')
-                        .next()
-                        .unwrap_or_default()
-                        .to_string();
-                    body.clear();
-                    in_body = true;
-                    pending_test = false;
-                    braces =
-                        line.matches('{').count() as isize - line.matches('}').count() as isize;
-                    body.push_str(line);
-                    body.push('\n');
-                    continue;
-                } else if !trimmed.starts_with("#[") && !trimmed.is_empty() {
-                    pending_test = false;
-                    ignored = false;
-                }
-            }
-
-            if in_body {
-                body.push_str(line);
-                body.push('\n');
-                braces += line.matches('{').count() as isize - line.matches('}').count() as isize;
-                if braces == 0 {
-                    if !ignored {
-                        for entrypoint in ["recall", "remember", "forget"] {
-                            let direct = format!("{entrypoint}(");
-                            let qualified = format!("super::{entrypoint}(");
-                            assert!(
-                                !body.contains(&direct) && !body.contains(&qualified),
-                                "{name} must use injected fake stores, not {entrypoint}()"
-                            );
-                        }
-                    }
-                    in_body = false;
-                    ignored = false;
-                }
-            }
-        }
-    }
-
-    #[test]
     fn only_successful_reads_are_cached_and_mutations_keep_them_current() {
         let name = "OPENAI_API_KEY";
+        let root = temp_root("cache-root");
+        std::fs::create_dir_all(&root).unwrap();
         let cache = std::sync::Mutex::new(BTreeMap::new());
         for _ in 0..2 {
             assert_eq!(
-                super::recall_no_ui_cached(name, &cache, |_| Ok(None)),
+                super::recall_no_ui_cached(&root, name, &cache, |_, _| Ok(None)),
                 Ok(None)
             );
             assert!(cache.lock().unwrap().is_empty());
         }
         let found =
-            super::recall_no_ui_cached(name, &cache, |_| Ok(Some("recovered".into()))).unwrap();
-        assert_eq!(found.as_deref(), Some("recovered"));
+            super::recall_no_ui_cached(&root, name, &cache, |_, _| Ok(Some("retried".into())))
+                .unwrap();
+        assert_eq!(found.as_deref(), Some("retried"));
         assert_eq!(
-            super::recall_no_ui_cached(name, &cache, |_| panic!("success cached")).unwrap(),
+            super::recall_no_ui_cached(&root, name, &cache, |_, _| panic!("success cached"))
+                .unwrap(),
             found
         );
-        super::remember_cached(name, "replacement", &cache, |_, _| Ok(())).unwrap();
+        super::remember_cached(&root, name, "replacement", &cache, |_, _, _| Ok(())).unwrap();
         assert_eq!(
-            super::recall_no_ui_cached(name, &cache, |_| panic!("write cached"))
+            super::recall_no_ui_cached(&root, name, &cache, |_, _| panic!("write cached"))
                 .unwrap()
                 .as_deref(),
             Some("replacement")
         );
-        super::forget_cached(name, &cache, |_| Ok(())).unwrap();
+        super::forget_cached(&root, name, &cache, |_, _| Ok(())).unwrap();
         assert!(cache.lock().unwrap().is_empty());
         assert_eq!(
-            super::recall_no_ui_cached(name, &cache, |_| Ok(None)),
+            super::recall_no_ui_cached(&root, name, &cache, |_, _| Ok(None)),
             Ok(None)
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cached_reads_are_isolated_by_root() {
+        let root_a = temp_root("cache-root-a");
+        let root_b = temp_root("cache-root-b");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        let cache = std::sync::Mutex::new(BTreeMap::new());
+        let calls = std::sync::Mutex::new(Vec::new());
+        let read = |root: &std::path::Path, name: &str| {
+            calls
+                .lock()
+                .unwrap()
+                .push((root.to_path_buf(), name.to_string()));
+            if root == root_a {
+                Ok(Some("root-a-value".to_string()))
+            } else if root == root_b {
+                Ok(Some("root-b-value".to_string()))
+            } else {
+                panic!("unexpected root {}", root.display());
+            }
+        };
+
+        assert_eq!(
+            super::recall_no_ui_cached(&root_a, "OPENAI_API_KEY", &cache, read)
+                .unwrap()
+                .as_deref(),
+            Some("root-a-value")
+        );
+        assert_eq!(
+            super::recall_no_ui_cached(&root_b, "OPENAI_API_KEY", &cache, read)
+                .unwrap()
+                .as_deref(),
+            Some("root-b-value")
+        );
+        assert_eq!(
+            super::recall_no_ui_cached(&root_a, "OPENAI_API_KEY", &cache, |_, _| {
+                panic!("root A should be cached")
+            })
+            .unwrap()
+            .as_deref(),
+            Some("root-a-value")
+        );
+
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            [
+                (root_a.clone(), "OPENAI_API_KEY".to_string()),
+                (root_b.clone(), "OPENAI_API_KEY".to_string()),
+            ]
+        );
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn remember_and_forget_touch_only_the_matching_root_cache_entry() {
+        let root_a = temp_root("cache-mutation-root-a");
+        let root_b = temp_root("cache-mutation-root-b");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        let cache = std::sync::Mutex::new(BTreeMap::new());
+        super::remember_cached(
+            &root_a,
+            "OPENAI_API_KEY",
+            "root-a-old",
+            &cache,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        super::remember_cached(
+            &root_b,
+            "OPENAI_API_KEY",
+            "root-b-old",
+            &cache,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+
+        super::remember_cached(
+            &root_a,
+            "OPENAI_API_KEY",
+            "root-a-new",
+            &cache,
+            |root, _, _| {
+                assert_eq!(root, root_a);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            super::recall_no_ui_cached(&root_b, "OPENAI_API_KEY", &cache, |_, _| {
+                panic!("root B should remain cached")
+            })
+            .unwrap()
+            .as_deref(),
+            Some("root-b-old")
+        );
+
+        super::forget_cached(&root_a, "OPENAI_API_KEY", &cache, |root, _| {
+            assert_eq!(root, root_a);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            super::recall_no_ui_cached(&root_b, "OPENAI_API_KEY", &cache, |_, _| {
+                panic!("root B should remain cached after root A forget")
+            })
+            .unwrap()
+            .as_deref(),
+            Some("root-b-old")
+        );
+        assert_eq!(
+            super::recall_no_ui_cached(&root_a, "OPENAI_API_KEY", &cache, |_, _| {
+                Ok(Some("root-a-store".into()))
+            })
+            .unwrap()
+            .as_deref(),
+            Some("root-a-store")
+        );
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
     }
 
     #[test]
     fn an_unchanged_confirmed_value_skips_persistence_but_a_change_never_does() {
+        let root = temp_root("unchanged-cache-root");
+        std::fs::create_dir_all(&root).unwrap();
         let cache = std::sync::Mutex::new(BTreeMap::from([(
-            "OPENAI_API_KEY".into(),
+            super::CacheKey {
+                root: root.clone(),
+                name: "OPENAI_API_KEY".into(),
+            },
             Ok(Some("confirmed".into())),
         )]));
-        super::remember_cached("OPENAI_API_KEY", "confirmed", &cache, |_, _| {
-            panic!("redundant persistence after recovery")
+        super::remember_cached(&root, "OPENAI_API_KEY", "confirmed", &cache, |_, _, _| {
+            panic!("redundant persistence after cache hit")
         })
         .unwrap();
-        let error = super::remember_cached("OPENAI_API_KEY", "changed", &cache, |key, value| {
-            assert_eq!(key, "OPENAI_API_KEY");
-            assert_eq!(value, "changed");
-            Err(Problem::plain("synthetic no-UI refusal"))
-        })
+        let error = super::remember_cached(
+            &root,
+            "OPENAI_API_KEY",
+            "changed",
+            &cache,
+            |seen_root, key, value| {
+                assert_eq!(seen_root, root);
+                assert_eq!(key, "OPENAI_API_KEY");
+                assert_eq!(value, "changed");
+                Err(Problem::plain("synthetic no-UI refusal"))
+            },
+        )
         .unwrap_err();
         assert_eq!(error.said, "synthetic no-UI refusal");
         assert!(cache.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn failed_write_or_delete_cannot_publish_success_or_stale_cache() {
         for delete in [false, true] {
+            let root = temp_root("failed-cache-root");
+            std::fs::create_dir_all(&root).unwrap();
             let cache = std::sync::Mutex::new(BTreeMap::new());
-            super::remember_cached("OPENAI_API_KEY", "old", &cache, |_, _| Ok(())).unwrap();
+            super::remember_cached(&root, "OPENAI_API_KEY", "old", &cache, |_, _, _| Ok(()))
+                .unwrap();
             let denied =
                 Problem::plain("synthetic refusal, including restoration after OS success");
             let result = if delete {
-                super::forget_cached("OPENAI_API_KEY", &cache, |_| Err(denied.clone()))
+                super::forget_cached(&root, "OPENAI_API_KEY", &cache, |_, _| Err(denied.clone()))
             } else {
-                super::remember_cached("OPENAI_API_KEY", "new", &cache, |_, _| Err(denied.clone()))
+                super::remember_cached(&root, "OPENAI_API_KEY", "new", &cache, |_, _, _| {
+                    Err(denied.clone())
+                })
             };
             assert_eq!(result, Err(denied));
             assert!(cache.lock().unwrap().is_empty());
             assert_eq!(
-                super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| Ok(Some(
+                super::recall_no_ui_cached(&root, "OPENAI_API_KEY", &cache, |_, _| Ok(Some(
                     "authoritative".into()
                 )))
                 .unwrap()
                 .as_deref(),
                 Some("authoritative")
             );
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 
@@ -1154,19 +1122,21 @@ mod cache_tests {
         let denied = Problem::plain("synthetic read refused");
         assert_eq!(
             super::already_given_with_reader(
+                &root,
                 &path,
                 &["KEY_ENCRYPTION_KEY"],
                 super::ReadPolicy::NoUi,
-                |_| Err(denied.clone())
+                |_, _| Err(denied.clone())
             ),
             Err(denied)
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
         let missing = super::already_given_with_reader(
+            &root,
             &path,
             &["KEY_ENCRYPTION_KEY"],
             super::ReadPolicy::NoUi,
-            |_| Ok(None),
+            |_, _| Ok(None),
         )
         .unwrap();
         assert_eq!(
@@ -1206,6 +1176,7 @@ mod cache_tests {
         std::fs::write(&path, b"INTELLIGENCE_API_URL=\xff\n").unwrap();
 
         let file_only = super::already_given_with_policy(
+            &dir,
             &path,
             &["INTELLIGENCE_API_URL"],
             super::ReadPolicy::FileOnly,
@@ -1214,6 +1185,7 @@ mod cache_tests {
         assert!(file_only.is_empty());
 
         let no_ui = super::already_given_with_policy(
+            &dir,
             &path,
             &["INTELLIGENCE_API_URL"],
             super::ReadPolicy::NoUi,
@@ -1231,7 +1203,9 @@ mod cache_tests {
     }
 
     #[test]
-    fn refused_reads_can_succeed_after_deliberate_recovery() {
+    fn refused_reads_can_succeed_after_a_later_attempt() {
+        let root = temp_root("refused-retry-cache-root");
+        std::fs::create_dir_all(&root).unwrap();
         let cache = std::sync::Mutex::new(BTreeMap::new());
         let attempts = std::sync::Mutex::new(0);
         let denied = Problem::with(
@@ -1240,7 +1214,7 @@ mod cache_tests {
         );
 
         for _ in 0..2 {
-            let result = super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| {
+            let result = super::recall_no_ui_cached(&root, "OPENAI_API_KEY", &cache, |_, _| {
                 *attempts.lock().unwrap() += 1;
                 Err(denied.clone())
             });
@@ -1250,11 +1224,14 @@ mod cache_tests {
         assert_eq!(*attempts.lock().unwrap(), 2);
         assert!(cache.lock().unwrap().is_empty());
         assert_eq!(
-            super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| Ok(Some("recovered".into())))
-                .unwrap()
-                .as_deref(),
-            Some("recovered")
+            super::recall_no_ui_cached(&root, "OPENAI_API_KEY", &cache, |_, _| Ok(Some(
+                "retried".into()
+            )))
+            .unwrap()
+            .as_deref(),
+            Some("retried")
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -1356,11 +1333,13 @@ SOMETHING_ELSE=kept\n",
         purge.insert("BOT_MODEL".to_string(), String::new());
         let mut remembered = Vec::new();
         write_env_after_remembering_with(
+            &dir,
             &path,
             &settings,
             &secrets,
             &purge,
-            |key, value| {
+            |root, key, value| {
+                assert_eq!(root, dir);
                 assert!(
                     std::fs::read_to_string(&path)
                         .unwrap()
@@ -1370,7 +1349,7 @@ SOMETHING_ELSE=kept\n",
                 remembered.push((key.to_string(), value.to_string()));
                 Ok(())
             },
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
         .unwrap();
 
@@ -1431,15 +1410,17 @@ SOMETHING_ELSE=kept\n",
         ]);
         let mut attempted = Vec::new();
         let error = write_env_after_remembering_with(
+            &dir,
             &path,
             &settings,
             &secrets,
             &secrets,
-            |key, _| {
+            |root, key, _| {
+                assert_eq!(root, dir);
                 attempted.push(key.to_string());
                 Err(Problem::plain(format!("refused {key}")))
             },
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
         .unwrap_err();
 
@@ -1476,12 +1457,14 @@ SOMETHING_ELSE=kept\n",
         let secrets = BTreeMap::from([("OPENAI_API_KEY".to_string(), String::new())]);
         let mut forgotten = Vec::new();
         write_env_after_remembering_with(
+            &dir,
             &path,
             &settings,
             &secrets,
             &secrets,
-            |key, _| panic!("empty secret should have been forgotten, not remembered: {key}"),
-            |key| {
+            |_, key, _| panic!("empty secret should have been forgotten, not remembered: {key}"),
+            |root, key| {
+                assert_eq!(root, dir);
                 forgotten.push(key.to_string());
                 Ok(())
             },
@@ -1497,27 +1480,23 @@ SOMETHING_ELSE=kept\n",
         assert!(written.contains("SOMETHING_ELSE=kept"), "{written}");
     }
 
-    /**
-    The real store on this machine, round-tripped.
-
-    Ignored because it writes to the person's own Keychain, which a test run should not do without
-    being asked. Run it by hand: `cargo test --lib vault_round_trip -- --ignored`.
-    */
     #[test]
-    #[ignore = "writes to this machine's real credential store"]
     fn vault_round_trip() {
+        let root = temp_root("vault-round-trip");
+        std::fs::create_dir_all(&root).unwrap();
         let name = "OPENBOT_VAULT_SELF_TEST";
-        remember(name, "a value with spaces and $ymbols").expect("could not store");
+        remember(&root, name, "a value with spaces and $ymbols").expect("could not store");
         assert_eq!(
-            recall(name).unwrap().as_deref(),
+            recall(&root, name).unwrap().as_deref(),
             Some("a value with spaces and $ymbols")
         );
-        forget(name).unwrap();
+        forget(&root, name).unwrap();
         assert_eq!(
-            recall(name).unwrap(),
+            recall(&root, name).unwrap(),
             None,
             "forget left the credential behind"
         );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /**
@@ -1529,13 +1508,14 @@ SOMETHING_ELSE=kept\n",
     anyone issues will not be the thing that fails when somebody issues a longer one.
     */
     #[test]
-    #[ignore = "writes to this machine's real credential store"]
     fn a_long_credential_is_not_truncated() {
+        let root = temp_root("vault-long-round-trip");
+        std::fs::create_dir_all(&root).unwrap();
         let name = "OPENBOT_VAULT_LENGTH_TEST";
         for length in [128, 129, 164, 256, 512] {
             let value: String = std::iter::repeat_n('k', length).collect();
-            remember(name, &value).expect("could not store");
-            let read = recall(name).unwrap().unwrap_or_default();
+            remember(&root, name, &value).expect("could not store");
+            let read = recall(&root, name).unwrap().unwrap_or_default();
             assert_eq!(
                 read.len(),
                 length,
@@ -1543,6 +1523,7 @@ SOMETHING_ELSE=kept\n",
             );
             assert_eq!(read, value);
         }
-        forget(name).unwrap();
+        forget(&root, name).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
