@@ -151,12 +151,29 @@ export const listNeedsCredential = false;
  * is the field every transport already gets and `effectiveUrl` already owns. Null for anything that is
  * not one of ours, so a misrouted connection lists nothing instead of asking Composio about a
  * hostname.
+ *
+ * ONE SLUG OR NOTHING, and the strictness is the security property rather than tidiness. This answer
+ * becomes `ServerAccess.toolkit` (`./access`), which is the name the brokered gate looks a person's
+ * row up by in `composio_connections` — so a url read loosely is somebody's connection to one app
+ * satisfying a call against another. Whatever follows the scheme has to be a slug and nothing else:
+ * `composio://gmail/messages` used to answer `"gmail/messages"`, taking a path segment for an app.
+ *
+ * TRIMMED BEFORE THE SLASHES COME OFF, because the other order does not work. `composio://gmail/ `
+ * ran the strip against a string whose last character was a space, so the slash was not at the end,
+ * nothing matched, and the trim then produced `"gmail/"`.
+ *
+ * The character class is deliberately not case-folded. `composio_connections.toolkit` documents the
+ * column as lower case and this function does not lower-case what it returns; that mismatch is a
+ * separate known issue, and matching case-insensitively here keeps this change to the shape of the
+ * url rather than quietly settling it.
  */
+const TOOLKIT_SLUG = /^[A-Za-z0-9_-]+$/;
+
 export function toolkitOf(url: string): string | null {
   const prefix = "composio://";
   if (!url.startsWith(prefix)) return null;
-  const slug = url.slice(prefix.length).replace(/\/+$/, "").trim();
-  return slug === "" ? null : slug;
+  const slug = url.slice(prefix.length).trim().replace(/\/+$/, "");
+  return TOOLKIT_SLUG.test(slug) ? slug : null;
 }
 
 /**

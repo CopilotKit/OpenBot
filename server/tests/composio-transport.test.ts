@@ -89,6 +89,26 @@ describe("which app a connection names", () => {
     expect(toolkitOf("composio://")).toBeNull();
     expect(toolkitOf("")).toBeNull();
   });
+
+  test("anything past the app slug means the url does not name one app", () => {
+    // This answer is the app a person's connection is checked against — `accessFor` puts it on
+    // `ServerAccess.toolkit` (`access.ts:133`) and the brokered gate looks `composio_connections`
+    // up by it. A url this function reads loosely is a check performed against the wrong app, so
+    // anything it cannot read as exactly one slug has to be no app rather than a best guess.
+    expect(toolkitOf("composio://gmail/messages")).toBeNull();
+    expect(toolkitOf("composio://gmail?scope=read")).toBeNull();
+    expect(toolkitOf("composio://gmail#inbox")).toBeNull();
+    expect(toolkitOf("composio://gmail slack")).toBeNull();
+  });
+
+  test("surrounding space is taken off before the trailing slash, not after", () => {
+    // The strip ran first and the trim second, so a slash that was not the last character survived
+    // it: `composio://gmail/ ` answered `"gmail/"`, which matches no row in `composio_connections`
+    // and is not the app anybody meant.
+    expect(toolkitOf("composio://gmail/ ")).toBe("gmail");
+    expect(toolkitOf("composio://gmail  ")).toBe("gmail");
+    expect(toolkitOf("composio://google_drive//")).toBe("google_drive");
+  });
 });
 
 describe("what a label means", () => {
