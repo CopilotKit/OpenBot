@@ -261,24 +261,59 @@ test("publishes every service that holds a secret on loopback only", () => {
 });
 
 /**
- * Every Bot is reachable at whatever `OPENAI_BASE_URL` names.
- *
- * The API server reads that variable from `.env` directly, so it moves with the deployment. The
- * Bots run in containers and see only what compose hands them, and a deployment that moved its
- * models to a gateway and found half of itself still calling OpenAI would have no way to tell.
- *
- * Three services now, not two: the harness somebody picks in setup is dialled the same way, and
- * leaving it out would point the Bot they actually chose at OpenAI while the two shipped ones went
- * to their gateway.
+ * The host reads OPENAI_BASE_URL directly; containers can need a different route to that model.
+ * Exercise Compose's nested interpolation so all shipped Bots and the picked harness receive the
+ * override when present and keep the host fallback when it is absent or explicitly cleared.
  */
-test("gives every Bot the OpenAI-compatible endpoint", () => {
-  const compose = composeFile();
+const compatibleEndpointCases: Array<{
+  name: string;
+  environment: Record<string, string>;
+  expected: string;
+}> = [
+  {
+    name: "uses the container override ahead of the host endpoint",
+    environment: {
+      OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
+      OPENAI_CONTAINER_BASE_URL: "http://model-service:11434/v1",
+    },
+    expected: "http://model-service:11434/v1",
+  },
+  {
+    name: "uses the host endpoint when the container override is unset",
+    environment: { OPENAI_BASE_URL: "https://models.example/v1" },
+    expected: "https://models.example/v1",
+  },
+  {
+    name: "uses the host endpoint when the container override is cleared",
+    environment: {
+      OPENAI_BASE_URL: "https://models.example/v1",
+      OPENAI_CONTAINER_BASE_URL: "",
+    },
+    expected: "https://models.example/v1",
+  },
+  {
+    name: "leaves the endpoint empty when neither route is configured",
+    environment: {},
+    expected: "",
+  },
+];
 
-  // The two shipped Bots and the picked harness. All three speak OpenAI; only the framework Bot
-  // can be pointed at the other two providers.
-  expect(
-    compose.match(/OPENAI_BASE_URL: \$\{OPENAI_BASE_URL:-?\}/g),
-  ).toHaveLength(3);
+for (const { name, environment, expected } of compatibleEndpointCases) {
+  test(`every Bot ${name}`, () => {
+    const config = runComposeConfig({
+      OPENAI_API_KEY: "synthetic-openai-key",
+      ...environment,
+    });
+    for (const service of ["agent-bot", "agent-langgraph", "agent-harness"]) {
+      expect(config.services[service].environment.OPENAI_BASE_URL).toBe(
+        expected,
+      );
+    }
+  });
+}
+
+test("preserves the framework Bot's other provider endpoints", () => {
+  const compose = composeFile();
   for (const variable of [
     "ANTHROPIC_BASE_URL",
     "GOOGLE_GENERATIVE_AI_BASE_URL",
