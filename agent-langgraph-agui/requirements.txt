@@ -1,4 +1,4 @@
-ag-ui-langgraph
+ag-ui-langgraph==0.0.45
 langgraph
 langchain
 langchain-openai

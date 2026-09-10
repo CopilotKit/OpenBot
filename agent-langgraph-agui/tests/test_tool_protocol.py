@@ -87,7 +87,11 @@ def boundary(monkeypatch):
             )
             offered = {t["function"]["name"] for t in body.get("tools", [])}
             if messages[-1]["role"] == "tool":
-                content = "Observed tool result: " + messages[-1]["content"]
+                content = "Observed tool result: " + (
+                    " | ".join(m["content"] for m in messages if m["role"] == "tool")
+                    if captured.get("all_results")
+                    else messages[-1]["content"]
+                )
                 delta = {"role": "assistant", "content": content}
                 finish = "stop"
             elif all(name in offered for name in names):
@@ -113,17 +117,44 @@ def boundary(monkeypatch):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
-            # Real streaming boundary: each call's indexed fragment arrives as
-            # an SSE chunk. The separately retained batched-chunk diagnostic
-            # exposes the installed upstream adapter's first-chunk limitation.
-            parts = (
-                [
-                    {"role": "assistant", "tool_calls": [call]}
-                    for call in delta["tool_calls"]
-                ]
-                if "tool_calls" in delta
-                else [delta]
-            )
+            parts = [delta]
+            if "tool_calls" in delta:
+                calls = delta["tool_calls"]
+                shape = captured.get("shape", "sequential")
+                if shape == "sequential":
+                    parts = [
+                        {"role": "assistant", "tool_calls": [call]} for call in calls
+                    ]
+                elif shape == "interleaved":
+                    parts = [
+                        {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    **call,
+                                    "function": {
+                                        "name": call["function"]["name"],
+                                        "arguments": "",
+                                    },
+                                }
+                            ],
+                        }
+                        for call in calls
+                    ]
+                    for fragment in ['{"value":', '"public marker"}']:
+                        for call in calls:
+                            parts.append(
+                                {
+                                    "tool_calls": [
+                                        {
+                                            "index": call["index"],
+                                            "function": {"arguments": fragment},
+                                        }
+                                    ]
+                                }
+                            )
+                if captured.get("text_with_tools"):
+                    parts[0]["content"] = "Using the computer."
             for part, reason in [*((part, None) for part in parts), ({}, finish)]:
                 chunk = {
                     "id": "response-proof",

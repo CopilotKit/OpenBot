@@ -8,14 +8,16 @@ checkpoint, model message, or AG-UI state snapshot.
 
 import asyncio
 import os
+from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 import httpx
 from ag_ui.core import EventType, RunAgentInput, RunErrorEvent, Tool
-from ag_ui_langgraph import LangGraphAgent
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END
+
+from .parallel_tools import ParallelToolAgent
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class UnofferedToolError(ValueError):
     pass
 
 
-class ToolAwareAgent(LangGraphAgent):
+class ToolAwareAgent(ParallelToolAgent):
     async def run(self, input: RunAgentInput):
         props = input.forwarded_props if isinstance(input.forwarded_props, dict) else {}
         names = props.get("openbotDeploymentTools", [])
@@ -65,10 +67,11 @@ class ToolAwareAgent(LangGraphAgent):
                     "openbot_deployment_tools",
                 }
             }
-            async for event in super().run(
-                input.model_copy(update={"forwarded_props": clean_props})
-            ):
-                yield event
+            async with aclosing(
+                super().run(input.model_copy(update={"forwarded_props": clean_props}))
+            ) as stream:
+                async for event in stream:
+                    yield event
         except UnofferedToolError:
             yield RunErrorEvent(
                 type=EventType.RUN_ERROR,
