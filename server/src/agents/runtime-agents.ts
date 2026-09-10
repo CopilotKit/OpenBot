@@ -60,17 +60,14 @@ export function createRuntimeAgentLoader(
        * environment, so it is the same relationship the Bot in the box has.
        */
       if (isRemoteAgent && managedAgent) {
-        /*
-         * Compared without a trailing slash, because `URL` adds one and a stored address does not
-         * have to. `new URL("http://127.0.0.1:4206").toString()` is `".../4206/"`, and the row for
-         * that Bot says `".../4206"`, so an exact match silently fails and the Bot answers 401.
-         * The endpoint with a path — the Bot in the box — matched only because a path suppresses
-         * the slash, which is why this went unnoticed until a second endpoint existed.
-         */
-        const same = (url: string) => url.replace(/\/+$/, "");
-        const ours = [managedAgent.endpoint, managedAgent.alsoRun]
-          .filter((url): url is URL => url !== undefined)
-          .some((url) => same(agent.endpoint) === same(url.toString()));
+        // Config parses URLs, while package rows retain their original spelling. Compare both
+        // in canonical form so scheme/host case cannot silently drop the deployment token.
+        const endpoint = managedEndpointIdentity(agent.endpoint);
+        const ours =
+          endpoint !== undefined &&
+          [managedAgent.endpoint, managedAgent.alsoRun]
+            .filter((url): url is URL => url !== undefined)
+            .some((url) => endpoint === managedEndpointIdentity(url));
         if (ours) {
           agent.headers = {
             ...agent.headers,
@@ -92,6 +89,18 @@ export function createRuntimeAgentLoader(
 
     return [...registered.values()];
   };
+}
+
+/** Keep the existing pathname slash tolerance without erasing query or fragment differences. */
+function managedEndpointIdentity(value: string | URL): string | undefined {
+  try {
+    const endpoint = new URL(value);
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "");
+    return endpoint.toString();
+  } catch {
+    // An invalid stored URL is not a managed endpoint; it must not abort another agent's load.
+    return undefined;
+  }
 }
 
 function selectActiveAgents(database: Database, actor: AgentActor) {

@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import type { RunAgentInput } from "@ag-ui/client";
 import { BunSQLPreparedQuery } from "drizzle-orm/bun-sql";
 import type { PreparedQueryConfig } from "drizzle-orm/pg-core";
@@ -9,6 +10,7 @@ import { loadConfig } from "../src/config";
 import { buildAgents } from "../src/copilot";
 import { encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { loadTenantPackage } from "../src/tenant-package";
 import { testEnvironment } from "./support/environment";
 
 const fixtureToken = "synthetic-deployment-token";
@@ -20,9 +22,16 @@ async function runPicked(options: {
   installed: boolean;
   target?: "picked" | "bundled" | "customer";
   customerAuth?: boolean;
+  spelling?: "uppercase";
+  configuredQuery?: string;
+  rowEndpoint?: (endpoint: string) => string;
+  expectedManaged?: boolean;
+  invalidCompanion?: boolean;
+  packageProducer?: boolean;
 }) {
   const requests: {
     path: string;
+    search: string;
     method: string;
     headerNames: string[];
     status: number;
@@ -33,8 +42,9 @@ async function runPicked(options: {
     async fetch(request) {
       const path = new URL(request.url).pathname;
       const managed =
-        path === "/bundled/ag-ui" ||
-        (path === "/picked/ag-ui" && options.installed);
+        options.expectedManaged ??
+        (path.replace(/\/+$/, "") === "/bundled/ag-ui" ||
+          (path.replace(/\/+$/, "") === "/picked/ag-ui" && options.installed));
       const authorized = managed
         ? request.headers.get("x-openbot-agent-token") === fixtureToken
         : options.customerAuth
@@ -45,6 +55,7 @@ async function runPicked(options: {
       const status = authorized ? 200 : 401;
       requests.push({
         path,
+        search: new URL(request.url).search,
         method: request.method,
         headerNames: [...request.headers.keys()].sort(),
         status,
@@ -69,8 +80,45 @@ async function runPicked(options: {
       );
     },
   });
-  const endpoint = (name: string) =>
-    new URL(`/${name}/ag-ui`, server.url).toString();
+  const endpoint = (name: string) => {
+    const value = new URL(
+      `/${name}/ag-ui${options.configuredQuery ?? ""}`,
+      server.url,
+    ).toString();
+    return options.spelling === "uppercase"
+      ? value.replace("http://127.0.0.1", "HTTP://LOCALHOST")
+      : value;
+  };
+  let storedEndpoint = endpoint(options.target ?? "picked");
+  if (options.packageProducer) {
+    const publicEnvironment = {
+      MANAGED_AGENT_AG_UI_URL: options.bundled ? endpoint("bundled") : "",
+      PICKED_HARNESS_URL: endpoint("picked"),
+      PICKED_HARNESS_KIND: "remote-ag-ui",
+    };
+    const previous = new Map(
+      Object.keys(publicEnvironment).map((key) => [key, process.env[key]]),
+    );
+    try {
+      Object.assign(process.env, publicEnvironment);
+      const tenant = await loadTenantPackage(
+        fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
+      );
+      const picked = tenant.agents.find(
+        (agent) => agent.id === "picked-harness",
+      );
+      if (!picked || typeof picked.configuration.endpoint !== "string")
+        throw new Error("Expected endpoint from default package producer");
+      expect(picked.configuration.endpoint).toBe(endpoint("picked"));
+      storedEndpoint = picked.configuration.endpoint;
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+  storedEndpoint = options.rowEndpoint?.(storedEndpoint) ?? storedEndpoint;
   const config = loadConfig(
     testEnvironment({
       KEY_ENCRYPTION_KEY: Buffer.alloc(32, 17).toString("base64"),
@@ -109,7 +157,7 @@ async function runPicked(options: {
     ) {
       throw new Error("Unexpected SQL at the controlled roster boundary");
     }
-    return [
+    const rows = [
       {
         id: "picked-harness",
         name: "Picked Harness",
@@ -117,7 +165,7 @@ async function runPicked(options: {
         title: "Synthetic harness",
         roleDescription: "Answer the controlled protocol request.",
         configuration: {
-          endpoint: endpoint(options.target ?? "picked"),
+          endpoint: storedEndpoint,
           ...(options.customerAuth
             ? {
                 auth: {
@@ -129,6 +177,16 @@ async function runPicked(options: {
         },
       },
     ];
+    return options.invalidCompanion
+      ? [
+          ...rows,
+          {
+            ...rows[0],
+            id: "invalid-companion",
+            configuration: { endpoint: "not a valid URL" },
+          },
+        ]
+      : rows;
   });
   let credentialReads = 0;
   let failed = false;
@@ -283,4 +341,102 @@ test("a picked installed harness requires a token even when the bundled Bot is o
       }),
     ),
   ).toThrow("MANAGED_AGENT_TOKEN");
+});
+
+test("the default package's case-only picked URL authenticates through the real HTTP client", async () => {
+  const result = await runPicked({
+    bundled: false,
+    installed: true,
+    spelling: "uppercase",
+    packageProducer: true,
+  });
+  expect(result.requests.map((request) => request.status)).toEqual([200]);
+  expect(result.failed).toBe(false);
+  expect(result.config.managedAgent?.endpoint).toBeUndefined();
+});
+
+test.each(["picked", "bundled"] as const)(
+  "canonical matching authenticates uppercase %s endpoints",
+  async (target) => {
+    const result = await runPicked({
+      bundled: true,
+      installed: true,
+      target,
+      spelling: "uppercase",
+    });
+    expect(result.requests.map((request) => request.status)).toEqual([200]);
+    expect(result.failed).toBe(false);
+  },
+);
+
+test("canonical matching keeps trailing pathname slash tolerance", async () => {
+  const result = await runPicked({
+    bundled: false,
+    installed: true,
+    spelling: "uppercase",
+    rowEndpoint: (endpoint) => `${endpoint}/`,
+  });
+  expect(result.requests.map((request) => request.status)).toEqual([200]);
+  expect(result.failed).toBe(false);
+});
+
+test.each([
+  [
+    "path case",
+    "",
+    (endpoint: string) => endpoint.replace("/picked/", "/Picked/"),
+  ],
+  [
+    "query value",
+    "?owner=managed",
+    (endpoint: string) => endpoint.replace("owner=managed", "owner=customer"),
+  ],
+  [
+    "query trailing slash",
+    "?owner=customer",
+    (endpoint: string) => `${endpoint}/`,
+  ],
+] as const)(
+  "a customer endpoint differing by %s keeps only its own credential",
+  async (_difference, configuredQuery, rowEndpoint) => {
+    const result = await runPicked({
+      bundled: false,
+      installed: true,
+      configuredQuery,
+      rowEndpoint,
+      customerAuth: true,
+      expectedManaged: false,
+    });
+    expect(result.requests.map((request) => request.status)).toEqual([200]);
+    expect(result.requests[0]?.headerNames).not.toContain(
+      "x-openbot-agent-token",
+    );
+    expect(result.requests[0]?.headerNames).toContain("authorization");
+    expect(result.credentialReads).toBe(1);
+    expect(result.failed).toBe(false);
+  },
+);
+
+test("uppercase BYO endpoints keep customer auth without a deployment token", async () => {
+  const result = await runPicked({
+    bundled: true,
+    installed: false,
+    spelling: "uppercase",
+    customerAuth: true,
+  });
+  expect(result.requests.map((request) => request.status)).toEqual([200]);
+  expect(result.requests[0]?.headerNames).not.toContain(
+    "x-openbot-agent-token",
+  );
+  expect(result.failed).toBe(false);
+});
+
+test("an invalid stored companion does not prevent the valid managed agent from loading", async () => {
+  const result = await runPicked({
+    bundled: false,
+    installed: true,
+    invalidCompanion: true,
+  });
+  expect(result.requests.map((request) => request.status)).toEqual([200]);
+  expect(result.failed).toBe(false);
 });
