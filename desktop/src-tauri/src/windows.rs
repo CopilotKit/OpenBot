@@ -128,7 +128,18 @@ impl Blocker {
 
 /// The persisted step, beside the rest of the app's data.
 fn default_wsl_version_probe_command() -> &'static str {
-    "$ErrorActionPreference = 'Stop';      $path = 'Software\Microsoft\Windows\CurrentVersion\Lxss';      $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path);      if ($null -eq $key) { 2; return };      try {        $value = $key.GetValue('DefaultVersion', $null);        if ($null -eq $value) { 2; return };        if ($value -isnot [int]) { throw 'DefaultVersion is not a registry DWORD' };        $value      } finally {        $key.Dispose()      }"
+    r#"$ErrorActionPreference = 'Stop';
+$path = 'Software\Microsoft\Windows\CurrentVersion\Lxss';
+$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path);
+if ($null -eq $key) { 2; return }
+try {
+  $value = $key.GetValue('DefaultVersion', $null);
+  if ($null -eq $value) { 2; return }
+  if ($value -isnot [int]) { throw 'DefaultVersion is not a registry DWORD' }
+  $value
+} finally {
+  $key.Dispose()
+}"#
 }
 
 fn parse_default_wsl_version(operation: &str, output: &str) -> Result<u8, Problem> {
