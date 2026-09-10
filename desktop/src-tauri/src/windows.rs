@@ -144,7 +144,7 @@ fn wsl_default_version(status_output: &str) -> Option<u8> {
         let Some((label, value)) = line.split_once([':', '：']) else {
             continue;
         };
-        if label.trim().is_empty() {
+        if !is_default_version_label(label) {
             continue;
         }
         match value.trim() {
@@ -154,6 +154,19 @@ fn wsl_default_version(status_output: &str) -> Option<u8> {
         }
     }
     None
+}
+
+fn is_default_version_label(label: &str) -> bool {
+    let normalized: String = label
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect();
+
+    matches!(
+        normalized.as_str(),
+        "defaultversion" | "versionpardéfaut" | "wsl版本"
+    )
 }
 
 pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
@@ -617,10 +630,16 @@ Dernière mise à jour : jamais
     }
 
     #[test]
-    fn status_parser_does_not_treat_dotted_component_versions_as_default_wsl1() {
+    fn status_parser_does_not_treat_other_numeric_status_fields_as_default_wsl1() {
         for status in [
             "Default Distribution: Ubuntu-1
 Kernel version: 1.2.3
+",
+            "Default Distribution: 1
+Default Version: 2
+",
+            "Default Distribution: 2
+Default Version: 1
 ",
             "WSL version: 1.2.3
 Kernel version: 6.18.33.2
@@ -630,7 +649,14 @@ Kernel version: 6.18.33.2
             ": 1
 ",
         ] {
-            assert_eq!(wsl_default_version(status), None, "accepted {status:?}");
+            let expected = if status.contains("Default Version: 1") {
+                Some(1)
+            } else if status.contains("Default Version: 2") {
+                Some(2)
+            } else {
+                None
+            };
+            assert_eq!(wsl_default_version(status), expected, "misread {status:?}");
         }
     }
 
