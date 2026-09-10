@@ -88,11 +88,7 @@ export function Ask({
 
       <div className="row">
         {answer === null ? (
-          <button
-            type="button"
-            onClick={ask}
-            disabled={asking}
-          >
+          <button type="button" onClick={ask} disabled={asking}>
             {asking ? "Asking…" : "Ask"}
           </button>
         ) : (

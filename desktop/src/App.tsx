@@ -173,16 +173,7 @@ export function App() {
       credentialContext.current = next;
       setFailure(null);
     }
-  }, [
-    root,
-    model,
-    apiKey,
-    apiUrl,
-    wsUrl,
-    harness,
-    step,
-    reuseIntelligence,
-  ]);
+  }, [root, model, apiKey, apiUrl, wsUrl, harness, step, reuseIntelligence]);
 
   const clearRootScopedSavedState = useCallback(() => {
     setApiKey("");

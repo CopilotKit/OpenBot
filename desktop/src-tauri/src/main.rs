@@ -358,8 +358,28 @@ async fn sign_in_image(
     root: &Path,
     published: &str,
 ) -> Result<String, Problem> {
-    deployment_ready(app, root).await?;
-    sign_in_reference(root, published, deployment::reference)
+    sign_in_image_with(
+        root,
+        published,
+        |ready_root| async move { deployment_ready(app, &ready_root).await },
+        deployment::reference,
+    )
+    .await
+}
+
+async fn sign_in_image_with<Ready, ReadyFuture, Reference>(
+    root: &Path,
+    published: &str,
+    deployment_ready: Ready,
+    reference: Reference,
+) -> Result<String, Problem>
+where
+    Ready: FnOnce(PathBuf) -> ReadyFuture,
+    ReadyFuture: std::future::Future<Output = Result<(), Problem>>,
+    Reference: FnOnce(&Path, &str) -> Result<String, String>,
+{
+    deployment_ready(root.to_path_buf()).await?;
+    sign_in_reference(root, published, reference)
 }
 
 fn sign_in_reference(
@@ -2049,26 +2069,32 @@ mod tests {
     }
 
     #[test]
-    fn plan_sign_in_reference_uses_the_selected_root() {
+    fn plan_sign_in_boundary_uses_selected_root_for_deploy_and_reference() {
         let default = temp_root("signin-default-root");
         let selected = temp_root("signin-selected-root");
         std::fs::create_dir_all(&default).unwrap();
         std::fs::create_dir_all(&selected).unwrap();
         std::fs::write(default.join("manifest.json"), "poisoned-default").unwrap();
-        let mut seen = None;
+        let ready_root = std::cell::RefCell::new(None);
+        let reference_root = std::cell::RefCell::new(None);
 
-        let image = sign_in_reference(
+        let image = tauri::async_runtime::block_on(sign_in_image_with(
             &selected,
             openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+            |root| {
+                *ready_root.borrow_mut() = Some(root);
+                async { Ok(()) }
+            },
             |root, published| {
-                seen = Some((root.to_path_buf(), published.to_string()));
+                *reference_root.borrow_mut() = Some((root.to_path_buf(), published.to_string()));
                 Ok(format!("{}@{}", published, root.display()))
             },
-        )
+        ))
         .unwrap();
 
+        assert_eq!(ready_root.into_inner(), Some(selected.clone()));
         assert_eq!(
-            seen,
+            reference_root.into_inner(),
             Some((
                 selected.clone(),
                 openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE.to_string()

@@ -784,7 +784,9 @@ test("same-process setup remount prefers the retained selected root", async () =
     "value",
     rootB,
   );
-  await userEvent.click(await view.findByRole("button", { name: "Start OpenBot" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start OpenBot" }),
+  );
 
   expect(
     invokeCalls.filter((call) => call.command === "already_configured"),
@@ -1520,7 +1522,9 @@ test("Start credential failures do not expose a restore action", async () => {
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
 
-  expect(await view.findByText("Saved credential needs authorization.")).toBeTruthy();
+  expect(
+    await view.findByText("Saved credential needs authorization."),
+  ).toBeTruthy();
   expect(
     view.queryByRole("button", { name: "Restore access to saved setup" }),
   ).toBeNull();

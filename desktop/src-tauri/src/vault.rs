@@ -879,6 +879,49 @@ mod file_store_tests {
         assert!(!problem.said.contains("macOS"), "{problem:?}");
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn public_file_store_apis_are_root_isolated() {
+        let default = temp_root("vault-public-default-root");
+        let selected = temp_root("vault-public-selected-root");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::create_dir_all(&selected).unwrap();
+
+        super::remember(&default, "OPENAI_API_KEY", "default-poison").unwrap();
+        super::remember(&selected, "OPENAI_API_KEY", "selected-secret").unwrap();
+        assert_eq!(
+            super::recall(&selected, "OPENAI_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("selected-secret")
+        );
+        assert_eq!(
+            super::recall(&default, "OPENAI_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("default-poison")
+        );
+        assert_eq!(
+            std::fs::read_to_string(default.join(".secrets/OPENAI_API_KEY.secret")).unwrap(),
+            "default-poison"
+        );
+        assert_eq!(
+            std::fs::read_to_string(selected.join(".secrets/OPENAI_API_KEY.secret")).unwrap(),
+            "selected-secret"
+        );
+
+        super::forget(&selected, "OPENAI_API_KEY").unwrap();
+        assert_eq!(super::recall(&selected, "OPENAI_API_KEY").unwrap(), None);
+        assert_eq!(
+            super::recall(&default, "OPENAI_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("default-poison")
+        );
+
+        std::fs::remove_dir_all(default).unwrap();
+        std::fs::remove_dir_all(selected).unwrap();
+    }
 }
 
 #[cfg(test)]
