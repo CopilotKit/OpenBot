@@ -17,10 +17,10 @@ import {
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
-  type OAuthClient,
-  type PluginKind,
   deploymentFaultSentence,
   isDeploymentFault,
+  type OAuthClient,
+  type PluginKind,
   PluginRefusedError,
   type PluginStore,
 } from "./store";

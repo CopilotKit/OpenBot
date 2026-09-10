@@ -33,6 +33,11 @@ import {
   skillTools,
 } from "../db/schema";
 import {
+  accessFor,
+  type ServerAccess,
+  ServerUnresolvableError,
+} from "./access";
+import {
   type CatalogueEntry,
   catalogueEntry,
   classifyTool,
@@ -40,11 +45,6 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
-import {
-  accessFor,
-  type ServerAccess,
-  ServerUnresolvableError,
-} from "./access";
 import { VERSION_ARG } from "./composio";
 import { inspectToolArguments } from "./content-governance";
 import { type ListedTool, McpServerError } from "./mcp";
