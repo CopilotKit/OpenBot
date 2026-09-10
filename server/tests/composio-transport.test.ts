@@ -486,6 +486,15 @@ describe("calling one action", () => {
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/version/i);
     expect(calls).toEqual([]);
+
+    // The refusal used to name a refresh as THE fix, unconditionally. It is not one where the
+    // vendor published no version: `listTools` sets the field only when Composio sent one, so a
+    // refresh writes the same nothing back and the reader presses the button again. The sentence
+    // has to make the remedy conditional on the vendor, which is the part nobody here controls.
+    expect(result.text).not.toContain(
+      "Refresh this app's tools on its Plugins page and try again.",
+    );
+    expect(result.text).toMatch(/only if Composio publishes/i);
   });
 
   test("an actor named in the arguments is ignored, whichever way it is spelled", async () => {

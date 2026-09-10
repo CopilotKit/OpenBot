@@ -19,8 +19,14 @@ import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
  *
  * It implements the same interface as the other three, as module-level exports, because that is the
  * shape {@link ./transport} resolves: a `TransportKind` maps to a MODULE. Which is also why the client
- * arrives through {@link useComposioClient} rather than a constructor — the registry is built at
- * import time, long before `index.ts` has configuration.
+ * would have to arrive through a setter rather than a constructor — the registry is built at import
+ * time, long before anything has read configuration. {@link useComposioClient} is that setter.
+ *
+ * NOTHING IN THE SHIPPED PRODUCT CALLS IT. There is no adapter under `server/src`: the only caller
+ * is the test suite. So on every real deployment `installed` is null, which is a state this module
+ * is written for rather than an outage — {@link listTools} throws a sentence saying so and
+ * {@link callTool} refuses with one. Read every mention of "the client" below as a description of
+ * the seam an adapter would plug into, not of wiring that exists.
  */
 
 /**
@@ -75,8 +81,8 @@ export type ComposioAction = {
  * `ToolExecuteResponseSchema` in `@composio/core` 0.18.1 spells all three of these REQUIRED — `data`
  * a record, `error` a nullable string, `successful` a boolean — so the outcome of a call is a field
  * on a resolution and not only a thrown exception. Named here rather than imported so this module
- * keeps no compile-time dependency on the vendor's package; the adapter that installs the real
- * client is the one place their types belong.
+ * keeps no compile-time dependency on the vendor's package; the adapter that would install a real
+ * client is the one place their types belong, and it has not been written.
  *
  * `logId` and `sessionInfo` are the rest of the envelope, carried so the type stays a true statement
  * about what arrives. Nothing here reads them and nothing here shows them to a model.
@@ -93,7 +99,8 @@ export type ComposioResult = {
  * What this module needs of Composio, and nothing more.
  *
  * A narrow projection rather than their client, so a test satisfies it with two functions and the
- * SDK's shape is somebody else's problem in exactly one place: the adapter that installs the real one.
+ * SDK's shape is confined to one place: the adapter that would install a real client. No such
+ * adapter exists yet, so today the only implementations of this type are stubs.
  *
  * `execute` RESOLVES AN OUTCOME, AND RESOLVING IS NOT SUCCEEDING. This comment used to say the
  * opposite — "resolves or throws, with no error field to check" — and {@link callTool} was written to
@@ -128,7 +135,12 @@ export type ComposioActions = {
 let installed: ComposioActions | null = null;
 
 /**
- * Hand this module its client, once, from the place that reads configuration.
+ * The seam an adapter would hand this module its client through, once, at startup.
+ *
+ * WOULD, BECAUSE NO SUCH ADAPTER EXISTS. Nothing under `server/src` calls this function — the only
+ * callers are tests — so `installed` is null on every deployment of the shipped product. The
+ * comment here used to describe `index.ts` doing the installing, and the code below was written
+ * around a state that was treated as an edge case when it is in fact the only state.
  *
  * `null` is a supported argument, and not only for symmetry: the suite is one process, so a test that
  * installs a stub has to be able to take it back out. It is also the unconfigured state — a
@@ -584,11 +596,16 @@ export async function callTool(
      * a call against some other revision of the action, whose arguments and behaviour are not the ones
      * that were listed, classified and granted.
      *
-     * In practice this means the app's tool list has not been refreshed since the version column
-     * existed, which is an operator's one-click fix rather than anything a person asking can do.
+     * THE REMEDY IS CONDITIONAL ON THE VENDOR, and this sentence used to state it as certain.
+     * "Refresh this app's tools and try again" is right for one of the two causes — a list recorded
+     * before the version column existed — and wrong for the other. Where Composio published no
+     * version for the action, {@link listTools} records none, `store.ts` writes `tool.version ??
+     * null`, and the next refresh writes the same null back: the reader presses the button, is told
+     * nothing changed, and presses it again. So the sentence names the refresh and names the
+     * condition under which it helps, which is the part nobody in this deployment controls.
      */
     return failure(
-      `${toolName} has no recorded version, so it cannot be called. Refresh this app's tools on its Plugins page and try again.`,
+      `${toolName} has no recorded version, so it cannot be called: Composio requires a specific one and rejects "latest", so there is nothing to fall back on. Refreshing this app's tools on its Plugins page recovers it only if Composio publishes a version for this action. Where Composio publishes none, no refresh will make it callable.`,
     );
   }
 
