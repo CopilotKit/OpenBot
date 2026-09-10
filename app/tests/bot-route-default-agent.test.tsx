@@ -60,6 +60,22 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   return queryClient;
 }
 
+function queryClientWithAgentsAndFetchedAgent(
+  agents: AgentProfile[],
+  agentId: string,
+  response: Response,
+) {
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `/api/agents/${agentId}`) return response.clone();
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  return queryClientWithAgents(agents);
+}
+
 function queryClientWithFailingAgents() {
   global.fetch = Object.assign(
     async () => new Response(null, { status: 500 }),
@@ -167,13 +183,56 @@ test("/bot preserves an explicit agent, including the built-in first agent", asy
 
 test("/bot preserves an explicit unknown agent as a clear missing-bot state", async () => {
   const view = renderBot(
-    queryClientWithAgents([GENERAL_ASSISTANT, PICKED_HARNESS]),
+    queryClientWithAgentsAndFetchedAgent(
+      [GENERAL_ASSISTANT, PICKED_HARNESS],
+      "missing-agent",
+      new Response(null, { status: 404 }),
+    ),
     "/bot?agent=missing-agent",
   );
 
   expect(
     await view.findByText('This deployment has no Bot called "missing-agent".'),
   ).toBeTruthy();
+  expect(view.queryByTestId("copilot-chat")).toBeNull();
+});
+
+test("/bot loads a hidden explicit agent from the detail endpoint", async () => {
+  const hiddenBot = agent({
+    hidden: true,
+    id: "hidden-bot",
+    name: "Hidden Bot",
+    title: "Hidden Bot",
+  });
+  const view = renderBot(
+    queryClientWithAgentsAndFetchedAgent(
+      [GENERAL_ASSISTANT],
+      "hidden-bot",
+      Response.json({ agent: hiddenBot }),
+    ),
+    "/bot?agent=hidden-bot",
+  );
+
+  expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
+  expect(
+    view.queryByText('This deployment has no Bot called "hidden-bot".'),
+  ).toBeNull();
+});
+
+test("/bot reports an explicit agent detail load failure", async () => {
+  const view = renderBot(
+    queryClientWithAgentsAndFetchedAgent(
+      [GENERAL_ASSISTANT],
+      "error-bot",
+      Response.json({ error: "detail exploded" }, { status: 500 }),
+    ),
+    "/bot?agent=error-bot",
+  );
+
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Bot couldn't be loaded.",
+  );
   expect(view.queryByTestId("copilot-chat")).toBeNull();
 });
 

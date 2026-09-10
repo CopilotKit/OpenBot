@@ -5,7 +5,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { defaultAgentId } from "@/lib/agents/default-agent";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import {
+  type AgentProfile,
+  agentKeys,
+  agentListQueryOptions,
+} from "@/lib/agents/queries";
+import { tryClient } from "@/lib/client";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
@@ -29,6 +34,33 @@ export const Route = createFileRoute("/_authed/_app/bot")({
  * A named Bot that this deployment does not have is answered in a sentence rather than thrown,
  * for the same reason: a mistyped link is not a crash.
  */
+type BotDetailLookup =
+  | { bot: AgentProfile; status: "found" }
+  | { status: "missing" };
+
+function isAgentEnvelope(body: unknown): body is { agent: AgentProfile } {
+  if (body === null || typeof body !== "object") return false;
+  const agent = (body as { agent?: unknown }).agent;
+  return (
+    agent !== null &&
+    typeof agent === "object" &&
+    typeof (agent as { id?: unknown }).id === "string" &&
+    typeof (agent as { name?: unknown }).name === "string"
+  );
+}
+
+async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
+  const response = await tryClient(
+    `/api/agents/${encodeURIComponent(agentId)}`,
+  );
+  if (response.status === 404) return { status: "missing" };
+  if (!response.ok) throw new Error("Bot couldn't be loaded.");
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!isAgentEnvelope(body)) throw new Error("Bot couldn't be loaded.");
+  return { bot: body.agent, status: "found" };
+}
+
 function RouteComponent() {
   const { agent } = Route.useSearch();
   const {
@@ -37,15 +69,39 @@ function RouteComponent() {
     isPending,
   } = useQuery(agentListQueryOptions());
   const agentId = agent ?? defaultAgentId(agents);
-  const bot = agents?.find((candidate) => candidate.id === agentId);
+  const listedBot = agents?.find((candidate) => candidate.id === agentId);
+  const detailAgentId = agent ?? "";
+  const shouldLoadExplicitBot =
+    Boolean(agent) && agents !== undefined && listedBot === undefined;
+  const {
+    data: detail,
+    isError: isDetailError,
+    isPending: isDetailPending,
+  } = useQuery({
+    enabled: shouldLoadExplicitBot,
+    queryKey: agentKeys.detail(detailAgentId),
+    queryFn: () => loadExplicitBot(detailAgentId),
+    retry: false,
+  });
+  const bot =
+    listedBot ?? (detail?.status === "found" ? detail.bot : undefined);
   const known = bot !== undefined;
 
-  if (isPending) return null;
+  if (isPending || (shouldLoadExplicitBot && isDetailPending)) return null;
   if (isError && agents === undefined) {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
           Bots couldn't be loaded.
+        </p>
+      </div>
+    );
+  }
+  if (shouldLoadExplicitBot && isDetailError) {
+    return (
+      <div className="flex h-screen items-center justify-center p-6">
+        <p className="text-destructive text-sm" role="alert">
+          Bot couldn't be loaded.
         </p>
       </div>
     );
