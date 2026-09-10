@@ -174,6 +174,26 @@ test("/channel/new keeps a successful visible recipient enabled", async () => {
   );
 });
 
+test("/channel/new ignores stale detail errors when the URL agent is listed", async () => {
+  const queryClient = queryClientWithAgents([GENERAL_ASSISTANT]);
+  await queryClient.prefetchQuery({
+    queryKey: agentKeys.detail("general-assistant"),
+    queryFn: async () => {
+      throw new Error("stale detail exploded");
+    },
+    retry: false,
+  });
+  const view = renderChannelNew(
+    queryClient,
+    "/channel/new?agent=general-assistant",
+  );
+
+  expect(view.queryByRole("alert")).toBeNull();
+  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
+    "false",
+  );
+});
+
 test("/channel/new keeps a successful hidden URL recipient enabled", async () => {
   const hiddenBot = agent({
     hidden: true,
@@ -182,6 +202,29 @@ test("/channel/new keeps a successful hidden URL recipient enabled", async () =>
     title: "Hidden Bot",
   });
   const queryClient = queryClientWithAgents([GENERAL_ASSISTANT]);
+  queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
+  const view = renderChannelNew(queryClient, "/channel/new?agent=hidden-bot");
+
+  expect(view.queryByRole("alert")).toBeNull();
+  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
+    "false",
+  );
+});
+
+test("/channel/new keeps a usable hidden detail when a background refetch fails", async () => {
+  const hiddenBot = agent({
+    hidden: true,
+    id: "hidden-bot",
+    name: "Hidden Bot",
+    title: "Hidden Bot",
+  });
+  const queryClient = queryClientWithHiddenDetail(
+    [GENERAL_ASSISTANT],
+    "hidden-bot",
+    async () => {
+      throw new Error("background detail exploded");
+    },
+  );
   queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
   const view = renderChannelNew(queryClient, "/channel/new?agent=hidden-bot");
 

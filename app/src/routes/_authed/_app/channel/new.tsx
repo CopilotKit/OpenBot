@@ -67,16 +67,15 @@ function RouteComponent() {
     listed ??
     (fetched?.id === agent ? fetched : undefined) ??
     (agent ? undefined : defaultAgentProfile(profiles));
+  const needsUrlAgentDetail =
+    Boolean(agent) && profiles !== undefined && !listed;
   const waitingForUrlAgent =
-    Boolean(agent) &&
-    profiles !== undefined &&
-    !listed &&
-    detailPending &&
-    !detailError;
+    needsUrlAgentDetail && detailPending && !detailError;
+  const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
       ? "Coworkers couldn't be loaded."
-      : detailError
+      : urlAgentDetailFailed
         ? "Coworker couldn't be loaded."
         : null;
   const recipients: Recipient[] = chosen
