@@ -318,7 +318,7 @@ $sealed = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'Current
     let sealed = powershell(PROTECT, Some(value))?;
     let path = vault_dir(root)?.join(format!("{name}.dpapi"));
     std::fs::write(&path, sealed.trim())
-        .map_err(|error| dpapi_problem(format!("{}: {error}", path.display())))
+        .map_err(|error| dpapi_write_problem(format!("{}: {error}", path.display())))
 }
 
 #[cfg(target_os = "windows")]
@@ -342,7 +342,7 @@ fn read_dpapi_store_file(path: &Path) -> Result<Option<String>, Problem> {
     match std::fs::read_to_string(path) {
         Ok(sealed) => Ok(Some(sealed)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(dpapi_problem(format!("{}: {error}", path.display()))),
+        Err(error) => Err(dpapi_read_problem(format!("{}: {error}", path.display()))),
     }
 }
 
@@ -416,8 +416,21 @@ fn dpapi_output(mut child: std::process::Child, input: Option<&str>) -> Result<S
 
 #[cfg(any(target_os = "windows", test))]
 fn dpapi_problem(detail: String) -> Problem {
+    dpapi_write_problem(detail)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn dpapi_write_problem(detail: String) -> Problem {
     Problem::with(
         "OpenBot could not save your sign-in details to this computer's protected storage.",
+        detail,
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn dpapi_read_problem(detail: String) -> Problem {
+    Problem::with(
+        "OpenBot could not read your sign-in details from this computer's protected storage.",
         detail,
     )
 }
@@ -554,7 +567,7 @@ mod dpapi_tests {
             .expect_err("an existing unreadable DPAPI blob is not absence");
         assert_eq!(
             problem.said,
-            "OpenBot could not save your sign-in details to this computer's protected storage."
+            "OpenBot could not read your sign-in details from this computer's protected storage."
         );
         let detail = problem.detail.as_deref().unwrap_or_default();
         assert!(
@@ -1194,6 +1207,29 @@ mod cache_tests {
             );
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn protected_store_read_failure_reaches_already_given_boundary_without_file_fallback() {
+        let root = temp_root("vault-protected-store-read-failure");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(".env");
+        let legacy = "KEY_ENCRYPTION_KEY=synthetic-existing-valid-key\n";
+        std::fs::write(&path, legacy).unwrap();
+        let denied = super::dpapi_read_problem("synthetic protected store read denied".into());
+
+        let problem = super::already_given_with_reader(
+            &root,
+            &path,
+            &["KEY_ENCRYPTION_KEY"],
+            super::ReadPolicy::NoUi,
+            |_, _| Err(denied.clone()),
+        )
+        .expect_err("protected-store read failure must not be treated as absence");
+
+        assert_eq!(problem, denied);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
