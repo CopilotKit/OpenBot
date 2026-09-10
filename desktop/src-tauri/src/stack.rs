@@ -1204,24 +1204,26 @@ fn stop_windows_processes_under_with(
     netstat: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
-    // A same-PID row without identity metadata is unresolved, not proof that the PID was reused.
+    // A same-PID row without usable identity metadata is unresolved, not proof of PID reuse.
     // Keep the original evidence for a later inventory that can positively verify or reject it.
     if let Some(record) = recorded.iter().find(|record| {
         processes.iter().any(|live| {
             live.process_id == record.pid
-                && [
-                    &live.executable_path,
-                    &live.command_line,
-                    &live.creation_date,
-                ]
-                .iter()
-                .any(|field| matches!(field.as_deref(), None | Some("")))
+                && ([&live.executable_path, &live.command_line]
+                    .iter()
+                    .any(|field| matches!(field.as_deref(), None | Some("")))
+                    || live
+                        .creation_date
+                        .as_deref()
+                        .and_then(windows_creation_time)
+                        .is_none()
+                    || windows_creation_time(&record.creation_date).is_none())
         })
     }) {
         return Err(Problem::with(
             "OpenBot could not verify one of its recorded host processes.",
             format!(
-                "{}: process inventory lacks identity metadata for pid {}; ownership records retained",
+                "{}: process inventory lacks usable identity metadata for pid {}; ownership records retained",
                 host_pids_path(root).display(),
                 record.pid
             ),
@@ -1528,7 +1530,8 @@ pub fn verified_openbot_root_pids(
             let live = processes
                 .iter()
                 .find(|process| process.process_id == record.pid)?;
-            record.matches(live).then_some(record.pid)
+            (record.matches(live) && windows_creation_time(&record.creation_date).is_some())
+                .then_some(record.pid)
         })
         .collect()
 }
@@ -1550,6 +1553,93 @@ pub fn verified_openbot_pids_listening_on(
         .collect()
 }
 
+/// A UTC instant in microseconds, preserving both Windows PowerShell's JSON date format
+/// and the CIM datetime format. Unknown fields or malformed timestamps cannot prove ancestry.
+fn windows_creation_time(value: &str) -> Option<i64> {
+    fn digits(value: &str) -> Option<i64> {
+        (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| value.parse().ok())?
+    }
+
+    // ConvertTo-Json in Windows PowerShell emits /Date(milliseconds[+/-HHmm])/.
+    // The number is already UTC; the optional offset describes its local DateTime kind.
+    if let Some(value) = value
+        .strip_prefix("/Date(")
+        .and_then(|s| s.strip_suffix(")/"))
+    {
+        let offset_index = value
+            .char_indices()
+            .skip(1)
+            .find(|(_, ch)| matches!(ch, '+' | '-'))
+            .map(|(index, _)| index);
+        let milliseconds = if let Some(index) = offset_index {
+            let offset = value.get(index + 1..)?;
+            if offset.len() != 4 || digits(offset.get(..2)?)? > 23 || digits(offset.get(2..)?)? > 59
+            {
+                return None;
+            }
+            value.get(..index)?
+        } else {
+            value
+        };
+        digits(milliseconds.strip_prefix('-').unwrap_or(milliseconds))?;
+        let milliseconds: i64 = milliseconds.parse().ok()?;
+        // The .NET DateTime range is 0001-01-01 through 9999-12-31.
+        return (-62_135_596_800_000..=253_402_300_799_999)
+            .contains(&milliseconds)
+            .then(|| milliseconds * 1_000);
+    }
+
+    // CIM: yyyymmddHHMMSS.mmmmmm+/-UUU, with a signed UTC offset in minutes.
+    // https://learn.microsoft.com/en-us/windows/win32/wmisdk/cim-datetime
+    if value.len() != 25 || value.get(14..15)? != "." {
+        return None;
+    }
+    let year = digits(value.get(..4)?)?;
+    let month = digits(value.get(4..6)?)?;
+    let day = digits(value.get(6..8)?)?;
+    let hour = digits(value.get(8..10)?)?;
+    let minute = digits(value.get(10..12)?)?;
+    let second = digits(value.get(12..14)?)?;
+    let micros = digits(value.get(15..21)?)?;
+    let offset = digits(value.get(22..)?)?
+        * match value.get(21..22)? {
+            "+" => 1,
+            "-" => -1,
+            _ => return None,
+        };
+    if year == 0 || !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let month_index = usize::try_from(month - 1).ok()?;
+    if !(1..=month_days[month_index]).contains(&day) {
+        return None;
+    }
+    let prior_year = year - 1;
+    let days = 365 * prior_year + prior_year / 4 - prior_year / 100
+        + prior_year / 400
+        + month_days[..month_index].iter().sum::<i64>()
+        + day
+        - 1
+        - 719_162;
+    Some((((days * 24 + hour) * 60 + minute - offset) * 60 + second) * 1_000_000 + micros)
+}
+
 fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) -> bool {
     if roots.contains(&pid) {
         return true;
@@ -1568,11 +1658,33 @@ fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) ->
             return false;
         };
         let parent = process.parent_process_id;
-        if roots.contains(&parent) {
-            return true;
-        }
         if parent == 0 || parent == current {
             return false;
+        }
+        let Some(parent_process) = processes
+            .iter()
+            .find(|process| process.process_id == parent)
+        else {
+            return false;
+        };
+        let times = process
+            .creation_date
+            .as_deref()
+            .and_then(windows_creation_time)
+            .zip(
+                parent_process
+                    .creation_date
+                    .as_deref()
+                    .and_then(windows_creation_time),
+            );
+        // ParentProcessId can refer to a reused PID. A newer parent instance cannot have
+        // created this child. Validate every link, including the final link to an owned root.
+        // https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-process
+        if !times.is_some_and(|(child, parent)| parent <= child) {
+            return false;
+        }
+        if roots.contains(&parent) {
+            return true;
         }
         current = parent;
     }
@@ -2510,11 +2622,11 @@ mod tests {
 
     #[test]
     fn windows_initial_inventory_does_not_own_a_direct_sibling_replacement() {
-        let original = recorded_process("server", 9000, "original");
+        let original = recorded_process("server", 9000, "/Date(1000)/");
         let rows = [
-            live_process(9000, 7000, "original"),
-            live_process(9001, 7000, "replacement"),
-            live_process(9002, 8000, "foreign"),
+            live_process(9000, 7000, "/Date(1000)/"),
+            live_process(9001, 7000, "/Date(2000)/"),
+            live_process(9002, 8000, "/Date(3000)/"),
         ];
         let listing = "TCP 127.0.0.1:3001 0.0.0.0:0 LISTENING 9001\nTCP 127.0.0.1:3010 0.0.0.0:0 LISTENING 9002\n";
         assert_eq!(
@@ -2528,7 +2640,7 @@ mod tests {
             &rows
         )
         .is_empty());
-        let replacement = recorded_process("server", 9001, "replacement");
+        let replacement = recorded_process("server", 9001, "/Date(2000)/");
         assert_eq!(
             verified_openbot_pids_listening_on(
                 listing,
@@ -2550,13 +2662,13 @@ mod tests {
         let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
         let pid = replacement.id();
         let mut children = vec![("server", replacement)];
-        let old = recorded_process("server", 9000, "original");
+        let old = recorded_process("server", 9000, "/Date(1000)/");
         write_host_pid_file(
             &root,
             &serde_json::json!({"version":1,"processes":[old.clone()]}),
         )
         .unwrap();
-        let row = live_process(pid, std::process::id(), "replacement");
+        let row = live_process(pid, std::process::id(), "/Date(2000)/");
         std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([{
             "ProcessId":pid,"ParentProcessId":row.parent_process_id,"ExecutablePath":row.executable_path,"CommandLine":row.command_line,"CreationDate":row.creation_date
         }])).unwrap()).unwrap();
@@ -2582,7 +2694,7 @@ mod tests {
         assert!(alive);
         assert_eq!(
             recorded_host_processes(&root).unwrap(),
-            [old, recorded_process("server", pid, "replacement")]
+            [old, recorded_process("server", pid, "/Date(2000)/")]
         );
         assert!(fixture
             .log()
@@ -3243,12 +3355,12 @@ fn main() {
     fn windows_pidfile_preserves_all_records_on_partial_failure_and_retries() {
         let root = temp_root("windows-pidfile-retry");
         let recorded = [
-            recorded_process("server", 9000, "created-server"),
-            recorded_process("worker", 9001, "created-worker"),
+            recorded_process("server", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
         ];
         let processes = [
-            live_host_process("server", 9000, 0, "created-server"),
-            live_host_process("worker", 9001, 0, "created-worker"),
+            live_host_process("server", 9000, 0, "/Date(1000)/"),
+            live_host_process("worker", 9001, 0, "/Date(2000)/"),
         ];
         write_host_pid_file(
             &root,
@@ -3294,7 +3406,7 @@ fn main() {
     #[test]
     fn windows_pidfile_unknown_identity_is_preserved_without_killing_any_process() {
         let root = temp_root("windows-pidfile-unknown-identity");
-        let recorded = [recorded_process("server", 9000, "created-server")];
+        let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
         write_host_pid_file(
             &root,
             &serde_json::json!({"version": 1, "processes": recorded}),
@@ -3303,29 +3415,35 @@ fn main() {
         let path = host_pids_path(&root);
         let before = std::fs::read(&path).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
-        for missing in [None, Some(String::new())] {
-            for field in 0..3 {
-                let mut live = live_process(9000, 0, "created-server");
-                match field {
-                    0 => live.executable_path = missing.clone(),
-                    1 => live.command_line = missing.clone(),
-                    _ => live.creation_date = missing.clone(),
-                }
-                fixture.scenario("pidfile-ok");
-                let problem = stop_windows_processes_under_with(
-                    &root,
-                    &recorded,
-                    &[live],
-                    &fixture.command("netstat"),
-                    &fixture.command("taskkill"),
-                )
-                .expect_err("a missing identity field does not prove PID reuse or exit");
-                let detail = problem.detail.unwrap();
-                assert!(detail.contains("9000"), "{detail}");
-                assert!(detail.contains(&path.display().to_string()), "{detail}");
-                assert_eq!(std::fs::read(&path).unwrap(), before);
-                assert_eq!(fixture.log(), "");
+        let mut cases: Vec<_> = [None, Some(String::new())]
+            .into_iter()
+            .flat_map(|missing| (0..3).map(move |field| (field, missing.clone())))
+            .collect();
+        cases.extend([
+            (2, Some("invalid-date".to_string())),
+            (2, Some("20260931010101.000000+000".to_string())),
+        ]);
+        for (field, missing) in cases {
+            let mut live = live_process(9000, 0, "/Date(1000)/");
+            match field {
+                0 => live.executable_path = missing.clone(),
+                1 => live.command_line = missing.clone(),
+                _ => live.creation_date = missing.clone(),
             }
+            fixture.scenario("pidfile-ok");
+            let problem = stop_windows_processes_under_with(
+                &root,
+                &recorded,
+                &[live],
+                &fixture.command("netstat"),
+                &fixture.command("taskkill"),
+            )
+            .expect_err("an unresolved identity field does not prove PID reuse or exit");
+            let detail = problem.detail.unwrap();
+            assert!(detail.contains("9000"), "{detail}");
+            assert!(detail.contains(&path.display().to_string()), "{detail}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(fixture.log(), "");
         }
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -3333,10 +3451,10 @@ fn main() {
     #[test]
     fn windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors() {
         let root = temp_root("windows-pidfile-remove");
-        let recorded = [recorded_process("server", 9000, "created-server")];
+        let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
         let fixture = CleanupCommandFixture::new(&root);
         let path = host_pids_path(&root);
-        for processes in [vec![], vec![live_process(9000, 0, "reused-pid")]] {
+        for processes in [vec![], vec![live_process(9000, 0, "/Date(2000)/")]] {
             write_host_pid_file(
                 &root,
                 &serde_json::json!({"version": 1, "processes": recorded}),
@@ -4672,6 +4790,144 @@ fn main() {
         );
     }
 
+    fn ancestry_listeners(pids: &[u32]) -> String {
+        pids.iter()
+            .map(|pid| format!("TCP 127.0.0.1:3010 0.0.0.0:0 LISTENING {pid}\n"))
+            .collect()
+    }
+
+    fn assert_windows_ancestry_selection(
+        recorded: &[RecordedHostProcess],
+        processes: &[WindowsProcess],
+        listeners: &[u32],
+        expected: &[u32],
+    ) {
+        let listing = ancestry_listeners(listeners);
+        assert_eq!(
+            verified_openbot_pids_listening_on(&listing, &[3010], recorded, processes),
+            expected,
+            "listener ownership: {processes:?}"
+        );
+        let mut killed = Vec::new();
+        let stopped = stop_windows_processes_in(recorded, processes, &listing, |pid| {
+            killed.push(pid);
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(killed, expected, "cleanup ownership: {processes:?}");
+        assert_eq!(stopped, expected.len());
+    }
+
+    #[test]
+    fn windows_ancestry_rejects_a_reused_newer_parent_pid() {
+        let recorded = [recorded_process("app", 9001, "20260910010101.000000-420")];
+        let processes = [
+            live_host_process("app", 9001, 7000, "20260910010101.000000-420"),
+            live_host_process("app", 9000, 9001, "20260909010101.000000-420"),
+        ];
+        assert_windows_ancestry_selection(&recorded, &processes, &[9000], &[]);
+    }
+
+    #[test]
+    fn windows_ancestry_checks_intermediate_parent_instances() {
+        let recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+        let processes = [
+            live_host_process("app", 9001, 7000, "/Date(1000)/"),
+            live_host_process("app", 9002, 9001, "/Date(3000)/"),
+            live_host_process("app", 9003, 9002, "/Date(2000)/"),
+        ];
+        assert_windows_ancestry_selection(
+            &recorded,
+            &processes,
+            &[9001, 9002, 9003],
+            &[9001, 9002],
+        );
+    }
+
+    #[test]
+    fn windows_ancestry_compares_instants_and_preserves_direct_and_descendant_ownership() {
+        for (parent, child, owned) in [
+            (
+                "20260910010101.000000-420",
+                "20260910010101.000001-420",
+                true,
+            ),
+            (
+                "20260910010101.000001-420",
+                "20260910010101.000000-420",
+                false,
+            ),
+            (
+                "20260910010101.000000-420",
+                "20260910010101.000000-420",
+                true,
+            ),
+            // Local date order reverses at a timezone boundary; compare UTC instants.
+            (
+                "20260910003000.000000+060",
+                "20260909234500.000000+000",
+                true,
+            ),
+            (
+                "20260909234500.000000+000",
+                "20260910003000.000000+060",
+                false,
+            ),
+            ("/Date(1000)/", "/Date(1001)/", true),
+            ("/Date(1001)/", "/Date(1000)/", false),
+            ("/Date(1000+0700)/", "/Date(1001-0800)/", true),
+            ("/Date(-1)/", "/Date(0)/", true),
+            ("19700101010000.000000+060", "/Date(0)/", true),
+            ("19700101000000.000001+000", "/Date(0)/", false),
+        ] {
+            let recorded = [recorded_process("app", 9001, parent)];
+            let processes = [
+                live_host_process("app", 9001, 7000, parent),
+                live_host_process("app", 9002, 9001, child),
+            ];
+            let expected: &[u32] = if owned { &[9001, 9002] } else { &[9001] };
+            assert_windows_ancestry_selection(&recorded, &processes, &[9001, 9002], expected);
+        }
+    }
+
+    #[test]
+    fn windows_ancestry_refuses_missing_or_invalid_times_at_every_link() {
+        for invalid in [
+            None,
+            Some(""),
+            Some("unknown"),
+            Some("20260910010101.000000+***"),
+            Some("20260931010101.000000+000"),
+            Some("20260229010101.000000+000"),
+            Some("20260910240101.000000+000"),
+            Some("20260910010160.000000+000"),
+            Some("20260910010101.00000x+000"),
+            Some("/Date()/"),
+            Some("/Date(9223372036854775807)/"),
+            Some("/Date(0+2400)/"),
+            Some("/Date(0+0060)/"),
+            Some("/Date(0+000)/"),
+            Some("/Date(0)"),
+        ] {
+            for index in 0..3 {
+                let mut recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+                let mut processes = [
+                    live_host_process("app", 9001, 7000, "/Date(1000)/"),
+                    live_host_process("app", 9002, 9001, "/Date(2000)/"),
+                    live_host_process("app", 9003, 9002, "/Date(3000)/"),
+                ];
+                processes[index].creation_date = invalid.map(str::to_string);
+                if index == 0 {
+                    recorded[0].creation_date = invalid.unwrap_or("").to_string();
+                }
+                assert_windows_ancestry_selection(&recorded, &processes, &[9003], &[]);
+                if index == 0 {
+                    assert_windows_ancestry_selection(&recorded, &processes, &[9001], &[]);
+                }
+            }
+        }
+    }
+
     #[test]
     fn windows_app_port_requires_the_app_role_and_its_verified_descendant() {
         let root = temp_root("windows-app-role-port");
@@ -4687,7 +4943,7 @@ fn main() {
         .unwrap();
         std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([
             {"ProcessId":9001,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("app"),"CreationDate":"20260909010101.000000-420"},
-            {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"later"},
+            {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"20260909010102.000000-420"},
             {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909010101.000000-420"}
         ])).unwrap()).unwrap();
         let owns = |name, port| {
