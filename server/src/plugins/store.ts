@@ -482,6 +482,40 @@ const TOKEN_TIMEOUT_MS = 10_000;
 export type OAuthClient = { clientId: string; clientSecret: string };
 
 /**
+ * Whether a value read back out of the vault is a client this deployment can actually present.
+ *
+ * Guarding the parse is only half of the question. `JSON.parse` answers for SYNTAX, and the
+ * `as OAuthClient` cast behind it answers for nothing at all — so a row holding
+ * `{"client_id":"","client_secret":""}`, which is what a hand-repair or a half-written row leaves,
+ * parses cleanly and yields a client whose `clientId` is `undefined`.
+ *
+ * SHAPE AND SYNTAX ARE ONE CONCERN, which is why all three readers ask this beside their parse
+ * rather than only around it: either way the deployment holds a client it cannot use, and the
+ * operator's signal has to survive both. `unusableClient` is that signal, and it is deliberately
+ * distinct from `noClient`'s holding none.
+ *
+ * The shape half earns the check by ending WORSE than the syntax half beside it. An `undefined`
+ * client id is sent to the vendor, the vendor answers `invalid_client`, and
+ * {@link refuseAndReplaceEvictedClient} reads that as the vendor having disowned our registration —
+ * so a corrupt LOCAL row replaces the deployment-wide client every existing consent was granted
+ * against, and reports it as the vendor's doing rather than naming the credential that broke.
+ *
+ * The id has to be there; the secret only has to be a string. A public client registered
+ * dynamically proves itself with PKCE and is stored with an empty secret ON PURPOSE —
+ * `registerDynamicClient` checks the id exactly this way and defaults the secret to `""` — so
+ * demanding a non-empty secret here would refuse every self-registering entry in the catalogue.
+ */
+function isUsableClient(value: unknown): value is OAuthClient {
+  if (typeof value !== "object" || value === null) return false;
+  const { clientId, clientSecret } = value as Partial<OAuthClient>;
+  return (
+    typeof clientId === "string" &&
+    clientId !== "" &&
+    typeof clientSecret === "string"
+  );
+}
+
+/**
  * The client and when the vault row holding it was written.
  *
  * The date is not about the client: it is how long ago this deployment last introduced itself, which
@@ -867,12 +901,49 @@ export function createPluginStore(options: PluginStoreOptions) {
       if (!server?.credentialId) {
         throw new PluginRefusedError(noClient, null);
       }
-      return {
-        client: JSON.parse(
-          await secretFor(server.credentialId, unusableClient),
-        ) as OAuthClient,
-        registeredAt: server.registeredAt,
-      };
+      /*
+       * Decrypted outside the guard below, so that `secretFor`'s own refusal for a revoked or
+       * missing row is not caught here and relabelled. Only the parse is guarded.
+       */
+      const decrypted = await secretFor(server.credentialId, unusableClient);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(decrypted);
+      } catch {
+        /*
+         * Unreadable is the same as none, exactly as it is for {@link heldOAuthClient} and
+         * {@link storedOAuthClient}: there is nothing here to present to a vendor. Those two answer
+         * null because their callers are deciding whether a consent flow can start; this one is
+         * already mid-call, and its every caller would have to turn a null into this same refusal
+         * on the next line — so it raises it.
+         *
+         * THE PARSER'S OWN WORDS ARE NEVER CARRIED. `JSON.parse` reports failure by quoting the
+         * input it choked on, and the input here is the DECRYPTED OAuth client. Rethrowing it puts
+         * a fragment of the client secret — under Bun's parser, the whole of it when the stored
+         * value is a bare token — into the `mcp.call_failed` payload and into
+         * `mcp_servers.last_error`, two durable stores that the Plugins page draws for anybody who
+         * can read it.
+         *
+         * A reader should conclude that the signal is not lost, only the bytes: `unusableClient`
+         * says the deployment holds a client it cannot use, which is distinct from `noClient`'s
+         * holding none, and it names connecting again as what replaces it. An operator can tell
+         * the credential is broken; nobody learns what was in it.
+         */
+        throw new PluginRefusedError(unusableClient, null);
+      }
+      /*
+       * The same refusal for a value that parsed and is not a client — see {@link isUsableClient},
+       * which is where the criterion and the reason live, because all three readers share both.
+       *
+       * Raised rather than answered null, for the reason above: this caller is mid-call. It is the
+       * third throw in a row here — `noClient`, then the parse, then this — and that is the shape
+       * of the contract rather than a repetition to collapse. Each names a different state of the
+       * deployment's credential, and only the sentence is shared between the last two.
+       */
+      if (!isUsableClient(parsed)) {
+        throw new PluginRefusedError(unusableClient, null);
+      }
+      return { client: parsed, registeredAt: server.registeredAt };
     }
 
     /*
@@ -1272,9 +1343,13 @@ export function createPluginStore(options: PluginStoreOptions) {
     if (!held || held.revokedAt) return null;
 
     try {
-      return JSON.parse(
+      const parsed: unknown = JSON.parse(
         await decryptSecret(encryptionKey, held.encryptedValue),
-      ) as OAuthClient;
+      );
+      // A value that parsed and is not a client is unreadable in the same way and for the same
+      // caller — see {@link isUsableClient}. Null, because that is what this reader's caller acts
+      // on: it goes and registers one, which is the answer to holding none.
+      return isUsableClient(parsed) ? parsed : null;
     } catch {
       // Unreadable is the same as none: there is nothing to send anybody to consent with.
       return null;
@@ -1407,13 +1482,16 @@ export function createPluginStore(options: PluginStoreOptions) {
     if (!row?.credentialId) return null;
 
     try {
-      return JSON.parse(
+      const parsed: unknown = JSON.parse(
         await decryptCredentialForUse(
           encryptionKey,
           credentials,
           row.credentialId,
         ),
-      ) as OAuthClient;
+      );
+      // A client that parsed and is not one is as unusable as the revoked or missing row the catch
+      // below answers for, and is the same none to every caller — see {@link isUsableClient}.
+      return isUsableClient(parsed) ? parsed : null;
     } catch {
       // A revoked, missing or unreadable client is the same as none for every caller: there is
       // nothing to send anybody to consent with, and the answer is to obtain one again.

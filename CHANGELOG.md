@@ -8,6 +8,60 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot cannot end its turn by asking a person nothing
+
+`ask_person` is how a Bot stops and puts something to a person instead of guessing, and a call with
+no question in it was already meant to come back as a sentence telling it to say what it needs. That
+only happened when the field was missing altogether. A question that was present and empty was
+carried out: the Bot was told its question had been put to somebody, its turn ended there, and the
+trail took an escalation row with nothing in its question — the row an administrator counts these by,
+saying a person was asked something that was never said. On a deployment whose escalation route is a
+duty desk rather than the person already in the conversation, it is a page to somebody with no
+question on it. A blank question is now refused with the sentence that was already written for it,
+and a question typed with room around it is recorded as the question rather than as the spacing.
+### A routine scheduled for Sunday says Sundays, whichever number it was written with
+
+Crontab has always let Sunday be either 0 or 7, the scheduler here takes both, and a routine written
+with 7 is stored and fires on Sunday like any other. Only the 0 spelling was recognised by the
+sentence the Routines page draws and the Bot reads back, so a working weekend routine appeared on
+that page as `0 9 * * 7` while its neighbour said "Sundays at 09:00" — the same schedule, described
+two ways, with the raw one looking like something had gone wrong. Both spellings now read as Sunday,
+and a list that names the day under both of its numbers says it once.
+### A tenant package's theme may carry a comment
+
+A package's `theme.css` is checked at start-up against what it is allowed to define: the `:root` and
+`.dark` blocks, the approved variables, no imports and no URLs. A CSS comment defines none of those
+and was being read as though it did. One above the blocks — the line a hand-written stylesheet opens
+with, saying whose brand it is and where the colours came from — was left over once the blocks were
+set aside and refused as a second selector; one inside a block was split on the semicolons around it
+and refused as a variable name, with the comment quoted back as the name it was not. Because the
+package is read while the deployment starts, that was not a warning: the deployment did not come up,
+over a comment, saying nothing about comments. Comments are now taken out before the file is read as
+definitions, which also closes a comment wedged into the middle of `url(` as a way past the rule
+above it.
+### Test connection stops reading once it has seen the agent answer
+
+The button that checks an agent before it is registered sends it a real run and reads what comes
+back, needing only the opening of the stream to tell an AG-UI agent from a web server that happens to
+be reachable. It was reading the whole reply first and applying that limit afterwards, so the check
+took as long as the agent's run did. An agent that streams for more than fifteen seconds — a Bot
+working through a document, a model answering slowly — was given up on mid-answer and reported as
+`The agent started answering and the connection broke`, about a connection that had not broken and an
+agent that had answered correctly in its first two events. It now reads the opening it needs, closes
+the connection, and answers in the time the agent took to start rather than the time it took to
+finish.
+### A key pasted with a line break in it is now refused, instead of reported as an unreachable agent
+
+The box that holds an agent's key takes whatever is pasted into it, and what comes off a clipboard is
+not always what was on the screen: a long key copied out of a wrapped terminal line brings the wrap
+with it, and a hyphen copied out of a document has often been turned into an en dash on the way.
+Neither can be sent as an HTTP header — the runtime refuses the value outright — and neither was
+being looked at. On Test connection that refusal surfaced as "This server could not reach that
+address", with a suggestion about tunnels and firewalls, about an agent that was running perfectly
+well and had never been dialled. Stored on the Bot it was quieter and worse: the form said saved, and
+every turn that Bot took afterwards failed on a value nothing on screen said anything about. Both
+places now check the value before accepting it and say which kind of character is in the way. The
+character is named; the key never is.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

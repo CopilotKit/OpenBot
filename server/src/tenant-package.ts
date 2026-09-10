@@ -51,7 +51,30 @@ const approvedThemeVariables = new Set([
   "--sidebar-ring",
 ]);
 
-export function validateThemeCss(css: string) {
+export function validateThemeCss(rawCss: string) {
+  /*
+   * A comment is not something a theme defines, so it is taken out before anything below reads the
+   * text as definitions.
+   *
+   * Every rule here is about what a theme may DEFINE — two blocks, approved variables, no imports
+   * and no URLs — and a comment defines nothing. They were applied to the raw file anyway, so a
+   * stylesheet carrying the line every hand-written stylesheet opens with, saying whose brand it is
+   * and where the colours came from, was refused twice over. Above the blocks it survived the
+   * removal of them and read as a second selector: "Tenant theme may only define :root and .dark
+   * blocks". Inside one it was split on the semicolons around it and read as a variable name, so the
+   * refusal quoted the comment back as the variable it was not. A tenant package is loaded at
+   * start-up, so neither of those is a warning: the deployment does not come up, over a comment, and
+   * says nothing about comments.
+   *
+   * Taking them out first is stricter than leaving them in, never weaker. A comment wedged into the
+   * middle of the word `url` makes something a browser does not read as a URL token, and the test
+   * below did not read it as one either; with the comment gone, both do, and it is refused. A
+   * comment that is never closed does not match and is not removed, so it stays as the nonsense it
+   * is and is still refused. What a comment cannot do here is hide anything: what is left once they
+   * are gone is what a browser would act on.
+   */
+  const css = rawCss.replace(/\/\*[\s\S]*?\*\//g, " ");
+
   if (/@import|url\s*\(/i.test(css)) {
     throw new Error("Tenant theme must not contain imports or URLs");
   }
