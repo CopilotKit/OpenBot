@@ -14,6 +14,7 @@ import {
   ProviderPicker,
 } from "./ProviderPicker";
 import { Welcome } from "./Welcome";
+import { isHttpEndpointUrl } from "./http-endpoint-url";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -323,6 +324,13 @@ export function App() {
   function modelCanStart() {
     if (!model) return false;
     if (!model.saved) return true;
+    if (model.provider === "openai-compatible") {
+      return (
+        model.login === "endpoint" &&
+        isHttpEndpointUrl(model.baseUrl ?? "") &&
+        Boolean(model.model?.trim())
+      );
+    }
     if (model.provider !== "openai" && model.provider !== "anthropic") {
       return false;
     }

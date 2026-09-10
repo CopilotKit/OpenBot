@@ -376,6 +376,119 @@ async function startWithCompatibleEndpoint(
   );
 }
 
+function useSavedCompatibleEndpointSetup(
+  baseUrl = "https://models.example/v1",
+  model = "saved-model",
+  keyed = true,
+  savedModel = "compatible-endpoint",
+) {
+  useCompatibleEndpointSetup({});
+  const setupHandler = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "already_configured") {
+      return {
+        values: { OPENAI_BASE_URL: baseUrl, BOT_MODEL: model },
+        saved: {
+          intelligenceApiKey: true,
+          model: savedModel,
+          modelApiKeys: { compatible: keyed },
+          modelSessions: {},
+        },
+      };
+    }
+    return setupHandler(command, args);
+  };
+}
+
+test.each([true, false])(
+  "saved compatible endpoint reaches Start with scoped public fields (keyed=%s)",
+  async (keyed) => {
+    useSavedCompatibleEndpointSetup(undefined, undefined, keyed);
+    const view = await renderApp();
+    await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(view.getByLabelText("Base URL")).toHaveProperty(
+      "value",
+      "https://models.example/v1",
+    );
+    expect(view.getByLabelText("Model name")).toHaveProperty(
+      "value",
+      "saved-model",
+    );
+    expect(
+      view.getByLabelText("API key, if the endpoint needs one"),
+    ).toHaveProperty("value", "");
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+    expect(
+      invokeCalls.filter((call) => call.command === "start_stack"),
+    ).toHaveLength(1);
+    expect(getStartStackPayload()).toEqual({
+      root: "/tmp/openbot-app-test",
+      apiKey: "",
+      apiUrl: "https://api.intelligence.copilotkit.ai",
+      gatewayWsUrl: "wss://realtime.intelligence.copilotkit.ai",
+      harness: { id: "langgraph" },
+      model: {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl: "https://models.example/v1",
+        model: "saved-model",
+        ...(keyed ? { saved: true } : {}),
+      },
+    });
+  },
+);
+
+test.each([
+  ["", "saved-model"],
+  ["https://models.example/v1", ""],
+  ["https://models.example/v1", "   "],
+  ["ftp://models.example/v1", "saved-model"],
+  ["https://", "saved-model"],
+])(
+  "incomplete saved endpoint stays on the provider screen (%s, %s)",
+  async (baseUrl, model) => {
+    useSavedCompatibleEndpointSetup(baseUrl, model);
+    const view = await renderApp();
+    await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+    expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+      false,
+    );
+  },
+);
+
+test("an unsupported saved model kind does not become a startable endpoint", async () => {
+  useSavedCompatibleEndpointSetup(
+    undefined,
+    undefined,
+    true,
+    "unsupported-model",
+  );
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+});
+
 test("Change the model after an Ask failure stops the stack and reaches the provider picker", async () => {
   invokeHandler = async (command) => {
     if (command === "detect_engine") {
@@ -597,8 +710,12 @@ test("mount leaves setup visible when the shared port answers without selected r
 
   const view = await renderApp();
 
-  expect(await view.findByRole("button", { name: "Set up OpenBot" })).toBeTruthy();
-  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(false);
+  expect(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  ).toBeTruthy();
+  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+    false,
+  );
 });
 
 test("saved startup credentials enable Start without raw protected secrets on mount", async () => {
