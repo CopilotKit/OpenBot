@@ -327,6 +327,8 @@ services:
       # there either way; this variable is what tells the harness to read it.
       CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # A bind mount, not a named volume, and read-write on purpose. The signed-in plan's access
       # token expires within the hour and the harness renews it, so the renewal has to land back on

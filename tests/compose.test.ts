@@ -187,6 +187,7 @@ function runComposeConfig(env: Record<string, string>) {
       string,
       {
         environment: Record<string, string>;
+        extra_hosts?: string[];
         volumes?: Array<{ type: string; source: string; target: string }>;
       }
     >;
@@ -415,10 +416,13 @@ test("gives the selected harness the same governed callback as the framework Bot
     OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
     AGENT_TOOL_TOKEN: "synthetic-callback-token",
   });
-  for (const service of ["agent-harness", "agent-langgraph"]) {
+  for (const service of ["agent-harness", "agent-langgraph"] as const) {
     expect(config.services[service].environment).toMatchObject({
       OPENBOT_TOOL_URL: "http://callback.example/api/agent-tools/call",
       AGENT_TOOL_TOKEN: "synthetic-callback-token",
     });
+    expect(config.services[service].extra_hosts).toContain(
+      "host.docker.internal=host-gateway",
+    );
   }
 });
