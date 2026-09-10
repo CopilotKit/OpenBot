@@ -868,35 +868,29 @@ async fn start_stack_inner<R: tauri::Runtime>(
     }
     report(&app, "dependencies", true, "installed");
 
-    let mut started = Vec::new();
-    for process in stack::HOST_PROCESSES.iter() {
-        let child = stack::spawn_host_process(process, &root, &logs, &bun, &secrets)
-            .map_err(|e| format!("could not start {}: {e}", process.name))?;
-        started.push((process.name, child));
-        report(&app, process.name, true, "started");
-    }
-
-    // Spawning is not starting. Nothing is called running until the API answers.
     let logs_for_wait = logs.clone();
-    let (outcome, started) = tauri::async_runtime::spawn_blocking(move || {
-        let mut started = started;
-        let outcome = stack::wait_until_answering(
-            &mut started,
-            &logs_for_wait,
-            &stack::Ready {
-                api: openbot_env::Ports::default().server,
-                app: openbot_env::Ports::default().app,
-            },
-            std::time::Duration::from_secs(180),
-        );
-        (outcome, started)
-    })
-    .await
-    .map_err(|error| format!("the wait did not run: {error}"))?;
-
     let shell = app.state::<Shell>();
-    let generation = finish_host_start(&shell, &root, started, outcome)
-        .inspect_err(|problem| report(&app, "answering", false, problem_detail(problem.clone())))?;
+    let generation = start_host_processes(
+        &shell,
+        &root,
+        &logs,
+        &bun,
+        &secrets,
+        |name| report(&app, name, true, "started"),
+        move |started| {
+            stack::wait_until_answering(
+                started,
+                &logs_for_wait,
+                &stack::Ready {
+                    api: openbot_env::Ports::default().server,
+                    app: openbot_env::Ports::default().app,
+                },
+                std::time::Duration::from_secs(180),
+            )
+        },
+    )
+    .await
+    .inspect_err(|problem| report(&app, "answering", false, problem_detail(problem.clone())))?;
     // Only a stack that answered successfully acquires a restart policy.
     supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
 
@@ -1075,6 +1069,54 @@ where
         *shell.root.lock().unwrap() = None;
     }
     result
+}
+
+/// The initial host launch, including ownership handoff on every outcome.
+async fn start_host_processes<R, W>(
+    shell: &Shell,
+    root: &Path,
+    logs: &Path,
+    bun: &Path,
+    secrets: &stack::Secrets,
+    mut report_started: R,
+    wait: W,
+) -> Result<u64, Problem>
+where
+    R: FnMut(&'static str),
+    W: FnOnce(&mut Vec<(&'static str, std::process::Child)>) -> Result<(), String> + Send + 'static,
+{
+    let mut started = Vec::new();
+    for process in stack::HOST_PROCESSES.iter() {
+        let child = match stack::spawn_host_process(process, root, logs, bun, secrets) {
+            Ok(child) => child,
+            Err(error) => {
+                return finish_host_start(
+                    shell,
+                    root,
+                    started,
+                    Err(format!("could not start {}: {error}", process.name)),
+                );
+            }
+        };
+        started.push((process.name, child));
+        report_started(process.name);
+    }
+    // A failed blocking task must not drop the only handles either. The caller retains the
+    // vector while readiness borrows it; even a panic returns every child to the same cleanup.
+    let owned = std::sync::Arc::new(Mutex::new(started));
+    let waiting = std::sync::Arc::clone(&owned);
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let mut started = waiting.lock().unwrap();
+        wait(&mut started)
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("the wait did not run: {error}")));
+    let started = std::mem::take(
+        &mut *owned
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    finish_host_start(shell, root, started, outcome)
 }
 
 fn finish_host_start(
@@ -4306,6 +4348,207 @@ fi\n";
         }));
         assert_eq!(server.request().path, "/api/capabilities");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    struct InitialHostFixture {
+        base: PathBuf,
+        root: PathBuf,
+        bun: PathBuf,
+        pids: std::cell::RefCell<Vec<u32>>,
+    }
+
+    #[cfg(unix)]
+    impl InitialHostFixture {
+        fn new(mode: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let base = temp_root("initial-host-launch");
+            let root = base.join("deployment");
+            std::fs::create_dir_all(&root).unwrap();
+            for process in stack::HOST_PROCESSES {
+                if mode == "first-fails"
+                    || ((mode == "second-fails" || mode == "cleanup-refuses")
+                        && process.name != "server")
+                {
+                    break;
+                }
+                std::fs::create_dir(root.join(process.cwd)).unwrap();
+            }
+            let bun = base.join("bun");
+            // The production spawn boundary supplies cwd/argv/log files. Only the executable is
+            // synthetic: one direct child with no network, engine, or credential access.
+            std::fs::write(
+                &bun,
+                "#!/bin/sh\nprintf '%s' \"$$\" > child.pid\nexec /bin/sleep 60\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&bun, std::fs::Permissions::from_mode(0o700)).unwrap();
+            Self {
+                base,
+                root,
+                bun,
+                pids: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn observe(&self, name: &str) {
+            let path = self.root.join(name).join("child.pid");
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let pid = loop {
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    if let Ok(pid) = text.parse::<u32>() {
+                        break pid;
+                    }
+                }
+                assert!(std::time::Instant::now() < until, "child did not start");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            self.pids.borrow_mut().push(pid);
+        }
+
+        fn alive(&self) -> Vec<u32> {
+            self.pids
+                .borrow()
+                .iter()
+                .copied()
+                .filter(|pid| unsafe { libc::kill(*pid as i32, 0) } == 0)
+                .collect()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for InitialHostFixture {
+        fn drop(&mut self) {
+            // Even an old-code regression failure must not orphan the fixture. waitpid first
+            // proves this is still our direct, unreaped child; ECHILD never authorizes a signal.
+            for pid in self.pids.get_mut() {
+                if unsafe { libc::waitpid(*pid as i32, std::ptr::null_mut(), libc::WNOHANG) } == 0 {
+                    unsafe {
+                        libc::kill(*pid as i32, libc::SIGKILL);
+                        libc::waitpid(*pid as i32, std::ptr::null_mut(), 0);
+                    }
+                }
+            }
+            if self.base.is_file() {
+                std::fs::remove_file(&self.base).unwrap();
+            } else {
+                std::fs::remove_dir_all(&self.base).unwrap();
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn initial_host_case(mode: &'static str) {
+        let fixture = InitialHostFixture::new(mode);
+        let shell = Shell::default();
+        let result = tauri::async_runtime::block_on(start_host_processes(
+            &shell,
+            &fixture.root,
+            &fixture.root.join(".logs"),
+            &fixture.bun,
+            &stack::Secrets::new(),
+            |name| {
+                fixture.observe(name);
+                if mode == "cleanup-refuses" {
+                    // A real filesystem failure prevents both the second spawn and verification
+                    // of the first child's deployment. No cleanup failure is mocked away.
+                    std::fs::remove_dir_all(&fixture.base).unwrap();
+                    std::fs::write(&fixture.base, b"blocked fixture parent").unwrap();
+                }
+            },
+            move |_| match mode {
+                "wait-fails" => Err("synthetic readiness failure".into()),
+                "wait-panics" => panic!("synthetic readiness task panic"),
+                "success" => Ok(()),
+                _ => panic!("readiness must not run after a spawn failure"),
+            },
+        ));
+        let alive = fixture.alive();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "initialHostCase": mode,
+                "spawned": fixture.pids.borrow().len(),
+                "aliveAfterStart": alive,
+                "heldAfterStart": shell.children.lock().unwrap().len(),
+                "error": result.as_ref().err().map(|problem| &problem.said),
+            })
+        );
+        if mode == "success" {
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(alive.len(), 3);
+            assert_eq!(stack::recorded_host_pids(&fixture.root).unwrap().len(), 3);
+        } else {
+            let problem = result.unwrap_err();
+            let expected = match mode {
+                "first-fails" => "could not start server:",
+                "second-fails" | "cleanup-refuses" => "could not start app:",
+                "wait-fails" => "synthetic readiness failure",
+                "wait-panics" => "the wait did not run:",
+                _ => unreachable!(),
+            };
+            assert!(problem.said.starts_with(expected), "{problem:?}");
+            if mode == "cleanup-refuses" {
+                assert_eq!(alive.len(), 1);
+                assert_eq!(shell.children.lock().unwrap().len(), 1);
+                assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&fixture.root));
+                assert!(
+                    problem.detail.is_some(),
+                    "cleanup failure must remain visible"
+                );
+                std::fs::remove_file(&fixture.base).unwrap();
+                std::fs::create_dir_all(&fixture.root).unwrap();
+            } else {
+                assert!(
+                    alive.is_empty(),
+                    "failed Start left owned children alive: {alive:?}"
+                );
+                assert!(shell.children.lock().unwrap().is_empty());
+                assert!(shell.root.lock().unwrap().is_none());
+            }
+        }
+        if mode == "success" || mode == "cleanup-refuses" {
+            retire_host_processes(&shell, &fixture.root, stack::stop_processes_under).unwrap();
+            assert!(fixture.alive().is_empty());
+            assert!(shell.children.lock().unwrap().is_empty());
+            assert!(shell.root.lock().unwrap().is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_second_spawn_failure_cleans_the_real_first_child() {
+        initial_host_case("second-fails");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_first_spawn_failure_never_waits_or_publishes() {
+        initial_host_case("first-fails");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_success_records_then_stops_all_children() {
+        initial_host_case("success");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_readiness_failure_preserves_error_and_cleans_children() {
+        initial_host_case("wait-fails");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_wait_panic_keeps_children_available_for_cleanup() {
+        initial_host_case("wait-panics");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_host_cleanup_refusal_keeps_original_error_and_stop_ownership() {
+        initial_host_case("cleanup-refuses");
     }
 
     #[cfg(unix)]
