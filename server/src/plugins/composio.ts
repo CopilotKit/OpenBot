@@ -269,11 +269,20 @@ function schemaNode(value: unknown): Record<string, unknown> | null {
  * only the top level of `properties` would answer false for every ref-based schema, which is the
  * majority of the ones that carry a file.
  *
- * The keys walked are every subschema-bearing keyword `ParametersSchema` and
- * `JSONSchemaPropertySchema` keep — a key those two strip cannot be present to be walked, so the
- * list is closed. It is wider than the vendor's predicate by `patternProperties`, `not` and the
- * conditional trio, which that one skips: a file staged only under a condition is still a file
- * this deployment cannot stage.
+ * WHAT BOUNDS THE LIST IS NOT WHAT COMPLETES IT, and this comment used to claim the second from the
+ * first. A keyword `ParametersSchema` and `JSONSchemaPropertySchema` strip cannot be present to be
+ * walked, so nothing outside those two needs a branch — but every subschema-bearing keyword inside
+ * them does, and `additionalProperties` had none. Both of them keep it as a FULL SUBSCHEMA
+ * (`src/types/tool.types.ts:154` and `:111`), which is how a toolkit spells a bag of attachments, so
+ * a file hidden there was offered to a model under both auto-upload settings and every call against
+ * the action failed.
+ *
+ * `additionalProperties` and `items` are unions rather than plain subschemas — the first with
+ * `boolean`, the second with a tuple array. The boolean arm falls out of {@link schemaNode} and the
+ * array arm is what the second loop's `Array.isArray` is for, so neither needs a case of its own.
+ *
+ * Wider than the vendor's predicate by `patternProperties`, `not` and the conditional trio, which
+ * that one skips: a file staged only under a condition is still a file this deployment cannot stage.
  */
 function stagesAFile(schema: unknown): boolean {
   const node = schemaNode(schema);
@@ -295,6 +304,7 @@ function stagesAFile(schema: unknown): boolean {
     "oneOf",
     "allOf",
     "items",
+    "additionalProperties",
     "not",
     "if",
     "then",
