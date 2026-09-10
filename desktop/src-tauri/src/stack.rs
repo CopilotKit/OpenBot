@@ -263,16 +263,82 @@ pub fn migrate(
 /// stopped, so the prefix belongs with the label rather than at the call site.
 const SUPERVISOR_FILTER: &str = "label=openbot.supervisor=true";
 
+/// Resolve the same namespace the selected deployment gives its supervisor. Compose owns
+/// interpolation, env-file quoting and defaults; parsing .env independently can select a different
+/// deployment. Never include the resolved configuration (which can contain secrets) in an error.
+fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    let config = root.join("docker-compose.yml");
+    match std::fs::metadata(&config) {
+        Ok(metadata) if metadata.is_file() => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if !crate::deployment::stamp_path(root)
+                .try_exists()
+                .map_err(|error| format!("could not verify computer namespace ownership: {error}"))?
+            {
+                // Welcome/setup has no deployment yet. In particular, do not let Compose search
+                // a parent directory for a file belonging to another installation.
+                return Ok(None);
+            }
+            return Err("could not resolve computer namespace: installed deployment is missing docker-compose.yml".into());
+        }
+        _ => return Err("could not resolve computer namespace: selected deployment configuration is not readable".into()),
+    }
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["-f", "docker-compose.yml", "config", "--format", "json"])
+        .output()
+        .map_err(|error| format!("could not resolve computer namespace: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not resolve computer namespace: Compose configuration failed ({})",
+            output.status
+        ));
+    }
+    let config: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        format!("could not resolve computer namespace: unreadable Compose response ({error})")
+    })?;
+    let configured = config
+        .pointer("/services/supervisor/environment/COMPUTER_NAMESPACE")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("could not resolve computer namespace: supervisor configuration has no namespace")?;
+    // Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
+    // ASCII identifier grammar. A malformed/missing response never becomes an unscoped filter.
+    let namespace = match configured.trim() {
+        "" => "openbot",
+        value => value,
+    };
+    if namespace.len() > 64
+        || !namespace.as_bytes()[0].is_ascii_alphanumeric()
+        || !namespace
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("could not resolve computer namespace: supervisor namespace is invalid".into());
+    }
+    Ok(Some(namespace.to_string()))
+}
+
 /// Stop the computers the supervisor made, which Compose does not know about.
 ///
 /// A Bot's computer is created at runtime, not declared in `docker-compose.yml`, so `compose down`
 /// leaves it running: an idle Ubuntu container per Bot, with the application gone and nothing on
 /// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
 /// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
-pub fn stop_computers(engine: &Address) -> Result<(), String> {
+/// Returns false only when the selected root has no installed deployment to take down.
+pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
+    let Some(namespace) = computer_namespace(engine, root)? else {
+        return Ok(false);
+    };
+    let namespace_filter = format!("label=openbot.namespace={namespace}");
     let listed = engine
         .command()
-        .args(["ps", "--quiet", "--filter", SUPERVISOR_FILTER])
+        .args([
+            "ps",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &namespace_filter,
+        ])
         .output()
         .map_err(|error| format!("could not list the Bots' computers: {error}"))?;
     if !listed.status.success() {
@@ -284,7 +350,7 @@ pub fn stop_computers(engine: &Address) -> Result<(), String> {
         .map(str::to_string)
         .collect();
     if running.is_empty() {
-        return Ok(());
+        return Ok(true);
     }
 
     let stopped = engine
@@ -294,7 +360,7 @@ pub fn stop_computers(engine: &Address) -> Result<(), String> {
         .output()
         .map_err(|error| format!("could not stop the Bots' computers: {error}"))?;
     if stopped.status.success() {
-        return Ok(());
+        return Ok(true);
     }
     Err(command_said(&stopped.stderr))
 }
@@ -302,7 +368,9 @@ pub fn stop_computers(engine: &Address) -> Result<(), String> {
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     // Before Compose, because the supervisor is what would otherwise start another one while this
     // is happening.
-    stop_computers(engine)?;
+    if !stop_computers(engine, root)? {
+        return Ok(());
+    }
 
     /*
      * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
@@ -316,7 +384,7 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
      * earlier run started, and whether that run picked one is not something a Stop can know.
      */
     let output = compose_command(engine, root, &Secrets::new())
-        .args(["--profile", "harness", "down"])
+        .args(["-f", "docker-compose.yml", "--profile", "harness", "down"])
         .output()
         .map_err(|error| format!("could not stop the stack: {error}"))?;
 
@@ -2655,7 +2723,43 @@ fn main() {
             .unwrap();
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
-    match (std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap().as_str(), joined.as_str()) {
+    let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    if scenario == "computer-stop" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let without_file;
+        let actual = if actual.get(1).map(String::as_str) == Some("-f") {
+            without_file = std::iter::once(actual[0].clone()).chain(actual[3..].iter().cloned()).collect::<Vec<_>>();
+            &without_file[..]
+        } else { actual };
+        match actual.first().map(String::as_str) {
+            Some("compose") if actual.get(1).map(String::as_str) == Some("config") => {
+                if std::path::Path::new(".fixture-config-failure").exists() { std::process::exit(17); }
+                print!("{}", std::fs::read_to_string(".fixture-config").unwrap());
+            }
+            Some("ps") => {
+                // Model the engine's AND-label filtering over owned, other-namespace, and
+                // non-supervisor rows. The connected proof separately exercises the real daemon.
+                let labels = [
+                    ("current", "true", "fixture-selected"),
+                    ("other", "true", "fixture-other"),
+                    ("unowned", "false", "fixture-selected"),
+                    ("default", "true", "openbot"),
+                ];
+                for (id, supervisor, namespace) in labels {
+                    let matches = actual.windows(2).filter(|pair| pair[0] == "--filter").all(|pair| {
+                        pair[1] == format!("label=openbot.supervisor={supervisor}")
+                            || pair[1] == format!("label=openbot.namespace={namespace}")
+                    });
+                    if matches { println!("{id}"); }
+                }
+            }
+            Some("stop") => {}
+            Some("compose") if actual == ["compose", "--profile", "harness", "down"] => {}
+            _ => std::process::exit(2),
+        }
+        return;
+    }
+    match (scenario.as_str(), joined.as_str()) {
         ("exit17", args) if args.starts_with("compose ps ") => {
             print!("agent-computer\tUp\n");
             eprint!("compose ps refused\n");
@@ -4136,7 +4240,8 @@ fn main() {
     fn stopping_names_the_harness_profile() {
         let source = include_str!("stack.rs");
         assert!(
-            source.contains(r#".args(["--profile", "harness", "down"])"#),
+            source
+                .contains(r#".args(["-f", "docker-compose.yml", "--profile", "harness", "down"])"#),
             "compose down without the profile leaves agent-harness running"
         );
     }
@@ -4257,6 +4362,153 @@ fn main() {
         );
         assert!(SUPERVISOR_FILTER.contains("openbot.supervisor=true"));
         assert!(!SUPERVISOR_FILTER.contains("name="));
+    }
+
+    fn computer_stop_root(path: &PathFixture, label: &str, config: &str) -> (PathBuf, PathBuf) {
+        let root = path.bin.join(label);
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        std::fs::write(root.join(".fixture-config"), config).unwrap();
+        let record = path.bin.join(format!("{label}.log"));
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        (root, record)
+    }
+
+    fn resolved_namespace_fixture(namespace: &str) -> String {
+        serde_json::json!({"services":{"supervisor":{"environment":{"COMPUTER_NAMESPACE":namespace}}}}).to_string()
+    }
+
+    #[test]
+    fn computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine() {
+        let path = PathFixture::with_fake_engine("computer-stop");
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        std::fs::copy(
+            path.bin.join(format!("docker{suffix}")),
+            path.bin.join(format!("podman{suffix}")),
+        )
+        .unwrap();
+        for (engine, connection, prefix) in [
+            (crate::engine::Engine::Docker, None, ""),
+            (
+                crate::engine::Engine::Podman,
+                Some("fixture-machine".into()),
+                "--connection fixture-machine ",
+            ),
+        ] {
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("root-{}", engine.binary()),
+                &resolved_namespace_fixture("fixture-selected"),
+            );
+            down(&Address::new(engine, connection), &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                log.contains(&format!(
+                    "{prefix}compose -f docker-compose.yml config --format json"
+                )),
+                "{log}"
+            );
+            assert!(log.contains(&format!("{prefix}ps --quiet --filter label=openbot.supervisor=true --filter label=openbot.namespace=fixture-selected")), "{log}");
+            assert!(
+                log.lines()
+                    .any(|line| line.ends_with(&format!("\t{prefix}stop current"))),
+                "{log}"
+            );
+            assert!(
+                !log.contains("stop current other") && !log.contains("stop unowned"),
+                "{log}"
+            );
+            assert!(
+                log.contains(&format!(
+                    "{prefix}compose -f docker-compose.yml --profile harness down"
+                )),
+                "{log}"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_stop_preserves_supervisor_default_and_trim_rules() {
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for (index, namespace) in ["openbot", "", "  ", " fixture-selected "]
+            .iter()
+            .enumerate()
+        {
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("case-{index}"),
+                &resolved_namespace_fixture(namespace),
+            );
+            down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap();
+            let expected = if index == 3 { "current" } else { "default" };
+            assert!(std::fs::read_to_string(record)
+                .unwrap()
+                .lines()
+                .any(|line| line.ends_with(&format!("\tstop {expected}"))));
+        }
+        for (index, namespace) in ["9Mixed_Case-namespace".to_string(), "a".repeat(64)]
+            .iter()
+            .enumerate()
+        {
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("valid-{index}"),
+                &resolved_namespace_fixture(namespace),
+            );
+            down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                log.contains(&format!("label=openbot.namespace={namespace}")),
+                "{log}"
+            );
+            assert!(!log.contains("\tstop "), "{log}");
+        }
+    }
+
+    #[test]
+    fn computer_stop_refuses_unresolved_namespace_before_listing_or_stopping() {
+        let path = PathFixture::with_fake_engine("computer-stop");
+        let configs = [
+            "not json".to_string(),
+            "{\"services\":{}}".to_string(),
+            "{\"services\":{\"supervisor\":{\"environment\":{\"COMPUTER_NAMESPACE\":12}}}}"
+                .to_string(),
+            resolved_namespace_fixture("_invalid"),
+            resolved_namespace_fixture("bad/value"),
+            resolved_namespace_fixture(&"a".repeat(65)),
+        ];
+        for (index, config) in configs.iter().enumerate() {
+            let (root, record) = computer_stop_root(&path, &format!("invalid-{index}"), config);
+            let error =
+                down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap_err();
+            assert!(error.contains("namespace"), "{error}");
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                !log.contains("\tps ") && !log.contains("\tstop ") && !log.contains("harness down"),
+                "{log}"
+            );
+        }
+        let (root, record) = computer_stop_root(&path, "provider-failure", "{}");
+        std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
+        assert!(down(&Address::new(crate::engine::Engine::Docker, None), &root).is_err());
+        assert!(!std::fs::read_to_string(record).unwrap().contains("\tps "));
+    }
+
+    #[test]
+    fn computer_stop_without_installed_config_never_searches_parent_or_lists_globally() {
+        let path = PathFixture::with_fake_engine("computer-stop");
+        let record = path.bin.join("no-stack.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let absent = path.bin.join("absent");
+        let empty = path.bin.join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        for root in [&absent, &empty] {
+            down(&Address::new(crate::engine::Engine::Docker, None), root).unwrap();
+            assert!(!record.exists());
+        }
+        crate::deployment::record(&empty, "fixture").unwrap();
+        assert!(down(&Address::new(crate::engine::Engine::Docker, None), &empty).is_err());
+        assert!(!record.exists());
     }
 
     #[test]

@@ -3169,6 +3169,7 @@ mod tests {
         let active = temp_root("openbot-active-stop-root");
         let fallback = temp_root("openbot-default-stop-root");
         std::fs::create_dir_all(&active).unwrap();
+        std::fs::write(active.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::create_dir_all(&fallback).unwrap();
         let shell = Shell::default();
         *shell.root.lock().unwrap() = Some(active.clone());
@@ -3190,6 +3191,7 @@ mod tests {
         let active = temp_root("openbot-active-quit-root");
         let fallback = temp_root("openbot-default-quit-root");
         std::fs::create_dir_all(&active).unwrap();
+        std::fs::write(active.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::create_dir_all(&fallback).unwrap();
         let shell = Shell::default();
         *shell.root.lock().unwrap() = Some(active.clone());
@@ -3210,6 +3212,7 @@ mod tests {
         let active = temp_root("openbot-active-stop-failures");
         let fallback = temp_root("openbot-default-stop-failures");
         std::fs::create_dir_all(&active).unwrap();
+        std::fs::write(active.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::create_dir_all(&fallback).unwrap();
         let shell = Shell::default();
         *shell.root.lock().unwrap() = Some(active.clone());
@@ -3260,6 +3263,7 @@ mod tests {
         let active = temp_root("openbot-active-exit-failures");
         let fallback = temp_root("openbot-default-exit-failures");
         std::fs::create_dir_all(&active).unwrap();
+        std::fs::write(active.join("docker-compose.yml"), "services: {}\n").unwrap();
         std::fs::create_dir_all(&fallback).unwrap();
         let shell = Shell::default();
         *shell.root.lock().unwrap() = Some(active.clone());
@@ -4836,7 +4840,7 @@ fi\n";
         fn set() -> Self {
             Self::set_with(
                 "docker",
-                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n",
+                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\ncase \"$*\" in *'config --format json') printf '{\"services\":{\"supervisor\":{\"environment\":{\"COMPUTER_NAMESPACE\":\"openbot\"}}}}\\n';; esac\n",
             )
         }
 
@@ -4910,9 +4914,11 @@ fi\n";
         let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let lines = std::fs::read_to_string(record).expect("command record");
         assert!(
-            lines
-                .lines()
-                .any(|line| line == format!("{}\tcompose --profile harness down", root.display())),
+            lines.lines().any(|line| line
+                == format!(
+                    "{}\tcompose -f docker-compose.yml --profile harness down",
+                    root.display()
+                )),
             "{lines}"
         );
     }
