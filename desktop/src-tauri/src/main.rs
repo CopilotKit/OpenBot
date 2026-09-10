@@ -993,6 +993,47 @@ fn stop_held_process_handles(
     Ok(())
 }
 
+fn cleanup_after_host_recording_failure<C, F>(
+    shell: &Shell,
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    recording: Problem,
+    cleanup: C,
+    force_handles: F,
+) -> Result<u64, Problem>
+where
+    C: FnOnce(&Path, &mut Vec<(&'static str, std::process::Child)>) -> Result<usize, Problem>,
+    F: FnOnce(&mut Vec<(&'static str, std::process::Child)>) -> Result<(), Problem>,
+{
+    shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let cleanup = cleanup(root, children);
+    let failure = match cleanup {
+        Ok(_) => {
+            *shell.root.lock().unwrap() = None;
+            return Err(recording);
+        }
+        Err(cleanup) => cleanup,
+    };
+    let forced = force_handles(children);
+    let mut detail = recording.detail.unwrap_or_default();
+    if !detail.is_empty() {
+        detail.push('\n');
+    }
+    detail.push_str(&problem_detail(failure));
+    match forced {
+        Ok(()) => {
+            *shell.root.lock().unwrap() = None;
+        }
+        Err(forced) => {
+            detail.push('\n');
+            detail.push_str(&problem_detail(forced));
+        }
+    }
+    Err(Problem::with(recording.said, detail))
+}
+
 fn retire_host_processes<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize, Problem>
 where
     C: FnOnce(&Path) -> Result<usize, Problem>,
@@ -1048,25 +1089,14 @@ fn finish_host_start(
             .map(|(name, child)| (*name, child.id()))
             .collect::<Vec<_>>(),
     ) {
-        shell
-            .generation
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let cleanup = cleanup_host_children(root, &mut children, stack::stop_processes_under)
-            .inspect_err(|_| {
-                let _ = stop_held_process_handles(&mut children);
-            });
-        *shell.root.lock().unwrap() = None;
-        return match cleanup {
-            Ok(_) => Err(recording),
-            Err(cleanup) => {
-                let mut detail = recording.detail.unwrap_or_default();
-                if !detail.is_empty() {
-                    detail.push('\n');
-                }
-                detail.push_str(&problem_detail(cleanup));
-                Err(Problem::with(recording.said, detail))
-            }
-        };
+        return cleanup_after_host_recording_failure(
+            shell,
+            root,
+            &mut children,
+            recording,
+            |root, children| cleanup_host_children(root, children, stack::stop_processes_under),
+            stop_held_process_handles,
+        );
     }
     Ok(shell
         .generation
@@ -3794,6 +3824,100 @@ fi\n";
             ))
             .unwrap()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_host_recording_keeps_root_and_handles_when_forced_cleanup_fails() {
+        let root = temp_root("failed-recording-stubborn-child");
+        std::fs::create_dir_all(&root).unwrap();
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .current_dir(&root)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut children = vec![("server", child)];
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let result = cleanup_after_host_recording_failure(
+            &shell,
+            &root,
+            &mut children,
+            Problem::with("recording failed", "recording detail"),
+            |_, _| {
+                Err(Problem::with(
+                    "normal cleanup failed",
+                    "normal cleanup detail",
+                ))
+            },
+            |_| {
+                Err(Problem::with(
+                    "forced cleanup failed",
+                    "forced cleanup detail",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(result.said, "recording failed");
+        let detail = result.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("recording detail"), "{detail}");
+        assert!(detail.contains("normal cleanup detail"), "{detail}");
+        assert!(detail.contains("forced cleanup detail"), "{detail}");
+        assert_eq!(shell.root.lock().unwrap().as_deref(), Some(root.as_path()));
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].1.id(), pid);
+        for (_, child) in children.iter_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_host_recording_clears_root_and_handles_when_forced_cleanup_succeeds() {
+        let root = temp_root("failed-recording-forced-cleanup");
+        std::fs::create_dir_all(&root).unwrap();
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .current_dir(&root)
+            .spawn()
+            .unwrap();
+        let mut children = vec![("server", child)];
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        let result = cleanup_after_host_recording_failure(
+            &shell,
+            &root,
+            &mut children,
+            Problem::with("recording failed", "recording detail"),
+            |_, _| {
+                Err(Problem::with(
+                    "normal cleanup failed",
+                    "normal cleanup detail",
+                ))
+            },
+            |children| {
+                for (_, child) in children.iter_mut() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                children.clear();
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(result.said, "recording failed");
+        let detail = result.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("recording detail"), "{detail}");
+        assert!(detail.contains("normal cleanup detail"), "{detail}");
+        assert!(!detail.contains("forced cleanup"), "{detail}");
+        assert!(shell.root.lock().unwrap().is_none());
+        assert!(children.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 
