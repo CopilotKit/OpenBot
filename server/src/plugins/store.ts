@@ -280,6 +280,109 @@ export class PluginInvariantError extends Error {
  * keep doing so: `access.ts` is a leaf that `store.ts` imports, so the shelf cannot be declared
  * once without one of them importing the other back.
  */
+/**
+ * The one character no PostgreSQL `text` or `jsonb` value can hold, whatever the vendor sent.
+ *
+ * Not a length limit and not an encoding preference: the server rejects the statement outright,
+ * mid-transaction, and the rejection arrives as a query error rather than as anything about the
+ * value.
+ */
+const NUL = "\u0000";
+
+/**
+ * The driver's own complaint about a query, without the query.
+ *
+ * CRITERION. What this returns never contains the statement or the values bound to it.
+ *
+ * REASON. drizzle's `DrizzleQueryError` puts both in its own `message` and hangs the driver's
+ * error off `cause`. The driver's message is the useful half — `duplicate key value violates
+ * unique constraint`, `invalid byte sequence`, `canceling statement due to statement timeout` —
+ * and it is the half that names nothing anybody sent. An error shaped differently gets a fixed
+ * sentence rather than its own message, because the reason this exists is that a message from an
+ * unexamined shape is exactly what leaked the last one.
+ *
+ * Capped where every other quoted failure in this file is capped, for the same reason: parts of
+ * it come from somewhere else and none of it is a promise about length.
+ */
+function databaseComplaint(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return cause instanceof Error
+    ? cause.message.slice(0, 400)
+    : "The database gave no reason this deployment can quote.";
+}
+
+/**
+ * What a vendor listed, as rows this database will actually take.
+ *
+ * CRITERION ONE. No two rows carry the same name, whatever the vendor listed.
+ *
+ * CRITERION TWO. No string reaching the insert contains U+0000, in a column or inside a schema.
+ *
+ * REASON. Both of these used to abort the replace from INSIDE the transaction and OUTSIDE the
+ * vendor `try` above it, so they came out of `refreshTools` as a raw `DrizzleQueryError` — whose
+ * message is `Failed query: <the whole statement>` followed by `params:` and every value bound to
+ * it. That reached an operator's page and the logs as a SQL dump, which is the same disclosure
+ * shape as a leaked credential one layer out, and it left `lastError` holding whatever was there
+ * before: stale, or null, on a refresh that had in fact failed.
+ *
+ * FIXED BY NOT REACHING THE DATABASE WITH IT, rather than by catching it better. A vendor that
+ * names one action twice is answering about one action — `mcp_tools`' `(server_id, name)` primary
+ * key says so, and the first listing is as good an answer as the second, so the duplicate is
+ * dropped rather than made into an error somebody has to act on. A control character in a
+ * description is not content anybody wants to keep either. What is left after this is a
+ * transaction that fails for reasons that are genuinely not the vendor's, which is what the
+ * comment on the replace has always claimed.
+ *
+ * FIRST OCCURRENCE WINS, and the order is the vendor's own. Anything else needs a rule for which
+ * of two identical names is the real one, and there is no such rule.
+ */
+function storableTools(serverId: string, listed: ListedTool[]) {
+  const byName = new Map<
+    string,
+    {
+      serverId: string;
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+      effect: "read" | "write" | null;
+      destructive: boolean;
+      version: string | null;
+    }
+  >();
+
+  for (const tool of listed) {
+    const name = tool.name.replaceAll(NUL, "");
+    if (byName.has(name)) continue;
+    byName.set(name, {
+      serverId,
+      name,
+      description: tool.description.replaceAll(NUL, ""),
+      /*
+       * Through JSON rather than by walking the object, because the escape is what has to go and
+       * the schema is JSON by definition — it is stored in a `jsonb` column and came off the wire
+       * as JSON. `JSON.stringify` writes a literal U+0000 as the six characters `\u0000`, so that
+       * is the sequence removed here; a schema with none is rebuilt identical.
+       */
+      inputSchema: JSON.parse(
+        JSON.stringify(tool.inputSchema).replaceAll("\\u0000", ""),
+      ),
+      /*
+       * What the vendor said, when the vendor said anything.
+       *
+       * Only Composio publishes an effect and a version, and an MCP server publishes a
+       * destructive hint — see `mcp.ts`. All three stay null or false for a transport that says
+       * nothing, and `classifyTool` reads null as silence rather than as a value, which is what
+       * leaves Notion and Drive classified by their reviewed write list exactly as they were.
+       */
+      effect: tool.effect ?? null,
+      destructive: tool.destructive ?? false,
+      version: tool.version?.replaceAll(NUL, "") ?? null,
+    });
+  }
+
+  return [...byName.values()];
+}
+
 export function isDeploymentFault(error: unknown): error is Error {
   return (
     error instanceof ServerUnresolvableError ||
@@ -2482,32 +2585,43 @@ export function createPluginStore(options: PluginStoreOptions) {
        * rather than being copied into `lastError`, because a transaction this database would not take
        * is not something the vendor did.
        */
-      await database.transaction(async (transaction) => {
-        await transaction
-          .delete(mcpTools)
-          .where(eq(mcpTools.serverId, serverId));
-        if (listed.length > 0) {
-          await transaction.insert(mcpTools).values(
-            listed.map((tool) => ({
-              serverId,
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-              /*
-               * What the vendor said, when the vendor said anything.
-               *
-               * Only Composio publishes any of this today, so all three stay null or false for
-               * every other transport — and `classifyTool` reads null as silence rather than as a
-               * value, which is what leaves Notion and Drive classified by their reviewed write list
-               * exactly as they were before.
-               */
-              effect: tool.effect ?? null,
-              destructive: tool.destructive ?? false,
-              version: tool.version ?? null,
-            })),
-          );
-        }
-      });
+      // Names deduplicated and vendor text made storable before a transaction is opened on any of
+      // it, because both failures used to abort the replace from inside one. See
+      // {@link storableTools}.
+      const storable = storableTools(serverId, listed);
+
+      try {
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(mcpTools)
+            .where(eq(mcpTools.serverId, serverId));
+          if (storable.length > 0) {
+            await transaction.insert(mcpTools).values(storable);
+          }
+        });
+      } catch (error) {
+        /*
+         * A database failure, with the statement and its parameters left behind.
+         *
+         * CRITERION. Nothing raised from here carries the SQL or the values bound to it.
+         *
+         * REASON. drizzle wraps every failure as a `DrizzleQueryError`, whose message is
+         * `Failed query:` followed by the whole statement and then every parameter — here, the
+         * vendor's entire tool list. That message is what an unhandled throw puts in the logs and
+         * what any caller that prints an error puts on a screen. A SQL dump on an error path is
+         * the same disclosure shape as a credential leak one layer out, and it is gratuitous: the
+         * driver's own complaint says what went wrong without any of it.
+         *
+         * RAISED, NOT RECORDED, which is what the paragraph above this transaction argues for and
+         * is now true rather than merely intended: with duplicate names and unstorable text
+         * removed before the statement is built, what is left is this database refusing something
+         * this deployment's own schema says it will take, and `lastError` is where a VENDOR's
+         * answer goes.
+         */
+        throw new PluginInvariantError(
+          `${row.id}: the actions this app listed were not stored, so what it already had is unchanged. ${databaseComplaint(error)}`,
+        );
+      }
 
       await database
         .update(mcpServers)
@@ -2533,7 +2647,9 @@ export function createPluginStore(options: PluginStoreOptions) {
        * committed, because the guard above returns before this on an empty answer that would have
        * named every grant the app holds.
        */
-      const advertised = new Set(listed.map((tool) => tool.name));
+      // The names as STORED, so a grant is compared against a row that exists: a duplicate the
+      // vendor listed twice is one row, and a name is spelled here the way the insert spelled it.
+      const advertised = new Set(storable.map((tool) => tool.name));
       const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
         .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
         .sort(([left], [right]) => left.localeCompare(right));
@@ -2583,7 +2699,10 @@ export function createPluginStore(options: PluginStoreOptions) {
         });
       }
 
-      return { tools: listed.length };
+      // What was recorded, which is what "this app offers N actions" means on the page. Counting
+      // the listing instead reported a duplicate the vendor named twice as two actions the
+      // deployment holds, when `mcp_tools` holds one row for it.
+      return { tools: storable.length };
     },
 
     async listServers(): Promise<ServerRecord[]> {

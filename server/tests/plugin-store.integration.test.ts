@@ -5202,6 +5202,201 @@ test("a catalogue entry declaring the broker's transport is refused, not dialled
 });
 
 /**
+ * WHAT A VENDOR SENT THAT THIS DATABASE WILL NOT TAKE, and what came out when it did not.
+ *
+ * Both of these aborted the wholesale replace from INSIDE its transaction, which sits OUTSIDE the
+ * vendor `try` above it — so neither was recorded and neither was caught. What left `refreshTools`
+ * was drizzle's `DrizzleQueryError`, whose message is `Failed query:` followed by the entire
+ * statement and then `params:` and every value bound to it. A SQL dump on an error path is the
+ * same disclosure shape as a credential leak one layer out, and it reached the logs and any caller
+ * that prints an error, while `lastError` sat holding whatever it held before: stale, or null, on
+ * a refresh that had failed outright.
+ *
+ * Both are now settled before a statement is built, which is why the assertions below are about
+ * the rows rather than about a better error.
+ */
+describe("a listing this database would not have taken", () => {
+  test("a vendor naming one action twice records it once", async () => {
+    const { store, database } = await freshStore();
+    /*
+     * The same slug twice, with different text, which is what a paginated listing that overlaps
+     * or a broker with two entries for one action produces. `(server_id, name)` is the primary
+     * key, so as one multi-row insert this refused the whole statement and rolled the delete back
+     * with it — leaving the app holding its old actions and the refresh throwing a dump.
+     */
+    useComposioClient({
+      listActions: async () => [
+        {
+          slug: "GMAIL_SEND_EMAIL",
+          description: "Send an email.",
+          inputParameters: { type: "object", properties: {} },
+          version: "20260903_00",
+        },
+        {
+          slug: "GMAIL_SEND_EMAIL",
+          description: "Send an email, listed again.",
+          inputParameters: { type: "object", properties: {} },
+          version: "20260903_00",
+        },
+      ],
+      execute: async () => vendorAnswered(),
+    });
+    await seedComposioGmail(database, store);
+
+    // One action, because the vendor named one action. Not two rows, and not a refusal.
+    expect(await store.refreshTools("gmail", "admin_user")).toEqual({
+      tools: 1,
+    });
+
+    const rows = await database
+      .select({
+        name: mcpTools.name,
+        description: mcpTools.description,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"));
+
+    // The first occurrence, because the order is the vendor's own and there is no rule that says
+    // which of two identical names is the real one.
+    expect(rows).toEqual([
+      { name: "GMAIL_SEND_EMAIL", description: "Send an email." },
+    ]);
+
+    const [row] = await database
+      .select({ lastError: mcpServers.lastError })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, "gmail"));
+    // A healthy refresh, because that is what it was.
+    expect(row?.lastError).toBeNull();
+  });
+
+  test("a U+0000 in what the vendor wrote is dropped rather than aborting the replace", async () => {
+    const { store, database } = await freshStore();
+    /*
+     * In the name, in the description and inside the schema, because all three reach the insert
+     * and the column types differ: `text` refuses the byte and `jsonb` refuses the escape, and
+     * each aborts the same transaction from a different statement position.
+     */
+    useComposioClient({
+      listActions: async () => [
+        {
+          slug: "GMAIL_SEND\u0000_EMAIL",
+          description: "Send\u0000 an email.",
+          inputParameters: {
+            type: "object",
+            properties: { subject: { description: "The\u0000 subject" } },
+          },
+          version: "2026\u00000903_00",
+        },
+      ],
+      execute: async () => vendorAnswered(),
+    });
+    await seedComposioGmail(database, store);
+
+    expect(await store.refreshTools("gmail", "admin_user")).toEqual({
+      tools: 1,
+    });
+
+    const [stored] = await database
+      .select({
+        name: mcpTools.name,
+        description: mcpTools.description,
+        inputSchema: mcpTools.inputSchema,
+        version: mcpTools.version,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"));
+
+    expect(stored?.name).toBe("GMAIL_SEND_EMAIL");
+    expect(stored?.description).toBe("Send an email.");
+    expect(stored?.version).toBe("20260903_00");
+    // Inside the schema too, and the rest of the schema rebuilt exactly as it arrived.
+    expect(stored?.inputSchema).toEqual({
+      type: "object",
+      properties: { subject: { description: "The subject" } },
+    });
+  });
+
+  test("a replace this database still refuses raises without the statement", async () => {
+    /*
+     * A transaction forced to fail, because after the two cases above nothing a vendor can send
+     * reaches this branch — and this branch is the one that used to publish the dump. What is
+     * asserted is the SHAPE of what comes out: the driver's own complaint, and none of the
+     * statement or the values bound to it.
+     */
+    const { store, database } = await freshStore();
+    useComposioClient({
+      listActions: async () => [
+        {
+          slug: "GMAIL_SEND_EMAIL",
+          description: "Send an email.",
+          inputParameters: { type: "object", properties: {} },
+          version: "20260903_00",
+        },
+      ],
+      execute: async () => vendorAnswered(),
+    });
+    await seedComposioGmail(database, store);
+
+    /*
+     * Derived from the real one rather than stubbed, so every other query the refresh makes is
+     * the real query. The failure is spelled the way drizzle spells one: the statement and every
+     * bound value in `message`, the driver's own error hung off `cause`. That message is what
+     * used to escape.
+     */
+    const refusing: Database = Object.create(database);
+    Object.defineProperty(refusing, "transaction", {
+      value: async () => {
+        throw Object.assign(
+          new Error(
+            'Failed query: insert into "mcp_tools" ("server_id", "name") values ($1, $2) params: gmail, GMAIL_SEND_EMAIL',
+          ),
+          {
+            cause: new Error(
+              'duplicate key value violates unique constraint "mcp_tools_pkey"',
+            ),
+          },
+        );
+      },
+    });
+
+    const failing = createPluginStore({
+      database: refusing,
+      auditStore: { insert: async () => {} },
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+    });
+
+    let thrown: unknown;
+    try {
+      await failing.refreshTools("gmail", "admin_user");
+    } catch (error) {
+      thrown = error;
+    }
+
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    // The driver's complaint, which names what went wrong.
+    expect(message).toContain("duplicate key value violates unique constraint");
+    // And nothing of the statement or of what was bound to it.
+    expect(message).not.toContain("Failed query");
+    expect(message).not.toContain("insert into");
+    expect(message).not.toContain("params:");
+    // On the shelf that is raised rather than recorded and never relayed to a model, because a
+    // transaction this database would not take is not something the vendor did.
+    expect(isDeploymentFault(thrown)).toBe(true);
+
+    // And what the app already had is still there, because nothing was committed.
+    expect(
+      await database
+        .select({ name: mcpTools.name })
+        .from(mcpTools)
+        .where(eq(mcpTools.serverId, "gmail")),
+    ).toEqual([{ name: "GMAIL_FETCH_EMAILS" }]);
+  });
+});
+
+/**
  * The genuine empty listing, which has to stay recordable.
  *
  * The guard above must not turn "this app advertises nothing" into a state the deployment cannot
