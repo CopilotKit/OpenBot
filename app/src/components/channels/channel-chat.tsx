@@ -46,6 +46,25 @@ const JOIN_DEADLINE_MS = 1500;
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
 
+type ChannelActivitySignature = {
+  agentId: string;
+  at: string;
+  text: string;
+};
+
+function sameActivity(
+  left: ChannelActivitySignature | null,
+  right: ChannelActivitySignature | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.agentId === right.agentId &&
+    left.at === right.at &&
+    left.text === right.text
+  );
+}
+
 export function channelHistoryNotice({
   restoring,
   messageCount,
@@ -280,7 +299,7 @@ export function ChannelChat({
    * the platform's read of the thread can be a beat behind it.
    */
   useEffect(() => {
-    const authoredAt = () => {
+    const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
         pages: { channels: ChannelSummary[] }[];
       }>(channelKeys.list());
@@ -288,11 +307,22 @@ export function ChannelChat({
         .flatMap((page) => page.channels)
         .find((row) => row.id === channel.id);
       // Only a Bot's turn is news here; a person's own line arrives through the run that sent it.
-      if (!summary || summary.lastMessageAgentId === null) return null;
-      return summary.lastMessageAt;
+      if (
+        !summary ||
+        summary.lastMessageAgentId === null ||
+        summary.lastMessageAt === null ||
+        summary.lastMessage === null
+      ) {
+        return null;
+      }
+      return {
+        agentId: summary.lastMessageAgentId,
+        at: summary.lastMessageAt,
+        text: summary.lastMessage,
+      };
     };
 
-    let lastSeen = authoredAt();
+    let lastSeen = authoredActivity()?.at ?? null;
     let cancelled = false;
 
     const pull = () => {
@@ -335,9 +365,10 @@ export function ChannelChat({
     };
 
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      const at = authoredAt();
-      if (at && at !== lastSeen) {
-        lastSeen = at;
+      const activity = authoredActivity();
+      if (activity && activity.at !== lastSeen) {
+        lastSeen = activity.at;
+        if (sameActivity(selfReportedBotActivity.current, activity)) return;
         pull();
       }
     });
@@ -397,13 +428,18 @@ export function ChannelChat({
    * Tell the roster what was just said. Failures here must not block the conversation.
    */
   const recordActivity = useMutation(recordChannelActivityMutationOptions());
+  const selfReportedBotActivity = useRef<ChannelActivitySignature | null>(null);
 
   const report = (text: string, agentId: string | null) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const at = new Date().toISOString();
+    if (agentId !== null) {
+      selfReportedBotActivity.current = { agentId, at, text: trimmed };
+    }
     recordActivity.mutate({
       agentId,
-      at: new Date().toISOString(),
+      at,
       channelId: channel.id,
       text: trimmed,
     });

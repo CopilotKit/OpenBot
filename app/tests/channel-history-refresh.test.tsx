@@ -9,6 +9,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { z } from "zod";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   type AgentChannel,
@@ -20,6 +21,12 @@ import { applyChannelEvent } from "@/lib/channels/use-channel-events";
 import { queryClient } from "@/query-client";
 
 type ChannelCache = InfiniteData<ChannelPage>;
+const ActivityRequestSchema = z.object({
+  agentId: z.string().nullable(),
+  at: z.string(),
+  text: z.string(),
+});
+type ActivityRequest = z.infer<typeof ActivityRequestSchema>;
 const NativeResponse = globalThis.Response;
 const channel: AgentChannel = {
   id: "refresh-channel",
@@ -54,6 +61,8 @@ let history: (threadId: string) => Promise<Response>;
 let historyReads: string[];
 let gatewaySnapshot: readonly Message[] = [];
 let runRequests: { path: string; input: RunAgentInput }[] = [];
+let activityRequests: ActivityRequest[] = [];
+let runEvents: (input: RunAgentInput) => unknown[];
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
 
 function CoreProbe() {
@@ -109,12 +118,17 @@ beforeAll(() => {
           input instanceof Request ? input : new Request(url, init);
         const body = RunAgentInputSchema.parse(await request.json());
         runRequests.push({ path: url.pathname, input: body });
-        return sse([
-          { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
-          { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
-        ]);
+        return sse(runEvents(body));
       }
-      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+      if (/\/api\/channels\/[^/]+\/activity$/.test(url.pathname)) {
+        const request =
+          input instanceof Request ? input : new Request(url, init);
+        activityRequests.push(
+          ActivityRequestSchema.parse(await request.json()),
+        );
+        return new NativeResponse(null, { status: 204 });
+      }
+      if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {
@@ -174,6 +188,11 @@ function mounting(
   historyReads = [];
   gatewaySnapshot = snapshot;
   runRequests = [];
+  activityRequests = [];
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
   history = read;
   cacheChannel(channel);
   return render(tree(channel));
@@ -188,15 +207,23 @@ function currentAgent(selected = channel) {
   if (!agent) throw new Error("Mounted channel agent is not registered");
   return agent;
 }
-async function announce(at: number, selected = channel) {
+type ActivityFixture = { agentId?: string | null; text?: string; at?: string };
+
+async function announce(
+  at: number,
+  selected = channel,
+  activity: ActivityFixture = {},
+) {
   await act(async () => {
     queryClient.setQueryData<ChannelCache>(channelKeys.list(), (cache) => {
       if (!cache) throw new Error("No mounted channel cache");
       const patched = applyChannelEvent(cache, {
         channelId: selected.id,
-        lastMessage: "Bot announced a turn",
-        lastMessageAgentId: "refresh-bot",
-        lastMessageAt: `2026-09-09T00:00:${String(at).padStart(2, "0")}.000Z`,
+        lastMessage: activity.text ?? "Bot announced a turn",
+        lastMessageAgentId:
+          activity.agentId === undefined ? "refresh-bot" : activity.agentId,
+        lastMessageAt:
+          activity.at ?? `2026-09-09T00:00:${String(at).padStart(2, "0")}.000Z`,
       });
       if (patched === "unknown")
         throw new Error("Announced channel missing from cache");
@@ -246,6 +273,141 @@ test.each([
     });
     expect(view.getByText(unavailable)).toBeTruthy();
     expect(view.queryByText(/different CopilotKit project/)).toBeNull();
+  },
+);
+
+test("a same-tab activity echo does not append a lagging durable partial beside the completed local reply", async () => {
+  const fullReply = {
+    id: "streamed-full-reply",
+    role: "assistant",
+    content: "I can answer this fully from the live run.",
+  } satisfies Message;
+  const partialEcho = {
+    id: "durable-lagging-partial",
+    role: "assistant",
+    content: "I can answer this fully",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    {
+      type: "TEXT_MESSAGE_START",
+      messageId: fullReply.id,
+      role: "assistant",
+    },
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      messageId: fullReply.id,
+      delta: fullReply.content,
+    },
+    { type: "TEXT_MESSAGE_END", messageId: fullReply.id },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Ask for live answer",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(fullReply.content);
+  await waitFor(() =>
+    expect(
+      activityRequests.some(
+        (activity) =>
+          activity.agentId === "refresh-bot" &&
+          activity.text === fullReply.content,
+      ),
+    ).toBe(true),
+  );
+  const selfActivity = activityRequests.find(
+    (activity) =>
+      activity.agentId === "refresh-bot" && activity.text === fullReply.content,
+  );
+  if (!selfActivity) throw new Error("Missing self-reported Bot activity");
+  history = async () => stored([initial, partialEcho]);
+  await announce(1, channel, selfActivity);
+  expect(historyReads).toHaveLength(1);
+
+  expect(view.getByText(fullReply.content)).toBeTruthy();
+  expect(view.queryByText(partialEcho.content)).toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toContain(
+    fullReply.id,
+  );
+  expect(currentAgent().messages.map((message) => message.id)).not.toContain(
+    partialEcho.id,
+  );
+});
+
+test.each([
+  { name: "different timestamp", override: { at: "2026-09-09T00:00:10.000Z" } },
+  {
+    name: "different text",
+    override: { text: "A different Bot-authored update" },
+  },
+  { name: "different agent", override: { agentId: "relay-bot" } },
+])(
+  "a $name activity after a self report still refreshes durable history",
+  async ({ override }) => {
+    const fullReply = {
+      id: "local-live-reply",
+      role: "assistant",
+      content: "Local reply already rendered",
+    } satisfies Message;
+    const relayed = {
+      id: "relayed-durable-reply",
+      role: "assistant",
+      content: "Relayed durable reply",
+    } satisfies Message;
+    const view = mounting(async () => stored([initial]), [initial]);
+    await view.findByText(initial.content);
+    runEvents = (input) => [
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      {
+        type: "TEXT_MESSAGE_START",
+        messageId: fullReply.id,
+        role: "assistant",
+      },
+      {
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: fullReply.id,
+        delta: fullReply.content,
+      },
+      { type: "TEXT_MESSAGE_END", messageId: fullReply.id },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ];
+
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.type(
+      view.getByRole("textbox", { name: "Message" }),
+      "Ask before relay",
+    );
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await view.findByText(fullReply.content);
+    await waitFor(() =>
+      expect(
+        activityRequests.some(
+          (activity) =>
+            activity.agentId === "refresh-bot" &&
+            activity.text === fullReply.content,
+        ),
+      ).toBe(true),
+    );
+    const selfActivity = activityRequests.find(
+      (activity) =>
+        activity.agentId === "refresh-bot" &&
+        activity.text === fullReply.content,
+    );
+    if (!selfActivity) throw new Error("Missing self-reported Bot activity");
+
+    history = async () => stored([initial, relayed]);
+    await announce(1, channel, { ...selfActivity, ...override });
+    await view.findByText(relayed.content);
+    expect(historyReads).toHaveLength(2);
+    expect(currentAgent().messages.map((message) => message.id)).toContain(
+      relayed.id,
+    );
   },
 );
 
