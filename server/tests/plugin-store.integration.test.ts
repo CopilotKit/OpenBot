@@ -32,7 +32,10 @@ import {
   users,
 } from "../src/db/schema";
 import { catalogueEntry } from "../src/plugins/catalogue";
-import { useComposioClient } from "../src/plugins/composio";
+import {
+  type ComposioResult,
+  useComposioClient,
+} from "../src/plugins/composio";
 import { redirectUriFor } from "../src/plugins/oauth";
 import {
   type AccessToken,
@@ -3482,6 +3485,28 @@ async function seedComposioGmail(
   );
 }
 
+/**
+ * What Composio answers a call that worked, in the shape its own schema requires.
+ *
+ * `ToolExecuteResponseSchema` in `@composio/core` 0.18.1 spells `data`, `error` and `successful`
+ * REQUIRED. Every stub below used to answer `{}` or `{ messages: [] }`, which are shapes the vendor
+ * cannot produce, and nothing flagged it: `server/tsconfig.json` excludes `tests`, so no typecheck
+ * reads these files at all. They stayed green for a reason that is not the property under test —
+ * an ABSENT `successful` is not `successful === false`, so the transport's failure branch was
+ * simply never entered. A stub that can only answer things the vendor could actually say is what
+ * makes the success path's greenness mean something.
+ *
+ * Typed as {@link ComposioResult} rather than left to inference, so a vendor shape that drifts is a
+ * red squiggle here even though the suite is outside the typecheck's reach.
+ */
+const vendorAnswered = (
+  data: Record<string, unknown> = {},
+): ComposioResult => ({
+  data,
+  error: null,
+  successful: true,
+});
+
 // The vendor is a process-wide registry, so a stub outliving its test would be answering somebody
 // else's calls.
 afterEach(() => useComposioClient(null));
@@ -3544,7 +3569,7 @@ test("a Composio app is listed through the Composio transport, not dialled as MC
       asked.push(toolkit);
       return [];
     },
-    execute: async () => ({}),
+    execute: async () => vendorAnswered(),
   });
   await database.insert(mcpServers).values({
     id: "gmail",
@@ -3569,7 +3594,7 @@ test("a Composio call with nobody attributed is refused before it reaches the ve
     listActions: async () => [],
     execute: async (slug) => {
       reached.push(slug);
-      return {};
+      return vendorAnswered();
     },
   });
   await seedComposioGmail(database, store);
@@ -3611,7 +3636,7 @@ test("a Composio call with nobody attributed is refused even when a connection r
     listActions: async () => [],
     execute: async (slug) => {
       reached.push(slug);
-      return {};
+      return vendorAnswered();
     },
   });
   await seedComposioGmail(database, store);
@@ -3646,7 +3671,7 @@ test("a Composio call by somebody who has not connected the app is refused with 
     listActions: async () => [],
     execute: async (slug) => {
       reached.push(slug);
-      return {};
+      return vendorAnswered();
     },
   });
   await seedComposioGmail(database, store, { connect: false });
@@ -3672,7 +3697,7 @@ test("a Composio call whose url names no app is refused rather than falling back
     listActions: async () => [],
     execute: async (slug) => {
       reached.push(slug);
-      return {};
+      return vendorAnswered();
     },
   });
   // Brokered by provenance, with a url that names no Composio app: `accessFor` answers
@@ -3699,7 +3724,7 @@ test("a Composio call whose row id and url name different apps is refused", asyn
     listActions: async () => [],
     execute: async (slug) => {
       reached.push(slug);
-      return {};
+      return vendorAnswered();
     },
   });
   // The row is called `gmail` and the person has connected `gmail`; the url dials Slack, which is
@@ -3729,7 +3754,7 @@ test("a Composio call sends the version recorded for that action", async () => {
     listActions: async () => [],
     execute: async (slug, _userId, version) => {
       calls.push({ slug, version });
-      return {};
+      return vendorAnswered();
     },
   });
   await seedComposioGmail(database, store);
@@ -3762,7 +3787,7 @@ test("a version a model supplied in its own arguments cannot beat the recorded o
     listActions: async () => [],
     execute: async (slug, _userId, version) => {
       calls.push({ slug, version });
-      return {};
+      return vendorAnswered();
     },
   });
   await seedComposioGmail(database, store);
@@ -3791,7 +3816,7 @@ test("a version a model supplied cannot stand in for an action with none recorde
     listActions: async () => [],
     execute: async (slug, _userId, version) => {
       calls.push({ slug, version });
-      return {};
+      return vendorAnswered();
     },
   });
   // The action with no recorded version, which is the branch the test above does not cover: there
@@ -3824,7 +3849,7 @@ test("a Composio call is recorded as reaching the vendor as the person, not as t
   const { store, database, auditStore } = await freshStore();
   useComposioClient({
     listActions: async () => [],
-    execute: async () => ({ messages: [] }),
+    execute: async () => vendorAnswered({ messages: [] }),
   });
   await seedComposioGmail(database, store);
 
@@ -3938,7 +3963,7 @@ test("a brokered call is judged by the effect the vendor recorded, not by the ab
   const { store, database, auditStore } = await freshStore();
   useComposioClient({
     listActions: async () => [],
-    execute: async () => ({}),
+    execute: async () => vendorAnswered(),
   });
   // `effect: "read"` on the seeded action, and no catalogue entry for `gmail` at all — so the two
   // sources disagree and the row records which one decided.
@@ -4012,7 +4037,7 @@ test("refreshing a Composio app records each action's effect, destructive marker
         version: "20260903_00",
       },
     ],
-    execute: async () => ({}),
+    execute: async () => vendorAnswered(),
   });
 
   await database.insert(mcpServers).values({
@@ -4086,7 +4111,7 @@ test("a granted Composio action that the vendor withdrew is still shown as grant
         version: "20260903_00",
       },
     ],
-    execute: async () => ({}),
+    execute: async () => vendorAnswered(),
   });
   await seedComposioGmail(database, store);
 
@@ -4234,7 +4259,10 @@ describe("a refresh whose transport could not ask anybody", () => {
  */
 test("an app with nothing recorded against it can be refreshed to no actions at all", async () => {
   const { store, database } = await freshStore();
-  useComposioClient({ listActions: async () => [], execute: async () => ({}) });
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () => vendorAnswered(),
+  });
   await database.insert(mcpServers).values({
     id: "gmail",
     title: "Gmail",
@@ -4299,7 +4327,7 @@ test("an audit write that fails is not recorded as the vendor misbehaving", asyn
         version: "20260903_00",
       },
     ],
-    execute: async () => ({}),
+    execute: async () => vendorAnswered(),
   });
   // The granted action is absent from what the vendor now lists, so the refresh reaches the audit
   // write about grants nothing advertises — the one the stub above refuses.
