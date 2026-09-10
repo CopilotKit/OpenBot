@@ -2557,6 +2557,166 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * A stored client that parses cleanly and is not a client.
+   *
+   * The sibling of the unparseable row, and its worse half. Guarding the parse answers for SYNTAX
+   * only, and the `as OAuthClient` cast behind it answers for nothing — so a row holding
+   * snake_case keys, which is what a hand-repair or a half-written row leaves, yields a client
+   * whose `clientId` is `undefined` and is handed on as usable.
+   *
+   * WHAT MAKES IT WORSE THAN A SYNTAX ERROR is where it ends. The unparseable row is refused before
+   * the transaction; this one is not refused at all, so the `undefined` id goes to the vendor, the
+   * vendor answers `invalid_client`, and {@link refuseAndReplaceEvictedClient} reads that as the
+   * vendor having disowned this deployment's registration. A corrupt LOCAL row then buys a
+   * DEPLOYMENT-WIDE remedy: the client every existing consent was granted against is replaced, and
+   * the operator is told the vendor forgot us rather than which credential actually broke.
+   */
+  describe("a stored OAuth client whose shape is not a client's", () => {
+    /** Snake_case where the type is camelCase, with a secret distinctive enough to search for. */
+    const MISSHAPEN = JSON.stringify({
+      client_id: "dyn-snake",
+      client_secret: `shh_notAClient_${suite}`,
+    });
+    /** What the operator must be told instead: the credential named, and nothing else claimed. */
+    const UNUSABLE =
+      "Notion has no usable OAuth client for this deployment. Connect Notion again in Settings: the deployment registers itself with the vendor on the next connect.";
+
+    /**
+     * Plant arbitrary stored bytes as this server's client, the way {@link putClient} plants a real
+     * one — aged an hour, so the re-registration window is not what refuses the call. A row younger
+     * than the window would pass these tests for the wrong reason.
+     */
+    async function putStoredBytes(plaintext: string) {
+      await database
+        .update(credentials)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(credentials.kind, "mcp_oauth_client"),
+            eq(credentials.provider, dynamicServerId),
+            eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
+            sql`${credentials.revokedAt} IS NULL`,
+          ),
+        );
+      const [row] = await database
+        .insert(credentials)
+        .values({
+          kind: "mcp_oauth_client",
+          provider: dynamicServerId,
+          keyId: `oauth-client-${dynamicServerId}`,
+          metadata: {},
+          encryptedValue: await encryptSecret(DYNAMIC_KEY, plaintext),
+          createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        })
+        .returning({ id: credentials.id });
+      if (!row) throw new Error("misshapen client was not stored");
+      vaultRows.push(row.id);
+      await database
+        .update(mcpServers)
+        .set({ credentialId: row.id })
+        .where(eq(mcpServers.id, dynamicServerId));
+      return row.id;
+    }
+
+    /**
+     * This tool's failure rows with their ids, so one call's can be told from the suite's.
+     *
+     * Every test in this describe calls the SAME tool, and the ones above this deliberately produce
+     * the eviction sentence — so an assertion that no failure row anywhere mentions it would be
+     * about its siblings rather than about this call. The ids are what separate them; there is no
+     * ordering finer than the millisecond these rows are written in.
+     */
+    async function failureRows() {
+      return database
+        .select({ id: auditEvents.id, payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "mcp.call_failed"),
+            eq(auditEvents.targetType, "mcp_tool"),
+            eq(auditEvents.targetId, dynamicRef),
+          ),
+        );
+    }
+
+    /** Which credential the server row names, which is the thing a re-registration replaces. */
+    async function pointedAt() {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+      return row?.credentialId ?? null;
+    }
+
+    test("a call is refused, and the deployment's client is not replaced", async () => {
+      const planted = await putStoredBytes(MISSHAPEN);
+      await connect();
+      const registeredBefore = await registeredRows();
+      // The vendor would honour a fresh client, so registering is available here and would look
+      // like a recovery. The point is that it is never reached: there is nothing in this row for a
+      // vendor to refuse, so there is nothing to read as an eviction.
+      accepted = new Set([FRESH.clientId]);
+      issue = () => FRESH;
+
+      await expect(call()).rejects.toThrow(UNUSABLE);
+
+      // Refused before the exchange, so the vendor is never offered an `undefined` client id and
+      // never gets to answer `invalid_client` about it.
+      expect(offered).toEqual([]);
+      // And so the destructive remedy never runs. These are the property: a corrupt local row costs
+      // this one call, not every consent in the deployment.
+      expect(registrations).toEqual([]);
+      expect(await pointedAt()).toBe(planted);
+      expect((await registeredRows()).length).toBe(registeredBefore.length);
+    });
+
+    test("the refusal names the credential rather than carrying it", async () => {
+      await putStoredBytes(MISSHAPEN);
+      await connect();
+      accepted = new Set([FRESH.clientId]);
+      issue = () => FRESH;
+
+      const before = new Set((await failureRows()).map((row) => row.id));
+      const refusal = await call().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const written = JSON.stringify(
+        (await failureRows()).filter((row) => !before.has(row.id)),
+      );
+      // The same absence the unparseable row is held to: a misshapen value is still the decrypted
+      // client, and half of this one IS a client secret.
+      expect(written).not.toContain(`shh_notAClient_${suite}`);
+      // Never the eviction sentence either. It would claim a re-registration that did not happen
+      // and point the operator at the vendor instead of at the row.
+      expect(written).not.toContain("no longer recognises");
+      expect(written).toContain(UNUSABLE);
+      expect(refusal).toBeInstanceOf(PluginRefusedError);
+    });
+
+    /**
+     * The readers answer none, which is their existing contract for a value they cannot read.
+     *
+     * `ensureOAuthClient` consults the stored client first and then again under the lock, so both
+     * reads are on this path. Unguarded, the first hands back the misshapen object and a consent
+     * URL is built with an `undefined` client id — the person reaches a vendor screen for a client
+     * that does not exist. None is the answer that instead gets them a client that works.
+     */
+    test("the consent flow reads it as none and obtains one that works", async () => {
+      await putStoredBytes(MISSHAPEN);
+      issue = () => FRESH;
+
+      expect(await dynamicStore.oauthClientFor(dynamicServerId)).toBeNull();
+      expect(
+        await dynamicStore.ensureOAuthClient(
+          dynamicServerId,
+          "admin@openbot.test",
+        ),
+      ).toEqual(FRESH);
+    });
+  });
+
+  /**
    * The vault row and the pointer that names it commit together, or neither does.
    *
    * They were two transactions, so a failure between them left `mcp_user_credentials` naming a
