@@ -2195,7 +2195,8 @@ pub fn wait_until_answering(
             }
         }
 
-        api_up = api_up || answering_at(ready.api, "/api/capabilities").is_some();
+        // An earlier API success is no longer sufficient when the app becomes ready later.
+        api_up = answering_at(ready.api, "/api/capabilities").is_some();
         if api_up && app_url(ready.app).is_some() {
             return Ok(());
         }
@@ -2205,13 +2206,13 @@ pub fn wait_until_answering(
 
     if api_up {
         return Err(format!(
-            "the API is answering, but the app never did on port {}. {}",
+            "the API is answering, but the app is not answering on port {}. {}",
             ready.app,
             tail_of(logs, "app")
         ));
     }
     Err(format!(
-        "the API never answered on port {}. {}",
+        "the API is not answering on port {}. {}",
         ready.api,
         tail_of(logs, "server")
     ))
@@ -5262,6 +5263,199 @@ fn main() {
         crate::deployment::record(&empty, "fixture").unwrap();
         assert!(down(&Address::new(crate::engine::Engine::Docker, None), &empty).is_err());
         assert!(!record.exists());
+    }
+
+    struct ReadinessFixture {
+        root: PathBuf,
+        children: Vec<(&'static str, std::process::Child)>,
+        ready: Ready,
+    }
+
+    impl ReadinessFixture {
+        fn new(api: &str, app: &str) -> Self {
+            let root = temp_root("current-api-readiness");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut fixture = Self {
+                root,
+                children: Vec::new(),
+                ready: Ready { api: 0, app: 0 },
+            };
+            let source = fixture.root.join("readiness.rs");
+            std::fs::write(
+                &source,
+                r#"
+use std::io::{Read, Write};
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let name = &args[1];
+    let mode = &args[2];
+    let statuses: Vec<&str> = mode.split(',').collect();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    std::fs::write(format!("{name}.port"), listener.local_addr().unwrap().port().to_string()).unwrap();
+    let mut requests = std::fs::File::create(format!("{name}.requests")).unwrap();
+    for (index, stream) in listener.incoming().enumerate() {
+        let mut stream = stream.unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            if stream.read(&mut byte).unwrap() == 0 { break; }
+            request.push(byte[0]);
+        }
+        let status = if mode == "exit" { "503" } else { statuses[index.min(statuses.len() - 1)] };
+        writeln!(requests, "{status} {}", String::from_utf8_lossy(&request).lines().next().unwrap()).unwrap();
+        write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        if mode == "exit" { std::process::exit(17); }
+    }
+}
+"#,
+            )
+            .unwrap();
+            let binary = fixture
+                .root
+                .join(format!("readiness{}", std::env::consts::EXE_SUFFIX));
+            crate::test_support::compile_fixture(&source, &binary);
+            for (name, mode) in [("server", api), ("app", app)] {
+                std::fs::write(
+                    fixture.root.join(format!("{name}.log")),
+                    format!("synthetic {name} diagnostic"),
+                )
+                .unwrap();
+                fixture.children.push((
+                    name,
+                    Command::new(&binary)
+                        .args([name, mode])
+                        .current_dir(&fixture.root)
+                        .spawn()
+                        .unwrap(),
+                ));
+                let port_file = fixture.root.join(format!("{name}.port"));
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                let port = loop {
+                    if let Ok(port) = std::fs::read_to_string(&port_file) {
+                        if let Ok(port) = port.parse() {
+                            break port;
+                        }
+                    }
+                    assert!(fixture
+                        .children
+                        .last_mut()
+                        .unwrap()
+                        .1
+                        .try_wait()
+                        .unwrap()
+                        .is_none());
+                    assert!(std::time::Instant::now() < deadline, "fixture did not bind");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                };
+                if name == "server" {
+                    fixture.ready.api = port;
+                } else {
+                    fixture.ready.app = port;
+                }
+            }
+            fixture
+        }
+
+        fn wait(&mut self, patience: std::time::Duration) -> Result<(), String> {
+            wait_until_answering(&mut self.children, &self.root, &self.ready, patience)
+        }
+
+        fn requests(&self, name: &str) -> String {
+            std::fs::read_to_string(self.root.join(format!("{name}.requests"))).unwrap()
+        }
+    }
+
+    impl Drop for ReadinessFixture {
+        fn drop(&mut self) {
+            for (_, child) in &mut self.children {
+                let _ = child.kill();
+                child.wait().expect("owned HTTP fixture must be reaped");
+            }
+            for port in [self.ready.api, self.ready.app] {
+                assert!(!something_answers(port), "owned HTTP listener must close");
+            }
+            eprintln!(
+                "readiness fixture cleaned: pids={:?}; ports={:?}",
+                self.children
+                    .iter()
+                    .map(|(_, child)| child.id())
+                    .collect::<Vec<_>>(),
+                [self.ready.api, self.ready.app]
+            );
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn readiness_rechecks_api_after_an_earlier_success() {
+        let mut fixture = ReadinessFixture::new("200,503", "503,200");
+        let result = fixture.wait(std::time::Duration::from_secs(2));
+        let api_requests = fixture.requests("server");
+        let live = fixture
+            .children
+            .iter_mut()
+            .all(|(_, child)| child.try_wait().unwrap().is_none());
+        let api_now = answering_at(fixture.ready.api, "/api/capabilities");
+        let app_now = app_url(fixture.ready.app);
+        eprintln!("current API readiness: result={result:?}; children_alive={live}; api_requests={api_requests:?}; api_now={api_now:?}; app_now={app_now:?}");
+        drop(fixture);
+        assert!(live && api_now.is_none() && app_now.is_some());
+        let error = result.expect_err("a historical API success cannot satisfy readiness");
+        assert!(api_requests.lines().count() >= 2, "{api_requests}");
+        assert!(error.contains("the API is not answering"), "{error}");
+        assert!(error.contains("synthetic server diagnostic"), "{error}");
+    }
+
+    #[test]
+    fn readiness_accepts_currently_healthy_api_and_app() {
+        let mut fixture = ReadinessFixture::new("200", "200");
+        let result = fixture.wait(std::time::Duration::from_secs(2));
+        let api_requests = fixture.requests("server");
+        let app_requests = fixture.requests("app");
+        drop(fixture);
+        assert!(result.is_ok(), "{result:?}");
+        assert!(api_requests.contains("200 GET /api/capabilities HTTP/1.1"));
+        assert!(app_requests.contains("200 GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn readiness_timeout_names_the_currently_unavailable_service() {
+        for (api, app, missing) in [("503", "200", "server"), ("200", "503", "app")] {
+            let mut fixture = ReadinessFixture::new(api, app);
+            let result = fixture.wait(std::time::Duration::from_millis(100));
+            let port = if missing == "server" {
+                fixture.ready.api
+            } else {
+                fixture.ready.app
+            };
+            drop(fixture);
+            let error = result.unwrap_err();
+            let service = if missing == "server" { "API" } else { "app" };
+            assert!(
+                error.contains(&format!("the {service} is not answering on port {port}")),
+                "{error}"
+            );
+            assert!(
+                error.contains(&format!("synthetic {missing} diagnostic")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn readiness_reports_child_exit_without_waiting_for_timeout() {
+        let mut fixture = ReadinessFixture::new("exit", "200");
+        let started = std::time::Instant::now();
+        let result = fixture.wait(std::time::Duration::from_secs(30));
+        let elapsed = started.elapsed();
+        let status = fixture.children[0].1.try_wait().unwrap().unwrap();
+        drop(fixture);
+        let error = result.unwrap_err();
+        assert!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
+        assert_eq!(status.code(), Some(17));
+        assert!(error.contains("server stopped straight away"), "{error}");
+        assert!(error.contains("synthetic server diagnostic"), "{error}");
     }
 
     #[test]
