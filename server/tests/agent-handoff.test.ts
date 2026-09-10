@@ -341,6 +341,22 @@ describe("handing work to another Bot", () => {
     });
   });
 
+  test("a queued hop carries the run initiator to the delivery signer", async () => {
+    const started = desk();
+    await started.desk.send({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(started.rows[0]?.payload).toMatchObject({
+      fromBotId: "assistant",
+      toBotId: "researcher",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+  });
+
   test("a run that says nothing leaves the row filed as a person's", async () => {
     const plain = desk();
     await plain.desk.send({

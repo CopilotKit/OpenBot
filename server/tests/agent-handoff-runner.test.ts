@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  mintRunAssertion,
+  readRunAssertion,
+} from "../src/agents/callback-token";
+import {
   createHandoffRunner,
   type HandoffWork,
 } from "../src/agents/handoff-runner";
@@ -12,6 +16,8 @@ import type { WorkItem, WorkQueue } from "../src/work/queue";
  * Running the other Bot twice for one hop. Finishing work that is no longer this replica's. And
  * letting a lease lapse in the middle of a run, which is the same as the first with extra steps.
  */
+
+const KEY = "test-encryption-key-not-a-real-one";
 
 const WORK: HandoffWork = {
   fromBotId: "assistant",
@@ -88,7 +94,18 @@ function runner(options?: {
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
-      sign: (work) => `signed:${work.toBotId}:${work.depth}`,
+      sign: (work) =>
+        mintRunAssertion(
+          {
+            botId: work.toBotId,
+            actorId: work.actorId,
+            runId: "delivery-run",
+            threadId: work.threadId,
+            depth: work.depth,
+            ...(work.initiator ? { initiator: work.initiator } : {}),
+          },
+          KEY,
+        ),
       auditStore,
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
@@ -135,7 +152,46 @@ describe("delivering a hop", () => {
 
     await sweep.sweep();
 
-    expect(delivered[0]?.assertion).toBe("signed:researcher:1");
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      depth: 1,
+    });
+  });
+
+  test("the delivery assertion preserves the run initiator across the queue", async () => {
+    const { runner: sweep, delivered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: {
+            ...WORK,
+            initiator: { kind: "routine", id: "routine_7" },
+          },
+          attempts: 1,
+        },
+      ],
+    });
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      actorId: "user-1",
+      threadId: "thread-1",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+  });
+
+  test("a legacy queued hop without an initiator is still read as a person's", async () => {
+    const { runner: sweep, delivered } = runner();
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)?.initiator).toEqual({
+      kind: "person",
+    });
   });
 
   /*

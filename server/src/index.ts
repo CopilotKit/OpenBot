@@ -903,6 +903,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
           runId: randomUUID(),
           threadId: work.threadId,
           depth: work.depth,
+          ...(work.initiator ? { initiator: work.initiator } : {}),
         },
         config.keyEncryptionKey,
       ),
