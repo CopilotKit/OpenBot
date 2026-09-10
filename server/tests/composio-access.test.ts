@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { accessFor } from "../src/plugins/access";
 import type { CatalogueEntry } from "../src/plugins/catalogue";
-import { catalogueEntry } from "../src/plugins/catalogue";
+import { catalogueEntry, resolveServerUrl } from "../src/plugins/catalogue";
 
 /**
  * How a server row is reached, resolved once.
@@ -74,12 +74,19 @@ describe("accessFor", () => {
   });
 
   test("Routines is in-process, with no credential, and acts as the person", () => {
-    const routines = catalogueEntry("routines");
-    if (!routines) return;
+    // Resolved the way a row is written rather than spelled by hand. The url this used to carry —
+    // `openbot://routines` — is a scheme this codebase does not have anywhere, so the row shape the
+    // test claims to cover was not the one being passed in.
+    const routines = resolveServerUrl("routines");
+    if (!routines) {
+      throw new Error(
+        "catalogue slug `routines` no longer resolves, so this test asserts nothing about it",
+      );
+    }
     expect(
       accessFor(
-        { provenance: "first-party", url: "openbot://routines" },
-        routines,
+        { provenance: "first-party", url: routines.url },
+        routines.entry,
       ),
     ).toEqual({
       transport: "builtin-routines",
@@ -98,7 +105,10 @@ describe("accessFor", () => {
       title: "Public Thing",
       vendor: "Somebody",
       summary: "A server that answers without being told who is asking.",
-      host: "mcp.example.com",
+      // Scheme included, because every non-builtin entry carries one — pinned by
+      // `plugin-catalogue.test.ts`. A bare host here made this stand for an entry the catalogue
+      // would reject, and the row url below is joined from it so the two cannot drift apart.
+      host: "https://mcp.example.com",
       path: "/mcp",
       auth: { kind: "none" },
       writeTools: [],
@@ -106,7 +116,10 @@ describe("accessFor", () => {
     };
     expect(
       accessFor(
-        { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+        {
+          provenance: "first-party",
+          url: `${publicEntry.host}${publicEntry.path}`,
+        },
         publicEntry,
       ),
     ).toEqual({
@@ -119,7 +132,14 @@ describe("accessFor", () => {
 
   test("a curated entry wins over provenance, so a slug cannot be shadowed into a broker", () => {
     const notion = catalogueEntry("notion");
-    if (!notion) return;
+    // Thrown rather than returned. A missing slug here does not make the property hold, it makes
+    // this test stop checking it — and the whole point of the test is that the protection is never
+    // unguarded. Renaming the slug must break this file, not quietly empty it.
+    if (!notion) {
+      throw new Error(
+        "catalogue slug `notion` is gone, so nothing here checks that an entry beats provenance",
+      );
+    }
     // A row whose provenance was tampered with must not turn a reviewed vendor into a brokered one,
     // and must not acquire an app at the broker either — a url edited to `composio://gmail` on a
     // curated slug is the same tampering by another field.
