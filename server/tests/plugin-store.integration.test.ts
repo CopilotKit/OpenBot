@@ -4657,19 +4657,25 @@ test("a granted Composio action that the vendor withdrew is still shown as grant
 });
 
 /*
- * A refresh that listed nothing, on the path every real deployment takes.
+ * A refresh the transport REFUSED, on the path every real deployment takes.
  *
  * NOTHING IN THE SHIPPED PRODUCT CALLS `useComposioClient`, so `installed` is null on every live
- * install and the Composio transport answers `[]` — not a throw — for want of a client to ask with.
- * The tests below install no stub, which is that state exactly rather than a fiction about it.
+ * install and `composio.listTools` throws for want of a client to ask with. The tests below install
+ * no stub, which is that state exactly rather than a fiction about it.
  *
- * A wholesale replace on that answer deletes what the last real listing recorded, and `version` is
- * the column that cannot be reconstructed: `callTool` refuses without it, so an app whose actions
- * were dropped this way stops working for everybody until somebody presses Refresh on a deployment
- * that can actually reach the vendor. The grants survive the delete pointing at rows that no longer
- * exist, which is invisible on the Plugins page and revived by the next refresh that works.
+ * THE PREMISE THIS DESCRIBE USED TO STATE — that the transport answers `[]` rather than throwing —
+ * WAS TRUE AND IS NOT. It was corrected at the seam, deliberately: a transport that could not ask
+ * anybody must throw, because an empty answer is indistinguishable from an app that genuinely
+ * publishes nothing. These three cases therefore land in `refreshTools`'s vendor `catch`, which
+ * records the sentence and returns before the replace — and they say nothing whatever about the
+ * empty-listing guard below it, which is what the describe after this one is for. Two suites
+ * asserting the same three outcomes through different branches is how that guard came to be
+ * deletable with every test still green.
+ *
+ * What is under test here is the catch branch's own promise: a listing that could not be made
+ * leaves every recorded action where it is, stamps no refresh, and withdraws nothing.
  */
-describe("a refresh whose transport could not ask anybody", () => {
+describe("a refresh whose transport refused to ask anybody", () => {
   test("leaves the actions the app already advertises, with what the vendor said about them", async () => {
     const { store, database } = await freshStore();
     await seedComposioGmail(database, store);
@@ -4710,9 +4716,18 @@ describe("a refresh whose transport could not ask anybody", () => {
       .from(mcpServers)
       .where(eq(mcpServers.id, "gmail"));
 
-    // Not cleared. An empty answer from a transport that reached no vendor is not evidence that
-    // whatever was wrong before has been put right.
-    expect(row?.lastError).not.toBeNull();
+    /*
+     * The transport's own sentence, named rather than merely counted as present.
+     *
+     * `not.toBeNull()` was what this asserted, and the refresh had in fact OVERWRITTEN the value
+     * the test set up two lines earlier — so "not cleared" passed on a different string than the
+     * one it was about, and would have gone on passing had the column been filled with anything at
+     * all, the empty-listing guard's sentence included. Which sentence is here is the whole
+     * difference between "nobody could be asked" and "the app was asked and offers nothing", and
+     * those send an operator to different places.
+     */
+    expect(row?.lastError).toContain("Composio is not configured");
+    expect(row?.lastError).not.toBe("The vendor would not answer.");
     // And no refresh stamp, because nothing was listed: the column says when this deployment last
     // learned what the app offers, and it did not learn it here.
     expect(row?.toolsRefreshedAt).toBeNull();
@@ -4766,6 +4781,120 @@ describe("a refresh whose transport could not ask anybody", () => {
 
     // The state is this deployment's own, so it must not be written down as something a vendor did.
     expect(row?.lastError).toBeNull();
+  });
+});
+
+/**
+ * THE VENDOR ITSELF ANSWERING NOTHING, which is the state the empty-listing guard exists for.
+ *
+ * WHAT THIS COVERS THAT NOTHING ELSE DOES. The guard sits after the vendor `catch` and before the
+ * wholesale replace, and only a listing that was actually MADE and came back empty reaches it. The
+ * describe above cannot: its transport throws, so it returns from the catch several lines earlier.
+ * With those three cases routed around it, `if (listed.length === 0)` could be replaced by
+ * `if (false)` — deleting the guard outright — and the whole suite stayed green. Everything below
+ * reddens under that mutation, which is the only thing that makes the guard's presence a fact
+ * about this codebase rather than a comment in it.
+ *
+ * WHY IT MATTERS. The replace is a delete and an insert, so committing an empty answer deletes
+ * every `mcp_tools` row for the app and takes `effect`, `destructive` and `version` with it.
+ * `version` cannot be reconstructed — `callTool` refuses an action without one — so a refresh that
+ * reported success broke every later call, with the grants left pointing at rows that no longer
+ * exist. A stub that answers `[]` is a vendor's honest answer and is exactly what an app that has
+ * been emptied at the broker looks like; keeping what is held is the only reading that is
+ * recoverable if it is wrong.
+ */
+describe("a refresh the vendor answered with no actions at all", () => {
+  /** A client that answers, and answers nothing — which no throw can stand in for. */
+  function useEmptyAnsweringClient() {
+    useComposioClient({
+      listActions: async () => [],
+      execute: async () => vendorAnswered(),
+    });
+  }
+
+  test("keeps every action already recorded, with what the vendor said about them", async () => {
+    const { store, database } = await freshStore();
+    useEmptyAnsweringClient();
+    await seedComposioGmail(database, store);
+
+    // The honest count is what is HELD, because nothing was replaced. Answering 0 here would tell
+    // the page the app offers nothing while the rows are still there.
+    expect(await store.refreshTools("gmail", "admin_user")).toEqual({
+      tools: 1,
+    });
+
+    const rows = await database
+      .select({
+        name: mcpTools.name,
+        effect: mcpTools.effect,
+        version: mcpTools.version,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"));
+
+    // The version above all: it is what `callTool` sends, so losing it breaks every later call on
+    // an app the refresh reported as fine.
+    expect(rows).toEqual([
+      { name: "GMAIL_FETCH_EMAILS", effect: "read", version: "20260903_00" },
+    ]);
+  });
+
+  test("says the actions were kept, and does not stamp a refresh", async () => {
+    const { store, database } = await freshStore();
+    useEmptyAnsweringClient();
+    await seedComposioGmail(database, store);
+
+    await store.refreshTools("gmail", "admin_user");
+
+    const [row] = await database
+      .select({
+        lastError: mcpServers.lastError,
+        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, "gmail"));
+
+    /*
+     * The sentence for THIS state and not the other one. The app answered, so nothing here may
+     * send an operator to check their configuration — that is the refused transport's sentence,
+     * and the describe above asserts that one. What this reader needs to know is that the app
+     * listed nothing and that the actions it holds were not deleted over it.
+     */
+    expect(row?.lastError).not.toBeNull();
+    expect(row?.lastError).toContain("kept rather than deleted");
+    // No stamp: the column says when this deployment last learned what the app offers, and an
+    // answer it declined to believe is not it.
+    expect(row?.toolsRefreshedAt).toBeNull();
+  });
+
+  test("withdraws nothing and strands no grant", async () => {
+    const { store, database, auditStore } = await freshStore();
+    useEmptyAnsweringClient();
+    await seedComposioGmail(database, store);
+
+    await store.refreshTools("gmail", "admin_user");
+
+    const gmail = (await store.listServers()).find(
+      (server) => server.id === "gmail",
+    );
+
+    // Still offered and still not withdrawn.
+    expect(gmail?.tools.map((tool) => tool.ref)).toEqual([
+      "gmail/GMAIL_FETCH_EMAILS",
+    ]);
+    expect(gmail?.withdrawn).toEqual([]);
+    // Nor filed as having stopped being offered. That row is written from the listing, so an empty
+    // one committed would name every grant the app holds — the trail asserting a withdrawal on
+    // exactly the answer this deployment decided not to believe.
+    expect(
+      auditStore
+        .recorded()
+        .filter(
+          (event) =>
+            (event.payload as { change?: string }).change ===
+            "grants_not_advertised",
+        ),
+    ).toEqual([]);
   });
 });
 
