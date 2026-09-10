@@ -133,6 +133,11 @@ export function effectOf(tags: readonly string[] | undefined): {
  * An action with no schema is still listed, with an open one. The vendor is the right party to reject a
  * bad argument, and an action silently missing from the list reads to an administrator as an app that
  * does not have it.
+ *
+ * A listing that could not be read at all is a THROW rather than an empty list, for the same reason
+ * turned around: an empty list is what an app with no actions looks like, so answering emptily would
+ * report a success and strand every grant. What throws is a sentence, never a vendor object. See the
+ * catch below.
  */
 export async function listTools(connection: {
   url: string;
@@ -140,7 +145,26 @@ export async function listTools(connection: {
   const toolkit = toolkitOf(connection.url);
   if (!toolkit || !installed) return [];
 
-  const actions = await installed.listActions(toolkit);
+  let actions: ComposioAction[];
+  try {
+    actions = await installed.listActions(toolkit);
+  } catch (error) {
+    /*
+     * THROWN, NOT ANSWERED EMPTY, and with a sentence rather than the vendor's raw object.
+     *
+     * The two candidate behaviours are not equivalent. `refreshTools` records a throw in the row's
+     * `lastError` and leaves the tools it already holds alone; an empty answer is indistinguishable
+     * from an app that genuinely publishes no actions, so it would report a success and leave every
+     * grant pointing at a name nothing advertises. So a listing this deployment could not read must
+     * propagate.
+     *
+     * What propagates is a sentence. `refreshTools` puts `error.message` on the admin page, and a
+     * `ToolSchema` mismatch's message is the Zod issue array as JSON — an operator reading 400
+     * characters of `{"code":"invalid_type","path":[...]}` learns nothing they can act on, and the
+     * same string was reaching a model's context. The original is kept as `cause` for a log.
+     */
+    throw new Error(listingSentence(toolkit, error), { cause: error });
+  }
 
   return actions.map((action) => {
     const { effect, destructive } = effectOf(action.tags);
@@ -177,6 +201,42 @@ export function vendorSentence(error: unknown): string | null {
   const inner = (outer as { error?: unknown } | null | undefined)?.error;
   const message = (inner as { message?: unknown } | null | undefined)?.message;
   return typeof message === "string" && message.trim() !== "" ? message : null;
+}
+
+/**
+ * Whether a thrown listing failure is the SDK's own schema refusing the vendor's answer.
+ *
+ * Duck-typed rather than `instanceof ZodError` so this file keeps no dependency on the vendor's
+ * package: `@composio/core` reaches it only through {@link useComposioClient}, and importing `zod`
+ * here would tie the transport to whichever major version the vendor happens to bundle — which is
+ * exactly the coupling that makes a schema mismatch possible in the first place.
+ */
+function isSchemaMismatch(error: unknown): boolean {
+  const shaped = error as
+    | { name?: unknown; issues?: unknown }
+    | null
+    | undefined;
+  return shaped?.name === "ZodError" || Array.isArray(shaped?.issues);
+}
+
+/**
+ * Why an app's action list could not be read, as one sentence an operator can act on.
+ *
+ * The schema case names the fix, because it is a vendor change rather than a misconfiguration: the
+ * answer arrived and this deployment's copy of their SDK would not accept it, so nothing an
+ * administrator can do to this row will help and upgrading the package will.
+ */
+function listingSentence(toolkit: string, error: unknown): string {
+  if (isSchemaMismatch(error)) {
+    return `Composio's action list for ${toolkit} did not match the shape this deployment's @composio/core accepts, so the list was not refreshed and the tools already held are untouched. That is a vendor change rather than a setting: upgrading the package is the fix.`;
+  }
+  const thrown = error instanceof Error ? error.message.trim() : "";
+  return (
+    vendorSentence(error) ??
+    (thrown === ""
+      ? `Composio did not answer with an action list for ${toolkit}.`
+      : thrown)
+  );
 }
 
 const failure = (message: string): McpCallResult => ({

@@ -211,6 +211,41 @@ describe("listing an app's actions", () => {
   test("listing with no client installed is empty rather than a crash", async () => {
     expect(await listTools({ url: "composio://gmail" })).toEqual([]);
   });
+
+  test("a listing the vendor's own schema rejects throws a sentence, not a Zod dump", async () => {
+    const issues = [
+      {
+        code: "invalid_type",
+        expected: "string",
+        received: "number",
+        path: ["slug"],
+        message: "Expected string, received number",
+      },
+    ];
+    useComposioClient(
+      recording({
+        listActions: async () => {
+          // What `ToolSchema` throws: `message` is the issue array as JSON, which is what would land
+          // in `lastError` and, before `refreshTools` existed, in a model's context.
+          throw Object.assign(new Error(JSON.stringify(issues, null, 2)), {
+            name: "ZodError",
+            issues,
+          });
+        },
+      }).client,
+    );
+
+    const listing = listTools({ url: "composio://gmail" });
+
+    // Propagated rather than answered empty, because `refreshTools` records a throw in `lastError`
+    // and leaves the tools it already holds alone. An empty answer would read as an app that has no
+    // actions, and every grant would point at a name nothing advertises.
+    await expect(listing).rejects.toThrow(/did not match/i);
+
+    const thrown = await listing.catch((error: unknown) => error);
+    expect(String((thrown as Error).message)).not.toContain("invalid_type");
+    expect(String((thrown as Error).message)).toContain("gmail");
+  });
 });
 
 describe("calling one action", () => {
