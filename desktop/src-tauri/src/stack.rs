@@ -2042,7 +2042,7 @@ nothing on this machine binds.
 */
 pub fn published_in(listing: &str) -> std::collections::HashSet<u16> {
     let mut ports = std::collections::HashSet::new();
-    for mapping in listing.split(',') {
+    for mapping in listing.lines().flat_map(|row| row.split(',')) {
         let Some((host, _)) = mapping.split_once("->") else {
             continue;
         };
@@ -4858,6 +4858,45 @@ fn main() {
             !found.contains(&5432),
             "the container's own port was taken as published"
         );
+        assert_eq!(found, std::collections::HashSet::from([4200, 4206, 5544]));
+    }
+
+    #[test]
+    fn published_ports_include_every_ipv4_only_row() {
+        let listing = "127.0.0.1:4200->3000/tcp\r\n\
+                       \r\n\
+                       127.0.0.1:4206->3001/tcp\r\n\
+                       127.0.0.1:5544->5432/tcp\r\n";
+        assert_eq!(
+            published_in(listing),
+            std::collections::HashSet::from([4200, 4206, 5544])
+        );
+    }
+
+    #[test]
+    fn multiline_published_ports_exempt_owned_listeners_but_reject_foreign_listener() {
+        let listeners = [(); 4].map(|()| std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+        let [first, second, third, foreign] = listeners
+            .each_ref()
+            .map(|listener| listener.local_addr().unwrap().port());
+        let listing = format!(
+            "127.0.0.1:{first}->{foreign}/tcp\n\
+             127.0.0.1:{second}->{foreign}/tcp\n\
+             127.0.0.1:{third}->{foreign}/tcp\n"
+        );
+        let ours = published_in(&listing);
+        let owned_ports = [("API server", first), ("Bot", second), ("Database", third)];
+
+        assert!(port_already_taken(&owned_ports).is_some());
+        assert_eq!(
+            port_already_taken_except(&owned_ports, &ours),
+            None,
+            "every published host port must be exempted across all Compose rows"
+        );
+        let problem = port_already_taken_except(&[("Foreign server", foreign)], &ours)
+            .expect("a container-side port must not exempt an unrelated host listener");
+        assert!(problem.contains(&foreign.to_string()), "{problem}");
+        assert!(problem.contains("Foreign server"), "{problem}");
     }
 
     /// A service with no published ports says nothing rather than confusing the parser.
