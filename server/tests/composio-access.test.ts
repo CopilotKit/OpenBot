@@ -20,18 +20,27 @@ import { catalogueEntry } from "../src/plugins/catalogue";
 describe("accessFor", () => {
   test("a Composio app is dialled through Composio, brokered, and reached as the person", () => {
     // No entry, because an app an operator enabled is a row and not something we shipped.
-    expect(accessFor({ provenance: "composio" }, null)).toEqual({
+    expect(
+      accessFor({ provenance: "composio", url: "composio://gmail" }, null),
+    ).toEqual({
       transport: "composio",
       credential: "brokered",
       reachedAs: "person",
+      toolkit: "gmail",
     });
   });
 
   test("a server somebody added by URL is MCP, on the deployment's own token", () => {
-    expect(accessFor({ provenance: "custom" }, null)).toEqual({
+    expect(
+      accessFor(
+        { provenance: "custom", url: "https://mcp.example.com/mcp" },
+        null,
+      ),
+    ).toEqual({
       transport: "mcp",
       credential: "deployment-token",
       reachedAs: "deployment",
+      toolkit: null,
     });
   });
 
@@ -39,30 +48,44 @@ describe("accessFor", () => {
     const notion = catalogueEntry("notion");
     expect(notion).not.toBeNull();
     if (!notion) return;
-    expect(accessFor({ provenance: "first-party" }, notion)).toEqual({
+    const notionUrl = `https://${notion.host}${notion.path}`;
+    expect(
+      accessFor({ provenance: "first-party", url: notionUrl }, notion),
+    ).toEqual({
       transport: "mcp",
       credential: "person-oauth",
       reachedAs: "person",
+      toolkit: null,
     });
   });
 
   test("Drive is its REST adapter, on the asking person's own grant", () => {
     const drive = catalogueEntry("google-drive");
     if (!drive) return;
-    expect(accessFor({ provenance: "first-party" }, drive)).toEqual({
+    const driveUrl = `https://${drive.host}${drive.path}`;
+    expect(
+      accessFor({ provenance: "first-party", url: driveUrl }, drive),
+    ).toEqual({
       transport: "google-drive-rest",
       credential: "person-oauth",
       reachedAs: "person",
+      toolkit: null,
     });
   });
 
   test("Routines is in-process, with no credential, and acts as the person", () => {
     const routines = catalogueEntry("routines");
     if (!routines) return;
-    expect(accessFor({ provenance: "first-party" }, routines)).toEqual({
+    expect(
+      accessFor(
+        { provenance: "first-party", url: "openbot://routines" },
+        routines,
+      ),
+    ).toEqual({
       transport: "builtin-routines",
       credential: "none",
       reachedAs: "person",
+      toolkit: null,
     });
   });
 
@@ -81,20 +104,50 @@ describe("accessFor", () => {
       writeTools: [],
       docsUrl: "https://example.com/docs",
     };
-    expect(accessFor({ provenance: "first-party" }, publicEntry)).toEqual({
+    expect(
+      accessFor(
+        { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+        publicEntry,
+      ),
+    ).toEqual({
       transport: "mcp",
       credential: "none",
       reachedAs: "deployment",
+      toolkit: null,
     });
   });
 
   test("a curated entry wins over provenance, so a slug cannot be shadowed into a broker", () => {
     const notion = catalogueEntry("notion");
     if (!notion) return;
-    // A row whose provenance was tampered with must not turn a reviewed vendor into a brokered one.
-    expect(accessFor({ provenance: "composio" }, notion).transport).toBe("mcp");
-    expect(accessFor({ provenance: "composio" }, notion).credential).toBe(
-      "person-oauth",
+    // A row whose provenance was tampered with must not turn a reviewed vendor into a brokered one,
+    // and must not acquire an app at the broker either — a url edited to `composio://gmail` on a
+    // curated slug is the same tampering by another field.
+    const shadowed = accessFor(
+      { provenance: "composio", url: "composio://gmail" },
+      notion,
     );
+    expect(shadowed.transport).toBe("mcp");
+    expect(shadowed.credential).toBe("person-oauth");
+    expect(shadowed.toolkit).toBeNull();
+  });
+
+  test("which app a Composio row is comes from its url, not from its id", () => {
+    // The id is a display key and the url is what the transport dials, so the url is what decides.
+    // A row named `gmail` at `composio://slack` used to be checked against a Gmail connection and
+    // then run as Slack, because three places derived this fact and none of them compared answers.
+    expect(
+      accessFor({ provenance: "composio", url: "composio://slack" }, null)
+        .toolkit,
+    ).toBe("slack");
+
+    // No app in the url is no app at all. `store.ts` refuses a brokered row that reaches it, rather
+    // than falling back to the id — see the narrowing throw beside its connection gate.
+    expect(
+      accessFor(
+        { provenance: "composio", url: "https://example.com/mcp" },
+        null,
+      ).toolkit,
+    ).toBeNull();
   });
 });

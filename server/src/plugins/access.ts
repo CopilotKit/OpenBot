@@ -1,14 +1,22 @@
 import type { CatalogueEntry } from "./catalogue";
+import { toolkitOf } from "./composio";
 import type { TransportKind } from "./transport";
 
 /**
- * How one server row is reached: which protocol, whose credential, and whose name the trail records.
+ * How one server row is reached: which protocol, whose credential, which app at a broker, and whose
+ * name the trail records.
  *
  * WHY THIS EXISTS AS ONE THING. These three questions were asked separately, in three places, each
  * deriving its own answer from whichever field was nearest. That was complete while every server
  * either had a frozen catalogue entry or was somebody's MCP endpoint. A Composio app is neither: it
  * is a row an operator enabled, with no entry to carry a transport field and no OAuth kind to read,
  * so all three questions answered wrongly by default and each failed silently in its own direction.
+ *
+ * The fourth question arrived the same way. Which app a brokered row is was read from the row id by
+ * the gate that checks whether a person has connected it, from the url by the transport that dials
+ * it, and described as a third thing by the schema column that records the connection — with nothing
+ * comparing the three, so a row whose id and url slug differed was checked against one app and run
+ * against another.
  *
  * Resolved once, here, and read as a field everywhere else. A fourth kind of server cannot be added
  * without filling in this function, and the test beside it enumerates every row shape that exists —
@@ -43,6 +51,20 @@ export type ServerAccess = {
    * naming the asker would assert an attribution that does not exist.
    */
   reachedAs: "person" | "deployment";
+  /**
+   * Which app at the broker this row is, and null for a row that is not brokered at all.
+   *
+   * Read from the URL, because the URL is what the transport dials — so the app a person is checked
+   * against is the same app the call runs in, by construction rather than by two spellings agreeing.
+   * The row id is a display key: it is what an operator sees and what a grant names, and nothing
+   * keeps it equal to the slug in the URL. Deriving the app from it meant a row could pass the "has
+   * this person connected this app" gate on one spelling and run against another.
+   *
+   * Null everywhere else, because there is no app: an MCP endpoint and a per-person OAuth vendor are
+   * reached at an address, not at a broker, and a caller that finds null where it needs a toolkit is
+   * looking at a row it should not be brokering.
+   */
+  toolkit: string | null;
 };
 
 const CREDENTIAL_BY_AUTH: Record<
@@ -91,7 +113,7 @@ const REACHED_AS_BY_AUTH: Record<
  * somebody else's MCP endpoint by definition, reached on the one token the deployment holds for it.
  */
 export function accessFor(
-  row: { provenance: string },
+  row: { provenance: string; url: string },
   entry: CatalogueEntry | null,
 ): ServerAccess {
   if (entry) {
@@ -99,6 +121,7 @@ export function accessFor(
       transport: entry.transport ?? "mcp",
       credential: CREDENTIAL_BY_AUTH[entry.auth.kind],
       reachedAs: REACHED_AS_BY_AUTH[entry.auth.kind],
+      toolkit: null,
     };
   }
 
@@ -107,6 +130,7 @@ export function accessFor(
       transport: "composio",
       credential: "brokered",
       reachedAs: "person",
+      toolkit: toolkitOf(row.url),
     };
   }
 
@@ -114,5 +138,6 @@ export function accessFor(
     transport: "mcp",
     credential: "deployment-token",
     reachedAs: "deployment",
+    toolkit: null,
   };
 }

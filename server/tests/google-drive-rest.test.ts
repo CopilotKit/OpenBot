@@ -49,8 +49,12 @@ describe("the adapter is the transport the catalogue asks for", () => {
     expect(entry?.transport).toBe("google-drive-rest");
     // Identity, not shape: proves the registry wired this module rather than something MCP-shaped.
     expect(
-      transportFor(accessFor({ provenance: "first-party" }, entry).transport)
-        .callTool,
+      transportFor(
+        accessFor(
+          { provenance: "first-party", url: "https://www.googleapis.com" },
+          entry,
+        ).transport,
+      ).callTool,
     ).toBe(callTool);
   });
 
@@ -59,8 +63,12 @@ describe("the adapter is the transport the catalogue asks for", () => {
     // Composed through `accessFor`, which is where the absent-entry fallback now lives — and asserted
     // as MCP rather than as "not Drive", which any wrongly resolved kind would also satisfy.
     expect(
-      transportFor(accessFor({ provenance: "custom" }, null).transport)
-        .callTool,
+      transportFor(
+        accessFor(
+          { provenance: "custom", url: "https://mcp.example.com/mcp" },
+          null,
+        ).transport,
+      ).callTool,
     ).toBe(mcpCallTool);
   });
 

@@ -3440,17 +3440,21 @@ async function freshStore() {
  * `version: null` is the action Composio listed without one — a granted, callable row whose version
  * column is null, which is a state the vendor's own optional field produces rather than a leftover
  * from before the column existed.
+ *
+ * `url` is an option because the id and the url are two fields and nothing holds them equal: a row
+ * called `gmail` at `composio://slack` is the shape that used to pass the connection gate on one
+ * spelling and run against the other. The connected person is still connected to `gmail`.
  */
 async function seedComposioGmail(
   database: Database,
   store: PluginStore,
-  options: { connect?: boolean; version?: string | null } = {},
+  options: { connect?: boolean; version?: string | null; url?: string } = {},
 ) {
   await database.insert(mcpServers).values({
     id: "gmail",
     title: "Gmail",
     vendor: "Composio",
-    url: "composio://gmail",
+    url: options.url ?? "composio://gmail",
     provenance: "composio",
   });
   await database.insert(mcpTools).values({
@@ -3659,6 +3663,36 @@ test("a Composio call by somebody who has not connected the app is refused with 
 
   // Refused here rather than at Composio, so a person is told what to do instead of being shown
   // somebody else's error, and so no call is spent finding out.
+  expect(reached).toEqual([]);
+});
+
+test("a Composio call whose row id and url name different apps is refused", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return {};
+    },
+  });
+  // The row is called `gmail` and the person has connected `gmail`; the url dials Slack, which is
+  // the app the call would actually run in.
+  await seedComposioGmail(database, store, { url: "composio://slack" });
+
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "user_asker",
+    }),
+  ).rejects.toThrow(/connect it in settings/i);
+
+  // The gate keys on the app the url names, because that is the app the transport dials. Keyed on
+  // the row id, this call completed: it ran a Slack action against a Gmail connection, sent the
+  // version recorded for the Gmail action, and was audited as having reached the asker's own
+  // account — a person granted one app and dialled into another with nothing noticing.
   expect(reached).toEqual([]);
 });
 

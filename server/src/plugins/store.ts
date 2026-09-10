@@ -805,12 +805,38 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
+      /*
+       * Narrowing, not a second decision.
+       *
+       * `access.toolkit` is the app slug read off this row's url in `access.ts`, and it is non-null
+       * for every row whose credential resolved to `brokered` — but the descriptor declares it
+       * nullable because every other kind of row has no broker to name an app at, and the compiler
+       * cannot follow the credential back to the url it was derived beside.
+       *
+       * A throw rather than a fallback, for the reason the `user-oauth` narrowing below throws: both
+       * alternatives fail open. Falling back to `row.id` checks the connection against a spelling
+       * nothing dials, and skipping the gate spends the deployment's shared key on a connector whose
+       * whole purpose is to keep one person's account out of another's.
+       */
+      if (!access.toolkit) {
+        throw new Error(
+          `${row.id} resolves to a brokered credential with no Composio app in its url.`,
+        );
+      }
+
+      /*
+       * Keyed on the app the call will run in, which is the one the url names.
+       *
+       * `row.id` is a display key and nothing holds it equal to the slug in the url, so a row named
+       * `gmail` at `composio://slack` passed this gate on a Gmail connection and then ran a Slack
+       * action — the person having connected an app they were never asked about.
+       */
       const [connected] = await database
         .select({ toolkit: composioConnections.toolkit })
         .from(composioConnections)
         .where(
           and(
-            eq(composioConnections.toolkit, row.id),
+            eq(composioConnections.toolkit, access.toolkit),
             eq(composioConnections.userId, actorId),
           ),
         )
