@@ -424,14 +424,59 @@ fn record_windows_host_processes_with(
     processes: &[(&str, u32)],
     powershell: &Path,
 ) -> Result<(), Problem> {
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not verify its Windows host process ownership.",
+            format!(
+                "{}: {detail}; ownership records retained",
+                host_pids_path(root).display()
+            ),
+        )
+    };
+    let mut seen_names = std::collections::HashSet::new();
+    let mut seen_pids = std::collections::HashSet::new();
+    for (name, pid) in processes {
+        if !HOST_PROCESSES.iter().any(|process| process.name == *name) {
+            return Err(problem(format!("unknown host launch {name}, pid {pid}")));
+        }
+        if !seen_names.insert(*name) || !seen_pids.insert(*pid) {
+            return Err(problem(format!("duplicate host launch {name}, pid {pid}")));
+        }
+    }
+
     let snapshot = windows_processes_with(powershell)?;
-    let records: Vec<RecordedHostProcess> = processes
-        .iter()
-        .filter_map(|(name, pid)| {
-            let live = snapshot.iter().find(|process| process.process_id == *pid)?;
-            RecordedHostProcess::from_live(name, live)
-        })
-        .collect();
+    let mut records = Vec::with_capacity(processes.len());
+    for (name, pid) in processes {
+        let matches: Vec<_> = snapshot
+            .iter()
+            .filter(|process| process.process_id == *pid)
+            .collect();
+        let live = match matches.as_slice() {
+            [] => {
+                return Err(problem(format!(
+                    "host {name}, pid {pid} is missing from the process inventory"
+                )));
+            }
+            [live] => *live,
+            _ => {
+                return Err(problem(format!(
+                    "host {name}, pid {pid} appeared more than once in the process inventory"
+                )));
+            }
+        };
+        let record = RecordedHostProcess::from_live(name, live)
+            .filter(|record| {
+                !record.executable_path.is_empty()
+                    && !record.command_line.is_empty()
+                    && !record.creation_date.is_empty()
+            })
+            .ok_or_else(|| {
+                problem(format!(
+                    "host {name}, pid {pid} has incomplete process identity metadata"
+                ))
+            })?;
+        records.push(record);
+    }
     write_host_pid_file(
         root,
         &serde_json::json!({ "version": 1, "processes": records }),
@@ -3340,6 +3385,250 @@ fn main() {
                 verified_openbot_root_pids(std::slice::from_ref(&recorded), &[live]).is_empty()
             );
         }
+    }
+
+    #[test]
+    fn windows_recording_refuses_partial_inventory_without_replacing_pidfile() {
+        let root = temp_root("windows-record-partial-inventory");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = br#"{"version":1,"processes":[{"name":"server","pid":7000,"executable_path":"prior.exe","command_line":"prior","creation_date":"prior-created"}]}"#;
+        std::fs::write(&path, prior).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun src/index.ts","CreationDate":"created-server"},
+                {"ProcessId":44,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun src/index.ts","CreationDate":"created-worker"},
+                {"ProcessId":999,"ParentProcessId":0,"ExecutablePath":"other.exe","CommandLine":"other","CreationDate":"created-other"}
+            ])).unwrap(),
+        )
+        .unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 43), ("worker", 44)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("a missing requested live pid must not produce partial ownership evidence");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("app") && detail.contains("43"), "{detail}");
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_refuses_incomplete_identity_without_replacing_pidfile() {
+        for (field, value) in [
+            ("ExecutablePath", serde_json::Value::Null),
+            ("CommandLine", serde_json::Value::Null),
+            ("CreationDate", serde_json::Value::String(String::new())),
+        ] {
+            let root = temp_root("windows-record-incomplete-identity");
+            std::fs::create_dir_all(root.join(".logs")).unwrap();
+            let fixture = CleanupCommandFixture::new(&root);
+            fixture.scenario("held-refusal");
+            let path = host_pids_path(&root);
+            let prior = b"[]";
+            std::fs::write(&path, prior).unwrap();
+            let mut row = serde_json::json!({
+                "ProcessId":42,
+                "ParentProcessId":0,
+                "ExecutablePath":"bun.exe",
+                "CommandLine":"bun src/index.ts",
+                "CreationDate":"created-server"
+            });
+            row.as_object_mut()
+                .unwrap()
+                .insert(field.to_string(), value);
+            std::fs::write(
+                root.join("synthetic-inventory.json"),
+                serde_json::to_vec(&serde_json::json!([row])).unwrap(),
+            )
+            .unwrap();
+
+            let problem = record_windows_host_processes_with(
+                &root,
+                &[("server", 42)],
+                &fixture.command("powershell"),
+            )
+            .expect_err("a requested pid with incomplete identity must not be omitted");
+
+            let detail = problem.detail.as_deref().unwrap_or_default();
+            assert!(
+                detail.contains("server") && detail.contains("42"),
+                "{detail}"
+            );
+            assert!(detail.contains("identity"), "{detail}");
+            assert_eq!(std::fs::read(&path).unwrap(), prior);
+            assert!(!fixture.log().contains("taskkill\t"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn windows_recording_refuses_duplicate_inventory_rows_without_replacing_pidfile() {
+        let root = temp_root("windows-record-duplicate-inventory");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = b"[]";
+        std::fs::write(&path, prior).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"first.exe","CommandLine":"first","CreationDate":"created-first"},
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"second.exe","CommandLine":"second","CreationDate":"created-second"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate inventory rows for one pid cannot identify one process instance");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("more than once") && detail.contains("42"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_refuses_duplicate_requested_hosts_without_inventory_or_replacement() {
+        let root = temp_root("windows-record-duplicate-request");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = b"[]";
+        std::fs::write(&path, prior).unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("server", 43)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate requested host names must not replace ownership evidence");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("duplicate") && detail.contains("server"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        assert_eq!(fixture.log(), "");
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 42)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate requested pids must not replace ownership evidence");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("duplicate") && detail.contains("42"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        assert_eq!(fixture.log(), "");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_writes_all_requested_records_and_ignores_extra_rows() {
+        let root = temp_root("windows-record-complete-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"server.exe","CommandLine":"server args","CreationDate":"created-server"},
+                {"ProcessId":43,"ParentProcessId":0,"ExecutablePath":"app.exe","CommandLine":"app args","CreationDate":"created-app"},
+                {"ProcessId":44,"ParentProcessId":0,"ExecutablePath":"worker.exe","CommandLine":"worker args","CreationDate":"created-worker"},
+                {"ProcessId":999,"ParentProcessId":0,"ExecutablePath":"other.exe","CommandLine":"other args","CreationDate":"created-other"}
+            ])).unwrap(),
+        )
+        .unwrap();
+
+        record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 43), ("worker", 44)],
+            &fixture.command("powershell"),
+        )
+        .unwrap();
+
+        let records = recorded_host_processes(&root).unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0],
+            RecordedHostProcess {
+                name: "server".to_string(),
+                pid: 42,
+                executable_path: "server.exe".to_string(),
+                command_line: "server args".to_string(),
+                creation_date: "created-server".to_string(),
+            }
+        );
+        assert_eq!(
+            records[1],
+            RecordedHostProcess {
+                name: "app".to_string(),
+                pid: 43,
+                executable_path: "app.exe".to_string(),
+                command_line: "app args".to_string(),
+                creation_date: "created-app".to_string(),
+            }
+        );
+        assert_eq!(
+            records[2],
+            RecordedHostProcess {
+                name: "worker".to_string(),
+                pid: 44,
+                executable_path: "worker.exe".to_string(),
+                command_line: "worker args".to_string(),
+                creation_date: "created-worker".to_string(),
+            }
+        );
+        assert!(!records.iter().any(|record| record.pid == 999));
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
