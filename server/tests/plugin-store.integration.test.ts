@@ -3845,6 +3845,45 @@ test("a version a model supplied cannot stand in for an action with none recorde
   expect(result.text).toMatch(/Refresh this app's tools on its Plugins page/);
 });
 
+/*
+ * WHOSE ACCOUNT THE CALL OPENS, OBSERVED AT THE VENDOR.
+ *
+ * This is the claim the whole brokered transport exists to make, and until these two tests it was
+ * the one thing nothing looked at. The deployment holds ONE Composio key; which person's mailbox a
+ * call opens is decided entirely by the id sent beside it. Every stub in this file took `_userId`
+ * and threw it away, so a store that sent the Bot's id, or the empty string, or a constant, passed
+ * all of them — the property held by construction and nothing would have noticed it stopping.
+ *
+ * `execute`'s SECOND positional argument is that id. Recorded here rather than counted, so a
+ * regression fails naming the id that actually went out.
+ */
+test("a Composio call reaches the vendor as the person asking, not as the Bot", async () => {
+  const { store, database } = await freshStore();
+  const reached: { slug: string; userId: string }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug, userId) => {
+      reached.push({ slug, userId });
+      return vendorAnswered();
+    },
+  });
+  await seedComposioGmail(database, store);
+
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  // `user_asker`, not `bot_helper` and not "". The id comes off the connection the call path built
+  // from the session — `app.ts` takes it from a credential assertion and `routes.ts` from the
+  // session — and it is the only thing standing between this Bot and somebody else's mailbox.
+  expect(reached).toEqual([
+    { slug: "GMAIL_FETCH_EMAILS", userId: "user_asker" },
+  ]);
+});
+
 test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
   const { store, database, auditStore } = await freshStore();
   useComposioClient({
