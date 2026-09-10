@@ -969,6 +969,14 @@ where
     C: FnOnce(&Path) -> Result<usize, Problem>,
 {
     let held = stack::stop_host_children(root, children)?;
+    stop_held_process_handles(children)?;
+    let recorded = cleanup(root)?;
+    Ok(held + recorded)
+}
+
+fn stop_held_process_handles(
+    children: &mut Vec<(&'static str, std::process::Child)>,
+) -> Result<(), Problem> {
     for (name, child) in children.iter_mut() {
         let failure = |error| {
             Problem::with(
@@ -981,9 +989,8 @@ where
         }
         child.wait().map_err(failure)?;
     }
-    let recorded = cleanup(root)?;
     children.clear();
-    Ok(held + recorded)
+    Ok(())
 }
 
 fn retire_host_processes<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize, Problem>
@@ -1031,14 +1038,36 @@ fn finish_host_start(
             Err(cleanup) => Err(Problem::with(original, problem_detail(cleanup))),
         };
     }
-    // Keep handles even if durable recording fails; no supervisor is installed on that path.
-    stack::record_host_processes(
+    // Keep handles only while the recording failure is being cleaned up. Reporting Start failure
+    // while leaving the just-spawned host processes alive would recreate the orphan this ownership
+    // record exists to prevent.
+    if let Err(recording) = stack::record_host_processes(
         root,
         &children
             .iter()
             .map(|(name, child)| (*name, child.id()))
             .collect::<Vec<_>>(),
-    )?;
+    ) {
+        shell
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let cleanup = cleanup_host_children(root, &mut children, stack::stop_processes_under)
+            .inspect_err(|_| {
+                let _ = stop_held_process_handles(&mut children);
+            });
+        *shell.root.lock().unwrap() = None;
+        return match cleanup {
+            Ok(_) => Err(recording),
+            Err(cleanup) => {
+                let mut detail = recording.detail.unwrap_or_default();
+                if !detail.is_empty() {
+                    detail.push('\n');
+                }
+                detail.push_str(&problem_detail(cleanup));
+                Err(Problem::with(recording.said, detail))
+            }
+        };
+    }
     Ok(shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -3727,6 +3756,45 @@ fi\n";
             self.done.take().expect("thread").join().expect("join");
             request
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_host_recording_retires_children_and_preserves_recording_failure() {
+        let root = temp_root("failed-recording-lifecycle");
+        std::fs::create_dir_all(&root).unwrap();
+        let worker = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .current_dir(&root)
+            .spawn()
+            .unwrap();
+        let children = vec![("bogus", worker)];
+        let shell = Shell::default();
+        let result = finish_host_start(&shell, &root, children, Ok(())).unwrap_err();
+        assert_eq!(
+            result.said,
+            "OpenBot could not verify its host process ownership."
+        );
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("invalid host launch bogus")),
+            "{result:?}"
+        );
+        assert!(shell.children.lock().unwrap().is_empty());
+        assert!(shell.root.lock().unwrap().is_none());
+        assert_eq!(
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert!(
+            !restart_host_process_with(&shell, &root, "worker", 0, || panic!(
+                "failed recording attempt restarted"
+            ))
+            .unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
