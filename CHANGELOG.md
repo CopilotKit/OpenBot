@@ -8,6 +8,81 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A deployment directory pasted with a stray space goes where it says
+
+The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
+after trimming, and then sent the untrimmed string — the same trap the API URL, the gateway URL, the
+intelligence key and the model key were taken out of, and this is the one of the five that is a
+place on disk rather than a credential. A path copied with the space the selection picked up, or
+with the newline a copied line carries, was used whole. A trailing space made a second directory
+beside the one everything else means: the tray's Stop and the next launch both ask for the default
+path, which has no space in it, so a person was left with a deployment nothing on screen could
+reach. A leading space was worse, because a path starting with a space does not start with a
+separator — it stopped being absolute, and the deployment was laid out relative to wherever the
+window happened to be running from. The path is trimmed at both ends now. Spaces inside it are part
+of a directory's name and are left alone.
+### The desktop app notices a busy port whichever loopback holds it
+
+The shell refuses to start when something already holds port 3001 or 3010, because otherwise the
+readiness check that follows is answered by a server it never started: everything reads green and
+none of it is yours. That readiness check asks both loopback addresses on purpose, since a process
+binds whichever one its runtime resolved `localhost` to — Node picks `::1`, Bun picks `127.0.0.1` —
+so an answer at either counts. The refusal in front of it asked only `127.0.0.1`, which meant a port
+held on `::1` alone was reported free and the start went ahead into it. Both addresses are asked
+now, so the two agree on what "in use" means and the person is told which port is taken and what
+OpenBot wanted it for.
+### A request for a secret no longer follows a Bot into tomorrow's conversations
+
+An unanswered ask to take the wheel stops being shown after ten minutes, because control belongs to a
+Bot's computer rather than to a conversation. The other prompt on that computer, the masked box a Bot
+opens when it needs one value it must not be told, was never given the same treatment: it sat there
+indefinitely, so every later conversation with that Bot was flagged as needing a person and showed a
+request for a password, captioned with a label written for whoever asked half a day earlier. It now
+expires on the same ten-minute window, and stops being answerable at the moment it stops being shown,
+so a value typed into a box left open in an old tab is refused rather than sent to a page whose run
+has ended. A request inside the window is unchanged, and a person actually holding the wheel is still
+never timed out.
+### `COMPUTER_BROWSER_IDLE_MS=0` now keeps browsers resident, as it says it does
+
+Zero is the documented way to switch off the sweep that closes a Bot's browser after it has sat
+untouched, and the sweep itself reads a timeout of zero as being switched off. The value never got
+that far. It was read the way the cap on running browsers is, where zero would close every browser
+the moment it opened and so has to be refused, and an operator who typed zero got the thirty-minute
+default handed back instead. Their browsers went on being closed, which is a Bot signed out of a site
+that only issues session cookies and a cold Chromium on its next turn. Zero is now kept for this one
+setting. A blank variable, which is what an unset variable declared in a compose file arrives as, is
+still not zero: it means "not set" and takes the default, as do a negative and anything that is not a
+number.
+### A flag or a family emoji in a channel preview is no longer cut in half
+
+The one line a roster draws is cut to a cap, and the cut walked code points -- right for a plain
+emoji, wrong for every emoji built out of more than one. A flag is two regional indicators, a family
+is three people joined by zero-width joiners, a thumbs-up with a skin tone is the thumb plus a
+modifier, and a keycap is a digit plus a variation selector plus an enclosing mark. Landing the cut
+inside any of those left a boxed letter, a dangling joiner or a bare digit in the sidebar, in the
+generated channel title, and in the excerpt the titler is shown. The cut is now taken between
+grapheme clusters, so what a person sees as one character is kept or dropped whole. Plain text is
+cut in exactly the same place as before.
+### A scroll with an unusable `deltaY` is refused, rather than scrolling some other distance
+
+`POST /computers/:botId/scroll` and `POST /computers/:botId/human/scroll` accepted any JSON number
+as `deltaY`, and `1e999` is a JSON number: it parses to `Infinity`, passes the `typeof` check, and is
+turned back into `null` by the hop to the Bot's computer, which reads the field as absent and scrolls
+its own default distance. The caller was answered 200 for a scroll it had not asked for. A `deltaY`
+that is not a finite number now answers 400 and the page is not touched, the way the timeout on
+`exec` and the coordinates behind a person's click already did.
+### An MCP call carrying `x-api-key` is stopped the same as one carrying `api-key`
+
+The check that keeps credentials out of MCP tool arguments compared each argument name against a
+list, and `api-key` was on it while `x-api-key` was not -- so the spelling that is more obviously a
+credential header was the one that went out. `x-` is the conventional prefix for a non-standard
+header and says nothing about the value, so it is now dropped before the comparison. The same pass
+adds the spellings of names already on the list that were missing from it: `passwd` and `pwd` for
+`password`, `auth_token` and `bearer_token` and `session_token` for `token`, `api_secret` and
+`secret_key` and `signing_key` for `secret`, and `ssh_key` for `private_key`. Nothing new counts as
+a credential: an argument named `x_axis`, `token_count`, `max_tokens` or `secretary` is passed as
+before.
+
 ### One command to stop what `start.sh` started
 
 Stopping the local stack meant four commands read off the end of a successful start, and the one
@@ -18,6 +93,16 @@ and is safe to rerun. It kills a port holder only once that process has identifi
 OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
 deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
 leaves the browsers signed in.
+### The trail says when an identity provider was added, not only when one was taken away
+
+Whoever holds an identity provider decides who can sign in at all, and the audit trail recorded only
+half of that. Removing one through the administration screen was written down; registering one was
+not, because registration is the sign-in library's own endpoint and nothing this deployment owns ran
+on the way through. The event type for it had been declared and never written. Removing a provider
+through the library's endpoint rather than the screen was unrecorded for the same reason. Both are
+now written where the deployment already stands in front of those routes to check that the person
+asking is an administrator, so a provider appearing or disappearing names itself and whoever did it.
+
 ### Two workers on one machine can no longer fire the same routine twice
 
 Every process that claims work from the shared queue named itself after its hostname, and the queue

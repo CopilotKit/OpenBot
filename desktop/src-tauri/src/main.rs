@@ -527,6 +527,20 @@ fn require_existing_encryption_key(
     Ok(())
 }
 
+/// Bind recovery and the operation to one deployment path before either can access settings.
+fn begin_credential_action(
+    typed_root: &str,
+    action: openbot_desktop_lib::recovery::Action,
+    begin: impl FnOnce(
+        &Path,
+        openbot_desktop_lib::recovery::Action,
+    ) -> Result<openbot_desktop_lib::recovery::Attempt, Problem>,
+) -> Result<(PathBuf, openbot_desktop_lib::recovery::Attempt), Problem> {
+    let root = stack::root_from(typed_root);
+    let attempt = begin(&root, action)?;
+    Ok((root, attempt))
+}
+
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
 async fn start_stack<R: tauri::Runtime>(
@@ -542,9 +556,10 @@ async fn start_stack<R: tauri::Runtime>(
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let recovery = app.state::<Shell>().recovery.clone();
-    let attempt = recovery.begin(
-        Path::new(&root),
+    let (root, attempt) = begin_credential_action(
+        &root,
         openbot_desktop_lib::recovery::Action::Start,
+        |root, action| recovery.begin(root, action),
     )?;
     let result =
         start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await;
@@ -553,15 +568,13 @@ async fn start_stack<R: tauri::Runtime>(
 
 async fn start_stack_inner<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    root: String,
+    root: PathBuf,
     api_url: String,
     gateway_ws_url: String,
     api_key: String,
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
 ) -> Result<(), Problem> {
-    let root = PathBuf::from(root);
-
     /*
      * Resolved from the catalogue rather than taken from the window.
      *
@@ -874,7 +887,7 @@ fn cancel_credential_recovery<R: tauri::Runtime>(
 /// of everything their Bot had logged into.
 #[tauri::command]
 fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
-    stop_everything(&app, &PathBuf::from(&root))
+    stop_everything(&app, &stack::root_from(&root))
 }
 
 #[cfg(test)]
@@ -1150,7 +1163,7 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 /// an answer on the port says one is running now.
 #[tauri::command]
 fn already_running(root: String) -> bool {
-    let root = PathBuf::from(&root);
+    let root = stack::root_from(&root);
     if deployment::installed(&root).is_none() {
         return false;
     }
@@ -1199,13 +1212,16 @@ async fn ask_the_bot<R: tauri::Runtime>(
     question: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let recovery = app.state::<Shell>().recovery.clone();
-    let attempt = recovery.begin(Path::new(&root), openbot_desktop_lib::recovery::Action::Ask)?;
+    let (root, attempt) = begin_credential_action(
+        &root,
+        openbot_desktop_lib::recovery::Action::Ask,
+        |root, action| recovery.begin(root, action),
+    )?;
     let result = ask_the_bot_inner(root, question).await;
     recovery.finish(attempt, result)
 }
 
-async fn ask_the_bot_inner(root: String, question: String) -> Result<String, Problem> {
-    let root = PathBuf::from(root);
+async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Problem> {
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
     let settings = openbot_desktop_lib::vault::already_given_no_ui(
@@ -1308,7 +1324,7 @@ anywhere, and only the settings the wizard asks about are read.
 */
 #[tauri::command]
 fn already_configured(root: String) -> AlreadyConfigured {
-    let root = PathBuf::from(root);
+    let root = stack::root_from(&root);
     let env_file = root.join(".env");
     let mut values = openbot_desktop_lib::vault::already_given_file_only(
         &env_file,
@@ -2105,6 +2121,64 @@ mod tests {
     }
 
     #[test]
+    fn start_and_ask_bind_recovery_and_work_to_the_same_pasted_deployment() {
+        use openbot_desktop_lib::recovery::{Action, Recovery};
+        let root = temp_root("openbot-command-root My Files");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("settings-marker"), "this deployment").unwrap();
+        for action in [Action::Start, Action::Ask] {
+            for typed in [
+                root.display().to_string(),
+                format!(" \n{}\t ", root.display()),
+            ] {
+                let recovery = Recovery::default();
+                let (work_root, attempt) =
+                    begin_credential_action(&typed, action, |ticket_root, seen_action| {
+                        assert_eq!(seen_action, action);
+                        assert_eq!(
+                            std::fs::read_to_string(ticket_root.join("settings-marker")).unwrap(),
+                            "this deployment"
+                        );
+                        recovery.begin(ticket_root, seen_action)
+                    })
+                    .unwrap();
+                let read = std::fs::read_to_string(work_root.join("settings-marker")).unwrap();
+                assert_eq!(
+                    recovery.finish(attempt, Ok(read)).unwrap(),
+                    "this deployment"
+                );
+                let (_, cancelled) = begin_credential_action(&typed, action, |path, action| {
+                    recovery.begin(path, action)
+                })
+                .unwrap();
+                recovery.stop();
+                assert!(recovery.finish(cancelled, Ok(())).is_err());
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn already_configured_trims_pasted_root_and_preserves_interior_spaces() {
+        let root = temp_root("openbot-pasted-root My Files");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=https://trim.example.test\n",
+        )
+        .unwrap();
+        let typed = format!(" \n{}\t ", root.display());
+        let configured = already_configured(typed);
+        let normal = already_configured(root.to_string_lossy().into_owned());
+        assert_eq!(configured.values, normal.values);
+        assert_eq!(
+            configured.values.get("INTELLIGENCE_API_URL"),
+            Some(&"https://trim.example.test".to_string())
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn already_configured_returns_file_values_and_saved_indicators() {
         let root = temp_root("openbot-already-configured");
         std::fs::create_dir_all(&root).unwrap();
@@ -2347,11 +2421,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".env")).unwrap();
         let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
-        let problem = tauri::async_runtime::block_on(ask_the_bot_inner(
-            root.to_string_lossy().into_owned(),
-            "hello".into(),
-        ))
-        .expect_err("unreadable .env must stop Ask before transport");
+        let problem =
+            tauri::async_runtime::block_on(ask_the_bot_inner(root.clone(), "hello".into()))
+                .expect_err("unreadable .env must stop Ask before transport");
 
         assert_eq!(problem.said, "OpenBot could not read its settings.");
         assert!(
