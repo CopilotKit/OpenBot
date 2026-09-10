@@ -3507,6 +3507,18 @@ const vendorAnswered = (
   successful: true,
 });
 
+/**
+ * What Composio answers when it ran nothing and says why, which is a 200 and not a throw.
+ *
+ * `successful: false` beside a sentence is the vendor reporting its own failure inside the
+ * envelope, which is the case that used to come back from this transport as `isError: false`.
+ */
+const vendorRefused = (sentence: string): ComposioResult => ({
+  data: {},
+  error: sentence,
+  successful: false,
+});
+
 // The vendor is a process-wide registry, so a stub outliving its test would be answering somebody
 // else's calls.
 afterEach(() => useComposioClient(null));
@@ -3970,6 +3982,114 @@ test("a Composio call is recorded as reaching the vendor as the person, not as t
   // the same action and the same Bot can have touched two different mailboxes, and nothing else in
   // the row says which.
   expect(call?.payload).toMatchObject({ reachedAs: "user_asker" });
+});
+
+/**
+ * Every call event this suite's store recorded against one tool, in order.
+ *
+ * Named because the assertions below are about WHICH event was written, and reading that off an
+ * unfiltered list would also pick up the grant the fixture makes. `mcp.call_` is the prefix the
+ * three outcomes share.
+ */
+function callEventsFor(
+  auditStore: { recorded: () => { eventType: string; targetId?: string }[] },
+  targetId: string,
+) {
+  return auditStore
+    .recorded()
+    .filter(
+      (event) =>
+        event.targetId === targetId && event.eventType.startsWith("mcp.call_"),
+    );
+}
+
+/**
+ * A vendor that reported its own failure is filed as a failure, not as a success.
+ *
+ * `mcp.call_failed` is derived from `result.isError` and nothing asserted the derivation: flipping
+ * the two event names left the suite green, so the trail could have said `mcp.call_succeeded` about
+ * every refused call and the only surface that counts successes would have agreed. That is the same
+ * class of defect as the one the comment above the try block describes — a trail asserting the
+ * opposite of what happened — and it was still open on this branch.
+ *
+ * The sentence matters as much as the name. `payload.failure` is the vendor's own words, and it is
+ * the most useful thing an operator gets: it is what turned "the connector is broken" into "the
+ * connection lapsed" on the Drive path.
+ */
+test("a call the vendor refused is filed as failed, with the vendor's own sentence", async () => {
+  const { store, database, auditStore } = await freshStore();
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () =>
+      vendorRefused("Gmail rejected the request: bad label."),
+  });
+  await seedComposioGmail(database, store);
+
+  const result = await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  expect(result.isError).toBe(true);
+
+  // Exactly one call row, and it is the failure. Asserted as the whole list rather than by finding
+  // a failure in it, because a `find` passes just as happily when a `mcp.call_succeeded` row sits
+  // beside it — and a success row for a refused call is the thing being ruled out.
+  expect(callEventsFor(auditStore, "gmail/GMAIL_FETCH_EMAILS")).toMatchObject([
+    {
+      eventType: "mcp.call_failed",
+      payload: {
+        actor: "user_asker",
+        bot: "bot_helper",
+        failure: "Gmail rejected the request: bad label.",
+      },
+    },
+  ]);
+});
+
+/**
+ * Our own unreadable answer is filed under the SAME name as the vendor's refusal.
+ *
+ * GATED AS IT BEHAVES TODAY, AND THE CONFLATION IS THE FINDING. `callTool` in `composio.ts` is
+ * careful to keep these two apart — the vendor's `try` holds the vendor's call and nothing else,
+ * precisely so a `JSON.stringify` throw of ours is not reported as the action having failed — and
+ * then `store.ts` collapses the distinction again on the way to the trail, because the event name
+ * is derived from `isError` alone and both are `isError: true`. So the only thing telling an
+ * operator "Composio refused" from "Composio answered and we could not read it" is the sentence in
+ * `payload.failure`, which is prose and not a queryable field. A reader counting `mcp.call_failed`
+ * to decide whether a connector is healthy cannot separate a vendor fault from a bug of ours.
+ *
+ * A circular `data` is the honest way to reach it: `resultOf` stringifies whatever the vendor sent,
+ * and a structure that cannot be serialized is one of the three faults its comment names.
+ */
+test("an answer this deployment could not read is filed under the same name as a vendor refusal", async () => {
+  const { store, database, auditStore } = await freshStore();
+  const circular: Record<string, unknown> = {};
+  circular.itself = circular;
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () => vendorAnswered(circular),
+  });
+  await seedComposioGmail(database, store);
+
+  const result = await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  expect(result.isError).toBe(true);
+
+  const [event] = callEventsFor(auditStore, "gmail/GMAIL_FETCH_EMAILS");
+  // The same event name the vendor's own refusal gets, one test above.
+  expect(event?.eventType).toBe("mcp.call_failed");
+  // And the sentence is the only thing that says this one was ours.
+  expect((event?.payload as { failure?: string } | undefined)?.failure).toMatch(
+    /could not turn that answer into text/,
+  );
 });
 
 test("an action's effect, destructive marker and version round-trip", async () => {
