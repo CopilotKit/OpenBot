@@ -1405,7 +1405,7 @@ fn problem_detail(problem: Problem) -> String {
     }
 }
 
-/// The processes listening on any of `ports`, from `netstat -ano` output.
+/// The TCP processes listening on any of `ports`, from `netstat -ano` output.
 ///
 /// Pure and tested, because the column layout is the thing that goes wrong. Read as four columns
 /// rather than five, the foreign address is taken for the state and the state for the pid: nothing
@@ -1416,7 +1416,7 @@ pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
     for line in listing.lines() {
         // Protocol, local address, foreign address, state, pid.
         let mut fields = line.split_whitespace();
-        let (Some(_proto), Some(local), Some(_foreign), Some(state), Some(pid)) = (
+        let (Some(proto), Some(local), Some(_foreign), Some(state), Some(pid)) = (
             fields.next(),
             fields.next(),
             fields.next(),
@@ -1425,7 +1425,7 @@ pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
         ) else {
             continue;
         };
-        if !state.eq_ignore_ascii_case("LISTENING") {
+        if !proto.eq_ignore_ascii_case("TCP") || !state.eq_ignore_ascii_case("LISTENING") {
             continue;
         }
         // `rsplit` rather than `split`, because an IPv6 local address is `[::1]:3010`.
@@ -1878,9 +1878,11 @@ fn recorded_process_owns_port_windows_with(
         return Ok(false);
     }
     let processes = windows_processes_with(powershell)?;
-    let operation = format!("{} -ano -p tcp", netstat.display());
+    // `-p tcp` omits IPv6 (`tcpv6`); inventory both families before requiring every
+    // TCP listener to be owned. The parser ignores UDP rows in the unfiltered output.
+    let operation = format!("{} -ano", netstat.display());
     let listing = command(netstat)
-        .args(["-ano", "-p", "tcp"])
+        .arg("-ano")
         .output()
         .map_err(|error| cleanup_spawn_problem(&operation, error))?;
     if !listing.status.success() {
@@ -3431,7 +3433,33 @@ fn main() {
         }
         ("powershell", "held-refusal") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
         ("netstat", "held-refusal") => {},
-        ("powershell", "already-running") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("powershell", "already-running" | "ownership-inventory" | "ownership-netstat-fail") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("netstat", "ownership-inventory" | "ownership-netstat-fail") => {
+            // Model netstat's protocol filter at the command boundary: `-p tcp` excludes
+            // IPv6 even though both address families use TCP in the output's Proto column.
+            let protocol = if args == ["-ano"] {
+                None
+            } else if args == ["-ano", "-p", "tcp"] {
+                Some(false)
+            } else if args == ["-ano", "-p", "tcpv6"] {
+                Some(true)
+            } else {
+                panic!("unexpected netstat arguments: {args:?}");
+            };
+            let listing = std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-netstat.txt")).unwrap();
+            for line in listing.lines() {
+                let mut fields = line.split_whitespace();
+                let proto = fields.next().unwrap_or_default();
+                let local = fields.next().unwrap_or_default();
+                if protocol.map_or(true, |ipv6| proto == "TCP" && local.starts_with('[') == ipv6) {
+                    println!("{line}");
+                }
+            }
+            if scenario == "ownership-netstat-fail" {
+                eprintln!("synthetic netstat status failure after partial listing");
+                std::process::exit(19);
+            }
+        },
         ("netstat", "already-running") => {
             println!("  Proto  Local Address          Foreign Address        State           PID");
             println!("  TCP    127.0.0.1:45123        0.0.0.0:0              LISTENING       9000");
@@ -4078,7 +4106,7 @@ fn main() {
         .unwrap());
         let log = fixture.log();
         assert!(log.contains("powershell\t"), "{log}");
-        assert!(log.contains("netstat\t-ano -p tcp"), "{log}");
+        assert!(log.contains("netstat\t-ano\n"), "{log}");
         assert!(!log.contains("taskkill\t"), "{log}");
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -4104,6 +4132,110 @@ fn main() {
         .unwrap());
         assert!(fixture.log().is_empty(), "{}", fixture.log());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn probe_windows_port_ownership_fixture(
+        listing: &str,
+        scenario: &str,
+    ) -> Result<bool, Problem> {
+        let root = temp_root("windows-port-ownership");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario(scenario);
+        let app = recorded_process("app", 9001, "20260909010101.000000-420");
+        write_host_pid_file(&root, &serde_json::json!({"version":1,"processes":[app]})).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9001,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("app"),"CreationDate":"20260909010101.000000-420"},
+                {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"20260909010102.000000-420"},
+                {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":"foreign.exe","CommandLine":"foreign app","CreationDate":"20260909010102.000000-420"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(root.join("synthetic-netstat.txt"), listing).unwrap();
+        let result = recorded_process_owns_port_windows_with(
+            &root,
+            "app",
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat"),
+        );
+        let log = fixture.log();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(log.contains("powershell\t"), "{log}");
+        assert!(log.contains("netstat\t"), "{log}");
+        assert!(!log.contains("taskkill\t"), "{log}");
+        result
+    }
+
+    #[test]
+    fn windows_port_ownership_accepts_owned_ipv6_listener() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_accepts_owned_ipv6_listener",
+        ) {
+            return;
+        }
+        assert!(probe_windows_port_ownership_fixture(
+            "TCP [::1]:45123 [::]:0 LISTENING 9000\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_rejects_foreign_ipv6_beside_owned_ipv4() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_rejects_foreign_ipv6_beside_owned_ipv4",
+        ) {
+            return;
+        }
+        assert!(!probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::]:0 LISTENING 9002\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_accepts_owned_dual_stack_ignoring_udp_and_connections() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_accepts_owned_dual_stack_ignoring_udp_and_connections",
+        ) {
+            return;
+        }
+        assert!(probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::]:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::1]:51999 ESTABLISHED 9002\n\
+             UDP 127.0.0.1:45123 *:* 9002\n\
+             UDP [::1]:45123 *:* 9002\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_reports_failed_netstat_with_partial_listing() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_reports_failed_netstat_with_partial_listing",
+        ) {
+            return;
+        }
+        let problem = probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n",
+            "ownership-netstat-fail",
+        )
+        .expect_err("partial command output cannot prove ownership");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("netstat"), "{detail}");
+        assert!(detail.contains("19"), "{detail}");
+        assert!(
+            detail.contains("synthetic netstat status failure after partial listing"),
+            "{detail}"
+        );
     }
 
     #[test]
