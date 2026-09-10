@@ -128,6 +128,58 @@ describe("asking a person", () => {
 
     expect(said).toContain("say what you need");
   });
+
+  /*
+   * The same call, spelled the other way.
+   *
+   * A question field that is present and empty is a call with nothing in it too, and the refusal
+   * above is the sentence written for it. `message_bot`, the tool this competes with for the same
+   * decision, refuses a blank task and says so; this is the other half of that.
+   */
+  test.each([
+    ["an empty question", ""],
+    ["a question of spaces", "   "],
+  ])("%s is refused as a sentence", async (_name, question) => {
+    const tool = escalationTool({ from: FROM, route: askTheirOwnPerson });
+
+    const said = await tool.execute({ question });
+
+    expect(said).toContain("say what you need");
+    expect(said).not.toContain(PUT_TO);
+  });
+
+  test("a blank question reaches nobody and leaves no row saying it did", async () => {
+    const { written, store } = recorder();
+    let reached = 0;
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        reached += 1;
+        return { reached: "the on-call engineer" };
+      },
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "  " });
+
+    // An `agent.escalated` row with no question in it is the row an operator counts escalations by,
+    // saying a person was asked something that was never said.
+    expect(reached).toBe(0);
+    expect(written).toEqual([]);
+  });
+
+  test("a question with room around it is recorded as the question", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "  which account?  " });
+
+    expect(written[0]?.payload).toMatchObject({ question: "which account?" });
+  });
 });
 
 /*

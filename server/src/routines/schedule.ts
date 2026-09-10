@@ -214,6 +214,27 @@ function joinWords(words: string[]): string {
   return `${rest.join(", ")} and ${last}`;
 }
 
+/**
+ * The days a plain day-of-week field names, or null when it is not one.
+ *
+ * SUNDAY IS 0 AND IT IS ALSO 7. Both are ordinary crontab, `cron-parser` fires on Sunday for either,
+ * and `nextOccurrence` above accepts both — so a routine written `0 9 * * 7` is scheduled, fires on
+ * Sunday, and was then described to its owner and back to the model as `0 9 * * 7`, because only the
+ * 0 spelling was recognised here. That is not the raw-expression fallback doing its job on a shape
+ * this cannot render; it is one of this function's own shapes arriving under the other of the two
+ * names its own scheduler takes.
+ *
+ * De-duplicated, because 7 and 0 are one day and `0,7` would otherwise render as "Sundays and
+ * Sundays", which is worse than the raw expression it replaced. Order is left as written, like the
+ * weekday list always has been.
+ */
+function weekdays(field: string): number[] | null {
+  if (!/^[0-7](,[0-7])*$/.test(field)) return null;
+  return [
+    ...new Set(field.split(",").map((digit) => Number.parseInt(digit, 10) % 7)),
+  ];
+}
+
 function parsePlainInt(field: string, min: number, max: number): number | null {
   if (!/^\d{1,2}$/.test(field)) return null;
   const value = Number.parseInt(field, 10);
@@ -295,14 +316,12 @@ export function describeCron(cron: string): string {
       if (dayOfWeekField === "1-5") {
         return `Weekdays at ${time}`;
       }
-      if (/^[0-6]$/.test(dayOfWeekField)) {
-        const dayIndex = Number.parseInt(dayOfWeekField, 10);
-        return `${WEEKDAY_NAMES[dayIndex]}s at ${time}`;
+      const days = weekdays(dayOfWeekField);
+      if (days?.length === 1) {
+        return `${WEEKDAY_NAMES[days[0] as number]}s at ${time}`;
       }
-      if (/^[0-6](,[0-6])+$/.test(dayOfWeekField)) {
-        const names = dayOfWeekField
-          .split(",")
-          .map((digit) => `${WEEKDAY_NAMES[Number.parseInt(digit, 10)]}s`);
+      if (days && days.length > 1) {
+        const names = days.map((day) => `${WEEKDAY_NAMES[day]}s`);
         return `${joinWords(names)} at ${time}`;
       }
     }
