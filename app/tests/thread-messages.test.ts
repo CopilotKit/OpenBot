@@ -255,12 +255,15 @@ describe("shapes a real thread contains", () => {
 });
 
 describe("thread history retrieval outcomes", () => {
-  const withFetch = async (
-    fetch: typeof globalThis.fetch,
-    run: () => Promise<void>,
-  ) => {
+  type FetchHandler = (
+    ...args: Parameters<typeof globalThis.fetch>
+  ) => ReturnType<typeof globalThis.fetch>;
+
+  const withFetch = async (handler: FetchHandler, run: () => Promise<void>) => {
     const original = globalThis.fetch;
-    globalThis.fetch = fetch;
+    globalThis.fetch = Object.assign(handler, {
+      preconnect: original.preconnect,
+    });
     try {
       await run();
     } finally {
@@ -288,6 +291,24 @@ describe("thread history retrieval outcomes", () => {
       async () => {
         throw new TypeError("network down");
       },
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test.each([
+    { name: "missing messages field", body: {} },
+    { name: "non-array messages field", body: { messages: { id: "m1" } } },
+  ])("a 200 response with $name is unavailable history", async ({ body }) => {
+    await withFetch(
+      async () => Response.json(body),
       async () => {
         const read = await readThreadMessages("thread-1", "agent-1");
 

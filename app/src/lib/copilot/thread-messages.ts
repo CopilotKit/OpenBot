@@ -50,11 +50,6 @@ export type StoredThread = {
   availability: "ready" | "unavailable";
 };
 
-const EMPTY_THREAD: StoredThread = {
-  messages: [],
-  unreadable: 0,
-  availability: "ready",
-};
 const UNAVAILABLE_THREAD: StoredThread = {
   messages: [],
   unreadable: 0,
@@ -182,8 +177,12 @@ export async function readThreadMessages(
       `/api/copilotkit/threads/${encodeURIComponent(threadId)}/messages?agentId=${encodeURIComponent(agentId)}`,
     );
     if (!response.ok) return UNAVAILABLE_THREAD;
-    const stored = (await response.json())?.messages;
-    return Array.isArray(stored) ? readableTurns(stored) : EMPTY_THREAD;
+    const body: unknown = await response.json();
+    const stored =
+      typeof body === "object" && body !== null && "messages" in body
+        ? body.messages
+        : null;
+    return Array.isArray(stored) ? readableTurns(stored) : UNAVAILABLE_THREAD;
   } catch {
     return UNAVAILABLE_THREAD;
   }
