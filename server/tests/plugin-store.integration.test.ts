@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { MCPMock } from "@copilotkit/aimock/mcp";
+import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
@@ -175,13 +175,15 @@ let ownsFixtureIds = false;
  *
  * The suites above own suite-scoped ids and only ever READ the deployment's own rows, so skipping a
  * delete is enough for them — that is what `suiteCreatedServerRow` and its siblings are for.
- * The Composio fixtures at the bottom of this file cannot do that: they INSERT at `gmail`, `notion`,
- * `bot_helper` and `user_asker`, and those ids are not a choice. `seedNotionServer` needs
- * `catalogueEntry("notion")` to resolve to the real catalogue entry, and `gmail` is the toolkit slug
- * that gets sent to Composio, so neither can be suffixed. A fixture that inserts at an id cannot
- * coexist with a real row at that id: skipping the delete would only turn the collision into a
- * primary-key conflict, and capture-and-restore would be a lot of machinery whose failure mode is
- * destroying the thing it protects, because the cascade has already run by the time it restores.
+ * The fixtures in this file cannot do that: they INSERT at `gmail`, `notion`, `bot_helper` and
+ * `user_asker`, and those ids are not a choice. `gmail` is the toolkit slug that gets sent to
+ * Composio. `notion` is fixed twice over: the dynamic-registration suite pins `dynamicServerId` to
+ * it because that is the catalogue entry which registers its own client, and the test for an action
+ * listed before the effect columns existed inserts a `notion` server row directly, because a
+ * first-party row is what it is about. A fixture that inserts at an id cannot coexist with a real
+ * row at that id: skipping the delete would only turn the collision into a primary-key conflict,
+ * and capture-and-restore would be a lot of machinery whose failure mode is destroying the thing
+ * it protects, because the cascade has already run by the time it restores.
  *
  * What the cascade takes is why this is a refusal rather than a warning. `mcp_user_credentials`
  * references `mcp_servers.id`, so removing a real `notion` row takes every person's per-user
@@ -1704,6 +1706,71 @@ describe("refresh token rotation", () => {
 });
 
 /**
+ * A real MCP server on localhost answering as the pinned Notion host, and everything a refresh
+ * against it overwrites put back afterwards.
+ *
+ * The seam is `fetch`: the host is pinned and nothing in the store will take a URL from a caller, so
+ * pointing the pinned host at the mock is what lets a real listing over the real protocol happen.
+ * What a refresh then overwrites is the deployment's own row — it replaces the advertised tool list
+ * wholesale and stamps `toolsRefreshedAt` and `lastError` — so the list and both stamps are read
+ * first and put back in a `finally`.
+ *
+ * A `finally` rather than a paragraph copied per test, because a restore is the part that a test
+ * still passes without: skip it and the cost lands on whatever runs next, reading a tool list this
+ * test invented.
+ */
+async function withMockedNotionListing(
+  notionServerId: string,
+  tools: MCPToolDefinition[],
+  body: () => Promise<void>,
+) {
+  const mock = new MCPMock();
+  for (const tool of tools) mock.addTool(tool);
+  const mockUrl = await mock.start();
+
+  const advertisedBefore = await database
+    .select()
+    .from(mcpTools)
+    .where(eq(mcpTools.serverId, notionServerId));
+  const [stampBefore] = await database
+    .select({
+      toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+      lastError: mcpServers.lastError,
+    })
+    .from(mcpServers)
+    .where(eq(mcpServers.id, notionServerId));
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const target = String(input instanceof Request ? input.url : input);
+    return realFetch(
+      target.startsWith("https://mcp.notion.com") ? mockUrl : input,
+      init,
+    );
+  }) as typeof fetch;
+
+  try {
+    await body();
+  } finally {
+    globalThis.fetch = realFetch;
+    await mock.stop?.();
+    await database
+      .delete(mcpTools)
+      .where(eq(mcpTools.serverId, notionServerId));
+    if (advertisedBefore.length > 0) {
+      await database.insert(mcpTools).values(advertisedBefore);
+    }
+    await database
+      .update(mcpServers)
+      .set({
+        toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
+        lastError: stampBefore?.lastError ?? null,
+      })
+      .where(eq(mcpServers.id, notionServerId));
+  }
+}
+
+/**
  * A client this deployment registered for itself, which the vendor has since forgotten.
  *
  * A dynamically registered client is nobody's paperwork: there is no console entry an administrator
@@ -2524,9 +2591,8 @@ describe("a dynamic client the vendor has evicted", () => {
    * silent.
    *
    * The vendor here is a real MCP server on localhost, reached by pointing the pinned host at it for
-   * the length of this test. The host is pinned for good reasons and nothing in the store will take a
-   * URL from a caller, so the seam is fetch — which is also the honest one: what is under test is
-   * what a real listing over the real protocol produces.
+   * the length of this test — see {@link withMockedNotionListing}, which also puts back what the
+   * refresh overwrites. What is under test is what a real listing over the real protocol produces.
    */
   test("a refresh names the advertised tools no write list covers", async () => {
     await putClient(EVICTED);
@@ -2535,65 +2601,30 @@ describe("a dynamic client the vendor has evicted", () => {
 
     /** Suite-scoped, so it cannot be a name Notion really advertises, nor a name in `writeTools`. */
     const unlistedName = `notion-invent-${suite}`;
-    const mock = new MCPMock();
-    mock
-      .addTool({
-        name: "notion-create-pages",
-        description: "A write the list already names.",
-        inputSchema: { type: "object", properties: {} },
-      })
-      .addTool({
-        name: unlistedName,
-        description: "Advertised, and named by no write list.",
-        inputSchema: { type: "object", properties: {} },
-      });
-    const mockUrl = await mock.start();
 
-    // What the deployment currently advertises for this server, because a refresh replaces the list
-    // wholesale and this one is pointing the vendor at a mock.
-    const advertisedBefore = await database
-      .select()
-      .from(mcpTools)
-      .where(eq(mcpTools.serverId, dynamicServerId));
-    const [stampBefore] = await database
-      .select({
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
-        lastError: mcpServers.lastError,
-      })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion-create-pages",
+          description: "A write the list already names.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: unlistedName,
+          description: "Advertised, and named by no write list.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 2 });
+      },
+    );
 
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      const target = String(input instanceof Request ? input.url : input);
-      return realFetch(
-        target.startsWith("https://mcp.notion.com") ? mockUrl : input,
-        init,
-      );
-    }) as typeof fetch;
-
-    try {
-      expect(
-        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
-      ).toEqual({ tools: 2 });
-    } finally {
-      globalThis.fetch = realFetch;
-      await mock.stop?.();
-      await database
-        .delete(mcpTools)
-        .where(eq(mcpTools.serverId, dynamicServerId));
-      if (advertisedBefore.length > 0) {
-        await database.insert(mcpTools).values(advertisedBefore);
-      }
-      await database
-        .update(mcpServers)
-        .set({
-          toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
-          lastError: stampBefore?.lastError ?? null,
-        })
-        .where(eq(mcpServers.id, dynamicServerId));
-    }
-
+    // Read after the restore, because the audit trail is what the refresh leaves that the restore
+    // does not take back.
     const named = (
       await database
         .select({ payload: auditEvents.payload })
@@ -2631,105 +2662,70 @@ describe("a dynamic client the vendor has evicted", () => {
     await connect();
     accepted = new Set([EVICTED.clientId]);
 
-    const mock = new MCPMock();
-    mock
-      .addTool({
-        name: "notion-fetch",
-        description: "A read no write list names.",
-        inputSchema: { type: "object", properties: {} },
-      })
-      .addTool({
-        name: "notion-create-pages",
-        description: "A write the list already names.",
-        inputSchema: { type: "object", properties: {} },
-      });
-    const mockUrl = await mock.start();
-
-    // What the deployment currently advertises for this server, because a refresh replaces the list
-    // wholesale and this one is pointing the vendor at a mock.
-    const advertisedBefore = await database
-      .select()
-      .from(mcpTools)
-      .where(eq(mcpTools.serverId, dynamicServerId));
-    const [stampBefore] = await database
-      .select({
-        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
-        lastError: mcpServers.lastError,
-      })
-      .from(mcpServers)
-      .where(eq(mcpServers.id, dynamicServerId));
-
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      const target = String(input instanceof Request ? input.url : input);
-      return realFetch(
-        target.startsWith("https://mcp.notion.com") ? mockUrl : input,
-        init,
-      );
-    }) as typeof fetch;
-
-    try {
-      // Two tools listed, so the assertions below have something to be about: `every` over an empty
-      // list is true, and a refusal recorded in `lastError` would leave exactly that.
-      expect(
-        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
-      ).toEqual({ tools: 2 });
-
-      const rows = await database
-        .select({
-          name: mcpTools.name,
-          effect: mcpTools.effect,
-          destructive: mcpTools.destructive,
-          version: mcpTools.version,
-        })
-        .from(mcpTools)
-        .where(eq(mcpTools.serverId, dynamicServerId))
-        .orderBy(asc(mcpTools.name));
-
-      expect(rows).toEqual([
-        {
-          name: "notion-create-pages",
-          effect: null,
-          destructive: false,
-          version: null,
-        },
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
         {
           name: "notion-fetch",
-          effect: null,
-          destructive: false,
-          version: null,
+          description: "A read no write list names.",
+          inputSchema: { type: "object", properties: {} },
         },
-      ]);
+        {
+          name: "notion-create-pages",
+          description: "A write the list already names.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        // Two tools listed, so the assertions below have something to be about: `every` over an
+        // empty list is true, and a refusal recorded in `lastError` would leave exactly that.
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 2 });
 
-      const listed = (await dynamicStore.listServers()).find(
-        (server) => server.id === dynamicServerId,
-      );
+        const rows = await database
+          .select({
+            name: mcpTools.name,
+            effect: mcpTools.effect,
+            destructive: mcpTools.destructive,
+            version: mcpTools.version,
+          })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId))
+          .orderBy(asc(mcpTools.name));
 
-      // The reviewed write list, still deciding: the name it covers is a write and the name it does
-      // not is a read. A recorded effect on either row is what would take this over.
-      expect(
-        listed?.tools.map((tool) => ({ name: tool.name, effect: tool.effect })),
-      ).toEqual([
-        { name: "notion-create-pages", effect: "write" },
-        { name: "notion-fetch", effect: "read" },
-      ]);
-    } finally {
-      globalThis.fetch = realFetch;
-      await mock.stop?.();
-      await database
-        .delete(mcpTools)
-        .where(eq(mcpTools.serverId, dynamicServerId));
-      if (advertisedBefore.length > 0) {
-        await database.insert(mcpTools).values(advertisedBefore);
-      }
-      await database
-        .update(mcpServers)
-        .set({
-          toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
-          lastError: stampBefore?.lastError ?? null,
-        })
-        .where(eq(mcpServers.id, dynamicServerId));
-    }
+        expect(rows).toEqual([
+          {
+            name: "notion-create-pages",
+            effect: null,
+            destructive: false,
+            version: null,
+          },
+          {
+            name: "notion-fetch",
+            effect: null,
+            destructive: false,
+            version: null,
+          },
+        ]);
+
+        const listed = (await dynamicStore.listServers()).find(
+          (server) => server.id === dynamicServerId,
+        );
+
+        // The reviewed write list, still deciding: the name it covers is a write and the name it
+        // does not is a read. A recorded effect on either row is what would take this over.
+        expect(
+          listed?.tools.map((tool) => ({
+            name: tool.name,
+            effect: tool.effect,
+          })),
+        ).toEqual([
+          { name: "notion-create-pages", effect: "write" },
+          { name: "notion-fetch", effect: "read" },
+        ]);
+      },
+    );
   });
 
   /**
@@ -3364,9 +3360,6 @@ describe("a vendor reply that is not a token", () => {
  * ids exists, which makes every row they remove one of this file's own. Cleaning before each test
  * rather than after is then just so a run that dies halfway leaves the next one nothing to trip over;
  * the `afterAll` below is what stops the last test's fixtures from outliving the run.
- *
- * {@link seedNotionServer} below is `export`ed for one reason: it is shared scaffolding whose first
- * caller has not been written yet, and a fixture nothing calls reads to the linter as dead code.
  */
 async function freshDatabase(): Promise<Database> {
   /*
@@ -3483,59 +3476,9 @@ async function seedComposioGmail(
   );
 }
 
-/** Whatever a fixture installed into a global, undone after the test that installed it. */
-const installed: (() => Promise<void>)[] = [];
-
-/**
- * A first-party MCP server, with a real MCP server on localhost standing in for the vendor.
- *
- * The seam is `fetch`, the way the refresh test above does it: the host is pinned and nothing in the
- * store will take a URL from a caller, so pointing the pinned host at the mock is what lets a real
- * listing over the real protocol happen. `store` is taken and unused because this vendor needs no
- * grant to be listed — the callers hand it over so the two seeds read the same way.
- */
-export async function seedNotionServer(
-  database: Database,
-  _store: PluginStore,
-) {
-  await database.insert(mcpServers).values({
-    id: "notion",
-    title: "Notion",
-    vendor: "Notion",
-    url: "https://mcp.notion.com/mcp",
-    provenance: "first-party",
-  });
-
-  const mock = new MCPMock();
-  mock.addTool({
-    name: "notion-fetch",
-    description: "Fetch a page.",
-    inputSchema: { type: "object", properties: {} },
-  });
-  const mockUrl = await mock.start();
-
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const target = String(input instanceof Request ? input.url : input);
-    return realFetch(
-      target.startsWith("https://mcp.notion.com") ? mockUrl : input,
-      init,
-    );
-  }) as typeof fetch;
-
-  installed.push(async () => {
-    globalThis.fetch = realFetch;
-    await mock.stop?.();
-  });
-}
-
 // The vendor is a process-wide registry, so a stub outliving its test would be answering somebody
 // else's calls.
 afterEach(() => useComposioClient(null));
-
-afterEach(async () => {
-  while (installed.length > 0) await installed.pop()?.();
-});
 
 /*
  * The last test's fixtures, which nothing else would remove.
