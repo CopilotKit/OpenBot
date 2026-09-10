@@ -53,9 +53,9 @@ describe.skipIf(!live)("Composio, for real", () => {
       (action) =>
         !(action.tags ?? []).some(
           (tag) => tag === "readOnlyHint" || tag === "destructiveHint",
-        ) && effectOf(action.tags).effect === "write",
+        ),
     );
-    expect(unlabelled.length).toBeGreaterThanOrEqual(0);
+    expect(unlabelled).toEqual([]);
 
     const reads = actions.filter(
       (action) => effectOf(action.tags).effect === "read",
