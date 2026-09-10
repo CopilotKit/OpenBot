@@ -1517,7 +1517,7 @@ pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem
 }
 
 #[cfg(unix)]
-fn recorded_server_owns_port_unix(root: &Path, _port: u16) -> Result<bool, Problem> {
+fn recorded_server_owns_port_unix(root: &Path, port: u16) -> Result<bool, Problem> {
     let deployment = std::fs::canonicalize(root).map_err(|error| {
         unix_ownership_problem(format!(
             "{}: could not resolve deployment: {error}",
@@ -1531,10 +1531,14 @@ fn recorded_server_owns_port_unix(root: &Path, _port: u16) -> Result<bool, Probl
         }) => unix_processes,
         _ => return Ok(false),
     };
+    let listening = unix_pids_listening_on(port)?;
     for record in records
         .iter()
         .filter(|record| record.name == "server" && record.deployment == deployment)
     {
+        if !listening.contains(&record.pid) {
+            continue;
+        }
         if let Some(live) = unix_process(record.pid)? {
             if live.start == record.start {
                 return Ok(true);
@@ -1542,6 +1546,40 @@ fn recorded_server_owns_port_unix(root: &Path, _port: u16) -> Result<bool, Probl
         }
     }
     Ok(false)
+}
+
+#[cfg(unix)]
+fn unix_pids_listening_on(port: u16) -> Result<Vec<u32>, Problem> {
+    let operation = format!("lsof -nP -iTCP:{port} -sTCP:LISTEN -Fp");
+    let output = command("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) {
+            return Ok(Vec::new());
+        }
+        return Err(cleanup_status_problem(&operation, &output));
+    }
+    let listed = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_lsof_pid_fields(&listed))
+}
+
+#[cfg(unix)]
+fn parse_lsof_pid_fields(listing: &str) -> Vec<u32> {
+    let mut found = Vec::new();
+    for line in listing.lines() {
+        let Some(pid) = line
+            .strip_prefix('p')
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if !found.contains(&pid) {
+            found.push(pid);
+        }
+    }
+    found
 }
 
 #[cfg(any(not(unix), test))]
@@ -3217,6 +3255,88 @@ fn main() {
         );
 
         assert_eq!(found, vec![8636]);
+    }
+
+    #[cfg(unix)]
+    fn spawn_owned_listener(label: &str) -> (std::process::Child, u16) {
+        let dir = temp_root(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("listener.rs");
+        std::fs::write(
+            &source,
+            r#"
+use std::io::Write;
+use std::net::TcpListener;
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    println!("{}", listener.local_addr().unwrap().port());
+    std::io::stdout().flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(60));
+}
+"#,
+        )
+        .unwrap();
+        let binary = dir.join("listener");
+        let rustc =
+            std::env::var_os("RUSTC").unwrap_or_else(|| "/Users/dmckay/.cargo/bin/rustc".into());
+        let output = Command::new(rustc)
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "listener helper did not compile: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut child = Command::new(&binary)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut port = String::new();
+        use std::io::BufRead;
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut port)
+            .unwrap();
+        let port = port.trim().parse().unwrap();
+        (child, port)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_lsof_pid_parser_keeps_only_pid_fields_once() {
+        let listing = "p111\nf3\nnTCP 127.0.0.1:3010 (LISTEN)\np222\nf4\np111\nnot-a-pid\npbad\n";
+        assert_eq!(parse_lsof_pid_fields(listing), vec![111, 222]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_recorded_server_ownership_requires_the_recorded_process_to_own_the_port() {
+        let root_a = temp_root("unix-already-running-root-a");
+        let root_b = temp_root("unix-already-running-root-b");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        let mut inert = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let (mut listener, port) = spawn_owned_listener("unix-already-running-listener-b");
+        record_host_processes(&root_a, &[("server", inert.id())]).unwrap();
+        record_host_processes(&root_b, &[("server", listener.id())]).unwrap();
+
+        assert!(
+            !recorded_server_owns_port(&root_a, port).unwrap(),
+            "root A recorded a live server PID, but a different process owns the answering port"
+        );
+        assert!(
+            recorded_server_owns_port(&root_b, port).unwrap(),
+            "root B recorded the process that owns the answering port"
+        );
+
+        let _ = inert.kill();
+        let _ = inert.wait();
+        let _ = listener.kill();
+        let _ = listener.wait();
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
     }
 
     #[test]

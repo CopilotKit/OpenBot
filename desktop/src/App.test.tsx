@@ -573,6 +573,34 @@ test("empty Intelligence projects keep sign-in retryable while Start waits for a
   );
 });
 
+test("mount navigates to OpenBot only when the selected root is already owned and running", async () => {
+  const root = "/tmp/openbot-owned-running-root";
+  useRootConfigurationSetup(root, async () => emptyConfiguration());
+  const setupHandler = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "already_running") {
+      expect(args).toEqual({ root });
+      return true;
+    }
+    return setupHandler(command, args);
+  };
+
+  await renderApp();
+  await waitFor(() =>
+    expect(invokeCalls).toContainEqual({ command: "show_openbot" }),
+  );
+});
+
+test("mount leaves setup visible when the shared port answers without selected root ownership", async () => {
+  const root = "/tmp/openbot-unowned-running-root";
+  useRootConfigurationSetup(root, async () => emptyConfiguration());
+
+  const view = await renderApp();
+
+  expect(await view.findByRole("button", { name: "Set up OpenBot" })).toBeTruthy();
+  expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(false);
+});
+
 test("saved startup credentials enable Start without raw protected secrets on mount", async () => {
   invokeHandler = async (command) => {
     if (command === "detect_engine") {
