@@ -67,6 +67,7 @@ import {
   type IdentifyUser,
   mountCopilotRuntime,
   resolveRuntimeAgents,
+  runtimeModelForEnvironment,
   type ToolSelection,
 } from "./copilot";
 import {
@@ -467,9 +468,11 @@ const stallGuard = createStallGuard({
   auditStore: bootAuditStore,
 });
 
+const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
-    model: tenantPackage.model,
+    model: runtimeModel,
     resolveApiKey: () =>
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
@@ -488,7 +491,7 @@ const intentRouter = createIntentRouter({
  * on every call, so a credential rotated a moment ago is used by the next run.
  */
 const chooseSkills = createModelCompleter({
-  model: tenantPackage.model,
+  model: runtimeModel,
   resolveApiKey: () =>
     resolveModelApiKey({
       encryptionKey: config.keyEncryptionKey,
@@ -679,7 +682,7 @@ const buildAgentFor = async ({
   const actor = await actorFor(ownerUserId);
   const agents = await resolveRuntimeAgents(
     () => loadAgentsForActor(actor),
-    tenantPackage.model,
+    runtimeModel,
     resolveRuntimeModelApiKey,
     stallGuard,
     loadToolsForActor(actor.id, initiator),
@@ -762,7 +765,7 @@ const routineRunner = createRoutineRunner({
  */
 const copilotRuntime = mountCopilotRuntime(
   config,
-  tenantPackage.model,
+  runtimeModel,
   loadAgentsForActor,
   resolveRuntimeModelApiKey,
   identifyUser,
@@ -1067,7 +1070,7 @@ const channelSummaries = {
   queue: createWorkQueue(database),
   transcript: routineIntelligence,
   title: createChannelTitler({
-    model: tenantPackage.model.defaultModel,
+    model: runtimeModel.defaultModel,
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
   owner: workOwner("summariser"),

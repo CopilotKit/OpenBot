@@ -1,10 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY } from "rxjs";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { loadConfig } from "../src/config";
 import {
   buildAgents,
   builtInAgentConfiguration,
@@ -12,9 +15,12 @@ import {
   type LoadInstructions,
   registeredAgentFromRow,
   resolveRuntimeAgents,
+  runtimeModelForEnvironment,
   standingRoleMessage,
 } from "../src/copilot";
 import { grantedToolGuidance } from "../src/plugins/tools";
+import { loadTenantPackage } from "../src/tenant-package";
+import { testEnvironment } from "./support/environment";
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
 const assistantRow = {
@@ -49,6 +55,84 @@ function expectWrappedHttpTransport(agent: unknown): HttpAgent {
   expect(transport).toBeInstanceOf(HttpAgent);
   return transport as HttpAgent;
 }
+
+describe("deployment model selection", () => {
+  const packagePath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../examples/fintech",
+  );
+
+  async function runGeneralAssistantWithEnvironment(
+    environment: Record<string, string | undefined>,
+  ) {
+    const config = loadConfig({ ...testEnvironment(), ...environment });
+    expect(config.runtime.mode).toBe("intelligence");
+    const tenantPackage = await loadTenantPackage(packagePath);
+    const model = runtimeModelForEnvironment(tenantPackage.model, environment);
+    const recorder = new LLMock();
+    const originalBase = process.env.OPENAI_BASE_URL;
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, {
+        type: "text",
+        content: "DEFAULTMODEL001 fixture completed.",
+      });
+      const agents = await resolveRuntimeAgents(
+        () => [
+          {
+            id: "general-assistant",
+            name: "General Assistant",
+            type: "built_in" as const,
+            systemPrompt: "Be helpful.",
+          },
+        ],
+        model,
+        async () => "synthetic-model-key",
+      );
+      const agent = agents["general-assistant"]?.clone();
+      if (!agent) throw new Error("Expected General Assistant.");
+      agent.addMessage({
+        id: "defaultmodel001-request",
+        role: "user",
+        content: "Complete the fixture request.",
+      });
+      await agent.runAgent();
+      expect(agent.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "DEFAULTMODEL001 fixture completed.",
+      });
+      expect(recorder.getRequests()).toHaveLength(1);
+      return recorder.getRequests()[0]?.body as { model?: unknown };
+    } finally {
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+      await recorder.stop();
+    }
+  }
+
+  test("desktop-selected BOT_MODEL drives the built-in default agent model", async () => {
+    const request = await runGeneralAssistantWithEnvironment({
+      OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
+      BOT_MODEL: " selected-local-model ",
+    });
+
+    expect(request.model).toBe("selected-local-model");
+  });
+
+  test.each([
+    {},
+    { OPENAI_BASE_URL: "http://127.0.0.1:11434/v1", BOT_MODEL: "   " },
+    { BOT_MODEL: "selected-local-model" },
+    { BOT_PROVIDER: "anthropic", BOT_MODEL: "claude-sonnet-4-5" },
+  ])(
+    "package default remains the model without a compatible endpoint selection: %j",
+    async (environment) => {
+      const request = await runGeneralAssistantWithEnvironment(environment);
+
+      expect(request.model).toBe("gpt-5.6-terra");
+    },
+  );
+});
 
 describe("registered Copilot agents", () => {
   test("normalizes built-in and remote rows", () => {

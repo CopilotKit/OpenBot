@@ -147,6 +147,23 @@ export type RuntimeModel = {
   defaultModel: string;
 };
 
+export function runtimeModelForEnvironment(
+  packageModel: RuntimeModel,
+  environment: Record<string, string | undefined> = process.env,
+): RuntimeModel {
+  const selectedModel = environment.BOT_MODEL?.trim();
+  const selectedProvider = environment.BOT_PROVIDER?.trim();
+  const compatibleEndpoint =
+    !selectedProvider && !!environment.OPENAI_BASE_URL?.trim();
+  return {
+    provider: packageModel.provider,
+    defaultModel:
+      compatibleEndpoint && selectedModel
+        ? selectedModel
+        : packageModel.defaultModel,
+  };
+}
+
 type RuntimeAgentRow = {
   id: string;
   name: string;
