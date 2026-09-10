@@ -48,6 +48,8 @@ struct Shell {
     last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
     selected_root: Mutex<Option<PathBuf>>,
     root: Mutex<Option<PathBuf>>,
+    /// Containers may outlive a failed Start before any host root is published.
+    containers: Mutex<Option<ContainerDeployment>>,
     /// An Intelligence sign-in waiting for its loopback callback.
     signing_in_to_intelligence:
         Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
@@ -67,6 +69,14 @@ struct Shell {
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
+}
+
+/// The deployment whose Compose up may have created containers, including a partial failure.
+/// Independent of the editable selection and host ownership. Change this ownership while
+/// holding `Shell::startup`; capture before up and release only after its down succeeds. Keeping
+/// it in one record lets shutdown carry further deployment identity without changing host state.
+struct ContainerDeployment {
+    root: PathBuf,
 }
 
 /// One ticket spans the whole initial Start, including deployment and dependency preparation.
@@ -229,6 +239,14 @@ fn cleanup_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
         .lock()
         .unwrap()
         .clone()
+        .or_else(|| {
+            shell
+                .containers
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|owned| owned.root.clone())
+        })
         .or_else(|| shell.selected_root.lock().unwrap().clone())
         .unwrap_or_else(|| fallback_root.to_path_buf())
 }
@@ -670,7 +688,6 @@ async fn start_stack<R: tauri::Runtime>(
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
-    remember_selected_root(&app.state::<Shell>(), &root);
     start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await
 }
 
@@ -685,6 +702,22 @@ async fn start_stack_inner<R: tauri::Runtime>(
 ) -> Result<(), Problem> {
     let shell = app.state::<Shell>();
     let attempt = StartAttempt::begin(&shell)?;
+    {
+        let _startup = attempt.lock_current()?;
+        if shell
+            .containers
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|owned| owned.root != root)
+        {
+            return Err(Problem::plain(
+                "OpenBot still has services from another installation to stop. Choose Stop OpenBot before starting in a different folder.",
+            ));
+        }
+        // A rejected concurrent Start must not replace the accepted attempt's selection.
+        remember_selected_root(&shell, &root);
+    }
     /*
      * Resolved from the catalogue rather than taken from the window.
      *
@@ -876,6 +909,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
          */
         let bundled_bots = stack::BundledBots::for_credential(&credential);
         attempt.require_current()?;
+        // Even a failed up can have started some services. Keep their root until down succeeds.
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment { root: root.clone() });
         let requested_services =
             stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
         report(&app, "services", true, "containers up");
@@ -1049,7 +1084,7 @@ where
         failures.push(problem_detail(problem));
     }
 
-    if let Err(problem) = down(&root) {
+    if let Err(problem) = down_containers_with(shell, &root, down) {
         failures.push(format!("Compose down failed: {problem}"));
     }
 
@@ -1058,6 +1093,22 @@ where
     } else {
         Err(failures.join("\n"))
     }
+}
+
+/// Called under the startup lock by both Stop and Quit. Host cleanup can clear its own root
+/// first; Compose must still use the deployment captured before up, retaining it on any error.
+fn down_containers_with<D>(shell: &Shell, fallback_root: &Path, down: D) -> Result<(), String>
+where
+    D: FnOnce(&Path) -> Result<(), String>,
+{
+    let mut containers = shell.containers.lock().unwrap();
+    let root = containers
+        .as_ref()
+        .map(|owned| owned.root.as_path())
+        .unwrap_or(fallback_root);
+    down(root)?;
+    *containers = None;
+    Ok(())
 }
 
 /// Reclaim held replacements before consulting durable inventory. Keep the handles and pidfile
@@ -1399,7 +1450,7 @@ where
     if let Err(problem) = cleanup_host_state(shell, &root, cleanup) {
         failures.push(problem_detail(problem));
     }
-    if let Err(problem) = down(&root) {
+    if let Err(problem) = down_containers_with(shell, &root, down) {
         failures.push(format!("Compose down failed: {problem}"));
     }
     failures
@@ -3971,6 +4022,348 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(selected);
         let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    // End-to-end command tests: only the Tauri window and external engine are synthetic.
+    // Start, deployment validation, private credential files, Stop and Quit cleanup are real.
+    #[cfg(unix)]
+    mod container_root {
+        use super::*;
+
+        struct Fixture {
+            base: PathBuf,
+            a: PathBuf,
+            b: PathBuf,
+            path: SerializedPath,
+            app: tauri::App<tauri::test::MockRuntime>,
+            window: tauri::WebviewWindow<tauri::test::MockRuntime>,
+        }
+
+        impl Fixture {
+            fn new() -> Self {
+                let base = temp_root("container-root-workflow");
+                std::fs::create_dir_all(&base).unwrap();
+                let base = base.canonicalize().unwrap();
+                let a = base.join("a");
+                let b = base.join("b");
+                write_installed_deployment(&a);
+                std::fs::create_dir_all(&b).unwrap();
+                let path = SerializedPath::set_only_with("docker", "shutdown");
+                // Both engine names stay inside this subprocess's fixture PATH.
+                let source = path.bin().join("container-engine.rs");
+                std::fs::write(&source, r#"
+use std::{env,fs,io::Write,path::PathBuf};
+fn main() {
+    let args:Vec<String>=env::args().skip(1).collect();
+    let cwd=env::current_dir().unwrap();
+    let record=PathBuf::from(env::var_os("OPENBOT_TEST_ENGINE_RECORD").unwrap());
+    let mut log=fs::OpenOptions::new().create(true).append(true).open(record).unwrap();
+    writeln!(log,"{}\t{}",cwd.display(),args.join(" ")).unwrap();
+    let words:Vec<&str>=args.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["version","--format",_] => println!("1.44"),
+        ["compose","version"] => println!("Synthetic Compose"),
+        ["compose","ps","--format",_] => (),
+        ["compose","up",..] => {
+            fs::write(cwd.join("fixture-containers-running"),"owned by up").unwrap();
+            if cwd.join("fail-up").exists() { eprintln!("synthetic partial up failure");std::process::exit(71); }
+        }
+        ["compose","run","--rm","migrate"] => { eprintln!("synthetic migration barrier");std::process::exit(72); }
+        ["compose","-f","docker-compose.yml","config","--format","json"] => println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}"),
+        ["compose","-f","docker-compose.yml","stop","supervisor"] => (),
+        ["ps","--quiet","--filter",_,"--filter",_] => (),
+        ["compose","-f","docker-compose.yml","--profile","harness","down"] => {
+            if cwd.join("fail-down").exists() { eprintln!("synthetic down refusal");std::process::exit(73); }
+            match fs::remove_file(cwd.join("fixture-containers-running")) {
+                Ok(()) => (), Err(e) if e.kind()==std::io::ErrorKind::NotFound => (), Err(e)=>panic!("{e}"),
+            }
+        }
+        _ => { eprintln!("unexpected fixture command: {args:?}");std::process::exit(99); }
+    }
+}
+"#).unwrap();
+                crate::test_support::compile_fixture(&source, &path.bin().join("docker"));
+                std::fs::copy(path.bin().join("docker"), path.bin().join("podman")).unwrap();
+                std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", base.join("commands.log"));
+                let app = tauri::test::mock_builder()
+                    .manage(Shell::default())
+                    .invoke_handler(tauri::generate_handler![start_stack, stop_stack])
+                    .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                    .unwrap();
+                let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                    .build()
+                    .unwrap();
+                Self {
+                    base,
+                    a,
+                    b,
+                    path,
+                    app,
+                    window,
+                }
+            }
+
+            fn invoke(
+                &self,
+                cmd: &str,
+                body: serde_json::Value,
+            ) -> Result<serde_json::Value, serde_json::Value> {
+                tauri::test::get_ipc_response(
+                    &self.window,
+                    tauri::webview::InvokeRequest {
+                        cmd: cmd.into(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: "tauri://localhost".parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(body),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.into(),
+                    },
+                )
+                .map(|body| body.deserialize().unwrap())
+            }
+
+            fn start(&self, root: &Path, saved: bool) -> serde_json::Value {
+                let model = if saved {
+                    serde_json::json!({"provider":"openai","login":"api-key","saved":true})
+                } else {
+                    serde_json::json!({"provider":"openai","login":"api-key","apiKey":"synthetic-container-root-key"})
+                };
+                let result = self.invoke("start_stack", serde_json::json!({
+                    "root":root,"apiUrl":"https://intelligence.example.test","gatewayWsUrl":"wss://gateway.example.test",
+                    "apiKey":"synthetic-intelligence-key","model":model,"harness":null,
+                })).expect_err("fixture Start must stop before host startup");
+                println!(
+                    "CONTAINER_START={}",
+                    serde_json::json!({"root":root,"problem":result})
+                );
+                assert!(!root.join(".logs").exists(), "no hosts may start");
+                result
+            }
+
+            fn stop(&self) -> Result<serde_json::Value, serde_json::Value> {
+                self.invoke("stop_stack", serde_json::json!({"root":self.b}))
+            }
+
+            fn quit(&self) {
+                let app = self.app.handle().clone();
+                let fallback = self.b.clone();
+                let (sent, received) = std::sync::mpsc::channel();
+                request_quit_with(
+                    std::sync::Arc::clone(&self.app.state::<Shell>().quit),
+                    None,
+                    || (),
+                    move || {
+                        exit_cleanup_with(
+                            &app.state::<Shell>(),
+                            &fallback,
+                            stack::stop_processes_under,
+                            |root| match engine::detect().address {
+                                Some(found) => stack::down(&found, root),
+                                None => Ok(()),
+                            },
+                        )
+                    },
+                    |error| panic!("Quit cleanup failed: {error}"),
+                    move |code| sent.send(code).unwrap(),
+                    |work| std::thread::Builder::new().spawn(work).map(|_| ()),
+                )
+                .unwrap();
+                assert_eq!(
+                    received
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .unwrap(),
+                    0
+                );
+            }
+
+            fn commands(&self) -> String {
+                std::fs::read_to_string(self.base.join("commands.log")).unwrap_or_default()
+            }
+
+            fn assert_stopped(&self) {
+                let commands = self.commands();
+                println!(
+                    "CONTAINER_COMMANDS={}",
+                    serde_json::json!({"a":self.a,"b":self.b,"commands":commands,"aStillRunning":self.a.join("fixture-containers-running").exists()})
+                );
+                assert_compose_down_ran_under(&self.base.join("commands.log"), &self.a);
+                assert!(!self.a.join("fixture-containers-running").exists());
+                assert!(!commands
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{}\tcompose", self.b.display()))));
+            }
+        }
+
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                println!(
+                    "CONTAINER_CLEANUP={}",
+                    serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"persistentFixtureProcesses":0})
+                );
+                std::fs::remove_dir_all(&self.base).expect("independent private fixture cleanup");
+                std::fs::remove_dir_all(self.path.bin())
+                    .expect("independent engine fixture cleanup");
+                assert!(!self.base.exists());
+                assert!(!self.path.bin().exists());
+            }
+        }
+
+        fn failed_retry(quit: bool, partial_up: bool) {
+            let fixture = Fixture::new();
+            if partial_up {
+                std::fs::write(fixture.a.join("fail-up"), "").unwrap();
+            }
+            let problem = fixture.start(&fixture.a, false);
+            assert!(
+                problem["detail"].as_str().unwrap().contains(if partial_up {
+                    "synthetic partial up failure"
+                } else {
+                    "synthetic migration barrier"
+                }),
+                "{problem}"
+            );
+            assert!(fixture.a.join("fixture-containers-running").exists());
+            let ready = engine::detect();
+            assert!(ready.responding);
+            assert!(ready.address.unwrap().composes());
+            let retry = fixture.start(&fixture.b, true);
+            assert!(retry["said"].is_string());
+            assert!(!fixture.b.join("docker-compose.yml").exists());
+            if quit {
+                fixture.quit();
+            } else {
+                fixture.stop().unwrap();
+            }
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn stop_retains_a_after_b_preflight_refusal() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::stop_retains_a_after_b_preflight_refusal",
+            ) {
+                return;
+            }
+            failed_retry(false, false);
+        }
+
+        #[test]
+        fn quit_retains_a_after_b_preflight_refusal() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::quit_retains_a_after_b_preflight_refusal",
+            ) {
+                return;
+            }
+            failed_retry(true, false);
+        }
+
+        #[test]
+        fn partial_up_retains_a_for_stop() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::partial_up_retains_a_for_stop",
+            ) {
+                return;
+            }
+            failed_retry(false, true);
+        }
+
+        #[test]
+        fn same_root_retry_reuses_a_and_failed_down_remains_retryable() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::same_root_retry_reuses_a_and_failed_down_remains_retryable",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            for _ in 0..2 {
+                assert!(fixture.start(&fixture.a, false)["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains("synthetic migration barrier"));
+            }
+            assert_eq!(
+                fixture
+                    .commands()
+                    .lines()
+                    .filter(|line| line.contains("\tcompose up "))
+                    .count(),
+                2
+            );
+            std::fs::write(fixture.a.join("fail-down"), "").unwrap();
+            assert!(fixture
+                .stop()
+                .unwrap_err()
+                .as_str()
+                .unwrap()
+                .contains("synthetic down refusal"));
+            fixture.start(&fixture.b, true);
+            std::fs::remove_file(fixture.a.join("fail-down")).unwrap();
+            fixture.stop().unwrap();
+            fixture.assert_stopped();
+        }
+
+        #[test]
+        fn successful_down_releases_a_for_a_new_deployment() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::successful_down_releases_a_for_a_new_deployment",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            fixture.start(&fixture.a, false);
+            fixture.stop().unwrap();
+            write_installed_deployment(&fixture.b);
+            let problem = fixture.start(&fixture.b, false);
+            assert!(problem["detail"]
+                .as_str()
+                .unwrap()
+                .contains("synthetic migration barrier"));
+            fixture.stop().unwrap();
+            for root in [&fixture.a, &fixture.b] {
+                assert_compose_down_ran_under(&fixture.base.join("commands.log"), root);
+                assert!(!root.join("fixture-containers-running").exists());
+            }
+        }
+
+        #[test]
+        fn uninstalled_b_control_does_not_issue_compose_cleanup() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::uninstalled_b_control_does_not_issue_compose_cleanup",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            let problem = fixture.start(&fixture.b, true);
+            assert!(problem["said"]
+                .as_str()
+                .unwrap()
+                .contains("saved OpenAI API key"));
+            fixture.stop().unwrap();
+            assert!(!fixture.commands().contains("compose"));
+        }
+
+        #[test]
+        fn rejected_concurrent_start_does_not_change_selected_root() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::rejected_concurrent_start_does_not_change_selected_root",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            let shell = fixture.app.state::<Shell>();
+            remember_selected_root(&shell, &fixture.a);
+            let _attempt = StartAttempt::begin(&shell).unwrap();
+            assert!(fixture.start(&fixture.b, true)["said"]
+                .as_str()
+                .unwrap()
+                .contains("already starting"));
+            assert_eq!(
+                shell.selected_root.lock().unwrap().as_ref(),
+                Some(&fixture.a)
+            );
+            assert!(fixture.commands().is_empty());
+        }
     }
 
     fn harness_start_ipc_case(case: &str) {
