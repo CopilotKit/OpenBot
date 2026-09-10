@@ -867,12 +867,38 @@ export function createPluginStore(options: PluginStoreOptions) {
       if (!server?.credentialId) {
         throw new PluginRefusedError(noClient, null);
       }
-      return {
-        client: JSON.parse(
-          await secretFor(server.credentialId, unusableClient),
-        ) as OAuthClient,
-        registeredAt: server.registeredAt,
-      };
+      /*
+       * Decrypted outside the guard below, so that `secretFor`'s own refusal for a revoked or
+       * missing row is not caught here and relabelled. Only the parse is guarded.
+       */
+      const decrypted = await secretFor(server.credentialId, unusableClient);
+      try {
+        return {
+          client: JSON.parse(decrypted) as OAuthClient,
+          registeredAt: server.registeredAt,
+        };
+      } catch {
+        /*
+         * Unreadable is the same as none, exactly as it is for {@link heldOAuthClient} and
+         * {@link storedOAuthClient}: there is nothing here to present to a vendor. Those two answer
+         * null because their callers are deciding whether a consent flow can start; this one is
+         * already mid-call, and its every caller would have to turn a null into this same refusal
+         * on the next line — so it raises it.
+         *
+         * THE PARSER'S OWN WORDS ARE NEVER CARRIED. `JSON.parse` reports failure by quoting the
+         * input it choked on, and the input here is the DECRYPTED OAuth client. Rethrowing it puts
+         * a fragment of the client secret — under Bun's parser, the whole of it when the stored
+         * value is a bare token — into the `mcp.call_failed` payload and into
+         * `mcp_servers.last_error`, two durable stores that the Plugins page draws for anybody who
+         * can read it.
+         *
+         * A reader should conclude that the signal is not lost, only the bytes: `unusableClient`
+         * says the deployment holds a client it cannot use, which is distinct from `noClient`'s
+         * holding none, and it names connecting again as what replaces it. An operator can tell
+         * the credential is broken; nobody learns what was in it.
+         */
+        throw new PluginRefusedError(unusableClient, null);
+      }
     }
 
     /*

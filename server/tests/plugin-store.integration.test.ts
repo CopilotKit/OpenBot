@@ -1458,6 +1458,153 @@ describe("refresh token rotation", () => {
       await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
     ).toBe("rt-3");
   });
+
+  /**
+   * A stored OAuth client whose decrypted bytes are not a client at all.
+   *
+   * CRITERION: neither the decrypted plaintext nor a parser's account of it may reach
+   * `audit_events` or `mcp_servers.last_error`. REASON: that plaintext IS the deployment's OAuth
+   * client secret, and `JSON.parse` reports failure by quoting the input it choked on — so an
+   * unguarded parse writes a fragment of the secret into two durable stores, both of which the
+   * Plugins page draws for an administrator.
+   *
+   * A corrupted row is not hypothetical: a partially written value, a row encrypted under a key
+   * this deployment no longer holds, or a hand-edited vault all produce bytes that decrypt and are
+   * not JSON.
+   *
+   * The refusal is asserted alongside the absence, because an unreadable client that produced
+   * nothing at all would be its own bug: the operator would see a connector failing with no reason
+   * given, and the credential is the reason.
+   */
+  describe("a stored OAuth client that does not read back as one", () => {
+    /*
+     * A bare secret where a client object belongs — the shape a wrongly encrypted row really has,
+     * and the worst case for the leak. It decrypts, so the vault is happy; it is not JSON, so the
+     * parse fails; and it is a single identifier token, which is what the parser quotes back
+     * WHOLE. Distinctive, so an assertion can look for the plaintext itself rather than a shape.
+     */
+    const UNREADABLE_PLAINTEXT = `secret_notJsonClient${suite}`;
+    /** What the person and the trail are told instead, which is the operator's signal. */
+    const UNUSABLE = "Notion has no usable OAuth client for this deployment.";
+
+    /** The client the suite registered, restored after each test repoints the server. */
+    let registeredClientId: string | null = null;
+
+    /** Point the server at a vault row that decrypts to something that is not a client. */
+    async function pointAtUnreadableClient() {
+      const [server] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, rotationServerId));
+      registeredClientId = server?.credentialId ?? null;
+
+      const [credential] = await database
+        .insert(credentials)
+        .values({
+          kind: "mcp_oauth_client",
+          provider: rotationServerId,
+          // Fresh per call, because `credentials_active_key_idx` holds one live row per
+          // (kind, provider, key_id) and the row this leaves behind is never revoked.
+          keyId: `oauth-client-unreadable-${randomUUID().slice(0, 8)}`,
+          metadata: {},
+          encryptedValue: await encryptSecret(
+            ROTATION_KEY,
+            UNREADABLE_PLAINTEXT,
+          ),
+        })
+        .returning({ id: credentials.id });
+      if (!credential) throw new Error("unreadable client was not stored");
+      vaultRows.push(credential.id);
+
+      await database
+        .update(mcpServers)
+        .set({ credentialId: credential.id })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
+
+    /** Put the readable client back, so the tests after this one still have one. */
+    async function restoreClient() {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: registeredClientId })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
+
+    test("the trail of a refused call carries neither the plaintext nor the parser", async () => {
+      await connect();
+      await pointAtUnreadableClient();
+      try {
+        /*
+         * The throw is held rather than asserted on first, because what this test is about is the
+         * ROW. Asserting the thrown type up front would fail on the unguarded code before any
+         * durable store had been read, and report the wrong thing.
+         */
+        const refusal = await rotationStore
+          .callTool({
+            ref: rotationRef,
+            args: {},
+            botId: rotationBotId,
+            actorId: rotationUserId,
+          })
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+
+        const failures = (await auditRowsFor(rotationRef)).filter(
+          (row) => row.eventType === "mcp.call_failed",
+        );
+        const written = JSON.stringify(failures);
+        expect(written).not.toContain(UNREADABLE_PLAINTEXT);
+        /*
+         * The parser's vocabulary as well as the plaintext. A parser quotes only a window of its
+         * input — how wide is the runtime's business, not ours — so a message could carry a
+         * fragment the assertion above would miss, and any of these words reaching the trail means
+         * a parse wrote it.
+         */
+        expect(written).not.toContain("JSON Parse error");
+        expect(written).not.toContain("SyntaxError");
+        expect(written).not.toContain("Unexpected");
+        // And the operator is still told which thing is broken, in the trail and to the caller.
+        expect(written).toContain(UNUSABLE);
+        expect(refusal).toBeInstanceOf(PluginRefusedError);
+      } finally {
+        await restoreClient();
+      }
+    });
+
+    test("a refresh leaves the same absence in the server's last error", async () => {
+      await connect();
+      const [before] = await database
+        .select({ lastError: mcpServers.lastError })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, rotationServerId));
+      await pointAtUnreadableClient();
+      try {
+        // Refuses before the vendor is asked, so nothing here needs a reachable Notion.
+        expect(
+          await rotationStore.refreshTools(rotationServerId, rotationUserId),
+        ).toEqual({ tools: 0 });
+
+        const [after] = await database
+          .select({ lastError: mcpServers.lastError })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, rotationServerId));
+        const written = after?.lastError ?? "";
+        expect(written).not.toContain(UNREADABLE_PLAINTEXT);
+        expect(written).not.toContain("JSON Parse error");
+        expect(written).not.toContain("SyntaxError");
+        expect(written).not.toContain("Unexpected");
+        expect(written).toContain(UNUSABLE);
+      } finally {
+        await restoreClient();
+        await database
+          .update(mcpServers)
+          .set({ lastError: before?.lastError ?? null })
+          .where(eq(mcpServers.id, rotationServerId));
+      }
+    });
+  });
 });
 
 /**
