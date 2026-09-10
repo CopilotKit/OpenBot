@@ -248,6 +248,82 @@ describe("listing an app's actions", () => {
     ]);
   });
 
+  test("an action that stages a file is not offered at all", async () => {
+    useComposioClient(
+      recording({
+        listActions: async () => [
+          GMAIL_READ,
+          {
+            slug: "GMAIL_SEND_EMAIL",
+            description: "Send an email.",
+            tags: ["createHint"],
+            version: "20260903_00",
+            inputParameters: {
+              type: "object",
+              properties: {
+                recipient: { type: "string" },
+                // What the SDK hands on under its default file handling: the vendor's own staging
+                // descriptor, untouched. `dangerouslyAllowAutoUploadDownloadFiles` is off unless a
+                // client asks for it (`src/models/Tools.ts:136`, `:242-248`), and only that flag
+                // collapses the shape. An `s3key` is issued by an upload nothing here performs.
+                attachment: {
+                  type: "object",
+                  file_uploadable: true,
+                  properties: {
+                    name: { type: "string" },
+                    mimetype: { type: "string" },
+                    s3key: { type: "string" },
+                  },
+                },
+              },
+              required: ["recipient", "attachment"],
+            },
+          },
+        ],
+      }).client,
+    );
+
+    const listed = await listTools({ url: "composio://gmail" });
+
+    // Dropped rather than offered with a field the model can only invent. Offering it guarantees a
+    // hallucinated key and a rejection at the vendor's staging lookup, and a grant recorded against
+    // a name that can never work.
+    expect(listed.map((tool) => tool.name)).toEqual(["GMAIL_FETCH_EMAILS"]);
+  });
+
+  test("a file parameter reached through $defs and a variant is found too", async () => {
+    useComposioClient(
+      recording({
+        listActions: async () => [
+          GMAIL_READ,
+          {
+            slug: "GMAIL_GET_ATTACHMENT",
+            version: "20260903_00",
+            inputParameters: {
+              type: "object",
+              properties: { body: { $ref: "#/$defs/upload" } },
+              $defs: {
+                upload: {
+                  anyOf: [
+                    { type: "null" },
+                    { type: "string", file_uploadable: true },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      }).client,
+    );
+
+    // Composio toolkits routinely express the flag through a `$ref`/`$defs` indirection, which is
+    // why the SDK's own predicate walks `$defs` and every composed variant
+    // (`src/utils/modifiers/FileToolModifier.utils.neutral.ts:77-134`). A walk that stopped at
+    // `properties` would answer false for every ref-based schema and offer it anyway.
+    const listed = await listTools({ url: "composio://gmail" });
+    expect(listed.map((tool) => tool.name)).toEqual(["GMAIL_FETCH_EMAILS"]);
+  });
+
   test("an action with no schema is still listed, with an open one", async () => {
     useComposioClient(
       recording({

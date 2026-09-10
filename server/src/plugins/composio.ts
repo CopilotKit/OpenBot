@@ -187,12 +187,65 @@ export function effectOf(tags: readonly string[] | undefined): {
   return { effect: "write", destructive: false };
 }
 
+/** A JSON Schema node, or null for anything that is not one. */
+function schemaNode(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Whether an action asks for a file, anywhere in its schema.
+ *
+ * `file_uploadable` is Composio's own extension keyword, and one of the few the SDK's
+ * `JSONSchemaPropertySchema` whitelists rather than strips (`@composio/core` 0.18.1,
+ * `src/types/tool.types.ts:89`) — so unlike most of what the vendor publishes, this one is still
+ * here to be read. See {@link listTools} for what is done with the answer.
+ *
+ * WALKED, NOT LOOKED UP. Composio toolkits routinely put the flag behind a `$ref`/`$defs`
+ * indirection or inside an `anyOf` variant, which is why the vendor's own predicate recurses
+ * through both (`src/utils/modifiers/FileToolModifier.utils.neutral.ts:77-134`). A check that read
+ * only the top level of `properties` would answer false for every ref-based schema, which is the
+ * majority of the ones that carry a file.
+ *
+ * The keys walked are the composition keywords `ParametersSchema` and `JSONSchemaPropertySchema`
+ * actually keep, and no others: a key those two strip cannot be present to be walked.
+ */
+function stagesAFile(schema: unknown): boolean {
+  const node = schemaNode(schema);
+  if (!node) return false;
+  if (node.file_uploadable === true) return true;
+
+  for (const key of [
+    "properties",
+    "patternProperties",
+    "$defs",
+    "definitions",
+  ]) {
+    const children = schemaNode(node[key]);
+    if (children && Object.values(children).some(stagesAFile)) return true;
+  }
+
+  for (const key of ["anyOf", "oneOf", "allOf", "items", "not"]) {
+    const branch = node[key];
+    if (
+      Array.isArray(branch) ? branch.some(stagesAFile) : stagesAFile(branch)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Every action this app publishes, in the shape a `tools/list` answer has, plus what we know about it.
  *
  * An action with no schema is still listed, with an open one. The vendor is the right party to reject a
  * bad argument, and an action silently missing from the list reads to an administrator as an app that
- * does not have it.
+ * does not have it. The one exception is an action that asks for a FILE, which is dropped — see the
+ * criterion beside the filter below, and note that it turns on the action being uncallable rather
+ * than on its schema being unfamiliar.
  *
  * A listing that could not be read at all is a THROW rather than an empty list, for the same reason
  * turned around: an empty list is what an app with no actions looks like, so answering emptily would
@@ -268,17 +321,41 @@ export async function listTools(connection: {
     );
   }
 
-  return actions.map((action) => {
-    const { effect, destructive } = effectOf(action.tags);
-    return {
-      name: action.slug,
-      description: action.description ?? "",
-      inputSchema: action.inputParameters ?? {},
-      effect,
-      destructive,
-      ...(action.version ? { version: action.version } : {}),
-    };
-  });
+  /*
+   * AN ACTION IS OFFERED ONLY IF A MODEL COULD ACTUALLY FILL IN ITS ARGUMENTS.
+   *
+   * A `file_uploadable` parameter fails that. Under the SDK's default file handling — the flag is
+   * `dangerouslyAllowAutoUploadDownloadFiles` and it is off unless a client asks for it
+   * (`src/models/Tools.ts:136`, `:242-248`) — the parameter reaches the model as the vendor's
+   * internal staging descriptor, `{ name, mimetype, s3key }`. An `s3key` is issued by an upload to
+   * Composio's bucket. Nothing in this deployment performs one, and a model has no way to obtain
+   * one, so the only value it can produce is invented and the vendor's staging lookup rejects the
+   * call. The SDK says as much itself in the warning it logs on that path (`:349-366`).
+   *
+   * WHY THIS IS NOT THE SAME AS THE SCHEMALESS ACTION ABOVE, which is deliberately still offered.
+   * There the vendor is the right party to reject a bad argument, and the action might well
+   * succeed. Here it cannot: every call is a rejection, and an advertised action that can only
+   * fail is worse than an absent one, because an administrator grants it, the audit trail records
+   * attempts against it, and the model spends turns retrying with a different invented key.
+   *
+   * ENABLING AUTO-UPLOAD WOULD NOT FIX IT EITHER, which is why the answer is not "turn the flag
+   * on". That flag collapses the parameter to `{ type: 'string', format: 'path' }` — a promise
+   * that the SDK will read a local path off this server's disk. A model naming a server-side path
+   * is a worse offer than one naming a bucket key, not a better one.
+   */
+  return actions
+    .filter((action) => !stagesAFile(action.inputParameters))
+    .map((action) => {
+      const { effect, destructive } = effectOf(action.tags);
+      return {
+        name: action.slug,
+        description: action.description ?? "",
+        inputSchema: action.inputParameters ?? {},
+        effect,
+        destructive,
+        ...(action.version ? { version: action.version } : {}),
+      };
+    });
 }
 
 /**
