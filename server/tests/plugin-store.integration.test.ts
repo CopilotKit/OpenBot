@@ -4030,7 +4030,7 @@ test("a Composio call with nobody attributed is refused before it reaches the ve
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4072,7 +4072,7 @@ test("a Composio call with nobody attributed is refused even when a connection r
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4155,7 +4155,7 @@ test("a Composio call by somebody who has not connected the app is refused with 
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4198,7 +4198,7 @@ test("a Composio call by somebody who has not connected the app is refused even 
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4226,7 +4226,7 @@ test("a Composio call whose url names no app is refused rather than falling back
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4253,7 +4253,7 @@ test("a Composio call whose row id and url name different apps is refused", asyn
   const reached: string[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return vendorAnswered();
     },
@@ -4293,7 +4293,7 @@ test("a Composio call sends the version recorded for that action", async () => {
   const calls: { slug: string; version: string }[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug, _userId, version) => {
+    execute: async ({ slug, version }) => {
       calls.push({ slug, version });
       return vendorAnswered();
     },
@@ -4326,7 +4326,7 @@ test("a version a model supplied in its own arguments cannot beat the recorded o
   const calls: { slug: string; version: string }[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug, _userId, version) => {
+    execute: async ({ slug, version }) => {
       calls.push({ slug, version });
       return vendorAnswered();
     },
@@ -4355,7 +4355,7 @@ test("a version a model supplied cannot stand in for an action with none recorde
   const calls: { slug: string; version: string }[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug, _userId, version) => {
+    execute: async ({ slug, version }) => {
       calls.push({ slug, version });
       return vendorAnswered();
     },
@@ -4411,7 +4411,7 @@ test("a Composio call reaches the vendor as the person asking, not as the Bot", 
   const reached: { slug: string; userId: string }[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug, userId) => {
+    execute: async ({ slug, userId }) => {
       reached.push({ slug, userId });
       return vendorAnswered();
     },
@@ -4458,7 +4458,7 @@ test("an identity a model puts in the arguments does not change whose account th
   const reached: { userId: string; args: Record<string, unknown> }[] = [];
   useComposioClient({
     listActions: async () => [],
-    execute: async (_slug, userId, _version, args) => {
+    execute: async ({ userId }, args) => {
       reached.push({ userId, args });
       return vendorAnswered();
     },

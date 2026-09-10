@@ -151,7 +151,7 @@ const answered: ComposioResult = { data: {}, error: null, successful: true };
 function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
   useComposioClient({
     listActions: async () => [],
-    execute: async (slug) => {
+    execute: async ({ slug }) => {
       reached.push(slug);
       return answered;
     },
