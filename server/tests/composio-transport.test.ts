@@ -10,6 +10,7 @@ import {
   useComposioClient,
   vendorSentence,
 } from "../src/plugins/composio";
+import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 
 /**
  * The Composio transport's boundary, asserted with no network and no database.
@@ -46,6 +47,24 @@ function answered(
     error: outcome.error ?? null,
     successful: outcome.successful ?? true,
   };
+}
+
+/**
+ * What a capped answer ends with, and exactly how long a capped answer is.
+ *
+ * IMPORTED RATHER THAN RESTATED, and asserted as an equality rather than as an upper bound. The
+ * three cap tests below used to allow anything under 25,000 while `MAX_RESULT_CHARS` is 20,000, so
+ * the number they were named for was the one thing they did not pin: a regression that doubled the
+ * cap to 40,000 fails, but one that raised it to 24,000 — half again as much of somebody's context
+ * window spent by somebody else's server — passed. A bound with slack in it is a bound that has to
+ * be re-argued every time the constant moves, so there is no reason for it to have any.
+ */
+const TRUNCATION_MARKER = "\n\n[truncated]";
+const CAPPED_LENGTH = MAX_RESULT_CHARS + TRUNCATION_MARKER.length;
+
+/** The nesting `vendorSentence` reaches through, with whatever the vendor left at the bottom of it. */
+function nested(message: unknown): unknown {
+  return { cause: { error: { error: { message } } } };
 }
 
 function recording(answers: Partial<ComposioActions> = {}): {
@@ -193,6 +212,25 @@ describe("finding the vendor's own sentence", () => {
     expect(vendorSentence(new Error("boom"))).toBeNull();
     expect(vendorSentence({ cause: { error: {} } })).toBeNull();
     expect(vendorSentence(undefined)).toBeNull();
+  });
+
+  test("a sentence made only of whitespace is not a sentence", () => {
+    // The `.trim()` on the return had nothing asserting it. A blank message that counted as a
+    // sentence is worse than none: `callTool` and `listingSentence` both prefer it over their
+    // fallbacks, so the reader gets an empty refusal instead of the one line naming what to do.
+    expect(vendorSentence(nested(""))).toBeNull();
+    expect(vendorSentence(nested("   "))).toBeNull();
+    expect(vendorSentence(nested("\n\t "))).toBeNull();
+  });
+
+  test("a message that is not a string is not read as one", () => {
+    // Nothing asserted the type guard either. Composio's payloads are somebody else's JSON, so the
+    // field can be a number, an object or null; handed on unchecked, each of those reaches a model's
+    // context and an audit row as `[object Object]` or `1810`.
+    expect(vendorSentence(nested(1810))).toBeNull();
+    expect(vendorSentence(nested(null))).toBeNull();
+    expect(vendorSentence(nested({ text: "a nested sentence" }))).toBeNull();
+    expect(vendorSentence(nested(["a sentence in a list"]))).toBeNull();
   });
 });
 
@@ -397,6 +435,27 @@ describe("listing an app's actions", () => {
     expect(tool?.effect).toBe("write");
   });
 
+  test("an action Composio published no version for is listed with no version key", async () => {
+    useComposioClient(
+      recording({
+        listActions: async () => [
+          { slug: "GMAIL_UNVERSIONED", tags: ["readOnlyHint"] },
+        ],
+      }).client,
+    );
+
+    const [tool] = await listTools({ url: "composio://gmail" });
+
+    // The branch that spreads the key only when the vendor sent one had nothing exercising it:
+    // every listing stub above carries a version. What it guards is not cosmetic. `store.ts`
+    // writes `tool.version ?? null`, so a key present and empty would be recorded as a version this
+    // deployment believes it has, and `callTool` would send `""` to a vendor that rejects it —
+    // instead of the refusal that names what the reader can and cannot do about it.
+    expect(Object.keys(tool ?? {})).not.toContain("version");
+    expect(tool?.name).toBe("GMAIL_UNVERSIONED");
+    expect(tool?.effect).toBe("read");
+  });
+
   test("a listing nobody was asked for throws rather than answering empty", async () => {
     // `[]` means "the vendor was asked and advertises none" everywhere else in this codebase, and
     // `refreshTools` commits it as a healthy refresh. No client installed is the SHIPPED state —
@@ -415,8 +474,26 @@ describe("listing an app's actions", () => {
     expect(thrown.message).toMatch(/expected/i);
   });
 
-  test("a url that names no app throws about the url, not about the client", async () => {
-    useComposioClient(recording().client);
+  test("a url that names no app throws about the url, and asks nobody", async () => {
+    /*
+     * THE REFUSAL IS ONLY HALF THE CLAIM, and this test used to make only that half.
+     *
+     * With the default stub answering `[]`, nothing here noticed whether Composio had been asked
+     * at all — so the guard could be moved to after the dial and every assertion below still
+     * passed, while the transport handed `https://example.com` to the vendor as an app slug. That
+     * is the failure the guard exists to prevent: `toolkitOf` is what keeps a url this deployment
+     * cannot read from becoming a request, and a test that cannot tell a refusal from a round trip
+     * is not testing the guard.
+     */
+    const asked: unknown[] = [];
+    useComposioClient(
+      recording({
+        listActions: async (toolkit, page) => {
+          asked.push({ toolkit, page });
+          return [];
+        },
+      }).client,
+    );
 
     const listing = listTools({ url: "https://example.com" });
 
@@ -427,6 +504,7 @@ describe("listing an app's actions", () => {
     const thrown = (await listing.catch((error: unknown) => error)) as Error;
     expect(thrown.message).not.toMatch(/not configured/i);
     expect(thrown.message).toContain("https://example.com");
+    expect(asked).toEqual([]);
   });
 
   test("a listing the vendor's own schema rejects throws a sentence, not a Zod dump", async () => {
@@ -462,6 +540,29 @@ describe("listing an app's actions", () => {
     const thrown = await listing.catch((error: unknown) => error);
     expect(String((thrown as Error).message)).not.toContain("invalid_type");
     expect(String((thrown as Error).message)).toContain("gmail");
+  });
+
+  test("a listing that failed with nothing said still names the app it was about", async () => {
+    // The other arm of `listingSentence`'s fallback, which nothing reached. `refreshTools` puts
+    // this string in the row's `lastError` and an administrator reads it off the Plugins page, so
+    // a blank one is a refresh that reports having failed and declines to say about what.
+    for (const thrown of [{ status: 502 }, new Error(""), new Error("   ")]) {
+      useComposioClient(
+        recording({
+          listActions: async () => {
+            throw thrown;
+          },
+        }).client,
+      );
+
+      const message = await listTools({ url: "composio://gmail" }).then(
+        () => "",
+        (error: unknown) => (error as Error).message,
+      );
+
+      expect(message.trim()).not.toBe("");
+      expect(message).toContain("gmail");
+    }
   });
 });
 
@@ -644,8 +745,16 @@ describe("calling one action", () => {
       { __version: "20260903_00" },
     );
 
+    // VISIBLY is the marker and RATHER THAN SILENTLY is the flag, and this test asserted only the
+    // flag. `truncated: true` beside text that just stops is exactly the silent cut the name
+    // promises against: the model reads a JSON document that ends mid-token and completes it from
+    // memory, because nothing in what it was handed says the ending is ours.
+    expect(result.isError).toBe(false);
     expect(result.truncated).toBe(true);
-    expect(result.text.length).toBeLessThan(25_000);
+    expect(result.text.slice(-TRUNCATION_MARKER.length)).toBe(
+      TRUNCATION_MARKER,
+    );
+    expect(result.text.length).toBe(CAPPED_LENGTH);
   });
 
   test("an empty answer says so in words rather than being empty", async () => {
@@ -662,6 +771,10 @@ describe("calling one action", () => {
     // `data` is a required record, so the empty answer the SDK can actually produce is `{}` — if that
     // did not count, this branch would be unreachable and its promise would be a fiction.
     expect(result.text).toMatch(/returned nothing/i);
+    // Nothing to say is not a failure and is not a truncation. Both fields were unasserted, so this
+    // branch could have started reporting an error and the test would not have noticed.
+    expect(result.isError).toBe(false);
+    expect(result.truncated).toBe(false);
   });
 
   test("an answer the vendor marked unsuccessful is a failure, not content", async () => {
@@ -708,11 +821,14 @@ describe("calling one action", () => {
     );
 
     expect(result.isError).toBe(false);
-    expect(result.text).toContain("m1");
-    // `successful`, `error` and `logId` are the envelope this transport reads to decide the outcome.
-    // Reporting them as content spends a model's context on our own bookkeeping.
-    expect(result.text).not.toContain("log_must_not_appear");
-    expect(result.text).not.toContain("successful");
+    // `successful`, `error` and `logId` are the envelope this transport reads to decide the
+    // outcome. Reporting them as content spends a model's context on our own bookkeeping. Pinned
+    // as the whole string rather than as three absences, because a list of things that must not
+    // appear is only ever as long as the fields the envelope had on the day it was written — the
+    // vendor's `sessionInfo` is already in the type and named in none of them.
+    expect(result.text).toBe(
+      JSON.stringify({ messages: [{ id: "m1" }] }, null, 2),
+    );
   });
 
   test("an unsuccessful answer with no sentence still says something actionable", async () => {
@@ -755,6 +871,39 @@ describe("calling one action", () => {
     expect(result.text).toMatch(/Plugins page/);
   });
 
+  test("a failure that carries no message at all still says something actionable", async () => {
+    /*
+     * The empty-message arm of the fallback, which nothing reached. Both ways of arriving at it are
+     * real: `@composio/core` rejects with plain objects on some paths, so `error instanceof Error`
+     * is false and there is no message to read at all; and a thrown `Error` whose message is blank
+     * or whitespace is what a transport-level abort produces.
+     *
+     * Passed on unchanged, either one lands in a model's context and in `store.ts`'s audit row as an
+     * empty refusal — a failure with `isError: true` and nothing said, which reads to a model as
+     * permission to invent a reason and retry.
+     */
+    for (const thrown of [{ status: 502 }, new Error(""), new Error("  \n ")]) {
+      useComposioClient(
+        recording({
+          execute: async () => {
+            throw thrown;
+          },
+        }).client,
+      );
+
+      const result = await callTool(
+        { url: "composio://gmail", actorId: "user_asker" },
+        "GMAIL_FETCH_EMAILS",
+        { __version: "20260903_00" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text.trim()).not.toBe("");
+      expect(result.text).toContain("GMAIL_FETCH_EMAILS");
+      expect(result.text).toMatch(/Plugins page/);
+    }
+  });
+
   test("an enormous vendor sentence is capped in a refusal too, and says so", async () => {
     useComposioClient(
       recording({
@@ -773,7 +922,11 @@ describe("calling one action", () => {
     // is the same unbounded spend the success path already refuses to make.
     expect(result.isError).toBe(true);
     expect(result.truncated).toBe(true);
-    expect(result.text.length).toBeLessThan(25_000);
+    // "and says so" is the marker, which nothing here used to check.
+    expect(result.text.slice(-TRUNCATION_MARKER.length)).toBe(
+      TRUNCATION_MARKER,
+    );
+    expect(result.text.length).toBe(CAPPED_LENGTH);
   });
 
   test("an enormous thrown message is capped in a refusal too", async () => {
@@ -793,7 +946,10 @@ describe("calling one action", () => {
 
     expect(result.isError).toBe(true);
     expect(result.truncated).toBe(true);
-    expect(result.text.length).toBeLessThan(25_000);
+    expect(result.text.slice(-TRUNCATION_MARKER.length)).toBe(
+      TRUNCATION_MARKER,
+    );
+    expect(result.text.length).toBe(CAPPED_LENGTH);
   });
 
   test("our own serialization failure is not reported as the action having failed", async () => {
