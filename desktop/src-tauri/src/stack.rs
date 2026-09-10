@@ -1496,6 +1496,78 @@ fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) ->
     }
 }
 
+/// Whether this deployment has recorded ownership for the server answering `port`.
+///
+/// Used by the passive startup probe. Absence of current, root-scoped ownership is not fatal
+/// there; it means the app must show setup instead of adopting a process on the shared port.
+pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem> {
+    #[cfg(unix)]
+    {
+        recorded_server_owns_port_unix(root, port)
+    }
+    #[cfg(not(unix))]
+    {
+        recorded_server_owns_port_windows_with(
+            root,
+            port,
+            Path::new("powershell"),
+            Path::new("netstat"),
+        )
+    }
+}
+
+#[cfg(unix)]
+fn recorded_server_owns_port_unix(root: &Path, _port: u16) -> Result<bool, Problem> {
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    let records = match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::UnixRecords {
+            version: 2,
+            unix_processes,
+        }) => unix_processes,
+        _ => return Ok(false),
+    };
+    for record in records
+        .iter()
+        .filter(|record| record.name == "server" && record.deployment == deployment)
+    {
+        if let Some(live) = unix_process(record.pid)? {
+            if live.start == record.start {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(any(not(unix), test))]
+fn recorded_server_owns_port_windows_with(
+    root: &Path,
+    port: u16,
+    powershell: &Path,
+    netstat: &Path,
+) -> Result<bool, Problem> {
+    let recorded = recorded_host_processes(root)?;
+    if recorded.is_empty() {
+        return Ok(false);
+    }
+    let processes = windows_processes_with(powershell)?;
+    let operation = format!("{} -ano -p tcp", netstat.display());
+    let listing = command(netstat)
+        .args(["-ano", "-p", "tcp"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !listing.status.success() {
+        return Err(cleanup_status_problem(&operation, &listing));
+    }
+    let listed = String::from_utf8_lossy(&listing.stdout);
+    Ok(!verified_openbot_pids_listening_on(&listed, &[port], &recorded, &processes).is_empty())
+}
+
 /**
 The tail of one service's log.
 
@@ -2686,6 +2758,12 @@ fn main() {
     match (program.as_str(), scenario.as_str()) {
         ("powershell", "held-refusal") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
         ("netstat", "held-refusal") => {},
+        ("powershell", "already-running") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("netstat", "already-running") => {
+            println!("  Proto  Local Address          Foreign Address        State           PID");
+            println!("  TCP    127.0.0.1:45123        0.0.0.0:0              LISTENING       9000");
+            println!("  TCP    127.0.0.1:45124        0.0.0.0:0              LISTENING       9002");
+        },
         ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
         ("powershell", "inventory-fail") => {
             print!("synthetic partial inventory that must not be trusted");
@@ -3139,6 +3217,66 @@ fn main() {
         );
 
         assert_eq!(found, vec![8636]);
+    }
+
+    #[test]
+    fn recorded_server_ownership_requires_matching_identity_on_listening_port() {
+        let root = temp_root("openbot-already-running-windows-owner");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        let recorded = recorded_process("server", 9000, "20260909010101.000000-420");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[recorded]}),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9000,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909010101.000000-420"},
+                {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909020202.000000-420"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(recorded_server_owns_port_windows_with(
+            &root,
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        assert!(!recorded_server_owns_port_windows_with(
+            &root,
+            45124,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        let log = fixture.log();
+        assert!(log.contains("powershell\t"), "{log}");
+        assert!(log.contains("netstat\t-ano -p tcp"), "{log}");
+        assert!(!log.contains("taskkill\t"), "{log}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recorded_server_ownership_is_false_without_current_records() {
+        let root = temp_root("openbot-already-running-no-owner");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        assert!(!recorded_server_owns_port_windows_with(
+            &root,
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        assert!(fixture.log().is_empty(), "{}", fixture.log());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

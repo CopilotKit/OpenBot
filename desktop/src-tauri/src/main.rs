@@ -1254,13 +1254,7 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
 ///
 /// Asked of the deployment rather than of a file: a stamp says a deployment was installed, and only
 /// an answer on the port says one is running now.
-#[tauri::command]
-fn already_running(root: String) -> bool {
-    let root = stack::root_from(&root);
-    if deployment::installed(&root).is_none() {
-        return false;
-    }
-    let port = openbot_env::Ports::default().server;
+fn server_capabilities_answer(port: u16) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
@@ -1273,6 +1267,24 @@ fn already_running(root: String) -> bool {
         })
         .map(|response| response.status().is_success())
         .unwrap_or(false)
+}
+
+fn already_running_on<F>(root: &Path, port: u16, owns_server: F) -> bool
+where
+    F: FnOnce(&Path, u16) -> Result<bool, Problem>,
+{
+    if deployment::installed(root).is_none() {
+        return false;
+    }
+    server_capabilities_answer(port) && owns_server(root, port).unwrap_or(false)
+}
+
+#[tauri::command]
+fn already_running(root: String) -> bool {
+    let root = stack::root_from(&root);
+    already_running_on(&root, openbot_env::Ports::default().server, |root, port| {
+        stack::recorded_server_owns_port(root, port)
+    })
 }
 
 /// What stopped the stack, if anything did, and forget it once it has been read.
@@ -3786,6 +3798,60 @@ fi\n";
             self.done.take().expect("thread").join().expect("join");
             request
         }
+    }
+
+    fn test_server_port(server: &TestServer) -> u16 {
+        server
+            .url
+            .strip_prefix("http://127.0.0.1:")
+            .expect("loopback url")
+            .parse()
+            .expect("port")
+    }
+
+    #[test]
+    fn already_running_requires_selected_root_ownership_for_loopback_answer() {
+        let root_a = temp_root("already-running-root-a");
+        let root_b = temp_root("already-running-root-b");
+        write_installed_deployment(&root_a);
+        write_installed_deployment(&root_b);
+
+        let server_a = TestServer::new("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+        let port_a = test_server_port(&server_a);
+        assert!(
+            !already_running_on(&root_a, port_a, |root, port| {
+                assert_eq!(root, root_a.as_path());
+                assert_eq!(port, port_a);
+                Ok(false)
+            }),
+            "an answering shared port without selected-root ownership must not auto-adopt root A"
+        );
+        assert_eq!(server_a.request().path, "/api/capabilities");
+
+        let server_b = TestServer::new("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+        let port_b = test_server_port(&server_b);
+        assert!(already_running_on(&root_b, port_b, |root, port| {
+            assert_eq!(root, root_b.as_path());
+            assert_eq!(port, port_b);
+            Ok(true)
+        }));
+        assert_eq!(server_b.request().path, "/api/capabilities");
+
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn already_running_returns_false_when_ownership_is_unproven() {
+        let root = temp_root("already-running-unproven-root");
+        write_installed_deployment(&root);
+        let server = TestServer::new("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+        let port = test_server_port(&server);
+        assert!(!already_running_on(&root, port, |_, _| {
+            Err(Problem::with("ownership unavailable", "synthetic failure"))
+        }));
+        assert_eq!(server.request().path, "/api/capabilities");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
