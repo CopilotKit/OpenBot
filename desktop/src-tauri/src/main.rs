@@ -5461,6 +5461,21 @@ mod tests {
                     path.push(previous);
                 }
             }
+            #[cfg(windows)]
+            if !inherit_path {
+                // Start saves synthetic credentials through DPAPI. Keep its OS interpreter
+                // available without exposing real engines from the inherited developer PATH.
+                let system_root = std::env::var_os("SystemRoot")
+                    .filter(|root| !root.is_empty())
+                    .expect("Windows fixtures require SystemRoot to locate Windows PowerShell");
+                path.push(";");
+                path.push(
+                    PathBuf::from(system_root)
+                        .join("System32")
+                        .join("WindowsPowerShell")
+                        .join("v1.0"),
+                );
+            }
             std::env::set_var("PATH", path);
             Self {
                 previous,
@@ -5692,6 +5707,27 @@ fn main() {
             let _ = self.app_child.wait();
             let _ = std::fs::remove_dir_all(&self.base);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn restricted_engine_path_keeps_windows_credential_storage_available() {
+        if crate::test_support::isolated_process(
+            "tests::restricted_engine_path_keeps_windows_credential_storage_available",
+        ) {
+            return;
+        }
+        let path = SerializedPath::set_only_with("docker", "shutdown");
+        let root = temp_root("openbot-restricted-path-credential-store");
+        std::fs::create_dir_all(&root).unwrap();
+        let saved = openbot_desktop_lib::vault::remember(
+            &root,
+            "OPENAI_API_KEY",
+            "synthetic-path-regression-key",
+        );
+        std::fs::remove_dir_all(&root).expect("remove owned credential fixture");
+        std::fs::remove_dir_all(path.bin()).expect("remove owned engine fixture");
+        saved.expect("restricted engine PATH must retain Windows protected-storage support");
     }
 
     #[test]
