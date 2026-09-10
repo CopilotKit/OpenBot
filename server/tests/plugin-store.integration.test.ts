@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
-import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -149,6 +149,34 @@ const store = createPluginStore({
   policy: () => policy,
 });
 
+/**
+ * When this run began, by the DATABASE's clock, so every audit query can exclude what came before.
+ *
+ * The trail is the one table this file cannot tidy up after itself: `audit_events` is append-only,
+ * and 0012 closed the last way around that, so every row every previous run wrote is still there and
+ * still matches. The refusals are recorded against `google-drive/search_files` and named by rules
+ * about `google-drive` — production spellings, forced for the same reason the fixtures are — so a
+ * query narrowed only by target and rule matches nine hundred rows this run had nothing to do with,
+ * and an assertion that one exists is answered by a run that finished yesterday. That is a test
+ * which cannot fail: deleting the code that writes the row would leave it green.
+ *
+ * Postgres's clock rather than this process's, because the two are not the same clock and the
+ * comparison happens against a column the server stamps.
+ *
+ * Read through {@link sinceThisRun}, which refuses rather than defaulting: a bound of "the beginning
+ * of time" is the unscoped query back again, silently.
+ */
+let runStartedAt: Date | null = null;
+
+function sinceThisRun() {
+  if (!runStartedAt) {
+    throw new Error(
+      "the run's start was never recorded, so no audit query can be narrowed to it",
+    );
+  }
+  return gte(auditEvents.createdAt, runStartedAt);
+}
+
 async function auditRowsFor(targetId: string) {
   return database
     .select({
@@ -162,6 +190,7 @@ async function auditRowsFor(targetId: string) {
       and(
         eq(auditEvents.targetType, "mcp_tool"),
         eq(auditEvents.targetId, targetId),
+        sinceThisRun(),
       ),
     );
 }
@@ -213,6 +242,16 @@ let ownsFixtureIds = false;
  * makes them safe.
  */
 beforeAll(async () => {
+  /*
+   * Stamped here, in the first hook the file registers, so no row this run writes is older than it
+   * and no row an earlier run wrote is newer.
+   */
+  const [clock] = await database.execute<{ now: Date }>(
+    sql`select now() as now`,
+  );
+  if (!clock) throw new Error("the database would not say what time it is");
+  runStartedAt = clock.now;
+
   const [configuredServers, existingBots, existingConnections, existingPeople] =
     await Promise.all([
       database
@@ -618,7 +657,10 @@ describe("the policy is asked as well as the grant", () => {
         (row.payload as { decision?: { rule?: string } }).decision?.rule ===
           rule,
     );
-    expect(recorded.length).toBeGreaterThan(0);
+    // The one this call wrote. Exact, because the reads below are of `recorded[0]` and the list is
+    // in no order: with the rows of every previous run in it, that index was whichever the planner
+    // returned first, which is a row this code did not write.
+    expect(recorded).toHaveLength(1);
     /*
      * What tells this row apart from a call this deployment actually stopped. `allowed` is the
      * policy's answer and `carriedOut` is what the mode did with it, so a reader counting what a
@@ -878,6 +920,14 @@ describe("removing an MCP server", () => {
 
 describe("the trail can be read by a second reader", () => {
   test("a refusal names the bot, the server and the tool in queryable JSON", async () => {
+    /*
+     * This run's refusal, not whichever of nine hundred the planner happened to hand back first.
+     *
+     * Unbounded, `limit(1)` was answered by the oldest row in the table — a refusal from a run
+     * whose Bot id no longer names anything — so the payload shape being asserted was a shape this
+     * branch's code had never written. Ordered as well as bounded, because `limit` without an order
+     * is a row the query plan picks.
+     */
     const [row] = await database
       .select({
         bot: sql<string>`payload ->> 'bot'`,
@@ -890,8 +940,10 @@ describe("the trail can be read by a second reader", () => {
           eq(auditEvents.targetType, "mcp_tool"),
           eq(auditEvents.eventType, "mcp.call_rejected"),
           eq(auditEvents.targetId, ref),
+          sinceThisRun(),
         ),
       )
+      .orderBy(asc(auditEvents.createdAt), asc(auditEvents.id))
       .limit(1);
 
     // Asserted in SQL rather than through the application, because the stored payload shape is the
@@ -2096,6 +2148,8 @@ describe("a dynamic client the vendor has evicted", () => {
         and(
           eq(auditEvents.eventType, "mcp.oauth_client_registered"),
           eq(auditEvents.targetId, dynamicServerId),
+          // `notion` and `dyn-1` are fixed spellings, so without this the count is every run's.
+          sinceThisRun(),
         ),
       );
   }
@@ -2702,6 +2756,14 @@ describe("a dynamic client the vendor has evicted", () => {
             eq(auditEvents.eventType, "configuration.changed"),
             eq(auditEvents.targetId, dynamicServerId),
             sql`payload ->> 'change' = 'unlisted_tools_advertised'`,
+            /*
+             * `named` is what THIS refresh recorded, not the union over every refresh there has
+             * ever been. `notion` and `notion-create-pages` are both fixed spellings, so both
+             * assertions below were being answered partly by rows older code wrote: the negative
+             * one would report today's classification as wrong on the strength of a row from
+             * before the write list covered that name.
+             */
+            sinceThisRun(),
           ),
         )
     ).flatMap((row) => (row.payload as { tools?: string[] }).tools ?? []);
