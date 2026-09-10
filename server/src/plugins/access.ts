@@ -102,12 +102,52 @@ const REACHED_AS_BY_AUTH: Record<
 };
 
 /**
- * A reviewed entry decides for itself; otherwise the row decides.
+ * A row that claims to be two servers at once, which makes it neither.
+ *
+ * CRITERION. A row whose provenance says `composio` and whose id is a curated catalogue slug is
+ * refused, not resolved — in either direction.
+ *
+ * REASON. {@link accessFor} holds two facts and no third: the row, and the entry that row's id
+ * looked up. A curated row whose provenance column was edited to `composio` and a genuinely
+ * brokered app that happens to be named `notion` arrive here identically, so every answer is right
+ * about one of them and wrong about the other. Entry-wins picked the first reading and therefore
+ * dialled the second as MCP at the curated vendor's pinned host, spending the deployment's own
+ * grant instead of the asking person's brokered connection — the wrong vendor on the wrong
+ * credential, recorded in the trail as an ordinary call to a reviewed server.
+ *
+ * THE SAME COLLISION IS ALREADY REFUSED AT THE OTHER END. `addCustomServer` will not let a row take
+ * a curated slug, because the slug prefixes tool names and is what a grant and a policy rule are
+ * written against. There is no `addComposioServer` to copy that guard into — nothing in the shipped
+ * product writes a `composio` row at all — so a colliding row arrives only by hand edit or restore,
+ * and only a check at resolution sees one.
+ *
+ * NOBODY ASKED FOR THIS REFUSAL, so it is not a person's to act on mid-call: it is two of our own
+ * columns contradicting each other, the same shelf `PluginInvariantError` sits on. Declared here
+ * rather than imported from `store.ts` because this module is a leaf — `store.ts` imports it, and
+ * it imports nothing back.
+ */
+export class ServerRowAmbiguousError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ServerRowAmbiguousError";
+  }
+}
+
+/**
+ * A reviewed entry decides for itself; otherwise the row decides — and a row that claims both is
+ * refused rather than resolved.
  *
  * THE ENTRY WINS, AND THAT ORDER IS THE SECURITY PROPERTY. A curated slug's behaviour comes from code
  * that was reviewed, so a row whose provenance column says something else — edited by hand, restored
  * from an old backup, written by a bug — cannot turn a reviewed vendor into a brokered one and start
  * sending its calls somewhere else. The row only ever answers where the catalogue is silent.
+ *
+ * IT CUTS BOTH WAYS, WHICH IS WHY `composio` IS REFUSED RATHER THAN OVERRULED. Only one direction
+ * was considered when that order was written: a brokered row whose id collides with a curated slug
+ * was quietly answered as the curated vendor. Nothing in these two arguments tells that row apart
+ * from a tampered curated one, so the only answer that is not wrong in one of the two worlds is no
+ * answer. See {@link ServerRowAmbiguousError}. Every other provenance value still loses to the
+ * entry, because none of them proposes a different vendor to reach.
  *
  * MCP stays the fallback, which is still right for a server an administrator added by URL: that is
  * somebody else's MCP endpoint by definition, reached on the one token the deployment holds for it.
@@ -116,6 +156,12 @@ export function accessFor(
   row: { provenance: string; url: string },
   entry: CatalogueEntry | null,
 ): ServerAccess {
+  if (entry && row.provenance === "composio") {
+    throw new ServerRowAmbiguousError(
+      `${entry.key} is a server this deployment ships an entry for, and a row with that id says its provenance is composio. Nothing can tell an edited column from a brokered app that took the name, so this row is not resolved at all: rename it, or correct its provenance.`,
+    );
+  }
+
   if (entry) {
     return {
       transport: entry.transport ?? "mcp",

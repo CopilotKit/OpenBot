@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { accessFor } from "../src/plugins/access";
+import { accessFor, ServerRowAmbiguousError } from "../src/plugins/access";
 import type { CatalogueEntry } from "../src/plugins/catalogue";
 import { catalogueEntry, resolveServerUrl } from "../src/plugins/catalogue";
 
@@ -143,13 +143,55 @@ describe("accessFor", () => {
     // A row whose provenance was tampered with must not turn a reviewed vendor into a brokered one,
     // and must not acquire an app at the broker either — a url edited to `composio://gmail` on a
     // curated slug is the same tampering by another field.
+    //
+    // `composio` is deliberately NOT the value used here. That one combination is now refused
+    // outright rather than overruled — see the test below for why the entry cannot arbitrate it —
+    // and this test is about every other value the column can hold, where the entry still decides.
     const shadowed = accessFor(
-      { provenance: "composio", url: "composio://gmail" },
+      { provenance: "custom", url: "composio://gmail" },
       notion,
     );
     expect(shadowed.transport).toBe("mcp");
     expect(shadowed.credential).toBe("person-oauth");
     expect(shadowed.toolkit).toBeNull();
+  });
+
+  test("a brokered row that carries a curated slug is refused, not dialled at the curated vendor", () => {
+    const notion = catalogueEntry("notion");
+    // Thrown for the reason the test above throws: a renamed slug must break this file rather than
+    // quietly stop checking the protection it exists for.
+    if (!notion) {
+      throw new Error(
+        "catalogue slug `notion` is gone, so nothing here checks that a colliding row is refused",
+      );
+    }
+    // Two different rows produce this pair of arguments and nothing in them tells the two apart: a
+    // curated Notion row whose provenance column was edited to `composio`, and a genuinely brokered
+    // Notion app whose id happens to be the catalogue's slug. Entry-wins answered as though only
+    // the first existed, so the second was dialled as MCP at Notion's pinned host on the
+    // deployment's grant rather than the person's brokered connection. Refusing is the only answer
+    // that is not wrong in one of the two worlds.
+    expect(() =>
+      accessFor({ provenance: "composio", url: "composio://notion" }, notion),
+    ).toThrow(ServerRowAmbiguousError);
+
+    // The url is not what makes it ambiguous. The ID is, and `entry` is how this function is told
+    // the id collided — so a brokered row pointed at some other app is refused on the same ground,
+    // and nothing here can be satisfied by reading the url more carefully.
+    expect(() =>
+      accessFor({ provenance: "composio", url: "composio://gmail" }, notion),
+    ).toThrow(ServerRowAmbiguousError);
+
+    // And the refusal is the collision's, not the provenance value's: the same row with no curated
+    // entry behind its id resolves exactly as any other brokered row does.
+    expect(
+      accessFor({ provenance: "composio", url: "composio://notion" }, null),
+    ).toEqual({
+      transport: "composio",
+      credential: "brokered",
+      reachedAs: "person",
+      toolkit: "notion",
+    });
   });
 
   test("which app a Composio row is comes from its url, not from its id", () => {

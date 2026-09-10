@@ -2153,14 +2153,20 @@ export function createPluginStore(options: PluginStoreOptions) {
        * some other app's connections, or none, for the very row shape that gate already refuses to
        * trust. `accessFor` is asked rather than the url parsed here, so this cannot drift from it.
        *
+       * ASKED WITH NO ENTRY, deliberately, and that is not the entry-wins order being dodged. An
+       * entry can only ever SUPPRESS this answer — `accessFor` returns a null toolkit for every row
+       * that has one — so passing the entry a colliding id looks up would hide the brokered state of
+       * the one row most in need of clearing, and would now refuse outright the very row this method
+       * exists to get rid of, leaving the collision unremovable. Nothing is dialled here, so there is
+       * no vendor for an entry to protect; the only question is which app's consent rows this row's
+       * own url stands for.
+       *
        * Before the server row goes, for the reason the revokes above are: what a failure between
        * two writes leaves has to be the recoverable half. A connection cleared with the app still
        * present is fixed by removing it again; an app deleted with the connections standing is
        * reachable by no operation at all, because the toolkit was only ever readable off its url.
        */
-      const toolkit = existing
-        ? accessFor(existing, catalogueEntry(serverId)).toolkit
-        : null;
+      const toolkit = existing ? accessFor(existing, null).toolkit : null;
 
       if (toolkit) {
         const connected = await database
