@@ -77,7 +77,7 @@ fn main() {
                 .last()
                 .filter(|s| ["agent-langgraph", "agent-harness"].contains(&s.as_str()))
             {
-                println!("OpenAIAuthenticationError: {service} refused the key");
+                println!("OpenAIAuthenticationError: 401 {service} refused the key");
             }
         }
         return;

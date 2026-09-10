@@ -330,6 +330,17 @@ pub fn compose(
      * One address and one kind. The package's single row drops itself while the address is blank,
      * so a deployment that picked nothing registers nothing.
      */
+    // KIND describes the wire protocol, not who runs the endpoint. Always replace this
+    // nonsecret provenance, including when nothing is picked: `write` preserves omitted keys.
+    env.insert(
+        "PICKED_HARNESS_SOURCE".into(),
+        match harness {
+            Some(PickedHarness::Installed { .. }) => "installed",
+            Some(PickedHarness::RemoteAgUi { .. }) => "byo",
+            None => "",
+        }
+        .into(),
+    );
     if let Some(picked) = harness {
         match picked {
             PickedHarness::Installed {
@@ -1780,6 +1791,52 @@ mod model_tests {
         assert!(!env.contains_key("PICKED_HARNESS_IMAGE"));
         assert!(!env.contains_key("PICKED_HARNESS_PORT"));
         assert!(!env.contains_key("PICKED_HARNESS_AGENT_ID"));
+    }
+
+    #[test]
+    fn harness_provenance_is_replaced_and_cleared_in_saved_settings() {
+        let dir = temp_root("harness-provenance");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(".env");
+        let installed = PickedHarness::Installed {
+            image: "synthetic-harness".into(),
+            port: 4206,
+            name: "Installed".into(),
+            mastra: false,
+            run_path: "/ag-ui".into(),
+            remote_agent_id: String::new(),
+        };
+        let byo = PickedHarness::RemoteAgUi {
+            url: "https://agent.example/ag-ui".into(),
+            name: "BYO".into(),
+            remote_agent_id: String::new(),
+        };
+        for (selection, expected) in [
+            (Some(&installed), "installed"),
+            (Some(&byo), "byo"),
+            (None, ""),
+            (Some(&installed), "installed"),
+        ] {
+            let values = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine(),
+                &Ports::default(),
+                &pinned(),
+                selection,
+                &BTreeMap::new(),
+            );
+            write(&file, &values, &BTreeMap::new()).unwrap();
+            let saved = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(
+                saved
+                    .lines()
+                    .filter(|line| line.starts_with("PICKED_HARNESS_SOURCE="))
+                    .collect::<Vec<_>>(),
+                [format!("PICKED_HARNESS_SOURCE={expected}")]
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Nothing picked writes none of it, so the package's gated rows stay dropped.

@@ -1769,6 +1769,7 @@ fn ask_saved_settings(root: &Path) -> Result<std::collections::BTreeMap<String, 
         &[
             "PICKED_HARNESS_URL",
             "PICKED_HARNESS_KIND",
+            "PICKED_HARNESS_SOURCE",
             "PICKED_HARNESS_AGENT_ID",
             "MANAGED_AGENT_AG_UI_URL",
             "MANAGED_AGENT_TOKEN",
@@ -1789,7 +1790,10 @@ async fn ask_the_bot_with_settings(
     let (endpoint, log_service, kind, agent_id) = match picked_endpoint {
         Some(endpoint) => (
             endpoint.clone(),
-            "agent-harness",
+            // Only a selection this install explicitly recorded as local can explain itself
+            // through Compose logs. Legacy/unknown provenance and stale IMAGE/PORT do not.
+            (settings.get("PICKED_HARNESS_SOURCE").map(String::as_str) == Some("installed"))
+                .then_some("agent-harness"),
             settings.get("PICKED_HARNESS_KIND").cloned(),
             settings.get("PICKED_HARNESS_AGENT_ID").cloned(),
         ),
@@ -1798,7 +1802,7 @@ async fn ask_the_bot_with_settings(
                 .get("MANAGED_AGENT_AG_UI_URL")
                 .cloned()
                 .unwrap_or_default(),
-            "agent-langgraph",
+            Some("agent-langgraph"),
             None,
             None,
         ),
@@ -1828,8 +1832,14 @@ async fn ask_the_bot_with_settings(
             agent_id.as_deref(),
         ) {
             Ok(answer) => Ok(answer),
-            // The empty sentence is `ask` saying it has no reason to give, which is the case the
-            // log exists for. Anything else already carries both halves.
+            // An empty sentence carries no cause. Local logs can explain an installed Bot;
+            // they cannot explain a BYO endpoint, even when an old local harness still has logs.
+            Err(problem) if problem.said.is_empty() && log_service.is_none() => {
+                Err(Some(Problem::with(
+                    "The Bot at the selected endpoint returned no answer text. Check that endpoint's logs and ask again.",
+                    format!("endpoint {endpoint}\nThe run returned no answer text."),
+                )))
+            }
             Err(problem) if problem.said.is_empty() => Err(None),
             Err(problem) => Err(Some(problem)),
         }
@@ -1845,9 +1855,12 @@ async fn ask_the_bot_with_settings(
         Ok(answer) => Ok(answer),
         Err(Some(problem)) => Err(problem),
         Err(None) => {
-            let log = engine::detect()
-                .address
-                .map(|found| stack::service_log(&found, &root, log_service, 40))
+            let log = log_service
+                .and_then(|service| {
+                    engine::detect()
+                        .address
+                        .map(|found| stack::service_log(&found, &root, service, 40))
+                })
                 .unwrap_or_default();
             Err(openbot_desktop_lib::ask::why_nothing_came_back(&log))
         }
@@ -4942,6 +4955,210 @@ fn main() {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Exercise the generated command and the settings writer/reader, with real loopback HTTP
+    /// and a disposable external Compose executable. No model, engine or native GUI is started.
+    #[test]
+    fn ask_command_attributes_empty_answers_to_the_selected_endpoint() {
+        const TEST: &str = "tests::ask_command_attributes_empty_answers_to_the_selected_endpoint";
+        if crate::test_support::isolated_process(TEST) {
+            return;
+        }
+        let path = SerializedPath::set_only_with("docker", "empty-answer");
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![ask_the_bot])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let mut failures = Vec::new();
+        for case in [
+            "byo",
+            "installed-to-byo",
+            "legacy",
+            "unknown",
+            "installed-ag-ui",
+            "installed-mastra",
+            "managed",
+        ] {
+            let root = temp_root(&format!("ask-provenance-{case}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let record = root.join("commands.log");
+            std::fs::write(&record, "").unwrap();
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            let server = TestServer::new(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+                 data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
+                 data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
+            );
+            let endpoint = format!("{}/ag-ui", server.url);
+            let installed = openbot_env::PickedHarness::Installed {
+                image: "localhost/synthetic-old-harness@sha256:00".into(),
+                port: test_server_port(&server),
+                name: "Installed fixture".into(),
+                mastra: case == "installed-mastra",
+                run_path: "/ag-ui".into(),
+                remote_agent_id: "fixture-agent".into(),
+            };
+            let byo = openbot_env::PickedHarness::RemoteAgUi {
+                url: format!("  {endpoint}  "),
+                name: "An agent you already run".into(),
+                remote_agent_id: String::new(),
+            };
+            let ports = openbot_env::Ports {
+                langgraph: test_server_port(&server),
+                ..Default::default()
+            };
+            let compose = |harness| {
+                openbot_env::compose(
+                    &openbot_env::Intelligence {
+                        api_url: "https://intelligence.example.test".into(),
+                        gateway_ws_url: "wss://gateway.example.test".into(),
+                        api_key: String::new(),
+                    },
+                    &openbot_env::Model {
+                        credential: openbot_env::ModelCredential::OpenAi {
+                            api_key: "synthetic-provider-key".into(),
+                        },
+                    },
+                    &engine::EngineStatus {
+                        engine: None,
+                        address: None,
+                        responding: false,
+                        engine_socket: None,
+                        detail: String::new(),
+                    },
+                    &ports,
+                    &[],
+                    harness,
+                    &std::collections::BTreeMap::from([(
+                        "MANAGED_AGENT_TOKEN".into(),
+                        "synthetic-ask-token".into(),
+                    )]),
+                )
+            };
+            let file = root.join(".env");
+            let write_settings = |values: &std::collections::BTreeMap<String, String>| {
+                openbot_env::write(&file, values, &Default::default()).unwrap();
+            };
+            if ["installed-to-byo", "legacy", "unknown"].contains(&case) {
+                write_settings(&compose(Some(&installed)));
+            }
+            write_settings(&compose(match case {
+                "managed" => None,
+                "installed-ag-ui" | "installed-mastra" => Some(&installed),
+                _ => Some(&byo),
+            }));
+            // Simulate older/unknown metadata only after the real installed -> BYO writes. The
+            // image/port remain stale, and KIND is the same as an installed AG-UI selection.
+            if case == "legacy" {
+                let text = std::fs::read_to_string(&file).unwrap();
+                std::fs::write(
+                    &file,
+                    text.lines()
+                        .filter(|line| !line.starts_with("PICKED_HARNESS_SOURCE="))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+                .unwrap();
+            } else if case == "unknown" {
+                write_settings(&std::collections::BTreeMap::from([(
+                    "PICKED_HARNESS_SOURCE".into(),
+                    "future-source".into(),
+                )]));
+            }
+            let public_settings = openbot_env::read_already_set(
+                &file,
+                &[
+                    "PICKED_HARNESS_URL",
+                    "PICKED_HARNESS_KIND",
+                    "PICKED_HARNESS_SOURCE",
+                    "PICKED_HARNESS_IMAGE",
+                    "PICKED_HARNESS_PORT",
+                    "MANAGED_AGENT_AG_UI_URL",
+                ],
+            )
+            .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: "ask_the_bot".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: if cfg!(any(windows, target_os = "android")) {
+                        "http://tauri.localhost"
+                    } else {
+                        "tauri://localhost"
+                    }
+                    .parse()
+                    .unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(
+                        serde_json::json!({"root":root,"question":"F5499 endpoint provenance question"}),
+                    ),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            );
+            // Join the HTTP fixture and remove the private root before any result assertion.
+            let request = server.request();
+            let commands = std::fs::read_to_string(&record).unwrap();
+            let problem = result.expect_err("completed stream without text is a Problem");
+            let said = problem["said"].as_str().unwrap();
+            let detail = problem["detail"].as_str().unwrap_or("");
+            let local =
+                case.starts_with("installed-") && case != "installed-to-byo" || case == "managed";
+            let expected_service = if case == "managed" {
+                "agent-langgraph"
+            } else {
+                "agent-harness"
+            };
+            let correct = if local {
+                said.contains("That key was refused")
+                    && detail.contains(expected_service)
+                    && commands
+                        .lines()
+                        .filter(|line| line.contains("compose logs"))
+                        .count()
+                        == 1
+                    && commands.contains(&format!("\tcompose logs --tail 40 {expected_service}\n"))
+            } else {
+                said.contains("selected endpoint")
+                    && detail.contains(&endpoint)
+                    && !said.contains("key was refused")
+                    && !detail.contains("refused the key")
+                    && commands.is_empty()
+            };
+            let request_correct = request.path
+                == if case == "installed-mastra" {
+                    "/api/agents/fixture-agent/stream"
+                } else {
+                    "/ag-ui"
+                }
+                && request.body.contains("F5499 endpoint provenance question")
+                && request
+                    .headers
+                    .iter()
+                    .any(|header| header == "x-openbot-agent-token: synthetic-ask-token");
+            std::fs::remove_dir_all(&root).unwrap();
+            println!(
+                "F5499_ASK_IPC={}",
+                serde_json::json!({
+                    "case":case, "publicSettings":public_settings, "problem":problem, "commands":commands,
+                    "requestPath":request.path, "requestBody":request.body, "syntheticTokenHeaderCorrect":request_correct,
+                    "expectedBehavior":correct, "httpThreadJoined":true, "rootRemoved":!root.exists(),
+                })
+            );
+            if !correct || !request_correct {
+                failures.push(case);
+            }
+        }
+        std::fs::remove_dir_all(path.bin()).unwrap();
+        assert!(
+            failures.is_empty(),
+            "incorrect endpoint diagnostics: {failures:?}"
+        );
+    }
+
     #[test]
     fn ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer() {
         if crate::test_support::isolated_process(
@@ -5027,6 +5244,7 @@ fn main() {
             "What is 17 times 23?".to_string(),
             std::collections::BTreeMap::from([
                 ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
+                ("PICKED_HARNESS_SOURCE".to_string(), "installed".to_string()),
                 (
                     "PICKED_HARNESS_KIND".to_string(),
                     "remote-ag-ui".to_string(),
