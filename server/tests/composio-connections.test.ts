@@ -313,6 +313,13 @@ test("retiring the same person twice retires nothing the second time", async () 
  * THE ANONYMOUS ACTOR OWNS NOTHING, and `notNull` does not exclude the empty string, so a row at
  * `(toolkit, "")` is legal. Retiring "nobody" must not be what deletes it — that would be an
  * unattributed offboarding reaching a row it cannot possibly own.
+ *
+ * WHOSE ROW THIS IS, since the actor half of the key names nobody. The app half does: {@link
+ * toolkit} carries this run's suffix, so the sweep in `clean` takes this row by the same clause it
+ * takes the asker's by, and no other file can arrive at the pair by guessing. That is the whole of
+ * the ownership — a delete keyed on `user_id = ''` alone would reach every app's anonymous row at
+ * once, which is how this fixture came to be removed mid-run by another file, and how a run of
+ * this file that died before its cleanup came to refuse every test in that one.
  */
 test("retiring nobody retires nothing and leaves the anonymous row alone", async () => {
   await seedApp({ connect: false });
@@ -320,6 +327,33 @@ test("retiring nobody retires nothing and leaves the anonymous row alone", async
 
   expect((await store.retireConnectionsFor("", admin)).retired).toBe(0);
   expect(await connectedToolkitsFor("")).toEqual([toolkit]);
+});
+
+/**
+ * The fixture above is taken back by the same sweep every other row here is, and by nothing wider.
+ *
+ * CRITERION. After the sweep, this run holds no `composio_connections` row at all — the one at the
+ * anonymous actor included, which none of the person ids that sweep names would reach.
+ *
+ * REASON. Brokered connections are removed here by toolkit, so the anonymous row is already
+ * covered and needs no second, broader delete to reach it. Asserted rather than read off the code,
+ * because the tempting spelling for "take the anonymous row too" is `user_id = ''`, which is every
+ * app at once: the sweep that lands on another file's fixture. A test that reddens the moment this
+ * file needs a wider delete is what keeps that spelling out.
+ */
+test("the sweep takes this run's anonymous row without reaching by actor", async () => {
+  await seedApp({ connect: false });
+  await database.insert(composioConnections).values({ toolkit, userId: "" });
+  expect(await connectedToolkitsFor("")).toEqual([toolkit]);
+
+  await clean();
+
+  expect(
+    await database
+      .select({ userId: composioConnections.userId })
+      .from(composioConnections)
+      .where(eq(composioConnections.toolkit, toolkit)),
+  ).toEqual([]);
 });
 
 /**

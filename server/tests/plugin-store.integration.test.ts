@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
-import { and, asc, eq, gte, inArray, like, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, like, or, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -265,20 +265,35 @@ beforeAll(async () => {
         .from(agents)
         .where(eq(agents.id, "bot_helper")),
       /*
-       * The anonymous actor is one of these ids too. `composio_connections.user_id` is notNull and
-       * notNull does not exclude the empty string, so `("gmail", "")` is a row a deployment can
-       * legally hold — which is the whole point of the test that inserts one — and the delete that
-       * takes it back again runs inline, outside `freshDatabase` and outside every other sweep.
+       * The anonymous actor is one of these ids too, but only at the app this file writes it
+       * against.
+       *
+       * CRITERION. This guard refuses on the PAIR `("gmail", "")` and on no other row at the
+       * anonymous actor, because that pair is the only one this file inserts and the only one it
+       * deletes.
+       *
+       * REASON. `composio_connections.user_id` is notNull and notNull does not exclude the empty
+       * string, so `("gmail", "")` is a row a deployment can legally hold — which is the whole
+       * point of the test that inserts one. Asked as `user_id = ''` alone, this also caught the
+       * anonymous row `composio-connections.test.ts` writes against its OWN run-suffixed app: a
+       * run of that file killed between its insert and its cleanup left a row nobody here owns,
+       * and every one of this file's tests then refused for good over it. Keyed on the pair, a
+       * stranded row belonging to another file is simply not this one's business.
        */
       database
-        .select({ userId: composioConnections.userId })
+        .select({
+          toolkit: composioConnections.toolkit,
+          userId: composioConnections.userId,
+        })
         .from(composioConnections)
         .where(
-          inArray(composioConnections.userId, [
-            "user_asker",
-            "user_leaver",
-            "",
-          ]),
+          or(
+            inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
+            and(
+              eq(composioConnections.toolkit, "gmail"),
+              eq(composioConnections.userId, ""),
+            ),
+          ),
         ),
       /*
        * The person, who was missing from this guard entirely.
@@ -297,7 +312,8 @@ beforeAll(async () => {
     ...configuredServers.map((row) => `the mcp_servers row '${row.id}'`),
     ...existingBots.map((row) => `the Bot '${row.id}'`),
     ...existingConnections.map(
-      (row) => `the composio_connections row for '${row.userId}'`,
+      (row) =>
+        `the composio_connections row ('${row.toolkit}', '${row.userId}')`,
     ),
     ...existingPeople.map((row) => `the person '${row.id}'`),
   ];
@@ -3554,9 +3570,28 @@ async function freshDatabase(): Promise<Database> {
   // first test below is about, so nothing else removes these rows — and a delete by toolkit alone
   // would take every person's Gmail connection, leaving one orphaned at the broker with no local row
   // left to find it by. Only the two people this file invents.
-  await database
-    .delete(composioConnections)
-    .where(inArray(composioConnections.userId, ["user_asker", "user_leaver"]));
+  await database.delete(composioConnections).where(
+    or(
+      inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
+      /*
+       * And the one pair at the anonymous actor this file writes, which no person id names.
+       *
+       * CRITERION. Exactly `("gmail", "")`, never `user_id = ''` across every app: the second
+       * spelling reaches the anonymous row another file owns at its own run-suffixed app.
+       *
+       * REASON. The test that inserts this pair takes it back in a `finally`, which covers a
+       * failed assertion and not a killed process — and the row it would otherwise leave is
+       * precisely what the guard at the top of this file refuses on. Swept here, a pair stranded
+       * earlier in this same run is gone before the next test looks at it; a pair that was
+       * already there when the run started is still the guard's to refuse, because at that point
+       * nothing has established it is ours.
+       */
+      and(
+        eq(composioConnections.toolkit, "gmail"),
+        eq(composioConnections.userId, ""),
+      ),
+    ),
+  );
   // The person the connection outlives, who is a row in `users` like anybody else. Reached only
   // through the check at the top of this function, because there is no suffix on this id to tell a
   // fixture apart from somebody's account and ten cascades sit behind the difference.
@@ -3818,6 +3853,22 @@ test("a Composio call with nobody attributed is refused even when a connection r
   await database
     .insert(composioConnections)
     .values({ toolkit: "gmail", userId: "" });
+  /*
+   * A second anonymous row, at an app this file has nothing to do with.
+   *
+   * CRITERION. Whatever removes the row above must leave this one exactly where it is.
+   *
+   * REASON. The cleanup below used to be `user_id = ''`, which is every app at once. That reached
+   * the anonymous row `composio-connections.test.ts` writes against its own run-suffixed app —
+   * deleting another file's fixture out from under it when the two run together — and it is the
+   * other half of the same confusion the guard at the top of this file suffered from. Suffixed, so
+   * this row is provably this run's to insert and to take away again, and so no real deployment
+   * row can be what the assertion below is reading.
+   */
+  const unrelatedApp = `sweep_witness_${suite}`;
+  await database
+    .insert(composioConnections)
+    .values({ toolkit: unrelatedApp, userId: "" });
 
   try {
     await expect(
@@ -3830,12 +3881,44 @@ test("a Composio call with nobody attributed is refused even when a connection r
     ).rejects.toThrow(/not attributed to anybody/i);
 
     expect(reached).toEqual([]);
-  } finally {
-    // Inline, because `freshDatabase` clears this table by the two people this file invents and the
-    // anonymous actor is neither — so nothing else in the run would ever remove this row.
+
+    // Here rather than only in `freshDatabase`, so the row is gone the moment this test is done
+    // with it and the assertion below has something to read. Keyed on the PAIR either way: the app
+    // is what makes this row this file's, and the anonymous actor on its own names nobody's.
     await database
       .delete(composioConnections)
-      .where(eq(composioConnections.userId, ""));
+      .where(
+        and(
+          eq(composioConnections.toolkit, "gmail"),
+          eq(composioConnections.userId, ""),
+        ),
+      );
+
+    // What the cleanup took, and what it did not. Asked as two facts about this list rather than
+    // as the whole of it, deliberately: a third app's anonymous row is somebody else's business,
+    // and a test that failed because one existed would be the same over-reach in assertion form.
+    const anonymous = (
+      await database
+        .select({ toolkit: composioConnections.toolkit })
+        .from(composioConnections)
+        .where(eq(composioConnections.userId, ""))
+    ).map((row) => row.toolkit);
+    expect(anonymous).not.toContain("gmail");
+    expect(anonymous).toContain(unrelatedApp);
+  } finally {
+    // Both, so a failed assertion above still leaves the table as this test found it. Each is keyed
+    // on an app this run named, which is what makes the deletes this run's to make.
+    await database
+      .delete(composioConnections)
+      .where(eq(composioConnections.toolkit, unrelatedApp));
+    await database
+      .delete(composioConnections)
+      .where(
+        and(
+          eq(composioConnections.toolkit, "gmail"),
+          eq(composioConnections.userId, ""),
+        ),
+      );
   }
 });
 
