@@ -397,6 +397,7 @@ export function ChannelChat({
   // Run failures arrive as events and are reported only for turns started in this mount.
   const [runError, setRunError] = useState<string | null>(null);
   const awaitingReply = useRef(false);
+  const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
 
   /*
    * TWO DIFFERENT FACTS ABOUT ONE TURN, AND NEITHER OF THEM IS `agent.isRunning`.
@@ -478,6 +479,11 @@ export function ChannelChat({
     const target = agentRef.current;
 
     setRunError(null);
+    assistantMessagesBeforeRun.current = new Set(
+      target.messages
+        .filter((message) => message.role === "assistant")
+        .map((message) => message.id),
+    );
     awaitingReply.current = true;
 
     /*
@@ -569,7 +575,11 @@ export function ChannelChat({
 
         const reply = [...agent.messages]
           .reverse()
-          .find((message) => message.role === "assistant");
+          .find(
+            (message) =>
+              message.role === "assistant" &&
+              !assistantMessagesBeforeRun.current.has(message.id),
+          );
         const content = typeof reply?.content === "string" ? reply.content : "";
         if (content) reportRef.current(content, runtimeAgentId);
       },

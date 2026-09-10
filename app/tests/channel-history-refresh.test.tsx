@@ -276,6 +276,105 @@ test.each([
   },
 );
 
+test("a finished run without new assistant text does not report a prior assistant as new activity", async () => {
+  const priorReply = {
+    id: "prior-run-reply",
+    role: "assistant",
+    content: "Earlier answer",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    {
+      type: "TEXT_MESSAGE_START",
+      messageId: priorReply.id,
+      role: "assistant",
+    },
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      messageId: priorReply.id,
+      delta: priorReply.content,
+    },
+    { type: "TEXT_MESSAGE_END", messageId: priorReply.id },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Ask for the first answer",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(priorReply.content);
+  await waitFor(() =>
+    expect(
+      activityRequests.filter(
+        (activity) =>
+          activity.agentId === "refresh-bot" &&
+          activity.text === priorReply.content,
+      ),
+    ).toHaveLength(1),
+  );
+
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Ask for a no-text follow-up",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(runRequests).toHaveLength(2));
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  expect(
+    activityRequests.filter(
+      (activity) =>
+        activity.agentId === "refresh-bot" &&
+        activity.text === priorReply.content,
+    ),
+  ).toHaveLength(1);
+});
+
+test("a finished run with new assistant text still reports that assistant text as activity", async () => {
+  const reply = {
+    id: "current-run-reply",
+    role: "assistant",
+    content: "Current run answer",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    { type: "TEXT_MESSAGE_START", messageId: reply.id, role: "assistant" },
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      messageId: reply.id,
+      delta: reply.content,
+    },
+    { type: "TEXT_MESSAGE_END", messageId: reply.id },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Ask for current answer",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(reply.content);
+  await waitFor(() =>
+    expect(
+      activityRequests.some(
+        (activity) =>
+          activity.agentId === "refresh-bot" && activity.text === reply.content,
+      ),
+    ).toBe(true),
+  );
+});
+
 test("a same-tab activity echo does not append a lagging durable partial beside the completed local reply", async () => {
   const fullReply = {
     id: "streamed-full-reply",
