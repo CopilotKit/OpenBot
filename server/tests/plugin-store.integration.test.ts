@@ -3702,6 +3702,51 @@ test("a Composio call by somebody who has not connected the app is refused with 
   expect(reached).toEqual([]);
 });
 
+/**
+ * One person having connected the app is not the asking person having connected it.
+ *
+ * THE FAIL-OPEN THIS CLOSES. The gate reads `composio_connections` for `(toolkit, actorId)`, and
+ * every test around it seeds a database where the app is connected by the asker or by nobody at
+ * all — so dropping `eq(composioConnections.userId, actorId)` from that `where`, which turns the
+ * question into "has ANYBODY connected Gmail", left the whole suite green. That single term is what
+ * keeps one person's mailbox out of another's: with it gone, the first colleague to connect Gmail
+ * makes the app callable by everybody, the broker is handed the stranger's id, and Composio answers
+ * with whatever account it holds for them — or refuses in words that read as the connector being
+ * broken.
+ *
+ * The stranger is never inserted anywhere. `composio_connections.user_id` is text with no foreign
+ * key and the brokered path touches no vault row, so asking as somebody unknown writes nothing this
+ * suite would have to clean up — which is the only reason a second person can appear here without
+ * a fixture.
+ */
+test("a Composio call by somebody who has not connected the app is refused even though a colleague has", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return vendorAnswered();
+    },
+  });
+  // `user_asker` is connected to Gmail. Nobody else is.
+  await seedComposioGmail(database, store);
+
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "user_stranger",
+    }),
+  ).rejects.toThrow(/connect it in settings/i);
+
+  // Never dialled, which is the half that matters: a call let through here is spent at the broker
+  // in a stranger's name, and the person asking sees somebody else's mailbox or somebody else's
+  // error.
+  expect(reached).toEqual([]);
+});
+
 test("a Composio call whose url names no app is refused rather than falling back to the row id", async () => {
   const { store, database } = await freshStore();
   const reached: string[] = [];
