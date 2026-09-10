@@ -35,6 +35,28 @@ import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
  */
 export const VERSION_ARG = "__version";
 
+/**
+ * How many actions one listing asks for, which is as many as this SDK can be made to answer with.
+ *
+ * A NUMBER RATHER THAN NO NUMBER, because omitting it is not "no opinion". Composio's page defaults
+ * to 20 and Gmail publishes 63 actions, so an omitted limit truncates — and worse, it NARROWS:
+ * `getRawComposioTools` sets `important=true` whenever the query named toolkits and gave no limit,
+ * no tags and no search (`@composio/core` 0.18.1, `src/models/Tools.ts:505-515`), so the short
+ * answer is a filtered one and nothing in it says a filter was applied. Passing a limit is what
+ * turns the flag off.
+ *
+ * 1000 BECAUSE THAT IS THE CEILING, not because it is generous. The REST parameter documents "max
+ * allowed is 1000" (`@composio/client` 0.1.0-alpha.76, `resources/tools.d.ts:441-444`), and the
+ * core SDK exposes no way to go past it: `ToolListParamsSchema` has no cursor field, and
+ * `getRawComposioTools` reads `tools.items` and drops the response's `next_cursor`. So one page at
+ * the ceiling is not a page — it is the whole listing, and the only listing expressible here.
+ *
+ * Which is why {@link listTools} refuses a page that came back FULL. At the ceiling a complete
+ * answer and a truncated one are the same array, and there is no second request that could tell
+ * them apart.
+ */
+export const LISTING_LIMIT = 1000;
+
 /** One action, as much of Composio's listing as anything here reads. */
 export type ComposioAction = {
   slug: string;
@@ -82,7 +104,19 @@ export type ComposioResult = {
  * resolution and an exception have to be read.
  */
 export type ComposioActions = {
-  listActions(toolkit: string): Promise<ComposioAction[]>;
+  /**
+   * Every action of one app, for a page the CALLER has to name.
+   *
+   * `page` is required rather than optional, and that is the whole point of it being here. The
+   * previous signature took the toolkit alone, so an adapter had nothing to pass a limit through
+   * and the SDK's default applied — 20 rows, silently narrowed to the vendor's "important" subset.
+   * A required argument makes the narrowed listing a thing a caller has to ask for on purpose
+   * instead of a thing they get by leaving something out. See {@link LISTING_LIMIT}.
+   */
+  listActions(
+    toolkit: string,
+    page: { limit: number },
+  ): Promise<ComposioAction[]>;
   execute(
     slug: string,
     userId: string,
@@ -200,7 +234,7 @@ export async function listTools(connection: {
 
   let actions: ComposioAction[];
   try {
-    actions = await installed.listActions(toolkit);
+    actions = await installed.listActions(toolkit, { limit: LISTING_LIMIT });
   } catch (error) {
     /*
      * THROWN, NOT ANSWERED EMPTY, and with a sentence rather than the vendor's raw object.
@@ -217,6 +251,21 @@ export async function listTools(connection: {
      * same string was reaching a model's context. The original is kept as `cause` for a log.
      */
     throw new Error(listingSentence(toolkit, error), { cause: error });
+  }
+
+  if (actions.length >= LISTING_LIMIT) {
+    /*
+     * A FULL PAGE IS NOT A COMPLETE LISTING, and this deployment cannot find out which it is.
+     *
+     * `LISTING_LIMIT` is the largest page the vendor's REST parameter allows, and the core SDK
+     * offers no cursor to ask for a second one. So an app with exactly that many actions and an app
+     * with more of them answer identically here. Committed as complete, the second one has every
+     * action past the cut deleted from `mcp_tools` under a refresh that reported success — the same
+     * loss the empty answer used to cause, arriving by a different route.
+     */
+    throw new Error(
+      `Composio answered with ${actions.length} actions for ${toolkit}, which is the largest page this deployment's @composio/core can ask for, so there may be more that it cannot see. The actions already recorded are kept rather than replaced by a listing that might be a fragment.`,
+    );
   }
 
   return actions.map((action) => {

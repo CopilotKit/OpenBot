@@ -3,6 +3,7 @@ import {
   type ComposioActions,
   callTool,
   effectOf,
+  LISTING_LIMIT,
   listNeedsCredential,
   listTools,
   toolkitOf,
@@ -178,6 +179,49 @@ describe("finding the vendor's own sentence", () => {
 describe("listing an app's actions", () => {
   test("listing needs no credential", () => {
     expect(listNeedsCredential).toBe(false);
+  });
+
+  test("the listing asks for a page, and for one big enough to be the whole list", async () => {
+    const asked: unknown[] = [];
+    useComposioClient(
+      recording({
+        listActions: async (toolkit, page) => {
+          asked.push({ toolkit, page });
+          return [GMAIL_READ];
+        },
+      }).client,
+    );
+
+    await listTools({ url: "composio://gmail" });
+
+    // Composio's default page is 20 and Gmail publishes 63 actions, so an omitted limit truncates.
+    // It also NARROWS: `getRawComposioTools` auto-applies `important=true` when no limit, no tags
+    // and no search were given (`@composio/core` 0.18.1, `src/models/Tools.ts:505-515`), and
+    // nothing in the short answer says a filter was applied. Asking for a page is therefore not an
+    // optimisation, and the seam must not let a caller forget to.
+    expect(asked).toEqual([
+      { toolkit: "gmail", page: { limit: LISTING_LIMIT } },
+    ]);
+  });
+
+  test("a listing that filled the biggest page the SDK can ask for is not called complete", async () => {
+    useComposioClient(
+      recording({
+        listActions: async () =>
+          Array.from({ length: LISTING_LIMIT }, (_unused, index) => ({
+            ...GMAIL_READ,
+            slug: `GMAIL_ACTION_${index}`,
+          })),
+      }).client,
+    );
+
+    // `ToolListParamsSchema` accepts no cursor and `getRawComposioTools` drops the response's
+    // `next_cursor`, so one page at the API's stated maximum is the largest listing expressible
+    // through this SDK. A page that came back full is therefore indistinguishable from a truncated
+    // one, and committing it would delete every action past the cut while reporting a success.
+    await expect(listTools({ url: "composio://gmail" })).rejects.toThrow(
+      /there may be more/i,
+    );
   });
 
   test("an action arrives with its schema, its effect and its version", async () => {
