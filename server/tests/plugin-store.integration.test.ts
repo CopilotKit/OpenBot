@@ -234,9 +234,11 @@ let ownsFixtureIds = false;
  * the way production spells it, so a row already sitting at it belongs to somebody else. Each of
  * `mcp_servers`, `agents`, `composio_connections` and `users` is asked about here, and nothing else
  * needs to be: `mcp_tools` and `plugin_grants` are the two remaining unconditional deletes and both
- * are reached only by a key that references one of these four, so a row at either could not exist
- * without the guard having already refused over its parent. Every other delete in this file names
- * an id carrying {@link suite}.
+ * are reached only by a key that references one of these four — `mcp_tools.server_id` names a
+ * server, `plugin_grants.agent_id` names a Bot — so a row at either could not exist without the
+ * guard having already refused over its parent. Every other delete in this file names an id
+ * carrying {@link suite}, and the reads that touch the deployment's own `google-drive` row skip
+ * their delete instead, on the {@link suiteCreatedServerRow} flags above.
  *
  * So the deletes in {@link freshDatabase} are authorised by {@link ownsFixtureIds} and this is what
  * makes them safe.
@@ -262,11 +264,21 @@ beforeAll(async () => {
         .select({ id: agents.id })
         .from(agents)
         .where(eq(agents.id, "bot_helper")),
+      /*
+       * The anonymous actor is one of these ids too. `composio_connections.user_id` is notNull and
+       * notNull does not exclude the empty string, so `("gmail", "")` is a row a deployment can
+       * legally hold — which is the whole point of the test that inserts one — and the delete that
+       * takes it back again runs inline, outside `freshDatabase` and outside every other sweep.
+       */
       database
         .select({ userId: composioConnections.userId })
         .from(composioConnections)
         .where(
-          inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
+          inArray(composioConnections.userId, [
+            "user_asker",
+            "user_leaver",
+            "",
+          ]),
         ),
       /*
        * The person, who was missing from this guard entirely.
