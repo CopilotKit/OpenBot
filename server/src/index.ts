@@ -13,6 +13,7 @@ import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
 import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
 import { createHandoffDelivery } from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
+import { signHandoffDeliveryRun } from "./agents/handoff-signing";
 import { handoffTool } from "./agents/handoff-tool";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
@@ -895,18 +896,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
      * The signed statement of the run the addressed Bot is about to start, carrying how deep the
      * chain has gone. Minted here, where the key lives, and one deeper than the run that asked.
      */
-    sign: (work) =>
-      mintRunAssertion(
-        {
-          botId: work.toBotId,
-          actorId: work.actorId,
-          runId: randomUUID(),
-          threadId: work.threadId,
-          depth: work.depth,
-          ...(work.initiator ? { initiator: work.initiator } : {}),
-        },
-        config.keyEncryptionKey,
-      ),
+    sign: (work) => signHandoffDeliveryRun(work, config.keyEncryptionKey),
     delivery: createHandoffDelivery({
       /*
        * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a
