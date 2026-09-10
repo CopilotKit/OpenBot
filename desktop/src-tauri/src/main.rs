@@ -797,16 +797,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * with the subscription they already pay for was handed two dead containers and two red lines
      * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
      */
-    let bundled_bots = match credential {
-        openbot_env::ModelCredential::OpenAi { .. }
-        | openbot_env::ModelCredential::Compatible { .. } => {
-            stack::BundledBots::openai_compatible()
-        }
-        openbot_env::ModelCredential::Anthropic { .. } => stack::BundledBots::anthropic(),
-        openbot_env::ModelCredential::None
-        | openbot_env::ModelCredential::ClaudePlan { .. }
-        | openbot_env::ModelCredential::ChatGptPlan { .. } => stack::BundledBots::none(),
-    };
+    let bundled_bots = stack::BundledBots::for_credential(&credential);
     let requested_services = stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
     report(&app, "services", true, "containers up");
 
@@ -3376,6 +3367,15 @@ mod tests {
                 "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph",
                 None,
             ),
+            "anthropic-api" => {
+                model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+            }
+            "compatible" => {
+                model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
+                ("compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph", None)
+            }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
                 ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
@@ -3394,6 +3394,13 @@ mod tests {
             }
             _ => panic!("unknown test case"),
         };
+        if case.ends_with("-plan") {
+            std::fs::write(
+                root.join(".env"),
+                "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui\n",
+            )
+            .unwrap();
+        }
         if case == "remote-stale-image" {
             std::fs::write(
                 root.join(".env"),
@@ -3454,6 +3461,8 @@ mod tests {
             &root.join(".env"),
             &[
                 "TENANT_PACKAGE_DIR",
+                "MANAGED_AGENT_AG_UI_URL",
+                "PICKED_HARNESS_NAME",
                 "PICKED_HARNESS_URL",
                 "PICKED_HARNESS_KIND",
                 "PICKED_HARNESS_IMAGE",
@@ -3464,8 +3473,19 @@ mod tests {
             settings.get("TENANT_PACKAGE_DIR").map(String::as_str),
             Some("../examples/fintech")
         );
+        let bundled_url = settings
+            .get("MANAGED_AGENT_AG_UI_URL")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert_eq!(
+            bundled_url.is_empty(),
+            !expected_up
+                .split_whitespace()
+                .any(|service| service == "agent-langgraph"),
+            "case={case}, persisted advertisement must match actual Start services"
+        );
         let mut asked = false;
-        if case.starts_with("remote") {
+        if case.starts_with("remote") || case == "compatible" {
             assert_eq!(settings.get("PICKED_HARNESS_URL"), Some(&remote));
             assert_eq!(
                 settings.get("PICKED_HARNESS_KIND").map(String::as_str),
@@ -3502,6 +3522,7 @@ mod tests {
             "D53_START_IPC={}",
             serde_json::json!({
                 "case":case, "composeUp":up, "commands":commands, "intentionalMigrationBarrier":true,
+                "publicSettings":settings,
                 "defaultPackage":"../examples/fintech", "remoteEndpointPersistedAndConsumed":asked,
                 "actualAskIpcResponse":asked.then_some("D53-BYO-REMOTE-ANSWER"),
                 "noHostStartup":true, "nativeGui":false, "realEngineOrDatabase":false,
@@ -3543,6 +3564,18 @@ mod tests {
     #[test]
     fn claude_plan_harness_start_ipc_overrides_remote_choice() {
         harness_start_ipc_case("claude-plan");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn anthropic_api_harness_start_ipc_advertises_eligible_bundled_agent() {
+        harness_start_ipc_case("anthropic-api");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compatible_harness_start_ipc_advertises_eligible_bundled_agent() {
+        harness_start_ipc_case("compatible");
     }
 
     #[cfg(unix)]

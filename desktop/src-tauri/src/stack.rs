@@ -45,6 +45,20 @@ pub struct BundledBots {
 }
 
 impl BundledBots {
+    /// One provider decision for both service selection and the advertised package endpoint.
+    pub fn for_credential(credential: &crate::env::ModelCredential) -> Self {
+        use crate::env::ModelCredential;
+        match credential {
+            ModelCredential::OpenAi { .. } | ModelCredential::Compatible { .. } => {
+                Self::openai_compatible()
+            }
+            ModelCredential::Anthropic { .. } => Self::anthropic(),
+            ModelCredential::None
+            | ModelCredential::ClaudePlan { .. }
+            | ModelCredential::ChatGptPlan { .. } => Self::none(),
+        }
+    }
+
     pub const fn none() -> Self {
         Self {
             agent_bot: false,

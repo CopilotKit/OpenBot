@@ -306,7 +306,13 @@ pub fn compose(
     );
     env.insert(
         "MANAGED_AGENT_AG_UI_URL".into(),
-        format!("http://127.0.0.1:{}/ag-ui", ports.langgraph),
+        if crate::stack::BundledBots::for_credential(&model.credential).agent_langgraph {
+            format!("http://127.0.0.1:{}/ag-ui", ports.langgraph)
+        } else {
+            // An owned empty value also clears a previously advertised API-key Bot on plan switch.
+            // The package loader omits its row while the endpoint is blank.
+            String::new()
+        },
     );
 
     /*
@@ -1260,6 +1266,25 @@ HTTPS_PROXY=http://proxy:8080
             with.get("ENGINE_SOCKET").map(String::as_str),
             Some("/run/user/501/podman/podman.sock")
         );
+    }
+
+    #[test]
+    fn no_model_choice_does_not_advertise_an_unselected_bundled_service() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(env["MANAGED_AGENT_AG_UI_URL"], "");
+        assert!(!crate::stack::selected_services(
+            false,
+            crate::stack::BundledBots::for_credential(&ModelCredential::None)
+        )
+        .contains(&"agent-langgraph"));
     }
 
     #[test]

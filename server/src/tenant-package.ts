@@ -170,6 +170,8 @@ export type TenantPackage = {
   productName: string;
   stylesheet: string | null;
   agents: TenantAgent[];
+  /** Remote agents explicitly disabled by a blank endpoint, not arbitrary removed YAML rows. */
+  omittedAgentIds: string[];
   channels: TenantChannel[];
   model: {
     provider: "openai";
@@ -483,6 +485,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       ? requiredString(skin.stylesheet, "skin.stylesheet")
       : null,
     agents,
+    omittedAgentIds: [...omittedAgentIds],
     channels,
     model: {
       provider: "openai",
@@ -642,6 +645,34 @@ export async function synchronizeTenantPackage(
 
     if (!deploymentPackage) {
       throw new Error("Tenant package could not be synchronized");
+    }
+
+    // Disable only explicitly unconfigured agents still owned by this package. Keep canonical
+    // rows and conversation memberships: runtime tombstones preserve their readable history.
+    // Normal seeding below clears deletedAt if an endpoint is configured again.
+    if (tenantPackage.omittedAgentIds.length > 0) {
+      const now = new Date();
+      await transaction
+        .update(agentProfiles)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            isNull(agentProfiles.ownerUserId),
+            isNull(agentProfiles.deletedAt),
+            inArray(
+              agentProfiles.agentId,
+              transaction
+                .select({ id: agentTable.id })
+                .from(agentTable)
+                .where(
+                  and(
+                    eq(agentTable.packageId, deploymentPackage.id),
+                    inArray(agentTable.id, tenantPackage.omittedAgentIds),
+                  ),
+                ),
+            ),
+          ),
+        );
     }
 
     for (const agent of tenantPackage.agents) {
