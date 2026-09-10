@@ -269,8 +269,11 @@ function schemaNode(value: unknown): Record<string, unknown> | null {
  * only the top level of `properties` would answer false for every ref-based schema, which is the
  * majority of the ones that carry a file.
  *
- * The keys walked are the composition keywords `ParametersSchema` and `JSONSchemaPropertySchema`
- * actually keep, and no others: a key those two strip cannot be present to be walked.
+ * The keys walked are every subschema-bearing keyword `ParametersSchema` and
+ * `JSONSchemaPropertySchema` keep — a key those two strip cannot be present to be walked, so the
+ * list is closed. It is wider than the vendor's predicate by `patternProperties`, `not` and the
+ * conditional trio, which that one skips: a file staged only under a condition is still a file
+ * this deployment cannot stage.
  */
 function stagesAFile(schema: unknown): boolean {
   const node = schemaNode(schema);
@@ -287,7 +290,16 @@ function stagesAFile(schema: unknown): boolean {
     if (children && Object.values(children).some(stagesAFile)) return true;
   }
 
-  for (const key of ["anyOf", "oneOf", "allOf", "items", "not"]) {
+  for (const key of [
+    "anyOf",
+    "oneOf",
+    "allOf",
+    "items",
+    "not",
+    "if",
+    "then",
+    "else",
+  ]) {
     const branch = node[key];
     if (
       Array.isArray(branch) ? branch.some(stagesAFile) : stagesAFile(branch)
