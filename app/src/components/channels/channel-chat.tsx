@@ -330,6 +330,7 @@ export function ChannelChat({
       const isCurrent = () =>
         !cancelled && version === historyReadVersion.current;
       void (async () => {
+        let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -341,13 +342,15 @@ export function ChannelChat({
           );
           if (!isCurrent()) return;
           if (stored.availability === "unavailable") {
-            // Only an exhausted refresh is a failure to announce. Keep the last known hole count.
-            if (delayMs === 1500) {
+            // Only an exhausted refresh with no successful read is a failure to announce. Keep the
+            // last known ready notice when the store already answered this refresh cycle.
+            if (delayMs === 1500 && !sawReady) {
               setHistoryAvailability("unavailable");
               setHistoryReadFailed(true);
             }
             continue;
           }
+          sawReady = true;
           // A ready read owns the notice even when every readable id is already on screen.
           setUnreadable(stored.unreadable);
           setHistoryAvailability("ready");

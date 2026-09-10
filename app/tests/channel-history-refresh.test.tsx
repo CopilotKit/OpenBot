@@ -630,6 +630,51 @@ test("headless unreadable-only history updates the notice while preserving local
   ]);
 });
 
+test("a successful same-message refresh is not overwritten by later unavailable retries", async () => {
+  const view = await mounted();
+  await act(async () => currentAgent().addMessage(local));
+  const beforeRefresh = historyReads.length;
+  let refreshReads = 0;
+  history = async () => {
+    refreshReads += 1;
+    return refreshReads === 1
+      ? stored([initial, broken])
+      : new NativeResponse("failed", { status: 500 });
+  };
+
+  await announce(1);
+  await view.findByText(oneHole);
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+
+  expect(historyReads.length - beforeRefresh).toBe(3);
+  expect(view.getByText(oneHole)).toBeTruthy();
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    "initial",
+    "local",
+  ]);
+}, 5000);
+
+test("a first ready stale refresh still retries and renders a later stored message", async () => {
+  const view = await mounted();
+  const beforeRefresh = historyReads.length;
+  let refreshReads = 0;
+  history = async () => {
+    refreshReads += 1;
+    return stored(refreshReads === 1 ? [initial] : [initial, fresh]);
+  };
+
+  await announce(1);
+  await view.findByText(fresh.content);
+
+  expect(historyReads.length - beforeRefresh).toBe(2);
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    "initial",
+    "fresh",
+  ]);
+}, 3000);
+
 test("mixed history, exhausted failure, and recovery update the notice without duplicating messages", async () => {
   const view = await mounted();
   await act(async () => currentAgent().addMessage(local));
