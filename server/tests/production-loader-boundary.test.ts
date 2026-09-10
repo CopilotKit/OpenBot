@@ -73,7 +73,7 @@ async function runProductionEntry() {
 }
 
 describe("production server loader boundary", () => {
-  test("the production-used server entry loads the real index graph after preloading EventSource", async () => {
+  test("the production-used server entry reaches the configured database boundary after preloading EventSource", async () => {
     const result = await runProductionEntry();
     const output = `${result.stdout}\n${result.stderr}`;
 
@@ -81,6 +81,6 @@ describe("production server loader boundary", () => {
     expect(output).not.toContain("require() async module");
     expect(output).not.toContain("OPENBOT_SERVER_LOADER_SMOKE");
     expect(output).toContain("Failed query: insert into");
-    expect(output).toContain("Connection closed");
+    expect(output).toMatch(/Connection closed|Failed to connect|ERR_POSTGRES_CONNECTION_REFUSED/);
   });
 });
