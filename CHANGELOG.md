@@ -20,6 +20,29 @@ package is read while the deployment starts, that was not a warning: the deploym
 over a comment, saying nothing about comments. Comments are now taken out before the file is read as
 definitions, which also closes a comment wedged into the middle of `url(` as a way past the rule
 above it.
+### Test connection stops reading once it has seen the agent answer
+
+The button that checks an agent before it is registered sends it a real run and reads what comes
+back, needing only the opening of the stream to tell an AG-UI agent from a web server that happens to
+be reachable. It was reading the whole reply first and applying that limit afterwards, so the check
+took as long as the agent's run did. An agent that streams for more than fifteen seconds — a Bot
+working through a document, a model answering slowly — was given up on mid-answer and reported as
+`The agent started answering and the connection broke`, about a connection that had not broken and an
+agent that had answered correctly in its first two events. It now reads the opening it needs, closes
+the connection, and answers in the time the agent took to start rather than the time it took to
+finish.
+### A key pasted with a line break in it is now refused, instead of reported as an unreachable agent
+
+The box that holds an agent's key takes whatever is pasted into it, and what comes off a clipboard is
+not always what was on the screen: a long key copied out of a wrapped terminal line brings the wrap
+with it, and a hyphen copied out of a document has often been turned into an en dash on the way.
+Neither can be sent as an HTTP header — the runtime refuses the value outright — and neither was
+being looked at. On Test connection that refusal surfaced as "This server could not reach that
+address", with a suggestion about tunnels and firewalls, about an agent that was running perfectly
+well and had never been dialled. Stored on the Bot it was quieter and worse: the form said saved, and
+every turn that Bot took afterwards failed on a value nothing on screen said anything about. Both
+places now check the value before accepting it and say which kind of character is in the way. The
+character is named; the key never is.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
