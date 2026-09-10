@@ -62,12 +62,8 @@ struct Shell {
     /// the flow that showed the URL is the only one that can redeem the code: each start mints its
     /// own PKCE challenge and state, so a second start invalidates the first.
     signing_in: Mutex<Option<openbot_desktop_lib::plan::SigningIn>>,
-    /// Where the shell's own interface lives, read from the window rather than spelled out.
-    ///
-    /// Tauri does not serve the bundle from the same address on every platform: macOS and Linux
-    /// get `tauri://localhost`, Windows gets `http://tauri.localhost`. Spelling one of them into
-    /// the code means Stop leaves Windows staring at a page whose servers have just been killed,
-    /// which is what it did. The window knows its own address, so it is asked once and kept.
+    /// The configured setup destination, resolved using Tauri's build mode and platform.
+    /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
 }
 
@@ -1498,26 +1494,87 @@ fn show_openbot_on<R: tauri::Runtime>(
     outcome
 }
 
+/// Resolve the configured setup page before WebView2's first navigation completes.
+/// Tauri 2's App URL mapping uses devUrl in development and the platform app protocol for
+/// bundled files. Keep this aligned with Tauri's get_app_url and prepare_webview mapping:
+/// https://v2.tauri.app/reference/config/#webviewurl
+fn configured_setup_url(
+    config: &tauri::utils::config::Config,
+    development: bool,
+    windows: bool,
+) -> Result<tauri::Url, String> {
+    let window = config
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .ok_or("the OpenBot setup window is not configured")?;
+    match &window.url {
+        tauri::WebviewUrl::External(url) | tauri::WebviewUrl::CustomProtocol(url) => {
+            Ok(url.clone())
+        }
+        tauri::WebviewUrl::App(path) => {
+            let configured_base = if development {
+                config.build.dev_url.as_ref()
+            } else {
+                match &config.build.frontend_dist {
+                    Some(tauri::utils::config::FrontendDist::Url(url)) => Some(url),
+                    _ => None,
+                }
+            };
+            let base = match configured_base {
+                Some(url) => url.clone(),
+                None => {
+                    let protocol = if windows {
+                        if window.use_https_scheme {
+                            "https://tauri.localhost/"
+                        } else {
+                            "http://tauri.localhost/"
+                        }
+                    } else {
+                        "tauri://localhost/"
+                    };
+                    protocol
+                        .parse()
+                        .map_err(|error| format!("invalid setup URL: {error}"))?
+                }
+            };
+            // Tauri omits the default document when creating the initial app URL.
+            if path == Path::new("index.html") {
+                Ok(base)
+            } else {
+                base.join(&path.to_string_lossy())
+                    .map_err(|error| format!("invalid setup page path: {error}"))
+            }
+        }
+        _ => Err("the OpenBot setup window URL is not supported".into()),
+    }
+}
+
+fn remember_setup_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    let setup = configured_setup_url(app.config(), tauri::is_dev(), cfg!(windows))?;
+    *app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.to_string());
+    Ok(())
+}
+
 /// Put the setup screen back, when there is something to set up again.
 #[tauri::command]
 fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
-    // Whatever this build serves its own interface from, recorded at startup from the window
-    // itself. The dev server is the fallback because in development that is where it starts.
+    // Use the intended setup destination even before the initial page has finished loading.
     let setup = app
         .state::<Shell>()
         .setup_url
         .lock()
         .unwrap()
         .clone()
-        // Asked for, not named, and numeric either way: `localhost` resolves differently per
-        // operating system, so the two loopbacks are tried and whichever answers is used. The
-        // v4 literal is the last resort rather than a hostname.
+        .map(Ok)
         .unwrap_or_else(|| {
-            stack::app_url(3020).unwrap_or_else(|| "http://127.0.0.1:3020".to_string())
-        });
+            configured_setup_url(app.config(), tauri::is_dev(), cfg!(windows))
+                .map(|url| url.to_string())
+        })?;
     window
         .navigate(
             setup
@@ -2326,10 +2383,7 @@ fn main() {
                 &stack::default_root(),
             )));
 
-            if let Some(window) = app.get_webview_window("main") {
-                // Asked before anything navigates away from it.
-                *app.state::<Shell>().setup_url.lock().unwrap() = Some(window.url()?.to_string());
-            }
+            remember_setup_url(app.handle())?;
 
             // The status menu lets somebody open the window, stop the stack, or quit the app.
             use tauri::menu::{Menu, MenuItem};
@@ -5748,6 +5802,104 @@ fn main() {
         assert!(output.status.success());
         assert!(String::from_utf8_lossy(&output.stdout)
             .contains("Docker Compose version disposable-provider"));
+    }
+
+    fn setup_navigation_config() -> tauri::utils::config::Config {
+        serde_json::from_str(include_str!("../tauri.conf.json")).unwrap()
+    }
+
+    #[test]
+    fn setup_navigation_bundled_destination_uses_platform_scheme_and_ignores_dev_server() {
+        let mut config = setup_navigation_config();
+        for (windows, https, expected) in [
+            (false, false, "tauri://localhost/"),
+            (false, true, "tauri://localhost/"),
+            (true, false, "http://tauri.localhost/"),
+            (true, true, "https://tauri.localhost/"),
+        ] {
+            config.app.windows[0].use_https_scheme = https;
+            assert_eq!(
+                configured_setup_url(&config, false, windows)
+                    .unwrap()
+                    .as_str(),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn setup_navigation_development_uses_configured_url_and_app_path() {
+        let mut config = setup_navigation_config();
+        config.build.dev_url = Some("http://localhost:4137/desktop/".parse().unwrap());
+        assert_eq!(
+            configured_setup_url(&config, true, true).unwrap().as_str(),
+            "http://localhost:4137/desktop/",
+        );
+        config.app.windows[0].url = tauri::WebviewUrl::App("setup.html".into());
+        assert_eq!(
+            configured_setup_url(&config, true, false).unwrap().as_str(),
+            "http://localhost:4137/desktop/setup.html",
+        );
+    }
+
+    #[test]
+    fn setup_navigation_hosted_frontend_uses_configured_production_url() {
+        let mut config = setup_navigation_config();
+        config.build.frontend_dist = Some(tauri::utils::config::FrontendDist::Url(
+            "https://setup.example/desktop/".parse().unwrap(),
+        ));
+        assert_eq!(
+            configured_setup_url(&config, false, true).unwrap().as_str(),
+            "https://setup.example/desktop/",
+        );
+    }
+
+    #[test]
+    fn setup_navigation_missing_main_config_is_reported() {
+        let mut config = setup_navigation_config();
+        config.app.windows[0].label = "another-window".into();
+        assert_eq!(
+            configured_setup_url(&config, true, true).unwrap_err(),
+            "the OpenBot setup window is not configured",
+        );
+    }
+
+    #[test]
+    fn setup_navigation_ignores_initial_blank_and_returns_after_deployment_navigation() {
+        for setup in [
+            "tauri://localhost/",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/",
+            "http://localhost:3020/",
+        ] {
+            let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+            context.config_mut().app.windows = vec![tauri::utils::config::WindowConfig {
+                url: serde_json::from_value(serde_json::json!(setup)).unwrap(),
+                ..Default::default()
+            }];
+            let app = tauri::test::mock_builder()
+                .manage(Shell::default())
+                .build(context)
+                .unwrap();
+            let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .unwrap();
+            window.navigate("about:blank".parse().unwrap()).unwrap();
+            // Restore can arrive before startup has initialized the cached destination.
+            show_setup(app.handle().clone()).unwrap();
+            assert_eq!(window.url().unwrap().as_str(), setup);
+            window.navigate("about:blank".parse().unwrap()).unwrap();
+            remember_setup_url(app.handle()).unwrap();
+            show_setup(app.handle().clone()).unwrap();
+            assert_eq!(window.url().unwrap().as_str(), setup);
+            // Initial setup eventually loads, then a running deployment replaces it.
+            window.navigate(setup.parse().unwrap()).unwrap();
+            window
+                .navigate("http://127.0.0.1:3000/ask".parse().unwrap())
+                .unwrap();
+            show_setup(app.handle().clone()).unwrap();
+            assert_eq!(window.url().unwrap().as_str(), setup);
+        }
     }
 
     #[test]
