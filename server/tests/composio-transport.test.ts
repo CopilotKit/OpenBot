@@ -222,13 +222,36 @@ describe("listing an app's actions", () => {
     expect(tool?.effect).toBe("write");
   });
 
-  test("listing a url that names no app is empty rather than an error", async () => {
-    useComposioClient(recording().client);
-    expect(await listTools({ url: "https://example.com" })).toEqual([]);
+  test("a listing nobody was asked for throws rather than answering empty", async () => {
+    // `[]` means "the vendor was asked and advertises none" everywhere else in this codebase, and
+    // `refreshTools` commits it as a healthy refresh. No client installed is the SHIPPED state —
+    // nothing under `server/src` calls `useComposioClient` — so `[]` here was the only answer a
+    // real Composio refresh could produce, and committing it deleted every recorded action.
+    const listing = listTools({ url: "composio://gmail" });
+
+    await expect(listing).rejects.toThrow(
+      /not configured for this deployment/i,
+    );
+
+    const thrown = (await listing.catch((error: unknown) => error)) as Error;
+    expect(thrown.message).toContain("gmail");
+    // Not a crash report. No deployment installs a client yet, so an operator reading this has to
+    // recognise a state rather than go hunting for a fault.
+    expect(thrown.message).toMatch(/expected/i);
   });
 
-  test("listing with no client installed is empty rather than a crash", async () => {
-    expect(await listTools({ url: "composio://gmail" })).toEqual([]);
+  test("a url that names no app throws about the url, not about the client", async () => {
+    useComposioClient(recording().client);
+
+    const listing = listTools({ url: "https://example.com" });
+
+    // The two refusals send an operator to different places — one to this deployment's
+    // configuration, one to the row — so they must not share a sentence.
+    await expect(listing).rejects.toThrow(/does not name a Composio app/i);
+
+    const thrown = (await listing.catch((error: unknown) => error)) as Error;
+    expect(thrown.message).not.toMatch(/not configured/i);
+    expect(thrown.message).toContain("https://example.com");
   });
 
   test("a listing the vendor's own schema rejects throws a sentence, not a Zod dump", async () => {

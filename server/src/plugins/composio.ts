@@ -98,8 +98,10 @@ let installed: ComposioActions | null = null;
  *
  * `null` is a supported argument, and not only for symmetry: the suite is one process, so a test that
  * installs a stub has to be able to take it back out. It is also the unconfigured state — a
- * deployment with no Composio key installs nothing, and every function here answers emptily or
- * refuses rather than failing, so an app nobody configured is absent rather than broken.
+ * deployment with no Composio key installs nothing. What that state produces is not an empty answer:
+ * {@link listTools} THROWS and {@link callTool} refuses, both saying which of the two it is, because
+ * an empty listing is indistinguishable from an app that advertises nothing and would be committed
+ * as one.
  */
 export function useComposioClient(client: ComposioActions | null): void {
   installed = client;
@@ -162,12 +164,39 @@ export function effectOf(tags: readonly string[] | undefined): {
  * turned around: an empty list is what an app with no actions looks like, so answering emptily would
  * report a success and strand every grant. What throws is a sentence, never a vendor object. See the
  * catch below.
+ *
+ * AND SO IS A LISTING NOBODY WAS ASKED FOR, which is the same criterion applied one step earlier.
+ * `[]` from a `listTools` means, in `mcp.ts`, `google-drive-rest.ts` and `builtin-routines.ts`
+ * alike, "the vendor was asked and advertises no actions" — and `refreshTools` commits that as a
+ * healthy refresh. This function used to answer `[]` for a url naming no app and for a deployment
+ * with no client installed, neither of which involved asking anybody, and the commit deleted every
+ * `mcp_tools` row for the app: the recorded `effect`, `destructive` and, fatally, `version`, which
+ * `callTool` refuses to run without and which only a listing can put back. So the two "asked
+ * nobody" cases throw, and they throw SEPARATELY, because one sends an operator to this
+ * deployment's configuration and the other to the row's url.
  */
 export async function listTools(connection: {
   url: string;
 }): Promise<ListedTool[]> {
   const toolkit = toolkitOf(connection.url);
-  if (!toolkit || !installed) return [];
+  if (!toolkit) {
+    throw new Error(
+      `${connection.url} does not name a Composio app, so nothing was asked what it offers. A row reached through this transport is one whose provenance says composio, and its url has to be composio:// followed by an app slug; correct the url on the Plugins page.`,
+    );
+  }
+  if (!installed) {
+    /*
+     * A STATE, NOT A FAULT, and the sentence has to read as one.
+     *
+     * Nothing under `server/src` installs a Composio client — see {@link useComposioClient} — so
+     * this is what every Composio refresh on every real deployment answers today, by design and
+     * not by accident. An operator who reads it as a crash goes looking for a broken vendor; what
+     * they need to know is that the connector is not wired up here and that nothing was lost.
+     */
+    throw new Error(
+      `Composio is not configured for this deployment, so nothing could be asked what ${toolkit} offers. That is the expected answer until a Composio client is installed at startup, and the actions already recorded for this app are kept rather than cleared.`,
+    );
+  }
 
   let actions: ComposioAction[];
   try {
