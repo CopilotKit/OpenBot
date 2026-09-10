@@ -794,13 +794,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
     report(&app, "migrate", true, "migrations applied");
 
     // `compose up` succeeds once it has asked for everything. A service that then exits is not its
-    // problem, and both Bots exit immediately without a model key. Reported rather than passed
-    // over, or the window shows a healthy stack while nothing can answer a question.
-    for (name, why) in stack::services_that_exited(&found, &root).inspect_err(|problem| {
-        report(&app, "services", false, problem.said.clone());
-    })? {
-        report(&app, "services", false, format!("{name} stopped: {why}"));
-    }
+    // problem, and both Bots exit immediately without a model key. Reported and made fatal here;
+    // otherwise the window can show a healthy stack while nothing can answer a question.
+    require_no_exited_compose_services(&found, &root, |detail| {
+        report(&app, "services", false, detail);
+    })?;
 
     /*
      * Reclaim this deployment's own host processes before deciding the ports are taken.
@@ -1041,6 +1039,32 @@ fn finish_host_start(
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1)
+}
+
+fn require_no_exited_compose_services(
+    found: &engine::Address,
+    root: &Path,
+    mut report_failure: impl FnMut(String),
+) -> Result<(), Problem> {
+    let dead = stack::services_that_exited(found, root).inspect_err(|problem| {
+        report_failure(problem.said.clone());
+    })?;
+    if dead.is_empty() {
+        return Ok(());
+    }
+
+    let detail = dead
+        .iter()
+        .map(|(name, why)| format!("{name} stopped: {why}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for line in detail.lines() {
+        report_failure(line.to_string());
+    }
+    Err(Problem::with(
+        "Part of OpenBot stopped during startup.",
+        detail,
+    ))
 }
 
 fn cleanup_before_start<R, C>(
@@ -3098,6 +3122,78 @@ mod tests {
     }
 
     #[test]
+    fn start_fails_when_required_compose_service_exited_before_host_startup() {
+        let root = temp_root("openbot-dead-compose-start");
+        write_installed_deployment(&root);
+        let record = temp_root("openbot-dead-compose-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", DEAD_SERVICE_START_DOCKER);
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.clone(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            "synthetic-intelligence-key".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+        .expect_err("a dead required Compose service must fail Start");
+
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert_eq!(
+            problem.said, "Part of OpenBot stopped during startup.",
+            "problem={problem:?} commands={commands}"
+        );
+        assert_eq!(
+            problem.detail.as_deref(),
+            Some("server stopped: server died after boot")
+        );
+        println!("SLOT1B dead Compose Start proof:\nproblem={problem:?}\ncommands={commands}");
+        assert!(
+            commands.contains("\tversion --format {{.Server.APIVersion}}\n"),
+            "{commands}"
+        );
+        assert!(commands.contains("\tcompose version\n"), "{commands}");
+        assert!(commands.contains("\tcompose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph\n"), "{commands}");
+        assert!(
+            commands.contains("\tcompose run --rm migrate\n"),
+            "{commands}"
+        );
+        assert!(
+            commands.contains("\tcompose ps -a --format {{.Service}}\t{{.State}}\n"),
+            "{commands}"
+        );
+        assert!(
+            commands.contains("\tcompose logs --tail 3 server\n"),
+            "{commands}"
+        );
+        assert!(
+            !root.join(".logs/server.log").exists(),
+            "host processes must not spawn after dead service"
+        );
+        assert!(
+            !root.join("node_modules").exists(),
+            "dependency install must not run after dead service"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    #[test]
     fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness() {
         let server = TestServer::new(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
@@ -3346,6 +3442,75 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    const DEAD_SERVICE_START_DOCKER: &str = r#"#!/bin/sh
+if [ -n "$OPENBOT_TEST_ENGINE_RECORD" ]; then
+  printf '%s\t%s\n' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
+fi
+case "$*" in
+  "version --format {{.Server.APIVersion}}") printf '1.44\n' ;;
+  "compose version") printf 'Docker Compose version v2.0.0\n' ;;
+  "compose ps --format {{.Ports}}") ;;
+  "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph") ;;
+  "compose run --rm migrate") ;;
+  "compose ps -a --format "*) printf 'agent-computer\tUp\nmigrate\tExited\nserver\tExited\n' ;;
+  "compose logs --tail 3 server") printf 'server died after boot\n' ;;
+  *) printf 'unexpected docker args: %s\n' "$*" >&2; exit 42 ;;
+esac
+"#;
+
+    fn write_installed_deployment(root: &Path) {
+        std::fs::create_dir_all(root.join("server")).unwrap();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::create_dir_all(root.join("worker")).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        std::fs::write(
+            root.join("app/package.json"),
+            r#"{"scripts":{"serve":"vite preview"}}"#,
+        )
+        .unwrap();
+        let images = deployment::Images {
+            version: DEPLOYMENT_VERSION.into(),
+            images: std::collections::BTreeMap::from([
+                (
+                    "server".into(),
+                    deployment::Image {
+                        reference: "localhost/openbot-server@sha256:00".into(),
+                    },
+                ),
+                (
+                    "supervisor".into(),
+                    deployment::Image {
+                        reference: "localhost/openbot-supervisor@sha256:00".into(),
+                    },
+                ),
+                (
+                    "agent-computer".into(),
+                    deployment::Image {
+                        reference: "localhost/openbot-agent-computer@sha256:00".into(),
+                    },
+                ),
+                (
+                    "agent-bot".into(),
+                    deployment::Image {
+                        reference: "localhost/openbot-agent-bot@sha256:00".into(),
+                    },
+                ),
+                (
+                    "agent-langgraph".into(),
+                    deployment::Image {
+                        reference: "localhost/openbot-agent-langgraph@sha256:00".into(),
+                    },
+                ),
+            ]),
+        };
+        std::fs::write(
+            deployment::images_path(root),
+            serde_json::to_string(&images).unwrap(),
+        )
+        .unwrap();
+        deployment::record(root, DEPLOYMENT_VERSION).unwrap();
     }
 
     const EMPTY_ANSWER_LOG_DOCKER: &str = "#!/bin/sh\n\
