@@ -34,7 +34,10 @@ function RouteComponent() {
   const [error, setError] = useState<string | null>(null);
 
   /** Default recipient when the composer draft has no mention. */
-  const fallback = defaultAgentProfile(agents, explore?.[0]);
+  const fallback = defaultAgentProfile(
+    agents,
+    agents?.find((agent) => agent.visibility === "public"),
+  );
 
   return (
     <>
