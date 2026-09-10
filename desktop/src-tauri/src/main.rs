@@ -780,13 +780,17 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * with the subscription they already pay for was handed two dead containers and two red lines
      * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
      */
-    let a_key_exists = matches!(
-        credential,
+    let bundled_bots = match credential {
         openbot_env::ModelCredential::OpenAi { .. }
-            | openbot_env::ModelCredential::Anthropic { .. }
-            | openbot_env::ModelCredential::Compatible { .. }
-    );
-    stack::up(&found, &root, picked.is_some(), a_key_exists, &secrets)?;
+        | openbot_env::ModelCredential::Compatible { .. } => {
+            stack::BundledBots::openai_compatible()
+        }
+        openbot_env::ModelCredential::Anthropic { .. } => stack::BundledBots::anthropic(),
+        openbot_env::ModelCredential::None
+        | openbot_env::ModelCredential::ClaudePlan { .. }
+        | openbot_env::ModelCredential::ChatGptPlan { .. } => stack::BundledBots::none(),
+    };
+    let requested_services = stack::up(&found, &root, picked.is_some(), bundled_bots, &secrets)?;
     report(&app, "services", true, "containers up");
 
     report(&app, "migrate", true, "applying migrations");
@@ -796,7 +800,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // `compose up` succeeds once it has asked for everything. A service that then exits is not its
     // problem, and both Bots exit immediately without a model key. Reported and made fatal here;
     // otherwise the window can show a healthy stack while nothing can answer a question.
-    require_no_exited_compose_services(&found, &root, |detail| {
+    require_no_exited_compose_services(&found, &root, &requested_services, |detail| {
         report(&app, "services", false, detail);
     })?;
 
@@ -1044,11 +1048,15 @@ fn finish_host_start(
 fn require_no_exited_compose_services(
     found: &engine::Address,
     root: &Path,
+    requested_services: &[&str],
     mut report_failure: impl FnMut(String),
 ) -> Result<(), Problem> {
-    let dead = stack::services_that_exited(found, root).inspect_err(|problem| {
-        report_failure(problem.said.clone());
-    })?;
+    let requested: std::collections::HashSet<&str> = requested_services.iter().copied().collect();
+    let dead = stack::services_that_exited_among(found, root, Some(&requested)).inspect_err(
+        |problem| {
+            report_failure(problem.said.clone());
+        },
+    )?;
     if dead.is_empty() {
         return Ok(());
     }
@@ -3160,7 +3168,7 @@ mod tests {
         );
         assert_eq!(
             problem.detail.as_deref(),
-            Some("server stopped: server died after boot")
+            Some("agent-computer stopped: agent-computer died after boot")
         );
         println!("SLOT1B dead Compose Start proof:\nproblem={problem:?}\ncommands={commands}");
         assert!(
@@ -3178,7 +3186,7 @@ mod tests {
             "{commands}"
         );
         assert!(
-            commands.contains("\tcompose logs --tail 3 server\n"),
+            commands.contains("\tcompose logs --tail 3 agent-computer\n"),
             "{commands}"
         );
         assert!(
@@ -3188,6 +3196,72 @@ mod tests {
         assert!(
             !root.join("node_modules").exists(),
             "dependency install must not run after dead service"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    #[test]
+    fn anthropic_start_does_not_raise_openai_only_agent_bot_or_fail_on_its_stale_exit() {
+        let root = temp_root("openbot-anthropic-bot-selection-start");
+        write_installed_deployment(&root);
+        let record = temp_root("openbot-anthropic-bot-selection-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", ANTHROPIC_SERVICE_SELECTION_DOCKER);
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.clone(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            "synthetic-intelligence-key".into(),
+            ChosenModel {
+                provider: "anthropic".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-anthropic-key".into()),
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            None,
+        ))
+        .expect_err("dead selected LangGraph service must fail Start");
+
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands.contains(
+                "\tcompose up -d --no-build postgres supervisor agent-computer agent-langgraph\n"
+            ),
+            "{commands}"
+        );
+        assert!(
+            !commands
+                .contains("compose up -d --no-build postgres supervisor agent-computer agent-bot"),
+            "Anthropic Start must not target the OpenAI-only agent-bot: {commands}"
+        );
+        assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("agent-langgraph stopped: langgraph died after boot"),
+            "{detail}"
+        );
+        assert!(
+            !detail.contains("agent-bot"),
+            "stale, unrequested agent-bot exit must not fail this Anthropic Start: {detail}"
+        );
+        assert!(
+            !commands.contains("\tcompose logs --tail 3 agent-bot\n"),
+            "stale unrequested agent-bot should not get reported: {commands}"
+        );
+        assert!(
+            commands.contains("\tcompose logs --tail 3 agent-langgraph\n"),
+            "selected dead LangGraph service should get reported: {commands}"
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
@@ -3446,17 +3520,51 @@ mod tests {
 
     const DEAD_SERVICE_START_DOCKER: &str = r#"#!/bin/sh
 if [ -n "$OPENBOT_TEST_ENGINE_RECORD" ]; then
-  printf '%s\t%s\n' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
+  printf '%s	%s
+' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
 fi
 case "$*" in
-  "version --format {{.Server.APIVersion}}") printf '1.44\n' ;;
-  "compose version") printf 'Docker Compose version v2.0.0\n' ;;
+  "version --format {{.Server.APIVersion}}") printf '1.44
+' ;;
+  "compose version") printf 'Docker Compose version v2.0.0
+' ;;
   "compose ps --format {{.Ports}}") ;;
   "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph") ;;
   "compose run --rm migrate") ;;
-  "compose ps -a --format "*) printf 'agent-computer\tUp\nmigrate\tExited\nserver\tExited\n' ;;
-  "compose logs --tail 3 server") printf 'server died after boot\n' ;;
-  *) printf 'unexpected docker args: %s\n' "$*" >&2; exit 42 ;;
+  "compose ps -a --format "*) printf 'agent-computer	Exited
+migrate	Exited
+' ;;
+  "compose logs --tail 3 agent-computer") printf 'agent-computer died after boot
+' ;;
+  *) printf 'unexpected docker args: %s
+' "$*" >&2; exit 42 ;;
+esac
+"#;
+
+    const ANTHROPIC_SERVICE_SELECTION_DOCKER: &str = r#"#!/bin/sh
+if [ -n "$OPENBOT_TEST_ENGINE_RECORD" ]; then
+  printf '%s	%s
+' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
+fi
+case "$*" in
+  "version --format {{.Server.APIVersion}}") printf '1.44
+' ;;
+  "compose version") printf 'Docker Compose version v2.0.0
+' ;;
+  "compose ps --format {{.Ports}}") ;;
+  "compose up -d --no-build postgres supervisor agent-computer agent-langgraph") ;;
+  "compose run --rm migrate") ;;
+  "compose ps -a --format "*) printf 'agent-computer	Up
+migrate	Exited
+agent-bot	Exited
+agent-langgraph	Exited
+' ;;
+  "compose logs --tail 3 agent-bot") printf 'agent-bot missing OPENAI_API_KEY
+' ;;
+  "compose logs --tail 3 agent-langgraph") printf 'langgraph died after boot
+' ;;
+  *) printf 'unexpected docker args: %s
+' "$*" >&2; exit 42 ;;
 esac
 "#;
 

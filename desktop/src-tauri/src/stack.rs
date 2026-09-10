@@ -36,7 +36,50 @@ never chose.
 Started when a key exists and left alone when it does not. The Bot the person actually picked speaks
 its plan and answers either way, which is what the last screen proves.
 */
-const BOTS_NEEDING_A_KEY: [&str; 2] = ["agent-bot", "agent-langgraph"];
+const AGENT_BOT: &str = "agent-bot";
+const AGENT_LANGGRAPH: &str = "agent-langgraph";
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BundledBots {
+    pub agent_bot: bool,
+    pub agent_langgraph: bool,
+}
+
+impl BundledBots {
+    pub const fn none() -> Self {
+        Self {
+            agent_bot: false,
+            agent_langgraph: false,
+        }
+    }
+
+    pub const fn openai_compatible() -> Self {
+        Self {
+            agent_bot: true,
+            agent_langgraph: true,
+        }
+    }
+
+    pub const fn anthropic() -> Self {
+        Self {
+            agent_bot: false,
+            agent_langgraph: true,
+        }
+    }
+}
+
+pub fn selected_services(harness: bool, bots: BundledBots) -> Vec<&'static str> {
+    let mut services = SERVICES.to_vec();
+    if bots.agent_bot {
+        services.push(AGENT_BOT);
+    }
+    if bots.agent_langgraph {
+        services.push(AGENT_LANGGRAPH);
+    }
+    if harness {
+        services.push("agent-harness");
+    }
+    services
+}
 
 /// The three that are not containers, in the order they are started.
 ///
@@ -131,11 +174,10 @@ pub fn up(
     engine: &Address,
     root: &Path,
     harness: bool,
-    // Whether the model screen produced a key. Without one the bundled Bots cannot start, and
-    // starting them to fail is worse than not starting them: see `BOTS_NEEDING_A_KEY`.
-    a_key_exists: bool,
+    // Which bundled Bots can read the provider the model screen selected.
+    bots: BundledBots,
     secrets: &Secrets,
-) -> Result<(), crate::problem::Problem> {
+) -> Result<Vec<&'static str>, crate::problem::Problem> {
     /*
      * The picked harness rides in on its profile.
      *
@@ -144,28 +186,19 @@ pub fn up(
      * fails the whole `up` rather than the one service nobody asked for. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
+    let requested = selected_services(harness, bots);
     let mut command = compose_command(engine, root, secrets);
     if harness {
         command.args(["--profile", "harness"]);
     }
     let output = command
         .args(["up", "-d", "--no-build"])
-        .args(SERVICES)
-        .args(if a_key_exists {
-            &BOTS_NEEDING_A_KEY[..]
-        } else {
-            &[][..]
-        })
-        .args(if harness {
-            &["agent-harness"][..]
-        } else {
-            &[][..]
-        })
+        .args(&requested)
         .output()
         .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
 
     if output.status.success() {
-        return Ok(());
+        return Ok(requested);
     }
     // Both registers: the sentence is chosen from what the engine said, and what it said is kept
     // beside it rather than shown as the headline. See `problem.rs`.
@@ -1450,6 +1483,14 @@ pub fn services_that_exited(
     engine: &Address,
     root: &Path,
 ) -> Result<Vec<(String, String)>, crate::problem::Problem> {
+    services_that_exited_among(engine, root, None)
+}
+
+pub fn services_that_exited_among(
+    engine: &Address,
+    root: &Path,
+    requested_services: Option<&std::collections::HashSet<&str>>,
+) -> Result<Vec<(String, String)>, crate::problem::Problem> {
     let operation = format!("{} compose ps -a", engine.engine.binary());
     let output = compose_command(engine, root, &Secrets::new())
         .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
@@ -1503,6 +1544,9 @@ pub fn services_that_exited(
         }
         // `migrate` is meant to exit: it is run to completion, not raised.
         if service == "migrate" {
+            continue;
+        }
+        if requested_services.is_some_and(|requested| !requested.contains(service)) {
             continue;
         }
         let why = compose_command(engine, root, &Secrets::new())
@@ -3497,20 +3541,33 @@ fn main() {
     }
 
     /// The published side of a mapping, which is the only side anything on this machine binds.
-    /// A plan is not a key, and the Bots that need one are not raised to fail.
+    /// A plan is not a key, and provider-specific Bots are not raised to fail.
     #[test]
-    fn the_bundled_bots_are_not_started_without_a_key() {
-        // Both say it themselves in their own source; this is the shell agreeing rather than
-        // starting them and reporting their refusal as a failure of the install.
-        assert_eq!(BOTS_NEEDING_A_KEY.len(), 2);
-        assert!(BOTS_NEEDING_A_KEY.contains(&"agent-bot"));
-        assert!(BOTS_NEEDING_A_KEY.contains(&"agent-langgraph"));
-        for bot in BOTS_NEEDING_A_KEY {
+    fn bundled_bot_service_selection_follows_the_selected_provider() {
+        for bot in [AGENT_BOT, AGENT_LANGGRAPH] {
             assert!(
                 !SERVICES.contains(&bot),
                 "{bot} is started unconditionally as well"
             );
         }
+
+        let no_key = selected_services(false, BundledBots::none());
+        assert!(!no_key.contains(&AGENT_BOT));
+        assert!(!no_key.contains(&AGENT_LANGGRAPH));
+
+        let openai = selected_services(false, BundledBots::openai_compatible());
+        assert!(openai.contains(&AGENT_BOT));
+        assert!(openai.contains(&AGENT_LANGGRAPH));
+
+        let anthropic = selected_services(false, BundledBots::anthropic());
+        assert!(
+            !anthropic.contains(&AGENT_BOT),
+            "Anthropic credentials must not start the OpenAI-only managed Bot"
+        );
+        assert!(anthropic.contains(&AGENT_LANGGRAPH));
+
+        let picked = selected_services(true, BundledBots::none());
+        assert!(picked.contains(&"agent-harness"));
     }
 
     /// Stop has to name the profile, or the one Bot the person picked keeps running.
