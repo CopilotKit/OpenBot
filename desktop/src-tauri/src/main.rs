@@ -1942,13 +1942,24 @@ where
 /// Used by the tray and by a second launch, both of which happen at moments when the caller has no
 /// idea which of the two the person should be looking at.
 fn show_whichever_applies(app: &tauri::AppHandle) {
+    restore_window_on(app, &openbot_env::Ports::default());
+}
+
+fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openbot_env::Ports) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
-    if let Some(url) = stack::app_url(openbot_env::Ports::default().app) {
+    let shell = app.state::<Shell>();
+    let root = cleanup_root(&shell, &stack::default_root());
+    // Restore has the same deployment ownership requirement as the setup page's passive probe.
+    // A successful app-port response alone may belong to another installation or application.
+    let owned = already_running_on(&root, ports.server, stack::recorded_server_owns_port);
+    if let Some(url) = owned.then(|| stack::app_url(ports.app)).flatten() {
         if let Ok(parsed) = url.parse() {
             let _ = window.navigate(parsed);
         }
+    } else {
+        let _ = show_setup(app.clone());
     }
     let _ = window.show();
     let _ = window.unminimize();
@@ -4920,6 +4931,208 @@ fi\n";
                     root.display()
                 )),
             "{lines}"
+        );
+    }
+    /// Real loopback responder in a separate process, so root/PID ownership checks use the same
+    /// OS inventory as production. The Tauri mock replaces only the window, never the HTTP/PID path.
+    #[cfg(unix)]
+    struct RestoreFixture {
+        base: PathBuf,
+        selected: PathBuf,
+        owned: PathBuf,
+        child: std::process::Child,
+        ports: openbot_env::Ports,
+    }
+
+    #[cfg(unix)]
+    impl RestoreFixture {
+        fn new() -> Self {
+            let base = temp_root("restore-owned-loopback");
+            let selected = base.join("selected");
+            let owned = base.join("owned");
+            write_installed_deployment(&selected);
+            write_installed_deployment(&owned);
+            let source = base.join("listener.rs");
+            std::fs::write(&source, r#"
+use std::io::{Read, Write};
+use std::net::TcpListener;
+fn serve(listener: TcpListener) {
+    for stream in listener.incoming() {
+        let mut stream = stream.unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut request = [0; 2048];
+        if stream.read(&mut request).unwrap_or(0) > 0 {
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+        }
+    }
+}
+fn main() {
+    let api = TcpListener::bind("127.0.0.1:0").unwrap();
+    let app = TcpListener::bind("127.0.0.1:0").unwrap();
+    println!("{} {}", api.local_addr().unwrap().port(), app.local_addr().unwrap().port());
+    std::io::stdout().flush().unwrap();
+    std::thread::spawn(move || serve(api));
+    serve(app);
+}
+"#).unwrap();
+            let binary = base.join("listener");
+            let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+            let output = std::process::Command::new(rustc)
+                .arg(&source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let mut child = std::process::Command::new(binary)
+                .current_dir(&owned)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufRead::read_line(
+                &mut std::io::BufReader::new(child.stdout.take().unwrap()),
+                &mut line,
+            )
+            .unwrap();
+            let numbers: Vec<u16> = line
+                .split_whitespace()
+                .map(|n| n.parse().unwrap())
+                .collect();
+            let fixture = Self {
+                base,
+                selected,
+                owned,
+                child,
+                ports: openbot_env::Ports {
+                    server: numbers[0],
+                    app: numbers[1],
+                    ..Default::default()
+                },
+            };
+            stack::record_host_processes(&fixture.owned, &[("server", fixture.child.id())])
+                .unwrap();
+            fixture
+        }
+
+        fn app(&self, root: &Path, setup: &str) -> tauri::App<tauri::test::MockRuntime> {
+            let shell = Shell::default();
+            remember_selected_root(&shell, root);
+            *shell.setup_url.lock().unwrap() = Some(setup.into());
+            let app = tauri::test::mock_builder()
+                .manage(shell)
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .unwrap();
+            window
+                .navigate("http://127.0.0.1:9/stale-page".parse().unwrap())
+                .unwrap();
+            app
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for RestoreFixture {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_window_refuses_answering_other_deployment_and_shows_recorded_setup() {
+        let f = RestoreFixture::new();
+        assert!(server_capabilities_answer(f.ports.server));
+        assert!(stack::app_url(f.ports.app).is_some());
+        assert!(!stack::recorded_server_owns_port(&f.selected, f.ports.server).unwrap());
+        assert!(stack::recorded_server_owns_port(&f.owned, f.ports.server).unwrap());
+        for setup in ["tauri://localhost/", "http://tauri.localhost/"] {
+            let app = f.app(&f.selected, setup);
+            restore_window_on(app.handle(), &f.ports);
+            assert_eq!(
+                app.get_webview_window("main")
+                    .unwrap()
+                    .url()
+                    .unwrap()
+                    .as_str(),
+                setup,
+                "tray/reopen must not adopt an unrelated successful app-port responder"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_window_owned_runtime_opens_app_and_active_root_takes_precedence() {
+        let f = RestoreFixture::new();
+        for active in [false, true] {
+            let app = f.app(
+                if active { &f.selected } else { &f.owned },
+                "tauri://localhost/",
+            );
+            if active {
+                *app.state::<Shell>().root.lock().unwrap() = Some(f.owned.clone());
+            }
+            restore_window_on(app.handle(), &f.ports);
+            assert_eq!(
+                app.get_webview_window("main")
+                    .unwrap()
+                    .url()
+                    .unwrap()
+                    .as_str(),
+                format!("http://127.0.0.1:{}/", f.ports.app)
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_window_unavailable_runtime_replaces_stale_page_with_setup() {
+        let mut f = RestoreFixture::new();
+        f.child.kill().unwrap();
+        f.child.wait().unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .as_str(),
+            "tauri://localhost/"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_window_unproven_identity_shows_setup_without_losing_selected_root() {
+        let f = RestoreFixture::new();
+        std::fs::write(f.owned.join(".logs/host-pids.json"), "not-json").unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .as_str(),
+            "tauri://localhost/"
+        );
+        assert_eq!(
+            app.state::<Shell>()
+                .selected_root
+                .lock()
+                .unwrap()
+                .as_deref(),
+            Some(f.owned.as_path())
         );
     }
 }
