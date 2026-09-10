@@ -3884,6 +3884,68 @@ test("a Composio call reaches the vendor as the person asking, not as the Bot", 
   ]);
 });
 
+/**
+ * An identity a model wrote into its own arguments does not become the identity of the call.
+ *
+ * THE THREE KEYS ARE THE ONES THAT WOULD WORK IF ANYTHING READ THEM. `userId` is the parameter
+ * name on the transport's own projection, `user_id` is how Composio spells arguments, and
+ * `entityId` is what their SDK called this before it was renamed — so a model that guessed at any
+ * of the three would be guessing well.
+ *
+ * FORWARDED, NOT STRIPPED, AND THAT IS THE CORRECT BEHAVIOUR. The identity is `execute`'s second
+ * POSITIONAL argument, taken from `connection.actorId`; `args` is the fourth and reaches the vendor
+ * as the action's own parameters. Nothing on that path reads `args` looking for an identity, which
+ * is what makes this structural rather than checked. Stripping the keys instead would be a bug with
+ * a real victim: Composio's schemas are snake_case, `user_id` is an ordinary parameter name on real
+ * actions, and a transport that swallowed it would quietly drop an argument the person meant. So
+ * this asserts BOTH halves — the vendor is handed the asker as the identity, and it is handed the
+ * model's arguments untouched.
+ *
+ * The absent `__version` is the other half of the same statement: the reserved key is the ONLY
+ * thing removed from what a model sent.
+ */
+test("an identity a model puts in the arguments does not change whose account the call opens", async () => {
+  const { store, database } = await freshStore();
+  const reached: { userId: string; args: Record<string, unknown> }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (_slug, userId, _version, args) => {
+      reached.push({ userId, args });
+      return vendorAnswered();
+    },
+  });
+  await seedComposioGmail(database, store);
+
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    // A model naming somebody else, three ways, beside one argument it genuinely meant.
+    args: {
+      userId: "user_stranger",
+      user_id: "user_stranger",
+      entityId: "user_stranger",
+      query: "is:unread",
+    },
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  expect(reached).toEqual([
+    {
+      // The session's person. None of the three keys reached the identity, because the identity is
+      // not read from arguments at all.
+      userId: "user_asker",
+      // Passed through whole, minus nothing: the reserved version key is the only thing the call
+      // path removes, and the model sent none.
+      args: {
+        userId: "user_stranger",
+        user_id: "user_stranger",
+        entityId: "user_stranger",
+        query: "is:unread",
+      },
+    },
+  ]);
+});
+
 test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
   const { store, database, auditStore } = await freshStore();
   useComposioClient({
