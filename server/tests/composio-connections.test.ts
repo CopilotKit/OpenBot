@@ -1,0 +1,379 @@
+import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { eq, inArray } from "drizzle-orm";
+import { createAuditStore } from "../src/audit";
+import type { ActionPolicy } from "../src/computer/policy";
+import type {
+  CredentialSecretReader,
+  CredentialStore,
+} from "../src/credentials";
+import { createDatabase } from "../src/db/client";
+import {
+  agents,
+  composioConnections,
+  mcpServers,
+  mcpTools,
+  pluginGrants,
+  users,
+} from "../src/db/schema";
+import type { ComposioActions, ComposioResult } from "../src/plugins/composio";
+import { useComposioClient } from "../src/plugins/composio";
+import { createPluginStore } from "../src/plugins/store";
+import { TEST_POOL } from "./support/database";
+
+/**
+ * What ends a brokered connection, and what the trail says when nobody was asking.
+ *
+ * `composio_connections` is the sole gate on a brokered call: the row `(toolkit, user_id)` is the
+ * whole of the permission, it points at no vault secret, and it references neither `users` nor
+ * `mcp_servers`. Nothing therefore cascades it away, which is deliberate — the row has to outlive
+ * the person so offboarding can still find it — and it means an explicit retirement is the ONLY
+ * thing that can ever end one. This file is about the two acts that must perform that retirement
+ * and about the trail they leave.
+ *
+ * WHY THIS FILE OWNS ITS IDS OUTRIGHT, AND SO NEEDS NO REFUSE-TO-RUN GUARD.
+ * `plugin-store.integration.test.ts` inserts at `gmail`, `notion` and `bot_helper` and refuses to
+ * run when a database already holds them: it asserts things about a real vendor's own action
+ * classification, so its ids are forced to be the spellings production uses, and a fixture at a
+ * forced id cannot coexist with a real row at that id. Nothing here asserts anything about a real
+ * vendor — `accessFor` answers `brokered` for ANY row whose provenance column says composio, and
+ * reads the app slug straight off the url — so every id below carries a run-unique suffix and every
+ * delete is keyed on one. That makes each row this file removes provably one it inserted, which is
+ * the property that guard buys the other way round, and it also lets this file run beside that one.
+ *
+ * The production deletes under test are keyed the same way: `removeServer` deletes by toolkit and
+ * `retireConnectionsFor` by user id, and both of those values are suite-scoped here, so neither can
+ * reach another run's rows either.
+ */
+
+const database = createDatabase(
+  process.env.DATABASE_URL ??
+    "postgres://openbot:openbot@localhost:5432/openbot",
+  TEST_POOL,
+);
+
+const suite = randomUUID().slice(0, 8);
+/** The app: its `mcp_servers.id`, and the slug in its url, which is what a connection is keyed on. */
+const toolkit = `revocable-${suite}`;
+const actionName = "APP_FETCH_ITEMS";
+const ref = `${toolkit}/${actionName}`;
+const botId = `agent_revoke_${suite}`;
+/** Somebody who connected the app. */
+const askerId = `user_asker_${suite}`;
+/** Somebody who connected it and whose `users` row is then deleted out from under the connection. */
+const leaverId = `user_leaver_${suite}`;
+const admin = "admin@openbot.local";
+
+const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
+
+/**
+ * The vault, and every method loud.
+ *
+ * A brokered call reaches no credential at all — the deployment's Composio key belongs to the
+ * transport and never travels through the store — and neither of the removals under test has a
+ * secret of this suite's to retire, because no `mcp_user_token` is ever minted here. So any call to
+ * any of these means this file has started exercising something it does not claim to, and a silent
+ * stub would hide that.
+ *
+ * Typed as the interface rather than left to inference, so a method added to the vault fails here
+ * instead of at the assignment further down. This file is not covered by `tsc` today — `tests` is
+ * outside `server/tsconfig.json`'s `include` — which is exactly why the shape is stated rather than
+ * assumed.
+ */
+const credentialsStub: CredentialSecretReader & CredentialStore = {
+  readSecret: async () => {
+    throw new Error("a brokered call reads no credential");
+  },
+  create: async () => {
+    throw new Error("this suite does not write credentials");
+  },
+  updateSecret: async () => {
+    throw new Error("this suite does not write credentials");
+  },
+  rotate: async () => {
+    throw new Error("this suite does not write credentials");
+  },
+  revoke: async () => {
+    throw new Error("this suite mints no credential to revoke");
+  },
+  isLive: async () => {
+    throw new Error("this suite holds no credential to ask about");
+  },
+  findLiveByKey: async () => {
+    throw new Error("this suite holds no credential to ask about");
+  },
+};
+
+/**
+ * A store over the real database, keeping every event it writes.
+ *
+ * Recorded ALONGSIDE the real insert rather than instead of it: the payloads are what these tests
+ * assert about, and a store whose audit insert never touched the database would not be exercising
+ * the one it has.
+ */
+const events: Parameters<ReturnType<typeof createAuditStore>["insert"]>[0][] =
+  [];
+const persisting = createAuditStore(database);
+const auditStore = {
+  insert: async (event: (typeof events)[number]) => {
+    events.push(event);
+    await persisting.insert(event);
+  },
+};
+
+const store = createPluginStore({
+  database,
+  auditStore,
+  credentials: credentialsStub,
+  encryptionKey: "x".repeat(44),
+  policy: () => policy,
+});
+
+/** Every action Composio was asked to run, so "was this call made" is an assertion and not a guess. */
+const reached: string[] = [];
+
+const answered: ComposioResult = { data: {}, error: null, successful: true };
+
+/**
+ * A client that answers everything, so a refusal in these tests is always this deployment's.
+ *
+ * The vendor is a process-wide registry, so `afterEach` takes it back out: a stub outliving its test
+ * would be answering another file's calls.
+ */
+function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return answered;
+    },
+    ...actions,
+  });
+}
+
+/** Only this run's rows, and every one of them keyed on an id this run invented. */
+async function clean() {
+  await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
+  await database.delete(agents).where(eq(agents.id, botId));
+  await database.delete(mcpTools).where(eq(mcpTools.serverId, toolkit));
+  await database.delete(mcpServers).where(eq(mcpServers.id, toolkit));
+  await database
+    .delete(composioConnections)
+    .where(eq(composioConnections.toolkit, toolkit));
+  await database.delete(users).where(inArray(users.id, [askerId, leaverId]));
+}
+
+/** The app's row and its one granted action. Separated from the Bot, so a re-add can reuse the Bot. */
+async function addApp() {
+  await database.insert(mcpServers).values({
+    id: toolkit,
+    title: "Revocable App",
+    vendor: "Composio",
+    url: `composio://${toolkit}`,
+    provenance: "composio",
+  });
+  await database.insert(mcpTools).values({
+    serverId: toolkit,
+    name: actionName,
+    description: "Fetch some items.",
+    effect: "read",
+    version: "20260903_00",
+  });
+  await store.grant("mcp", ref, botId, admin);
+}
+
+/** The app, a Bot holding its one action, and optionally somebody who has connected it. */
+async function seedApp(options: { connect?: boolean } = {}) {
+  await database.insert(agents).values({
+    id: botId,
+    name: "Helper",
+    type: "built_in",
+    configuration: {},
+  });
+  await addApp();
+  if (options.connect !== false) {
+    await database
+      .insert(composioConnections)
+      .values({ toolkit, userId: askerId });
+  }
+}
+
+/** What this deployment still believes somebody has connected. */
+async function connectedToolkitsFor(userId: string): Promise<string[]> {
+  const rows = await database
+    .select({ toolkit: composioConnections.toolkit })
+    .from(composioConnections)
+    .where(eq(composioConnections.userId, userId));
+  return rows.map((row) => row.toolkit);
+}
+
+function recordedOfType(eventType: string) {
+  return events.filter((event) => event.eventType === eventType);
+}
+
+// Cleaning BEFORE each test as well as after the run, so a run that dies halfway leaves the next
+// one nothing to trip over.
+beforeEach(async () => {
+  await clean();
+  events.length = 0;
+  reached.length = 0;
+});
+
+afterEach(() => useComposioClient(null));
+
+afterAll(async () => {
+  await clean();
+});
+
+/**
+ * OFFBOARDING. The act an administrator is told removes somebody's access.
+ *
+ * The call is made first, so what follows is an assertion about the retirement rather than about the
+ * fixture. Reaching the vendor a second time would be the person's mailbox being opened after they
+ * were removed.
+ */
+test("offboarding somebody retires the app they connected, and the next call is refused", async () => {
+  await seedApp();
+  useAnsweringClient();
+
+  await store.callTool({ ref, args: {}, botId, actorId: askerId });
+  expect(reached).toEqual([actionName]);
+
+  const { retired } = await store.retireConnectionsFor(askerId, admin);
+
+  // Counted, because the number is what "we removed their access" claims. Reporting the vault's
+  // tally alone would say nothing was retired for somebody whose only connector was brokered.
+  expect(retired).toBe(1);
+  expect(await connectedToolkitsFor(askerId)).toEqual([]);
+
+  await expect(
+    store.callTool({ ref, args: {}, botId, actorId: askerId }),
+  ).rejects.toThrow(/have not connected/i);
+  expect(reached).toEqual([actionName]);
+
+  const disconnected = recordedOfType("mcp.account_disconnected");
+  expect(disconnected).toHaveLength(1);
+  expect(disconnected[0].payload).toMatchObject({
+    actor: admin,
+    server: toolkit,
+    owner: askerId,
+    // An administrator removing somebody, never somebody changing their own mind. And the account
+    // at the broker is still connected: this closed the gate, it did not revoke anything at
+    // Composio.
+    reason: "person_removed",
+    vendorRevoked: false,
+  });
+});
+
+/**
+ * THE GATE, AFTER THE PERSON IS GONE.
+ *
+ * `composio_connections.user_id` carries no foreign key by design, so deleting somebody's `users`
+ * row leaves their connection standing — and the gate reads nothing but `(toolkit, user_id)`, so it
+ * goes on passing for an id no person answers to. That is the state offboarding exists to end, and
+ * it is the one the vault-based retirement cannot reach: there is no secret here to scan for,
+ * because Composio holds the account.
+ */
+test("a connection whose person is already deleted is retired, and stops passing the gate", async () => {
+  await seedApp({ connect: false });
+  useAnsweringClient();
+
+  await database
+    .insert(users)
+    .values({ id: leaverId, email: `${leaverId}@example.com`, name: "Leaver" });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit, userId: leaverId });
+  await database.delete(users).where(eq(users.id, leaverId));
+
+  // The design fact this rests on: the row outlives the person, which is what leaves anything to
+  // find. Asserted rather than assumed, because the retirement below is pointless without it.
+  expect(await connectedToolkitsFor(leaverId)).toEqual([toolkit]);
+
+  const { retired } = await store.retireConnectionsFor(leaverId, admin);
+  expect(retired).toBe(1);
+  expect(await connectedToolkitsFor(leaverId)).toEqual([]);
+
+  await expect(
+    store.callTool({ ref, args: {}, botId, actorId: leaverId }),
+  ).rejects.toThrow(/have not connected/i);
+  expect(reached).toEqual([]);
+});
+
+/** Retiring twice is something an administrator may legitimately do, and the second time is quiet. */
+test("retiring the same person twice retires nothing the second time", async () => {
+  await seedApp();
+  useAnsweringClient();
+
+  expect((await store.retireConnectionsFor(askerId, admin)).retired).toBe(1);
+  expect((await store.retireConnectionsFor(askerId, admin)).retired).toBe(0);
+});
+
+/**
+ * THE ANONYMOUS ACTOR OWNS NOTHING, and `notNull` does not exclude the empty string, so a row at
+ * `(toolkit, "")` is legal. Retiring "nobody" must not be what deletes it — that would be an
+ * unattributed offboarding reaching a row it cannot possibly own.
+ */
+test("retiring nobody retires nothing and leaves the anonymous row alone", async () => {
+  await seedApp({ connect: false });
+  await database.insert(composioConnections).values({ toolkit, userId: "" });
+
+  expect((await store.retireConnectionsFor("", admin)).retired).toBe(0);
+  expect(await connectedToolkitsFor("")).toEqual([toolkit]);
+});
+
+/**
+ * REMOVING THE APP. The second act that has to end a brokered connection.
+ *
+ * Nothing else can: the table references `mcp_servers` no more than it references `users`, so the
+ * rows simply stand there once the app's row is gone.
+ */
+test("removing the app takes every brokered connection to it", async () => {
+  await seedApp();
+  useAnsweringClient();
+
+  await store.callTool({ ref, args: {}, botId, actorId: askerId });
+
+  await store.removeServer(toolkit, admin);
+
+  expect(await connectedToolkitsFor(askerId)).toEqual([]);
+
+  const disconnected = recordedOfType("mcp.account_disconnected");
+  expect(disconnected).toHaveLength(1);
+  expect(disconnected[0].payload).toMatchObject({
+    actor: admin,
+    server: toolkit,
+    owner: askerId,
+    // An administrator took the whole app away and the person did nothing. Distinct from both
+    // "they disconnected" and "they were removed", which is what an auditor is trying to tell apart.
+    reason: "mcp_server_removed",
+    vendorRevoked: false,
+  });
+});
+
+/**
+ * CONSENT MUST NOT REATTACH.
+ *
+ * Removing an app and adding it back is two ordinary administrative acts. If the connection rows
+ * survive them, the second act silently restores everybody's brokered access without anybody being
+ * asked again — and the only visible difference between an app nobody has connected and an app
+ * everybody is still connected to is whether a call goes out.
+ */
+test("adding the app back does not restore a connection nobody re-granted", async () => {
+  await seedApp();
+  useAnsweringClient();
+
+  await store.callTool({ ref, args: {}, botId, actorId: askerId });
+  expect(reached).toEqual([actionName]);
+
+  await store.removeServer(toolkit, admin);
+  // The same app at the same id, added again. Only the server and its action: the Bot's grant
+  // survived the removal on its own, which is a separate defect about `plugin_grants` and not this
+  // one.
+  await addApp();
+
+  await expect(
+    store.callTool({ ref, args: {}, botId, actorId: askerId }),
+  ).rejects.toThrow(/have not connected/i);
+  expect(reached).toEqual([actionName]);
+});

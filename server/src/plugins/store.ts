@@ -2006,6 +2006,12 @@ export function createPluginStore(options: PluginStoreOptions) {
      *
      * Revoked rather than deleted, because the vault keeps revoked rows for audit.
      *
+     * A THIRD KIND OF ACCESS THAT IS NOT A SECRET. A brokered app holds no per-person secret at all
+     * — Composio keeps the accounts and the deployment sends a user id — so the only thing standing
+     * between a person and their mailbox is a `composio_connections` row, and that table references
+     * nothing that would cascade it. Removing the app therefore left every one of them behind, and
+     * adding the app back turned them live again without anybody being asked. That row goes too.
+     *
      * The revokes go first. These are writes on two tables and the store exposes no transaction that
      * spans both, so the order decides what a failure between them leaves: revoke-then-delete leaves
      * a server whose secrets no longer work and which removing again will finish off, while
@@ -2013,7 +2019,13 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async removeServer(serverId: string, by: string): Promise<void> {
       const [existing] = await database
-        .select({ credentialId: mcpServers.credentialId })
+        .select({
+          credentialId: mcpServers.credentialId,
+          // Read so the brokered connections below can be keyed on the app the url names, which is
+          // the same key the call gate uses. See there for why the row id will not do.
+          provenance: mcpServers.provenance,
+          url: mcpServers.url,
+        })
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId));
 
@@ -2095,6 +2107,64 @@ export function createPluginStore(options: PluginStoreOptions) {
             vendorRevoked: false,
           },
         });
+      }
+
+      /*
+       * The third kind of access, which is not a secret at all: everybody's brokered connection.
+       *
+       * CRITERION. Removing an app must leave nobody holding brokered access to it, so that adding
+       * it back again grants nothing until each person has consented afresh.
+       *
+       * REASON. `composio_connections` is the whole gate on a brokered call and it references
+       * nothing — not `mcp_servers`, not `users` — so nothing cascaded it and removing the app left
+       * every row standing. Two ordinary administrative acts, remove and add back, then restored
+       * everybody's access at a url the second act chose, with nobody asked again and no screen
+       * saying it had happened. Consent that reattaches by itself is not consent.
+       *
+       * KEYED ON THE APP THE URL NAMES, exactly as `connectionTokenFor` keys the gate. `row.id` is a
+       * display key and nothing holds it equal to the slug in the url, so a delete by id would clear
+       * some other app's connections, or none, for the very row shape that gate already refuses to
+       * trust. `accessFor` is asked rather than the url parsed here, so this cannot drift from it.
+       *
+       * Before the server row goes, for the reason the revokes above are: what a failure between
+       * two writes leaves has to be the recoverable half. A connection cleared with the app still
+       * present is fixed by removing it again; an app deleted with the connections standing is
+       * reachable by no operation at all, because the toolkit was only ever readable off its url.
+       */
+      const toolkit = existing
+        ? accessFor(existing, catalogueEntry(serverId)).toolkit
+        : null;
+
+      if (toolkit) {
+        const connected = await database
+          .delete(composioConnections)
+          .where(eq(composioConnections.toolkit, toolkit))
+          .returning({ userId: composioConnections.userId });
+
+        // Sorted, so two removals of the same app write their rows in the same order.
+        for (const connection of connected.sort((left, right) =>
+          left.userId.localeCompare(right.userId),
+        )) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.account_disconnected",
+            targetType: "mcp_server",
+            targetId: serverId,
+            payload: {
+              actor: by,
+              server: serverId,
+              owner: connection.userId,
+              // The same three-way distinction the vault loop above draws, and the same answer: an
+              // administrator took the whole app away and the person did nothing.
+              reason: "mcp_server_removed",
+              /*
+               * False, and said out loud. This closed the gate this deployment owns; the account
+               * the person connected is still connected at Composio, and only they or an operator
+               * of that broker can end it. A row implying otherwise would be worse than no row.
+               */
+              vendorRevoked: false,
+            },
+          });
+        }
       }
 
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
@@ -3041,6 +3111,11 @@ export function createPluginStore(options: PluginStoreOptions) {
      * The join rows go too, so the account pages stop claiming a connection this deployment can no
      * longer use.
      *
+     * AND THE BROKERED CONNECTIONS, which are neither a credential nor a join row. Composio holds
+     * the account, so there is no secret in the vault to find and the `composio_connections` row is
+     * itself the permission — the only thing deciding whether a call may go out as this person.
+     * Sweeping the vault alone therefore left that gate passing for somebody who had been removed.
+     *
      * NOT vendor-side revocation. That needs the OAuth client and the vendor's revoke endpoint, and
      * it belongs with disconnect. This is the half that stops us holding the secret; the grant at
      * Google outlives it until somebody revokes it there. Said plainly rather than implied, because
@@ -3096,6 +3171,62 @@ export function createPluginStore(options: PluginStoreOptions) {
       await database
         .delete(mcpUserCredentials)
         .where(eq(mcpUserCredentials.userId, userId));
+
+      /*
+       * Every app this person connected at the broker, where there is no secret to scan the vault
+       * for.
+       *
+       * CRITERION. After this returns, no brokered call may go out on this person's behalf.
+       *
+       * REASON. A brokered connection is not a credential: Composio holds the account and this
+       * deployment sends a user id, so the vault sweep above finds nothing and `composio_connections`
+       * is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
+       * connector was brokered, reported that as a retirement, and left the `(toolkit, user_id)` gate
+       * passing for a person who no longer exists — their access outliving them, which is the first
+       * thing anybody asks about a per-person connector. The table's own docblock justifies its shape
+       * by this path, so the shape was carrying a promise nothing kept.
+       *
+       * FOUND HERE AND NOWHERE ELSE, which is what the missing foreign key buys. The row survives the
+       * `users` row precisely so this can still name what the person had after they are gone — the
+       * same argument the vault lookup above makes, from the side that has no vault row. It is also
+       * why the guard at the top of this method is load-bearing rather than defensive: `not null`
+       * admits the empty string, so a row at `(toolkit, "")` is legal, and retiring "nobody" must not
+       * be what deletes it.
+       *
+       * COUNTED, because the number is what "we removed their access" claims. Retiring twice stays
+       * quiet on its own: the rows are gone, so the second call deletes none.
+       */
+      const brokered = await database
+        .delete(composioConnections)
+        .where(eq(composioConnections.userId, userId))
+        .returning({ toolkit: composioConnections.toolkit });
+
+      // Sorted, so two retirements of the same person write their rows in the same order.
+      for (const connection of brokered.sort((left, right) =>
+        left.toolkit.localeCompare(right.toolkit),
+      )) {
+        retired += 1;
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          // The app, which for a brokered connection is all the row records. The `mcp_servers` row
+          // it belongs to may have been removed already, and the connection outlives that too.
+          targetId: connection.toolkit,
+          payload: {
+            actor: by,
+            server: connection.toolkit,
+            owner: userId,
+            reason: "person_removed",
+            /*
+             * False here for a different reason than above. There, the grant at Google outlives our
+             * copy of the secret. Here there is no secret of ours at all: the account stays
+             * connected at Composio until somebody ends it there, and what this did was shut the
+             * only gate this deployment owns.
+             */
+            vendorRevoked: false,
+          },
+        });
+      }
 
       return { retired };
     },
