@@ -66,11 +66,24 @@ const appRoute = createRoute({
   getParentRoute: () => authedRoute,
   component: Outlet,
 });
+type TestFileRouteWiring = Parameters<typeof BotRoute.update>[0] & {
+  id: string;
+  path: string;
+  getParentRoute: () => typeof appRoute;
+};
+
+/*
+ * TanStack's generated route tree wires file routes with update({ id, path, getParentRoute })
+ * (app/src/routeTree.gen.ts), and the memory-router docs use an explicit test tree. The
+ * createFileRoute update type exposed to tests does not include those generated wiring fields,
+ * so this cast is confined to the file-route attachment point; the rendered component, router,
+ * query data, and assertions stay typed.
+ */
 const testBotRoute = BotRoute.update({
   id: "/bot",
   path: "/bot",
   getParentRoute: () => appRoute,
-});
+} as TestFileRouteWiring);
 const routeTree = rootRoute.addChildren([
   authedRoute.addChildren([appRoute.addChildren([testBotRoute])]),
 ]);
