@@ -4186,7 +4186,7 @@ fn main() {
     }
 
     #[cfg(unix)]
-    fn spawn_owned_listener(label: &str) -> (std::process::Child, u16) {
+    fn spawn_owned_listener(label: &str) -> (std::process::Child, u16, PathBuf) {
         let dir = temp_root(label);
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("listener.rs");
@@ -4216,7 +4216,7 @@ fn main() {
             .read_line(&mut port)
             .unwrap();
         let port = port.trim().parse().unwrap();
-        (child, port)
+        (child, port, dir)
     }
 
     #[cfg(unix)]
@@ -4234,7 +4234,8 @@ fn main() {
         std::fs::create_dir_all(&root_a).unwrap();
         std::fs::create_dir_all(&root_b).unwrap();
         let mut inert = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        let (mut listener, port) = spawn_owned_listener("unix-already-running-listener-b");
+        let (mut listener, port, listener_dir) =
+            spawn_owned_listener("unix-already-running-listener-b");
         record_host_processes(&root_a, &[("server", inert.id())]).unwrap();
         record_host_processes(&root_b, &[("server", listener.id())]).unwrap();
 
@@ -4250,7 +4251,8 @@ fn main() {
         let _ = inert.kill();
         let _ = inert.wait();
         let _ = listener.kill();
-        let _ = listener.wait();
+        listener.wait().expect("reap owned listener");
+        std::fs::remove_dir_all(listener_dir).expect("remove owned listener fixture");
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
     }
