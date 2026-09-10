@@ -322,7 +322,8 @@ export function ChannelChat({
       };
     };
 
-    let lastSeen = authoredActivity();
+    const initialActivity = authoredActivity();
+    let lastSeen = initialActivity;
     let cancelled = false;
 
     const pull = () => {
@@ -375,11 +376,21 @@ export function ChannelChat({
         pull();
       }
     });
+    void (async () => {
+      await joinGatePromise;
+      if (
+        !cancelled &&
+        initialActivity &&
+        !sameActivity(selfReportedBotActivity.current, initialActivity)
+      ) {
+        pull();
+      }
+    })();
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [channel.id, channel.threadId, runtimeAgentId]);
+  }, [channel.id, channel.threadId, joinGatePromise, runtimeAgentId]);
 
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);

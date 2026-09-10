@@ -166,12 +166,21 @@ function tree(selected: AgentChannel) {
     </QueryClientProvider>
   );
 }
-function cacheChannel(selected: AgentChannel) {
+function cacheChannel(
+  selected: AgentChannel,
+  activity: ActivityFixture | null = null,
+) {
   const summary: ChannelSummary = {
     ...selected,
     summary: null,
-    lastMessage: null,
-    lastMessageAgentId: "refresh-bot",
+    lastMessage: activity?.text ?? null,
+    lastMessageAgentId:
+      activity === null
+        ? "refresh-bot"
+        : activity.agentId === undefined
+          ? "refresh-bot"
+          : activity.agentId,
+    lastMessageAt: activity?.at ?? selected.lastMessageAt,
     createdAt: "2026-09-09T00:00:00.000Z",
     pinned: false,
     lastReadAt: null,
@@ -184,6 +193,7 @@ function cacheChannel(selected: AgentChannel) {
 function mounting(
   read: typeof history = async () => stored([initial]),
   snapshot: readonly Message[] = [],
+  cachedActivity: ActivityFixture | null = null,
 ) {
   historyReads = [];
   gatewaySnapshot = snapshot;
@@ -194,7 +204,7 @@ function mounting(
     { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
   ];
   history = read;
-  cacheChannel(channel);
+  cacheChannel(channel, cachedActivity);
   return render(tree(channel));
 }
 async function mounted() {
@@ -753,6 +763,41 @@ test("a successful same-message refresh is not overwritten by later unavailable 
     "local",
   ]);
 }, 5000);
+
+test("a cached Bot activity before mount retries stale durable history and restores the later message", async () => {
+  const later = {
+    id: "cached-activity-reply",
+    role: "assistant",
+    content: "Cached activity durable reply",
+  } satisfies Message;
+  let reads = 0;
+  const view = mounting(
+    async () => {
+      reads += 1;
+      return stored(reads < 3 ? [initial] : [initial, later]);
+    },
+    [initial],
+    {
+      agentId: "refresh-bot",
+      at: "2026-09-10T12:00:00.000Z",
+      text: "Cached Bot activity",
+    },
+  );
+
+  await view.findByText(later.content, {}, { timeout: 3000 });
+
+  expect(reads).toBe(3);
+  expect(historyReads).toEqual([
+    channel.threadId,
+    channel.threadId,
+    channel.threadId,
+  ]);
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    "initial",
+    later.id,
+  ]);
+  expect(view.queryByText(unavailable)).toBeNull();
+});
 
 test("a first ready stale refresh still retries and renders a later stored message", async () => {
   const view = await mounted();
