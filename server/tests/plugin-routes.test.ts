@@ -169,6 +169,41 @@ describe("refreshing a server that cannot be resolved", () => {
     expect(await response.json()).toEqual({ error: sentence });
   });
 
+  test("a failed query comes back as the reason, never as the statement", async () => {
+    /*
+     * The shape drizzle throws: `Failed query:` plus the whole statement, then `params:` and every
+     * value bound to it, with the driver's own error on `cause`. It is on the same shelf as the
+     * refusals above — not a vendor's doing, not the asker's to act on — so this route is where an
+     * operator is told about it, and it is the one member of that shelf whose `message` must not be
+     * what they are told.
+     */
+    const request = refreshApp(async () => {
+      throw Object.assign(
+        new Error(
+          'Failed query: select "credential_id" from "mcp_user_credentials" where "user_id" = $1 params: someone',
+        ),
+        {
+          query: 'select "credential_id" from "mcp_user_credentials"',
+          params: ["someone"],
+          cause: new Error("canceling statement due to statement timeout"),
+        },
+      );
+    });
+
+    const response = await request();
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error?: string };
+    // The reason, which is what an administrator can act on.
+    expect(body.error).toContain(
+      "canceling statement due to statement timeout",
+    );
+    // And none of the query. This route answers an administrator, but the browser it answers is
+    // still on somebody's laptop and the sentence still ends up in a screenshot and a ticket.
+    expect(body.error).not.toContain("Failed query");
+    expect(body.error).not.toContain("params:");
+    expect(body.error).not.toContain("mcp_user_credentials");
+  });
+
   test("a failure that is not one of ours is still not dressed up as one", async () => {
     // The must-not case, the same one the add route above carries: a database that is down is not
     // a row an administrator can go and correct, and answering 409 would send them to do it.

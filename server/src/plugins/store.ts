@@ -290,6 +290,50 @@ export class PluginInvariantError extends Error {
 const NUL = "\u0000";
 
 /**
+ * Whether a throw is a query failure carrying the statement and the values bound to it.
+ *
+ * CRITERION. Anything this answers true for has a message that must never be relayed — not to a
+ * model, not to a browser, not into a column an operator reads.
+ *
+ * REASON. drizzle wraps every failure as a `DrizzleQueryError` and puts `Failed query: <the whole
+ * statement>` and `params: <every bound value>` in its `message`. Along the tool-call path those
+ * values are credential ids, user ids and server ids; along the refresh path they are the vendor's
+ * entire tool list.
+ *
+ * BY SHAPE, NOT BY CLASS, and that is the one place this file departs from its own "tell them apart
+ * by a class, never by prose" rule. The class is drizzle's, reachable only through a deep import
+ * that is not part of its published surface, so an `instanceof` here would pin this deployment to
+ * an internal path a minor release may move. `query` and `params` as own properties on an `Error`
+ * is not prose — it is the shape the constructor assigns, it is what makes the message dangerous,
+ * and anything else carrying both fields is a query failure too.
+ */
+function isQueryFailure(
+  error: unknown,
+): error is Error & { query: unknown; params: unknown } {
+  return (
+    error instanceof Error &&
+    Object.hasOwn(error, "query") &&
+    Object.hasOwn(error, "params")
+  );
+}
+
+/**
+ * As much of a failure as may be shown to whoever is entitled to see it.
+ *
+ * CRITERION. Every place that copies a message out of a caught error asks this instead of reading
+ * `.message`. What comes back never contains a statement or a bound value.
+ *
+ * REASON. The message is the useful thing for a vendor's refusal, a person's missing connection or
+ * an invariant of ours — that is why those paths quote it, and they should go on quoting it. It is
+ * the wrong thing for exactly one kind of error, and that kind announces itself by shape. Asking
+ * here rather than at each site means a new audience cannot be added without the question already
+ * answered for it.
+ */
+function withoutStatement(error: Error): string {
+  return isQueryFailure(error) ? databaseComplaint(error) : error.message;
+}
+
+/**
  * The driver's own complaint about a query, without the query.
  *
  * CRITERION. What this returns never contains the statement or the values bound to it.
@@ -394,8 +438,25 @@ function storableTools(serverId: string, listed: ListedTool[]) {
 export function isDeploymentFault(error: unknown): error is Error {
   return (
     error instanceof ServerUnresolvableError ||
-    error instanceof PluginInvariantError
+    error instanceof PluginInvariantError ||
+    /*
+     * A query this database refused is on the shelf for the reason the other two are: it is not a
+     * vendor's doing, it is not the asker's to act on, and its message is the one thing here that
+     * must not travel. The replace in `refreshTools` was fixed at its own site; every other query
+     * on the call path — the advertised-tool read, the connection gate, the vault read, the locked
+     * credential swap — throws the same shape into a `catch` that copies `error.message` onward,
+     * so answering it here is what makes the four audiences agree without four more branches.
+     *
+     * Callers that SHOW the sentence to an operator must still ask {@link withoutStatement} for
+     * it rather than reading `.message`; this predicate settles who may be told, not what.
+     */
+    isQueryFailure(error)
   );
+}
+
+/** The operator-facing sentence for a fault on that shelf, with no statement in it. */
+export function deploymentFaultSentence(error: Error): string {
+  return withoutStatement(error);
 }
 
 /**
@@ -2492,14 +2553,34 @@ export function createPluginStore(options: PluginStoreOptions) {
         });
       } catch (error) {
         /*
-         * The narrowing throws in `connectionTokenFor` are ours, not a vendor's.
+         * Ours rather than a vendor's, asked as one question about the whole shelf.
          *
-         * They fire for a row that resolved to a brokered credential with no app in its url, or to a
-         * per-person credential with no `user-oauth` entry — contradictions between this deployment's
-         * own tables and its own code. Raised rather than recorded, so the page does not send whoever
-         * reads it to somebody else's status page.
+         * CRITERION. Nothing on the `isDeploymentFault` shelf is written into `lastError`, and
+         * nothing raised from here carries a statement or a bound value.
+         *
+         * WHAT THIS USED TO BE, and why the difference is not cosmetic. It read `error instanceof
+         * PluginInvariantError` — which was DEAD, and its own comment named two throws that cannot
+         * arrive here: `connectionTokenFor` is only called when `transport.listNeedsCredential`,
+         * which is false for `composio`, the only brokered transport, so the brokered narrowing
+         * cannot fire inside this `try`; and the `person-oauth` narrowing is unreachable because
+         * `accessFor` answers that credential only for a `user-oauth` entry. So the line could be
+         * deleted with every test still green while the arrival it should have been catching —
+         * a query of ours failing — went straight past it into the column below.
+         *
+         * A QUERY FAILURE IS THE REACHABLE ONE. `connectionTokenFor`'s vault read, its connection
+         * lookup and its locked credential swap all run inside this `try` for an MCP listing, and
+         * each throws a `DrizzleQueryError` whose message is the statement plus every value bound
+         * to it. Recorded, that put a SQL dump in the column the Plugins page draws, under a
+         * heading that says a vendor said it. Raised as an invariant of ours, with the driver's
+         * complaint and none of the query.
          */
-        if (error instanceof PluginInvariantError) throw error;
+        if (isDeploymentFault(error)) {
+          throw isQueryFailure(error)
+            ? new PluginInvariantError(
+                `${row.id}: asking this app what it offers failed on a query of this deployment's own, so nothing about the app was learned and nothing it holds was changed. ${databaseComplaint(error)}`,
+              )
+            : error;
+        }
 
         const message =
           error instanceof McpServerError || error instanceof Error
@@ -3819,8 +3900,18 @@ export function createPluginStore(options: PluginStoreOptions) {
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
             ...decided,
+            /*
+             * Asked through {@link withoutStatement}, because not every throw in this block is a
+             * vendor's sentence.
+             *
+             * The vendor's own words are what this field is for and are kept. But every query on
+             * the way here throws a `DrizzleQueryError` whose message is our statement and its
+             * bound values — credential ids, user ids, server ids — and `audit_events` is read by
+             * an operator and exported. A dump in the row that records a failed call is the same
+             * disclosure the tool-list replace was fixed for, in the trail rather than on a page.
+             */
             failure: (error instanceof Error
-              ? error.message
+              ? withoutStatement(error)
               : String(error)
             ).slice(0, 400),
           },

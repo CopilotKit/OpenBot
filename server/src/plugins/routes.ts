@@ -19,6 +19,7 @@ import {
   CustomServerRefusedError,
   type OAuthClient,
   type PluginKind,
+  deploymentFaultSentence,
   isDeploymentFault,
   PluginRefusedError,
   type PluginStore,
@@ -349,7 +350,10 @@ export function createPluginRoutes(
        * what the sentence tells the reader to go and do.
        */
       if (isDeploymentFault(error)) {
-        return context.json({ error: error.message }, 409);
+        // `deploymentFaultSentence` rather than `error.message`: the shelf now includes a query
+        // this database refused, and that one's message is the statement and every value bound to
+        // it. An administrator is entitled to the reason, not to the dump.
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
       }
       throw error;
     }

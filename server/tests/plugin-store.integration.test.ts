@@ -5440,6 +5440,279 @@ describe("a listing this database would not have taken", () => {
 });
 
 /**
+ * A QUERY OF OURS THAT FAILED, on the two paths that copy a caught message onward.
+ *
+ * WHAT THE SHAPE IS. drizzle wraps every failure as a `DrizzleQueryError`: `message` is `Failed
+ * query:` plus the whole statement, then `params:` and every value bound to it, with the driver's
+ * own error on `cause`. On the tool-call path those values are credential ids, user ids and server
+ * ids; on the refresh path they are the vendor's tool list.
+ *
+ * WHERE IT COMES FROM. A per-person MCP listing is the shape that runs a query of ours inside the
+ * block that catches the vendor's failures: `connectionTokenFor` reads the asking person's stored
+ * grant there. `composio` never gets that far — `listNeedsCredential` is false for it, the only
+ * brokered transport — and a server added by URL reads its one token from the vault rather than
+ * from a query. So the failure is injected at that one read and arrives exactly where it would in
+ * production, rather than being handed to the `catch` from somewhere it could not come from.
+ */
+describe("a query of this deployment's own that failed", () => {
+  /** The drizzle shape, spelled once: statement and bound values in `message`, driver on `cause`. */
+  function queryFailure() {
+    return Object.assign(
+      new Error(
+        'Failed query: select "credential_id" from "mcp_user_credentials" where "user_id" = $1 params: user_asker',
+      ),
+      {
+        query: 'select "credential_id" from "mcp_user_credentials"',
+        params: ["user_asker"],
+        cause: new Error("canceling statement due to statement timeout"),
+      },
+    );
+  }
+
+  test("a refresh raises it rather than recording it as what the vendor said", async () => {
+    const { database } = await freshStore();
+
+    /*
+     * Notion, because a per-person MCP listing is the only shape that runs a query of ours inside
+     * the vendor `try`. `composio` never gets there — `listNeedsCredential` is false for it, so
+     * `connectionTokenFor` is not called at all — and a server added by URL reads its one token
+     * from the vault rather than from a query. Resolved from the catalogue rather than spelled, so
+     * a renamed slug breaks this file instead of quietly emptying it.
+     */
+    const notion = catalogueEntry("notion");
+    if (!notion) {
+      throw new Error(
+        "catalogue slug `notion` is gone, so nothing here reaches a per-person listing",
+      );
+    }
+
+    // `user_leaver` rather than a new id: this file already owns a `users` row at it, so the
+    // person, the connection and the server row are all cleaned by machinery that exists.
+    await database.insert(users).values({
+      id: "user_leaver",
+      email: "leaver@example.com",
+      name: "Leaver",
+    });
+    const [grant] = await database
+      .insert(credentialRows)
+      .values({
+        kind: "mcp_user_token",
+        provider: "notion",
+        keyId: "user_leaver",
+        encryptedValue: "{}",
+        metadata: {},
+      })
+      .returning({ id: credentialRows.id });
+    if (!grant) throw new Error("grant row was not created");
+    await database.insert(mcpServers).values({
+      id: "notion",
+      title: notion.title,
+      vendor: notion.vendor,
+      url: `${notion.host}${notion.path}`,
+      provenance: "first-party",
+    });
+    await database.insert(mcpUserCredentials).values({
+      serverId: "notion",
+      userId: "user_leaver",
+      credentialId: grant.id,
+      scope: "",
+    });
+
+    /*
+     * The stored-grant read, failed — and nothing else.
+     *
+     * Derived from the real database so every other query the refresh makes is the real query.
+     * The second `select` is the one: `requireServer` reads the server row first, outside the
+     * block that catches vendor failures, and `connectionTokenFor`'s read of this person's grant
+     * is the next one and is inside it. Counting is what makes the failure land there rather than
+     * somewhere a blanket override would put it, and the assertions below distinguish the two —
+     * the row id in the message is added only by the conversion in that `catch`, so a failure
+     * escaping the earlier read would arrive as the raw dump and redden.
+     */
+    let selects = 0;
+    const refusing: Database = Object.create(database);
+    Object.defineProperty(refusing, "select", {
+      value: (...args: never[]) => {
+        selects += 1;
+        if (selects === 2) throw queryFailure();
+        return database.select(...args);
+      },
+    });
+    const failing = createPluginStore({
+      database: refusing,
+      auditStore: { insert: async () => {} },
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+    });
+
+    let thrown: unknown;
+    try {
+      await failing.refreshTools("notion", "user_leaver");
+    } catch (error) {
+      thrown = error;
+    }
+
+    try {
+      const [row] = await database
+        .select({
+          lastError: mcpServers.lastError,
+          toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, "notion"));
+
+      /*
+       * Nothing in the column, asserted FIRST because it is the half that was actually broken and
+       * because its failure prints what leaked.
+       *
+       * `lastError` is drawn on the Plugins page beside a refresh that looks merely to have
+       * failed, and the narrowing meant to keep our own faults out of it tested for a class that
+       * cannot arrive inside that `try` at all — so it could be deleted with every test green
+       * while the statement and every value bound to it went into a column an operator reads and
+       * an export carries.
+       */
+      expect(row?.lastError).toBeNull();
+      expect(row?.toolsRefreshedAt).toBeNull();
+
+      // Raised, because a query this database refused is not something the vendor did — the same
+      // criterion the replace further down this method is held to.
+      expect(isDeploymentFault(thrown)).toBe(true);
+      const message = thrown instanceof Error ? thrown.message : String(thrown);
+      expect(message).toContain("canceling statement due to statement timeout");
+      expect(message).not.toContain("Failed query");
+      expect(message).not.toContain("params:");
+      expect(message).not.toContain("mcp_user_credentials");
+      // Named by the conversion inside the refresh's own `catch`, which is how this asserts WHERE
+      // the failure was classified and not merely that something was thrown.
+      expect(message).toContain("notion:");
+    } finally {
+      /*
+       * Locally, and in this order. `mcp_user_credentials.credential_id` is a real foreign key
+       * that deliberately does not cascade, so the join row has to go before the vault row — and
+       * the teardown that clears vault rows for this file runs before the one that clears server
+       * rows, which is what would otherwise leave a delete refusing.
+       */
+      await database
+        .delete(mcpUserCredentials)
+        .where(
+          and(
+            eq(mcpUserCredentials.serverId, "notion"),
+            eq(mcpUserCredentials.userId, "user_leaver"),
+          ),
+        );
+      await database
+        .delete(credentialRows)
+        .where(eq(credentialRows.id, grant.id));
+    }
+  });
+
+  test("the model is told the call did not happen, and none of the query", async () => {
+    /*
+     * At the seam that decides, which is where the leak was.
+     *
+     * `grantedTools` takes a store, and the question is what it hands the model when that store
+     * throws — so the store is the thing stubbed and nothing else is. Every query on the call path
+     * runs inside `callTool`'s own recording block and comes out of it unchanged, so this shape
+     * arriving here is the production arrival, not an approximation of one.
+     */
+    const [tool] = await grantedTools({
+      store: {
+        listForAgent: async () => ({
+          tools: [
+            {
+              ref: "gmail/GMAIL_FETCH_EMAILS",
+              toolName: "gmail__GMAIL_FETCH_EMAILS",
+              description: "Fetch emails.",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+          skills: [],
+        }),
+        callTool: async () => {
+          throw queryFailure();
+        },
+      } as unknown as PluginStore,
+      botId: "bot_helper",
+      actorId: "user_asker",
+    });
+    if (!tool) throw new Error("the Bot was offered no tool to call");
+
+    const answer = await tool.execute({});
+
+    /*
+     * What the model is handed, exactly.
+     *
+     * Not the statement and not the values bound to it — on this path those are credential ids,
+     * user ids and server ids. Not a sentence blaming the vendor either: the call never reached
+     * one, and `That tool could not be called: <our SQL>` is what the model used to be given to
+     * explain the failure to the person asking.
+     */
+    expect(answer).toBe("That tool could not be called.");
+    expect(answer).not.toContain("Failed query");
+    expect(answer).not.toContain("params:");
+    expect(answer).not.toContain("mcp_user_credentials");
+  });
+
+  test("the trail gets the reason and none of the query", async () => {
+    const database = await freshDatabase();
+    const events: { eventType: string; payload: unknown }[] = [];
+    /*
+     * Thrown at the vendor seam, and recorded by the block above it.
+     *
+     * WHERE THIS ARRIVES FROM IN PRODUCTION: `connectionTokenFor`, three lines earlier and inside
+     * the same `try` — its connection gate read, its vault read and its locked credential swap
+     * are all queries of ours. Reaching one of those and failing only it needs a counted override
+     * of every `select` the call path makes, which pins a test to the order of queries rather than
+     * to the property. `callVendor` is the one seam this store hands a caller, and a throw through
+     * it lands in exactly the `catch` those queries land in; what that `catch` can do about a
+     * throw is classify it, which is the property.
+     */
+    const failing = createPluginStore({
+      database,
+      auditStore: {
+        insert: async (event) => {
+          events.push(event as (typeof events)[number]);
+        },
+      },
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+      callVendor: async () => {
+        throw queryFailure();
+      },
+    });
+    await seedComposioGmail(database, failing);
+
+    await expect(
+      failing.callTool({
+        ref: "gmail/GMAIL_FETCH_EMAILS",
+        args: {},
+        botId: "bot_helper",
+        actorId: "user_asker",
+      }),
+    ).rejects.toThrow();
+
+    const failed = events.filter(
+      (event) => event.eventType === "mcp.call_failed",
+    );
+    expect(failed).toHaveLength(1);
+    const failure =
+      (failed[0]?.payload as { failure?: string } | undefined)?.failure ?? "";
+    /*
+     * The reason, because "is this connector working" is asked of this row and the driver's
+     * complaint answers it. Not the statement and not the values bound to it: on this path those
+     * are credential ids, user ids and server ids, and `audit_events` is read by an operator and
+     * carried out of the deployment by an export.
+     */
+    expect(failure).toContain("canceling statement due to statement timeout");
+    expect(failure).not.toContain("Failed query");
+    expect(failure).not.toContain("params:");
+    expect(failure).not.toContain("mcp_user_credentials");
+  });
+});
+
+/**
  * The genuine empty listing, which has to stay recordable.
  *
  * The guard above must not turn "this app advertises nothing" into a state the deployment cannot
