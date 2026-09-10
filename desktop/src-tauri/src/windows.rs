@@ -139,6 +139,23 @@ impl Blocker {
 /// So this only says "no kernel" when **neither** answers, which is the state actually measured on
 /// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
 /// The caller must check probe success first: command failure is not evidence of a missing kernel.
+fn wsl_default_version(status_output: &str) -> Option<u8> {
+    for line in status_output.lines() {
+        let Some((label, value)) = line.split_once([':', '：']) else {
+            continue;
+        };
+        if label.trim().is_empty() {
+            continue;
+        }
+        match value.trim() {
+            "1" => return Some(1),
+            "2" => return Some(2),
+            _ => {}
+        }
+    }
+    None
+}
+
 pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
     if kernel_file_exists {
         return true;
@@ -423,7 +440,7 @@ fn blocker_with(
         "WSL status (wsl.exe --status)",
         run("wsl.exe", &["--status"]),
     )?;
-    if default_version.contains("Default Version: 1") {
+    if wsl_default_version(&default_version) == Some(1) {
         return Ok(Some(Blocker::WslOne));
     }
 
@@ -550,6 +567,71 @@ mod tests {
             .find(|format| format.locale == locale)
             .unwrap();
         component_version_output(&format)
+    }
+
+    #[test]
+    fn localized_wsl_status_default_version_one_blocks_before_kernel_file_health() {
+        for status in [
+            "Default Version: 1
+",
+            "Version par défaut : 1
+Dernière mise à jour : jamais
+",
+            "WSL 版本： 1
+",
+        ] {
+            assert_eq!(
+                fail_probe_at(4, Ok(probe_output(0, status, ""))),
+                Ok(Some(Blocker::WslOne)),
+                "missed WSL1 status {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn localized_wsl_status_default_version_two_continues_to_kernel_detection() {
+        for status in [
+            "Default Version: 2
+",
+            "Version par défaut : 2
+",
+            "WSL 版本： 2
+",
+        ] {
+            let mut probe = 0;
+            let result = blocker_with(
+                |program, args| {
+                    assert_probe_call(probe, program, args);
+                    let stdout = match probe {
+                        4 => status,
+                        current => PROBE_OUTPUTS[current],
+                    };
+                    probe += 1;
+                    Ok(probe_output(0, stdout, ""))
+                },
+                || Ok(false),
+            );
+            assert_eq!(result, Ok(None), "blocked healthy WSL2 status {status:?}");
+            assert_eq!(probe, 6);
+        }
+    }
+
+    #[test]
+    fn status_parser_does_not_treat_dotted_component_versions_as_default_wsl1() {
+        for status in [
+            "Default Distribution: Ubuntu-1
+Kernel version: 1.2.3
+",
+            "WSL version: 1.2.3
+Kernel version: 6.18.33.2
+",
+            "No colon and a bare 1
+",
+            ": 1
+",
+        ] {
+            assert_eq!(wsl_default_version(status), None, "accepted {status:?}");
+        }
     }
 
     #[test]
