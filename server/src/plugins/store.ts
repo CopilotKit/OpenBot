@@ -2369,26 +2369,34 @@ export function createPluginStore(options: PluginStoreOptions) {
        * nothing to lose, so the empty answer falls through to the replace below and commits — a
        * refresh stamp, no error, no actions.
        *
-       * REASON. `listTools` returning `[]` is supposed to mean "the vendor was asked and advertises
-       * none", and for three of the four transports it does. `composio.listTools` breaks it: it
-       * answers `[]` when no client is installed, and NOTHING IN THE SHIPPED PRODUCT CALLS
-       * `useComposioClient` — so on every real deployment that is the only answer a Composio refresh
-       * can produce. Committed, it deleted every `mcp_tools` row for the app, taking the recorded
-       * `effect`, `destructive` and `version` with it. `version` is the one that cannot be
-       * reconstructed: `callTool` refuses an action without it, so a refresh that reported success
-       * broke every subsequent call. The grants survived, pointing at rows that no longer existed —
-       * absent from `listServers`, and revived by a later refresh that worked.
+       * REASON. The replace below is a delete and an insert, so an empty answer committed here
+       * deletes every `mcp_tools` row for the server, taking the recorded `effect`, `destructive`
+       * and `version` with it. `version` is the one that cannot be reconstructed: `callTool` refuses
+       * an action without it, so a refresh that reported success broke every subsequent call, and
+       * the grants survived pointing at rows that no longer existed — absent from `listServers`, and
+       * revived only by a later refresh that worked.
+       *
+       * WHAT USED TO REACH THIS LINE, and no longer does. `composio.listTools` once answered `[]`
+       * for a url naming no app and for a deployment with no Composio client installed, neither of
+       * which is a vendor's answer, and the second of those is the state of every real deployment.
+       * Both throw now, so that particular arrival is closed at the seam rather than here. The guard
+       * stays because its argument never depended on who sent the empty answer.
        *
        * KEPT RATHER THAN TRUSTED, and that asymmetry is the whole argument. Holding actions the vendor
        * has withdrawn is visible and reversible: the next listing replaces them. Deleting actions the
        * vendor never withdrew is neither — `mcp_tools` is shared, so it is every replica at once, and
-       * only a refresh from a deployment that can actually reach the vendor puts it back.
+       * only a refresh from a deployment that can actually reach the vendor puts it back. That holds
+       * for any vendor that suddenly lists nothing, whatever made it do so, which is why removing
+       * this would reopen the same data loss for a different reason.
        *
-       * THE SEAM REQUIREMENT this leans on, which is not satisfied today: a transport that could not
-       * ask anybody must THROW rather than return `[]`. `composio.ts:141` returns `[]` for a missing
-       * client and for a url that names no app, and until it throws instead there is no field on the
-       * listing that tells the two apart. Nothing here asks which transport it is talking to, so the
-       * fix belongs in that one line and not in a branch on `access.transport`.
+       * THE SEAM REQUIREMENT this leans on, and it is satisfied: a transport that could not ask
+       * anybody must THROW rather than return `[]`. `composio.listTools` opens with two throws that
+       * say which of the two it is — no app in the url, no client installed — and no transport has
+       * an early `return []` left in it at all: `builtin-routines` answers a static list, and `mcp`
+       * and `google-drive-rest` hand back only what a request returned. So an empty listing reaching
+       * this line is a vendor's own answer, which is what the sentence below says. Nothing here asks
+       * which transport it is talking to, and nothing has to: the requirement is met at each seam
+       * rather than branched on here.
        */
       if (listed.length === 0) {
         const held = await database
@@ -2401,9 +2409,13 @@ export function createPluginStore(options: PluginStoreOptions) {
             .update(mcpServers)
             .set({
               // Named as the state it is, because "listed nothing" and "would not answer" send an
-              // operator to different places. No `toolsRefreshedAt`: that column says when this
-              // deployment last learned what the app offers, and it did not learn it here.
-              lastError: `This app listed no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check that the connector is configured for this deployment, then refresh again.`,
+              // operator to different places, and reaching this line settles which one it was: a
+              // listing that could not be made throws and lands in the `catch` above instead. So
+              // this sentence must not send anybody to check their configuration — that is the
+              // other state's sentence, written by the transport that refused. No
+              // `toolsRefreshedAt`: that column says when this deployment last learned what the app
+              // offers, and it did not learn it here.
+              lastError: `This app was asked and answered with no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check whether it still publishes them, then refresh again.`,
               updatedAt: new Date(),
             })
             .where(eq(mcpServers.id, serverId));
