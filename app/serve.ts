@@ -47,6 +47,7 @@ export function fileFor(pathname: string): string | null {
     if (error instanceof URIError) return null;
     throw error;
   }
+  if (decoded.includes("\0")) return null;
   const wanted = normalize(join(DIST, decoded));
   if (wanted !== DIST && !wanted.startsWith(`${DIST}${sep}`)) return null;
   if (wanted === DIST || pathname.endsWith("/"))

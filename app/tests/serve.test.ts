@@ -179,6 +179,25 @@ describe("which file a path names", () => {
     expect(fileFor(pathname)).toBeNull();
   });
 
+  test("a decoded NUL path is refused before it reaches Bun.file", async () => {
+    const proxy = await startProxy(await unusedPort());
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${proxy.port}/assets/a%00b.js`,
+      );
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe("not found");
+    } finally {
+      await proxy.stop();
+    }
+
+    expect(fileFor("/assets/a%00b.js")).toBeNull();
+  });
+
+  test("only decoded NUL is refused by the invalid-path guard", () => {
+    expect(fileFor("/assets/a%1Fb.js")).toEndWith("/dist/assets/ab.js");
+  });
+
   test("a client route remains available for the router", () => {
     expect(fileFor("/channel/channel_1ed78a89")).toEndWith(
       "/dist/channel/channel_1ed78a89",
