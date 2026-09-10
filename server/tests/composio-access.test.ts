@@ -48,7 +48,7 @@ describe("accessFor", () => {
     const notion = catalogueEntry("notion");
     expect(notion).not.toBeNull();
     if (!notion) return;
-    const notionUrl = `https://${notion.host}${notion.path}`;
+    const notionUrl = `${notion.host}${notion.path}`;
     expect(
       accessFor({ provenance: "first-party", url: notionUrl }, notion),
     ).toEqual({
@@ -62,7 +62,7 @@ describe("accessFor", () => {
   test("Drive is its REST adapter, on the asking person's own grant", () => {
     const drive = catalogueEntry("google-drive");
     if (!drive) return;
-    const driveUrl = `https://${drive.host}${drive.path}`;
+    const driveUrl = `${drive.host}${drive.path}`;
     expect(
       accessFor({ provenance: "first-party", url: driveUrl }, drive),
     ).toEqual({
