@@ -126,7 +126,7 @@ impl Blocker {
     }
 }
 
-/// The persisted step, beside the rest of the app's data.
+/// Query the same current-user WSL registry value that upstream uses for the default version.
 fn default_wsl_version_probe_command() -> &'static str {
     r#"$ErrorActionPreference = 'Stop';
 $path = 'Software\Microsoft\Windows\CurrentVersion\Lxss';
