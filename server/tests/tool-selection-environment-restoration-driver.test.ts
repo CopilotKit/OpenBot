@@ -145,13 +145,69 @@ async function emitRestorationProof(modelModule: ModelModule) {
   }
 }
 
-async function fixtureListenerStopped(url: string) {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(1_000) });
-    return false;
-  } catch {
+function fetchFailureLooksLikeStoppedListener(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (
+    error.message ===
+    "Unable to connect. Is the computer able to access the url?"
+  ) {
     return true;
   }
+
+  const cause = (error as { cause?: { code?: unknown } }).cause;
+  return (
+    cause?.code === "ECONNREFUSED" ||
+    cause?.code === "ECONNRESET" ||
+    cause?.code === "EPIPE"
+  );
+}
+
+async function fixtureListenerStopped(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+
+  try {
+    await fetch(parsed, { signal: AbortSignal.timeout(1_000) });
+    return false;
+  } catch (error) {
+    return fetchFailureLooksLikeStoppedListener(error);
+  }
+}
+
+if (mode === undefined) {
+  test("fixtureListenerStopped observes a live loopback listener before proving it stopped", async () => {
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch() {
+        return new Response("fixture live");
+      },
+    });
+
+    try {
+      await expect(fixtureListenerStopped(server.url.href)).resolves.toBe(
+        false,
+      );
+      await server.stop(true);
+      await expect(fixtureListenerStopped(server.url.href)).resolves.toBe(true);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("fixtureListenerStopped does not treat client input failures as stopped listeners", async () => {
+    await expect(fixtureListenerStopped("not a url")).resolves.toBe(false);
+    await expect(fixtureListenerStopped("file:///tmp/not-http")).resolves.toBe(
+      false,
+    );
+  });
 }
 
 let proofEmitted = false;
