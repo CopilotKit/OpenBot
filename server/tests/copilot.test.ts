@@ -119,6 +119,16 @@ describe("deployment model selection", () => {
     expect(request.model).toBe("selected-local-model");
   });
 
+  test("explicit OpenAI provider still uses the OpenAI-compatible selected model", async () => {
+    const request = await runGeneralAssistantWithEnvironment({
+      BOT_PROVIDER: " openai ",
+      OPENAI_BASE_URL: "http://127.0.0.1:11434/v1",
+      BOT_MODEL: " selected-local-model ",
+    });
+
+    expect(request.model).toBe("selected-local-model");
+  });
+
   test.each([
     {},
     { OPENAI_BASE_URL: "http://127.0.0.1:11434/v1", BOT_MODEL: "   " },

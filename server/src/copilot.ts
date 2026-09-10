@@ -152,9 +152,10 @@ export function runtimeModelForEnvironment(
   environment: Record<string, string | undefined> = process.env,
 ): RuntimeModel {
   const selectedModel = environment.BOT_MODEL?.trim();
-  const selectedProvider = environment.BOT_PROVIDER?.trim();
+  const selectedProvider = environment.BOT_PROVIDER?.trim().toLowerCase();
   const compatibleEndpoint =
-    !selectedProvider && !!environment.OPENAI_BASE_URL?.trim();
+    (!selectedProvider || selectedProvider === "openai") &&
+    !!environment.OPENAI_BASE_URL?.trim();
   return {
     provider: packageModel.provider,
     defaultModel:
