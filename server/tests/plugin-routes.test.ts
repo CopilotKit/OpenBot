@@ -5,6 +5,7 @@ import { ServerRowAmbiguousError } from "../src/plugins/access";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  PluginInvariantError,
 } from "../src/plugins/store";
 import { testEnvironment } from "./support/environment";
 
@@ -83,6 +84,29 @@ describe("adding a curated server", () => {
     });
 
     expect((await request({ key: "nope" })).status).toBe(400);
+  });
+
+  test("a row the deployment cannot resolve comes back with its sentence", async () => {
+    /*
+     * ADDING REFRESHES, which is what puts this fault on this route.
+     *
+     * `addServer` asks the vendor what it offers before it answers — deliberately, so a bad
+     * credential is reported now rather than the first time a Bot uses one — so everything
+     * `refreshTools` raises arrives here as well: a vendor listing one action twice, a query of
+     * ours failing, a row whose two columns contradict each other. Unmapped, all of it left the
+     * route on the default path and the admin page said "That did not work", while the SAME fault
+     * on the refresh button said which row and what to do about it.
+     */
+    const sentence =
+      "notion: the actions this app listed were not stored, so what it already had is unchanged.";
+    const request = appWith(async () => {
+      throw new PluginInvariantError(sentence);
+    });
+
+    const response = await request({ key: "notion" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: sentence });
   });
 
   test("a failure that is not a refusal is not dressed up as one", async () => {

@@ -213,6 +213,23 @@ export function createPluginRoutes(
       ) {
         return context.json({ error: error.message }, 400);
       }
+      /*
+       * The same mapping the refresh route makes, on the routes that call the same method.
+       *
+       * CRITERION. Every admin route whose store call can reach a fault on the
+       * `isDeploymentFault` shelf answers with the sentence rather than leaving it to the default
+       * handler.
+       *
+       * REASON. Adding a server REFRESHES it before answering — deliberately, so a bad credential
+       * is reported now rather than the first time a Bot uses it — so every fault `refreshTools`
+       * raises arrives here too, and a vendor listing one action twice or a query of ours failing
+       * is exactly that. Mapped on one route and not on its siblings, the same fault is a named
+       * sentence or "That did not work" depending on which button was pressed, which is the shape
+       * that made this class hard to see the first time.
+       */
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
+      }
       throw error;
     }
   });
@@ -257,6 +274,11 @@ export function createPluginRoutes(
       ) {
         return context.json({ error: error.message }, 400);
       }
+      // As on the curated add above, and for the same reason: this path refreshes before it
+      // answers.
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
+      }
       throw error;
     }
   });
@@ -300,6 +322,11 @@ export function createPluginRoutes(
         error instanceof CustomServerRefusedError
       ) {
         return context.json({ error: error.message }, 400);
+      }
+      // Registering a client resolves the row first, so a row this deployment cannot say how to
+      // reach refuses here as well.
+      if (isDeploymentFault(error)) {
+        return context.json({ error: deploymentFaultSentence(error) }, 409);
       }
       throw error;
     }
