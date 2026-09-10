@@ -113,6 +113,25 @@ export type TransportKind =
   | "builtin-routines"
   | "composio";
 
+/**
+ * The kinds a CATALOGUE ENTRY may name, which is every one except the broker's.
+ *
+ * CRITERION. `composio` is not writable in a reviewed entry, and the compiler is what says so.
+ *
+ * REASON. A brokered row is reached by an app slug read off its url and a per-person connection
+ * looked up by that slug; a catalogue entry has neither, and `accessFor` answers `toolkit: null`
+ * and `credential` from the entry's auth kind for everything it resolves. So an entry declaring
+ * `transport: "composio"` yielded a Composio dial with no app named, no brokered gate, and
+ * `reachedAs` taken from an auth kind that has nothing to do with whose account the broker would
+ * have run in — a row that walks past both store gates while satisfying every type in the module
+ * that claims to enumerate how a row can be reached. No entry declares it, which is why this is a
+ * door being shut rather than a bug being fixed, and why shutting it costs nothing.
+ *
+ * `Exclude` rather than a hand-written second union, so a kind added above is offered to the
+ * catalogue automatically and only the broker stays out.
+ */
+export type CuratedTransportKind = Exclude<TransportKind, "composio">;
+
 const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,

@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { AuditInitiator } from "../audit";
 import type { SelectableSkill } from "./selection";
-import { PluginRefusedError, type PluginStore } from "./store";
+import {
+  isDeploymentFault,
+  PluginRefusedError,
+  type PluginStore,
+} from "./store";
 
 /**
  * The tools a Bot may call, as the runtime's own tool definitions, executed on the server.
@@ -203,6 +207,22 @@ export async function grantedTools(options: {
         if (error instanceof PluginRefusedError) {
           return `${REFUSAL_MARKER} ${error.message}`;
         }
+        /*
+         * A contradiction in this deployment's own tables says nothing to a model.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf may have its message relayed from
+         * here, whatever it says.
+         *
+         * REASON. The branch below hands `error.message` to the model, which is right for a
+         * vendor's own words — that is somebody else's software explaining itself, and the
+         * diagnosis is worth having. These are not that. `ServerRowAmbiguousError` names two of
+         * our columns and tells the reader to rename a row or correct its provenance: an
+         * instruction only an operator can carry out, arriving in an end user's model context as
+         * the reason their tool failed, from which the model can only invent something to tell
+         * them. The operator who can act on it is served on the admin surface instead, where the
+         * refresh route now answers with the sentence in full.
+         */
+        if (isDeploymentFault(error)) return "That tool could not be called.";
         // A vendor that failed is not a refusal, and the difference matters to the person reading
         // the answer: one means "not allowed", the other means "it broke".
         return error instanceof Error

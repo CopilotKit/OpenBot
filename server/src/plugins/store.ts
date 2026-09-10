@@ -40,7 +40,11 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
-import { accessFor, type ServerAccess } from "./access";
+import {
+  accessFor,
+  type ServerAccess,
+  ServerUnresolvableError,
+} from "./access";
 import { VERSION_ARG } from "./composio";
 import { inspectToolArguments } from "./content-governance";
 import { type ListedTool, McpServerError } from "./mcp";
@@ -248,6 +252,39 @@ export class PluginInvariantError extends Error {
     super(message);
     this.name = "PluginInvariantError";
   }
+}
+
+/**
+ * Whether a throw is this deployment contradicting itself, rather than anything anybody asked for.
+ *
+ * CRITERION. Every audience boundary asks THIS instead of listing classes of its own. A fault it
+ * answers true for reaches an operator as its own sentence, on a surface only an operator can
+ * reach, and reaches everybody else as the fact that the call did not happen — no message, no
+ * column names, no instruction about a row.
+ *
+ * REASON. The distinction already existed and was drawn by hand, once, in each place that
+ * remembered to draw it: {@link PluginRefusedError} is relayed verbatim because it is a refusal
+ * the asker can act on, and everything else fell into a branch that copies `error.message`
+ * onwards. {@link ServerUnresolvableError} was caught by none of them — the refresh route rethrew
+ * it into the framework's default handler, which answers a bodiless 500, so the admin page said
+ * "That did not work" and named nothing; `grantedTools` put its message in a model's context,
+ * where a sentence telling an operator to correct a provenance column became a Bot's explanation
+ * to an end user of why their tool failed. Two audiences, one refusal, neither served.
+ *
+ * {@link PluginInvariantError} is on the same shelf and answers true for the same reason: it is
+ * this deployment finding a state its own code says cannot exist. That is not a vendor
+ * misbehaving and not a person's to act on mid-call, and its own docblock has said so since it
+ * was written — what it lacked was anywhere that asked.
+ *
+ * A PREDICATE RATHER THAN A SHARED BASE CLASS, because the two live in different modules and must
+ * keep doing so: `access.ts` is a leaf that `store.ts` imports, so the shelf cannot be declared
+ * once without one of them importing the other back.
+ */
+export function isDeploymentFault(error: unknown): error is Error {
+  return (
+    error instanceof ServerUnresolvableError ||
+    error instanceof PluginInvariantError
+  );
 }
 
 /**

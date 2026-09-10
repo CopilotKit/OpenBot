@@ -32,12 +32,19 @@ import {
   pluginGrants,
   users,
 } from "../src/db/schema";
+import {
+  accessFor,
+  CatalogueTransportUnroutableError,
+  ServerRowAmbiguousError,
+} from "../src/plugins/access";
+import type { CatalogueEntry } from "../src/plugins/catalogue";
 import { catalogueEntry } from "../src/plugins/catalogue";
 import {
   type ComposioResult,
   useComposioClient,
 } from "../src/plugins/composio";
 import { redirectUriFor } from "../src/plugins/oauth";
+import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import {
   type AccessToken,
   CustomServerRefusedError,
@@ -48,6 +55,7 @@ import {
   PluginInvariantError,
   PluginRefusedError,
   type PluginStore,
+  isDeploymentFault,
   TokenRefusedError,
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
@@ -5008,6 +5016,188 @@ describe("a refresh the vendor answered with no actions at all", () => {
             "grants_not_advertised",
         ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * WHO IS TOLD WHAT, when the row itself is the thing that cannot be resolved.
+ *
+ * `ServerRowAmbiguousError` refuses a row whose provenance says `composio` and whose id is a
+ * curated catalogue slug: nothing in the row and the entry tells a tampered curated row apart from
+ * a brokered app that took the name, so there is no answer that is not wrong in one of the two
+ * worlds. It shipped caught NOWHERE. Every audience therefore got the wrong thing at once — the
+ * admin page a bodiless 500 it renders as "That did not work", and a model the operator's own
+ * sentence about correcting a provenance column, offered to an end user as the reason their tool
+ * failed.
+ *
+ * The store's half is asserted here: it refuses, and it records nothing about a vendor while doing
+ * so. What each audience then sees is asserted where that audience is — the model below, and the
+ * administrator in `plugin-routes.test.ts`, which is the file that exists for that mapping.
+ */
+describe("a row that resolves to two servers at once", () => {
+  /** A colliding row, spelled the way the collision actually occurs: a curated slug, brokered. */
+  async function seedCollidingNotion(database: Database) {
+    await database.insert(mcpServers).values({
+      id: "notion",
+      title: "Notion",
+      vendor: "Composio",
+      url: "composio://notion",
+      provenance: "composio",
+    });
+  }
+
+  test("a refresh refuses it, and writes nothing about a vendor", async () => {
+    const { store, database } = await freshStore();
+    await seedCollidingNotion(database);
+
+    await expect(store.refreshTools("notion", "admin_user")).rejects.toThrow(
+      ServerRowAmbiguousError,
+    );
+
+    const [row] = await database
+      .select({
+        lastError: mcpServers.lastError,
+        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, "notion"));
+
+    // Two of our columns disagreeing is not a vendor's answer, so it must not be written where the
+    // page draws what the vendor said. Raised instead, which is what the route reads.
+    expect(row?.lastError).toBeNull();
+    expect(row?.toolsRefreshedAt).toBeNull();
+  });
+
+  test("the model is told the call did not happen, and nothing about our columns", async () => {
+    const { store, database } = await freshStore();
+    await seedCollidingNotion(database);
+    await database.insert(mcpTools).values({
+      serverId: "notion",
+      name: "notion-fetch",
+      description: "Fetch a page.",
+    });
+    await database.insert(agents).values({
+      id: "bot_helper",
+      name: "Helper",
+      type: "built_in",
+      configuration: {},
+    });
+    await store.grant(
+      "mcp",
+      "notion/notion-fetch",
+      "bot_helper",
+      "admin@example.com",
+    );
+
+    const [tool] = await grantedTools({
+      store,
+      botId: "bot_helper",
+      actorId: "user_asker",
+    });
+    if (!tool) throw new Error("the Bot was offered no tool to call");
+
+    const answer = await tool.execute({});
+
+    /*
+     * Every part of the operator's sentence, named rather than summarised.
+     *
+     * The message says the row is one the deployment ships an entry for, that its provenance says
+     * composio, and that somebody should rename it or correct the column. Each of those is a fact
+     * about our database and an instruction only an administrator can act on; a model handed any
+     * of them can only relay or embroider it. Asserted piecewise so a reworded sentence that still
+     * leaks cannot pass by not matching one long string.
+     */
+    expect(answer).not.toContain("provenance");
+    expect(answer).not.toContain("rename");
+    expect(answer).not.toContain("notion");
+    // And not dressed as a refusal either: nothing was decided against, so the marker the
+    // transcript draws as a boundary holding would be a lie about which of the two happened.
+    expect(answer.startsWith(REFUSAL_MARKER)).toBe(false);
+    expect(answer).toBe("That tool could not be called.");
+  });
+
+  test("it is on the same shelf the store already raises rather than records", async () => {
+    /*
+     * The distinction, asked the way every audience asks it.
+     *
+     * Both audiences above branch on `isDeploymentFault` rather than on a class list of their own,
+     * so what makes them correct is this answer and not the two `catch` blocks. A class added to
+     * the shelf and forgotten here is the defect being fixed, one round later.
+     */
+    expect(isDeploymentFault(new ServerRowAmbiguousError("x"))).toBe(true);
+    expect(isDeploymentFault(new CatalogueTransportUnroutableError("x"))).toBe(
+      true,
+    );
+    expect(isDeploymentFault(new PluginInvariantError("x"))).toBe(true);
+    // And the refusal somebody CAN act on is not on it: its message is the one thing this codebase
+    // relays verbatim, to a model and to a browser alike.
+    expect(isDeploymentFault(new PluginRefusedError("x", null))).toBe(false);
+    expect(isDeploymentFault(new Error("the vendor did not answer"))).toBe(
+      false,
+    );
+  });
+});
+
+/**
+ * A catalogue entry naming the broker's transport, which no entry can be reached over.
+ *
+ * NOT A LIVE BUG AND NOT MEANT TO BECOME ONE. No entry declares it, and `CuratedTransportKind` now
+ * makes declaring it a compile error — which is the real fix, since entries are code. This is what
+ * holds when the type is bypassed: a cast, a fixture like the one below, or a loader that ever
+ * reads an entry from outside the build.
+ *
+ * WHAT THE UNREFUSED ANSWER WAS. `transport: "composio"` with `toolkit: null`, a credential taken
+ * from the entry's auth kind rather than `brokered`, and `reachedAs` from the same table. So the
+ * dial went to the broker while both gates that keep one person's brokered account out of
+ * another's — the connection lookup in `connectionTokenFor` and the app-slug check in
+ * `refreshTools` — were keyed on a null app and skipped, and the trail recorded whose account had
+ * been reached from a field that had nothing to do with it. Refusing is the only answer that does
+ * not assert something false.
+ */
+test("a catalogue entry declaring the broker's transport is refused, not dialled", () => {
+  /*
+   * Cast at the fixture, deliberately and in one place. The type is what keeps this out of the
+   * catalogue, so a test about what happens when the type is bypassed has to bypass it — and doing
+   * it here rather than in a helper keeps the bypass visible beside the thing it is testing.
+   */
+  const brokered = {
+    key: "brokered-entry",
+    title: "Brokered Entry",
+    vendor: "Somebody",
+    summary: "An entry that names a transport an entry cannot be reached over.",
+    host: "https://mcp.example.com",
+    path: "/mcp",
+    auth: {
+      kind: "user-oauth" as const,
+      authorizationUrl: "https://example.com/auth",
+      tokenUrl: "https://example.com/token",
+      revokeUrl: "https://example.com/revoke",
+      scopes: [],
+    },
+    writeTools: [],
+    transport: "composio",
+    docsUrl: "https://example.com/docs",
+  } as unknown as CatalogueEntry;
+
+  expect(() =>
+    accessFor(
+      { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+      brokered,
+    ),
+  ).toThrow(CatalogueTransportUnroutableError);
+
+  // The same entry with the transport it is actually reached over resolves as any other curated
+  // per-person vendor does, so what is refused is the value and not the fixture.
+  expect(
+    accessFor(
+      { provenance: "first-party", url: "https://mcp.example.com/mcp" },
+      { ...brokered, transport: undefined },
+    ),
+  ).toEqual({
+    transport: "mcp",
+    credential: "person-oauth",
+    reachedAs: "person",
+    toolkit: null,
   });
 });
 

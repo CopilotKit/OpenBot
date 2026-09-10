@@ -19,6 +19,7 @@ import {
   CustomServerRefusedError,
   type OAuthClient,
   type PluginKind,
+  isDeploymentFault,
   PluginRefusedError,
   type PluginStore,
 } from "./store";
@@ -329,6 +330,26 @@ export function createPluginRoutes(
     } catch (error) {
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json({ error: error.message }, 404);
+      }
+      /*
+       * The one audience the sentence was written for, and the only route that may show it.
+       *
+       * CRITERION. A contradiction between this deployment's own columns comes back to an
+       * administrator as itself: a body, naming the row and what to do about it.
+       *
+       * REASON. Unmapped, it reached the framework's default handler — a 500 with no JSON at all,
+       * which the admin page reads as "That did not work", the fallback it uses when a response
+       * carries no message. So the one refusal that names exactly which row is wrong and how to
+       * correct it was the one an operator could not see, while the same sentence WAS reaching a
+       * model on the tool-call path. This route is `requireAdmin`, which is what makes showing it
+       * here safe and showing it anywhere else not.
+       *
+       * 409 rather than 500: nothing broke, and nothing about the request was malformed. Two rows
+       * of ours disagree, and the request cannot be answered until one of them changes — which is
+       * what the sentence tells the reader to go and do.
+       */
+      if (isDeploymentFault(error)) {
+        return context.json({ error: error.message }, 409);
       }
       throw error;
     }
@@ -878,6 +899,28 @@ export function createPluginRoutes(
       }
       if (error instanceof CatalogueEntryUnknownError) {
         return context.json({ error: error.message }, 404);
+      }
+      /*
+       * Ours, and so neither the vendor's fault nor this caller's business.
+       *
+       * CRITERION. A fault on the `isDeploymentFault` shelf is not reported through the branch
+       * below, and its sentence does not leave this process by this route.
+       *
+       * REASON. Two things would be wrong at once. `failed: true` and 502 say somebody else's
+       * software did not answer, which is a false statement about a call that never went out —
+       * and this route is `requireUser`, not `requireAdmin`, so the sentence naming our columns
+       * and the correction to make would be readable by anybody with a session. The operator who
+       * can act on it reads it on the refresh route above, which is admin-gated; here the honest
+       * answer is that the deployment cannot make this call as it stands.
+       */
+      if (isDeploymentFault(error)) {
+        return context.json(
+          {
+            error:
+              "That tool is not configured in a way this deployment can act on. An administrator has to look at the server it belongs to.",
+          },
+          500,
+        );
       }
       // A server that failed is not a refusal, and saying so matters: one means the deployment
       // decided against it, the other means somebody else's software did not answer.

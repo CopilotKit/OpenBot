@@ -102,6 +102,29 @@ const REACHED_AS_BY_AUTH: Record<
 };
 
 /**
+ * The shelf both refusals below sit on: this deployment cannot say how to reach a row, and will
+ * not guess.
+ *
+ * CRITERION. Nothing on this shelf is a vendor's doing, a credential's doing, or anything the
+ * person asking can act on. An operator gets the sentence, because it names two of our own columns
+ * and what to do about them; every other audience — a model's context, a person's browser — gets
+ * the fact that the call did not happen, and none of the sentence.
+ *
+ * REASON. `store.ts` draws exactly this line already, between {@link PluginRefusedError} — a
+ * refusal somebody CAN act on, and the one class the codebase relays verbatim — and
+ * `PluginInvariantError`, a state this deployment's own code says cannot exist. These two are that
+ * second kind, found one step earlier: in resolving the row rather than in querying against it.
+ *
+ * A BASE CLASS RATHER THAN A LIST AT EACH AUDIENCE. `ServerRowAmbiguousError` shipped with no
+ * `catch` anywhere, so the refresh route rethrew it into the default handler — an administrator
+ * got a 500 with no body and a page that said "That did not work" — and `grantedTools` copied its
+ * message into a model's context, offering an end user's Bot a sentence about correcting a
+ * provenance column. A third contradiction added here has to be refused everywhere without a
+ * second edit, so the audiences ask one question: `isDeploymentFault` in `store.ts`.
+ */
+export abstract class ServerUnresolvableError extends Error {}
+
+/**
  * A row that claims to be two servers at once, which makes it neither.
  *
  * CRITERION. A row whose provenance says `composio` and whose id is a curated catalogue slug is
@@ -126,11 +149,49 @@ const REACHED_AS_BY_AUTH: Record<
  * rather than imported from `store.ts` because this module is a leaf — `store.ts` imports it, and
  * it imports nothing back.
  */
-export class ServerRowAmbiguousError extends Error {
+export class ServerRowAmbiguousError extends ServerUnresolvableError {
   constructor(message: string) {
     super(message);
     this.name = "ServerRowAmbiguousError";
   }
+}
+
+/**
+ * A reviewed entry that names a transport no entry can be reached over.
+ *
+ * CRITERION. An entry declaring `transport: "composio"` is refused at resolution, and no answer is
+ * produced for it.
+ *
+ * REASON. {@link CuratedTransportKind} already keeps the value out of the catalogue at compile
+ * time, which is where it belongs — nothing writes an entry at runtime. This is what stands behind
+ * a cast, a JSON fixture in a test, or a future loader that reads entries from somewhere: what the
+ * unrefused answer WAS is a Composio dial with `toolkit: null` and a `reachedAs` copied from the
+ * entry's auth kind, so both store gates that keep one person's brokered account out of another's
+ * were skipped and the trail said the wrong thing about whose account was reached. Fail-closed
+ * costs one comparison; the alternative is a hole that opens the first time the type is bypassed.
+ */
+export class CatalogueTransportUnroutableError extends ServerUnresolvableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogueTransportUnroutableError";
+  }
+}
+
+/**
+ * Whether a kind is the broker's, asked through a function so the question survives being answered.
+ *
+ * CRITERION. This comparison must stay live even though {@link CuratedTransportKind} makes it
+ * unreachable from the catalogue as the catalogue stands today.
+ *
+ * REASON. Written inline against `entry.transport`, the compiler narrows the operand to the three
+ * curated kinds and rejects the comparison as pointless — correctly, and only while nothing
+ * bypasses the type. A cast, a test fixture, or a loader that ever reads entries from outside the
+ * build would each produce the state this refuses, and each arrives at runtime where a type says
+ * nothing. Widening to {@link TransportKind} at a parameter costs one call and keeps both the
+ * compile-time door and the runtime one shut, rather than trading the second for the first.
+ */
+function isBrokerTransport(kind: TransportKind): boolean {
+  return kind === "composio";
 }
 
 /**
@@ -163,6 +224,12 @@ export function accessFor(
   }
 
   if (entry) {
+    if (isBrokerTransport(entry.transport ?? "mcp")) {
+      throw new CatalogueTransportUnroutableError(
+        `${entry.key} is a catalogue entry declaring the composio transport, which is reached from a row's provenance and the app slug in its url — neither of which an entry has. There is no app to broker to and no connection to check, so this entry is not resolved at all: give it the transport it is actually reached over.`,
+      );
+    }
+
     return {
       transport: entry.transport ?? "mcp",
       credential: CREDENTIAL_BY_AUTH[entry.auth.kind],

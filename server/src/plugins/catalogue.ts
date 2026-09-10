@@ -30,7 +30,7 @@
 // cloud credentials. `target.ts` imports nothing itself, so asking it here adds no dependency.
 import { isNeverAllowedHostname } from "../computer/target";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
-import type { TransportKind } from "./transport";
+import type { CuratedTransportKind } from "./transport";
 
 export type CatalogueAuth =
   /** Answers without any credential at all. */
@@ -132,8 +132,12 @@ export type CatalogueEntry = {
    * serves Drive over both an MCP endpoint and an ordinary REST API, and which one this deployment
    * uses is a decision about availability and risk rather than a property of the vendor. Naming it
    * here keeps that decision beside the host it applies to, and makes reversing it a one-line diff.
+   *
+   * NOT EVERY KIND, and the narrowing is the point: see {@link CuratedTransportKind}. The broker's
+   * transport is reached from a row's provenance and its url, never from an entry, and an entry
+   * naming it resolves to a Composio dial with no app and no brokered gate.
    */
-  transport?: TransportKind;
+  transport?: CuratedTransportKind;
   docsUrl: string;
 };
 
