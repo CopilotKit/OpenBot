@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { accessFor } from "../src/plugins/access";
 import { catalogueEntry } from "../src/plugins/catalogue";
 import { callTool, listTools } from "../src/plugins/google-drive-rest";
-import { callTool as mcpCallTool } from "../src/plugins/mcp";
+import { type McpTool, callTool as mcpCallTool } from "../src/plugins/mcp";
 import { transportFor } from "../src/plugins/transport";
 
 /**
@@ -19,8 +19,35 @@ const connection = {
 };
 
 const realFetch = globalThis.fetch;
+
+/**
+ * Anything this file did not stub is an escape, and an escape fails the test that let it out.
+ *
+ * Ordering used to matter here: a test awaited `listTools` before installing its stub, and got away
+ * with it only because this adapter's list happens to be a local constant. Reordering that one call
+ * fixes it once; a call made before its stub would go out to Google again the moment any of these
+ * functions grows a request. So `fetch` is armed to refuse instead, before every test.
+ *
+ * Refusing is not enough on its own — the adapter catches its own transport errors and reports them
+ * as a sentence, which would turn an escape into a plausible-looking failure message. The escapes
+ * are therefore recorded and the ledger asserted empty afterwards, so one is named as what it is
+ * rather than read as Drive being unreachable.
+ */
+let escapedToNetwork: string[] = [];
+
+beforeEach(() => {
+  escapedToNetwork = [];
+  // Annotated as answering, though it never does: a function that only throws infers as returning
+  // `never`, which does not overlap `fetch` enough for the cast the stub below makes freely.
+  globalThis.fetch = (async (input: string | URL): Promise<Response> => {
+    escapedToNetwork.push(String(input));
+    throw new Error(`unstubbed fetch escaped to the network: ${String(input)}`);
+  }) as typeof fetch;
+});
+
 afterEach(() => {
   globalThis.fetch = realFetch;
+  expect(escapedToNetwork).toEqual([]);
 });
 
 /** Records what was requested and answers with a fixed body. */
@@ -43,8 +70,31 @@ function stubFetch(
   return calls;
 }
 
+/**
+ * Arguments a tool will accept, read off the tool's own schema rather than written out here.
+ *
+ * A tool added to the adapter with a required argument this file has never heard of still gets
+ * called with one, so the coverage below cannot quietly stop covering it.
+ */
+function argsFor(tool: McpTool): Record<string, unknown> {
+  const required: unknown[] = Array.isArray(tool.inputSchema.required)
+    ? tool.inputSchema.required
+    : [];
+  return Object.fromEntries(required.map((name) => [String(name), "given"]));
+}
+
+/**
+ * A body that answers every advertised tool: a listing for the searches, a text file for the reads.
+ */
+const anyToolsBody = {
+  files: [],
+  id: "given",
+  name: "notes.txt",
+  mimeType: "text/plain",
+};
+
 describe("the adapter is the transport the catalogue asks for", () => {
-  test("the Drive entry resolves to this adapter, not to MCP", async () => {
+  test("the Drive entry resolves to this adapter, not to MCP", () => {
     const entry = catalogueEntry("google-drive");
     expect(entry?.transport).toBe("google-drive-rest");
     // Identity, not shape: proves the registry wired this module rather than something MCP-shaped.
@@ -73,14 +123,69 @@ describe("the adapter is the transport the catalogue asks for", () => {
   });
 
   test("every advertised tool is one the dispatcher handles", async () => {
+    // Stubbed before the first call of any kind, so nothing here depends on `listTools` staying
+    // local; the guard above turns a reintroduction of that order into a named failure.
+    stubFetch(anyToolsBody);
     const tools = await listTools(connection);
-    stubFetch({ files: [] });
+    expect(tools.length).toBeGreaterThan(0);
+
     for (const tool of tools) {
-      // Called with no arguments on purpose. A handled tool complains about a missing argument or
-      // answers; an unhandled one says it is not implemented, which is the failure being excluded.
-      const result = await callTool(connection, tool.name, {});
-      expect(result.text).not.toContain("is not a tool this connector");
+      /*
+       * Called with what the tool asks for, and asserted on what a handled tool DOES: it reaches
+       * Drive and answers. The dispatcher's fallthrough is the failure being excluded, and it is
+       * excluded by never making a request — which stays true however that refusal is worded, and
+       * which a reworded, mistyped or entirely different error cannot satisfy.
+       */
+      const calls = stubFetch(anyToolsBody);
+      const result = await callTool(connection, tool.name, argsFor(tool));
+      expect(calls.length).toBeGreaterThan(0);
+      expect(result.isError).toBe(false);
     }
+  });
+
+  test("a tool the dispatcher does not implement is refused without a request", async () => {
+    // The other half of the pair: the fallthrough exists, and is what a tool NOT in the list gets.
+    const calls = stubFetch(anyToolsBody);
+    const result = await callTool(connection, "delete_everything", {});
+
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+/*
+ * Drive is `user-oauth`, so the store refuses a call with nobody's credential long before this
+ * module is reached and the adapter's own check is the second lock. It is asserted anyway: it is
+ * the difference between a sentence saying so and a request to Google carrying `Bearer undefined`,
+ * which Drive answers with a 401 whose meaning is a great deal less obvious.
+ */
+describe("a call with no credential never leaves the process", () => {
+  const withoutToken = { url: connection.url };
+
+  test("every advertised tool refuses, and none of them requests anything", async () => {
+    stubFetch(anyToolsBody);
+    const tools = await listTools(withoutToken);
+    expect(tools.length).toBeGreaterThan(0);
+
+    for (const tool of tools) {
+      const calls = stubFetch(anyToolsBody);
+      const result = await callTool(withoutToken, tool.name, argsFor(tool));
+      // Silence first, and asserted as silence rather than as wording: nothing was requested, so
+      // no `Bearer undefined` went to Google to come back as a 401 about the wrong thing.
+      expect(calls).toHaveLength(0);
+      expect(result.isError).toBe(true);
+    }
+  });
+
+  test("listing what the adapter offers asks nobody, so it needs nothing", async () => {
+    /*
+     * Two properties in one call, and the second is why this test is left unstubbed. The gate that
+     * once stood here made connecting Drive a four-stop journey, so a tokenless listing has to
+     * answer in full — and the reason it can is that it asks nobody, which the armed `fetch` above
+     * is what proves. A `listTools` that grew a request would fail here by name.
+     */
+    expect(await listTools(withoutToken)).toEqual(await listTools(connection));
+    expect(escapedToNetwork).toEqual([]);
   });
 });
 
