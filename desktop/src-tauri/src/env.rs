@@ -743,6 +743,17 @@ pub fn write(
     // copy would sit in the file forever, since `write` otherwise keeps every line it does not own.
     purge: &BTreeMap<String, String>,
 ) -> std::io::Result<()> {
+    // Each unquoted row is one setting. A line break in a model name must not become another
+    // setting, and a refused update must leave the previous file untouched.
+    if owned
+        .iter()
+        .any(|(key, value)| key.contains(['\r', '\n']) || value.contains(['\r', '\n']))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "OpenBot setting names and values must not contain line breaks.",
+        ));
+    }
     let existing = match std::fs::read_to_string(path) {
         Ok(existing) => existing,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -824,6 +835,67 @@ mod tests {
             engine_socket: socket.map(str::to_string),
             detail: String::new(),
         }
+    }
+
+    #[test]
+    fn multiline_compatible_models_cannot_create_or_replace_a_settings_file() {
+        let dir = temp_root("env-multiline-model");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        for separator in ["\n", "\r", "\r\n"] {
+            let settings = compose(
+                &intelligence(),
+                &Model {
+                    credential: ModelCredential::Compatible {
+                        base_url: "http://127.0.0.1:11434/v1".into(),
+                        api_key: "synthetic-key".into(),
+                        model: format!("model{separator}UNREQUESTED=public-marker"),
+                    },
+                },
+                &engine_status(None),
+                &Ports::default(),
+                &pinned(),
+                None,
+                &BTreeMap::new(),
+            );
+            let (owned, secrets) = crate::vault::split(settings);
+            assert!(!owned.contains_key("OPENAI_API_KEY"));
+            assert!(secrets.contains_key("OPENAI_API_KEY"));
+            for existing in [false, true] {
+                if existing {
+                    std::fs::write(&path, "PUBLIC_SETTING=previous\n").unwrap();
+                }
+                let error = write(&path, &owned, &secrets).unwrap_err();
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+                assert!(!error.to_string().contains("public-marker"));
+                if existing {
+                    assert_eq!(std::fs::read(&path).unwrap(), b"PUBLIC_SETTING=previous\n");
+                    std::fs::remove_file(&path).unwrap();
+                } else {
+                    assert!(!path.exists());
+                }
+                assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_setting_name_cannot_introduce_another_row_or_leak_into_an_error() {
+        let dir = temp_root("env-multiline-name");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        for separator in ["\r", "\n"] {
+            let owned = BTreeMap::from([(
+                format!("MODEL=public-marker{separator}UNREQUESTED"),
+                "value".into(),
+            )]);
+            let error = write(&path, &owned, &BTreeMap::new()).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(!error.to_string().contains("public-marker"));
+            assert!(!path.exists());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
