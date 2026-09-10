@@ -963,7 +963,6 @@ pub fn stop_host_children(
         root,
         children,
         Path::new("powershell"),
-        Path::new("netstat"),
         Path::new("taskkill"),
     )
 }
@@ -973,7 +972,6 @@ fn stop_windows_host_children_with(
     root: &Path,
     children: &mut [(&str, std::process::Child)],
     powershell: &Path,
-    netstat: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
     let mut held = Vec::new();
@@ -1014,7 +1012,7 @@ fn stop_windows_host_children_with(
         }
     }
     write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))?;
-    stop_windows_processes_under_with(root, &records, &snapshot, netstat, taskkill)
+    stop_windows_processes_under_with(root, &records, &snapshot, taskkill)
 }
 
 #[cfg(unix)]
@@ -1238,24 +1236,18 @@ pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
      * but that does not make the worker visible to the port sweep: after the port sweep alone, 3001
      * and 3010 were free and the worker was still running.
      */
-    stop_windows_processes_with_inventory(
-        _root,
-        Path::new("powershell"),
-        Path::new("netstat"),
-        Path::new("taskkill"),
-    )
+    stop_windows_processes_with_inventory(_root, Path::new("powershell"), Path::new("taskkill"))
 }
 
 #[cfg(any(not(unix), test))]
 fn stop_windows_processes_with_inventory(
     root: &Path,
     powershell: &Path,
-    netstat: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
     let recorded = recorded_host_processes(root)?;
     let processes = windows_processes_with(powershell)?;
-    stop_windows_processes_under_with(root, &recorded, &processes, netstat, taskkill)
+    stop_windows_processes_under_with(root, &recorded, &processes, taskkill)
 }
 
 #[cfg(any(not(unix), test))]
@@ -1263,7 +1255,6 @@ fn stop_windows_processes_under_with(
     root: &Path,
     recorded: &[RecordedHostProcess],
     processes: &[WindowsProcess],
-    netstat: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
     // A same-PID row without usable identity metadata is unresolved, not proof of PID reuse.
@@ -1291,43 +1282,12 @@ fn stop_windows_processes_under_with(
             ),
         ));
     }
-    let mut stopped_recorded = 0;
-    let roots = verified_openbot_root_pids(recorded, processes);
-    let mut failures = Vec::new();
-    for pid in &roots {
-        match taskkill_process_tree_with(taskkill, *pid) {
-            Ok(true) => stopped_recorded += 1,
-            Ok(false) => {}
-            Err(problem) => failures.push(problem),
-        }
-    }
-    // And a sweep of the two host ports, for a stack whose pidfile is gone. The containers are
-    // Compose's to stop, and killing whatever holds a container's published port would reach into
-    // the engine's own plumbing.
-    let operation = format!("{} -ano -p tcp", netstat.display());
-    let listing = command(netstat)
-        .args(["-ano", "-p", "tcp"])
-        .output()
-        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
-    let stopped_listening = if listing.status.success() {
-        let listed = String::from_utf8_lossy(&listing.stdout);
-        match stop_windows_processes_in(recorded, processes, &listed, |pid| {
-            taskkill_process_tree_with(taskkill, pid)
-        }) {
-            Ok(stopped) => stopped,
-            Err(problem) => {
-                failures.push(problem);
-                0
-            }
-        }
-    } else {
-        failures.push(cleanup_status_problem(&operation, &listing));
-        0
-    };
-
-    // Keep the complete ownership record until every cleanup phase has succeeded. A retry
-    // re-verifies each identity, so records for processes already stopped are safe to retain.
-    let stopped = cleanup_result(stopped_recorded + stopped_listening, failures)?;
+    // /T already terminates each verified root's tree. A later port sweep must not reuse
+    // that pre-termination identity: Windows can assign a terminated PID to another process.
+    // Keep all ownership records on any failure so a retry can obtain a fresh inventory.
+    let stopped = stop_verified_windows_roots_with(recorded, processes, |pid| {
+        taskkill_process_tree_with(taskkill, pid)
+    })?;
     let path = host_pids_path(root);
     match std::fs::remove_file(&path) {
         Ok(()) => {}
@@ -1368,20 +1328,17 @@ fn taskkill_process_tree_with(taskkill: &Path, pid: u32) -> Result<bool, Problem
 }
 
 #[cfg(any(not(unix), test))]
-fn stop_windows_processes_in<F>(
+fn stop_verified_windows_roots_with<F>(
     recorded: &[RecordedHostProcess],
     processes: &[WindowsProcess],
-    listing: &str,
     mut taskkill: F,
 ) -> Result<usize, Problem>
 where
     F: FnMut(u32) -> Result<bool, Problem>,
 {
-    let ports = crate::env::Ports::default();
-    let ours = [ports.app, ports.server];
     let mut stopped = 0;
     let mut failures = Vec::new();
-    for pid in verified_openbot_pids_listening_on(listing, &ours, recorded, processes) {
+    for pid in verified_openbot_root_pids(recorded, processes) {
         // With its children: `bun run serve` starts the real server as a grandchild, so ending
         // only the process holding the port leaves that one behind.
         match taskkill(pid) {
@@ -2970,7 +2927,6 @@ fn main() {
             &root,
             &mut children,
             &fixture.command("powershell"),
-            &fixture.command("netstat"),
             &fixture.command("taskkill"),
         );
         let alive = children[0].1.try_wait().unwrap().is_none();
@@ -3016,7 +2972,6 @@ fn main() {
                 &root,
                 &mut children,
                 &fixture.command("powershell"),
-                &fixture.command("netstat"),
                 &fixture.command("taskkill"),
             );
             let alive = children[0].1.try_wait().unwrap().is_none();
@@ -3357,6 +3312,15 @@ fn main() {
     let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
     let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
     match (program.as_str(), scenario.as_str()) {
+        ("taskkill", "snapshot-reuse") => {
+            if args.get(1).map(String::as_str) == Some("9001") {
+                std::fs::write(std::path::Path::new(&root).join("foreign-replacement"), "9000").unwrap();
+            }
+        }
+        ("netstat", "snapshot-reuse") => {
+            assert!(std::path::Path::new(&root).join("foreign-replacement").exists());
+            println!("TCP 127.0.0.1:3010 0.0.0.0:0 LISTENING 9000");
+        }
         ("powershell", "held-refusal") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
         ("netstat", "held-refusal") => {},
         ("powershell", "already-running") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
@@ -3564,16 +3528,17 @@ fn main() {
     #[cfg(test)]
     #[test]
     fn windows_cleanup_returns_taskkill_failures_after_attempting_later_targets() {
-        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       9000\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9001\r\n";
-        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let recorded = [
+            recorded_process("app", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
+        ];
         let processes = [
-            live_process(8636, 7000, "20260909010101.000000-420"),
-            live_process(9000, 8636, "20260909010102.000000-420"),
-            live_process(9001, 8636, "20260909010103.000000-420"),
+            live_host_process("app", 9000, 7000, "/Date(1000)/"),
+            live_host_process("worker", 9001, 7000, "/Date(2000)/"),
         ];
         let mut attempted = Vec::new();
 
-        let problem = stop_windows_processes_in(&recorded, &processes, listing, |pid| {
+        let problem = stop_verified_windows_roots_with(&recorded, &processes, |pid| {
             attempted.push(pid);
             if pid == 9000 {
                 Err(Problem::with(
@@ -3601,6 +3566,47 @@ fn main() {
     }
 
     #[test]
+    fn windows_cleanup_does_not_reuse_identity_after_terminating_the_root() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_does_not_reuse_identity_after_terminating_the_root",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-no-post-termination-sweep");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("snapshot-reuse");
+        let recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+        let snapshot = [
+            live_host_process("app", 9001, 0, "/Date(1000)/"),
+            live_host_process("app", 9000, 9001, "/Date(2000)/"),
+        ];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":recorded}),
+        )
+        .unwrap();
+        let result = stop_windows_processes_under_with(
+            &root,
+            &recorded,
+            &snapshot,
+            &fixture.command("taskkill"),
+        );
+        let log = fixture.log();
+        let replacement_created = root.join("foreign-replacement").exists();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            replacement_created,
+            "fixture must replace the child after the owned root is stopped"
+        );
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(
+            log, "taskkill\t/PID 9001 /T /F\n",
+            "a stopped process tree cannot authorize another taskkill"
+        );
+    }
+
+    #[test]
     fn source_bound_windows_command_failures_use_disposable_commands() {
         if crate::test_support::isolated_process(
             "stack::tests::source_bound_windows_command_failures_use_disposable_commands",
@@ -3610,33 +3616,25 @@ fn main() {
         let root = temp_root("openbot-source-bound-windows-cleanup");
         std::fs::create_dir_all(&root).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
-        let netstat = fixture.command("netstat");
         let taskkill = fixture.command("taskkill");
-        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let recorded = [
+            recorded_process("app", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
+        ];
         let processes = [
-            live_process(8636, 7000, "20260909010101.000000-420"),
-            live_process(9000, 8636, "20260909010102.000000-420"),
-            live_process(9001, 8636, "20260909010103.000000-420"),
+            live_host_process("app", 9000, 7000, "/Date(1000)/"),
+            live_host_process("worker", 9001, 7000, "/Date(2000)/"),
+            live_process(9002, 9000, "/Date(3000)/"),
         ];
 
-        fixture.scenario("windows-netstat-fail");
-        let problem =
-            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
-                .expect_err("netstat status failure must cross the production helper");
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("synthetic netstat status failure")),
-            "{problem:?}"
-        );
-
         fixture.scenario("windows-taskkill-fail");
-        let problem =
-            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
-                .expect_err("taskkill status failure must cross the production helper");
+        let problem = stop_windows_processes_under_with(&root, &recorded, &processes, &taskkill)
+            .expect_err("taskkill status failure must cross the production helper");
         let log = fixture.log();
-        assert!(log.contains("netstat\t-ano -p tcp"), "{log}");
+        assert!(
+            !log.contains("netstat\t"),
+            "cleanup must not retarget terminated PIDs: {log}"
+        );
         assert!(log.contains("taskkill\t/PID 9000 /T /F"), "{log}");
         assert!(
             log.contains("taskkill\t/PID 9001 /T /F"),
@@ -3651,10 +3649,9 @@ fn main() {
         );
 
         fixture.scenario("windows-ok");
-        let stopped =
-            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
-                .expect("all synthetic Windows cleanup commands should succeed");
-        assert_eq!(stopped, 3);
+        let stopped = stop_windows_processes_under_with(&root, &recorded, &processes, &taskkill)
+            .expect("all synthetic Windows cleanup commands should succeed");
+        assert_eq!(stopped, 2);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3687,7 +3684,6 @@ fn main() {
             &root,
             &recorded,
             &processes,
-            &fixture.command("netstat"),
             &fixture.command("taskkill"),
         )
         .expect_err("a failed root must retain ownership evidence for retry");
@@ -3704,8 +3700,7 @@ fn main() {
                 &root,
                 &retry_records,
                 &processes[..1],
-                &fixture.command("netstat"),
-                &fixture.command("taskkill"),
+                &fixture.command("taskkill")
             )
             .unwrap(),
             1
@@ -3748,7 +3743,6 @@ fn main() {
                 &root,
                 &recorded,
                 &[live],
-                &fixture.command("netstat"),
                 &fixture.command("taskkill"),
             )
             .expect_err("an unresolved identity field does not prove PID reuse or exit");
@@ -3780,8 +3774,7 @@ fn main() {
                     &root,
                     &recorded,
                     &processes,
-                    &fixture.command("netstat"),
-                    &fixture.command("taskkill"),
+                    &fixture.command("taskkill")
                 )
                 .unwrap(),
                 0
@@ -3790,14 +3783,9 @@ fn main() {
             assert!(!fixture.log().contains("taskkill\t"));
         }
         std::fs::create_dir(&path).unwrap();
-        let problem = stop_windows_processes_under_with(
-            &root,
-            &[],
-            &[],
-            &fixture.command("netstat"),
-            &fixture.command("taskkill"),
-        )
-        .expect_err("a required pidfile removal failure must be reported");
+        let problem =
+            stop_windows_processes_under_with(&root, &[], &[], &fixture.command("taskkill"))
+                .expect_err("a required pidfile removal failure must be reported");
         let detail = problem.detail.unwrap();
         assert!(detail.contains("could not remove pidfile"), "{detail}");
         assert!(detail.contains(&path.display().to_string()), "{detail}");
@@ -3807,8 +3795,7 @@ fn main() {
 
     #[cfg(test)]
     #[test]
-    fn windows_cleanup_success_counts_verified_listening_children() {
-        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+    fn windows_cleanup_success_counts_verified_root_trees() {
         let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
         let processes = [
             live_process(8636, 7000, "20260909010101.000000-420"),
@@ -3816,14 +3803,14 @@ fn main() {
         ];
         let mut attempted = Vec::new();
 
-        let stopped = stop_windows_processes_in(&recorded, &processes, listing, |pid| {
+        let stopped = stop_verified_windows_roots_with(&recorded, &processes, |pid| {
             attempted.push(pid);
             Ok(true)
         })
         .expect("verified child cleanup should succeed");
 
         assert_eq!(stopped, 1);
-        assert_eq!(attempted, vec![9000]);
+        assert_eq!(attempted, vec![8636]);
     }
 
     /// Real `netstat -ano` output, because the column layout is what went wrong.
@@ -4525,17 +4512,13 @@ fn main() {
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
         let powershell = fixture.command("powershell");
-        let netstat = fixture.command("netstat");
         let taskkill = fixture.command("taskkill");
         let path = host_pids_path(&root);
         for scenario in ["inventory-fail", "inventory-malformed", "inventory-blank"] {
             fixture.scenario(scenario);
             std::fs::write(&path, "[]").unwrap();
             assert!(windows_processes_with(&powershell).is_err());
-            assert!(
-                stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill)
-                    .is_err()
-            );
+            assert!(stop_windows_processes_with_inventory(&root, &powershell, &taskkill).is_err());
             assert!(
                 record_windows_host_processes_with(&root, &[("server", 42)], &powershell).is_err()
             );
@@ -4554,21 +4537,17 @@ fn main() {
         }
         let missing = root.join("no-powershell");
         assert!(windows_processes_with(&missing).is_err());
-        assert!(
-            stop_windows_processes_with_inventory(&root, &missing, &netstat, &taskkill).is_err()
-        );
+        assert!(stop_windows_processes_with_inventory(&root, &missing, &taskkill).is_err());
         assert!(record_windows_host_processes_with(&root, &[("server", 42)], &missing).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
         fixture.scenario("inventory-empty");
         std::fs::write(&path, "invalid").unwrap();
-        assert!(
-            stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill).is_err()
-        );
+        assert!(stop_windows_processes_with_inventory(&root, &powershell, &taskkill).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid");
         assert_eq!(fixture.log(), "");
         std::fs::write(&path, "[]").unwrap();
         assert_eq!(
-            stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill).unwrap(),
+            stop_windows_processes_with_inventory(&root, &powershell, &taskkill).unwrap(),
             0
         );
         assert!(!fixture.log().contains("taskkill\t"));
@@ -5150,14 +5129,6 @@ fn main() {
             expected,
             "listener ownership: {processes:?}"
         );
-        let mut killed = Vec::new();
-        let stopped = stop_windows_processes_in(recorded, processes, &listing, |pid| {
-            killed.push(pid);
-            Ok(true)
-        })
-        .unwrap();
-        assert_eq!(killed, expected, "cleanup ownership: {processes:?}");
-        assert_eq!(stopped, expected.len());
     }
 
     #[test]
