@@ -789,10 +789,17 @@ export function createPluginStore(options: PluginStoreOptions) {
     /*
      * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
      *
-     * Refused HERE rather than in the transport, for the two reasons the `user-oauth` branch below is:
-     * a person gets a sentence naming the step they can take, and no call is spent at the vendor
-     * finding out. The transport refuses again as a last line, which is the belt to this braces —
-     * deleting either one has to turn a test red.
+     * Refused HERE rather than in the transport, for the two reasons the `user-oauth` branch below
+     * is: a person gets a sentence naming the step they can take, and no call is spent at the
+     * vendor finding out. The transport refuses an unattributed run again as a last line, so
+     * deleting either that guard or this one has to turn a test red. The unconnected case has no
+     * such twin: the transport has no notion of a connection at all, so the last line there is
+     * Composio itself — which is what refusing locally earns its place for, since it turns the
+     * broker's error about an account it cannot find into a sentence naming the person's own next
+     * step.
+     *
+     * The throw between the two is not a third refusal. It is the narrowing that keeps this gate
+     * keyed on the app the url names, and its own comment says why neither fallback is available.
      *
      * There is no token. The key belongs to the transport and never travels through this function, so
      * nothing here can leak it into a connection object, an error or an audit row.
