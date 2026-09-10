@@ -176,7 +176,16 @@ export function useComposioClient(client: ComposioActions | null): void {
   installed = client;
 }
 
-/** The tool list needs no credential: Composio publishes an action's schema to anybody. */
+/**
+ * The tool list needs no credential FROM THE CONNECTION, which is not the same as needing none.
+ *
+ * The sentence here used to be "Composio publishes an action's schema to anybody", and the vendor's
+ * own client says otherwise: the listing is an authenticated request carrying the deployment's
+ * Composio API key, which the client holds and this module never sees. What is genuinely not
+ * required is a PERSON. An action's schema is the same whoever asks, so nothing about whose account
+ * is connected has to be settled before listing — which is exactly what this flag is asked to
+ * decide by `refreshTools`, and the only thing it decides. See {@link ./transport}.
+ */
 export const listNeedsCredential = false;
 
 /**
