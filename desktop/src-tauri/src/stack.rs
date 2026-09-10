@@ -1583,14 +1583,24 @@ fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) ->
 /// Used by the passive startup probe. Absence of current, root-scoped ownership is not fatal
 /// there; it means the app must show setup instead of adopting a process on the shared port.
 pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem> {
+    recorded_process_owns_port(root, "server", port)
+}
+
+/// Every listener on the port must belong to the requested recorded host role. This also rejects
+/// ambiguous IPv4/IPv6 ownership rather than showing whichever unrelated address answers first.
+pub fn recorded_process_owns_port(root: &Path, name: &str, port: u16) -> Result<bool, Problem> {
+    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+        return Ok(false);
+    }
     #[cfg(unix)]
     {
-        recorded_server_owns_port_unix(root, port)
+        recorded_process_owns_port_unix(root, name, port)
     }
     #[cfg(not(unix))]
     {
-        recorded_server_owns_port_windows_with(
+        recorded_process_owns_port_windows_with(
             root,
+            name,
             port,
             Path::new("powershell"),
             Path::new("netstat"),
@@ -1599,7 +1609,7 @@ pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem
 }
 
 #[cfg(unix)]
-fn recorded_server_owns_port_unix(root: &Path, port: u16) -> Result<bool, Problem> {
+fn recorded_process_owns_port_unix(root: &Path, name: &str, port: u16) -> Result<bool, Problem> {
     let deployment = std::fs::canonicalize(root).map_err(|error| {
         unix_ownership_problem(format!(
             "{}: could not resolve deployment: {error}",
@@ -1614,20 +1624,65 @@ fn recorded_server_owns_port_unix(root: &Path, port: u16) -> Result<bool, Proble
         _ => return Ok(false),
     };
     let listening = unix_pids_listening_on(port)?;
-    for record in records
+    if listening.is_empty() {
+        return Ok(false);
+    }
+    let records: Vec<_> = records
         .iter()
-        .filter(|record| record.name == "server" && record.deployment == deployment)
-    {
-        if !listening.contains(&record.pid) {
-            continue;
-        }
-        if let Some(live) = unix_process(record.pid)? {
-            if live.start == record.start {
-                return Ok(true);
+        .filter(|record| record.name == name && record.deployment == deployment)
+        .collect();
+    for pid in listening {
+        let mut owned = false;
+        for record in &records {
+            if unix_listener_belongs_to_record(pid, record, unix_process)? {
+                owned = true;
+                break;
             }
         }
+        if !owned {
+            return Ok(false);
+        }
     }
-    Ok(false)
+    Ok(true)
+}
+
+#[cfg(unix)]
+fn unix_listener_belongs_to_record<I>(
+    pid: u32,
+    record: &UnixHostProcess,
+    mut inspect: I,
+) -> Result<bool, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+{
+    let mut seen = std::collections::HashSet::new();
+    let mut chain = Vec::new();
+    let mut current = pid;
+    loop {
+        if !safe_unix_pid(current) || !seen.insert(current) {
+            return Ok(false);
+        }
+        let Some(live) = inspect(current)? else {
+            return Ok(false);
+        };
+        let parent = live.parent;
+        let at_root = current == record.pid;
+        if at_root && (record.start.is_empty() || live.start != record.start) {
+            return Ok(false);
+        }
+        chain.push(live);
+        if at_root {
+            // The app launcher may own a Vite child. Recheck every instance and parent link so a
+            // dead/reused anchor or a changed ancestry cannot authorize an unrelated listener.
+            for process in chain {
+                if inspect(process.pid)?.as_ref() != Some(&process) {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+        current = parent;
+    }
 }
 
 #[cfg(unix)]
@@ -1665,13 +1720,17 @@ fn parse_lsof_pid_fields(listing: &str) -> Vec<u32> {
 }
 
 #[cfg(any(not(unix), test))]
-fn recorded_server_owns_port_windows_with(
+fn recorded_process_owns_port_windows_with(
     root: &Path,
+    name: &str,
     port: u16,
     powershell: &Path,
     netstat: &Path,
 ) -> Result<bool, Problem> {
-    let recorded = recorded_host_processes(root)?;
+    let recorded: Vec<_> = recorded_host_processes(root)?
+        .into_iter()
+        .filter(|record| record.name == name)
+        .collect();
     if recorded.is_empty() {
         return Ok(false);
     }
@@ -1685,7 +1744,9 @@ fn recorded_server_owns_port_windows_with(
         return Err(cleanup_status_problem(&operation, &listing));
     }
     let listed = String::from_utf8_lossy(&listing.stdout);
-    Ok(!verified_openbot_pids_listening_on(&listed, &[port], &recorded, &processes).is_empty())
+    let listening = pids_listening_on(&listed, &[port]);
+    let verified = verified_openbot_pids_listening_on(&listed, &[port], &recorded, &processes);
+    Ok(!listening.is_empty() && listening.iter().all(|pid| verified.contains(pid)))
 }
 
 /**
@@ -3479,15 +3540,17 @@ fn main() {
         )
         .unwrap();
 
-        assert!(recorded_server_owns_port_windows_with(
+        assert!(recorded_process_owns_port_windows_with(
             &root,
+            "server",
             45123,
             &fixture.command("powershell"),
             &fixture.command("netstat")
         )
         .unwrap());
-        assert!(!recorded_server_owns_port_windows_with(
+        assert!(!recorded_process_owns_port_windows_with(
             &root,
+            "server",
             45124,
             &fixture.command("powershell"),
             &fixture.command("netstat")
@@ -3506,8 +3569,9 @@ fn main() {
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
         fixture.scenario("already-running");
-        assert!(!recorded_server_owns_port_windows_with(
+        assert!(!recorded_process_owns_port_windows_with(
             &root,
+            "server",
             45123,
             &fixture.command("powershell"),
             &fixture.command("netstat")
@@ -4572,5 +4636,77 @@ fn main() {
             .unwrap();
         let app = HOST_PROCESSES.iter().position(|p| p.name == "app").unwrap();
         assert!(server < app);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unix_app_listener_requires_stable_recorded_ancestry() {
+        let live = [
+            unix_fixture(401, 400),
+            unix_fixture(402, 401),
+            unix_fixture(403, 402),
+        ];
+        let inspect = |pid| Ok(live.iter().find(|row| row.pid == pid).cloned());
+        assert!(unix_listener_belongs_to_record(403, &unix_record(401), inspect).unwrap());
+        assert!(!unix_listener_belongs_to_record(403, &unix_record(501), inspect).unwrap());
+        let mut reused = unix_record(401);
+        reused.start = "earlier-instance".into();
+        assert!(!unix_listener_belongs_to_record(403, &reused, inspect).unwrap());
+        let mut seen = std::collections::HashMap::new();
+        assert!(
+            !unix_listener_belongs_to_record(403, &unix_record(401), |pid| {
+                let count = seen.entry(pid).or_insert(0);
+                *count += 1;
+                let mut row = live.iter().find(|row| row.pid == pid).cloned();
+                if pid == 402 && *count > 1 {
+                    row.as_mut().unwrap().parent = 999;
+                }
+                Ok(row)
+            })
+            .unwrap()
+        );
+        assert!(
+            !unix_listener_belongs_to_record(403, &unix_record(401), |pid| {
+                Ok(Some(unix_fixture(pid, if pid == 403 { 402 } else { 403 })))
+            })
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn windows_app_port_requires_the_app_role_and_its_verified_descendant() {
+        let root = temp_root("windows-app-role-port");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        let app = recorded_process("app", 9001, "20260909010101.000000-420");
+        let server = recorded_process("server", 9002, "20260909010101.000000-420");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[app,server]}),
+        )
+        .unwrap();
+        std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([
+            {"ProcessId":9001,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("app"),"CreationDate":"20260909010101.000000-420"},
+            {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"later"},
+            {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909010101.000000-420"}
+        ])).unwrap()).unwrap();
+        let owns = |name, port| {
+            recorded_process_owns_port_windows_with(
+                &root,
+                name,
+                port,
+                &fixture.command("powershell"),
+                &fixture.command("netstat"),
+            )
+            .unwrap()
+        };
+        assert!(owns("app", 45123));
+        assert!(!owns("server", 45123));
+        assert!(!owns("app", 45124));
+        assert!(owns("server", 45124));
+        assert!(!owns("worker", 45123));
+        let log = fixture.log();
+        assert!(!log.contains("taskkill"), "{log}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

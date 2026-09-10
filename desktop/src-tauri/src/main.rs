@@ -1258,12 +1258,20 @@ where
 /// same way on every operating system, which is the whole reason both are asked.
 #[tauri::command]
 fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
-    let port = openbot_env::Ports::default().app;
+    show_openbot_on(app, &openbot_env::Ports::default())
+}
+
+fn show_openbot_on<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    ports: &openbot_env::Ports,
+) -> Result<(), String> {
+    let port = ports.app;
     // Where it answered, not where it was asked to listen. A dev server binds whichever loopback
     // its runtime resolved `localhost` to, and navigating to the other one shows a blank window
     // that looks like the app failing to start.
-    let url = stack::app_url(port).ok_or_else(|| {
-        format!("OpenBot is not answering on port {port} yet, so there is nothing to show.")
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    let url = owned_app_url(&root, ports).ok_or_else(|| {
+        format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
     eprintln!("[show] navigating the window to {url}");
     let window = app
@@ -1344,9 +1352,21 @@ where
 #[tauri::command]
 fn already_running(root: String) -> bool {
     let root = stack::root_from(&root);
-    already_running_on(&root, openbot_env::Ports::default().server, |root, port| {
-        stack::recorded_server_owns_port(root, port)
-    })
+    already_running_at(&root, &openbot_env::Ports::default())
+}
+
+fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
+    owned_app_url(root, ports).is_some()
+}
+
+/// Neither an owned API nor an answering app port alone authorizes showing a deployment.
+fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
+    if !already_running_on(root, ports.server, stack::recorded_server_owns_port)
+        || !stack::recorded_process_owns_port(root, "app", ports.app).unwrap_or(false)
+    {
+        return None;
+    }
+    stack::app_url(ports.app)
 }
 
 /// What stopped the stack, if anything did, and forget it once it has been read.
@@ -1953,8 +1973,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let root = cleanup_root(&shell, &stack::default_root());
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
-    let owned = already_running_on(&root, ports.server, stack::recorded_server_owns_port);
-    if let Some(url) = owned.then(|| stack::app_url(ports.app)).flatten() {
+    if let Some(url) = owned_app_url(&root, ports) {
         if let Ok(parsed) = url.parse() {
             let _ = window.navigate(parsed);
         }
@@ -4941,12 +4960,18 @@ fi\n";
         selected: PathBuf,
         owned: PathBuf,
         child: std::process::Child,
+        app_child: std::process::Child,
+        app_descendant_pid: Option<u32>,
         ports: openbot_env::Ports,
     }
 
     #[cfg(unix)]
     impl RestoreFixture {
         fn new() -> Self {
+            Self::with_app_descendant(false)
+        }
+
+        fn with_app_descendant(descendant: bool) -> Self {
             let base = temp_root("restore-owned-loopback");
             let selected = base.join("selected");
             let owned = base.join("owned");
@@ -4967,6 +4992,16 @@ fn serve(listener: TcpListener) {
     }
 }
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--parent") {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--record-pid").arg(&args[2]).spawn().unwrap();
+        child.wait().unwrap();
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("--record-pid") {
+        std::fs::write(&args[2], std::process::id().to_string()).unwrap();
+    }
     let api = TcpListener::bind("127.0.0.1:0").unwrap();
     let app = TcpListener::bind("127.0.0.1:0").unwrap();
     println!("{} {}", api.local_addr().unwrap().port(), app.local_addr().unwrap().port());
@@ -4988,7 +5023,7 @@ fn main() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let mut child = std::process::Command::new(binary)
+            let mut child = std::process::Command::new(&binary)
                 .current_dir(&owned)
                 .stdout(std::process::Stdio::piped())
                 .spawn()
@@ -5003,19 +5038,53 @@ fn main() {
                 .split_whitespace()
                 .map(|n| n.parse().unwrap())
                 .collect();
+            let mut app_command = std::process::Command::new(&binary);
+            let descendant_file = base.join("app-listener.pid");
+            if descendant {
+                app_command.arg("--parent").arg(&descendant_file);
+            }
+            let mut app_child = app_command
+                .current_dir(&owned)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut app_line = String::new();
+            std::io::BufRead::read_line(
+                &mut std::io::BufReader::new(app_child.stdout.take().unwrap()),
+                &mut app_line,
+            )
+            .unwrap();
+            let app_numbers: Vec<u16> = app_line
+                .split_whitespace()
+                .map(|n| n.parse().unwrap())
+                .collect();
+            let app_descendant_pid = descendant.then(|| {
+                std::fs::read_to_string(descendant_file)
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            });
             let fixture = Self {
                 base,
                 selected,
                 owned,
                 child,
+                app_child,
+                app_descendant_pid,
                 ports: openbot_env::Ports {
                     server: numbers[0],
-                    app: numbers[1],
+                    app: app_numbers[1],
                     ..Default::default()
                 },
             };
-            stack::record_host_processes(&fixture.owned, &[("server", fixture.child.id())])
-                .unwrap();
+            stack::record_host_processes(
+                &fixture.owned,
+                &[
+                    ("server", fixture.child.id()),
+                    ("app", fixture.app_child.id()),
+                ],
+            )
+            .unwrap();
             fixture
         }
 
@@ -5042,6 +5111,14 @@ fn main() {
         fn drop(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
+            if let Some(pid) = self.app_descendant_pid {
+                // This PID was emitted by our own helper before its port announcement.
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status();
+            }
+            let _ = self.app_child.kill();
+            let _ = self.app_child.wait();
             let _ = std::fs::remove_dir_all(&self.base);
         }
     }
@@ -5134,5 +5211,49 @@ fn main() {
                 .as_deref(),
             Some(f.owned.as_path())
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn app_adoption_and_restore_refuse_foreign_app_with_owned_api_still_running() {
+        let f = RestoreFixture::new();
+        stack::record_host_processes(&f.owned, &[("server", f.child.id())]).unwrap();
+        stack::record_host_processes(&f.selected, &[("app", f.app_child.id())]).unwrap();
+        assert!(already_running_on(
+            &f.owned,
+            f.ports.server,
+            stack::recorded_server_owns_port
+        ));
+        assert!(stack::app_url(f.ports.app).is_some());
+        let initial_adoption = already_running_at(&f.owned, &f.ports);
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let shown = show_openbot_on(app.handle().clone(), &f.ports);
+        restore_window_on(app.handle(), &f.ports);
+        let destination = app.get_webview_window("main").unwrap().url().unwrap();
+        assert!(!initial_adoption && shown.is_err() && destination.as_str() == "tauri://localhost/",
+            "owned API must not authorize a foreign app: initial={initial_adoption}, shown={shown:?}, restore={destination}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn app_adoption_and_restore_allow_owned_app_direct_and_launcher_descendant() {
+        for descendant in [false, true] {
+            let f = RestoreFixture::with_app_descendant(descendant);
+            assert_ne!(f.child.id(), f.app_child.id());
+            if descendant {
+                assert_ne!(f.app_descendant_pid.unwrap(), f.app_child.id());
+            }
+            assert!(already_running_at(&f.owned, &f.ports));
+            let app = f.app(&f.owned, "tauri://localhost/");
+            show_openbot_on(app.handle().clone(), &f.ports).unwrap();
+            restore_window_on(app.handle(), &f.ports);
+            assert_eq!(
+                app.get_webview_window("main")
+                    .unwrap()
+                    .url()
+                    .unwrap()
+                    .as_str(),
+                format!("http://127.0.0.1:{}/", f.ports.app)
+            );
+        }
     }
 }
