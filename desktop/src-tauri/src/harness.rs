@@ -115,6 +115,21 @@ pub struct HarnessChoice {
     pub agent_url: Option<String>,
 }
 
+fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
+    if value.chars().any(char::is_control) {
+        return Err("Enter a valid http:// or https:// address for the agent endpoint.".into());
+    }
+    let trimmed = value.trim();
+    let parsed = reqwest::Url::parse(trimmed).map_err(|_| {
+        "Enter a valid http:// or https:// address for the agent endpoint.".to_string()
+    })?;
+    if matches!(parsed.scheme(), "http" | "https") && parsed.has_host() {
+        Ok(trimmed.into())
+    } else {
+        Err("Enter a valid http:// or https:// address for the agent endpoint.".into())
+    }
+}
+
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
 ///
@@ -330,11 +345,12 @@ pub fn picked(
         let url = choice
             .agent_url
             .as_deref()
-            .map(str::trim)
-            .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
-            .ok_or_else(|| "The agent endpoint must start with http:// or https://.".to_string())?;
+            .ok_or_else(|| {
+                "Enter a valid http:// or https:// address for the agent endpoint.".to_string()
+            })
+            .and_then(byo_remote_ag_ui_url)?;
         return Ok(Some(crate::env::PickedHarness::RemoteAgUi {
-            url: url.into(),
+            url,
             name: row.name,
             remote_agent_id: String::new(),
         }));
@@ -626,6 +642,97 @@ mod tests {
             picked(Some(&choice("   ")), &root).expect("it was refused"),
             None
         );
+    }
+
+    #[test]
+    fn byo_remote_endpoint_requires_a_parseable_http_url_with_host_before_env_persistence() {
+        let root = std::env::temp_dir();
+        for endpoint in [
+            "http://",
+            "https://",
+            "https://exa mple.example/ag-ui",
+            "https://agent.example/ag-ui\nOPENAI_API_KEY=injected",
+            "https://agent.example/ag-ui\r\nPICKED_HARNESS_KIND=remote-mastra",
+        ] {
+            let byo = HarnessChoice {
+                id: "byo-url".into(),
+                agent_url: Some(endpoint.into()),
+            };
+            let refused = picked(Some(&byo), &root).expect_err(endpoint);
+            assert!(
+                refused.contains("valid http:// or https:// address"),
+                "{endpoint:?}: {refused}"
+            );
+        }
+
+        for (endpoint, expected) in [
+            (
+                "  http://localhost:11434/ag-ui  ",
+                "http://localhost:11434/ag-ui",
+            ),
+            (
+                "https://models.example/ag-ui",
+                "https://models.example/ag-ui",
+            ),
+            ("http://[::1]:8000/ag-ui", "http://[::1]:8000/ag-ui"),
+        ] {
+            let byo = HarnessChoice {
+                id: "byo-url".into(),
+                agent_url: Some(endpoint.into()),
+            };
+            assert_eq!(
+                picked(Some(&byo), &root).expect(endpoint),
+                Some(crate::env::PickedHarness::RemoteAgUi {
+                    url: expected.into(),
+                    name: "An agent you already run".into(),
+                    remote_agent_id: String::new(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn picked_byo_endpoint_reaches_env_file_as_one_trimmed_setting() {
+        let root = scratch("byo-env-persistence");
+        let byo = HarnessChoice {
+            id: "byo-url".into(),
+            agent_url: Some("  https://agent.example/ag-ui  ".into()),
+        };
+        let picked = picked(Some(&byo), &root)
+            .expect("BYO endpoint should be valid")
+            .expect("BYO endpoint should register a harness");
+        let env = crate::env::compose(
+            &crate::env::Intelligence {
+                api_url: "https://api.example".into(),
+                gateway_ws_url: "wss://realtime.example".into(),
+                api_key: "key".into(),
+            },
+            &crate::env::Model::default(),
+            &crate::engine::EngineStatus {
+                engine: None,
+                address: None,
+                responding: true,
+                engine_socket: None,
+                detail: String::new(),
+            },
+            &crate::env::Ports::default(),
+            &[],
+            Some(&picked),
+            &std::collections::BTreeMap::new(),
+        );
+        let path = root.join(".env");
+        crate::env::write(&path, &env, &std::collections::BTreeMap::new())
+            .expect("env should be persisted");
+
+        let written = std::fs::read_to_string(&path).expect("env should be readable");
+        assert!(written.contains("\nPICKED_HARNESS_URL=https://agent.example/ag-ui\n"));
+        assert_eq!(
+            written.matches("PICKED_HARNESS_URL=").count(),
+            1,
+            "{written}"
+        );
+        assert!(!written.contains("OPENAI_API_KEY=injected"), "{written}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// A real row resolves to the image the release publishes and the port that image listens on.
