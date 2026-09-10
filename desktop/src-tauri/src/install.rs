@@ -654,6 +654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn windows_msi_recovery_uses_actual_child_process_boundary() {
         let (msi, log) = synthetic_msi_paths("msi-process-boundary");
         let fake = msi.parent().unwrap().join("fake-msiexec.sh");
