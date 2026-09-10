@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  type ComposioAction,
   type ComposioActions,
+  type ComposioResult,
   callTool,
   effectOf,
   LISTING_LIMIT,
@@ -267,6 +269,16 @@ describe("finding the vendor's own sentence", () => {
     expect(vendorSentence(nested(""))).toBeNull();
     expect(vendorSentence(nested("   "))).toBeNull();
     expect(vendorSentence(nested("\n\t "))).toBeNull();
+  });
+
+  test("the sentence comes back as it was measured, without its padding", () => {
+    // The guard trimmed and the return did not, so the one thing the function had already decided
+    // about the string was thrown away again. What comes out is a refusal in a model's context and
+    // a sentence in an audit row; leading newlines in both are this module's own untidiness, and
+    // the cap that measures the string measures the padding with it.
+    expect(vendorSentence(nested("  Gmail rejected the query.\n"))).toBe(
+      "Gmail rejected the query.",
+    );
   });
 
   test("a message that is not a string is not read as one", () => {
@@ -727,6 +739,88 @@ describe("listing an app's actions", () => {
       expect(message).toContain("gmail");
     }
   });
+
+  test("a listing failure carrying only the vendor's placeholder says something else", async () => {
+    /*
+     * `callTool` already refuses to pass "Error executing the tool X" on, and the listing path did
+     * not. Same string, same reader: `refreshTools` writes this sentence into the row's
+     * `lastError` and an administrator reads it off the Plugins page, where the name of the thing
+     * they asked to refresh is the one fact they already have.
+     */
+    useComposioClient(
+      recording({
+        listActions: async () => {
+          throw new Error("Error executing the tool GMAIL_FETCH_EMAILS");
+        },
+      }).client,
+    );
+
+    const message = await listTools({ url: "composio://gmail" }).then(
+      () => "",
+      (error: unknown) => (error as Error).message,
+    );
+
+    expect(message).not.toMatch(/error executing the tool/i);
+    expect(message).toContain("gmail");
+  });
+
+  test("an answer that is not a list of actions throws a sentence, not a TypeError", async () => {
+    /*
+     * `ComposioActions` is OUR projection of the vendor, implemented by an adapter nobody has
+     * written yet, and TypeScript polices none of what a promise actually resolves to at runtime.
+     * A client that answers `null` — a 204, an SDK path that returns before assigning, a mock in
+     * somebody's staging deployment — used to reach `actions.length` and `actions.filter` outside
+     * the try that wraps the vendor's call, so what propagated was `null is not an object`. That
+     * lands verbatim in `lastError` on the Plugins page and tells an administrator nothing about
+     * which app or what to do, which is the whole reason this path throws sentences.
+     */
+    // `[null]` is the same failure one level down: it clears `Array.isArray` and then reaches
+    // `action.inputParameters` in the filter, which is outside that try as well.
+    for (const shape of [null, undefined, { items: [] }, "gmail", [null]]) {
+      useComposioClient(
+        recording({
+          listActions: async () => shape as unknown as ComposioAction[],
+        }).client,
+      );
+
+      const message = await listTools({ url: "composio://gmail" }).then(
+        () => "",
+        (error: unknown) => (error as Error).message,
+      );
+
+      expect(message).toContain("gmail");
+      expect(message).not.toMatch(/is not an object|is not a function/i);
+    }
+  });
+
+  test("a version made only of whitespace is recorded as no version at all", async () => {
+    /*
+     * TRIMMED ON THE WAY IN BECAUSE IT IS TRIMMED ON THE WAY OUT. `callTool` trims the recorded
+     * version and refuses an empty one, so a blank string that counts as a version here is written
+     * to `mcp_tools` as a version this deployment believes it has and is then permanently
+     * unusable — and the refusal the caller gets names a refresh, which rewrites the same blank.
+     * That is exactly the loop the test above reasons about, reached by recording rather than by
+     * the vendor publishing nothing.
+     */
+    useComposioClient(
+      recording({
+        listActions: async () => [
+          { slug: "GMAIL_BLANK", tags: ["readOnlyHint"], version: "   " },
+          {
+            slug: "GMAIL_PADDED",
+            tags: ["readOnlyHint"],
+            version: " 20260903_00\n",
+          },
+        ],
+      }).client,
+    );
+
+    const [blank, padded] = await listTools({ url: "composio://gmail" });
+
+    expect(Object.keys(blank ?? {})).not.toContain("version");
+    // Recorded as the version `callTool` will actually send, rather than as one it has to repair.
+    expect(padded?.version).toBe("20260903_00");
+  });
 });
 
 describe("calling one action", () => {
@@ -1139,5 +1233,95 @@ describe("calling one action", () => {
     // its part here.
     expect(result.text).toMatch(/could not turn that answer into text/i);
     expect(result.text).toContain("GMAIL_FETCH_EMAILS");
+  });
+
+  test("an answer reporting an error while claiming success is a failure", async () => {
+    /*
+     * `ToolExecuteResponseSchema` spells `error` and `successful` as two independent required
+     * fields and correlates them nowhere; `transformToolExecuteResponse` copies both straight off
+     * the wire (`@composio/core` 0.18.1, `src/models/Tools.ts:215-222`). So the combination is a
+     * shape the vendor's own schema permits, and keying only on `successful === false` dropped the
+     * one sentence in it that says anything — audited as `mcp.call_succeeded`, with the failure
+     * handed to the model as though it were content.
+     *
+     * The strict reading is the safe one and it is also the vendor's: where the SDK has to derive
+     * the flag itself it writes `successful: !response.error` (`src/models/Tools.ts:1247`), so a
+     * present error IS a failure by their own arithmetic. Same rule as `effectOf` uses for
+     * contradictory labels — both at once is somebody else's bug, and we take the strict branch.
+     */
+    useComposioClient(
+      recording({
+        execute: async () =>
+          answered(
+            { messages: [{ id: "m1" }] },
+            {
+              successful: true,
+              error: "Gmail rejected the query: invalid search syntax.",
+            },
+          ),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("invalid search syntax");
+    // The data must not be handed over as content beside a reported failure.
+    expect(result.text).not.toContain("m1");
+  });
+
+  test("an empty error beside a success is still a success", async () => {
+    // The other side of the rule, and the reason it is worded as a SENTENCE rather than as a
+    // present field: `successful: !response.error` treats `""` as success, so an empty string is
+    // the vendor saying nothing went wrong in the least committal way available to it.
+    useComposioClient(
+      recording({
+        execute: async () =>
+          answered({ messages: [] }, { successful: true, error: "" }),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe(JSON.stringify({ messages: [] }, null, 2));
+  });
+
+  test("an answer that is not an envelope refuses rather than throwing", async () => {
+    /*
+     * THE NEVER-THROW CONTRACT, asserted against the shape that broke it. This module documents a
+     * failure as a RESULT and `store.ts` relies on it: a model is mid-run with a person waiting,
+     * and an exception ends the turn with nothing said and nothing audited.
+     *
+     * `reportedFailure(answer, …)` read `answer.successful` outside every try, so a client
+     * resolving `null` threw a `TypeError` straight out of `callTool`. Like the listing case, this
+     * is a shape `ToolExecuteResponseSchema` forbids and `ComposioActions` cannot police — the
+     * projection is ours, the adapter is unwritten, and a runtime resolution is not a type.
+     */
+    for (const shape of [null, undefined, "ok", 7]) {
+      useComposioClient(
+        recording({
+          execute: async () => shape as unknown as ComposioResult,
+        }).client,
+      );
+
+      const result = await callTool(
+        { url: "composio://gmail", actorId: "user_asker" },
+        "GMAIL_FETCH_EMAILS",
+        { __version: "20260903_00" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("GMAIL_FETCH_EMAILS");
+      expect(result.text).not.toMatch(/is not an object|undefined is not/i);
+    }
   });
 });

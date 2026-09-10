@@ -389,6 +389,35 @@ export async function listTools(connection: {
     throw new Error(listingSentence(toolkit, error), { cause: error });
   }
 
+  /*
+   * NOTHING IS READ OFF THE ANSWER UNTIL IT IS A LIST, and the check is here rather than assumed
+   * from the type. `ComposioActions` is this module's own projection, the adapter that would
+   * satisfy it has not been written, and a return type is not a promise about what resolves at
+   * runtime — a client that answers null, or a bare envelope with the array one level down, is a
+   * mistake this file will meet before a type checker does.
+   *
+   * Both reads below sit OUTSIDE the try that wraps the vendor's call, so before this guard
+   * `actions.length` propagated `null is not an object (evaluating 'actions.length')` — which is
+   * the string `refreshTools` writes into the row's `lastError` for an administrator to read. What
+   * this path owes that reader is a sentence naming the app and saying nothing was lost, so the
+   * shape is settled while such a sentence can still be written.
+   *
+   * THE ELEMENTS ARE CHECKED TOO, AND FOR THE SAME REASON RATHER THAN A DIFFERENT ONE. `[null]`
+   * reaches `action.inputParameters` in the filter below and `action.slug` in the map, both
+   * outside the try; it is the identical failure one level down, so it is answered here rather
+   * than left to produce a different unreadable message. What is checked is only that each
+   * element is an object — this module does not validate the vendor's schema, and an action
+   * missing a field it does not have is the vendor's business.
+   */
+  if (
+    !Array.isArray(actions) ||
+    actions.some((action) => schemaNode(action) === null)
+  ) {
+    throw new Error(
+      `Composio did not answer with an action list for ${toolkit}: what came back was not a list of actions at all. Nothing was refreshed and the actions already recorded for this app are kept.`,
+    );
+  }
+
   if (actions.length >= LISTING_LIMIT) {
     /*
      * A FULL PAGE IS NOT A COMPLETE LISTING, and this deployment cannot find out which it is.
@@ -430,13 +459,22 @@ export async function listTools(connection: {
     .filter((action) => !stagesAFile(action.inputParameters))
     .map((action) => {
       const { effect, destructive } = effectOf(action.tags);
+      /*
+       * TRIMMED HERE BECAUSE IT IS TRIMMED AT THE OTHER END. {@link callTool} trims the recorded
+       * version and refuses an empty one, so a whitespace-only string that counted as a version
+       * was written to `mcp_tools` as a version this deployment believes it holds and was then
+       * permanently uncallable — and the refusal its caller reads names a refresh, which records
+       * the same blank again. Recording exactly what `callTool` will send is what closes that
+       * loop; a blank becomes no version, which is the state whose refusal says so truthfully.
+       */
+      const version = action.version?.trim();
       return {
         name: action.slug,
         description: action.description ?? "",
         inputSchema: action.inputParameters ?? {},
         effect,
         destructive,
-        ...(action.version ? { version: action.version } : {}),
+        ...(version ? { version } : {}),
       };
     });
 }
@@ -457,13 +495,20 @@ export async function listTools(connection: {
  * Null when there is no such sentence, which leaves the caller to choose a fallback rather than
  * inventing one here. That choice is not simply "the thrown message": the thrown message is often the
  * placeholder above, and passing it on tells the reader nothing. See {@link unexplained}.
+ *
+ * TRIMMED ON THE WAY OUT AND NOT ONLY IN THE GUARD. The two used to disagree — the guard measured a
+ * trimmed string and the return handed back the padded one — so the decision the function had
+ * already made about the string was thrown away at the last line. What comes out is read by a person
+ * off an admin page, put in front of a model, and measured by {@link cap}, and in the third of those
+ * the padding is counted against somebody's context window.
  */
 export function vendorSentence(error: unknown): string | null {
   const cause = (error as { cause?: unknown } | null | undefined)?.cause;
   const outer = (cause as { error?: unknown } | null | undefined)?.error;
   const inner = (outer as { error?: unknown } | null | undefined)?.error;
   const message = (inner as { message?: unknown } | null | undefined)?.message;
-  return typeof message === "string" && message.trim() !== "" ? message : null;
+  const sentence = typeof message === "string" ? message.trim() : "";
+  return sentence === "" ? null : sentence;
 }
 
 /**
@@ -509,6 +554,11 @@ function isSchemaMismatch(error: unknown): boolean {
  * The schema case names the fix, because it is a vendor change rather than a misconfiguration: the
  * answer arrived and this deployment's copy of their SDK would not accept it, so nothing an
  * administrator can do to this row will help and upgrading the package will.
+ *
+ * THE PLACEHOLDER IS REFUSED HERE ON THE SAME GROUNDS {@link callTool} REFUSES IT, which is the
+ * half this function was missing. "Error executing the tool X" names only the thing the reader
+ * asked for; on this path they asked to refresh an app, so it is the one fact they already had.
+ * Falling through to the app's name at least tells them which row went wrong.
  */
 function listingSentence(toolkit: string, error: unknown): string {
   if (isSchemaMismatch(error)) {
@@ -517,7 +567,7 @@ function listingSentence(toolkit: string, error: unknown): string {
   const thrown = error instanceof Error ? error.message.trim() : "";
   return (
     vendorSentence(error) ??
-    (thrown === ""
+    (thrown === "" || VENDOR_PLACEHOLDER.test(thrown)
       ? `Composio did not answer with an action list for ${toolkit}.`
       : thrown)
   );
@@ -582,12 +632,30 @@ function resultOf(data: ComposioResult["data"] | undefined): McpCallResult {
 }
 
 /**
- * What the vendor said about its own call, read from the field its schema requires it to send.
+ * What the vendor said about its own call, read from BOTH fields its schema requires it to send.
  *
- * The criterion is that the vendor SAID the call did not succeed, which is `successful === false` and
- * not a falsy `successful`. An absent field is not the vendor reporting a failure — the schema makes
- * it impossible from the real client, and reading it as a failure would turn a projection looser than
- * the schema into a refusal of a call that worked.
+ * EITHER ONE CAN REPORT A FAILURE, and reading only the flag dropped the other. `successful ===
+ * false` is the plain case. The second is an `error` sentence arriving beside `successful: true`:
+ * `ToolExecuteResponseSchema` spells the two as independent required fields and correlates them
+ * nowhere, and `transformToolExecuteResponse` copies both straight off the wire (`@composio/core`
+ * 0.18.1, `src/models/Tools.ts:215-222`), so that combination is a shape the vendor's own schema
+ * permits. Keyed on the flag alone it was audited as `mcp.call_succeeded` and the one sentence
+ * saying what went wrong was shown to nobody.
+ *
+ * TAKING THE ERROR AT ITS WORD IS THE VENDOR'S OWN ARITHMETIC rather than a rule invented here:
+ * where the SDK has to derive the flag itself it writes `successful: !response.error` (`:1247`). It
+ * is also the reading this file already applies to a vendor contradicting itself — see
+ * {@link effectOf} on `destructiveHint` beside `readOnlyHint`.
+ *
+ * WHICH IS EQUALLY WHY THE CRITERION IS A NON-EMPTY SENTENCE. By that same line `""` is a success,
+ * so an empty `error` is the vendor saying nothing went wrong in the least committal way open to it.
+ * Whitespace is read as empty too, and that part is this file's own reading rather than the SDK's —
+ * it matches {@link vendorSentence}, because a blank sentence beside an explicit `successful: true`
+ * would otherwise become a refusal saying only that the call failed and nobody said why.
+ *
+ * AND `successful !== false` RATHER THAN A FALSY `successful`, because an absent field is not the
+ * vendor reporting anything: the schema makes it impossible from the real client, and reading it as
+ * a failure would turn a projection looser than the schema into a refusal of a call that worked.
  *
  * Null when there is nothing to report, so the caller can tell "succeeded" from "failed silently".
  */
@@ -595,8 +663,8 @@ function reportedFailure(
   answer: ComposioResult,
   toolName: string,
 ): string | null {
-  if (answer.successful !== false) return null;
   const sentence = typeof answer.error === "string" ? answer.error.trim() : "";
+  if (answer.successful !== false && sentence === "") return null;
   return sentence === "" || VENDOR_PLACEHOLDER.test(sentence)
     ? unexplained(toolName)
     : sentence;
@@ -683,6 +751,24 @@ export async function callTool(
         (thrown === "" || VENDOR_PLACEHOLDER.test(thrown)
           ? unexplained(toolName)
           : thrown),
+    );
+  }
+
+  /*
+   * NOTHING IS READ OFF THE ANSWER UNTIL IT IS AN ENVELOPE, and here the reason is stronger than
+   * the listing's. {@link callTool} is documented as never throwing and `store.ts` relies on that,
+   * so a shape this module did not expect has to become a refusal rather than an exception.
+   * `reportedFailure` reads `answer.successful` and was called from outside every try, so a client
+   * resolving null threw a `TypeError` straight out of here — ending a person's turn mid-run with
+   * nothing said and nothing audited, which is exactly what returning a result instead of throwing
+   * exists to prevent.
+   *
+   * A vendor fault it is not, so it does not get the vendor's words. This is the third kind of
+   * failure the comment above names: Composio answered and this deployment could not read it.
+   */
+  if (typeof answer !== "object" || answer === null) {
+    return failure(
+      `${toolName} was sent to Composio and its client resolved, but this deployment could not read what it resolved with: it was not the { data, error, successful } envelope Composio's own schema requires.`,
     );
   }
 
