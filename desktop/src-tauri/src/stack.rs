@@ -398,12 +398,10 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
 ///
 /// The three host processes are `bun` processes run from the source, so the source alone is not
 /// enough: without this the server stops at `ENOENT while resolving package 'zod'` and the app at
-/// `vite: command not found`, and neither says the word `node_modules`. Run after a fetch and
-/// skipped when the directory is already there, because it takes minutes.
+/// `vite: command not found`, and neither says the word `node_modules`. Always let Bun verify
+/// the frozen install: a failed download can leave the directory behind, while a complete
+/// installation can reuse Bun's cache without changing the lockfile.
 pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
-    if root.join("node_modules").exists() {
-        return Ok(());
-    }
     // `--ignore-scripts`, for two reasons that point the same way.
     //
     // A postinstall script is arbitrary code from somebody else's package, and an installer that
@@ -2999,6 +2997,64 @@ fn main() {
             }
             Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
         }
+    }
+
+    #[test]
+    fn dependency_install_retries_partial_directory_and_rechecks_cached_success() {
+        let root = temp_root("dependency-install-retry");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("fake_bun.rs");
+        std::fs::write(&source, r#"
+use std::io::Write;
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
+    let previous = std::fs::read_to_string("attempts.log").unwrap_or_default();
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open("attempts.log").unwrap();
+    writeln!(log, "{}", args.join(" ")).unwrap();
+    std::fs::create_dir_all("node_modules").unwrap();
+    if previous.is_empty() {
+        eprintln!("synthetic interrupted dependency download");
+        std::process::exit(9);
+    }
+    std::fs::write("node_modules/installed-package", "cached package contents").unwrap();
+}
+"#).unwrap();
+        let bun = root.join(if cfg!(windows) {
+            "fake-bun.exe"
+        } else {
+            "fake-bun"
+        });
+        crate::test_support::compile_fixture(&source, &bun);
+        let first = install_dependencies(&root, &bun);
+        assert!(
+            root.join("node_modules").is_dir(),
+            "failure must leave a partial directory"
+        );
+        let second = install_dependencies(&root, &bun);
+        let third = install_dependencies(&root, &bun);
+        let attempts = std::fs::read_to_string(root.join("attempts.log")).unwrap();
+        let installed = std::fs::read_to_string(root.join("node_modules/installed-package"));
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "firstError": first.as_ref().err(), "retrySucceeded": second.is_ok(),
+                "cachedSucceeded": third.is_ok(), "invocations": attempts.lines().count(),
+                "installed": installed.as_ref().ok(),
+            })
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(first
+            .unwrap_err()
+            .contains("synthetic interrupted dependency download"));
+        assert!(second.is_ok(), "{second:?}");
+        assert!(third.is_ok(), "{third:?}");
+        assert_eq!(
+            attempts.lines().count(),
+            3,
+            "retry and cached checks must invoke Bun"
+        );
+        assert_eq!(installed.unwrap(), "cached package contents");
     }
 
     fn host_command_line(name: &str) -> &'static str {
