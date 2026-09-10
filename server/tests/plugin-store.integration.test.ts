@@ -955,6 +955,80 @@ describe("removing an MCP server", () => {
     }
   });
 
+  /**
+   * A credential that was already retired, and the read that decides whether to retire it again.
+   *
+   * CRITERION. `removeServer` must not ask the vault to revoke a credential whose row already
+   * carries a `revoked_at`, and must still remove the server row.
+   *
+   * REASON. It reads liveness from the table before deciding, and nothing asserted that. The test
+   * above inserts a LIVE row and so takes the true branch; the one below has no credential at all
+   * and so never runs the query. So `isNull(revoked_at)` could be dropped with the whole suite
+   * green — and in production `credentials.revoke` throws "not found or already revoked", which
+   * propagates before `delete(mcpServers)` and leaves a server row that cannot be removed by any
+   * number of attempts, on a route with no `catch`. Two ordinary states produce the row: a
+   * previous removal that failed after the revoke, and a key rotated by hand.
+   *
+   * ASSERTED AS "revoke was not called", not as the absence of a throw. The vault here is a stub
+   * that is deliberately forgiving — it stamps whatever id it is handed — so a test waiting for it
+   * to complain would pass with the clause gone. What the read decides is whether the call is made
+   * at all, and that is what {@link revokedCredentialIds} records.
+   */
+  test("does not ask the vault to revoke a credential already revoked", async () => {
+    const removalServerId = `removal-target-retired-${suite}`;
+    revokedCredentialIds.length = 0;
+    const revokedAt = new Date();
+    const [credentialRow] = await database
+      .insert(credentialRows)
+      .values({
+        kind: "mcp",
+        provider: removalServerId,
+        keyId: `mcp-${removalServerId}`,
+        encryptedValue: "{}",
+        metadata: {},
+        revokedAt,
+        updatedAt: revokedAt,
+      })
+      .returning({ id: credentialRows.id });
+    const credentialId = credentialRow?.id;
+    if (!credentialId) throw new Error("credential row was not created");
+    issuedCredentialIds.push(credentialId);
+    await database.insert(mcpServers).values({
+      id: removalServerId,
+      title: "removal target with a retired credential",
+      vendor: "test",
+      url: "https://example.invalid/mcp",
+      credentialId,
+      provenance: "custom",
+    });
+
+    await store.removeServer(removalServerId, "admin@openbot.local");
+
+    // Not asked, because the row already says it is retired.
+    expect(revokedCredentialIds).toEqual([]);
+    // And the server row is gone, which is the act an administrator asked for and the thing a
+    // throw from the vault would have prevented.
+    expect(
+      await database
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, removalServerId)),
+    ).toEqual([]);
+    // No second revocation in the trail either: a row saying access ended twice is a row an
+    // auditor has to reconcile against nothing having happened.
+    expect(
+      await database
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "credential.revoked"),
+            eq(auditEvents.targetId, credentialId),
+          ),
+        ),
+    ).toEqual([]);
+  });
+
   test("does not call revoke when the server had no credential", async () => {
     const removalServerId = `removal-target-nocred-${suite}`;
     revokedCredentialIds.length = 0;
