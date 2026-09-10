@@ -747,6 +747,62 @@ pub fn replace_host_process(
     record_host_processes(root, &live)
 }
 
+/// Publish only the new Windows instance. Other roles may already be dead, and their
+/// durable identities must remain available for cleanup without trusting their old PIDs again.
+#[cfg(any(not(unix), test))]
+pub fn replace_windows_host_process_with(
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    name: &'static str,
+    child: std::process::Child,
+    powershell: &Path,
+) -> Result<(), Problem> {
+    // Retire only handles known to have exited. On any later failure Stop keeps the
+    // replacement, as well as any predecessor whose exit could not be confirmed.
+    children.retain_mut(|(held, child)| *held != name || !matches!(child.try_wait(), Ok(Some(_))));
+    children.push((name, child));
+    let child = &mut children.last_mut().unwrap().1;
+    let pid = child.id();
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not verify its Windows replacement process ownership.",
+            format!("{name}, pid {pid}: {detail}; ownership retained"),
+        )
+    };
+    let require_live = |child: &mut std::process::Child| match child.try_wait() {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) => Err(problem("replacement has exited".to_string())),
+        Err(error) => Err(problem(format!("could not inspect replacement: {error}"))),
+    };
+    require_live(child)?;
+    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+        return Err(problem("unknown host role".to_string()));
+    }
+    let snapshot = windows_processes_with(powershell)?;
+    // The held Child must remain live through capture: a PID alone cannot authorize
+    // recording a process that replaced it while the inventory command was running.
+    require_live(child)?;
+    let mut matches = snapshot.iter().filter(|live| live.process_id == pid);
+    let record = matches
+        .next()
+        .filter(|live| live.parent_process_id == std::process::id())
+        .and_then(|live| RecordedHostProcess::from_live(name, live))
+        .filter(|record| {
+            !record.executable_path.is_empty()
+                && !record.command_line.is_empty()
+                && windows_creation_time(&record.creation_date).is_some()
+        })
+        .ok_or_else(|| problem("complete direct-child identity is unavailable".to_string()))?;
+    if matches.next().is_some() {
+        return Err(problem("duplicate process inventory identity".to_string()));
+    }
+    let mut records = recorded_host_processes(root)?;
+    if !records.contains(&record) {
+        records.push(record);
+    }
+    write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))
+}
+
 #[cfg(unix)]
 fn unix_ownership_problem(detail: impl Into<String>) -> Problem {
     Problem::with(
@@ -2928,6 +2984,277 @@ fn main() {
             ),
             [9001]
         );
+    }
+
+    struct WindowsReplacementFixture {
+        root: PathBuf,
+        commands: CleanupCommandFixture,
+        children: Vec<(&'static str, std::process::Child)>,
+        binary: PathBuf,
+    }
+
+    impl WindowsReplacementFixture {
+        fn new() -> Self {
+            let root = temp_root("windows-replacement-records");
+            std::fs::create_dir_all(&root).unwrap();
+            let commands = CleanupCommandFixture::new(&root);
+            commands.scenario("ownership-inventory");
+            let source = root.join("held.rs");
+            std::fs::write(&source, "fn main() { let mut line = String::new(); std::io::stdin().read_line(&mut line).unwrap(); }").unwrap();
+            let binary = root.join(if cfg!(windows) { "held.exe" } else { "held" });
+            crate::test_support::compile_fixture(&source, &binary);
+            Self {
+                root,
+                commands,
+                children: Vec::new(),
+                binary,
+            }
+        }
+
+        fn spawn(&self) -> std::process::Child {
+            Command::new(&self.binary)
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap()
+        }
+
+        fn inventory(&self, rows: &[WindowsProcess]) {
+            let rows: Vec<_> = rows
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "ProcessId": row.process_id, "ParentProcessId": row.parent_process_id,
+                        "ExecutablePath": row.executable_path, "CommandLine": row.command_line,
+                        "CreationDate": row.creation_date,
+                    })
+                })
+                .collect();
+            std::fs::write(
+                self.root.join("synthetic-inventory.json"),
+                serde_json::to_vec(&rows).unwrap(),
+            )
+            .unwrap();
+        }
+
+        fn owns(&self, name: &str, pid: u32) -> bool {
+            std::fs::write(
+                self.root.join("synthetic-netstat.txt"),
+                format!("TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING {pid}\n"),
+            )
+            .unwrap();
+            recorded_process_owns_port_windows_with(
+                &self.root,
+                name,
+                45123,
+                &self.commands.command("powershell"),
+                &self.commands.command("netstat"),
+            )
+            .unwrap()
+        }
+    }
+
+    impl Drop for WindowsReplacementFixture {
+        fn drop(&mut self) {
+            for (_, child) in &mut self.children {
+                if child.try_wait().unwrap().is_none() {
+                    child.kill().unwrap();
+                }
+                child.wait().unwrap();
+            }
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    fn windows_restart_records_case<F>(both_dead: bool, mut publish: F)
+    where
+        F: FnMut(
+            &Path,
+            &mut Vec<(&'static str, std::process::Child)>,
+            &'static str,
+            std::process::Child,
+            &Path,
+        ) -> Result<(), Problem>,
+    {
+        let mut fixture = WindowsReplacementFixture::new();
+        let old_server = fixture.spawn();
+        let old_app = fixture.spawn();
+        let old = vec![
+            recorded_process("server", old_server.id(), "/Date(1000)/"),
+            recorded_process("app", old_app.id(), "/Date(1001)/"),
+        ];
+        fixture.children = vec![("server", old_server), ("app", old_app)];
+        write_host_pid_file(
+            &fixture.root,
+            &serde_json::json!({"version":1,"processes":old}),
+        )
+        .unwrap();
+        fixture.children[0].1.kill().unwrap();
+        fixture.children[0].1.wait().unwrap();
+        if both_dead {
+            fixture.children[1].1.kill().unwrap();
+            fixture.children[1].1.wait().unwrap();
+        }
+        let replacement = fixture.spawn();
+        let pid = replacement.id();
+        // The predecessor PID is now foreign; the other role can be live or absent.
+        let mut rows = vec![
+            live_process(old[0].pid, 0, "/Date(1500)/"),
+            live_process(pid, std::process::id(), "/Date(2000)/"),
+        ];
+        if !both_dead {
+            rows.push(live_host_process(
+                "app",
+                old[1].pid,
+                std::process::id(),
+                "/Date(1001)/",
+            ));
+        }
+        fixture.inventory(&rows);
+        assert!(!fixture.owns("server", pid));
+        publish(
+            &fixture.root,
+            &mut fixture.children,
+            "server",
+            replacement,
+            &fixture.commands.command("powershell"),
+        )
+        .unwrap();
+        assert!(
+            fixture.owns("server", pid),
+            "published replacement must own its listener"
+        );
+        assert!(
+            !fixture.owns("server", old[0].pid),
+            "a reused predecessor PID must remain foreign"
+        );
+        let records = recorded_host_processes(&fixture.root).unwrap();
+        assert!(
+            old.iter().all(|record| records.contains(record)),
+            "retain earlier cleanup evidence"
+        );
+        assert_eq!(records.len(), 3);
+        assert!(!fixture
+            .children
+            .iter()
+            .any(|(_, child)| child.id() == old[0].pid));
+        if both_dead {
+            let app = fixture.spawn();
+            let app_pid = app.id();
+            rows.push(live_host_process(
+                "app",
+                app_pid,
+                std::process::id(),
+                "/Date(2001)/",
+            ));
+            fixture.inventory(&rows);
+            publish(
+                &fixture.root,
+                &mut fixture.children,
+                "app",
+                app,
+                &fixture.commands.command("powershell"),
+            )
+            .unwrap();
+            assert!(fixture.owns("app", app_pid));
+            assert!(fixture.owns("server", pid));
+            assert_eq!(fixture.children.len(), 2);
+            assert_eq!(recorded_host_processes(&fixture.root).unwrap().len(), 4);
+        } else {
+            assert!(fixture.owns("app", old[1].pid));
+        }
+        assert!(!fixture.commands.log().contains("taskkill\t"));
+    }
+
+    #[test]
+    fn windows_replacement_records_new_owner_and_preserves_other_role() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_records_new_owner_and_preserves_other_role",
+        ) {
+            return;
+        }
+        windows_restart_records_case(false, replace_windows_host_process_with);
+    }
+
+    #[test]
+    fn windows_replacement_records_two_dead_roles_sequentially() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_records_two_dead_roles_sequentially",
+        ) {
+            return;
+        }
+        windows_restart_records_case(true, replace_windows_host_process_with);
+    }
+
+    #[test]
+    fn windows_replacement_recording_failure_retains_handles_and_prior_records() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_recording_failure_retains_handles_and_prior_records",
+        ) {
+            return;
+        }
+        for failure in [
+            "missing",
+            "wrong-parent",
+            "incomplete",
+            "malformed-time",
+            "duplicate",
+            "exited",
+            "read",
+        ] {
+            let mut fixture = WindowsReplacementFixture::new();
+            let prior = serde_json::to_vec(&serde_json::json!({"version":1,"processes":[recorded_process("app", 9000, "/Date(1001)/")]})).unwrap();
+            std::fs::create_dir_all(fixture.root.join(".logs")).unwrap();
+            let prior = if failure == "read" {
+                b"unreadable-records".to_vec()
+            } else {
+                prior
+            };
+            std::fs::write(host_pids_path(&fixture.root), &prior).unwrap();
+            // Even a live predecessor must not be dropped on a failed publication.
+            fixture.children.push(("server", fixture.spawn()));
+            let mut replacement = fixture.spawn();
+            let pid = replacement.id();
+            let mut live = live_process(pid, std::process::id(), "/Date(2000)/");
+            if failure == "wrong-parent" {
+                live.parent_process_id = 0;
+            }
+            if failure == "incomplete" {
+                live.creation_date = None;
+            }
+            if failure == "malformed-time" {
+                live.creation_date = Some("not-a-date".into());
+            }
+            let rows = match failure {
+                "missing" => vec![],
+                "duplicate" => vec![live.clone(), live],
+                _ => vec![live],
+            };
+            fixture.inventory(&rows);
+            if failure == "exited" {
+                replacement.kill().unwrap();
+                replacement.wait().unwrap();
+            }
+            let result = replace_windows_host_process_with(
+                &fixture.root,
+                &mut fixture.children,
+                "server",
+                replacement,
+                &fixture.commands.command("powershell"),
+            );
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(
+                std::fs::read(host_pids_path(&fixture.root)).unwrap(),
+                prior,
+                "{failure}"
+            );
+            assert_eq!(fixture.children.len(), 2, "{failure}");
+            assert_eq!(fixture.children[1].1.id(), pid);
+            assert_eq!(
+                fixture.children[1].1.try_wait().unwrap().is_none(),
+                failure != "exited"
+            );
+            assert!(!fixture.commands.log().contains("taskkill\t"));
+        }
     }
 
     #[cfg(unix)]

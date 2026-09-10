@@ -2243,10 +2243,13 @@ where
     #[cfg(unix)]
     stack::replace_host_process(root, &mut children, name, child)?;
     #[cfg(not(unix))]
-    {
-        children.retain(|(held, _)| *held != name);
-        children.push((name, child));
-    }
+    stack::replace_windows_host_process_with(
+        root,
+        &mut children,
+        name,
+        child,
+        Path::new("powershell"),
+    )?;
     Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst) == generation)
 }
 
