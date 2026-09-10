@@ -478,6 +478,34 @@ test.each([false, true])(
   },
 );
 
+test("a stalled mount history read releases the send gate and shows unavailable history", async () => {
+  const pending = delayedResponse();
+  const view = mounting((_threadId) => pending.promise, [initial]);
+  await waitFor(() => expect(historyReads).toHaveLength(1));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Send while history stalls",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+
+  await view.findByText(unavailable, {}, { timeout: 4000 });
+  await waitFor(() => expect(runRequests).toHaveLength(1), { timeout: 4000 });
+  expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
+  expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
+  expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial]);
+  expect(runRequests[0]?.input.messages.at(-1)).toMatchObject({
+    role: "user",
+    content: "Send while history stalls",
+  });
+
+  await act(async () => pending.resolve(stored([initial, fresh])));
+  expect(view.queryByText(fresh.content)).toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).not.toContain(
+    fresh.id,
+  );
+});
+
 test("a UI send waits for mount history before adding its message", async () => {
   const pending = delayedResponse();
   const view = mounting(() => pending.promise, [initial]);

@@ -321,6 +321,55 @@ describe("thread history retrieval outcomes", () => {
     );
   });
 
+  test.each([
+    {
+      name: "headers",
+      handler: ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<Response>((resolve) => {
+          signal?.addEventListener("abort", () =>
+            resolve(new Response("aborted", { status: 499 })),
+          );
+        }),
+    },
+    {
+      name: "body",
+      handler: ({ signal }: { signal?: AbortSignal }) =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                signal?.addEventListener("abort", () => controller.close());
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        ),
+    },
+  ])(
+    "a stalled $name read aborts and returns unavailable history",
+    async ({ handler }) => {
+      let capturedSignal: AbortSignal | undefined;
+      await withFetch(
+        (_input, init) => {
+          capturedSignal = init?.signal ?? undefined;
+          return handler({ signal: capturedSignal });
+        },
+        async () => {
+          const read = await readThreadMessages("thread-1", "agent-1", {
+            deadlineMs: 20,
+          });
+
+          expect(capturedSignal?.aborted).toBe(true);
+          expect(read).toEqual({
+            messages: [],
+            unreadable: 0,
+            availability: "unavailable",
+          });
+        },
+      );
+    },
+  );
+
   test("a readable empty response remains a valid empty history", async () => {
     await withFetch(
       async () =>
