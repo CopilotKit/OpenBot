@@ -4,6 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[cfg(test)]
+mod test_support;
+
 use openbot_desktop_lib::{
     acquire, deployment, engine, env as openbot_env, harness, install, problem::Problem, provider,
     quiet, stack, supervise, tray, windows as win,
@@ -3557,10 +3560,12 @@ mod tests {
 
     #[test]
     fn disposable_provider_fixture_repairs_missing_compose_at_process_boundary() {
-        let path = SerializedPath::set_only_with(
-            "podman",
-            "#!/bin/sh\ncase \"$*\" in\n\"version --format {{.Server.APIVersion}}\") printf '1.44\\n' ;;\n\"compose version\") command -v docker-compose >/dev/null 2>&1 && exec docker-compose version; printf 'missing compose\\n' >&2; exit 1 ;;\n*) printf 'unexpected podman args: %s\\n' \"$*\" >&2; exit 2 ;;\nesac\n",
-        );
+        if crate::test_support::isolated_process(
+            "tests::disposable_provider_fixture_repairs_missing_compose_at_process_boundary",
+        ) {
+            return;
+        }
+        let path = SerializedPath::set_only_with("podman", "podman");
         let address = engine::Address::new(engine::Engine::Podman, None);
         assert!(address.responds(), "fake podman must answer before repair");
         assert!(
@@ -3579,19 +3584,7 @@ mod tests {
                 detail: "podman is answering.".into(),
             },
             || {
-                std::fs::write(
-                    path.bin().join(install::compose_provider_name()),
-                    "#!/bin/sh\nprintf 'Docker Compose version disposable-provider\\n'\n",
-                )
-                .unwrap();
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let provider = path.bin().join(install::compose_provider_name());
-                    let mut permissions = std::fs::metadata(&provider).unwrap().permissions();
-                    permissions.set_mode(0o755);
-                    std::fs::set_permissions(&provider, permissions).unwrap();
-                }
+                path.write_binary(install::compose_provider_name(), "compose-provider");
                 installed = true;
                 Ok("Compose installed into disposable PATH.".into())
             },
@@ -3625,6 +3618,11 @@ mod tests {
 
     #[test]
     fn stop_shutdown_uses_the_active_root_at_the_external_command_boundary() {
+        if crate::test_support::isolated_process(
+            "tests::stop_shutdown_uses_the_active_root_at_the_external_command_boundary",
+        ) {
+            return;
+        }
         let _path = SerializedPath::set();
         let active = temp_root("openbot-active-stop-root");
         let fallback = temp_root("openbot-default-stop-root");
@@ -3647,6 +3645,11 @@ mod tests {
 
     #[test]
     fn quit_shutdown_uses_the_active_root_at_the_external_command_boundary() {
+        if crate::test_support::isolated_process(
+            "tests::quit_shutdown_uses_the_active_root_at_the_external_command_boundary",
+        ) {
+            return;
+        }
         let _path = SerializedPath::set();
         let active = temp_root("openbot-active-quit-root");
         let fallback = temp_root("openbot-default-quit-root");
@@ -3886,7 +3889,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(fallback);
     }
 
-    #[cfg(unix)]
     fn harness_start_ipc_case(case: &str) {
         struct Cleanup(Vec<PathBuf>);
         impl Drop for Cleanup {
@@ -3914,7 +3916,7 @@ mod tests {
             serde_json::to_string(&images).unwrap(),
         )
         .unwrap();
-        let _path = SerializedPath::set_only_with("docker", HARNESS_START_IPC_DOCKER);
+        let _path = SerializedPath::set_only_with("docker", "harness");
         let _cleanup = Cleanup(vec![root.clone(), _path.bin().to_path_buf()]);
         let record = root.join("commands.log");
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
@@ -4093,74 +4095,98 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn remote_harness_start_ipc_skips_local_service_and_asks_persisted_endpoint() {
+        if crate::test_support::isolated_process(
+            "tests::remote_harness_start_ipc_skips_local_service_and_asks_persisted_endpoint",
+        ) {
+            return;
+        }
         harness_start_ipc_case("remote");
     }
 
-    #[cfg(unix)]
     #[test]
     fn remote_harness_start_ipc_ignores_stale_local_image() {
+        if crate::test_support::isolated_process(
+            "tests::remote_harness_start_ipc_ignores_stale_local_image",
+        ) {
+            return;
+        }
         harness_start_ipc_case("remote-stale-image");
     }
 
-    #[cfg(unix)]
     #[test]
     fn installed_harness_start_ipc_keeps_local_service() {
+        if crate::test_support::isolated_process(
+            "tests::installed_harness_start_ipc_keeps_local_service",
+        ) {
+            return;
+        }
         harness_start_ipc_case("installed");
     }
 
-    #[cfg(unix)]
     #[test]
     fn no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services() {
+        if crate::test_support::isolated_process(
+            "tests::no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services",
+        ) {
+            return;
+        }
         harness_start_ipc_case("none");
     }
 
-    #[cfg(unix)]
     #[test]
     fn chatgpt_plan_harness_start_ipc_overrides_remote_choice() {
+        if crate::test_support::isolated_process(
+            "tests::chatgpt_plan_harness_start_ipc_overrides_remote_choice",
+        ) {
+            return;
+        }
         harness_start_ipc_case("chatgpt-plan");
     }
 
-    #[cfg(unix)]
     #[test]
     fn claude_plan_harness_start_ipc_overrides_remote_choice() {
+        if crate::test_support::isolated_process(
+            "tests::claude_plan_harness_start_ipc_overrides_remote_choice",
+        ) {
+            return;
+        }
         harness_start_ipc_case("claude-plan");
     }
 
-    #[cfg(unix)]
     #[test]
     fn anthropic_api_harness_start_ipc_advertises_eligible_bundled_agent() {
+        if crate::test_support::isolated_process(
+            "tests::anthropic_api_harness_start_ipc_advertises_eligible_bundled_agent",
+        ) {
+            return;
+        }
         harness_start_ipc_case("anthropic-api");
     }
 
-    #[cfg(unix)]
     #[test]
     fn compatible_harness_start_ipc_advertises_eligible_bundled_agent() {
+        if crate::test_support::isolated_process(
+            "tests::compatible_harness_start_ipc_advertises_eligible_bundled_agent",
+        ) {
+            return;
+        }
         harness_start_ipc_case("compatible");
     }
 
-    #[cfg(unix)]
-    const HARNESS_START_IPC_DOCKER: &str = r#"#!/bin/sh
-printf '%s\t%s\n' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
-case "$*" in
-  "version --format {{.Server.APIVersion}}") printf '1.44\n' ;;
-  "compose version") printf 'Docker Compose synthetic\n' ;;
-  "compose ps --format {{.Ports}}") printf '127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp\n' ;;
-  "compose up -d --no-build "* | "compose --profile harness up -d --no-build "*) ;;
-  "compose run --rm migrate") printf 'synthetic migration barrier\n' >&2; exit 71 ;;
-  *) printf 'forbidden synthetic engine command: %s\n' "$*" >&2; exit 99 ;;
-esac
-"#;
-
     #[test]
     fn start_fails_when_required_compose_service_exited_before_host_startup() {
+        if crate::test_support::isolated_process(
+            "tests::start_fails_when_required_compose_service_exited_before_host_startup",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-dead-compose-start");
         write_installed_deployment(&root);
         let record = temp_root("openbot-dead-compose-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
-        let _path = SerializedPath::set_only_with("docker", DEAD_SERVICE_START_DOCKER);
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
@@ -4229,11 +4255,16 @@ esac
 
     #[test]
     fn anthropic_start_does_not_raise_openai_only_agent_bot_or_fail_on_its_stale_exit() {
+        if crate::test_support::isolated_process(
+            "tests::anthropic_start_does_not_raise_openai_only_agent_bot_or_fail_on_its_stale_exit",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-anthropic-bot-selection-start");
         write_installed_deployment(&root);
         let record = temp_root("openbot-anthropic-bot-selection-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
-        let _path = SerializedPath::set_only_with("docker", ANTHROPIC_SERVICE_SELECTION_DOCKER);
+        let _path = SerializedPath::set_only_with("docker", "anthropic");
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
@@ -4430,7 +4461,12 @@ esac
 
     #[test]
     fn ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer() {
-        let _path = SerializedPath::set_with("docker", EMPTY_ANSWER_LOG_DOCKER);
+        if crate::test_support::isolated_process(
+            "tests::ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_with("docker", "empty-answer");
         let record = temp_root("openbot-managed-empty-answer-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
@@ -4486,7 +4522,12 @@ esac
 
     #[test]
     fn ask_the_bot_keeps_harness_log_for_picked_harness_empty_answer() {
-        let _path = SerializedPath::set_with("docker", EMPTY_ANSWER_LOG_DOCKER);
+        if crate::test_support::isolated_process(
+            "tests::ask_the_bot_keeps_harness_log_for_picked_harness_empty_answer",
+        ) {
+            return;
+        }
+        let _path = SerializedPath::set_with("docker", "empty-answer");
         let record = temp_root("openbot-picked-empty-answer-record").join("commands.log");
         std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
@@ -4545,56 +4586,6 @@ esac
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
     }
 
-    const DEAD_SERVICE_START_DOCKER: &str = r#"#!/bin/sh
-if [ -n "$OPENBOT_TEST_ENGINE_RECORD" ]; then
-  printf '%s	%s
-' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
-fi
-case "$*" in
-  "version --format {{.Server.APIVersion}}") printf '1.44
-' ;;
-  "compose version") printf 'Docker Compose version v2.0.0
-' ;;
-  "compose ps --format {{.Ports}}") ;;
-  "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph") ;;
-  "compose run --rm migrate") ;;
-  "compose ps -a --format "*) printf 'agent-computer	Exited
-migrate	Exited
-' ;;
-  "compose logs --tail 3 agent-computer") printf 'agent-computer died after boot
-' ;;
-  *) printf 'unexpected docker args: %s
-' "$*" >&2; exit 42 ;;
-esac
-"#;
-
-    const ANTHROPIC_SERVICE_SELECTION_DOCKER: &str = r#"#!/bin/sh
-if [ -n "$OPENBOT_TEST_ENGINE_RECORD" ]; then
-  printf '%s	%s
-' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
-fi
-case "$*" in
-  "version --format {{.Server.APIVersion}}") printf '1.44
-' ;;
-  "compose version") printf 'Docker Compose version v2.0.0
-' ;;
-  "compose ps --format {{.Ports}}") ;;
-  "compose up -d --no-build postgres supervisor agent-computer agent-langgraph") ;;
-  "compose run --rm migrate") ;;
-  "compose ps -a --format "*) printf 'agent-computer	Up
-migrate	Exited
-agent-bot	Exited
-agent-langgraph	Exited
-' ;;
-  "compose logs --tail 3 agent-bot") printf 'agent-bot missing OPENAI_API_KEY
-' ;;
-  "compose logs --tail 3 agent-langgraph") printf 'langgraph died after boot
-' ;;
-  *) printf 'unexpected docker args: %s
-' "$*" >&2; exit 42 ;;
-esac
-"#;
-
     fn write_installed_deployment(root: &Path) {
         std::fs::create_dir_all(root.join("server")).unwrap();
         std::fs::create_dir_all(root.join("app")).unwrap();
@@ -4647,29 +4638,6 @@ esac
         .unwrap();
         deployment::record(root, DEPLOYMENT_VERSION).unwrap();
     }
-
-    const EMPTY_ANSWER_LOG_DOCKER: &str = "#!/bin/sh\n\
-if [ -n \"$OPENBOT_TEST_ENGINE_RECORD\" ]; then\n\
-  printf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n\
-fi\n\
-if [ \"$1\" = \"version\" ]; then\n\
-  printf '1.0\\n'\n\
-  exit 0\n\
-fi\n\
-last=''\n\
-for arg in \"$@\"; do\n\
-  last=\"$arg\"\n\
-done\n\
-if [ \"$1\" = \"compose\" ] && [ \"$2\" = \"logs\" ]; then\n\
-  case \"$last\" in\n\
-    agent-langgraph)\n\
-      printf 'OpenAIAuthenticationError: agent-langgraph refused the key\\n'\n\
-      ;;\n\
-    agent-harness)\n\
-      printf 'OpenAIAuthenticationError: agent-harness refused the key\\n'\n\
-      ;;\n\
-  esac\n\
-fi\n";
 
     struct TestRequest {
         path: String,
@@ -5467,36 +5435,25 @@ fi\n";
 
     impl SerializedPath {
         fn set() -> Self {
-            Self::set_with(
-                "docker",
-                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\ncase \"$*\" in *'config --format json') printf '{\"services\":{\"supervisor\":{\"environment\":{\"COMPUTER_NAMESPACE\":\"openbot\"}}}}\\n';; esac\n",
-            )
+            Self::set_with("docker", "shutdown")
         }
 
-        fn set_with(binary: &str, script: &str) -> Self {
-            Self::set_with_path(binary, script, true)
+        fn set_with(binary: &str, scenario: &str) -> Self {
+            Self::set_with_path(binary, scenario, true)
         }
 
-        fn set_only_with(binary: &str, script: &str) -> Self {
-            Self::set_with_path(binary, script, false)
+        fn set_only_with(binary: &str, scenario: &str) -> Self {
+            Self::set_with_path(binary, scenario, false)
         }
 
-        fn set_with_path(binary: &str, script: &str, inherit_path: bool) -> Self {
+        fn set_with_path(binary: &str, scenario: &str, inherit_path: bool) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::env::var_os("PATH");
             let previous_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD");
             let bin = temp_root("openbot-fake-engine-bin");
             std::fs::create_dir_all(&bin).unwrap();
-            let command = bin.join(binary);
-            std::fs::write(&command, script).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut permissions = std::fs::metadata(&command).unwrap().permissions();
-                permissions.set_mode(0o755);
-                std::fs::set_permissions(&command, permissions).unwrap();
-            }
+            Self::write_binary_under(&bin, binary, scenario);
             let mut path = std::ffi::OsString::from(bin.clone());
             if inherit_path {
                 if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
@@ -5515,6 +5472,28 @@ fi\n";
 
         fn bin(&self) -> &Path {
             &self.bin
+        }
+
+        fn write_binary(&self, name: &str, scenario: &str) {
+            Self::write_binary_under(&self.bin, name, scenario);
+        }
+
+        fn write_binary_under(bin: &Path, name: &str, scenario: &str) {
+            let source = bin.join(format!("{name}.rs"));
+            std::fs::write(
+                &source,
+                format!(
+                    "const SCENARIO: &str = {scenario:?};\n{}",
+                    include_str!("../tests/fixtures/engine.rs")
+                ),
+            )
+            .unwrap();
+            let binary = bin.join(if cfg!(windows) && !name.ends_with(".exe") {
+                format!("{name}.exe")
+            } else {
+                name.to_string()
+            });
+            crate::test_support::compile_fixture(&source, &binary);
         }
     }
 
@@ -5553,7 +5532,6 @@ fi\n";
     }
     /// Real loopback responder in a separate process, so root/PID ownership checks use the same
     /// OS inventory as production. The Tauri mock replaces only the window, never the HTTP/PID path.
-    #[cfg(unix)]
     struct RestoreFixture {
         base: PathBuf,
         selected: PathBuf,
@@ -5564,7 +5542,6 @@ fi\n";
         ports: openbot_env::Ports,
     }
 
-    #[cfg(unix)]
     impl RestoreFixture {
         fn new() -> Self {
             Self::with_app_descendant(false)
@@ -5594,8 +5571,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--parent") {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .arg("--record-pid").arg(&args[2]).spawn().unwrap();
-        child.wait().unwrap();
+            .arg("--record-pid").arg(&args[2]).stdin(std::process::Stdio::null()).spawn().unwrap();
+        let mut stop = [0; 1];
+        let _ = std::io::stdin().read(&mut stop);
+        let _ = child.kill();
+        let _ = child.wait();
         return;
     }
     if args.get(1).map(String::as_str) == Some("--record-pid") {
@@ -5609,19 +5589,12 @@ fn main() {
     serve(app);
 }
 "#).unwrap();
-            let binary = base.join("listener");
-            let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-            let output = std::process::Command::new(rustc)
-                .arg(&source)
-                .arg("-o")
-                .arg(&binary)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            let binary = base.join(if cfg!(windows) {
+                "listener.exe"
+            } else {
+                "listener"
+            });
+            crate::test_support::compile_fixture(&source, &binary);
             let mut child = std::process::Command::new(&binary)
                 .current_dir(&owned)
                 .stdout(std::process::Stdio::piped())
@@ -5643,6 +5616,7 @@ fn main() {
                 app_command.arg("--parent").arg(&descendant_file);
             }
             let mut app_child = app_command
+                .stdin(std::process::Stdio::piped())
                 .current_dir(&owned)
                 .stdout(std::process::Stdio::piped())
                 .spawn()
@@ -5705,24 +5679,41 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
     impl Drop for RestoreFixture {
         fn drop(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
-            if let Some(pid) = self.app_descendant_pid {
-                // This PID was emitted by our own helper before its port announcement.
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .status();
+            if self.app_descendant_pid.is_some() {
+                // Dropping the pipe asks the fixture launcher to kill and reap its own child.
+                drop(self.app_child.stdin.take());
+            } else {
+                let _ = self.app_child.kill();
             }
-            let _ = self.app_child.kill();
             let _ = self.app_child.wait();
             let _ = std::fs::remove_dir_all(&self.base);
         }
     }
 
-    #[cfg(unix)]
+    #[test]
+    fn fixture_compilation_works_while_engine_path_is_replaced() {
+        if crate::test_support::isolated_process(
+            "tests::fixture_compilation_works_while_engine_path_is_replaced",
+        ) {
+            return;
+        }
+        let path = SerializedPath::set_only_with("docker", "shutdown");
+        path.write_binary("provider", "compose-provider");
+        let binary = path.bin().join(if cfg!(windows) {
+            "provider.exe"
+        } else {
+            "provider"
+        });
+        let output = std::process::Command::new(binary).output().unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains("Docker Compose version disposable-provider"));
+    }
+
     #[test]
     fn restore_window_refuses_answering_other_deployment_and_shows_recorded_setup() {
         let f = RestoreFixture::new();
@@ -5745,7 +5736,6 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn restore_window_owned_runtime_opens_app_and_active_root_takes_precedence() {
         let f = RestoreFixture::new();
@@ -5769,7 +5759,6 @@ fn main() {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn restore_window_unavailable_runtime_replaces_stale_page_with_setup() {
         let mut f = RestoreFixture::new();
@@ -5787,7 +5776,6 @@ fn main() {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn restore_window_unproven_identity_shows_setup_without_losing_selected_root() {
         let f = RestoreFixture::new();
@@ -5811,7 +5799,6 @@ fn main() {
             Some(f.owned.as_path())
         );
     }
-    #[cfg(unix)]
     #[test]
     fn app_adoption_and_restore_refuse_foreign_app_with_owned_api_still_running() {
         let f = RestoreFixture::new();
@@ -5832,7 +5819,6 @@ fn main() {
             "owned API must not authorize a foreign app: initial={initial_adoption}, shown={shown:?}, restore={destination}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn app_adoption_and_restore_allow_owned_app_direct_and_launcher_descendant() {
         for descendant in [false, true] {

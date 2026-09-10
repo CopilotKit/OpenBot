@@ -2655,6 +2655,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn windows_held_replacement_cleanup_keeps_evidence_on_refusal() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_held_replacement_cleanup_keeps_evidence_on_refusal",
+        ) {
+            return;
+        }
         let root = temp_root("windows-held-replacement-refusal");
         std::fs::create_dir_all(&root).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -2705,6 +2710,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing() {
+        if crate::test_support::isolated_process("stack::tests::windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing") { return; }
         for parent in [0, std::process::id()] {
             let root = temp_root("windows-held-identity-refusal");
             std::fs::create_dir_all(&root).unwrap();
@@ -2824,18 +2830,7 @@ mod tests {
             } else {
                 let source = bin.join("fake_engine.rs");
                 std::fs::write(&source, FAKE_ENGINE_SOURCE).unwrap();
-                let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-                let output = Command::new(rustc)
-                    .arg(&source)
-                    .arg("-o")
-                    .arg(&docker)
-                    .output()
-                    .expect("rustc should run for the fake engine");
-                assert!(
-                    output.status.success(),
-                    "fake engine did not compile: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
+                crate::test_support::compile_fixture(&source, &docker);
             }
             let mut path = std::ffi::OsString::from(&bin);
             if inherit_path {
@@ -2987,19 +2982,7 @@ fn main() {
             } else {
                 "cleanup-command"
             });
-            let rustc = std::env::var_os("RUSTC")
-                .unwrap_or_else(|| "/Users/dmckay/.cargo/bin/rustc".into());
-            let output = Command::new(rustc)
-                .arg(&source)
-                .arg("-o")
-                .arg(&compiled)
-                .output()
-                .expect("rustc should run for cleanup command fixture");
-            assert!(
-                output.status.success(),
-                "cleanup command fixture did not compile: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            crate::test_support::compile_fixture(&source, &compiled);
             for name in ["lsof", "netstat", "taskkill", "powershell"] {
                 std::fs::copy(
                     &compiled,
@@ -3145,6 +3128,11 @@ fn main() {
 
     #[test]
     fn service_inspection_spawn_failure_is_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_spawn_failure_is_a_problem",
+        ) {
+            return;
+        }
         let _fixture = PathFixture::with_broken_engine();
         let root = temp_root("openbot-service-inspection-spawn");
         std::fs::create_dir_all(&root).unwrap();
@@ -3169,6 +3157,11 @@ fn main() {
 
     #[test]
     fn service_inspection_nonzero_status_is_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_nonzero_status_is_a_problem",
+        ) {
+            return;
+        }
         let _fixture = PathFixture::with_fake_engine("exit17");
         let root = temp_root("openbot-service-inspection-status");
         std::fs::create_dir_all(&root).unwrap();
@@ -3193,6 +3186,11 @@ fn main() {
 
     #[test]
     fn service_inspection_empty_success_is_healthy() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_empty_success_is_healthy",
+        ) {
+            return;
+        }
         let _fixture = PathFixture::with_fake_engine("empty");
         let root = temp_root("openbot-service-inspection-empty");
         std::fs::create_dir_all(&root).unwrap();
@@ -3206,6 +3204,11 @@ fn main() {
 
     #[test]
     fn service_inspection_blank_lines_are_healthy_empty_output() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_blank_lines_are_healthy_empty_output",
+        ) {
+            return;
+        }
         let _fixture = PathFixture::with_fake_engine("blank-lines");
         let root = temp_root("openbot-service-inspection-blank-lines");
         std::fs::create_dir_all(&root).unwrap();
@@ -3219,6 +3222,11 @@ fn main() {
 
     #[test]
     fn malformed_service_inspection_rows_are_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::malformed_service_inspection_rows_are_a_problem",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-service-inspection-malformed");
         std::fs::create_dir_all(&root).unwrap();
 
@@ -3245,6 +3253,11 @@ fn main() {
 
     #[test]
     fn service_inspection_reports_only_unexpected_exited_services() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_reports_only_unexpected_exited_services",
+        ) {
+            return;
+        }
         let _fixture = PathFixture::with_fake_engine("mixed");
         let root = temp_root("openbot-service-inspection-rows");
         std::fs::create_dir_all(&root).unwrap();
@@ -3300,6 +3313,11 @@ fn main() {
 
     #[test]
     fn source_bound_windows_command_failures_use_disposable_commands() {
+        if crate::test_support::isolated_process(
+            "stack::tests::source_bound_windows_command_failures_use_disposable_commands",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-source-bound-windows-cleanup");
         std::fs::create_dir_all(&root).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -3353,6 +3371,11 @@ fn main() {
 
     #[test]
     fn windows_pidfile_preserves_all_records_on_partial_failure_and_retries() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_pidfile_preserves_all_records_on_partial_failure_and_retries",
+        ) {
+            return;
+        }
         let root = temp_root("windows-pidfile-retry");
         let recorded = [
             recorded_process("server", 9000, "/Date(1000)/"),
@@ -3405,6 +3428,7 @@ fn main() {
 
     #[test]
     fn windows_pidfile_unknown_identity_is_preserved_without_killing_any_process() {
+        if crate::test_support::isolated_process("stack::tests::windows_pidfile_unknown_identity_is_preserved_without_killing_any_process") { return; }
         let root = temp_root("windows-pidfile-unknown-identity");
         let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
         write_host_pid_file(
@@ -3450,6 +3474,7 @@ fn main() {
 
     #[test]
     fn windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors() {
+        if crate::test_support::isolated_process("stack::tests::windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors") { return; }
         let root = temp_root("windows-pidfile-remove");
         let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
         let fixture = CleanupCommandFixture::new(&root);
@@ -3574,19 +3599,7 @@ fn main() {
         )
         .unwrap();
         let binary = dir.join("listener");
-        let rustc =
-            std::env::var_os("RUSTC").unwrap_or_else(|| "/Users/dmckay/.cargo/bin/rustc".into());
-        let output = Command::new(rustc)
-            .arg(&source)
-            .arg("-o")
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "listener helper did not compile: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        crate::test_support::compile_fixture(&source, &binary);
         let mut child = Command::new(&binary)
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -3638,6 +3651,11 @@ fn main() {
 
     #[test]
     fn recorded_server_ownership_requires_matching_identity_on_listening_port() {
+        if crate::test_support::isolated_process(
+            "stack::tests::recorded_server_ownership_requires_matching_identity_on_listening_port",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-already-running-windows-owner");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -3683,6 +3701,11 @@ fn main() {
 
     #[test]
     fn recorded_server_ownership_is_false_without_current_records() {
+        if crate::test_support::isolated_process(
+            "stack::tests::recorded_server_ownership_is_false_without_current_records",
+        ) {
+            return;
+        }
         let root = temp_root("openbot-already-running-no-owner");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -3947,6 +3970,11 @@ fn main() {
 
     #[test]
     fn windows_recording_refuses_partial_inventory_without_replacing_pidfile() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_refuses_partial_inventory_without_replacing_pidfile",
+        ) {
+            return;
+        }
         let root = temp_root("windows-record-partial-inventory");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -3988,6 +4016,11 @@ fn main() {
 
     #[test]
     fn windows_recording_refuses_incomplete_identity_without_replacing_pidfile() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_refuses_incomplete_identity_without_replacing_pidfile",
+        ) {
+            return;
+        }
         for (field, value) in [
             ("ExecutablePath", serde_json::Value::Null),
             ("CommandLine", serde_json::Value::Null),
@@ -4037,6 +4070,7 @@ fn main() {
 
     #[test]
     fn windows_recording_refuses_duplicate_inventory_rows_without_replacing_pidfile() {
+        if crate::test_support::isolated_process("stack::tests::windows_recording_refuses_duplicate_inventory_rows_without_replacing_pidfile") { return; }
         let root = temp_root("windows-record-duplicate-inventory");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -4081,6 +4115,7 @@ fn main() {
 
     #[test]
     fn windows_recording_refuses_duplicate_requested_hosts_without_inventory_or_replacement() {
+        if crate::test_support::isolated_process("stack::tests::windows_recording_refuses_duplicate_requested_hosts_without_inventory_or_replacement") { return; }
         let root = temp_root("windows-record-duplicate-request");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -4122,6 +4157,11 @@ fn main() {
 
     #[test]
     fn windows_recording_writes_all_requested_records_and_ignores_extra_rows() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_writes_all_requested_records_and_ignores_extra_rows",
+        ) {
+            return;
+        }
         let root = temp_root("windows-record-complete-inventory");
         std::fs::create_dir_all(&root).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -4191,6 +4231,7 @@ fn main() {
 
     #[test]
     fn windows_inventory_command_errors_preserve_pidfiles_and_select_no_processes() {
+        if crate::test_support::isolated_process("stack::tests::windows_inventory_command_errors_preserve_pidfiles_and_select_no_processes") { return; }
         let root = temp_root("inventory-command-evidence");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -4562,6 +4603,7 @@ fn main() {
 
     #[test]
     fn computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine") { return; }
         let path = PathFixture::with_fake_engine("computer-stop");
         let suffix = if cfg!(windows) { ".exe" } else { "" };
         std::fs::copy(
@@ -4611,6 +4653,11 @@ fn main() {
 
     #[test]
     fn computer_stop_preserves_supervisor_default_and_trim_rules() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_preserves_supervisor_default_and_trim_rules",
+        ) {
+            return;
+        }
         let path = PathFixture::with_fake_engine("computer-stop");
         for (index, namespace) in ["openbot", "", "  ", " fixture-selected "]
             .iter()
@@ -4649,6 +4696,11 @@ fn main() {
 
     #[test]
     fn computer_stop_refuses_unresolved_namespace_before_listing_or_stopping() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_refuses_unresolved_namespace_before_listing_or_stopping",
+        ) {
+            return;
+        }
         let path = PathFixture::with_fake_engine("computer-stop");
         let configs = [
             "not json".to_string(),
@@ -4678,6 +4730,7 @@ fn main() {
 
     #[test]
     fn computer_stop_without_installed_config_never_searches_parent_or_lists_globally() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_without_installed_config_never_searches_parent_or_lists_globally") { return; }
         let path = PathFixture::with_fake_engine("computer-stop");
         let record = path.bin.join("no-stack.log");
         std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
@@ -4930,6 +4983,11 @@ fn main() {
 
     #[test]
     fn windows_app_port_requires_the_app_role_and_its_verified_descendant() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_app_port_requires_the_app_role_and_its_verified_descendant",
+        ) {
+            return;
+        }
         let root = temp_root("windows-app-role-port");
         std::fs::create_dir_all(root.join(".logs")).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
