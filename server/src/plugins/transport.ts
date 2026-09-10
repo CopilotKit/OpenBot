@@ -12,23 +12,38 @@ import * as mcp from "./mcp";
  * API is generally available — so one vendor needed a second way in, and a second way in wants a
  * seam rather than a branch at each call site.
  *
- * The interface is MCP's OWN, unchanged: `listTools` and `callTool`, the two functions
- * {@link ./mcp} already exported, with the shapes it already used. That direction matters. Had the
- * REST adapter been given its own interface with MCP adapted to fit, MCP would have become a special
- * case of a shape invented for Drive. As it is, MCP is the contract and the adapter conforms to it,
- * which is why swapping back is one field on one entry and not a refactor.
+ * The interface STARTED as MCP's OWN: `listTools` and `callTool`, the two functions {@link ./mcp}
+ * already exported, with the shapes it already used. That direction matters. Had the REST adapter
+ * been given its own interface with MCP adapted to fit, MCP would have become a special case of a
+ * shape invented for Drive. As it is, MCP is the contract the adapters conform to, which is why
+ * swapping Drive back is one field on one catalogue entry and not a refactor.
+ *
+ * What has been added since is a SUPERSET of that shape rather than a departure from it, so an
+ * MCP-shaped implementation still satisfies the seam unchanged. `listTools` answers `ListedTool[]`,
+ * which is `McpTool` plus optional fields a broker publishes and an MCP server does not; the
+ * connection carries an `actorId` and a `botId` for the transports whose authorization is the
+ * actor rather than a credential; and one reserved key on `args` hands a transport the recorded
+ * version of the action being called. Every addition is optional, which is why `mcp.ts` reads none
+ * of them and is still an implementation of this interface rather than an exception to it.
  *
  * There are exactly two call sites in the whole system — the tool listing and the tool call — and
- * both take a transport from here. Nothing else, including the OAuth flow, the per-person credential
- * selection, the grants, the policy engine and the audit trail, knows which protocol is underneath.
+ * both take a transport from here. Nothing else reads a `TransportKind` at all: the OAuth flow,
+ * the grants, the policy engine and the audit trail are written without one. Whose credential a
+ * row goes out on is a SEPARATE axis — `./access`'s `CredentialSource` — and that one is NOT
+ * protocol-blind, since the brokered branch of the credential selection looks a person's
+ * connection up in `composio_connections` by name. Read the blindness as a claim about this union
+ * and not about the store.
  */
 export type VendorTransport = {
   /**
    * Whether discovering the tool list needs somebody's credential.
    *
    * True for MCP, where the list is an answer from a remote server that will not give it up
-   * unauthenticated. False for an adapter whose tool list is this code, where there is nothing to ask
-   * and nobody to ask it of.
+   * unauthenticated. False whenever no credential has to be SELECTED for the listing: either
+   * because the list is this code, as it is for Drive and Routines, or because the transport
+   * already holds the one key it lists on and never receives it through the connection, as
+   * Composio does — a broker publishes an action's schema to anybody who asks with the
+   * deployment's own key.
    *
    * It is on the transport rather than assumed by the caller because getting it wrong is a whole
    * broken setup flow. Assumed true, an administrator configuring Drive was sent to their own
@@ -41,15 +56,21 @@ export type VendorTransport = {
     url: string;
     token?: string;
     /**
-     * Who this call is for, and which Bot is making it.
+     * Declared by the shared connection shape, and never supplied on THIS path.
      *
-     * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
-     * holds it is already decided by the time the connection is built. The builtin transport has no
-     * credential and no vendor — it acts on this deployment's own tables — so the actor is not
-     * context, it is the authorization, and it refuses without one. A routine is somebody's.
+     * `refreshTools` is the only caller of `listTools` in the system, and it passes `{url, token}`.
+     * No implementation here even accepts either field: `builtin-routines` takes no argument at
+     * all, Composio takes only `url`, and MCP and Drive take `{url, token}`. So a transport that
+     * read one would read `undefined` every time, and nothing on the listing path may be
+     * authorized by them.
+     *
+     * The actor is the authorization on the CALLING path instead — see {@link callTool} below,
+     * where Routines and Composio each refuse a run attributed to nobody. Listing is not
+     * somebody's: it is what this deployment offers everybody. A list that insisted on an actor
+     * would be asked without one, store zero tools, and leave the vendor advertising nothing to
+     * anybody.
      */
     actorId?: string;
-    /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
     botId?: string;
   }): Promise<ListedTool[]>;
   callTool(
@@ -59,10 +80,16 @@ export type VendorTransport = {
       /**
        * Who this call is for, and which Bot is making it.
        *
-       * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
-       * holds it is already decided by the time the connection is built. The builtin transport has no
-       * credential and no vendor — it acts on this deployment's own tables — so the actor is not
-       * context, it is the authorization, and it refuses without one. A routine is somebody's.
+       * Ignored where a CREDENTIAL is the authorization: MCP and Drive answer to a token, and whose
+       * it is was settled before the connection was built, so neither module's `Connection` type
+       * carries these at all. Read where the ACTOR is the authorization: Routines acts on this
+       * deployment's own tables, and Composio opens one person's account with a key the deployment
+       * holds for everybody, so both refuse a run attributed to nobody rather than run it as
+       * somebody. A routine is somebody's; so is a mailbox.
+       *
+       * They come off the connection, which the call path derives from the session, and are never
+       * read out of `args`. A model that could name either could schedule work as another person or
+       * read another person's mail.
        */
       actorId?: string;
       /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
