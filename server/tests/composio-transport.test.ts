@@ -28,6 +28,25 @@ afterEach(() => useComposioClient(null));
 
 type Recorded = { slug: string; userId: string; version: string };
 
+/**
+ * An answer in the shape `ToolExecuteResponseSchema` actually permits.
+ *
+ * Every stub here goes through this rather than returning a shape of its own, because the SDK's
+ * schema makes `data`, `error` and `successful` all REQUIRED — so a stub that resolves `null`, or a
+ * bare string, is testing a case the library cannot produce, and a test built on an impossible input
+ * proves nothing about the code that reads a real one.
+ */
+function answered(
+  data: Record<string, unknown>,
+  outcome: { error?: string | null; successful?: boolean } = {},
+) {
+  return {
+    data,
+    error: outcome.error ?? null,
+    successful: outcome.successful ?? true,
+  };
+}
+
 function recording(answers: Partial<ComposioActions> = {}): {
   client: ComposioActions;
   calls: Recorded[];
@@ -41,7 +60,7 @@ function recording(answers: Partial<ComposioActions> = {}): {
         answers.execute ??
         (async (slug, userId, version) => {
           calls.push({ slug, userId, version });
-          return { ok: true };
+          return answered({ ok: true });
         }),
     },
   };
@@ -275,7 +294,7 @@ describe("calling one action", () => {
       recording({
         execute: async (_slug, _userId, _version, args) => {
           seen.push(args);
-          return {};
+          return answered({});
         },
       }).client,
     );
@@ -407,7 +426,9 @@ describe("calling one action", () => {
 
   test("a result is capped visibly rather than silently", async () => {
     useComposioClient(
-      recording({ execute: async () => "x".repeat(60_000) }).client,
+      recording({
+        execute: async () => answered({ body: "x".repeat(60_000) }),
+      }).client,
     );
 
     const result = await callTool(
@@ -421,7 +442,7 @@ describe("calling one action", () => {
   });
 
   test("an empty answer says so in words rather than being empty", async () => {
-    useComposioClient(recording({ execute: async () => null }).client);
+    useComposioClient(recording({ execute: async () => answered({}) }).client);
 
     const result = await callTool(
       { url: "composio://gmail", actorId: "user_asker" },
@@ -431,6 +452,166 @@ describe("calling one action", () => {
 
     // An empty string in front of a model reads as "the action had nothing to say" rather than "there
     // is nothing there", and the model closes the gap from memory. Same reasoning as `resultText`.
+    // `data` is a required record, so the empty answer the SDK can actually produce is `{}` — if that
+    // did not count, this branch would be unreachable and its promise would be a fiction.
     expect(result.text).toMatch(/returned nothing/i);
+  });
+
+  test("an answer the vendor marked unsuccessful is a failure, not content", async () => {
+    // `ToolExecuteResponseSchema` makes `successful` REQUIRED and resolves `{ data, error,
+    // successful }`, so a 200 answer can carry a failure. Reported as a success it is audited as
+    // `mcp.call_succeeded` and the failure is handed to the model as though it were content.
+    useComposioClient(
+      recording({
+        execute: async () =>
+          answered(
+            {},
+            {
+              successful: false,
+              error: "Gmail rejected the query: invalid search syntax.",
+            },
+          ),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("invalid search syntax");
+  });
+
+  test("a successful answer hands the model the action's data and not the envelope", async () => {
+    useComposioClient(
+      recording({
+        execute: async () => ({
+          ...answered({ messages: [{ id: "m1" }] }),
+          logId: "log_must_not_appear",
+        }),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("m1");
+    // `successful`, `error` and `logId` are the envelope this transport reads to decide the outcome.
+    // Reporting them as content spends a model's context on our own bookkeeping.
+    expect(result.text).not.toContain("log_must_not_appear");
+    expect(result.text).not.toContain("successful");
+  });
+
+  test("an unsuccessful answer with no sentence still says something actionable", async () => {
+    useComposioClient(
+      recording({
+        execute: async () => answered({}, { successful: false, error: null }),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("GMAIL_FETCH_EMAILS");
+    expect(result.text).toMatch(/Plugins page/);
+  });
+
+  test("a failure carrying only the vendor's placeholder says something actionable", async () => {
+    // "Error executing the tool X" is the string this module's own comment calls useless. Echoing it
+    // tells a person nothing they did not already know: they asked for that tool.
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new Error("Error executing the tool GMAIL_FETCH_EMAILS");
+        },
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.text).not.toBe("Error executing the tool GMAIL_FETCH_EMAILS");
+    expect(result.text).toMatch(/Plugins page/);
+  });
+
+  test("an enormous vendor sentence is capped in a refusal too, and says so", async () => {
+    useComposioClient(
+      recording({
+        execute: async () =>
+          answered({}, { successful: false, error: "x".repeat(60_000) }),
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    // A refusal goes into a model's context exactly as a result does, so an uncapped vendor sentence
+    // is the same unbounded spend the success path already refuses to make.
+    expect(result.isError).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBeLessThan(25_000);
+  });
+
+  test("an enormous thrown message is capped in a refusal too", async () => {
+    useComposioClient(
+      recording({
+        execute: async () => {
+          throw new Error("y".repeat(60_000));
+        },
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBeLessThan(25_000);
+  });
+
+  test("our own serialization failure is not reported as the action having failed", async () => {
+    useComposioClient(
+      recording({
+        execute: async () => {
+          const data: Record<string, unknown> = { subject: "hello" };
+          // A circular reference, which `JSON.stringify` refuses. The action already ran and the
+          // vendor already answered; what fails is this deployment reading that answer.
+          data.itself = data;
+          return answered(data);
+        },
+      }).client,
+    );
+
+    const result = await callTool(
+      { url: "composio://gmail", actorId: "user_asker" },
+      "GMAIL_FETCH_EMAILS",
+      { __version: "20260903_00" },
+    );
+
+    expect(result.isError).toBe(true);
+    // Two different events, and the audit trail has to be able to tell them apart: the vendor did
+    // its part here.
+    expect(result.text).toMatch(/could not turn that answer into text/i);
+    expect(result.text).toContain("GMAIL_FETCH_EMAILS");
   });
 });

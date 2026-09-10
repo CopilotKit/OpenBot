@@ -48,14 +48,38 @@ export type ComposioAction = {
 };
 
 /**
+ * What Composio answers an execute with, as its own SDK defines it.
+ *
+ * `ToolExecuteResponseSchema` in `@composio/core` 0.18.1 spells all three of these REQUIRED — `data`
+ * a record, `error` a nullable string, `successful` a boolean — so the outcome of a call is a field
+ * on a resolution and not only a thrown exception. Named here rather than imported so this module
+ * keeps no compile-time dependency on the vendor's package; the adapter that installs the real
+ * client is the one place their types belong.
+ *
+ * `logId` and `sessionInfo` are the rest of the envelope, carried so the type stays a true statement
+ * about what arrives. Nothing here reads them and nothing here shows them to a model.
+ */
+export type ComposioResult = {
+  data: Record<string, unknown>;
+  error: string | null;
+  successful: boolean;
+  logId?: string;
+  sessionInfo?: unknown;
+};
+
+/**
  * What this module needs of Composio, and nothing more.
  *
  * A narrow projection rather than their client, so a test satisfies it with two functions and the
  * SDK's shape is somebody else's problem in exactly one place: the adapter that installs the real one.
  *
- * `execute` RESOLVES OR THROWS, with no error field to check. That is not a simplification — it is
- * what the live API does, confirmed by calling it. An earlier draft of this module checked a
- * `{ data, error }` shape that never occurs, so every stubbed test passed against a fiction.
+ * `execute` RESOLVES AN OUTCOME, AND RESOLVING IS NOT SUCCEEDING. This comment used to say the
+ * opposite — "resolves or throws, with no error field to check" — and {@link callTool} was written to
+ * match the comment rather than the library, which is how a 200 answer carrying `successful: false`
+ * came back from this transport as `isError: false`, was audited as `mcp.call_succeeded`, and was
+ * handed to the model as though the failure were content. The installed schema is the authority:
+ * `successful` is required. Throws still happen too, for a transport fault or a 4xx, so both a
+ * resolution and an exception have to be read.
  */
 export type ComposioActions = {
   listActions(toolkit: string): Promise<ComposioAction[]>;
@@ -64,7 +88,7 @@ export type ComposioActions = {
     userId: string,
     version: string,
     args: Record<string, unknown>,
-  ): Promise<unknown>;
+  ): Promise<ComposioResult>;
 };
 
 let installed: ComposioActions | null = null;
@@ -192,8 +216,9 @@ export async function listTools(connection: {
  * openbot already had this lesson from Drive, where a generic message cost a round of probing and the
  * vendor's own "The caller does not have permission" named the problem immediately.
  *
- * Null when there is no such sentence, so the caller falls back to the thrown message rather than
- * inventing one.
+ * Null when there is no such sentence, which leaves the caller to choose a fallback rather than
+ * inventing one here. That choice is not simply "the thrown message": the thrown message is often the
+ * placeholder above, and passing it on tells the reader nothing. See {@link unexplained}.
  */
 export function vendorSentence(error: unknown): string | null {
   const cause = (error as { cause?: unknown } | null | undefined)?.cause;
@@ -201,6 +226,27 @@ export function vendorSentence(error: unknown): string | null {
   const inner = (outer as { error?: unknown } | null | undefined)?.error;
   const message = (inner as { message?: unknown } | null | undefined)?.message;
   return typeof message === "string" && message.trim() !== "" ? message : null;
+}
+
+/**
+ * The vendor's placeholder, which is the one sentence never worth passing on.
+ *
+ * "Error executing the tool GMAIL_FETCH_EMAILS" tells a reader only the name of the thing they asked
+ * for. Matched on its opening rather than on the whole string, because the slug varies and the
+ * punctuation after it has not been stable across vendor versions.
+ */
+const VENDOR_PLACEHOLDER = /^error executing the tool\b/i;
+
+/**
+ * What to say when the vendor reported a failure and said nothing about it.
+ *
+ * A sentence naming the one thing the reader can actually do, because the alternative is echoing the
+ * placeholder above — and a model handed "Error executing the tool X" will either retry the identical
+ * call or invent a reason. The likely cause by a wide margin is a connection that has lapsed, which
+ * is a person's own two-click fix on the page named here.
+ */
+function unexplained(toolName: string): string {
+  return `${toolName} failed and Composio did not say why. Check that this app is still connected on its Plugins page, then try again.`;
 }
 
 /**
@@ -239,39 +285,83 @@ function listingSentence(toolkit: string, error: unknown): string {
   );
 }
 
+/**
+ * The cap every string this module puts in front of a model goes through.
+ *
+ * Its own function because BOTH ANSWERS NEED IT, and only one of them used to get it. A refusal lands
+ * in a model's context exactly as a result does, and a vendor's sentence is no shorter for being a
+ * failure — so {@link failure} capping nothing and reporting `truncated: false` was the silent
+ * truncation's mirror image: unbounded text, plus a field stating that nothing had been cut.
+ */
+function cap(text: string): { text: string; truncated: boolean } {
+  if (text.length <= MAX_RESULT_CHARS) return { text, truncated: false };
+  return {
+    text: `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated]`,
+    truncated: true,
+  };
+}
+
 const failure = (message: string): McpCallResult => ({
-  text: message,
+  ...cap(message),
   isError: true,
-  truncated: false,
 });
 
 /**
+ * The serializations that mean the action had nothing to say.
+ *
+ * `{}` is in here because `data` is a required RECORD: an action that matched nothing answers with an
+ * empty object, so if that did not count as nothing the branch below would be unreachable and its
+ * promise a fiction. `""` and `"null"` stay for a client whose projection is looser than the schema.
+ */
+const NOTHING = new Set(["", "null", "{}"]);
+
+/**
  * What the model reads, capped visibly.
+ *
+ * THE ACTION'S DATA, NOT THE WHOLE ENVELOPE. `error`, `successful` and `logId` are what
+ * {@link callTool} reads to decide the outcome; repeating them as content spends a model's context on
+ * this transport's own bookkeeping and invites the model to draw its own conclusion from a field it
+ * should never have seen.
  *
  * The same cap the MCP transport applies and for the same reason: a tool result goes straight into a
  * model's context, so an unbounded one is somebody else's server deciding how much of our context
  * window to spend. Truncated visibly, never silently. An empty answer is stated in words rather than
  * returned empty — an empty string reads as "the action had nothing to say" rather than "there is
  * nothing there", and a model closes that gap from memory.
+ *
+ * CAN THROW, and is called from outside the vendor's `try` for that reason. See {@link callTool}.
  */
-function resultOf(data: unknown): McpCallResult {
-  const text =
-    typeof data === "string" ? data : JSON.stringify(data ?? null, null, 2);
-  const truncated = text.length > MAX_RESULT_CHARS;
-  if (!truncated && (text === "" || text === "null")) {
+function resultOf(data: ComposioResult["data"] | undefined): McpCallResult {
+  const text = JSON.stringify(data ?? null, null, 2);
+  if (NOTHING.has(text)) {
     return {
       text: "The action returned nothing.",
       isError: false,
       truncated: false,
     };
   }
-  return {
-    text: truncated
-      ? `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated]`
-      : text,
-    isError: false,
-    truncated,
-  };
+  return { ...cap(text), isError: false };
+}
+
+/**
+ * What the vendor said about its own call, read from the field its schema requires it to send.
+ *
+ * The criterion is that the vendor SAID the call did not succeed, which is `successful === false` and
+ * not a falsy `successful`. An absent field is not the vendor reporting a failure — the schema makes
+ * it impossible from the real client, and reading it as a failure would turn a projection looser than
+ * the schema into a refusal of a call that worked.
+ *
+ * Null when there is nothing to report, so the caller can tell "succeeded" from "failed silently".
+ */
+function reportedFailure(
+  answer: ComposioResult,
+  toolName: string,
+): string | null {
+  if (answer.successful !== false) return null;
+  const sentence = typeof answer.error === "string" ? answer.error.trim() : "";
+  return sentence === "" || VENDOR_PLACEHOLDER.test(sentence)
+    ? unexplained(toolName)
+    : sentence;
 }
 
 /**
@@ -284,6 +374,12 @@ function resultOf(data: unknown): McpCallResult {
  * A failure comes back as a result rather than a throw, matching `builtin-routines`. The model is
  * mid-run with a person waiting; an exception ends the turn with nothing said, and the refusal is in
  * the audit trail either way.
+ *
+ * THREE KINDS OF FAILURE, all of them `isError: true` and each with its own sentence, because
+ * `store.ts` records that sentence beside the audit row: this transport refused before dialling, the
+ * vendor reported a failure — by throwing, or in the `successful` field of a 200 answer — or the
+ * vendor answered and this deployment could not read what it said. Only the last of those is ours,
+ * and it must not arrive wearing the vendor's words.
  */
 export async function callTool(
   connection: { url: string; actorId?: string },
@@ -324,15 +420,39 @@ export async function callTool(
     );
   }
 
+  /*
+   * THE VENDOR'S TRY HOLDS THE VENDOR'S CALL AND NOTHING ELSE.
+   *
+   * `resultOf` used to be invoked inside it, so a `JSON.stringify` throw of ours — a circular
+   * reference, a BigInt, a RangeError on something enormous — was reported as the action having
+   * failed after it ran. Those are two different events: in one the vendor refused, in the other the
+   * vendor did its part and this deployment could not read the answer. The audit trail has to be able
+   * to tell them apart, and it cannot if both arrive wearing the vendor's words.
+   */
+  let answer: ComposioResult;
   try {
-    return resultOf(await installed.execute(toolName, userId, version, rest));
+    answer = await installed.execute(toolName, userId, version, rest);
   } catch (error) {
     // The vendor's own sentence when there is one, because a generic message costs a diagnosis.
+    const thrown = error instanceof Error ? error.message.trim() : "";
     return failure(
       vendorSentence(error) ??
-        (error instanceof Error
-          ? error.message
-          : "Composio did not answer this action."),
+        (thrown === "" || VENDOR_PLACEHOLDER.test(thrown)
+          ? unexplained(toolName)
+          : thrown),
+    );
+  }
+
+  const reported = reportedFailure(answer, toolName);
+  if (reported !== null) return failure(reported);
+
+  try {
+    return resultOf(answer.data);
+  } catch (error) {
+    return failure(
+      `${toolName} ran and Composio answered, but this deployment could not turn that answer into text: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
 }
