@@ -999,10 +999,10 @@ export function createApp(
           : undefined,
         // Whether "built-in" is a kind of coworker this deployment can actually make: the create
         // path falls back to the managed Bot's endpoint, so without one it can only refuse.
-        config.managedAgent !== undefined,
+        config.managedAgent?.endpoint !== undefined,
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
-        config.managedAgent?.endpoint.toString(),
+        config.managedAgent?.endpoint?.toString(),
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

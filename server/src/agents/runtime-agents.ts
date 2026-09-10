@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import type { ManagedAgentConfig } from "../config";
 import { type RegisteredAgent, registeredAgentFromRow } from "../copilot";
 import type { CredentialSecretReader } from "../credentials";
 import type { Database } from "../db/client";
@@ -24,7 +25,7 @@ export function createRuntimeAgentLoader(
   /** Resolves a customer agent's key at load time. Absent means no agent can carry one. */
   vault?: { reader: CredentialSecretReader; encryptionKey: string },
   /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
-  managedAgent?: { endpoint: URL; token: string; alsoRun?: URL },
+  managedAgent?: ManagedAgentConfig,
 ) {
   return async (actor: AgentActor): Promise<RegisteredAgent[]> => {
     const [active, tombstones] = await Promise.all([

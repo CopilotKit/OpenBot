@@ -114,7 +114,8 @@ export function configuredAuthProviders(
 }
 
 export type ManagedAgentConfig = {
-  endpoint: URL;
+  /** The bundled Bot, absent when this deployment's provider cannot run it. */
+  endpoint?: URL;
   /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
   token: string;
   /**
@@ -150,11 +151,10 @@ export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
   /**
-   * The Bot in the box, when this deployment has one.
+   * Authentication for the bundled Bot and/or the installed picked harness.
    *
-   * Absent is the one-container image: it carries no AG-UI process, and a required URL would
-   * register a coworker against a host that is not there. Set both the URL and the token together
-   * when a remote Bot is actually running.
+   * The bundled endpoint is optional: plan credentials can run a picked harness without it.
+   * Its presence, not this auth configuration, determines whether a bundled Bot is available.
    */
   managedAgent?: ManagedAgentConfig;
   /**
@@ -439,13 +439,22 @@ function managedAgentConfig(
   environment: Environment,
 ): ManagedAgentConfig | undefined {
   const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
+  // BYO writes a URL too, but does not run our image or hold our deployment token.
+  const alsoRun = optional(environment, "PICKED_HARNESS_IMAGE")
+    ? optionalHttpUrl(environment, "PICKED_HARNESS_URL")
+    : undefined;
   const token = optional(environment, "MANAGED_AGENT_TOKEN");
   if (endpoint && !token) {
     throw new Error(
       "MANAGED_AGENT_TOKEN must be set when MANAGED_AGENT_AG_UI_URL is set",
     );
   }
-  if (!endpoint || !token) {
+  if (alsoRun && !token) {
+    throw new Error(
+      "MANAGED_AGENT_TOKEN must be set when an installed PICKED_HARNESS_URL is set",
+    );
+  }
+  if ((!endpoint && !alsoRun) || !token) {
     return undefined;
   }
   /*
@@ -457,8 +466,11 @@ function managedAgentConfig(
    * registered, addressable, routed to, and answered every call with 401. Only visible by asking it
    * something in the window.
    */
-  const alsoRun = optionalHttpUrl(environment, "PICKED_HARNESS_URL");
-  return { endpoint, token, ...(alsoRun ? { alsoRun } : {}) };
+  return {
+    ...(endpoint ? { endpoint } : {}),
+    token,
+    ...(alsoRun ? { alsoRun } : {}),
+  };
 }
 
 function oauthClient(
