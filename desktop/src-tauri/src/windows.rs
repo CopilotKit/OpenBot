@@ -139,34 +139,19 @@ impl Blocker {
 /// So this only says "no kernel" when **neither** answers, which is the state actually measured on
 /// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
 /// The caller must check probe success first: command failure is not evidence of a missing kernel.
-fn wsl_default_version(status_output: &str) -> Option<u8> {
-    for line in status_output.lines() {
-        let Some((label, value)) = line.split_once([':', '：']) else {
-            continue;
-        };
-        if !is_default_version_label(label) {
-            continue;
-        }
-        match value.trim() {
-            "1" => return Some(1),
-            "2" => return Some(2),
-            _ => {}
-        }
-    }
-    None
+fn default_wsl_version_probe_command() -> &'static str {
+    "$ErrorActionPreference = 'Stop';      $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';      if (Test-Path $key) {        $value = (Get-ItemProperty -Path $key -Name DefaultVersion -ErrorAction SilentlyContinue).DefaultVersion;        if ($null -eq $value) { 2 } else { $value }      } else { 2 }"
 }
 
-fn is_default_version_label(label: &str) -> bool {
-    let normalized: String = label
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect();
-
-    matches!(
-        normalized.as_str(),
-        "defaultversion" | "versionpardéfaut" | "wsl版本"
-    )
+fn parse_default_wsl_version(operation: &str, output: &str) -> Result<u8, Problem> {
+    match output.trim() {
+        "1" => Ok(1),
+        "2" => Ok(2),
+        other => Err(detection_failed(
+            operation,
+            format!("Expected default WSL version 1 or 2; probe returned: {other}"),
+        )),
+    }
 }
 
 pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
@@ -449,11 +434,23 @@ fn blocker_with(
         }));
     }
 
-    let default_version = probe_text(
-        "WSL status (wsl.exe --status)",
-        run("wsl.exe", &["--status"]),
+    let default_version = "the default WSL version (registry)";
+    let default_version = parse_default_wsl_version(
+        default_version,
+        &probe_text(
+            default_version,
+            run(
+                "powershell",
+                &[
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    default_wsl_version_probe_command(),
+                ],
+            ),
+        )?,
     )?;
-    if wsl_default_version(&default_version) == Some(1) {
+    if default_version == 1 {
         return Ok(Some(Blocker::WslOne));
     }
 
@@ -487,39 +484,30 @@ mod tests {
         "True\n",
         "True\n",
         "True\n",
-        "Default Version: 2\n",
+        "2\n",
         "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2\n",
     ];
 
     fn assert_probe_call(probe: usize, program: &str, args: &[&str]) {
-        if probe < 4 {
+        if probe < 5 {
             assert_eq!(program, "powershell");
             assert_eq!(args.len(), 4);
             assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
-            assert!(args[3].starts_with("$ErrorActionPreference = 'Stop'; "));
-            assert!(args[3].contains(match probe {
-                0 => "Get-CimInstance Win32_ComputerSystem",
-                1 => "WindowsBuiltInRole]::Administrator",
-                2 => "-FeatureName Microsoft-Windows-Subsystem-Linux",
-                3 => "-FeatureName VirtualMachinePlatform",
-                _ => unreachable!(),
-            }));
-            if probe == 3 {
-                assert_eq!(args[3], "$ErrorActionPreference = 'Stop'; \
+            match probe {
+                0 => assert!(args[3].contains("Get-CimInstance Win32_ComputerSystem")),
+                1 => assert!(args[3].contains("WindowsBuiltInRole]::Administrator")),
+                2 => assert!(args[3].contains("-FeatureName Microsoft-Windows-Subsystem-Linux")),
+                3 => assert_eq!(args[3], "$ErrorActionPreference = 'Stop'; \
                     $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
                     if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
-                    $state -eq 'Enabled'");
+                    $state -eq 'Enabled'"),
+                4 => assert_eq!(args[3], default_wsl_version_probe_command()),
+                _ => unreachable!(),
             }
         } else {
             assert_eq!(program, "wsl.exe");
-            assert_eq!(
-                args,
-                [match probe {
-                    4 => "--status",
-                    5 => "--version",
-                    _ => panic!("unexpected extra probe {probe}"),
-                }]
-            );
+            assert_eq!(args, ["--version"]);
+            assert_eq!(probe, 5);
         }
     }
 
@@ -583,80 +571,41 @@ mod tests {
     }
 
     #[test]
-    fn localized_wsl_status_default_version_one_blocks_before_kernel_file_health() {
-        for status in [
-            "Default Version: 1
-",
-            "Version par défaut : 1
-Dernière mise à jour : jamais
-",
-            "WSL 版本： 1
-",
-        ] {
-            assert_eq!(
-                fail_probe_at(4, Ok(probe_output(0, status, ""))),
-                Ok(Some(Blocker::WslOne)),
-                "missed WSL1 status {status:?}"
-            );
-        }
+    fn default_wsl_version_one_blocks_before_kernel_file_health() {
+        assert_eq!(
+            fail_probe_at(4, Ok(probe_output(0, "1\n", ""))),
+            Ok(Some(Blocker::WslOne))
+        );
     }
 
     #[test]
-    fn localized_wsl_status_default_version_two_continues_to_kernel_detection() {
-        for status in [
-            "Default Version: 2
-",
-            "Version par défaut : 2
-",
-            "WSL 版本： 2
-",
-        ] {
-            let mut probe = 0;
-            let result = blocker_with(
-                |program, args| {
-                    assert_probe_call(probe, program, args);
-                    let stdout = match probe {
-                        4 => status,
-                        current => PROBE_OUTPUTS[current],
-                    };
-                    probe += 1;
-                    Ok(probe_output(0, stdout, ""))
-                },
-                || Ok(false),
-            );
-            assert_eq!(result, Ok(None), "blocked healthy WSL2 status {status:?}");
-            assert_eq!(probe, 6);
-        }
+    fn default_wsl_version_two_continues_to_kernel_detection() {
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                assert_probe_call(probe, program, args);
+                let output = probe_output(0, PROBE_OUTPUTS[probe], "");
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert_eq!(result, Ok(None), "blocked healthy WSL2 default version");
+        assert_eq!(probe, 6);
     }
 
     #[test]
-    fn status_parser_does_not_treat_other_numeric_status_fields_as_default_wsl1() {
+    fn status_text_never_decides_default_wsl_version() {
         for status in [
-            "Default Distribution: Ubuntu-1
-Kernel version: 1.2.3
-",
-            "Default Distribution: 1
-Default Version: 2
-",
-            "Default Distribution: 2
-Default Version: 1
-",
-            "WSL version: 1.2.3
-Kernel version: 6.18.33.2
-",
-            "No colon and a bare 1
-",
-            ": 1
-",
+            "Default Distribution: 1\nDefault Version: 2\n",
+            "Default Distribution: 2\nDefault Version: 1\n",
+            "Version par défaut : 1\n",
+            "默认版本: 1\n",
         ] {
-            let expected = if status.contains("Default Version: 1") {
-                Some(1)
-            } else if status.contains("Default Version: 2") {
-                Some(2)
-            } else {
-                None
-            };
-            assert_eq!(wsl_default_version(status), expected, "misread {status:?}");
+            assert!(
+                parse_default_wsl_version("the default WSL version (registry)", status).is_err(),
+                "accepted localized status output as a registry value: {status:?}"
+            );
         }
     }
 
@@ -753,10 +702,11 @@ Kernel version: 6.18.33.2
                     .any(|arg| arg.contains("VirtualMachinePlatform"))
                 {
                     "False"
+                } else if program == "powershell" && args[3] == default_wsl_version_probe_command()
+                {
+                    "2"
                 } else if program == "powershell" {
                     "True"
-                } else if args == ["--status"] {
-                    "Default Version: 2"
                 } else {
                     "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2"
                 };
@@ -998,7 +948,7 @@ Kernel version: 6.18.33.2
                     "True",
                     "True",
                     "True",
-                    "Default Version: 1",
+                    "1",
                     PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::WslOne),
