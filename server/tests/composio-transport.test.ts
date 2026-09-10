@@ -344,6 +344,41 @@ describe("listing an app's actions", () => {
     expect(listed.map((tool) => tool.name)).toEqual(["GMAIL_FETCH_EMAILS"]);
   });
 
+  test("the schema a model is shown is the one the SDK handed over, unaltered", async () => {
+    /*
+     * A CHARACTERIZATION TEST, and it passed before the claim beside `inputParameters` was
+     * corrected — the correction is to a comment, because the loss it describes happens inside
+     * `ToolSchema.parse` and there is no key left here to restore.
+     *
+     * What it pins is the narrower promise that replaced the false one: this module adds nothing to
+     * the schema and removes nothing from it. The keys below are ones `ParametersSchema` and
+     * `JSONSchemaPropertySchema` would have stripped, so a real client never delivers them — which
+     * is exactly why they are the right probe for whether anything HERE also strips. `listTools`
+     * now walks the schema looking for a file parameter, and a walk that rebuilt what it read
+     * would silently narrow every schema in the listing.
+     */
+    const schema = {
+      type: "object",
+      properties: {
+        query: { type: "string", deprecated: true, contentEncoding: "utf-8" },
+      },
+      if: { required: ["query"] },
+      // No `then` beside it: biome bans a `then` key on an object literal, and the point of these
+      // is only that they are root keywords `ParametersSchema` does not name.
+      else: { required: [] },
+      examples: [{ query: "is:unread" }],
+      "x-openbot-probe": "kept",
+    };
+    useComposioClient(
+      recording({
+        listActions: async () => [{ ...GMAIL_READ, inputParameters: schema }],
+      }).client,
+    );
+
+    const [tool] = await listTools({ url: "composio://gmail" });
+    expect(tool?.inputSchema).toEqual(schema);
+  });
+
   test("an action with no schema is still listed, with an open one", async () => {
     useComposioClient(
       recording({

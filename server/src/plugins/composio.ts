@@ -67,7 +67,30 @@ export const LISTING_LIMIT = 1000;
 export type ComposioAction = {
   slug: string;
   description?: string;
-  /** JSON Schema, as they spell it. Absent for the occasional action that publishes none. */
+  /**
+   * The action's JSON Schema as `@composio/core` re-spells it, which is NOT as Composio published it.
+   *
+   * This used to say "as they spell it", and that claim travelled: whatever lands in this field is
+   * what {@link listTools} puts in front of a model as the vendor's own schema. The SDK parses the
+   * response through `ToolSchema`, and its `ParametersSchema` is a plain `z.object` with no
+   * passthrough (`@composio/core` 0.18.1, `src/types/tool.types.ts:134-174`), so every key it does
+   * not name is dropped before anything here can see it. At the schema ROOT that is `if`, `then`,
+   * `else`, `examples` and every `x-` extension. Per property, `JSONSchemaPropertySchema` (`:77-131`)
+   * does keep `if`/`then`/`else`/`examples`, but names neither `deprecated` nor `contentEncoding`,
+   * so both of those go.
+   *
+   * WHY THE CLAIM WAS DROPPED RATHER THAN THE LOSS FIXED. The strip happens inside the vendor's own
+   * parse, upstream of every byte this module receives, so there is nothing here to restore a key
+   * from — "stop losing them" is not an option this file has. The one place it could be avoided is
+   * the adapter that has yet to be written, by reading `client.tools.list` directly rather than
+   * `tools.getRawComposioTools` and never running `ToolSchema` over the answer; that is a decision
+   * about the vendor's types, and it belongs where the vendor's types belong. What this module can
+   * honestly promise is the narrower thing: it adds nothing to this schema and removes nothing from
+   * it, so what the SDK handed over is exactly what a model is shown.
+   *
+   * Absent for the occasional action that publishes none — and equally for one that published `{}`,
+   * which the SDK normalizes to absent before parsing (`src/models/Tools.ts:76-93`).
+   */
   inputParameters?: Record<string, unknown>;
   /** Behaviour labels mixed in with topical ones. See {@link effectOf}. */
   tags?: string[];
