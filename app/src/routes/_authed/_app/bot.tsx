@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
-import { agentListQueryOptions } from "@/lib/agents/queries";
 import { defaultAgentId } from "@/lib/agents/default-agent";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
@@ -31,12 +31,25 @@ export const Route = createFileRoute("/_authed/_app/bot")({
  */
 function RouteComponent() {
   const { agent } = Route.useSearch();
-  const { data: agents, isPending } = useQuery(agentListQueryOptions());
+  const {
+    data: agents,
+    isError,
+    isPending,
+  } = useQuery(agentListQueryOptions());
   const agentId = agent ?? defaultAgentId(agents);
   const bot = agents?.find((candidate) => candidate.id === agentId);
   const known = bot !== undefined;
 
   if (isPending) return null;
+  if (isError && agents === undefined) {
+    return (
+      <div className="flex h-screen items-center justify-center p-6">
+        <p className="text-destructive text-sm" role="alert">
+          Bots couldn't be loaded.
+        </p>
+      </div>
+    );
+  }
   if (!agentId || !known) {
     return (
       <div className="flex h-screen items-center justify-center p-6">

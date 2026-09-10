@@ -17,7 +17,12 @@ import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
 beforeAll(() => GlobalRegistrator.register());
 
-afterEach(() => cleanup());
+const originalFetch = global.fetch;
+
+afterEach(() => {
+  global.fetch = originalFetch;
+  cleanup();
+});
 
 afterAll(() => GlobalRegistrator.unregister());
 
@@ -53,6 +58,20 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   });
   queryClient.setQueryData(agentKeys.list(false), agents);
   return queryClient;
+}
+
+function queryClientWithFailingAgents() {
+  global.fetch = Object.assign(
+    async () => new Response(null, { status: 500 }),
+    { preconnect: originalFetch.preconnect },
+  );
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
 }
 
 const rootRoute = createRootRoute({ component: Outlet });
@@ -123,6 +142,13 @@ test("/bot defaults to the picked harness when this setup selected one", async (
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "picked-harness",
   );
+});
+
+test("/bot reports a failed initial roster load instead of claiming there are no Bots", async () => {
+  const view = renderBot(queryClientWithFailingAgents());
+
+  expect(await view.findByText("Bots couldn't be loaded.")).toBeTruthy();
+  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
 });
 
 test("/bot preserves an explicit agent, including the built-in first agent", async () => {
