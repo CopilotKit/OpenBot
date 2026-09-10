@@ -87,7 +87,7 @@ export function HarnessPicker({
       <h1>Your first Bot</h1>
       {/*
         Written to the person who has to act, not about the situation.
-        
+
         An earlier version said the default "makes no difference unless you write code", which
         describes a state and leaves a non-technical reader wondering what they were told. This
         gives them the one thing to do — nothing — and puts the conditional where the only person it
