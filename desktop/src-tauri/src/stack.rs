@@ -1257,7 +1257,24 @@ fn stop_windows_processes_with_inventory(
     powershell: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
-    let recorded = recorded_host_processes(root)?;
+    let recorded = match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::Pids(pids)) if !pids.is_empty() => {
+            // A previous Start wrote these PIDs, but a reopened window cannot prove their
+            // process instances. Keep that unresolved evidence without authorizing a signal.
+            return Err(Problem::with(
+                "OpenBot could not verify its recorded host processes.",
+                format!(
+                    "{}: legacy PID-only evidence lacks Windows process-instance identity; cleanup unresolved; ownership records retained",
+                    host_pids_path(root).display()
+                ),
+            ));
+        }
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes,
+        _ => Vec::new(),
+    };
     let processes = windows_processes_with(powershell)?;
     stop_windows_processes_under_with(root, &recorded, &processes, taskkill)
 }
@@ -3422,6 +3439,14 @@ fn main() {
     let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
     let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
     match (program.as_str(), scenario.as_str()) {
+        ("powershell", "legacy-evidence" | "legacy-evidence-v1") => {
+            assert_eq!(args.len(), 4);
+            assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+            assert!(args[3].contains("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate"));
+            print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap());
+        }
+        ("taskkill", "legacy-evidence") => panic!("legacy PID evidence must never authorize taskkill"),
+        ("taskkill", "legacy-evidence-v1") => assert_eq!(args, ["/PID", "9000", "/T", "/F"]),
         ("taskkill", "snapshot-reuse") => {
             if args.get(1).map(String::as_str) == Some("9001") {
                 std::fs::write(std::path::Path::new(&root).join("foreign-replacement"), "9000").unwrap();
@@ -3789,6 +3814,175 @@ fn main() {
             .expect("all synthetic Windows cleanup commands should succeed");
         assert_eq!(stopped, 2);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn windows_cleanup_evidence_fixture() -> (PathBuf, CleanupCommandFixture) {
+        let root = temp_root("windows-cleanup-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("legacy-evidence");
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9000,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"/Date(1000)/"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        (root, fixture)
+    }
+
+    #[test]
+    fn windows_cleanup_retains_nonempty_legacy_pid_evidence_as_unresolved() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_retains_nonempty_legacy_pid_evidence_as_unresolved",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        let original = b" \r\n[9000]\r\n";
+        std::fs::write(&path, original).unwrap();
+        let result = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        );
+        let retained = std::fs::read(&path).ok();
+        let log = fixture.log();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!log.contains("taskkill\t"), "{log}");
+        assert!(
+            result.is_err(),
+            "legacy cleanup returned {result:?}; evidence retained: {}; commands: {log}",
+            retained.is_some()
+        );
+        let detail = result.unwrap_err().detail.unwrap();
+        assert!(detail.contains("legacy"), "{detail}");
+        assert!(detail.contains("unresolved"), "{detail}");
+        assert!(detail.contains("retained"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()), "{detail}");
+        assert_eq!(retained.as_deref(), Some(original.as_slice()));
+    }
+
+    #[test]
+    fn windows_cleanup_missing_and_empty_legacy_evidence_are_safe_noops() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_missing_and_empty_legacy_evidence_are_safe_noops",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        for original in [None, Some(" []\r\n")] {
+            fixture.scenario("legacy-evidence");
+            if let Some(original) = original {
+                std::fs::write(&path, original).unwrap();
+            }
+            assert_eq!(
+                stop_windows_processes_with_inventory(
+                    &root,
+                    &fixture.command("powershell"),
+                    &fixture.command("taskkill"),
+                )
+                .unwrap(),
+                0
+            );
+            assert!(!path.exists());
+            let log = fixture.log();
+            assert!(log.contains("powershell\t"), "{log}");
+            assert!(!log.contains("taskkill\t"), "{log}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_cleanup_evidence_errors_preserve_files_without_commands() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_evidence_errors_preserve_files_without_commands",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        for (original, reason) in [
+            ("not json", "decode pidfile JSON"),
+            (
+                r#"{"version":9,"processes":[]}"#,
+                "unsupported pidfile version 9",
+            ),
+        ] {
+            std::fs::write(&path, original).unwrap();
+            let problem = stop_windows_processes_with_inventory(
+                &root,
+                &fixture.command("powershell"),
+                &fixture.command("taskkill"),
+            )
+            .unwrap_err();
+            assert!(problem.detail.unwrap().contains(reason));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+            assert!(fixture.log().is_empty());
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let problem = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        )
+        .unwrap_err();
+        assert!(problem.detail.unwrap().contains("could not read pidfile"));
+        assert!(path.is_dir());
+        assert!(fixture.log().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_cleanup_versioned_evidence_still_requires_live_identity() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_versioned_evidence_still_requires_live_identity",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let record = recorded_process("server", 9000, "/Date(1000)/");
+        let original =
+            serde_json::to_vec(&serde_json::json!({"version":1,"processes":[record]})).unwrap();
+        let path = host_pids_path(&root);
+        std::fs::write(&path, &original).unwrap();
+        fixture.scenario("legacy-evidence-v1");
+        assert_eq!(
+            stop_windows_processes_with_inventory(
+                &root,
+                &fixture.command("powershell"),
+                &fixture.command("taskkill"),
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!path.exists());
+        assert!(fixture.log().contains("taskkill\t/PID 9000 /T /F"));
+
+        std::fs::write(&path, &original).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            r#"[{"ProcessId":9000,"ParentProcessId":7000}]"#,
+        )
+        .unwrap();
+        fixture.scenario("legacy-evidence");
+        let problem = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        )
+        .unwrap_err();
+        assert!(problem
+            .detail
+            .unwrap()
+            .contains("lacks usable identity metadata"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert!(!fixture.log().contains("taskkill\t"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
