@@ -290,6 +290,7 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::test_support::temp_root;
 
     /// Whatever platform the tests run on, the sentence must not send somebody to a tool that
