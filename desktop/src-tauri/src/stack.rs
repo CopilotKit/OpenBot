@@ -1048,7 +1048,7 @@ fn stop_unix_records_with<I, T>(
 ) -> Result<usize, Problem>
 where
     I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
-    T: FnMut(i32) -> Result<bool, Problem>,
+    T: FnMut(i32, &mut dyn FnMut() -> Result<bool, Problem>) -> Result<bool, Problem>,
 {
     let mut stopped = 0;
     let mut failures = Vec::new();
@@ -1099,28 +1099,27 @@ where
                 index += 1;
             }
             let mut count = 0;
-            // Descendants first. Verify the complete live chain immediately before each signal.
-            // On failure leave the parent alive and retain durable evidence for a retry.
+            // Descendants must actually exit before their ownership ancestor is signaled.
+            // The same complete chain is revalidated during waits and before escalation.
             for index in (0..tree.len()).rev() {
-                let mut ancestor = Some(index);
-                let mut present = true;
-                while let Some(at) = ancestor {
-                    match inspect(tree[at].0.pid)? {
-                        Some(now) if now == tree[at].0 => {}
-                        None if at == index => {
-                            present = false;
-                            break;
+                let mut still_owned = || {
+                    let mut ancestor = Some(index);
+                    while let Some(at) = ancestor {
+                        match inspect(tree[at].0.pid)? {
+                            Some(now) if now == tree[at].0 => {}
+                            None if at == index => return Ok(false),
+                            _ => {
+                                return Err(unix_ownership_problem(format!(
+                                    "process identity or ancestry changed for pid {}",
+                                    tree[at].0.pid
+                                )))
+                            }
                         }
-                        _ => {
-                            return Err(unix_ownership_problem(format!(
-                                "process identity or ancestry changed for pid {}",
-                                tree[at].0.pid
-                            )))
-                        }
+                        ancestor = tree[at].1;
                     }
-                    ancestor = tree[at].1;
-                }
-                if present && terminate(tree[index].0.pid as i32)? {
+                    Ok(true)
+                };
+                if still_owned()? && terminate(tree[index].0.pid as i32, &mut still_owned)? {
                     count += 1;
                 }
             }
@@ -1135,11 +1134,74 @@ where
 }
 
 #[cfg(unix)]
-fn terminate_unix_process(pid: i32) -> Result<bool, Problem> {
+fn terminate_unix_process(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+) -> Result<bool, Problem> {
+    terminate_unix_process_with(
+        pid,
+        still_owned,
+        signal_unix_process,
+        std::time::Duration::from_secs(2),
+    )
+}
+
+#[cfg(unix)]
+fn terminate_unix_process_with<S>(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    mut signal: S,
+    patience: std::time::Duration,
+) -> Result<bool, Problem>
+where
+    S: FnMut(i32, i32) -> Result<bool, Problem>,
+{
+    if !still_owned()? || !signal(pid, libc::SIGTERM)? {
+        return Ok(false);
+    }
+    if wait_for_verified_unix_exit(still_owned, patience)? {
+        return Ok(true);
+    }
+    // Signal delivery is not termination. Keep the ancestor alive until the same descendant
+    // exits; if its identity or ancestry changes, refuse escalation and retain retry evidence.
+    if !still_owned()? || !signal(pid, libc::SIGKILL)? {
+        return Ok(true);
+    }
+    if wait_for_verified_unix_exit(still_owned, patience)? {
+        return Ok(true);
+    }
+    Err(Problem::with(
+        "OpenBot could not stop one of its host processes.",
+        format!(
+            "pid {pid} is still running after SIGKILL; ownership ancestor and records retained"
+        ),
+    ))
+}
+
+#[cfg(unix)]
+fn wait_for_verified_unix_exit(
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    patience: std::time::Duration,
+) -> Result<bool, Problem> {
+    let deadline = std::time::Instant::now() + patience;
+    loop {
+        if !still_owned()? {
+            return Ok(true);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(25)));
+    }
+}
+
+#[cfg(unix)]
+fn signal_unix_process(pid: i32, signal: i32) -> Result<bool, Problem> {
     if pid <= 1 || !safe_unix_pid(pid as u32) {
         return Err(unix_ownership_problem("refused unsafe process target"));
     }
-    let killed = unsafe { libc::kill(pid, libc::SIGTERM) };
+    let killed = unsafe { libc::kill(pid, signal) };
     if killed == 0 {
         return Ok(true);
     }
@@ -1149,7 +1211,7 @@ fn terminate_unix_process(pid: i32) -> Result<bool, Problem> {
     }
     Err(Problem::with(
         "OpenBot could not stop one of its host processes.",
-        format!("could not send SIGTERM to pid {pid}: {error}"),
+        format!("could not send signal {signal} to pid {pid}: {error}"),
     ))
 }
 
@@ -2338,6 +2400,233 @@ mod tests {
     }
 
     #[cfg(unix)]
+    struct UnixDescendantFixture {
+        root: PathBuf,
+        parent: std::process::Child,
+        leaf: UnixProcess,
+        port: u16,
+    }
+
+    #[cfg(unix)]
+    impl UnixDescendantFixture {
+        fn new(ignore_term: bool) -> Self {
+            let root = temp_root("unix-descendant-cleanup");
+            std::fs::create_dir_all(&root).unwrap();
+            let source = root.join("listener.rs");
+            std::fs::write(
+                &source,
+                format!(
+                    "const TERM: i32 = {}; const IGNORE: usize = {};\n{{}}",
+                    libc::SIGTERM,
+                    libc::SIG_IGN
+                )
+                .replace(
+                    "{}",
+                    r#"
+use std::io::Write;
+extern "C" { fn signal(sig: i32, handler: usize) -> usize; }
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args[1] == "parent" {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["leaf", &args[2]]).spawn().unwrap();
+        let status = child.wait().unwrap();
+        std::fs::write("descendant-exit", status.to_string()).unwrap();
+        return;
+    }
+    if args[2] == "ignore" { unsafe { signal(TERM, IGNORE); } }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    println!("{} {}", std::process::id(), listener.local_addr().unwrap().port());
+    std::io::stdout().flush().unwrap();
+    for stream in listener.incoming() { drop(stream.unwrap()); }
+}
+"#,
+                ),
+            )
+            .unwrap();
+            let binary = root.join("listener");
+            crate::test_support::compile_fixture(&source, &binary);
+            let mut parent = Command::new(binary)
+                .args(["parent", if ignore_term { "ignore" } else { "graceful" }])
+                .current_dir(&root)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufRead::read_line(
+                &mut std::io::BufReader::new(parent.stdout.take().unwrap()),
+                &mut line,
+            )
+            .unwrap();
+            let (pid, port) = line.trim().split_once(' ').unwrap();
+            let leaf = unix_process(pid.parse().unwrap()).unwrap().unwrap();
+            assert_eq!(leaf.parent, parent.id());
+            record_host_processes(&root, &[("app", parent.id())]).unwrap();
+            Self {
+                root,
+                parent,
+                leaf,
+                port: port.parse().unwrap(),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for UnixDescendantFixture {
+        fn drop(&mut self) {
+            // Old-code regressions must also clean up the exact fixture instance after it orphans.
+            if unix_process(self.leaf.pid)
+                .unwrap()
+                .is_some_and(|now| now.start == self.leaf.start)
+            {
+                unsafe {
+                    libc::kill(self.leaf.pid as i32, libc::SIGKILL);
+                }
+            }
+            let _ = self.parent.kill();
+            let _ = self.parent.wait();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while something_answers(self.port) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                !something_answers(self.port),
+                "fixture listener was not cleaned"
+            );
+            assert!(unix_process(self.parent.id()).unwrap().is_none());
+            assert!(unix_process(self.leaf.pid).unwrap().is_none());
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_cleanup_stops_ignoring_and_graceful_listeners_before_parent() {
+        for ignore_term in [true, false] {
+            let mut fixture = UnixDescendantFixture::new(ignore_term);
+            let result = stop_processes_under(&fixture.root);
+            let parent = fixture.parent.try_wait().unwrap();
+            let leaf = unix_process(fixture.leaf.pid).unwrap();
+            let listening = something_answers(fixture.port);
+            let retry = stop_processes_under(&fixture.root);
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "ignoreTerm": ignore_term, "stop": result.as_ref().ok(),
+                    "parentExited": parent.is_some(), "leafAlive": leaf.is_some(),
+                    "listenerOpen": listening, "retry": retry.as_ref().ok(),
+                    "parentPid": fixture.parent.id(), "leafPid": fixture.leaf.pid, "port": fixture.port,
+                })
+            );
+            drop(fixture);
+            assert!(result.is_ok(), "{result:?}");
+            assert!(
+                !listening,
+                "cleanup reported success while the descendant kept its listener"
+            );
+            assert!(leaf.is_none(), "cleanup left the descendant alive");
+            assert_eq!(retry.unwrap(), 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_failure_retains_real_parent_and_durable_retry_record() {
+        let mut fixture = UnixDescendantFixture::new(true);
+        let original = std::fs::read(host_pids_path(&fixture.root)).unwrap();
+        let records = unix_host_records(&fixture.root, &[("app", fixture.parent.id())]).unwrap();
+        let mut attempts = Vec::new();
+        let result = stop_unix_records_with(
+            &std::fs::canonicalize(&fixture.root).unwrap(),
+            &records,
+            &unix_inventory().unwrap(),
+            unix_process,
+            |pid, _| {
+                attempts.push(pid);
+                Err(unix_ownership_problem(
+                    "synthetic descendant signal refusal",
+                ))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, [fixture.leaf.pid as i32]);
+        assert!(
+            fixture.parent.try_wait().unwrap().is_none(),
+            "retry ancestor must stay alive"
+        );
+        assert!(something_answers(fixture.port));
+        assert_eq!(
+            std::fs::read(host_pids_path(&fixture.root)).unwrap(),
+            original
+        );
+        assert_eq!(
+            unix_process(fixture.leaf.pid).unwrap(),
+            Some(fixture.leaf.clone())
+        );
+        // Drop kills/reaps these exact owned fixtures and checks both PIDs and the port are gone.
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_escalation_refuses_changed_identity_and_retains_ancestor_on_failure() {
+        for failure in [
+            "reused",
+            "reparented",
+            "ancestor-reused",
+            "stuck",
+            "signal-denied",
+        ] {
+            let signaled = std::cell::Cell::new(false);
+            let mut attempts = Vec::new();
+            let result = stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100), (102, 101)],
+                |pid| {
+                    let mut live = unix_fixture(pid, if pid == 102 { 101 } else { 100 });
+                    if signaled.get() {
+                        if (failure == "reused" && pid == 102)
+                            || (failure == "ancestor-reused" && pid == 101)
+                        {
+                            live.start = "foreign-instance".into();
+                        }
+                        if failure == "reparented" && pid == 102 {
+                            live.parent = 201;
+                        }
+                    }
+                    Ok(Some(live))
+                },
+                |pid, still_owned| {
+                    terminate_unix_process_with(
+                        pid,
+                        still_owned,
+                        |pid, signal| {
+                            attempts.push((pid, signal));
+                            signaled.set(true);
+                            if failure == "signal-denied" {
+                                Err(unix_ownership_problem("synthetic signal refusal"))
+                            } else {
+                                Ok(true)
+                            }
+                        },
+                        std::time::Duration::ZERO,
+                    )
+                },
+            );
+            assert!(result.is_err(), "{failure} must remain a cleanup failure");
+            let expected = if failure == "stuck" {
+                vec![(102, libc::SIGTERM), (102, libc::SIGKILL)]
+            } else {
+                vec![(102, libc::SIGTERM)]
+            };
+            assert_eq!(
+                attempts, expected,
+                "{failure}: ancestor or changed instance must never be signaled"
+            );
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn unix_ownership_selects_only_recorded_instance_and_verified_descendants() {
         let live = [
@@ -2355,7 +2644,7 @@ mod tests {
             &[unix_record(101)],
             &rows,
             |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
-            |pid| {
+            |pid, _| {
                 attempted.push(pid);
                 Ok(true)
             },
@@ -2369,7 +2658,7 @@ mod tests {
                 &[unix_record(101)],
                 &rows,
                 |_| panic!("a different deployment is not inspected"),
-                |_| panic!("a different deployment is not signaled")
+                |_, _| panic!("a different deployment is not signaled")
             )
             .is_err());
         }
@@ -2379,7 +2668,7 @@ mod tests {
                 &[],
                 &rows,
                 |_| panic!("an unrecorded process is not inspected"),
-                |_| panic!("an unrecorded process is not signaled")
+                |_, _| panic!("an unrecorded process is not signaled")
             )
             .unwrap(),
             0
@@ -2399,7 +2688,7 @@ mod tests {
                 &[unix_record(101)],
                 &[(101, 100)],
                 |_| Ok(Some(changed.clone())),
-                |_| panic!("reused PID")
+                |_, _| panic!("reused PID")
             )
             .unwrap(),
             0
@@ -2420,7 +2709,7 @@ mod tests {
                     unix_fixture(pid, if pid == 102 { 101 } else { 100 })
                 }))
             },
-            |_| panic!("changed instance must be revalidated")
+            |_, _| panic!("changed instance must be revalidated")
         )
         .is_err());
         assert!(stop_unix_records_with(
@@ -2428,7 +2717,7 @@ mod tests {
             &[unix_record(101)],
             &[(101, 100), (102, 101)],
             |pid| Ok(Some(unix_fixture(pid, 100))),
-            |_| panic!("changed parent")
+            |_, _| panic!("changed parent")
         )
         .is_err());
         for pid in [
@@ -2443,7 +2732,7 @@ mod tests {
                 &[unix_record(pid)],
                 &[],
                 |_| panic!("unsafe PID"),
-                |_| panic!("unsafe PID")
+                |_, _| panic!("unsafe PID")
             )
             .is_err());
         }
@@ -2463,7 +2752,7 @@ mod tests {
             &[unix_record(101), unix_record(201)],
             &[(101, 100), (102, 101), (201, 100)],
             |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
-            |pid| {
+            |pid, _| {
                 attempted.push(pid);
                 if pid == 102 {
                     Err(unix_ownership_problem(
@@ -2483,7 +2772,7 @@ mod tests {
                 &[unix_record(101)],
                 &[(101, 100)],
                 |_| Ok(Some(unix_fixture(101, 100))),
-                |_| Ok(false)
+                |_, _| Ok(false)
             )
             .unwrap(),
             0
@@ -2493,7 +2782,7 @@ mod tests {
             &[unix_record(101)],
             &[],
             |_| Err(unix_ownership_problem("inventory denied")),
-            |_| panic!("lost inventory")
+            |_, _| panic!("lost inventory")
         )
         .is_err());
     }
