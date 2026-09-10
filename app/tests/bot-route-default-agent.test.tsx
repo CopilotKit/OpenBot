@@ -220,6 +220,28 @@ test("/bot loads a hidden explicit agent from the detail endpoint", async () => 
   ).toBeNull();
 });
 
+test("/bot hidden lookup does not collide with the shared agent detail cache", async () => {
+  const hiddenBot = agent({
+    hidden: true,
+    id: "hidden-bot",
+    name: "Hidden Bot",
+    title: "Hidden Bot",
+  });
+  const queryClient = queryClientWithAgentsAndFetchedAgent(
+    [GENERAL_ASSISTANT],
+    "hidden-bot",
+    Response.json({ agent: hiddenBot }),
+  );
+  queryClient.setQueryData(agentKeys.detail("hidden-bot"), hiddenBot);
+  const view = renderBot(queryClient, "/bot?agent=hidden-bot");
+
+  expect(await view.findByRole("heading", { name: "Hidden Bot" })).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe("hidden-bot");
+  expect(
+    view.queryByText('This deployment has no Bot called "hidden-bot".'),
+  ).toBeNull();
+});
+
 test("/bot reports an explicit agent detail load failure", async () => {
   const view = renderBot(
     queryClientWithAgentsAndFetchedAgent(

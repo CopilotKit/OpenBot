@@ -62,6 +62,8 @@ export const agentKeys = {
   all: ["agents"] as const,
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
+  botRouteDetail: (agentId: string) =>
+    ["agents", "bot-route-detail", agentId] as const,
   handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
   capabilities: () => ["agents", "capabilities"] as const,
 };

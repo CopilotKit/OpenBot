@@ -79,7 +79,7 @@ function RouteComponent() {
     isPending: isDetailPending,
   } = useQuery({
     enabled: shouldLoadExplicitBot,
-    queryKey: agentKeys.detail(detailAgentId),
+    queryKey: agentKeys.botRouteDetail(detailAgentId),
     queryFn: () => loadExplicitBot(detailAgentId),
     retry: false,
   });
