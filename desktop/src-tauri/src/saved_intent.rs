@@ -587,6 +587,7 @@ mod tests {
         let (root, secrets, _) = fixture("compatible-intent");
         let credential = ModelCredential::Compatible {
             base_url: "https://synthetic-model.example".into(),
+            container_base_url: None,
             api_key: "synthetic-endpoint-key".into(),
             model: "synthetic-model".into(),
         };
@@ -614,6 +615,7 @@ mod tests {
         let (root, mut secrets, _) = fixture("endpoint-partial-provider-switch");
         let endpoint = ModelCredential::Compatible {
             base_url: "https://model.example/v1".into(),
+            container_base_url: None,
             api_key: "synthetic-endpoint-key".into(),
             model: "model".into(),
         };
@@ -650,6 +652,7 @@ mod tests {
         for credential in [
             ModelCredential::Compatible {
                 base_url: "https://model.example/v1".into(),
+                container_base_url: None,
                 api_key: String::new(),
                 model: "model".into(),
             },
@@ -661,6 +664,7 @@ mod tests {
             let (root, secrets, _) = fixture("endpoint-retire");
             let endpoint = ModelCredential::Compatible {
                 base_url: "https://model.example/v1".into(),
+                container_base_url: None,
                 api_key: "synthetic-endpoint-key".into(),
                 model: "model".into(),
             };

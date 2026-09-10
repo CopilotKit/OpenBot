@@ -26,6 +26,7 @@ export type ModelChoice = {
   /** Explicit intent to try a saved value; only Start checks whether it is available. */
   saved?: boolean;
   baseUrl?: string;
+  containerBaseUrl?: string;
   model?: string;
 };
 
@@ -51,6 +52,7 @@ export type HeldConfiguration = {
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_BASE_URL?: string;
+  OPENAI_CONTAINER_BASE_URL?: string;
   BOT_MODEL?: string;
   saved?: SavedConfiguration;
 };
@@ -70,6 +72,7 @@ function recordedModel(held: HeldConfiguration): ModelChoice | null {
         provider: "openai-compatible",
         login: "endpoint",
         baseUrl: held.OPENAI_BASE_URL,
+        containerBaseUrl: held.OPENAI_CONTAINER_BASE_URL,
         model: held.BOT_MODEL,
         saved: held.saved.modelApiKeys?.compatible === true,
       };
@@ -123,6 +126,9 @@ export function ProviderPicker({
   );
   const [apiKey, setApiKey] = useState(initialChoice?.apiKey ?? "");
   const [baseUrl, setBaseUrl] = useState(initialChoice?.baseUrl ?? "");
+  const [containerBaseUrl, setContainerBaseUrl] = useState(
+    initialChoice?.containerBaseUrl ?? "",
+  );
   const [model, setModel] = useState(initialChoice?.model ?? "");
   const [reuseEndpointKey, setReuseEndpointKey] = useState(
     initialChoice?.provider === "openai-compatible" &&
@@ -272,6 +278,8 @@ export function ProviderPicker({
     reuseEndpointKey &&
     held.saved?.modelApiKeys?.compatible === true &&
     baseUrl.trim() === held.OPENAI_BASE_URL?.trim();
+  const containerBaseUrlIsValid =
+    containerBaseUrl.trim().length === 0 || isHttpEndpointUrl(containerBaseUrl);
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
@@ -286,6 +294,7 @@ export function ProviderPicker({
      */
     (login === "endpoint" &&
       isHttpEndpointUrl(baseUrl) &&
+      containerBaseUrlIsValid &&
       model.trim().length > 0);
 
   function continueWithChoice() {
@@ -294,6 +303,7 @@ export function ProviderPicker({
     const trimmedToken = token.trim();
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedModel = model.trim();
+    const trimmedContainerBaseUrl = containerBaseUrl.trim();
     onChoose({
       provider: row.id,
       login,
@@ -307,6 +317,9 @@ export function ProviderPicker({
         ? { saved: true }
         : {}),
       ...(trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
+      ...(trimmedContainerBaseUrl
+        ? { containerBaseUrl: trimmedContainerBaseUrl }
+        : {}),
       ...(trimmedModel ? { model: trimmedModel } : {}),
     });
   }
@@ -359,7 +372,12 @@ export function ProviderPicker({
                 );
                 if (r.id === "openai-compatible" && held.OPENAI_BASE_URL) {
                   setBaseUrl(held.OPENAI_BASE_URL);
+                  setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
                   setModel(held.BOT_MODEL ?? "");
+                } else {
+                  setBaseUrl("");
+                  setContainerBaseUrl("");
+                  setModel("");
                 }
               }}
             />
@@ -544,11 +562,40 @@ export function ProviderPicker({
                 <input
                   id="base"
                   value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setBaseUrl(next);
+                    if (
+                      held.OPENAI_CONTAINER_BASE_URL &&
+                      containerBaseUrl.trim() ===
+                        held.OPENAI_CONTAINER_BASE_URL.trim() &&
+                      next.trim() !== held.OPENAI_BASE_URL?.trim()
+                    ) {
+                      setContainerBaseUrl("");
+                    }
+                  }}
                   placeholder="https://…/v1"
                   spellCheck={false}
                 />
               </div>
+              <details className="field">
+                <summary>Advanced compatible endpoint options</summary>
+                <label htmlFor="container-base">
+                  Container Base URL, if different
+                </label>
+                <input
+                  id="container-base"
+                  value={containerBaseUrl}
+                  onChange={(e) => setContainerBaseUrl(e.target.value)}
+                  placeholder="http://ollama:11434/v1"
+                  spellCheck={false}
+                />
+                <p className="footnote">
+                  Leave this empty unless containers need a different address
+                  for a locally hosted model. Remote endpoints usually use the
+                  same Base URL.
+                </p>
+              </details>
               <div className="field">
                 <label htmlFor="model">Model name</label>
                 <input

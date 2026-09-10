@@ -409,6 +409,7 @@ struct ChosenModel {
     login: String,
     api_key: Option<String>,
     base_url: Option<String>,
+    container_base_url: Option<String>,
     model: Option<String>,
     /// Minted by signing in, never typed. Absent for every path but a plan.
     token: Option<String>,
@@ -496,6 +497,15 @@ impl ChosenModel {
                         "Enter a valid http:// or https:// address for your model endpoint.".into(),
                     );
                 }
+                let container_base_url = given(self.container_base_url);
+                if !container_base_url.is_empty()
+                    && !reqwest::Url::parse(&container_base_url)
+                        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.has_host())
+                {
+                    return Err(
+                        "Enter a valid http:// or https:// address for the container model endpoint.".into(),
+                    );
+                }
                 let model = given(self.model);
                 if model.is_empty() {
                     return Err("Enter the model name your endpoint serves.".into());
@@ -514,6 +524,8 @@ impl ChosenModel {
                 };
                 Ok(openbot_env::ModelCredential::Compatible {
                     base_url,
+                    container_base_url: (!container_base_url.is_empty())
+                        .then_some(container_base_url),
                     api_key,
                     model,
                 })
@@ -1464,6 +1476,7 @@ fn already_configured(root: String) -> AlreadyConfigured {
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "OPENAI_BASE_URL",
+            "OPENAI_CONTAINER_BASE_URL",
             "BOT_MODEL",
             "CLAUDE_CODE_OAUTH_TOKEN",
         ],
@@ -2436,6 +2449,7 @@ mod tests {
                     login: login.into(),
                     api_key: Some("synthetic-unselected-billable-key".into()),
                     base_url: None,
+                    container_base_url: None,
                     model: None,
                     token: None,
                     saved: Some(true),
@@ -2478,6 +2492,7 @@ mod tests {
                 login: "plan".into(),
                 api_key: Some("synthetic-unselected-key".into()),
                 base_url: None,
+                container_base_url: None,
                 model: None,
                 token: None,
                 saved: Some(true),
@@ -2522,6 +2537,7 @@ mod tests {
                 login: "api-key".into(),
                 api_key: None,
                 base_url: None,
+                container_base_url: None,
                 model: None,
                 token: None,
                 saved: Some(true),
@@ -2562,6 +2578,7 @@ mod tests {
                 login: "api-key".into(),
                 api_key: None,
                 base_url: None,
+                container_base_url: None,
                 model: None,
                 token: None,
                 saved: Some(true),
@@ -2689,6 +2706,7 @@ mod tests {
                     login: "api-key".to_string(),
                     api_key: None,
                     base_url: None,
+                    container_base_url: None,
                     model: None,
                     token: None,
                     saved: Some(true),
@@ -2729,6 +2747,7 @@ mod tests {
                     login: "api-key".to_string(),
                     api_key: None,
                     base_url: None,
+                    container_base_url: None,
                     model: None,
                     token: None,
                     saved: Some(true),
@@ -2769,6 +2788,7 @@ mod tests {
             login: "endpoint".into(),
             api_key: None,
             base_url: base_url.map(String::from),
+            container_base_url: None,
             model: model.map(String::from),
             token: None,
             saved: None,
@@ -2860,6 +2880,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let credential = openbot_env::ModelCredential::Compatible {
             base_url: "https://models.example/v1".into(),
+            container_base_url: None,
             api_key: "synthetic-old-key".into(),
             model: "model".into(),
         };
@@ -2883,6 +2904,41 @@ mod tests {
         assert_eq!(reads, 1);
         assert!(!error.said.contains("synthetic-other-key"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compatible_endpoint_accepts_trimmed_container_url_and_rejects_invalid_one() {
+        let mut choice =
+            compatible_choice(Some(" http://127.0.0.1:11434/v1 "), Some(" qwen3-vl:2b "));
+        choice.container_base_url = Some(" http://ollama:11434/v1 ".into());
+        let credential =
+            start_stack_credential(Path::new("synthetic-unused-compatible-root"), choice)
+                .expect("a valid container endpoint may be stored with the compatible credential");
+        let openbot_env::ModelCredential::Compatible {
+            base_url,
+            container_base_url,
+            model,
+            ..
+        } = credential
+        else {
+            panic!("the endpoint must retain its compatible credential");
+        };
+        assert_eq!(base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(
+            container_base_url.as_deref(),
+            Some("http://ollama:11434/v1")
+        );
+        assert_eq!(model, "qwen3-vl:2b");
+
+        let mut invalid = compatible_choice(Some("http://127.0.0.1:11434/v1"), Some("qwen3-vl:2b"));
+        invalid.container_base_url = Some("ollama:11434/v1".into());
+        let problem =
+            start_stack_credential(Path::new("synthetic-unused-compatible-root"), invalid)
+                .expect_err("a container endpoint URL must be an absolute HTTP(S) URL");
+        assert_eq!(
+            problem.said,
+            "Enter a valid http:// or https:// address for the container model endpoint."
+        );
     }
 
     #[test]
@@ -2940,6 +2996,7 @@ mod tests {
                     base_url: actual_url,
                     api_key: actual_key,
                     model,
+                    ..
                 } = credential
                 else {
                     panic!("the endpoint must retain its compatible credential");
@@ -3615,6 +3672,7 @@ esac
                 login: "api-key".into(),
                 api_key: Some("synthetic-openai-key".into()),
                 base_url: None,
+                container_base_url: None,
                 model: None,
                 token: None,
                 saved: Some(false),
@@ -3687,6 +3745,7 @@ esac
                 login: "api-key".into(),
                 api_key: Some("synthetic-anthropic-key".into()),
                 base_url: None,
+                container_base_url: None,
                 model: None,
                 token: None,
                 saved: Some(false),

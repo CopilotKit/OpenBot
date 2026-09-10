@@ -129,6 +129,7 @@ pub fn compose(
         for key in [
             "OPENAI_API_KEY",
             "OPENAI_BASE_URL",
+            "OPENAI_CONTAINER_BASE_URL",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
@@ -197,6 +198,7 @@ pub fn compose(
         }
         ModelCredential::Compatible {
             base_url,
+            container_base_url,
             api_key,
             model: name,
         } => {
@@ -219,6 +221,9 @@ pub fn compose(
                 insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
             }
             insert_if_given(&mut env, "OPENAI_BASE_URL", base_url);
+            if let Some(container_base_url) = container_base_url {
+                insert_if_given(&mut env, "OPENAI_CONTAINER_BASE_URL", container_base_url);
+            }
             insert_if_given(&mut env, "BOT_MODEL", name);
             /*
              * The bundled Bot's own model variable, set to the same name.
@@ -552,6 +557,7 @@ pub enum ModelCredential {
     /// to send it to, which is this shape and not a special case.
     Compatible {
         base_url: String,
+        container_base_url: Option<String>,
         api_key: String,
         model: String,
     },
@@ -854,6 +860,7 @@ mod tests {
                 &Model {
                     credential: ModelCredential::Compatible {
                         base_url: "http://127.0.0.1:11434/v1".into(),
+                        container_base_url: None,
                         api_key: "synthetic-key".into(),
                         model: format!("model{separator}UNREQUESTED=public-marker"),
                     },
@@ -1935,6 +1942,7 @@ mod model_tests {
             &Model {
                 credential: ModelCredential::Compatible {
                     base_url: "http://127.0.0.1:4310/v1".into(),
+                    container_base_url: None,
                     api_key: "x".into(),
                     model: "local-model".into(),
                 },
@@ -1998,6 +2006,7 @@ mod model_tests {
             &Model {
                 credential: ModelCredential::Compatible {
                     base_url: "http://127.0.0.1:11434/v1".into(),
+                    container_base_url: None,
                     api_key: "   ".into(),
                     model: "qwen2.5:1.5b".into(),
                 },
@@ -2023,6 +2032,7 @@ mod model_tests {
             &Model {
                 credential: ModelCredential::Compatible {
                     base_url: "https://api.example.test/v1".into(),
+                    container_base_url: None,
                     api_key: "sk-theirs".into(),
                     model: "some-model".into(),
                 },
@@ -2064,6 +2074,7 @@ mod model_tests {
         for cleared in [
             "OPENAI_API_KEY",
             "OPENAI_BASE_URL",
+            "OPENAI_CONTAINER_BASE_URL",
             "ANTHROPIC_API_KEY",
             "BOT_PROVIDER",
         ] {
@@ -2134,6 +2145,7 @@ mod model_tests {
             &Model {
                 credential: ModelCredential::Compatible {
                     base_url: "https://example.test/v1".into(),
+                    container_base_url: None,
                     api_key: "sk-whatever".into(),
                     model: "some-model".into(),
                 },
@@ -2154,6 +2166,59 @@ mod model_tests {
         assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
     }
 
+    #[test]
+    fn a_compatible_endpoint_can_give_containers_their_own_base_url() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "http://127.0.0.1:11434/v1".into(),
+                    container_base_url: Some("http://ollama:11434/v1".into()),
+                    api_key: "".into(),
+                    model: "qwen3-vl:2b".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            env.get("OPENAI_BASE_URL"),
+            Some(&"http://127.0.0.1:11434/v1".to_string())
+        );
+        assert_eq!(
+            env.get("OPENAI_CONTAINER_BASE_URL"),
+            Some(&"http://ollama:11434/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn a_compatible_endpoint_without_container_url_clears_stale_container_override() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "https://models.example/v1".into(),
+                    container_base_url: None,
+                    api_key: "".into(),
+                    model: "remote-model".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            env.get("OPENAI_BASE_URL"),
+            Some(&"https://models.example/v1".to_string())
+        );
+        assert_eq!(env.get("OPENAI_CONTAINER_BASE_URL"), Some(&String::new()));
+    }
+
     /// Nothing chosen writes no model keys at all, rather than empty ones.
     #[test]
     fn no_choice_writes_no_model_keys() {
@@ -2171,6 +2236,7 @@ mod model_tests {
         for key in [
             "OPENAI_API_KEY",
             "OPENAI_BASE_URL",
+            "OPENAI_CONTAINER_BASE_URL",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",

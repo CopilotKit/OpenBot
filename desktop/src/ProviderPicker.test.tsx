@@ -393,6 +393,99 @@ test("a compatible endpoint submits the key typed into its endpoint key field", 
   });
 });
 
+test("a compatible endpoint carries an optional container-only URL", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "http://127.0.0.1:11434/v1",
+  );
+  await userEvent.type(
+    view.getByLabelText("Container Base URL, if different"),
+    "http://ollama:11434/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "qwen3-vl:2b");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      containerBaseUrl: "http://ollama:11434/v1",
+      model: "qwen3-vl:2b",
+    },
+  ]);
+});
+
+test("a compatible endpoint uses the host URL for containers when no override is entered", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "https://models.example/v1",
+  );
+  expect(
+    view.getByText(
+      /Leave this empty unless containers need a different address/,
+    ),
+  ).toBeTruthy();
+  await userEvent.type(view.getByLabelText("Model name"), "remote-model");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://models.example/v1",
+      model: "remote-model",
+    },
+  ]);
+});
+
+test("a compatible endpoint refuses an invalid container-only URL", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld({}, (choice) => choices.push(choice));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "http://127.0.0.1:11434/v1",
+  );
+  await userEvent.type(
+    view.getByLabelText("Container Base URL, if different"),
+    "ollama:11434/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "qwen3-vl:2b");
+
+  const continueButton = view.getByRole("button", { name: "Continue" });
+  expect(continueButton).toHaveProperty("disabled", true);
+  await userEvent.click(continueButton);
+  expect(choices).toEqual([]);
+});
+
 test.each([
   "http://",
   "https://",
@@ -552,6 +645,7 @@ test("a saved compatible endpoint restores public fields and requests its scoped
   const view = await renderPickerWithHeld(
     {
       OPENAI_BASE_URL: "https://models.example/v1",
+      OPENAI_CONTAINER_BASE_URL: "http://ollama:11434/v1",
       BOT_MODEL: "local-model",
       saved: {
         model: "compatible-endpoint",
@@ -578,6 +672,7 @@ test("a saved compatible endpoint restores public fields and requests its scoped
       provider: "openai-compatible",
       login: "endpoint",
       baseUrl: "https://models.example/v1",
+      containerBaseUrl: "http://ollama:11434/v1",
       model: "local-model",
       saved: true,
     },

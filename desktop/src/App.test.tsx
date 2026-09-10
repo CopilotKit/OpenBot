@@ -60,6 +60,7 @@ type StartStackPayload = {
     login?: unknown;
     apiKey?: unknown;
     baseUrl?: unknown;
+    containerBaseUrl?: unknown;
     model?: unknown;
     saved?: unknown;
   };
@@ -344,7 +345,11 @@ function useCompatibleEndpointSetup(
   };
 }
 
-async function enterCompatibleEndpoint(baseUrl: string, endpointKey = "") {
+async function enterCompatibleEndpoint(
+  baseUrl: string,
+  endpointKey = "",
+  containerBaseUrl = "",
+) {
   const view = await renderApp();
 
   await userEvent.click(
@@ -355,6 +360,12 @@ async function enterCompatibleEndpoint(baseUrl: string, endpointKey = "") {
     await view.findByRole("radio", { name: /OpenAI-compatible/ }),
   );
   await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
+  if (containerBaseUrl) {
+    await userEvent.type(
+      view.getByLabelText("Container Base URL, if different"),
+      containerBaseUrl,
+    );
+  }
   await userEvent.type(view.getByLabelText("Model name"), "local-model");
   if (endpointKey) {
     await userEvent.type(
@@ -368,8 +379,13 @@ async function enterCompatibleEndpoint(baseUrl: string, endpointKey = "") {
 async function startWithCompatibleEndpoint(
   endpointKey = "",
   baseUrl = "https://models.example/v1",
+  containerBaseUrl = "",
 ) {
-  const view = await enterCompatibleEndpoint(baseUrl, endpointKey);
+  const view = await enterCompatibleEndpoint(
+    baseUrl,
+    endpointKey,
+    containerBaseUrl,
+  );
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(
     await view.findByRole("button", { name: "Start OpenBot" }),
@@ -381,13 +397,20 @@ function useSavedCompatibleEndpointSetup(
   model = "saved-model",
   keyed = true,
   savedModel = "compatible-endpoint",
+  containerBaseUrl: string | undefined = undefined,
 ) {
   useCompatibleEndpointSetup({});
   const setupHandler = invokeHandler;
   invokeHandler = async (command, args) => {
     if (command === "already_configured") {
       return {
-        values: { OPENAI_BASE_URL: baseUrl, BOT_MODEL: model },
+        values: {
+          OPENAI_BASE_URL: baseUrl,
+          ...(containerBaseUrl === undefined
+            ? {}
+            : { OPENAI_CONTAINER_BASE_URL: containerBaseUrl }),
+          BOT_MODEL: model,
+        },
         saved: {
           intelligenceApiKey: true,
           model: savedModel,
@@ -1326,6 +1349,55 @@ test.each(["http://localhost:11434/v1", "https://models.example/v1"])(
     expect(JSON.stringify(payload)).not.toContain("sk-synthetic-openai");
   },
 );
+
+test("custom compatible endpoint startup can route containers to a different public URL", async () => {
+  useCompatibleEndpointSetup({});
+
+  await startWithCompatibleEndpoint(
+    "",
+    "http://127.0.0.1:11434/v1",
+    "http://ollama:11434/v1",
+  );
+
+  const payload = getStartStackPayload();
+  expect(payload.model).toEqual({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    containerBaseUrl: "http://ollama:11434/v1",
+    model: "local-model",
+  });
+});
+
+test("saved compatible endpoint restores the optional container URL", async () => {
+  useSavedCompatibleEndpointSetup(
+    "http://127.0.0.1:11434/v1",
+    "qwen3-vl:2b",
+    false,
+    "compatible-endpoint",
+    "http://ollama:11434/v1",
+  );
+
+  const view = await renderApp();
+  await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(
+    view.getByLabelText("Container Base URL, if different"),
+  ).toHaveProperty("value", "http://ollama:11434/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start OpenBot" }),
+  );
+
+  expect(getStartStackPayload().model).toMatchObject({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    containerBaseUrl: "http://ollama:11434/v1",
+    model: "qwen3-vl:2b",
+  });
+});
 
 test("custom compatible endpoint startup submits an explicitly typed endpoint key", async () => {
   useCompatibleEndpointSetup({

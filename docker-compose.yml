@@ -275,7 +275,7 @@ services:
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       # gpt-5.5, not the deployment default: this Bot writes /v1/chat/completions by hand, and
       # gpt-5.6-* rejects function tools there unless reasoning is turned off. Its own variable, so
       # a BOT_MODEL set for the framework Bot cannot silently take its tools away.
@@ -318,7 +318,7 @@ services:
       # rest, and the ones the choice did not imply are written empty rather than left stale: see
       # `ModelCredential`.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
@@ -357,7 +357,7 @@ services:
       # Same server-to-Bot request boundary as agent-bot above.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
