@@ -75,6 +75,7 @@
         "cel-js": "^0.8.2",
         "cron-parser": "^5",
         "drizzle-orm": "^0.45.2",
+        "eventsource": "3.0.7",
         "hono": "^4.10.0",
         "postgres": "^3.4.9",
         "rxjs": "7.8.1",
@@ -84,7 +85,6 @@
       "devDependencies": {
         "@copilotkit/aimock": "1.39.0",
         "drizzle-kit": "^0.31.10",
-        "eventsource": "3.0.7",
       },
     },
     "worker": {

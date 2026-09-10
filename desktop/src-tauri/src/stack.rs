@@ -47,7 +47,7 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
     HostProcess {
         name: "server",
         cwd: "server",
-        script: "src/index.ts",
+        script: "src/production-entry.ts",
         package_script: "",
     },
     // `serve`, not `dev`. The dev server sets NODE_ENV to development, and the SDK reads that to
@@ -1012,10 +1012,9 @@ pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
     /*
      * The pids this window or an earlier one recorded, which is the only way to reach the worker.
      *
-     * It listens on no port, so the sweep below cannot see it, and its command line is identical to
-     * the server's: both are `bun --env-file=../.env src/index.ts`, differing only by working
-     * directory, which Windows will not tell you cheaply. Measured: after the port sweep alone,
-     * 3001 and 3010 were free and the worker was still running.
+     * It listens on no port, so the sweep below cannot see it. The server has its own loader entry,
+     * but that does not make the worker visible to the port sweep: after the port sweep alone, 3001
+     * and 3010 were free and the worker was still running.
      */
     stop_windows_processes_with_inventory(
         _root,
@@ -2298,24 +2297,35 @@ mod tests {
         }
     }
 
+    fn host_command_line(name: &str) -> &'static str {
+        match name {
+            "worker" => r#"bun --env-file=../.env src/index.ts"#,
+            _ => r#"bun --env-file=../.env src/production-entry.ts"#,
+        }
+    }
+
     fn recorded_process(name: &str, pid: u32, creation_date: &str) -> RecordedHostProcess {
         RecordedHostProcess {
             name: name.to_string(),
             pid,
             executable_path: r"C:\Users\person\.bun\bin\bun.exe".to_string(),
-            command_line: r#"bun --env-file=../.env src/index.ts"#.to_string(),
+            command_line: host_command_line(name).to_string(),
             creation_date: creation_date.to_string(),
         }
     }
 
-    fn live_process(pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
+    fn live_host_process(name: &str, pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
         WindowsProcess {
             process_id: pid,
             parent_process_id: parent,
             executable_path: Some(r"C:\Users\person\.bun\bin\bun.exe".to_string()),
-            command_line: Some(r#"bun --env-file=../.env src/index.ts"#.to_string()),
+            command_line: Some(host_command_line(name).to_string()),
             creation_date: Some(creation_date.to_string()),
         }
+    }
+
+    fn live_process(pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
+        live_host_process("server", pid, parent, creation_date)
     }
 
     struct PathFixture {
@@ -2853,8 +2863,8 @@ fn main() {
             recorded_process("worker", 9001, "created-worker"),
         ];
         let processes = [
-            live_process(9000, 0, "created-server"),
-            live_process(9001, 0, "created-worker"),
+            live_host_process("server", 9000, 0, "created-server"),
+            live_host_process("worker", 9001, 0, "created-worker"),
         ];
         write_host_pid_file(
             &root,
@@ -3664,6 +3674,24 @@ fn main() {
     fn the_three_host_processes_are_the_three_that_are_not_containers() {
         let names: Vec<_> = HOST_PROCESSES.iter().map(|p| p.name).collect();
         assert_eq!(names, vec!["server", "app", "worker"]);
+    }
+
+    #[test]
+    fn the_server_uses_the_production_loader_entry() {
+        let server = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "server")
+            .expect("the server is one of the three");
+        assert_eq!(server.script, "src/production-entry.ts");
+    }
+
+    #[test]
+    fn the_worker_keeps_its_own_index_entry() {
+        let worker = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "worker")
+            .expect("the worker is one of the three");
+        assert_eq!(worker.script, "src/index.ts");
     }
 
     #[test]

@@ -264,7 +264,7 @@ require_free_or_ours "$SERVER_PORT" server
 # rather than as an error.
 if [ "$SECRETS_ROTATED" = "true" ]; then
   info "  a secret was generated this run, so the server is restarted to pick it up"
-  pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+  pkill -f "bun --env-file=../.env src/production-entry.ts" >/dev/null 2>&1 || true
   sleep 1
 fi
 #
@@ -290,12 +290,12 @@ if identifies_as_openbot "$SERVER_PORT" server; then
   case "$HANDOFF_STATUS" in
     401)
       info "  server: up, but refuses the worker's secret (401), so it is restarted to pick it up"
-      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      pkill -f "bun --env-file=../.env src/production-entry.ts" >/dev/null 2>&1 || true
       sleep 1
       ;;
     404)
       info "  server: up, but has no /internal/routines/run (404: an older checkout), so it is restarted"
-      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      pkill -f "bun --env-file=../.env src/production-entry.ts" >/dev/null 2>&1 || true
       sleep 1
       ;;
   esac
@@ -307,11 +307,11 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
   else
     (cd server && PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
