@@ -785,7 +785,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
     }
 
-    // The harness is a service only when one was picked; see `stack::up`.
+    // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
+    let installed_harness = picked
+        .as_ref()
+        .and_then(|picked| picked.installed_port())
+        .is_some();
     /*
      * The bundled Bots only when there is a key for them.
      *
@@ -803,7 +807,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         | openbot_env::ModelCredential::ClaudePlan { .. }
         | openbot_env::ModelCredential::ChatGptPlan { .. } => stack::BundledBots::none(),
     };
-    let requested_services = stack::up(&found, &root, picked.is_some(), bundled_bots, &secrets)?;
+    let requested_services = stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
     report(&app, "services", true, "containers up");
 
     report(&app, "migrate", true, "applying migrations");
@@ -3328,6 +3332,232 @@ mod tests {
         let _ = std::fs::remove_dir_all(fallback);
     }
 
+    #[cfg(unix)]
+    fn harness_start_ipc_case(case: &str) {
+        struct Cleanup(Vec<PathBuf>);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for path in &self.0 {
+                    std::fs::remove_dir_all(path).expect("remove owned IPC fixture");
+                }
+            }
+        }
+        let root = temp_root("openbot-harness-start-ipc");
+        write_installed_deployment(&root);
+        let mut images: deployment::Images =
+            serde_json::from_str(&std::fs::read_to_string(deployment::images_path(&root)).unwrap())
+                .unwrap();
+        for name in ["agent-langgraph-agui", "agent-claude-sdk"] {
+            images.images.insert(
+                name.into(),
+                deployment::Image {
+                    reference: format!("localhost/{name}@sha256:00"),
+                },
+            );
+        }
+        std::fs::write(
+            deployment::images_path(&root),
+            serde_json::to_string(&images).unwrap(),
+        )
+        .unwrap();
+        let _path = SerializedPath::set_only_with("docker", HARNESS_START_IPC_DOCKER);
+        let _cleanup = Cleanup(vec![root.clone(), _path.bin().to_path_buf()]);
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        // Reserve only an owned ephemeral loopback endpoint; no service thread until Start returns.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote = format!("http://{}/ag-ui", listener.local_addr().unwrap());
+        let mut model = serde_json::json!({
+            "provider":"openai", "login":"api-key", "apiKey":"synthetic-provider-key"
+        });
+        let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
+        let (expected_up, expected_image) = match case {
+            "remote" | "remote-stale-image" => (
+                "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph",
+                None,
+            ),
+            "installed" => {
+                choice = serde_json::json!({"id":"langgraph"});
+                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+            }
+            "none" => {
+                choice = serde_json::Value::Null;
+                ("compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph", None)
+            }
+            "chatgpt-plan" => {
+                model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
+                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-harness", Some("agent-langgraph-agui"))
+            }
+            "claude-plan" => {
+                model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
+                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-harness", Some("agent-claude-sdk"))
+            }
+            _ => panic!("unknown test case"),
+        };
+        if case == "remote-stale-image" {
+            std::fs::write(
+                root.join(".env"),
+                "PICKED_HARNESS_IMAGE=localhost/old-image@sha256:00\nPICKED_HARNESS_PORT=4206\n",
+            )
+            .unwrap();
+        }
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![start_stack, ask_the_bot])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |command: &str, body: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+            .map(|body| body.deserialize::<serde_json::Value>().unwrap())
+        };
+        let problem = invoke("start_stack", serde_json::json!({
+            "root":root, "apiUrl":"https://intelligence.example.test", "gatewayWsUrl":"wss://gateway.example.test",
+            "apiKey":"synthetic-intelligence-key", "model":model, "harness":choice,
+        })).expect_err("intentional migration barrier prevents host/DB startup");
+        let commands = std::fs::read_to_string(&record).unwrap_or_default();
+        assert!(
+            problem["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("synthetic migration barrier"),
+            "{problem:?} {commands}"
+        );
+        let up: Vec<_> = commands
+            .lines()
+            .filter_map(|line| {
+                let (_, command) = line.split_once('\t')?;
+                command.contains(" up -d ").then_some(command)
+            })
+            .collect();
+        assert_eq!(
+            up,
+            vec![expected_up],
+            "case={case}, actual Start IPC commands:\n{commands}"
+        );
+        assert!(commands.contains("\tcompose run --rm migrate\n"));
+        assert!(!root.join(".logs").exists(), "no host runtime was launched");
+        let settings = openbot_env::read_already_set(
+            &root.join(".env"),
+            &[
+                "TENANT_PACKAGE_DIR",
+                "PICKED_HARNESS_URL",
+                "PICKED_HARNESS_KIND",
+                "PICKED_HARNESS_IMAGE",
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            settings.get("TENANT_PACKAGE_DIR").map(String::as_str),
+            Some("../examples/fintech")
+        );
+        let mut asked = false;
+        if case.starts_with("remote") {
+            assert_eq!(settings.get("PICKED_HARNESS_URL"), Some(&remote));
+            assert_eq!(
+                settings.get("PICKED_HARNESS_KIND").map(String::as_str),
+                Some("remote-ag-ui")
+            );
+            let server = TestServer::from_listener(listener,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+                 data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"D53-BYO-REMOTE-ANSWER\"}\n\n\
+                 data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n");
+            let answer = invoke(
+                "ask_the_bot",
+                serde_json::json!({"root":root,"question":"D53 remote IPC question"}),
+            )
+            .unwrap();
+            let request = server.request();
+            assert_eq!(answer, "D53-BYO-REMOTE-ANSWER");
+            assert_eq!(request.path, "/ag-ui");
+            assert!(request.body.contains("D53 remote IPC question"));
+            assert!(request
+                .headers
+                .iter()
+                .any(|line| line.starts_with("x-openbot-agent-token: ")));
+            asked = true;
+        } else if let Some(image) = expected_image {
+            assert_eq!(
+                settings.get("PICKED_HARNESS_IMAGE"),
+                Some(&format!("localhost/{image}@sha256:00"))
+            );
+            assert_ne!(settings.get("PICKED_HARNESS_URL"), Some(&remote));
+        } else {
+            assert!(!settings.contains_key("PICKED_HARNESS_URL"));
+        }
+        println!(
+            "D53_START_IPC={}",
+            serde_json::json!({
+                "case":case, "composeUp":up, "commands":commands, "intentionalMigrationBarrier":true,
+                "defaultPackage":"../examples/fintech", "remoteEndpointPersistedAndConsumed":asked,
+                "actualAskIpcResponse":asked.then_some("D53-BYO-REMOTE-ANSWER"),
+                "noHostStartup":true, "nativeGui":false, "realEngineOrDatabase":false,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_harness_start_ipc_skips_local_service_and_asks_persisted_endpoint() {
+        harness_start_ipc_case("remote");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_harness_start_ipc_ignores_stale_local_image() {
+        harness_start_ipc_case("remote-stale-image");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installed_harness_start_ipc_keeps_local_service() {
+        harness_start_ipc_case("installed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_harness_start_ipc_keeps_only_core_and_eligible_bundled_services() {
+        harness_start_ipc_case("none");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chatgpt_plan_harness_start_ipc_overrides_remote_choice() {
+        harness_start_ipc_case("chatgpt-plan");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_plan_harness_start_ipc_overrides_remote_choice() {
+        harness_start_ipc_case("claude-plan");
+    }
+
+    #[cfg(unix)]
+    const HARNESS_START_IPC_DOCKER: &str = r#"#!/bin/sh
+printf '%s\t%s\n' "$PWD" "$*" >> "$OPENBOT_TEST_ENGINE_RECORD"
+case "$*" in
+  "version --format {{.Server.APIVersion}}") printf '1.44\n' ;;
+  "compose version") printf 'Docker Compose synthetic\n' ;;
+  "compose ps --format {{.Ports}}") printf '127.0.0.1:4206->4206/tcp, 127.0.0.1:4212->4212/tcp\n' ;;
+  "compose up -d --no-build "* | "compose --profile harness up -d --no-build "*) ;;
+  "compose run --rm migrate") printf 'synthetic migration barrier\n' >&2; exit 71 ;;
+  *) printf 'forbidden synthetic engine command: %s\n' "$*" >&2; exit 99 ;;
+esac
+"#;
+
     #[test]
     fn start_fails_when_required_compose_service_exited_before_host_startup() {
         let root = temp_root("openbot-dead-compose-start");
@@ -3857,8 +4087,12 @@ fi\n";
 
     impl TestServer {
         fn new(response: impl Into<String>) -> Self {
-            let response = response.into();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            Self::from_listener(listener, response)
+        }
+
+        fn from_listener(listener: std::net::TcpListener, response: impl Into<String>) -> Self {
+            let response = response.into();
             let url = format!("http://{}", listener.local_addr().expect("addr"));
             let (sender, received) = std::sync::mpsc::channel();
             let done = std::thread::spawn(move || {
