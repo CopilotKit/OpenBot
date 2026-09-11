@@ -4186,6 +4186,7 @@ fn main() {
     if !base.join(format!("{engine}-ready")).exists() { eprintln!("synthetic original runtime unavailable"); std::process::exit(74); }
     match words.as_slice() {
         ["version","--format",_] => println!("1.44"),
+        ["info","--format","{{.Host.ServiceIsRemote}}"] => println!("false"),
         ["compose","version"] => println!("Synthetic Compose"),
         ["compose","ps","--format",_] => (),
         ["compose","up",..] => {
