@@ -4513,7 +4513,9 @@ fn main() {
     let engine=PathBuf::from(env::args().next().unwrap()).file_name().unwrap().to_string_lossy().into_owned();
     let default=if engine=="docker" {"docker-context"} else {"podman-connection"};
     let mut target=fs::read_to_string(base.join(default)).unwrap();
-    if args.first().is_some_and(|a| ["--context","--host","--connection","--url"].contains(&a.as_str())) {
+    if engine=="podman" && args.first().is_some_and(|a| a=="--remote=false") {
+        target="local".into(); args.remove(0);
+    } else if args.first().is_some_and(|a| ["--context","--host","--connection","--url"].contains(&a.as_str())) {
         target=args[1].clone(); args.drain(..2);
     } else if engine=="docker" {
         target=env::var("DOCKER_CONTEXT").ok().filter(|s|!s.is_empty())
@@ -4906,6 +4908,69 @@ fn main() {
                 .lock()
                 .unwrap()
                 .is_none());
+        }
+
+        #[test]
+        fn local_podman_fixture_keeps_linux_selector_independent_of_remote_defaults() {
+            if crate::test_support::isolated_process("tests::container_root::local_podman_fixture_keeps_linux_selector_independent_of_remote_defaults") { return; }
+            let fixture = Fixture::new();
+            std::fs::write(fixture.base.join("podman-ready"), "").unwrap();
+            // Exercise Linux's actual pinned argv on every Unix test host. macOS normally
+            // selects a named remote connection and would never cover this fixture boundary.
+            let run = |root: &Path, args: &[&str]| {
+                let output = engine::Address::new(engine::Engine::Podman, None)
+                    .command()
+                    .args(args)
+                    .current_dir(root)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{args:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                output
+            };
+            let version = run(&fixture.a, &["--remote=false", "compose", "version"]);
+            assert_eq!(version.stdout, b"Synthetic Compose\n");
+            run(&fixture.a, &["--remote=false", "compose", "up", "-d"]);
+            assert_eq!(
+                std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap(),
+                "podman:local"
+            );
+
+            std::fs::write(fixture.base.join("podman-connection"), "remote-beta").unwrap();
+            std::env::set_var("CONTAINER_CONNECTION", "ambient-remote");
+            run(
+                &fixture.b,
+                &["--connection", "explicit-remote", "compose", "up", "-d"],
+            );
+            run(
+                &fixture.a,
+                &[
+                    "--remote=false",
+                    "compose",
+                    "-f",
+                    "docker-compose.yml",
+                    "--profile",
+                    "harness",
+                    "down",
+                ],
+            );
+
+            assert!(!fixture.a.join("fixture-containers-running").exists());
+            assert_eq!(
+                std::fs::read_to_string(fixture.b.join("fixture-containers-running")).unwrap(),
+                "podman:explicit-remote"
+            );
+            let trace = std::fs::read_to_string(fixture.base.join("affinity.log")).unwrap();
+            assert!(
+                trace
+                    .lines()
+                    .filter(|line| line.contains("--remote=false"))
+                    .all(|line| line.starts_with("podman:local\t")),
+                "{trace}"
+            );
         }
 
         fn runtime_affinity(case: &str) {
