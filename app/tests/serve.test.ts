@@ -4,6 +4,7 @@ import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  BunWebSocket,
   fileFor,
   isApiCall,
   isClientRoute,
@@ -335,7 +336,7 @@ async function startProxy(upstreamPort: number) {
 
 async function failedHandshake(url: string, headers: HeadersInit = {}) {
   const events: string[] = [];
-  const socket = new WebSocket(url, { headers });
+  const socket = new BunWebSocket(url, { headers });
   try {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(
@@ -357,8 +358,8 @@ async function failedHandshake(url: string, headers: HeadersInit = {}) {
 }
 
 async function connectWebSocket(url: string, headers: HeadersInit) {
-  return new Promise<WebSocket>((resolve, reject) => {
-    const socket = new WebSocket(url, { headers });
+  return new Promise<BunWebSocket>((resolve, reject) => {
+    const socket = new BunWebSocket(url, { headers });
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error("websocket did not open"));
@@ -382,7 +383,7 @@ async function connectWebSocket(url: string, headers: HeadersInit) {
   });
 }
 
-async function nextSocketMessage(socket: WebSocket) {
+async function nextSocketMessage(socket: BunWebSocket) {
   return new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => {
       socket.close();
@@ -558,7 +559,7 @@ describe("upstream websocket handshake", () => {
       },
     });
     const proxy = await startProxy(upstream.port!);
-    const socket = new WebSocket(
+    const socket = new BunWebSocket(
       `ws://127.0.0.1:${proxy.port}/api/events?mode=delayed`,
     );
     try {

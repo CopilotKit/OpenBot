@@ -74,14 +74,33 @@ export function upstreamWebSocketHeaders(requestHeaders: Headers): Headers {
   return headers;
 }
 
+/**
+ * Bun's WebSocket client: the DOM one, plus the two things Bun adds and the browser does not.
+ *
+ * `bun-types` hands the global `WebSocket` over to `lib.dom` whenever DOM is in `lib`, and this
+ * project has DOM in `lib` for the browser code that is the rest of `app/`. What is left describes
+ * the BROWSER's client, which has no `terminate()` and takes subprotocols where Bun takes options.
+ * This file only ever runs under Bun and uses both.
+ *
+ * Stated as an extension of the DOM type rather than by reaching for `Bun.WebSocket`, because that
+ * interface is written for projects WITHOUT DOM in `lib` and degrades to `{}` here — its events
+ * come back untyped, which costs more than the two members it would buy. Same socket either way;
+ * this is a type-level correction, not a different client.
+ */
+export type BunWebSocket = WebSocket & { terminate(): void };
+export const BunWebSocket = globalThis.WebSocket as unknown as {
+  new (url: string | URL, options?: { headers?: HeadersInit }): BunWebSocket;
+  readonly OPEN: number;
+};
+
 type WebSocketBridge = {
-  upstream: WebSocket;
+  upstream: BunWebSocket;
   attach: (downstream: ServerWebSocket<WebSocketBridge>) => void;
   dispose: () => void;
 };
 
 /** Own the upstream before awaiting its handshake, including any immediate welcome frames. */
-function prepareWebSocketBridge(upstream: WebSocket, signal: AbortSignal) {
+function prepareWebSocketBridge(upstream: BunWebSocket, signal: AbortSignal) {
   upstream.binaryType = "arraybuffer";
   let downstream: ServerWebSocket<WebSocketBridge> | undefined;
   const pending: (string | ArrayBuffer)[] = [];
@@ -185,7 +204,7 @@ if (import.meta.main) {
       },
       message(ws, message) {
         const { upstream } = ws.data;
-        if (upstream.readyState === WebSocket.OPEN) {
+        if (upstream.readyState === BunWebSocket.OPEN) {
           upstream.send(message);
         } else {
           ws.close(1011, "Upstream connection closed");
@@ -202,13 +221,13 @@ if (import.meta.main) {
       if (isApiCall(url.pathname)) {
         const target = SERVER + url.pathname + url.search;
         if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-          const upstream = new WebSocket(target.replace(/^http/, "ws"), {
+          const upstream = new BunWebSocket(target.replace(/^http/, "ws"), {
             headers: upstreamWebSocketHeaders(request.headers),
           });
           const bridge = prepareWebSocketBridge(upstream, request.signal);
           if (
             !(await bridge.opened) ||
-            upstream.readyState !== WebSocket.OPEN
+            upstream.readyState !== BunWebSocket.OPEN
           ) {
             bridge.data.dispose();
             return new Response("Could not connect to the upstream WebSocket", {
