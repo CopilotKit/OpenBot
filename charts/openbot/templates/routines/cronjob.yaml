@@ -14,7 +14,8 @@ problem in one workload rather than across several.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  {{- /* Fifty-two characters, not sixty-three; see `openbot.cronJobName`. */}}
+  name: {{ include "openbot.cronJobName" (dict "root" . "component" $component) }}
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
 spec:
