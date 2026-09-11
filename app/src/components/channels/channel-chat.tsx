@@ -500,6 +500,36 @@ export function ChannelChat({
   // Run failures arrive as events and are reported only for turns started in this mount.
   const [runError, setRunError] = useState<string | null>(null);
   const awaitingReply = useRef(false);
+  /**
+   * WHY THIS TURN ENDED WITHOUT AN ANSWER, KEPT WHERE `deliver` CAN STILL SEE IT — because the one
+   * thing that knows is a subscriber, and the one thing that has to act on it is an `await`.
+   *
+   * `copilotkit.runAgent` DOES NOT REJECT ON A FAILED RUN. `CopilotKitCore.runAgent` catches
+   * everything the agent throws, reports it through `emitError` as `AGENT_RUN_FAILED`, and returns
+   * `{ result: undefined, newMessages: [] }` — a value indistinguishable from a run that finished
+   * with nothing to say. So a gateway 503, a stream that dies, a model that refuses the request:
+   * every one of them arrived here as a resolved promise, and `say` reported success for a turn
+   * that never reached the server.
+   *
+   * WHAT THAT COST, WHICH IS THE REASON THIS EXISTS. `say` resolving is what every caller reads as
+   * "it went". The composer clears the box and gives up the chips it was riding; the queue empties
+   * into a draft nothing retries; `conversation-view.tsx` never runs either of the failure paths it
+   * has written for exactly this. The person is left with the failed turn in the transcript and a
+   * notice under it, the words unretryable, and the files behind them staged rows that nothing on
+   * any screen points at any more. The notice is honest and everything under it was not.
+   *
+   * READ OFF THE SAME `fail` THE NOTICE IS, and deliberately not from a second subscription of its
+   * own. `fail` already answers the one question a separate subscriber would get wrong: a turn the
+   * PERSON stopped also reaches `onRunFailed`, with an abort, and `onStop` clears `awaitingReply`
+   * before it — so Stop is not a failure here and nothing restores a draft somebody chose to end.
+   *
+   * ONE SLOT FOR ONE TURN AT A TIME, the same assumption `awaitingReply` beside it already makes.
+   * Two overlapping turns — a component button pressed during a composer send — would have the
+   * second clear the first's reason, which reports the earlier turn as successful. That is the
+   * pre-existing shape of `awaitingReply`, not a new one, and narrowing it means giving a run a
+   * handle that `copilotkit.runAgent` does not hand back.
+   */
+  const turnFailure = useRef<string | null>(null);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
 
   /*
@@ -586,6 +616,7 @@ export function ChannelChat({
     const target = agentRef.current;
 
     setRunError(null);
+    turnFailure.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
         .filter((message) => message.role === "assistant")
@@ -632,6 +663,30 @@ export function ChannelChat({
     } finally {
       setRunsInFlight((count) => count - 1);
     }
+
+    /*
+     * A TURN THAT DID NOT HAPPEN FAILS THE SEND, which is the only way anything upstream can tell.
+     * See `turnFailure` for why the resolved promise above says nothing about that.
+     *
+     * AFTER the `finally`, not inside the `try`: the run is over either way, so the counter that
+     * draws the Stop button must come down before this throws. Throwing from inside would leave
+     * `runsInFlight` high for a run that has already ended.
+     *
+     * WHAT THE THROW REACHES, so it is clear this is a message and not a crash. The composer's
+     * `catch` puts the words and the chips back; `conversation-view.tsx` puts a drained queue back
+     * as retryable entries carrying their files. Nothing here reports the failure — `runError` was
+     * already set from the same `fail` that set this, and the transcript already draws it — so this
+     * adds a retry, not a second sentence.
+     *
+     * THE MESSAGE STAYS ON SCREEN. `deliver` added it above and nothing takes it away: it is what
+     * the failed turn WAS, it is what the notice under it is about, and removing it would delete a
+     * partial answer that a mid-stream failure had already produced. The restored draft beside it
+     * is the retry, the same way a failed composer send has always put its words back while the
+     * transcript kept the turn.
+     */
+    if (turnFailure.current !== null) {
+      throw new Error(turnFailure.current);
+    }
   };
 
   /**
@@ -675,6 +730,9 @@ export function ChannelChat({
     const fail = (message: string) => {
       if (!awaitingReply.current) return;
       awaitingReply.current = false;
+      // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
+      // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
+      turnFailure.current = message;
       setRunError(message);
     };
     const subscription = agent.subscribe?.({
@@ -707,9 +765,16 @@ export function ChannelChat({
 
   /**
    * Component buttons speak as user turns without forcing every transcript card to re-render.
+   *
+   * The rejection is swallowed HERE rather than left to the void, and that is not a style choice:
+   * `say` throws on a failed turn now (see `turnFailure`), and a voided promise with nothing on the
+   * end of it is an unhandled rejection — in this repository's test runner, a failure attributed to
+   * whichever test happened to be running when it surfaced. There is nothing to restore for this
+   * caller either way: the words came from a button inside a rendered card, not from a box somebody
+   * is still holding, and the failed turn is already reported by `runError` under the transcript.
    */
   const askFromComponent = useCallback((text: string) => {
-    void sayRef.current(text);
+    void sayRef.current(text).catch(() => undefined);
   }, []);
 
   /**
@@ -721,9 +786,12 @@ export function ChannelChat({
     if (!pending) return;
     seedRef.current = null;
 
-    void sayRef.current(
-      typeof pending.content === "string" ? pending.content : "",
-    );
+    // Swallowed for the reason `askFromComponent` above records: `say` throws on a failed turn, and
+    // the seed has no box to go back into — it was typed on a screen that has already navigated
+    // away. The transcript keeps the seeded message and the notice under it says what happened.
+    void sayRef
+      .current(typeof pending.content === "string" ? pending.content : "")
+      .catch(() => undefined);
 
     // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
   }, []);
