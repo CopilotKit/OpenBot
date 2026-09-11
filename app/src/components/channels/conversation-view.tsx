@@ -159,7 +159,7 @@ export function ConversationView({
    *
    * THE WHOLE TRANSITION COMES BACK, NOT JUST THE RUN. It used to hand back `next.run` alone, which
    * was every caller's whole interest until a failed run became something either of them had to
-   * answer for: the run's own attachments are only releasable if you know which of them the queue
+   * answer for: a run can only be put back if you know which of the messages in it the queue
    * contributed, and that is on the transition beside it. Recomputing it out here would mean
    * re-deriving from a queue this function has already emptied.
    */
@@ -192,17 +192,22 @@ export function ConversationView({
   }, []);
 
   /**
-   * WALKING AWAY WITH SOMETHING STILL PARKED IS THE FOURTH WAY A ROW LOSES ITS LAST REFERENCE, and
+   * WALKING AWAY WITH SOMETHING STILL PARKED IS THE THIRD WAY A ROW LOSES ITS LAST REFERENCE, and
    * until this it was the one way that said nothing and gave nothing back.
    *
-   * The other three go through `apply` and the drain's `catch` above. This one goes through React:
+   * IT USED TO BE THE FOURTH, and the one that went was a way a row should never have lost its last
+   * reference at all: a drained turn whose send failed used to release everything it was carrying.
+   * That one is now a restore — the messages go back in the queue, still holding their rows — so
+   * the ways out are the two in `apply` above, a removal and the cap's excess, and this.
+   *
+   * The other two go through `apply` above. This one goes through React:
    * `queue.ts` is candid that the queue "lives and dies with the component holding it" and that
    * switching channels "takes anything parked in it with it" — but that paragraph is about the
    * person's WORDS, which they watched land on screen and can retype. It was never a statement
    * about the staged rows underneath them, and `releaseStagedAttachment` is explicit that a parked
    * entry holds the only reference anything has to those.
    *
-   * WHAT IT COSTS TO SKIP, stated because it is smaller than the other three and the fix should be
+   * WHAT IT COSTS TO SKIP, stated because it is smaller than the other two and the fix should be
    * priced honestly: the upload cap is scoped by `uploadGroup`, minted per composer mount, so this
    * orphan does not refuse anybody's next pick the way a removal's would — the composer that staged
    * it is gone and its group with it. It is storage held for up to a day by
@@ -228,6 +233,42 @@ export function ConversationView({
       }
     },
     [],
+  );
+
+  /**
+   * A RUN BUILT OUT OF THIS QUEUE FAILED, SO THE DRAIN WAITS FOR A TURN BEFORE TRYING AGAIN.
+   *
+   * Without it the restore below is a spin. The drain effect reads `queuedRef` rather than the
+   * state, so the restored messages are visible to it the instant `apply` writes them — and the
+   * commit that clears `running` schedules that effect with no ordering guarantee against the
+   * rejection that restores. The two land in either order, so on a server that is refusing every
+   * request the queue could be re-sent immediately, fail, restore, and be re-sent again, as fast as
+   * the round trip allows. A retry the person did not ask for is not a retry, it is a loop.
+   *
+   * A REF AND NOT STATE, for the reason `queuedRef` is one: the effect that reads this runs on the
+   * commit that clears `running`, and a state update made in the rejection is a render behind. It
+   * also must not itself cause a render — nothing on screen changes when a queue is held back; the
+   * entries are drawn as parked either way.
+   */
+  const heldBack = useRef(false);
+
+  /**
+   * PUT A FAILED RUN'S MESSAGES BACK WHERE THEY CAME FROM, and hold the drain until somebody asks.
+   *
+   * The one answer to a failed send, used by both paths that can produce a run. See the drain's
+   * `catch` for why restoring rather than releasing, and `heldBack` for why the hold.
+   */
+  const restoreFailedRun = useCallback(
+    (messages: readonly QueuedMessage[]) => {
+      if (messages.length === 0) {
+        return;
+      }
+      // Before the restore, not after: the effect reads both off refs, and the guard has to be
+      // true by the moment the queue is non-empty again rather than one statement later.
+      heldBack.current = true;
+      apply({ messages, type: "restore" });
+    },
+    [apply],
   );
 
   const start = async (draft: ComposerDraft) => {
@@ -260,35 +301,32 @@ export function ConversationView({
       const started = startRef.current(next.run);
       /*
        * A SEND THAT TOOK THE QUEUE WITH IT AND THEN FAILED LEAVES THE PARKED HALF HELD BY NOBODY,
-       * which is the same shape the drain effect below treats as a leak and, until this, the one
-       * path that answered it with nothing.
+       * which is the same shape the drain effect below answers, and with the same line.
        *
        * The ordinary send is not this. Its run IS the draft in the box, and the composer's `catch`
-       * puts those words and those chips straight back — so `strandedIfRunFails` is empty for it
-       * and this branch never runs. It is only the join, where `reduceQueue` empties the queue into
-       * an outgoing draft, that produces a run carrying rows the composer never had.
+       * puts those words and those chips straight back — so `restoreIfRunFails` is empty for it and
+       * this branch never runs. It is only the join, where `reduceQueue` empties the queue into an
+       * outgoing draft, that produces a run carrying messages the composer never had.
        *
-       * WHICH ROWS IS THE QUEUE'S ANSWER AND NOT ONE COMPUTED HERE. By the time this rejects, the
-       * queue that knew where each attachment came from is empty; `strandedIfRunFails` was decided
-       * on the transition that emptied it. Releasing the composer's own instead would delete the
-       * rows behind chips that are back on screen and still sendable.
+       * WHICH MESSAGES IS THE QUEUE'S ANSWER AND NOT ONE COMPUTED HERE. By the time this rejects,
+       * the queue that knew where each message came from is empty; `restoreIfRunFails` was decided
+       * on the transition that emptied it. Restoring the composer's own as well would queue a
+       * second copy of the words that are back in somebody's box.
        *
        * `started` IS WHAT GOES BACK TO THE COMPOSER, not the promise this `catch` derives from it.
        * The composer needs the rejection to restore the words, so the failure must still be its to
-       * handle; the derived promise exists only to hang the release off, is settled by the `catch`
+       * handle; the derived promise exists only to hang the restore off, is settled by the `catch`
        * itself, and is deliberately dropped.
        */
-      if (next.strandedIfRunFails.length > 0) {
-        const stranded = next.strandedIfRunFails;
+      if (next.restoreIfRunFails.length > 0) {
+        const carried = next.restoreIfRunFails;
         void started.catch(() => {
-          for (const attachment of stranded) {
-            releaseStagedAttachment(attachment);
-          }
+          restoreFailedRun(carried);
         });
       }
       return started;
     },
-    [apply],
+    [apply, restoreFailedRun],
   );
 
   /**
@@ -311,56 +349,63 @@ export function ConversationView({
    * queue that drained anyway would post one more user turn into a channel the screen has already
    * said is finished. The cost is that anything parked when that happens stays on screen unrun,
    * under a notice that explains why, which is the honest half of the trade.
+   *
+   * AND IT REFUSES ONCE A DRAIN HAS FAILED, until a turn starts. See `heldBack`.
    */
   useEffect(() => {
-    if (disabled || inFlight || queuedRef.current.length === 0) {
+    if (inFlight) {
+      /*
+       * A TURN STARTING IS WHAT LETS A HELD-BACK QUEUE GO AGAIN, and it is the only thing that
+       * does. Every way a turn starts is somebody asking for one — a send, a parked message joined
+       * to it, a button inside a rendered card — so the retry is always something a person did,
+       * never this effect trying again on its own.
+       */
+      heldBack.current = false;
+      return;
+    }
+    if (disabled || heldBack.current || queuedRef.current.length === 0) {
       return;
     }
     const next = apply({ type: "settle" });
     if (!next.run) {
       return;
     }
-    const stranded = next.strandedIfRunFails;
+    const carried = next.restoreIfRunFails;
     void startRef.current(next.run).catch(() => {
       /*
        * Swallowed on purpose, and only here. A failed send from the composer throws so the composer
-       * can put the words back in the box; there is no box to put these back into, and the screen
-       * already reports a failed turn through its own notice.
+       * can put the words back in the box; the box for these is the queue they came out of, and the
+       * screen already reports the failed turn through its own notice.
        *
-       * WHICH IS PRECISELY WHY THE FILES CANNOT JUST BE LEFT. The queue was emptied to build this
-       * draft and nothing retries it, so once this rejects the staged rows behind `run.attachments`
-       * are referenced by nothing at all: not the composer's strip, which let go of them as the
-       * messages parked, and not the queue, which drained to produce this. That is the same shape
-       * as a queued message taken back, minus the gesture — the person did nothing and is told
-       * nothing — so the rows are given back the same way rather than waiting a day for the sweep.
+       * IT USED TO DELETE THE STAGED ROWS INSTEAD, AND THAT WAS DATA LOSS. The reasoning was that
+       * the queue had emptied to build this draft and nothing retried it, so the rows behind
+       * `run.attachments` were referenced by nothing and might as well be given back rather than
+       * waiting for the sweep. The second half of that sentence was never true: `channel-chat.tsx`
+       * adds the user message to the transcript BEFORE the run and leaves it there when the run
+       * fails, so the files were referenced by a message the person is looking at. Releasing them
+       * emptied the tiles under a message that stayed on screen, with nothing said and no way back.
        *
-       * IT DOES NOT DISTURB WHAT THE SWALLOW IS FOR. The rejection is still swallowed and still not
-       * rethrown; nothing about which failures surface, or how the turn is reported, changes here.
-       * The comment above says restoring is impossible, not that the rows should be kept, and
-       * releasing them is the only remaining reading of "there is no box to put these back into".
+       * SO THE MESSAGES GO BACK IN THE QUEUE, WHOLE. Their words, their `/` chips and the rows the
+       * run actually carried return as parked entries — visible in the transcript, carried by the
+       * next turn, and released only if somebody takes one back by hand. Deleting on an explicit
+       * removal is the one gesture that has ever justified it; a run that failed is not that.
+       *
+       * `restoreIfRunFails` RATHER THAN THE QUEUE THIS DRAINED, WHICH FOR A DRAIN IS NEARLY THE
+       * SAME LIST AND IS NOT THE SAME CLAIM. The cap may have bumped attachments off the joined
+       * draft on the way out, and `apply` released those as the run was built; restoring the
+       * original entries would re-queue messages pointing at rows that are gone. Spelling it as the
+       * queue's own answer is also what lets `submit` — where the two are further apart still — use
+       * the identical line.
        *
        * NOT INSIDE `start`, AND THAT IS LOAD-BEARING. `start` is also called from `submit`, where
-       * the promise goes back to the composer and a failure is answered by putting the chips back
-       * beside the restored words. Releasing everything a run carries from inside `start` would
-       * delete the rows behind chips that are on screen again and still sendable, so the decision
-       * belongs to the call sites — this one, and the join in `submit`, which answers the same
-       * question from the same list.
-       *
-       * `strandedIfRunFails` RATHER THAN `run.attachments`, WHICH FOR A DRAIN IS THE SAME LIST AND
-       * IS NOT THE SAME CLAIM. Every message in a drain was parked, so the composer let go of all
-       * of them and the two are equal here by construction; spelling it as the queue's own answer
-       * is what lets `submit` — where they are NOT equal — use the identical line. One rule, read
-       * off the transition that knows, rather than two call sites each deciding for themselves.
-       *
-       * The cap already gave back its own excess through `apply`, so these are only the survivors —
-       * no row is released twice. A send that failed AFTER the message was created answers 409 and
-       * changes nothing, which is left uninspected exactly as `releaseStagedAttachment` documents.
+       * the promise goes back to the composer and the composer restores its own draft. Restoring
+       * everything a run carries from inside `start` would queue a second copy of the words that
+       * are back in the box, so the decision belongs to the call sites — this one, and the join in
+       * `submit`, which answers the same question from the same list.
        */
-      for (const attachment of stranded) {
-        releaseStagedAttachment(attachment);
-      }
+      restoreFailedRun(carried);
     });
-  }, [apply, disabled, inFlight]);
+  }, [apply, disabled, inFlight, restoreFailedRun]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
