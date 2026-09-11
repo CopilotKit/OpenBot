@@ -1,4 +1,4 @@
-import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
+import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
@@ -17,6 +17,12 @@ import {
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import type { AgentActor } from "./agents/profile-types";
 import type { AuditInitiator } from "./audit";
+import {
+  attachmentIdsIn,
+  newInlineBudget,
+  resolveAttachmentParts,
+  type StoredAttachment,
+} from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import type { SelectableSkill, Selection } from "./plugins/selection";
@@ -411,6 +417,21 @@ export async function buildAgents(
    */
   loadInstructions?: LoadInstructions,
   initiator?: AuditInitiator,
+  /**
+   * How a message's attached files are put in front of the model.
+   *
+   * Appended last on purpose, like the collaborators above it: these are positional, so inserting
+   * one anywhere else silently shifts every existing call site's arguments by one.
+   *
+   * Absent means nothing is inlined and a Bot is shown the URL a file is stored behind rather than
+   * the file, which is what every deployment did before this existed.
+   */
+  loadAttachment?: LoadAttachment,
+  /**
+   * How a run says the files on the message it is answering went out in a send. Appended after
+   * `loadAttachment` for the positional reason it gives. Absent means nothing is recorded.
+   */
+  markAttachmentsSent?: MarkAttachmentsSent,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -465,6 +486,8 @@ export async function buildAgents(
           handoff,
           instructions ?? null,
           initiator,
+          loadAttachment,
+          markAttachmentsSent,
         ),
       ]),
     ),
@@ -479,6 +502,220 @@ export async function buildAgents(
  * serve everybody the first person's preferences. Null means they have written none.
  */
 export type LoadInstructions = () => Promise<string | null>;
+
+/**
+ * The bytes behind one stored attachment, fetched when a turn turns out to refer to it.
+ *
+ * A closure rather than the rows themselves, for the same reason {@link LoadInstructions} is one:
+ * which files a turn names is decided by the message, and a request is earlier than a message. It is
+ * ALSO bound to one person, like {@link LoadInstructions}: the ids reach it out of browser-supplied
+ * message content, so which rows it may return is decided against the asker's channel memberships.
+ * Null means this deployment no longer holds it OR it is not this person's to see, and on the
+ * message the turn is answering `resolveAttachmentParts` turns either into a failed turn rather
+ * than an answer about a file they never sent. Behind that message it becomes a note that the file
+ * is gone; see {@link inlineAttachments} for why the two answers differ.
+ *
+ * TAKES THE RUN'S THREAD, AND TAKES IT AS A REQUIRED SECOND ARGUMENT. Which files a turn may reach
+ * is decided by the conversation it is running in, not only by who is asking: an implementation
+ * resolves the thread to its channel and refuses a file belonging to another one. Required rather
+ * than optional, and second rather than curried in beside the actor, because those are the two
+ * shapes that cannot be forgotten — `resolveAttachmentParts` accepts a `(id) => …`, so a
+ * `LoadAttachment` is deliberately NOT assignable to it, and the binding that adapts one to the
+ * other is the line where the thread id has to be named. A caller that omits it does not compile.
+ * Mirrors {@link SignRun}, which takes the thread for the same class of reason.
+ */
+export type LoadAttachment = (
+  id: string,
+  threadId: string,
+) => Promise<StoredAttachment | null>;
+
+/**
+ * Records that these attachments went out in a message somebody sent.
+ *
+ * A closure bound to one person, like {@link LoadAttachment}, and for a stricter reason: this one
+ * WRITES. `attachedAt` is what the sweeper, the upload cap and the withdrawal route all read as
+ * "this file rode in a message somebody sent", so only the person whose send it was may record it,
+ * and only for rows they uploaded themselves — see `markAttachmentsSent` in
+ * channels/attachments.ts, which puts `uploadedBy` in the WHERE for exactly that.
+ *
+ * Called with the ids on the message being asked about and nothing else. History is replayed on
+ * every turn and by whoever runs it, so a message behind the send is not evidence of one.
+ *
+ * A failure to record is swallowed and logged rather than raised: a turn is somebody waiting for an
+ * answer, and bookkeeping that could not be written is not worth failing that answer over. Absent
+ * means nothing is recorded, which is what every deployment did before this existed.
+ *
+ * THE SWALLOW IS THE CALLER'S, NOT AN OBLIGATION ON THE IMPLEMENTATION. This read as though an
+ * implementation had to catch its own failure, and for a while only one did — so a rejection raised
+ * anywhere outside that one `.catch` failed the answer this paragraph promises it would not.
+ * `inlineAttachments` now holds it at the seam, so an implementation is free to reject and this
+ * type means what it says whoever supplies one.
+ */
+export type MarkAttachmentsSent = (
+  ids: readonly string[],
+  /**
+   * The conversation the send happened in, required for the reason {@link LoadAttachment} takes
+   * one — and here it is the stronger of the two cases, because this WRITES. A stamp recorded
+   * against the wrong conversation freezes a row in a channel that never saw the file: it can no
+   * longer be withdrawn and the culler will no longer reclaim it.
+   */
+  threadId: string,
+) => Promise<void>;
+
+/**
+ * The same history with every attached file put in front of the model.
+ *
+ * USER MESSAGES ONLY. A stored reference gets into a thread by somebody attaching a file to what
+ * they said; rewriting an assistant or tool message would be rewriting what a model already
+ * produced. A message that refers to no attachment comes back BY IDENTITY, which is almost all of
+ * them, so this pass costs nothing on a thread with no files in it.
+ *
+ * NOTHING HERE CATCHES, FOR THE MESSAGE BEING ASKED ABOUT. An attachment this deployment cannot load
+ * fails that turn, deliberately: see `resolvePart` in `channels/attachment-parts.ts` for why a Bot
+ * answering confidently about an image it never received is the worse of the two outcomes.
+ *
+ * THE MESSAGE BEING ASKED ABOUT IS THE LAST USER MESSAGE. Everything after it in `input.messages` is
+ * the Bot's own work on this turn, and everything before it is a turn already answered; the last
+ * thing a person said is what the run is a reply to, and so the only message whose attachments the
+ * answer is going to be about. It is also the only one whose attachments were just uploaded, which
+ * is what makes failing there recoverable: the person is still there, and can re-attach and re-send.
+ *
+ * OLDER MESSAGES DEGRADE INSTEAD. This maps over the WHOLE history, and history is replayed on every
+ * turn, so one vanished row failing here would fail this channel's every future turn for ever — the
+ * same geometry as the dangling tool call in `agents/history-sanitize.ts`, which opens by recording
+ * that exact failure found in production twice: a permanent failure grown out of transient damage,
+ * and nothing the person did wrong. It is reachable the same way, too: a send whose run is stopped
+ * before the load never stamps `attachedAt`, and the sweeper deletes the row a day later. So an
+ * older part whose row is gone becomes text saying so, which keeps the property that matters — the
+ * model is never left to answer as though a file it cannot see were in front of it — without the
+ * permanence.
+ *
+ * AND IT WALKS BACKWARDS, WHICH IS WHAT MAKES THE BUDGET FAIR. `MAX_INLINED_BYTES_PER_RUN` bounds
+ * what one turn may inline in total — nothing did, before, and a channel that had seen a few large
+ * images made every later turn read and base64 all of them again. A budget is only defensible if
+ * the person's own question is never what it cuts, so the walk starts at the newest message: the
+ * one being asked about is charged first, and is never cut whatever it costs. What runs out is the
+ * room left for the history behind it, and that history has already been in front of the model
+ * once, in the turn it arrived.
+ *
+ * NEVER CUT IS NOT THE SAME AS NEVER BOUNDED, and reading the first as the second is what left the
+ * asked message with no ceiling at all: `resolvePart` stopped spending only under
+ * `onMissing: "note"`, so a message a browser had just written could name two hundred
+ * previously-sent files and inline every one of them. It is still never cut — a person is never
+ * told their own question's attachment was quietly left out — but a message past
+ * `MAX_INLINED_BYTES_PER_RUN` now fails this turn with a sentence naming the file and the limit.
+ * Refusing is an answer somebody can act on, since the message is still in front of them; silently
+ * serving half of it is not.
+ *
+ * The walk is sequential for the same reason the parts within a message are: a budget spent by
+ * whichever database read happened to settle first would cut a different message on each run over
+ * the same thread. The concurrency given up is one round trip per message that carries a file,
+ * which is very few messages in very few threads.
+ */
+async function inlineAttachments(
+  messages: Message[],
+  load: LoadAttachment,
+  /**
+   * The conversation this run is in, passed to every load and to the stamp.
+   *
+   * Taken as a parameter rather than read off anything reachable from here because this function
+   * is handed a history, not a run — and it is the ONLY place that both knows which message is
+   * being asked about and is called from every path that can send one. Both call sites below have
+   * `input.threadId` in hand; neither can supply it by accident, since {@link LoadAttachment} does
+   * not typecheck without it.
+   */
+  threadId: string,
+  markSent?: MarkAttachmentsSent,
+): Promise<Message[]> {
+  const asked = messages.reduce(
+    (latest, message, index) => (message.role === "user" ? index : latest),
+    -1,
+  );
+  const budget = newInlineBudget();
+  const inlined = [...messages];
+  /**
+   * The ids to stamp once the whole walk has come back, or none.
+   *
+   * Collected during the walk and spent after it, which is the whole of the fix described at the
+   * `markSent` call below: the asked message is the FIRST thing this backward loop resolves, so a
+   * stamp written where it is found is written before any older message has been looked at.
+   */
+  let sentIds: readonly string[] = [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== "user") continue;
+    const content = await resolveAttachmentParts(
+      message.content,
+      /*
+       * The seam narrows to `(id) => …` HERE, and this line is the whole reason the thread id is a
+       * required parameter rather than something a wiring could forget. `resolveAttachmentParts`
+       * asks about one id at a time and knows nothing about runs; a `LoadAttachment` is not
+       * assignable to what it takes, so adapting one to the other cannot be done without naming
+       * the conversation the ids are being resolved for.
+       */
+      (id) => load(id, threadId),
+      index === asked ? "fail" : "note",
+      budget,
+    );
+    /*
+     * AND THIS IS WHERE `attachedAt` IS WRITTEN, for the asked message alone.
+     *
+     * The send that puts a file in front of a Bot goes out through AG-UI, so there is no request
+     * handler in channels/attachments.ts to hook the write onto; this function is the first place
+     * in the server that both knows the message and knows it is the one being asked about. Every
+     * other message here is history, replayed in full on every turn and by whoever is running it,
+     * which is why the write cannot live in `load`: a read happens for all of them.
+     *
+     * AFTER THE WHOLE HISTORY RESOLVES, NOT AFTER THIS MESSAGE DOES, which is why the ids are only
+     * COLLECTED here and the write happens past the end of the loop. The strict `"fail"` above is
+     * what refuses a turn that names a file the asker cannot see, and a send is not recorded for a
+     * turn that never ran — but this loop walks BACKWARDS, so the asked message is the first thing
+     * it resolves and every older message is still ahead of it. Stamping here meant stamping before
+     * any of them had been looked at, and a history load that rejects (a pool error, a timeout;
+     * `"note"` softens a MISSING row, not a failing read) then failed the turn with `attachedAt`
+     * already written for it. The stamp's entire meaning is "this file reached a message somebody
+     * actually sent", and three readers act on it — the sweeper's delete, the upload cap, the
+     * withdrawal route — so a stamp for a turn that never ran is not a cosmetic inaccuracy.
+     *
+     * Past the end of the loop is as late as this function can put it, and no later: whether the
+     * model ever answers is decided by things well downstream of here, and a stamp that waited for
+     * that would be waiting on something this function does not observe. What it can promise is
+     * that every message this turn was going to inline was inlined first.
+     *
+     * SWALLOWED HERE, WHERE THE CONTRACT IS WRITTEN. {@link MarkAttachmentsSent} says a failure to
+     * record is not worth failing an answer over, and until this `try` existed that promise was
+     * kept by one implementation's internal `.catch` rather than by this seam — so a rejection
+     * raised anywhere before it (a pool error thrown while the statement is built, or simply a
+     * second wiring of this optional parameter, which `buildAgents`, `resolveRuntimeAgents`,
+     * `createRequestAgents` and `mountCopilotRuntime` all expose) failed the turn of a person who
+     * was waiting for an answer. `try`/`catch` rather than `.catch()`, unlike the sibling seams
+     * above, because it also holds for an implementation that throws synchronously instead of
+     * returning a rejected promise; `.catch()` would not have been called at all.
+     *
+     * The log names the ids, because every consequence of a missing stamp — a file the sweeper
+     * reclaims, an upload slot that never frees — is about specific rows, and a line naming none
+     * cannot be acted on. The actor is named by the inner log in channels/attachments.ts; this
+     * seam does not know one.
+     */
+    if (index === asked && markSent) {
+      sentIds = attachmentIdsIn(message.content);
+    }
+    if (content !== message.content) {
+      inlined[index] = { ...message, content } as Message;
+    }
+  }
+  if (markSent && sentIds.length > 0) {
+    try {
+      await markSent(sentIds, threadId);
+    } catch (error) {
+      console.error(
+        `Could not record that attachments were sent: ${sentIds.join(", ")}.`,
+        error,
+      );
+    }
+  }
+  return inlined;
+}
 
 async function buildAgent(
   agent: RegisteredAgent,
@@ -495,6 +732,10 @@ async function buildAgent(
   /** Already resolved by {@link buildAgents}, so one roster costs one read. */
   standingInstructions: string | null = null,
   initiator?: AuditInitiator,
+  /** How this run's attached files are inlined. See {@link buildAgents}. */
+  loadAttachment?: LoadAttachment,
+  /** How this run records that those files were sent. See {@link buildAgents}. */
+  markAttachmentsSent?: MarkAttachmentsSent,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -600,6 +841,8 @@ async function buildAgent(
       signRun,
       connectedVendors,
       narrowing ? offeredFor : undefined,
+      loadAttachment,
+      markAttachmentsSent,
     );
   }
 
@@ -619,6 +862,8 @@ async function buildAgent(
         connectedVendors,
         standingInstructions,
       ),
+      loadAttachment,
+      markAttachmentsSent,
     );
 
   const whole = withTools(granted);
@@ -854,6 +1099,19 @@ function remoteAgentWithStandingRole(
    * Absent means no narrowing, which is the behaviour every deployment had before this existed.
    */
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
+  /*
+   * No `agentFetch` and no `initiator` here any more, and they were not dropped: the transport this
+   * function used to build itself is now built by `remoteTransport` and handed in as `next`, and
+   * that is where both went. Passing them again would be two names for one wiring, and the second
+   * one would be the one nothing reads.
+   */
+  /**
+   * How this run's attached files are inlined, applied inside the middleware below for the reason
+   * the sanitiser is: `run` skips `.use()`. Absent means nothing is inlined.
+   */
+  loadAttachment?: LoadAttachment,
+  /** How this run records that those files were sent. See {@link buildAgents}. */
+  markAttachmentsSent?: MarkAttachmentsSent,
 ) {
   /*
    * What this Bot holds, as a second standing message.
@@ -933,54 +1191,79 @@ function remoteAgentWithStandingRole(
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
-    return next.run({
-      ...input,
-      messages: [
-        agent.standingMessage,
-        ...(holdingsMessage ? [holdingsMessage] : []),
-        ...sanitizeSeededHistory(
-          input.messages.filter(
-            (message) =>
-              message.id !== agent.standingMessage.id &&
-              message.id !== holdingsMessage?.id,
-          ),
-          answeredByResume,
-        ),
-      ],
-      /*
-       * The Bot's own grants, added to whatever the surface offered.
-       *
-       * Sent on every run rather than configured once on the endpoint, because a grant an
-       * administrator adds or revokes has to apply to the next run and the endpoint is somebody
-       * else's process.
-       */
-      tools: [
-        ...(input.tools ?? []),
-        ...tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          parameters: z.toJSONSchema(tool.parameters) as Record<
-            string,
-            unknown
-          >,
-        })),
-      ],
-      context:
-        agent.type === "remote_mastra"
-          ? [
-              ...callerMastraContext(input.context ?? []),
-              ...mastraOpenBotContext({
-                standingMessage: agent.standingMessage,
-                holdingsMessage,
-                botId: agent.id,
-                deploymentTools,
-                runAssertion,
-              }),
-            ]
-          : input.context,
-      // Who the Bot is calling back as, so the audit row names it rather than "an agent".
-      forwardedProps,
-    } as never);
+    const history = sanitizeSeededHistory(
+      input.messages.filter(
+        (message) =>
+          message.id !== agent.standingMessage.id &&
+          message.id !== holdingsMessage?.id,
+      ),
+      answeredByResume,
+    );
+    /*
+     * And the attached files, inlined here for the same reason that guard is here: this middleware
+     * is the last thing between the browser's `input.messages` and the endpoint, and `run` skips
+     * `.use()`. Left alone, a file reaches the endpoint as an `/api/attachments/<id>` URL on a
+     * server that holds no session here and cannot fetch it, so the Bot answers about a file it
+     * never received.
+     *
+     * ALONGSIDE THE SANITISER, NOT INSTEAD OF IT. One drops what the provider is going to refuse;
+     * this puts in front of the model what the person actually attached.
+     */
+    return from(
+      loadAttachment
+        ? inlineAttachments(
+            history,
+            loadAttachment,
+            // The conversation this run is in, which is what decides whose files it may reach.
+            input.threadId,
+            markAttachmentsSent,
+          )
+        : Promise.resolve(history),
+    ).pipe(
+      switchMap((messages) =>
+        next.run({
+          ...input,
+          messages: [
+            agent.standingMessage,
+            ...(holdingsMessage ? [holdingsMessage] : []),
+            ...messages,
+          ],
+          /*
+           * The Bot's own grants, added to whatever the surface offered.
+           *
+           * Sent on every run rather than configured once on the endpoint, because a grant an
+           * administrator adds or revokes has to apply to the next run and the endpoint is somebody
+           * else's process.
+           */
+          tools: [
+            ...(input.tools ?? []),
+            ...tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              parameters: z.toJSONSchema(tool.parameters) as Record<
+                string,
+                unknown
+              >,
+            })),
+          ],
+          context:
+            agent.type === "remote_mastra"
+              ? [
+                  ...callerMastraContext(input.context ?? []),
+                  ...mastraOpenBotContext({
+                    standingMessage: agent.standingMessage,
+                    holdingsMessage,
+                    botId: agent.id,
+                    deploymentTools,
+                    runAssertion,
+                  }),
+                ]
+              : input.context,
+          // Who the Bot is calling back as, so the audit row names it rather than "an agent".
+          forwardedProps,
+        } as never),
+      ),
+    );
   };
 
   /*
@@ -1136,20 +1419,63 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
    * {@link clone} has to build another one of THIS class rather than of the base.
    */
   private readonly configuration: BuiltInAgentConfiguration;
+  /**
+   * How this Bot's attached files are inlined, or absent to leave them alone.
+   *
+   * Held for the same reason {@link configuration} is: {@link clone} builds another one of THIS
+   * class and everything the run depends on has to survive that.
+   */
+  private readonly loadAttachment: LoadAttachment | undefined;
+  /**
+   * How this Bot records that the files on the message it is answering were sent, or absent to
+   * record nothing. Held for the reason {@link loadAttachment} is: {@link clone} builds another one
+   * of THIS class, and a seam lost in a clone is a seam that never runs.
+   */
+  private readonly markAttachmentsSent: MarkAttachmentsSent | undefined;
 
-  constructor(configuration: BuiltInAgentConfiguration) {
+  constructor(
+    configuration: BuiltInAgentConfiguration,
+    loadAttachment?: LoadAttachment,
+    markAttachmentsSent?: MarkAttachmentsSent,
+  ) {
     super(configuration);
     this.configuration = configuration;
+    this.loadAttachment = loadAttachment;
+    this.markAttachmentsSent = markAttachmentsSent;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
-    return super.run({
-      ...input,
-      messages: sanitizeSeededHistory(input.messages, answeredByResume),
-    });
+    const history = sanitizeSeededHistory(input.messages, answeredByResume);
+    const load = this.loadAttachment;
+    /*
+     * ALONGSIDE THE GUARD ABOVE, NOT INSTEAD OF IT. One drops a conversation the model provider is
+     * going to refuse; this replaces the stored reference a person's attachment arrives as with the
+     * bytes themselves, because `BuiltInAgent.run` converts `input.messages` with no seam in
+     * between and a `/api/attachments/<id>` URL is not something a model provider will go and fetch.
+     *
+     * Nothing to load means nothing to inline, and the run goes up exactly as it did before any of
+     * this existed.
+     */
+    if (!load) return super.run({ ...input, messages: history });
+    /*
+     * Deferred, because `run` has to answer with a stream straight away and reading the bytes is a
+     * database round trip. `defer` puts that read on the subscription, which is where the run
+     * actually begins, so nothing is fetched until somebody is listening.
+     */
+    return defer(() =>
+      from(
+        inlineAttachments(
+          history,
+          load,
+          // As above: the run's own conversation, not the actor's channels at large.
+          input.threadId,
+          this.markAttachmentsSent,
+        ),
+      ).pipe(switchMap((messages) => super.run({ ...input, messages }))),
+    );
   }
 
   /**
@@ -1163,7 +1489,11 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
    * something does, it is not lost in a clone.
    */
   clone(): BuiltInAgentWithSaneHistory {
-    const cloned = new BuiltInAgentWithSaneHistory(this.configuration);
+    const cloned = new BuiltInAgentWithSaneHistory(
+      this.configuration,
+      this.loadAttachment,
+      this.markAttachmentsSent,
+    );
     type WithMiddlewares = { middlewares: unknown[] };
     (cloned as unknown as WithMiddlewares).middlewares = [
       ...(this as unknown as WithMiddlewares).middlewares,
@@ -1327,6 +1657,17 @@ export async function resolveRuntimeAgents(
   loadInstructions?: LoadInstructions,
   /** Appended after `loadInstructions`, for the positional reason it gives. */
   initiator?: AuditInitiator,
+  /**
+   * How a message's attached files are put in front of the model. Appended after `initiator`, for
+   * the same positional reason. Absent means nothing is inlined, which is what every deployment did
+   * before this existed.
+   */
+  loadAttachment?: LoadAttachment,
+  /**
+   * How a send is recorded against the files it carried. Appended after `loadAttachment`, for the
+   * same positional reason. Absent means nothing is recorded.
+   */
+  markAttachmentsSent?: MarkAttachmentsSent,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1359,6 +1700,8 @@ export async function resolveRuntimeAgents(
     handoff,
     loadInstructions,
     initiator,
+    loadAttachment,
+    markAttachmentsSent,
   );
 }
 
@@ -1440,6 +1783,28 @@ export function createRequestAgents(
    * so which person it belongs to has to be decided by the session and never by the caller.
    */
   loadInstructionsForActor?: (actorId: string) => LoadInstructions,
+  /**
+   * How the files on a person's message are put in front of the model, resolved for whoever is
+   * asking.
+   *
+   * Per actor, and through `identifyActor` rather than anything in the request body, for the reason
+   * `loadInstructionsForActor` is: the ids arrive inside `input.messages`, which the browser wrote,
+   * so a turn can name an attachment in a channel the asker was never in. Which rows this may read
+   * has to be decided by the session, exactly as the fetch route decides it. Appended last for the
+   * positional reason above. Absent means nothing is inlined, which is what every deployment did
+   * before this existed.
+   */
+  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
+  /**
+   * How a send is recorded against the files it carried, resolved for whoever is asking.
+   *
+   * Per actor for a stricter reason than the reader beside it: this one WRITES `attachedAt`, and
+   * `markAttachmentsSent` will only stamp rows the acting person uploaded themselves. Deciding who
+   * that is from the session rather than from the request body is what keeps one member from
+   * recording a send against a colleague's staged file. Appended last, positionally. Absent means
+   * nothing is recorded.
+   */
+  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -1458,6 +1823,11 @@ export function createRequestAgents(
       // Every Bot this person can see, so no `onlyBotId` here; the instructions follow it.
       undefined,
       loadInstructionsForActor?.(actor.id),
+      // No initiator: a request is a person asking, which is the default this path has always
+      // carried. Named only so the attachments after it land in the right position.
+      undefined,
+      loadAttachmentForActor?.(actor.id),
+      markAttachmentsSentForActor?.(actor.id),
     );
   };
 }
@@ -1588,6 +1958,27 @@ export function mountCopilotRuntime(
    * into only one of them would be the drift `agentFor` exists to prevent.
    */
   loadInstructionsForActor?: (actorId: string) => LoadInstructions,
+  /**
+   * How the files on a message are put in front of the model, resolved per person, on both paths
+   * below.
+   *
+   * Given to the request path and to `agentFor` alike, for the reason `loadInstructionsForActor` is:
+   * a routine's turn at three in the morning has to inline exactly as a person's chat turn does, and
+   * a seam wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed for
+   * the same reason every other collaborator here is — the ids come out of browser-supplied message
+   * content, so the person the run belongs to is what decides which attachments it may read.
+   * Appended last because these are positional. Absent means nothing is inlined.
+   */
+  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
+  /**
+   * How a send is recorded against the files it carried, resolved per person, on both paths below.
+   *
+   * Given to the request path and to `agentFor` alike, for the reason `loadAttachmentForActor` is:
+   * a routine's turn at three in the morning sends exactly as a person's chat turn does, and a seam
+   * wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed because the
+   * write is scoped to rows that person uploaded. Appended last. Absent means nothing is recorded.
+   */
+  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
 ) {
   const { intelligence } = config.runtime;
 
@@ -1633,6 +2024,8 @@ export function mountCopilotRuntime(
       input.botId,
       loadInstructionsForActor?.(actor.id),
       input.initiator,
+      loadAttachmentForActor?.(actor.id),
+      markAttachmentsSentForActor?.(actor.id),
     );
     return agents[input.botId] ?? null;
   };
@@ -1702,6 +2095,8 @@ export function mountCopilotRuntime(
       agentFetch,
       handoffForActor,
       loadInstructionsForActor,
+      loadAttachmentForActor,
+      markAttachmentsSentForActor,
     ) as never,
   });
 
