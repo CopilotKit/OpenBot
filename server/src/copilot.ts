@@ -541,15 +541,27 @@ export type LoadAttachment = (
  * Called with the ids on the message being asked about and nothing else. History is replayed on
  * every turn and by whoever runs it, so a message behind the send is not evidence of one.
  *
- * A failure to record is swallowed and logged rather than raised: a turn is somebody waiting for an
- * answer, and bookkeeping that could not be written is not worth failing that answer over. Absent
- * means nothing is recorded, which is what every deployment did before this existed.
+ * A FAILURE TO RECORD REFUSES THE TURN, AND THIS PARAGRAPH USED TO PROMISE THE OPPOSITE. It said a
+ * failure was swallowed and logged, because a turn is somebody waiting for an answer. The waiting
+ * is real; the conclusion was not. {@link inlineAttachments} calls this BEFORE it returns the
+ * history, and the history is what the run is given afterwards, so nothing has reached a model when
+ * this resolves. A rejection here therefore costs a turn that never started, while a silent one
+ * costs the file itself — `attachedAt` is what stops the culler reclaiming it, so a send recorded
+ * nowhere is a message that displays a file the sweeper deletes a day later. The long argument, and
+ * the four things that still do NOT reject, are in `markAttachmentsSent` in channels/attachments.ts.
  *
- * THE SWALLOW IS THE CALLER'S, NOT AN OBLIGATION ON THE IMPLEMENTATION. This read as though an
- * implementation had to catch its own failure, and for a while only one did — so a rejection raised
- * anywhere outside that one `.catch` failed the answer this paragraph promises it would not.
- * `inlineAttachments` now holds it at the seam, so an implementation is free to reject and this
- * type means what it says whoever supplies one.
+ * SO AN IMPLEMENTATION MUST RESOLVE ONLY WHEN THE RECORD IS DURABLE. Resolving because a statement
+ * was accepted is not enough: an UPDATE that matched no row is a successful command in Postgres, so
+ * an implementation that cannot distinguish "stamped" from "matched nothing" is reporting a send
+ * that did not happen. It must also treat a row that is ALREADY sent as recorded, because a replayed
+ * message and a retried run are both ordinary and neither is an error.
+ *
+ * REJECT WITH A SENTENCE, NOT A SYMPTOM. There is no `app.onError` behind this server, and what an
+ * implementation throws travels out of the run as an AG-UI error and is shown to the person who was
+ * waiting. It is the same road `resolvePart`'s refusals take, and it wants the same kind of message:
+ * what happened, and what they can do about it.
+ *
+ * Absent still means nothing is recorded, which is what every deployment did before this existed.
  */
 export type MarkAttachmentsSent = (
   ids: readonly string[],
@@ -682,20 +694,25 @@ async function inlineAttachments(
      * that would be waiting on something this function does not observe. What it can promise is
      * that every message this turn was going to inline was inlined first.
      *
-     * SWALLOWED HERE, WHERE THE CONTRACT IS WRITTEN. {@link MarkAttachmentsSent} says a failure to
-     * record is not worth failing an answer over, and until this `try` existed that promise was
-     * kept by one implementation's internal `.catch` rather than by this seam — so a rejection
-     * raised anywhere before it (a pool error thrown while the statement is built, or simply a
-     * second wiring of this optional parameter, which `buildAgents`, `resolveRuntimeAgents`,
-     * `createRequestAgents` and `mountCopilotRuntime` all expose) failed the turn of a person who
-     * was waiting for an answer. `try`/`catch` rather than `.catch()`, unlike the sibling seams
-     * above, because it also holds for an implementation that throws synchronously instead of
-     * returning a rejected promise; `.catch()` would not have been called at all.
+     * AND IT IS NO LONGER CAUGHT HERE, WHICH IS THE REVERSAL OF WHAT THIS SEAM USED TO DO. A
+     * `try`/`catch` stood around the call, holding {@link MarkAttachmentsSent}'s old promise that a
+     * failure to record would never fail an answer. The promise was kept and the outcome was still
+     * wrong: the run carried on to a model with a file whose `attachedAt` was never written, the
+     * culler reclaimed the row a day later, and the message went on displaying an attachment that no
+     * longer existed. Nobody was told, on either side.
      *
-     * The log names the ids, because every consequence of a missing stamp — a file the sweeper
-     * reclaims, an upload slot that never frees — is about specific rows, and a line naming none
-     * cannot be acted on. The actor is named by the inner log in channels/attachments.ts; this
-     * seam does not know one.
+     * THE POINT IS *WHERE* THIS LINE SITS, and it is the reason refusing is affordable at all.
+     * Everything above has resolved into `inlined`, and `inlined` is RETURNED — the run is handed to
+     * `super.run` / `next.run` by the caller, after this function comes back. So a rejection on this
+     * line happens with no model called, no token spent, and the person's message still in front of
+     * them, which is the same position `resolvePart`'s `"fail"` refusal leaves them in a few lines
+     * above. The turn is not yet spent, so the trade is not "an answer for a file" — it is a retry
+     * for a file, and it is only available here.
+     *
+     * The implementation logs the actor and the ids; what it throws is a sentence naming the files
+     * and what to do about them, and that sentence is what leaves through the run as an AG-UI error.
+     * Wrapping it again here would only put this seam's words in front of the ones that know which
+     * rows are involved.
      */
     if (index === asked && markSent) {
       sentIds = attachmentIdsIn(message.content);
@@ -705,14 +722,7 @@ async function inlineAttachments(
     }
   }
   if (markSent && sentIds.length > 0) {
-    try {
-      await markSent(sentIds, threadId);
-    } catch (error) {
-      console.error(
-        `Could not record that attachments were sent: ${sentIds.join(", ")}.`,
-        error,
-      );
-    }
+    await markSent(sentIds, threadId);
   }
   return inlined;
 }
