@@ -4067,6 +4067,7 @@ mod tests {
     #[cfg(unix)]
     mod container_root {
         use super::*;
+        use sha2::{Digest, Sha256};
 
         struct Fixture {
             base: PathBuf,
@@ -4157,7 +4158,11 @@ fn main() {
                 std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", base.join("commands.log"));
                 let app = tauri::test::mock_builder()
                     .manage(Shell::default())
-                    .invoke_handler(tauri::generate_handler![start_stack, stop_stack])
+                    .invoke_handler(tauri::generate_handler![
+                        start_stack,
+                        stop_stack,
+                        detect_engine
+                    ])
                     .build(tauri::test::mock_context(tauri::test::noop_assets()))
                     .unwrap();
                 let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -4216,9 +4221,14 @@ fn main() {
             }
 
             fn quit(&self) {
+                assert!(self.quit_failures().is_empty(), "Quit cleanup failed");
+            }
+
+            fn quit_failures(&self) -> Vec<String> {
                 let app = self.app.handle().clone();
                 let fallback = self.b.clone();
                 let (sent, received) = std::sync::mpsc::channel();
+                let (reported, failures) = std::sync::mpsc::channel();
                 request_quit_with(
                     std::sync::Arc::clone(&self.app.state::<Shell>().quit),
                     None,
@@ -4231,7 +4241,7 @@ fn main() {
                             |root| down_owned_containers(&app.state::<Shell>(), root),
                         )
                     },
-                    |error| panic!("Quit cleanup failed: {error}"),
+                    move |error| reported.send(error.to_owned()).unwrap(),
                     move |code| sent.send(code).unwrap(),
                     |work| std::thread::Builder::new().spawn(work).map(|_| ()),
                 )
@@ -4242,6 +4252,7 @@ fn main() {
                         .unwrap(),
                     0
                 );
+                failures.try_iter().collect()
             }
 
             fn commands(&self) -> String {
@@ -4266,7 +4277,7 @@ fn main() {
             fn drop(&mut self) {
                 println!(
                     "CONTAINER_CLEANUP={}",
-                    serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"affinity":std::fs::read_to_string(self.base.join("affinity.log")).unwrap_or_default(),"persistentFixtureProcesses":0})
+                    serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"affinity":std::fs::read_to_string(self.base.join("affinity.log")).unwrap_or_default(),"engineBinarySha256":format!("{:x}",Sha256::digest(std::fs::read(self.path.bin().join("docker")).unwrap())),"persistentFixtureProcesses":0})
                 );
                 std::fs::remove_dir_all(&self.base).expect("independent private fixture cleanup");
                 std::fs::remove_dir_all(self.path.bin())
@@ -4274,6 +4285,204 @@ fn main() {
                 assert!(!self.base.exists());
                 assert!(!self.path.bin().exists());
             }
+        }
+
+        // Docker live restore permits live containers while its API is unavailable. The compiled
+        // fixture models that state; this exercises product IPC and cleanup, not a real daemon.
+        fn engine_unavailable(quit: bool, host_error: bool, partial_up: bool) {
+            let fixture = Fixture::new();
+            if partial_up {
+                std::fs::write(fixture.a.join("fail-up"), "").unwrap();
+            }
+            let problem = fixture.start(&fixture.a, false);
+            assert!(problem["detail"].as_str().unwrap().contains(if partial_up {
+                "synthetic partial up failure"
+            } else {
+                "synthetic migration barrier"
+            }));
+            let owner =
+                std::fs::read_to_string(fixture.a.join("fixture-containers-running")).unwrap();
+            assert_eq!(owner, "docker:alpha");
+            assert!(fixture.commands().contains("\tcompose up "));
+
+            // Neither discovery candidate answers, but losing API access does not delete the
+            // containers. Probe through the generated command before independently asking Stop/Quit.
+            std::fs::remove_file(fixture.base.join("docker-ready")).unwrap();
+            let unavailable = fixture
+                .invoke("detect_engine", serde_json::json!({}))
+                .unwrap();
+            assert_eq!(unavailable["responding"], false);
+            assert!(unavailable["address"].is_null());
+            assert_eq!(unavailable["engine"], "docker");
+            assert!(unavailable["detail"]
+                .as_str()
+                .unwrap()
+                .contains("not answering"));
+            if host_error {
+                std::fs::create_dir_all(fixture.a.join(".logs")).unwrap();
+                std::fs::write(stack::host_pids_path(&fixture.a), "invalid ownership json")
+                    .unwrap();
+            }
+            let before_cleanup = fixture.commands();
+            let shell = fixture.app.state::<Shell>();
+            let generation = shell
+                .start_generation
+                .load(std::sync::atomic::Ordering::SeqCst);
+            let failures = if quit {
+                fixture.quit_failures()
+            } else {
+                fixture
+                    .stop()
+                    .err()
+                    .map(|error| error.as_str().unwrap().to_owned())
+                    .into_iter()
+                    .collect()
+            };
+            let cleanup_commands = fixture
+                .commands()
+                .strip_prefix(&before_cleanup)
+                .unwrap()
+                .to_owned();
+            let retained = shell.containers.lock().unwrap().is_some();
+            let still_live = fixture.a.join("fixture-containers-running").exists();
+            println!(
+                "ENGINE_UNAVAILABLE_PROOF={}",
+                serde_json::json!({
+                    "quit":quit,"hostError":host_error,"partialUp":partial_up,"owner":owner,
+                    "unavailable":unavailable,"failures":failures,"retained":retained,
+                    "stillLive":still_live,"cleanupCommands":cleanup_commands,
+                })
+            );
+            assert!(
+                still_live,
+                "fixture must model containers surviving the unavailable API"
+            );
+            let diagnostic = failures.join("\n");
+            assert!(
+                diagnostic.contains("Compose down failed:"),
+                "unavailable owned runtime was reported stopped: {diagnostic:?}"
+            );
+            // Namespace resolution reports the failed command/status without echoing potentially
+            // private Compose output. That failure must survive the shutdown boundary.
+            assert!(
+                diagnostic.contains("Compose configuration failed (exit status: 74)"),
+                "{diagnostic}"
+            );
+            assert!(retained, "unresolved cleanup must retain run ownership");
+            assert!(cleanup_commands.contains("compose -f docker-compose.yml config"));
+            assert!(
+                !cleanup_commands.contains("version --format"),
+                "cleanup must use retained runtime, not rediscover"
+            );
+            assert!(
+                shell
+                    .start_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    > generation
+            );
+            if host_error {
+                assert!(
+                    diagnostic.contains("host-pids.json"),
+                    "host cleanup error missing: {diagnostic}"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(stack::host_pids_path(&fixture.a)).unwrap(),
+                    "invalid ownership json"
+                );
+                std::fs::remove_file(stack::host_pids_path(&fixture.a)).unwrap();
+            }
+
+            // Recover access and prove that the same run is cleaned, including supervisor stop.
+            std::fs::write(fixture.base.join("docker-ready"), "").unwrap();
+            fixture.stop().unwrap();
+            fixture.assert_stopped();
+            assert!(shell.containers.lock().unwrap().is_none());
+            let trace = std::fs::read_to_string(fixture.base.join("affinity.log")).unwrap();
+            assert!(trace.contains("stop supervisor"));
+            for line in trace.lines().filter(|line| line.contains("compose")) {
+                assert!(
+                    line.starts_with(&format!("{owner}\t")),
+                    "runtime changed: {line}"
+                );
+            }
+            let stopped_commands = fixture.commands();
+            fixture.stop().unwrap();
+            assert_eq!(
+                fixture.commands(),
+                stopped_commands,
+                "repeated Stop must be harmless"
+            );
+            println!(
+                "ENGINE_UNAVAILABLE_RECOVERED={}",
+                serde_json::json!({
+                    "quit":quit,"hostError":host_error,"partialUp":partial_up,
+                    "owner":owner,"stillLive":false,"retained":false,"trace":trace,
+                })
+            );
+        }
+
+        #[test]
+        fn engine_unavailable_stop_retains_run_until_retry() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::engine_unavailable_stop_retains_run_until_retry",
+            ) {
+                return;
+            }
+            engine_unavailable(false, false, false);
+        }
+
+        #[test]
+        fn engine_unavailable_quit_reports_unresolved_run() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::engine_unavailable_quit_reports_unresolved_run",
+            ) {
+                return;
+            }
+            engine_unavailable(true, false, false);
+        }
+
+        #[test]
+        fn engine_unavailable_stop_preserves_host_cleanup_error() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::engine_unavailable_stop_preserves_host_cleanup_error",
+            ) {
+                return;
+            }
+            engine_unavailable(false, true, false);
+        }
+
+        #[test]
+        fn engine_unavailable_partial_up_retains_cleanup() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::engine_unavailable_partial_up_retains_cleanup",
+            ) {
+                return;
+            }
+            engine_unavailable(false, false, true);
+        }
+
+        #[test]
+        fn engine_unavailable_without_deployment_needs_no_cleanup() {
+            if crate::test_support::isolated_process(
+                "tests::container_root::engine_unavailable_without_deployment_needs_no_cleanup",
+            ) {
+                return;
+            }
+            let fixture = Fixture::new();
+            std::fs::remove_file(fixture.base.join("docker-ready")).unwrap();
+            fixture.stop().unwrap();
+            fixture.quit();
+            assert!(
+                fixture.commands().is_empty(),
+                "an empty deployment needs no engine access"
+            );
+            assert!(fixture
+                .app
+                .state::<Shell>()
+                .containers
+                .lock()
+                .unwrap()
+                .is_none());
         }
 
         fn runtime_affinity(case: &str) {
