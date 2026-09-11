@@ -1,7 +1,9 @@
+import type { Attachment } from "@copilotkit/react-core/v2";
 import { describe, expect, test } from "bun:test";
 import { chip, type Segment, text } from "prompt-area/helpers";
 import {
   applyCommandChips,
+  canSendDraft,
   type CommandOption,
   enforceSingleAgent,
   toDraft,
@@ -13,6 +15,15 @@ function agent(id: string, name: string) {
 
 function command(id: string, name: string) {
   return chip({ trigger: "/", value: id, displayText: name });
+}
+
+function attachment(status: Attachment["status"]): Attachment {
+  return {
+    id: status,
+    type: "image",
+    source: { type: "url", value: "https://example.com/a.png" },
+    status,
+  };
 }
 
 describe("toDraft", () => {
@@ -44,6 +55,32 @@ describe("toDraft", () => {
   test("treats whitespace-only content as empty", () => {
     expect(toDraft([text("   ")]).isEmpty).toBe(true);
     expect(toDraft([]).isEmpty).toBe(true);
+  });
+
+  test("defaults attachments to empty when called with one argument", () => {
+    expect(toDraft([text("hello")]).attachments).toEqual([]);
+  });
+});
+
+describe("canSendDraft", () => {
+  test("holds while an attachment is still uploading", () => {
+    const draft = toDraft([text("hi")], [attachment("uploading")]);
+    expect(canSendDraft(draft)).toBe(false);
+  });
+
+  test("releases once every attachment is ready", () => {
+    const draft = toDraft([text("hi")], [attachment("ready")]);
+    expect(canSendDraft(draft)).toBe(true);
+  });
+
+  test("allows a ready attachment alone, with no text typed", () => {
+    const draft = toDraft([], [attachment("ready")]);
+    expect(canSendDraft(draft)).toBe(true);
+  });
+
+  test("blocks an empty draft with no attachments", () => {
+    const draft = toDraft([]);
+    expect(canSendDraft(draft)).toBe(false);
   });
 });
 
