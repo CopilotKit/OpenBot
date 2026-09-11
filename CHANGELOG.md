@@ -8,6 +8,43 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.9
+
+### A message can carry files
+
+Pick them, drag them onto the composer or paste them in: up to eight files on one message, images up
+to 8 MiB and text files up to 1 MiB, in the four image formats a model reads (PNG, JPEG, GIF, WebP)
+and four text ones (plain text, Markdown, CSV and JSON). A file is uploaded as it is staged rather
+than when the message is sent, so the send is immediate and a send that fails keeps what was
+attached to it, instead of asking somebody to find eight files again. The bytes live in the
+deployment's own database and are served back from the app's own origin, which is also why the type
+is decided by reading the file rather than by believing what the browser called it: something that
+claims to be text and is not UTF-8 is refused rather than stored and served as accepted text on the
+client's word.
+
+What reaches the model is bounded separately from what may be uploaded, because the two limits pay
+for different things. An image goes whole. A text file is read up to 120,000 characters, roughly
+30,000 tokens, which is one attachment's share of a window that also holds the conversation and up
+to seven other files, and the part sent says where it was cut so the model is not left answering
+about a file it read only part of. A megabyte of text is therefore stored whole and read as its
+first eighth or so, and the person who attached it is not yet told that.
+
+### Unsent attachments have to be swept, or somebody who stages 32 can attach nothing again
+
+A file is stored when it is picked, not when it is sent, so every abandoned draft leaves bytes
+behind and nothing in the image reclaims them. The Helm chart runs the sweep hourly and deletes
+unsent files older than a day. Any other deployment has to run it:
+`bun scripts/cull-staged-attachments.ts` from `/app/server`, one pass then exit, with the retention
+window as its one optional argument. Unlike the routines sweep beside it, it needs only
+`DATABASE_URL`, so an external cron can run it with one variable set.
+
+This is not only about growth. A person may hold 32 unsent files across all their channels, which is
+what bounds a client that ignores the eight-per-message cap, and the refusal on the 33rd tells them
+anything still unsent is cleared within a day. That sentence is a promise made on the sweep's
+behalf: where nothing runs it, the files are never cleared and anybody who reaches 32 can attach
+nothing, in any channel, from then on. At 8 MiB a file, 32 staged files per person is the 256 MiB
+to size storage against.
+
 ### Fresh desktop installs pin the latest published deployment
 
 The desktop app resolves GitHub's latest published release on first setup and downloads that exact
@@ -36,6 +73,170 @@ decision or audit row.
 `postgres://…:0/…` parsed and booted, and every query then failed against a port nothing listens
 on. Ports outside 1-65535 are refused with a sentence naming `DATABASE_URL` before a socket is
 ever opened.
+
+### Setup installs the container engine, instead of telling somebody to go and get one
+
+Setup ended at "Install Podman Desktop or Docker Desktop first" on any machine that had neither,
+which is every machine this app is for: the step existed with nothing behind it, so the whole install
+stopped at a download page. It installs one now, and a Compose with it, because Podman ships no
+Compose implementation and a machine with a freshly installed Podman still cannot raise the stack.
+Both are pinned to the digest of the release they were tested against and refused if it does not
+match, because these are files this app then executes. Only what is missing is added: an engine
+somebody already has is theirs, and a Compose that already answers is left alone. Windows installs
+unattended; macOS and Linux each raise the platform's own authorization prompt, which is not
+something to route around. The two plan sign-ins set the engine up as well, since they run in a
+container themselves and previously named an obstacle with no way past it. Every engine command names
+a resolved path rather than trusting the PATH this process was started with, so an engine installed a
+minute ago can be used by the run that installed it.
+
+### Setup ends with a question the Bot has to answer
+
+Every step before the last one proves that something started, which is not the same as proving the
+answers work. A refused key, a lapsed plan or a model the account cannot use each give a stack that
+comes up clean and a Bot that cannot answer, and handing over at that point means somebody finds out
+later, inside the product, with no idea which of their answers caused it. Setup now ends on a
+question with one checkable answer and waits for it. A run that produces no text is a failure here
+rather than an empty answer, because the framework catches its own 401 and logs it, leaving the whole
+of a refusal in the container's log and nowhere else. The sentence on screen is OpenBot's own and
+names the choice to change, with the harness's log behind a disclosure for the developer half.
+
+### A subscription picks the Bot that can spend it
+
+A plan is not a key, and only one Bot speaks each vendor's subscription. Signing in to a Claude plan
+and keeping the default Bot gave a stack that came up clean and a Bot whose log read "Missing
+credentials. Please pass an `api_key`", after two screens the person had answered correctly and with
+no way to know which answer to change. A plan now re-points the Bot, and the model screen says which
+Bot that will be while there is still a screen to say it on. A signed-in ChatGPT plan gets the Codex
+model, because a plan token is a bearer for one address that langchain-openai pins on purpose and
+cannot be reached by pointing `OPENAI_BASE_URL` at it. The vendor's own token store is kept beside
+the `.env` as an owner-only file and mounted into the harness, so the renewals the provider makes
+outlast the container: the access token on its own expires within the hour and nothing can renew it,
+which would give a Bot that works in the morning and fails after lunch. The window also has an Edit
+menu now, so the shortcut works on the screen whose own instruction is "paste the code it shows you";
+macOS routes the clipboard through the menu bar, and a window without one has no Paste.
+
+### Signing in to CopilotKit from the window works
+
+The sign-in that creates a key for somebody had never been run end to end, and it failed four times
+in a row, each time silently or with a message that named nothing. The session is called `cliToken`,
+not `token`, so the first exchange failed with "error decoding response body" and no way to tell
+which field or which endpoint; a failure carries the response now, masked, because the one that
+diagnosed this also carried a live session token. Project ids are numbers, and requiring a string
+dropped every project, so the screen told somebody with ten of them that the account had none: an
+empty list and an unreadable one are told apart now, because one of them is a lie a person cannot
+argue with. The keys endpoint declares `project_id` as a number with no coercion, so the string "7"
+came back as a validation error on the last step of the flow. And the project tiles drew as blank
+white rectangles, because the tile rule overrode the background to white and not the colour, asking
+somebody to choose between six empty boxes. The sign-in address is kept on screen the way the plan
+sign-ins keep theirs, for the machine whose browser is not the one in front of the person.
+
+### An endpoint that needs no key can be connected
+
+The compatible row names Ollama and vLLM in its own summary and then refused to continue without an
+API key. Neither has one, so the two examples the screen offers by name were the two it would not
+accept, and the way out was to invent a key and hope the endpoint ignored it. An address and a model
+name are what that row needs. Both bundled Bots refused to start without `OPENAI_API_KEY` as well, so
+fixing the screen alone would have given two dead containers complaining about a key that person's
+server does not have: a base URL is a model and its key belongs to it, so a key is now required only
+when nothing else names the endpoint, and plain OpenAI still refuses without one. Because a
+deployment pulls the image the release pinned, and an image published before the Bots learned this
+still refuses, a placeholder string is sent to an endpoint that reads no key. Ollama, vLLM, LM Studio
+and llama.cpp all ignore the value. It is written in plain sight rather than put in the machine's
+credential store, because it is not a credential, and a key somebody actually typed is used
+unchanged. The model name reaches the bundled Bot too, which reads `AGENT_BOT_MODEL` and had been
+left on a pin chosen for OpenAI's own catalogue.
+
+### A model name no longer outlives the answer that chose it
+
+The compatible row is the only one that names a model, and switching away from it kept the name.
+Answering with an OpenAI key after trying a local endpoint left `BOT_MODEL=local-model`, so the Bot
+asked OpenAI for a model only that person's own server has, and the last screen said "That account
+cannot use the model that was chosen" about a model this run never chose. The name is removed rather
+than emptied, so the compose default applies, and taken out of the file as well, because the writer
+keeps the lines it did not write and that is what let it survive.
+
+### Credentials go to the machine's own credential store, not the `.env`
+
+The `.env` is a settings file, and a settings file is something somebody opens, reads out to support
+or pastes into a chat. A model key, a plan token and the tokens these services prove themselves to
+each other with are not settings. They go to the login Keychain on macOS, to DPAPI on Windows
+encrypted to the signed-in user, and on Linux to an owner-only file, which is said out loud rather
+than dressed up: no desktop Linux install can be assumed to be running a Secret Service daemon, and
+refusing to save a credential because gnome-keyring is missing would fail more people than it
+protects. The value never goes on a command line on any of them, since ps is readable by every
+process the person runs. macOS goes through the Keychain itself rather than the `security` command,
+whose password prompt truncates at 128 bytes with no error and an exit status of zero: an OpenAI
+project key is 164 characters, so every one of them was stored cut short and read back cut short on
+the next run, while the run that saved it worked fine. From the store the credentials reach the
+containers and the host processes as environment, which compose resolves before it reads the `.env`,
+so a secret arrives at exactly the services that declare it and is written down nowhere. What an
+earlier version already wrote in plaintext is moved and then purged, or the change would have bought
+nothing for anybody who already had OpenBot.
+
+### The credential store is asked once per run, not once per screen
+
+Four Keychain dialogs every time the setup screen mounted, each needing a click before the window
+would go on, and four more for navigating between setup and OpenBot. macOS authorizes every
+individual read of a stored password unless the application is signed with an identity the item's ACL
+already trusts; a development build is re-signed on every compile, so its ACL never matches, and the
+wizard reads four secrets to arrive filled in. The store is asked once per name per process now and
+the answer is held in memory, absence included, or a machine with nothing stored is asked on every
+mount for something that was never there. Writes go through the same memory and forgetting clears it,
+so the two cannot disagree. This does not remove the prompts on a first run, and nothing in this
+process can: that decision belongs to the operating system and to the signature.
+
+### Stop stops the Bot that was picked, and the next Start no longer refuses because of it
+
+Compose only acts on a profiled service when the profile is named, so Stop left the one container the
+person actually chose running on their laptop after they had stopped the app, still holding its port.
+The next Start then refused, saying something was already listening on 4206, about a container
+OpenBot itself had started, which the person never saw and could not find, and there was no way
+forward from that screen. A port this deployment already publishes is not a stranger on the port, so
+the check reclaims our own and keeps its teeth for somebody else's.
+
+### Stop stops the host processes on Windows
+
+Measured on Windows Server 2022: Stop took the containers down, reported success, and left the server
+answering on 3001, the routines worker up, and both halves of the app answering on 3010. Only the
+containers had gone. The handles a window holds cover what that window started and die with it, so a
+window stopping a stack an earlier one started held nothing, and the Windows arm returned success
+with a comment saying the host processes end with the session. They do not. The pids are written
+beside the logs when the processes start and Stop reads them, ending each process together with its
+children, since `bun run serve` starts the real server as a grandchild. A sweep of the ports this
+deployment publishes stays as a second pass for a stack whose pid file is gone. Separately, a
+byte-order mark in front of `package.json`, which `Set-Content -Encoding UTF8` writes freely, made
+the manifest unreadable and was reported as "the deployment is older than this version of OpenBot",
+sending somebody looking for a newer installer over three bytes.
+
+### The installed app is served without a development server
+
+"Show OpenBot" did nothing on a machine where the stack was up. The window said OpenBot was running,
+the button was there, and clicking it had no effect at all. The app host process was dead: it was
+started through `vite preview` under `bun --bun`, and Vite's proxy calls `socket.destroySoon()` when
+an upstream response ends, which bun's sockets do not implement, so the process died with a TypeError
+on the first call the app made. It served its page, exited, and nothing listened on 3010 from then
+on, while the shell went on reporting a stack that was up, because the containers were. The app is
+served by a small server of its own now: a directory and one forwarded prefix, which is all an
+install needs, with no Node and no Vite at runtime. The websocket upgrade the live screen needs is
+forwarded rather than answered with HTML, a miss under `/assets` is a 404 rather than the page, and
+paths are confined to the directory, since the deployment's `.env` sits two levels above it. The
+button also shows what it was told: the call behind it already answered "OpenBot is not answering on
+port 3010 yet, so there is nothing to show", and the click handler threw that sentence away, which is
+why a dead process looked like a dead button.
+
+### A conversation whose history this deployment cannot reach says so
+
+Clicking a conversation in the rail drew the coworker's name and then nothing at all. The rail comes
+from OpenBot's own database, so a channel is listed whatever the history store says, while the
+messages live in the Intelligence project: pointing a deployment at a different project leaves the
+platform answering `THREAD_NOT_FOUND`. That 404 is deliberately read as "no history" and has to stay
+that way, because a thread id is minted before the thread exists, so a brand-new conversation 404s as
+its normal opening move, and widening it would tell somebody their conversation was gone and invite
+them to start it over. The two are told apart by `lastMessageAt`, which is set only once something
+has been said: a conversation with none is genuinely new and silence is correct, while one that has
+been spoken in and comes back empty has a history this deployment cannot reach. That one now says so,
+in the notice slot beside the existing explanations for a deleted coworker and for turns that could
+not be parsed.
 
 ### `bun run dev` no longer starts a routines worker that cannot start
 
