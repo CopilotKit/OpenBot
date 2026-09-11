@@ -8,16 +8,10 @@ use std::sync::Mutex;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, deployment, engine, env as openbot_env, harness, install, problem::Problem, provider,
-    quiet, stack, supervise, tray, windows as win,
+    acquire, deployment, deployment_release, engine, env as openbot_env, harness, install,
+    problem::Problem, provider, quiet, stack, supervise, tray, windows as win,
 };
 
-/// The deployment this app installs.
-///
-/// Pinned rather than "latest": the images a release runs are pinned per release, so the tree that
-/// names them has to be too, and an app that fetches whatever shipped this morning is not a version
-/// anybody can be given. Moved deliberately, with the app.
-const DEPLOYMENT_VERSION: &str = "v0.0.8";
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
@@ -427,47 +421,43 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
         })
 }
 
-/// The deployment on disk, fetched if it is not there or is the wrong version.
+/// Install the latest published deployment on first use, then keep its recorded version.
 ///
 /// Extracted from `start_stack` because Start is no longer the only thing that needs it: a plan
 /// sign-in runs a published image, and the reference for that image is read from the manifest this
-/// lays down. Skipped when the recorded version already matches, so a restart is not a download.
+/// lays down. An installed deployment keeps its exact tag without consulting GitHub again.
 async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
 ) -> Result<(), Problem> {
-    if deployment::needs_fetch(root, DEPLOYMENT_VERSION) {
-        report(
-            app,
-            "deployment",
-            true,
-            format!("fetching {DEPLOYMENT_VERSION}"),
-        );
-        // On a blocking thread, not this one. A blocking HTTP client builds its own runtime, and
-        // dropping one inside an async context panics the worker rather than returning an error:
-        // "Cannot drop a runtime in a context where blocking is not allowed". The window survives
-        // that, which is worse than a crash, because the only symptom is a step that never ends.
-        let target = root.to_path_buf();
-        tauri::async_runtime::spawn_blocking(move || {
-            deployment::fetch(&target, DEPLOYMENT_VERSION)
-        })
-        .await
-        .map_err(|error| {
-            Problem::with(
-                "OpenBot could not download what it needs to run. Check the internet \
-                     connection and try again.",
-                format!("the download did not run: {error}"),
-            )
-        })?
-        .inspect_err(|error| {
-            report(app, "deployment", false, error.clone());
-        })?;
-    }
+    // Both release discovery and downloading use blocking HTTP. Keeping them in a blocking task
+    // avoids dropping reqwest's runtime inside this async context.
+    let target = root.to_path_buf();
+    let handle = app.clone();
+    let version = tauri::async_runtime::spawn_blocking(move || {
+        let version = deployment_release::resolve_version(&target)?;
+        if deployment::needs_fetch(&target, &version) {
+            report(&handle, "deployment", true, format!("fetching {version}"));
+            deployment::fetch(&target, &version)?;
+        }
+        Ok::<_, String>(version)
+    })
+    .await
+    .map_err(|error| format!("the download did not run: {error}"))
+    .and_then(|result| result)
+    .map_err(|error| {
+        report(app, "deployment", false, error.clone());
+        Problem::with(
+            "OpenBot could not download what it needs to run. Check the internet \
+             connection and try again.",
+            error,
+        )
+    })?;
     report(
         app,
         "deployment",
         true,
-        format!("{DEPLOYMENT_VERSION} in {}", root.display()),
+        format!("{version} in {}", root.display()),
     );
     Ok(())
 }
@@ -3293,6 +3283,26 @@ mod tests {
                 assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
             }
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deployment_ready_preserves_the_installed_release() {
+        let root = temp_root("deployment-ready-pinned");
+        write_installed_deployment(&root);
+        deployment::record(&root, "v0.0.7").unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+
+        tauri::async_runtime::block_on(deployment_ready(app.handle(), &root)).unwrap();
+
+        assert_eq!(deployment::installed(&root).unwrap().version, "v0.0.7");
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            "services: {}\n"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -6268,6 +6278,7 @@ fn main() {
     }
 
     fn write_installed_deployment(root: &Path) {
+        const DEPLOYMENT_VERSION: &str = "v0.0.8";
         std::fs::create_dir_all(root.join("server")).unwrap();
         std::fs::create_dir_all(root.join("app")).unwrap();
         std::fs::create_dir_all(root.join("worker")).unwrap();

@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Fresh desktop installs pin the latest published deployment
+
+The desktop app resolves GitHub's latest published release on first setup and downloads that exact
+tag's source and image manifest. It records the version after both downloads finish and reuses it
+on subsequent starts, so new installs no longer stay tied to the app's old v0.0.8 default.
+
 ### The Bot computer refuses a malformed scroll or live input before the browser sees it
 
 A non-finite wheel delta travelled into Playwright and came back as a 502 that read as a broken
