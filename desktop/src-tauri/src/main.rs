@@ -6600,7 +6600,12 @@ fn main() {
     #[test]
     fn recovery_notice_consumption_and_failed_retry_preserve_gate() {
         let f = RestoreFixture::new();
-        let app = f.app(&f.owned, "tauri://localhost/recovery");
+        let setup = if cfg!(any(windows, target_os = "android")) {
+            "http://tauri.localhost/recovery"
+        } else {
+            "tauri://localhost/recovery"
+        };
+        let app = f.app(&f.owned, setup);
         let shell = app.state::<Shell>();
         *shell.root.lock().unwrap() = Some(f.owned.clone());
         {
@@ -6614,7 +6619,7 @@ fn main() {
         let window = app.get_webview_window("main").unwrap();
         let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
             cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: setup.parse().unwrap(),
             body: tauri::ipc::InvokeBody::Json(serde_json::json!({
                 "root": f.owned, "apiUrl": "https://intelligence.example.test",
                 "gatewayWsUrl": "wss://gateway.example.test", "apiKey": "synthetic-unused-key",
@@ -6636,7 +6641,7 @@ fn main() {
         );
         assert!(show_openbot_on(app.handle().clone(), &f.ports).is_err());
         restore_window_on(app.handle(), &f.ports);
-        assert_eq!(window.url().unwrap().as_str(), "tauri://localhost/recovery");
+        assert_eq!(window.url().unwrap().as_str(), setup);
         // Reclaim may advance the active generation before a later Start failure. It still
         // cannot clear the recovery marker; only accepted readiness can do that.
         let attempt = StartAttempt::begin(&shell).unwrap();

@@ -32,6 +32,7 @@ fn main() {
     if SCENARIO == "podman" {
         match joined.as_str() {
             "version --format {{.Server.APIVersion}}" => println!("1.44"),
+            "info --format {{.Host.ServiceIsRemote}}" => println!("false"),
             "compose version" => {
                 let status = std::process::Command::new(if cfg!(windows) {
                     "docker-compose.exe"
