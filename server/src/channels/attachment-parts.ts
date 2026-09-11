@@ -279,6 +279,40 @@ function unreadableNote(
  * asked message arrives in full or not at all, while giving "in full" a
  * ceiling.
  *
+ * WHAT IT COUNTS IS PARTS EMITTED, NOT DISTINCT FILES READ — AND THE DIFFERENCE
+ * IS NOT A ROUNDING ERROR. For a while the charge was deduplicated by id: a
+ * `charged` set meant the second and every later part naming one id was both
+ * free and exempt from the cut, on the reasoning that one id is fetched once so
+ * it should be billed once. The premise is true and the conclusion does not
+ * follow. `resolveAttachmentParts` emits a base64 part for EVERY OCCURRENCE of
+ * an id — it must, because two parts cannot share one object — so what a run
+ * holds live is one encoded copy per PART, and a bound that counts distinct ids
+ * is not measuring the quantity it exists to bound.
+ *
+ * The measured failure: forty parts naming one stored 1,024-byte image, against
+ * a budget of 1,024, produced one read, forty inlined parts, 40,960 decoded
+ * bytes — and `remaining` sitting at zero, reporting a budget spent exactly to
+ * its limit. At the 8 MiB upload ceiling a hundred references to one file come
+ * to roughly 1.04 GiB of base64 against a 32 MiB budget. A repeated id was not
+ * an exotic input either: it is what quoting the same chart twice in a message
+ * looks like, and it cost nothing to write.
+ *
+ * SO THE CHARGE RUNS PER PART AND THE MEMO STAYS. `loadOnce` still fetches one
+ * id once — deduplicating the READ was never the bug and saves a real database
+ * round trip — but every part that gets encoded draws the budget down by the
+ * stored bytes it is about to encode, and once the room is gone no id is
+ * exempt from being cut. Charging per part is the honest number: those bytes
+ * really are base64-ed into the run that many times.
+ *
+ * DEDUPLICATING THE OUTPUT INSTEAD WAS THE OTHER WAY TO MAKE THE TWO NUMBERS
+ * AGREE, AND IS REJECTED. Emitting one part per distinct id would make "one
+ * charge per id" true by making one copy the only copy, but it changes what the
+ * model is handed — a message that names a file at two points in its content
+ * means to refer to it at both — and it breaks the rule that whatever runs after
+ * this owns the parts it was given, which `attachment-parts.test.ts` pins with
+ * `expect(result[0]).not.toBe(result[1])`. Bounding the output is this budget's
+ * job; rewriting the message is not.
+ *
  * It lives HERE and not in `shared/attachments.ts` beside the other limits on
  * purpose. Those are limits two sides have to agree on — the composer refuses
  * a file and the server refuses it again — and that file's whole argument is
@@ -298,7 +332,7 @@ export const MAX_INLINED_BYTES_PER_RUN = 32 * 1024 * 1024;
  * passes nothing and gets the unbounded behaviour this had before.
  */
 export type InlineBudget = {
-  /** Bytes still unspent. Drawn down once per distinct id a message charges to it. */
+  /** Bytes still unspent. Drawn down once per INLINED PART, not once per distinct id. */
   remaining: number;
   /**
    * What `remaining` started at, carried only so that a refusal can name it.
@@ -325,34 +359,6 @@ async function resolvePart(
   load: (id: string) => Promise<StoredAttachment | null>,
   onMissing: MissingAttachment,
   budget: InlineBudget | undefined,
-  /**
-   * The ids THIS MESSAGE has already spent bytes on, so a second part of it naming one costs
-   * nothing.
-   *
-   * `loadOnce` deduplicates the READ, which is what made "one read per distinct id" true; the charge
-   * lived here and ran once per PART, so a message quoting one image twice was billed twice for
-   * bytes fetched once. The budget is spent newest-first precisely so the asked message is served
-   * whole, and over-charging cut real history off the end of the run to pay for reads that never
-   * happened.
-   *
-   * PER MESSAGE AND NOT PER RUN, DELIBERATELY. This said "this run" for a while and the sentence was
-   * simply false: `resolveAttachmentParts` builds one of these per call, and it is called once per
-   * message, so an id quoted in two messages is read twice and charged twice. Hoisting the set to
-   * the run was considered and rejected, on two grounds.
-   *
-   * The first is that it cannot travel alone. Hoisting the charge without hoisting `loadOnce`'s memo
-   * would bill once for bytes genuinely read N times, replacing one false statement with another.
-   * The second is that hoisting the memo is worse than the read it saves: a run-scoped memo holds
-   * every distinct attachment's `Buffer` live for the whole backward walk, while a per-message one
-   * lets each message's buffers go once its parts are encoded — and what is live at the peak is the
-   * thing this budget exists to bound. Trading a rare second read (the same person re-attaching the
-   * same file in two messages) for unbounded buffer retention is the wrong way round.
-   *
-   * Charging twice is also the honest number rather than a concession. An id quoted in two messages
-   * IS read out of `bytea` twice and IS base64-ed into the run twice; the budget measures what a
-   * turn spends, and a turn that spends those bytes twice should be billed for them twice.
-   */
-  charged: Set<string>,
 ): Promise<unknown> {
   /*
    * CUT BEFORE THE LOAD, NOT AFTER IT. The read out of `bytea` is most of what
@@ -375,13 +381,15 @@ async function resolvePart(
    */
   const noRoomLeft = budget !== undefined && budget.remaining <= 0;
   /*
-   * An id already paid for is never cut, however little is left. Its bytes are in this run whatever
-   * happens next, so cutting the second mention would put one file in front of the model twice over
-   * — once as itself, once as a note saying it was left out — which is a worse answer than either.
-   * It is not refused either, for the same reason: the run is not about to save anything by failing
-   * over bytes it has already spent.
+   * AND AN ID SEEN ON AN EARLIER PART GETS NO EXEMPTION HERE. This read
+   * `noRoomLeft && !charged.has(id)` for a while, on the reasoning that a second
+   * mention of a file already paid for costs nothing to include. It costs a
+   * whole second copy of its base64, live at the same time as the first; see
+   * {@link MAX_INLINED_BYTES_PER_RUN} for the arithmetic and for the failure
+   * that exemption let through. Once the room is gone, every later part is cut
+   * or refused, whatever id it names.
    */
-  if (noRoomLeft && !charged.has(id)) {
+  if (noRoomLeft) {
     if (onMissing === "note") return notIncludedNote(part, id);
     tooMuchToInline(part, id, budget.limit);
   }
@@ -423,7 +431,7 @@ async function resolvePart(
     );
   }
 
-  if (budget && !charged.has(id)) {
+  if (budget) {
     /*
      * The same fork as above, one step later, for the file whose size could not
      * be known until it was read. In history a file that does not fit takes the
@@ -439,7 +447,6 @@ async function resolvePart(
       }
       tooMuchToInline(part, id, budget.limit);
     }
-    charged.add(id);
     budget.remaining = Math.max(0, budget.remaining - attachment.bytes.length);
   }
 
@@ -539,22 +546,29 @@ async function resolvePart(
  * up is concurrency across a handful of small reads, on the rare message that
  * carries a file at all.
  *
- * ONE READ PER DISTINCT ID, AND ONE CHARGE. The same id on two parts of one
- * message is loaded once and billed to the budget once. It is still encoded per
- * part, because two parts must not share one object: whatever runs after this is
- * entitled to treat the parts it was handed as its own.
+ * ONE READ PER DISTINCT ID, ONE CHARGE PER PART. The same id on two parts of one
+ * message is loaded once — `loadOnce` below — and encoded twice, because two
+ * parts must not share one object: whatever runs after this is entitled to treat
+ * the parts it was handed as its own. Those two copies are two charges against
+ * the budget, because they are two base64 strings live at once.
  *
- * The read half is `loadOnce` below; the charge half is the `charged` set it is
- * handed alongside. They were not always both true — the memo made the sentence
- * look satisfied while the charge still ran per part — so they are asserted
- * separately in `attachment-parts.test.ts` rather than as one claim.
+ * THE TWO HALVES OF THAT SENTENCE MUST NOT BE COLLAPSED INTO ONE. This once read
+ * "one read per distinct id, and one charge", with a `charged` set making the
+ * second half true, and the result was a budget that bounded nothing a repeated
+ * id could do to it: forty parts naming one 1 KiB file inlined 40 KiB under a
+ * 1 KiB budget. Deduplicating the read is a saving; deduplicating the charge is a
+ * hole. See {@link MAX_INLINED_BYTES_PER_RUN} for the full arithmetic, and
+ * `attachment-parts.test.ts`, which asserts the memo and the per-part charge as
+ * separate claims and measures the bound on DECODED OUTPUT BYTES rather than on
+ * `budget.remaining` — the counter read zero while forty copies went out.
  *
- * WITHIN ONE MESSAGE, WHICH IS ONE CALL OF THIS FUNCTION, AND NOT ACROSS THE RUN.
- * Both the memo and the set are built here, so neither outlives the message, and an
- * id quoted in two messages of one thread is read twice and charged twice. That is
- * the intended scope and not an oversight: see `resolvePart`'s `charged` parameter
- * for why the pair has to move together and why moving it costs more heap than the
- * second read costs time.
+ * THE MEMO IS WITHIN ONE MESSAGE, WHICH IS ONE CALL OF THIS FUNCTION, AND NOT
+ * ACROSS THE RUN. It is built here, so it does not outlive the message, and an id
+ * quoted in two messages of one thread is read twice. That is the intended scope:
+ * a run-scoped memo would pin every distinct attachment's `Buffer` live for the
+ * whole backward walk, and what is live at the peak is the thing this budget
+ * exists to bound. Trading a rare second read for unbounded buffer retention is
+ * the wrong way round.
  */
 export async function resolveAttachmentParts(
   content: unknown,
@@ -576,12 +590,6 @@ export async function resolveAttachmentParts(
     return reading;
   };
 
-  /**
-   * Ids THIS MESSAGE has already spent bytes on — see `resolvePart`'s `charged` parameter for why
-   * the scope is the message rather than the run it belongs to.
-   */
-  const charged = new Set<string>();
-
   const resolved: unknown[] = [];
   for (const [index, part] of content.entries()) {
     const id = ids[index];
@@ -594,7 +602,6 @@ export async function resolveAttachmentParts(
             loadOnce,
             onMissing,
             budget,
-            charged,
           ),
     );
   }
