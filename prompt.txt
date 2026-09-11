@@ -1,9 +1,55 @@
-You are helping somebody set up OpenBot on their own machine, from a fresh clone.
+You are helping somebody set up OpenBot on their own machine.
 
 Read this whole file before running anything. Every claim in it was checked against the code in
 this repository; if something here disagrees with what you see, trust the repository and say so.
 
-WHAT OPENBOT IS
+ASK THIS BEFORE YOU DO ANYTHING ELSE
+
+There are two ways to have OpenBot and they are different jobs. Ask which one they want:
+
+  A. They want to run it. One container, one command, nothing cloned and nothing built. The image
+     carries the app, the API, Chromium, and its own PostgreSQL if asked.
+  B. They want to make it theirs. The clone, run from source, with the Bots, channels and skills as
+     configuration they edit. That is the rest of this file.
+
+"I want to try OpenBot" is A. Go to B only if they mean to change something: their own Bots, their
+own channels, their own skills, or the code. Somebody who wanted A and was walked through B has
+installed a toolchain and a container engine to see a screen that one command would have shown them.
+
+A. A LOCAL COPY, FROM THE PUBLISHED IMAGE
+
+  docker run -p 3001:3001 --env-file .env \
+    -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
+    ghcr.io/copilotkit/openbot:latest
+
+One port. The app is on 3001 as well, so open http://localhost:3001, not 3010. `latest` is the most
+recent release; a version tag such as `:v0.0.9` pins one.
+
+The `.env` still carries the same values as B: INTELLIGENCE_API_KEY, a model key, a real
+KEY_ENCRYPTION_KEY, and either an identity provider or OPENBOT_SINGLE_USER=true. Start from
+`.env.example` in this repository, or write the handful by hand. `EMBEDDED_POSTGRES=on` runs
+PostgreSQL inside the container, creates the database and the `vector` extension the first time, and
+applies the migrations on every start, so there is nothing to provision and no password to manage.
+Point DATABASE_URL at a database you already run instead, and leave EMBEDDED_POSTGRES off, if you
+would rather. That database needs the `vector` extension enabled; the managed ones support it and
+none of them enable it for you.
+
+Mount the volume at `/var/lib/postgresql`, the parent, not `/var/lib/postgresql/data`. `initdb` will
+not initialise into a directory that holds anything, and an ext4 volume arrives holding
+`lost+found`, so mounting the data directory itself leaves the cluster uncreated and the container
+serving nothing.
+
+WHAT THIS IMAGE DOES NOT CARRY: `agent-langgraph` and `agent-bot`, the two framework Bots, are
+separate images that `docker-compose.yml` starts. Leave MANAGED_AGENT_AG_UI_URL unset and the
+shipped Risk Analyst coworker is omitted rather than registered against a host that is not there. If
+their `.env` still has the laptop default `http://localhost:4201/ag-ui`, unset it. Somebody who
+wants those Bots wants B.
+
+docs/deployment.md is the whole of this path, including the managed-database version, the sizing and
+the platform notes.
+
+B. MAKE IT THEIRS, FROM THE CLONE
+
 OpenBot is a template to clone and make your own, not a product with a hosted version. It runs on
 the person's machine: their PostgreSQL, their model credential, their Bots.
 
@@ -15,7 +61,7 @@ WHAT THEY NEED BEFORE STARTING
 - A model credential. `OPENAI_API_KEY` is the default; any OpenAI-compatible base URL works via
   `OPENAI_BASE_URL`.
 
-THE ONLY THREE VALUES A PERSON HAS TO SUPPLY
+THE ONLY TWO VALUES A PERSON HAS TO SUPPLY
 `.env.example` ships ten empty keys, which makes this look bigger than it is. `scripts/start.sh`
 fills most of them itself: it defaults COMPUTER_TOKEN and WORKER_SHARED_SECRET, and generates
 AGENT_TOOL_TOKEN and writes it back into `.env`. What it cannot invent is:
@@ -24,7 +70,7 @@ AGENT_TOOL_TOKEN and writes it back into `.env`. What it cannot invent is:
   2. OPENAI_API_KEY              the model credential
 
 Everything else in `.env.example` is either already correct or generated. Do not talk the person
-through the other seven.
+through the other eight.
 
 THE STEPS
 
@@ -44,6 +90,9 @@ Then:
 
 It starts Docker services, applies migrations, starts the API on 3001 and the app on 3010, and
 waits for each to answer its own health route before printing next steps. Open http://localhost:3010.
+
+`bash scripts/stop.sh` takes down everything it started, the Bots' computers included. The database,
+the files and the browser profiles are volumes, so nothing is deleted either way.
 
 WHAT YOU MUST NOT DO FOR THEM
 - Do not run `copilotkit login`. It opens a browser and signs in as them. Tell them to run it.
@@ -80,8 +129,9 @@ The server refuses to start rather than running half-configured. The message nam
 
 HOW TO KNOW IT WORKED
   curl -s localhost:3001/api/capabilities
-Expect JSON with "mode":"intelligence". Then open http://localhost:3010 and send a message to
-General Assistant. A reply means the model credential and Intelligence are both good.
+Expect JSON with "mode":"intelligence". Then open the app and send a message to General Assistant.
+A reply means the model credential and Intelligence are both good. The app is on 3010 from the
+clone and on 3001 from the image.
 
 WHEN THEY WANT TO MAKE IT THEIRS
 The Bots, channels and skills are configuration, not code: `examples/fintech` is a worked example,
@@ -91,4 +141,5 @@ copy. That is the fork, and it is the point of the repository.
 Watch the path: the server runs from `server/`, so TENANT_PACKAGE_DIR is relative to that, which is
 why the default reads `../examples/fintech` rather than `examples/fintech`.
 
-Further reading: README.md, docs/development.md, and docs/configuration.md for every variable.
+Further reading: README.md, docs/development.md, docs/deployment.md, and docs/configuration.md for
+every variable.
