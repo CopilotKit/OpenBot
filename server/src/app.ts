@@ -1,6 +1,8 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
+import { MAX_IMAGE_BYTES } from "../../shared/attachments";
 import { authoriseAgentCall, sameToken } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
@@ -23,6 +25,10 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import {
+  createAttachmentRoutes,
+  createChannelAttachmentRoutes,
+} from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -38,6 +44,7 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
+import type { Database } from "./db/client";
 import { createIntelligenceClient } from "./intelligence-client";
 import type { OnboardingStore } from "./people/onboarding";
 import type { PeopleStore } from "./people/store";
@@ -54,6 +61,39 @@ import {
   InstructionsTooLongError,
   type UserInstructionsStore,
 } from "./user-instructions";
+
+/**
+ * How much of a multipart body is boundary, headers and other fields rather than file.
+ *
+ * Generous on purpose. Measured against what the composer actually sends — one `file` part and one
+ * `uploadGroup` field — the framing is 360 bytes for a short filename and 614 for a 255-character
+ * one; a filename full of non-ASCII percent-encodes to a few times that and is still nowhere near
+ * this. 64 KiB is therefore an allowance no honest request can exhaust, and it raises the amount of
+ * memory a hostile request can pin by 0.8%, which was never the number that mattered.
+ */
+const MULTIPART_FRAMING_ALLOWANCE = 64 * 1024;
+
+/**
+ * The ceiling on the whole POST body of a channel attachment upload.
+ *
+ * THIS IS NOT `MAX_IMAGE_BYTES`, AND THE DIFFERENCE IS THE POINT. Every other gate on this path —
+ * the composer's pre-check, `attachmentsConfigFor`'s `maxSize`, the handler's own 413 — measures
+ * THE FILE. This one measures THE ENVELOPE: `bodyLimit` runs before anything has parsed the
+ * multipart body, so all it can count is bytes on the wire, file and framing together.
+ *
+ * Set to `MAX_IMAGE_BYTES` exactly, those two units were silently treated as one, and the ~360
+ * bytes of boundary and headers wrapped around a file at the documented ceiling were enough to push
+ * the body over it: an 8,388,608-byte image — the exact number the composer publishes as the limit —
+ * was refused 413, while 8,388,308 bytes went through. A limit nobody can reach is a limit that is
+ * wrong, so the envelope's ceiling is the file's ceiling plus room for the envelope.
+ *
+ * The slack costs nothing it was protecting against. A body between the two numbers is still read
+ * into memory, and then still refused by the handler once `file.size` is a thing anybody can look
+ * at — which is where a text upload, whose real limit is `MAX_FILE_BYTES`, is refused too. What the
+ * door exists to stop is the 2GB body, and it still does.
+ */
+export const UPLOAD_BODY_LIMIT_BYTES =
+  MAX_IMAGE_BYTES + MULTIPART_FRAMING_ALLOWANCE;
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -221,6 +261,17 @@ export function createApp(
    * shown an empty box, and the obvious thing to do with an empty box is fill it in again.
    */
   userInstructions?: UserInstructionsStore,
+  /**
+   * The database behind a channel's staged and sent files: upload, fetch, delete.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, the same
+   * degraded shape every other optional store here takes: a deployment that never built the
+   * database has no door for this at all, not a locked one.
+   */
+  attachmentDatabase?: Database,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -1044,6 +1095,68 @@ export function createApp(
     app.route(
       "/api/channels",
       createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
+    );
+  }
+
+  if (attachmentDatabase) {
+    /*
+     * `bodyLimit` sits in front of the upload route itself, not beside the mount below: the handler
+     * in channels/attachments.ts calls `file.arrayBuffer()` before it has looked at a single byte of
+     * size, so an unbounded body is read into memory in full before anything gets the chance to
+     * refuse it. A person (or an attacker) posting a 2GB body would have it buffered in RAM before
+     * the 413 the handler already knows how to return. `MAX_IMAGE_BYTES` is the largest thing this
+     * route could ever legitimately accept — a text upload is refused smaller, inside the handler,
+     * once the sniffed type is known — so refusing anything larger at the door costs nothing a real
+     * upload was ever going to use.
+     *
+     * The ceiling is `UPLOAD_BODY_LIMIT_BYTES` and not `MAX_IMAGE_BYTES` itself because THIS GATE
+     * MEASURES A DIFFERENT THING FROM EVERY OTHER ONE. See that constant.
+     */
+    const channelAttachments = new Hono<{ Variables: AppVariables }>();
+    channelAttachments.use(
+      "*",
+      bodyLimit({
+        maxSize: UPLOAD_BODY_LIMIT_BYTES,
+        /*
+         * THE REFUSAL AT THE DOOR HAS TO LOOK LIKE THE HANDLER'S OWN.
+         *
+         * hono's default `onError` answers with the plain string "Payload Too Large". The composer
+         * (app/src/components/channels/composer/attachments.ts) reads `{ error }` off every failed
+         * upload and falls back to a generic `Could not upload "<name>"` when the body will not
+         * parse as JSON — so the default body cost the person the one sentence that would have told
+         * them what went wrong, on the single refusal where the reason is both knowable and
+         * actionable. This is the same `{ error }` shape and the same number the handler's own 413
+         * names, so the two paths are indistinguishable from the outside.
+         *
+         * THE FILENAME AND THE KIND ARE BOTH DELIBERATELY ABSENT, and for the same reason: nothing
+         * has parsed the multipart body at this point, which is the entire reason this middleware
+         * runs ahead of the handler. The handler's sentences can say `'notes.txt' is larger than the
+         * 1MB limit for files` because by then it has sniffed the bytes. This one cannot, and must
+         * not guess — a 9MB text file refused here as being over "the 8MB limit for images" would
+         * send somebody off to shrink it to 7MB, whereupon the handler would refuse it a second time
+         * with a different number. So the sentence names the only thing that is true of every body
+         * this gate rejects: none of them can be under the largest ceiling the route has.
+         */
+        onError: (context) =>
+          context.json(
+            {
+              // The same rounding as `megabytes` in channels/attachments.ts, so the door and the
+              // handler name one limit in one voice.
+              error: `That upload is larger than the ${(MAX_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB limit.`,
+            },
+            413,
+          ),
+      }),
+    );
+    channelAttachments.route(
+      "/",
+      createChannelAttachmentRoutes(attachmentDatabase, requireUser),
+    );
+    app.route("/api/channels", channelAttachments);
+
+    app.route(
+      "/api/attachments",
+      createAttachmentRoutes(attachmentDatabase, requireUser),
     );
   }
 
