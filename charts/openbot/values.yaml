@@ -267,6 +267,42 @@ routines:
   # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
   schedule: "*/5 * * * *"
 
+# Deleting attachments somebody staged and then never sent. `attachedAt` stays null until an
+# attachment is actually sent, and the upload endpoint counts exactly those null rows against two
+# separate caps: eight per composer session, which is the per-message limit the composer's own screen
+# enforces, and 32 per PERSON across every channel and every session at once, which is the one that
+# makes this sweep load-bearing.
+#
+# The second cap is why never running this is worse than growth. The per-session eight is counted
+# over a bucket the client names in its own request, so a new tab is a new bucket and it bounds a
+# client that plays along and nothing else. The per-person 32 is not: it is every unsent row that
+# person holds anywhere, and the refusal they see on the 33rd file tells them anything still unsent
+# is cleared within a day, which is a promise made on this sweep's behalf. With the sweep off, a
+# changed mind is a permanent dead end naming files that are no longer on anybody's screen, and
+# anybody who reaches 32 can attach nothing, in any channel, for good.
+attachments:
+  culler:
+    # On by default, unlike `routines` above: this needs nothing but the database, which every
+    # deployment already has, so there is no failure mode where enabling it does more harm than the
+    # rows it was written to remove. Nothing but the database is meant literally — the script reads
+    # `DATABASE_URL` and no other variable, which is why this CronJob carries no secret at all.
+    enabled: true
+    # Hourly, not the five-minute schedule the other two CronJobs use: nothing here is time-sensitive
+    # the way a due routine or an idle browser is.
+    schedule: "0 * * * *"
+    # How long a staged attachment is kept before the sweep deletes it. Matches the script's own
+    # fallback, so leaving this out and never running the CronJob behave alike.
+    #
+    # A fraction is a fraction of an hour: `0.5` is thirty minutes. Be sure that is what you want —
+    # this deletes files a person picked in the composer and has not sent, and a window shorter than
+    # somebody's train of thought deletes one out from under them while the tab is still open.
+    olderThanHours: 24
+    # A ceiling on one sweep, because `concurrencyPolicy: Forbid` turns a hung one into a permanent
+    # stop. A deployment arriving with a large backlog does not need it raised: the sweep deletes in
+    # bounded batches, each its own transaction, so a run stopped at the ceiling keeps what it
+    # committed and the next one carries on from there. Raising it drains that backlog in fewer runs.
+    activeDeadlineSeconds: 300
+
 database:
   # Used when `postgresql.enabled` is false. A URL, or a secret holding one.
   #
@@ -414,11 +450,20 @@ networkPolicy:
   extraEgress: []
   extraIngress: []
   # `computers.mode: sandbox` only. The service range the Kubernetes API server answers on, so the
-  # rule that lets the API ask for a Bot's computer can name it instead of being left open.
+  # rule that lets the API ask for a Bot's computer can name it.
   #
-  # Empty means unscoped, which is the only thing a chart can do by default: the range is the
-  # cluster's, not the release's. `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows
-  # which one yours is on; on EKS it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  # REQUIRED once `enabled` is true and `computers.mode` is sandbox, and empty here because the range
+  # is the cluster's rather than the release's, so there is nothing this chart could put in its place.
+  # `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows which one yours is on; on EKS
+  # it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  #
+  # Empty USED to mean unscoped, and unscoped was not a looser version of this rule — it was the
+  # absence of one. An egress rule with ports and no `to` matches every destination in Kubernetes, so
+  # the default granted 443 and 6443 to all of `10/8`, `172.16/12`, `192.168/16` and `169.254/16`,
+  # which are the four ranges the rule beside it exists to cut out. It is refused rather than skipped
+  # because skipping it is an outage nobody is told about: on a cluster that enforces policy the API
+  # server can no longer ask for a computer and every Bot action fails. A `helm upgrade` that stops
+  # here has changed nothing in the cluster; set this and run it again.
   kubernetesApiCidr: ""
   # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
   # an internal site adds it here, one address at a time, rather than reopening the private ranges.
@@ -428,6 +473,8 @@ networkPolicy:
   cullerExtraEgress: []
   # The same, for the routines sweep.
   routinesExtraEgress: []
+  # The same, for the attachments culler.
+  attachmentsCullerExtraEgress: []
 
 podSecurityContext:
   runAsNonRoot: false
