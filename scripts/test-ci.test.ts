@@ -34,22 +34,6 @@ if (!process.stderr.write(stderr)) {
 process.exitCode = 7;
 `,
   );
-  await writeFile(
-    join(directory, "old-test-ci.ts"),
-    [
-      'const proc = Bun.spawn(["bun", "run", "test"], {',
-      '  stdout: "inherit",',
-      '  stderr: "pipe",',
-      "});",
-      "",
-      "const stderr = await new Response(proc.stderr).text();",
-      "process.stderr.write(stderr);",
-      "",
-      "const status = await proc.exited;",
-      "if (status !== 0) process.exit(status);",
-      "",
-    ].join("\n"),
-  );
   return directory;
 }
 
@@ -71,7 +55,7 @@ async function runBun(directory: string, script: string) {
 
 async function runBunThroughLogPipe(directory: string, script: string) {
   const proc = Bun.spawn(
-    ["bash", "-o", "pipefail", "-c", `bun ${script} 2>&1 | cat`],
+    ["bash", "-o", "pipefail", "-c", 'bun "$1" 2>&1 | cat', "bash", script],
     {
       cwd: directory,
       stdout: "pipe",
@@ -103,10 +87,6 @@ test("preserves the child stderr tail before returning the child status", async 
   expect(child.exitCode).toBe(7);
   expect(child.stdout).toBe("");
   expect(child.stderr).toContain(expectedTail);
-
-  const oldWrapper = await runBunThroughLogPipe(directory, "old-test-ci.ts");
-  expect(oldWrapper.exitCode).toBe(7);
-  expect(oldWrapper.stdout).not.toContain(expectedTail);
 
   const fixedWrapper = await runBunThroughLogPipe(
     directory,
