@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHAT A FAILED SEND DOES TO THE WORDS, WHICH UNTIL NOW COULD NOT BE ASKED AT ALL.
@@ -26,7 +27,10 @@ import { Composer } from "@/components/channels/composer/composer";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /** The editor inside the composer: the element the words actually live in. */
 function editorOf(container: HTMLElement): HTMLElement {

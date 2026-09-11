@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { RejectedFiles } from "@/components/channels/composer/rejected-files";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * THE HARNESS IS THIS REPOSITORY'S. `GlobalRegistrator` in `beforeAll`/`afterAll` and `cleanup` in
@@ -17,7 +18,10 @@ import { RejectedFiles } from "@/components/channels/composer/rejected-files";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /**
  * THE REFUSALS AS THEY ARE READ, ONE STRING PER LINE.

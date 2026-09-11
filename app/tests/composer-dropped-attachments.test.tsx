@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { Attachment } from "@copilotkit/react-core/v2";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * What the composer does with `droppedAttachments`: the files the queue has let go of, which must
@@ -32,7 +33,10 @@ import { Composer } from "@/components/channels/composer/composer";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /**
  * `filename` is OPTIONAL on the SDK's `Attachment` and optional here for the same reason: the

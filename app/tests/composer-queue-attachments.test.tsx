@@ -24,6 +24,7 @@ import {
   attachmentUrl,
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/channels/attachments";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHAT THE QUEUE DOES TO AN ATTACHMENT BEHIND SOMEBODY'S BACK, AT BOTH ENDS OF THE SAME ROW.
@@ -67,7 +68,10 @@ const realUseAttachments = ReactCoreV2.useAttachments;
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /** Every id `removeAttachment` was called with, and how many times `consumeAttachments` was. */
 let removeAttachmentCalls: string[];

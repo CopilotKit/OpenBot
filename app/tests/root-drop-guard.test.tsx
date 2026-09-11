@@ -7,6 +7,7 @@ import {
   render,
 } from "@testing-library/react";
 import { useUnclaimedDropGuard } from "@/routes/__root";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A FILE DROPPED WHERE NOTHING WAS LISTENING DOES NOT TAKE THE PAGE WITH IT.
@@ -35,7 +36,10 @@ import { useUnclaimedDropGuard } from "@/routes/__root";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /** The guard on its own, with no router around it: the hook is the whole of the behaviour. */
 function Guarded({ children }: { children?: React.ReactNode }) {

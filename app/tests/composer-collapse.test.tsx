@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render } from "@testing-library/react";
 import { Suspense, startTransition, use, useState } from "react";
 import { Collapse } from "@/components/channels/composer/collapse";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHEN THE BOX MEASURES THE THING IT IS ABOUT TO ANIMATE, AND WHEN IT REFUSES TO.
@@ -23,7 +24,10 @@ import { Collapse } from "@/components/channels/composer/collapse";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /** Every `offsetHeight` the component read since the last reset. */
 let measurements = 0;

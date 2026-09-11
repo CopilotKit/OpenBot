@@ -15,6 +15,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * What the composer does with a file, from the outside: the button that opens the picker, the drop
@@ -32,7 +33,10 @@ import { Composer } from "@/components/channels/composer/composer";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 

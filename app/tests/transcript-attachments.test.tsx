@@ -17,6 +17,7 @@ import {
 } from "@/components/channels/chat-transcript";
 import type { QueuedMessage } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * `toVisibleChatItems` (chat-messages.ts) gathers the attachment parts of a user turn into one
@@ -86,12 +87,13 @@ afterEach(() => {
 
 afterAll(async () => {
   /*
-   * ONE TURN OF THE LOOP BEFORE THE DOCUMENT GOES AWAY. A probe answered during the last test
-   * leaves React work scheduled on a macrotask, and the scheduler reaches for `window` when it
-   * runs — after `unregister`, that is a `ReferenceError` reported against whichever file bun
-   * happens to be running by then, which is a failure with somebody else's name on it.
+   * REACT FIRST, BEFORE THE DOCUMENT GOES AWAY. A probe answered during the last test leaves React
+   * work scheduled on a macrotask, and the scheduler reaches for `window` when it runs — after
+   * `unregister`, that is an error reported against whichever file bun happens to be running by
+   * then, which is a failure with somebody else's name on it. `settle-react-work.ts` says why one
+   * turn of `setTimeout` was the wrong instrument for waiting on it.
    */
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await settleReactWork();
   globalThis.fetch = realFetch;
   GlobalRegistrator.unregister();
 });

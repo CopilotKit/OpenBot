@@ -16,6 +16,7 @@ import {
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
 import type { ComposerDraft } from "@/components/channels/composer/draft";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHAT HAPPENS TO A STAGED FILE AFTER IT IS STAGED: the send it rides on, and the Remove that
@@ -36,7 +37,10 @@ import type { ComposerDraft } from "@/components/channels/composer/draft";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 

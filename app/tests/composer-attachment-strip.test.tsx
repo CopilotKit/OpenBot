@@ -5,6 +5,7 @@ import {
   AttachmentStrip,
   type StagedFile,
 } from "@/components/channels/composer/attachment-strip";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHAT A SCREEN READER IS OFFERED BY THE ROW ACROSS THE TOP OF THE COMPOSER, AND WHEN.
@@ -19,7 +20,10 @@ import {
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const notes: StagedFile = {
   id: "1",

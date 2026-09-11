@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
 import { RejectedFiles } from "@/components/channels/composer/rejected-files";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * THE GAP UNDER THE REFUSALS HAS TO BE INSIDE THE BOX THAT GETS MEASURED.
@@ -28,7 +29,10 @@ import { RejectedFiles } from "@/components/channels/composer/rejected-files";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const oneRefusal = [
   { id: "1", name: "logo.svg", reason: "SVGs are not accepted." },

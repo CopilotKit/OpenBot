@@ -9,6 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A CLAIM THAT NAMES NO FORMAT, ALL THE WAY TO THE UPLOAD — WHICH IS THE ONLY PLACE IT CAN BE SEEN.
@@ -35,7 +36,10 @@ import { Composer } from "@/components/channels/composer/composer";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 

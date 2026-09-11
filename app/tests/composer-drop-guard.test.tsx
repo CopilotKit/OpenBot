@@ -7,6 +7,7 @@ import {
   render,
 } from "@testing-library/react";
 import { Composer } from "@/components/channels/composer/composer";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * WHAT HAPPENS TO A FILE DROPPED ON A COMPOSER THAT CANNOT ACCEPT IT.
@@ -44,7 +45,10 @@ import { Composer } from "@/components/channels/composer/composer";
 
 beforeAll(() => GlobalRegistrator.register({ url: "http://localhost/" }));
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 /**
  * A `dataTransfer` good enough for the handler under test: it reads `.files` and writes
