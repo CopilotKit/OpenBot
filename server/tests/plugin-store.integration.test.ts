@@ -1574,9 +1574,9 @@ describe("refresh token rotation", () => {
             (error: unknown) => error,
           );
 
-        const failures = (await auditRowsFor(rotationRef)).filter(
-          (row) => row.eventType === "mcp.call_failed",
-        );
+        const failures = (
+          await auditRowsFor(rotationRef, rotationBotId, rotationUserId)
+        ).filter((row) => row.eventType === "mcp.call_failed");
         const written = JSON.stringify(failures);
         expect(written).not.toContain(UNREADABLE_PLAINTEXT);
         /*
@@ -2800,7 +2800,7 @@ describe("a dynamic client the vendor has evicted", () => {
         })
         .returning({ id: credentials.id });
       if (!row) throw new Error("misshapen client was not stored");
-      vaultRows.push(row.id);
+      clientFixture.track(row.id);
       await database
         .update(mcpServers)
         .set({ credentialId: row.id })
