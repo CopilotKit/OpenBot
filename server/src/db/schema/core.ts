@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   pgEnum,
@@ -14,6 +15,10 @@ import {
 // NOT drizzle's `jsonb`: that one serialises, and so does the driver, so every object landed as a
 // JSON string and nothing in this database could be queried by a JSON field. See ./json.ts.
 import { jsonb } from "./json";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -490,5 +495,99 @@ export const intelligenceChannelMappings = pgTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.channelId] }),
     uniqueIndex("intelligence_channel_mappings_thread_idx").on(table.threadId),
+  ],
+);
+
+/**
+ * A file somebody attached to a message in a channel.
+ *
+ * The bytes live here rather than on a disk or in a bucket because this deployment is a compose
+ * file: a volume would split the backup story in two, and an object store would put a bucket
+ * between a self-hoster and a working install. One `pg_dump` restores a deployment, and that stays
+ * true. Reads go through one endpoint, so moving the bytes later changes that endpoint and nothing
+ * else.
+ */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /**
+     * What the server decided this is, never what the client claimed.
+     *
+     * A browser will happily report `text/plain` for a file it dragged out of another application,
+     * and a client can send whatever it likes. This column is what the fetch endpoint serves as
+     * `Content-Type`, so a wrong value here is a security bug rather than a cosmetic one.
+     */
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    bytes: bytea("bytes").notNull(),
+    createdAt: createdAt(),
+    /**
+     * When this appeared in a sent message. Null means staged.
+     *
+     * Attach three files, change your mind and close the tab, and those rows would sit here forever
+     * with nothing referring to them. The sweeper deletes staged rows past a few hours; a row with a
+     * date is spoken for and is never swept.
+     */
+    attachedAt: timestamp("attached_at", { withTimezone: true }),
+    /**
+     * Which composer session staged this row, so the per-message cap counts the same set the
+     * composer does.
+     *
+     * NOT A DRAFT ID, and the name is the whole of the distinction. Nothing about the message is
+     * saved here: no text, no ordering, nothing that survives a reload. It is a grouping key over
+     * rows this table already held, minted fresh by each composer instance and thrown away with it.
+     *
+     * The cap it exists for is per message, and the client can only ever see what is on its own
+     * screen. Counted per channel instead — which is what this server did before this column — a
+     * closed tab, a stopped run or a removed queued message left staged rows nobody could see, and
+     * the client would then accept a pick the server refused with a 409 naming files that were on
+     * nobody's screen. Eight such orphans locked uploads in that channel until the sweeper's
+     * 24-hour window expired.
+     *
+     * NULLABLE, AND DELIBERATELY NOT BACKFILLED. Every row that predates this column has NULL here,
+     * `null = <anything>` is never true in SQL, and so those rows match no live group and block no
+     * upload. They are still the sweeper's to reclaim on its own schedule.
+     *
+     * `text` rather than `uuid` even though `newId()` mints a UUID: this value arrives as a form
+     * field the browser chose, and comparing text that is not uuid-shaped against a `uuid` column
+     * raises `22P02` and throws — the same trap `isUuidShaped` in channels/attachments.ts exists to
+     * step around. As text, a nonsense group is simply a group with nothing in it.
+     */
+    uploadGroup: text("upload_group"),
+  },
+  (table) => [
+    // Postgres does not index foreign key columns on its own. Deleting a
+    // channel cascades here, and without this index that cascade is a
+    // sequential scan of the one table in this deployment that holds blobs.
+    index("attachments_channel_idx").on(table.channelId),
+    // The same rationale as `attachments_channel_idx` above, for the other
+    // cascading foreign key on this table. Removing a person deletes their
+    // `users` row, and that cascade has to find every attachment they ever
+    // uploaded; unindexed, it is the same sequential scan over the same blob
+    // table, and it runs on the one operation a deployment cannot retry
+    // halfway through.
+    index("attachments_uploaded_by_idx").on(table.uploadedBy),
+    // The cap's own predicate, and every upload runs it. Partial for the same
+    // reason `attachments_staged_idx` below is: staged rows are a small,
+    // short-lived minority, and an index over every row would grow with the
+    // table for a query that only ever asks about the unstamped ones.
+    index("attachments_upload_group_idx")
+      .on(table.channelId, table.uploadedBy, table.uploadGroup)
+      .where(sql`${table.attachedAt} is null`),
+    // Partial, on the sweeper's own predicate rather than the whole column.
+    // The sweeper only ever asks for staged rows (`attached_at is null`),
+    // which are a small, short-lived minority of the table, so an index
+    // covering every row would grow with the table for no query that exists.
+    index("attachments_staged_idx")
+      .on(table.createdAt)
+      .where(sql`${table.attachedAt} is null`),
   ],
 );
