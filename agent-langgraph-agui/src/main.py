@@ -120,10 +120,9 @@ def _model():
         # model and warns in the module that this one is unofficial. That is a maintenance cost we
         # took knowingly rather than a reason to withhold the plan, because a subscription someone
         # already pays for is the whole point of offering it on the model screen.
-        from langchain_openai.chat_models.codex import (
-            _ChatOpenAICodex,
-            _FileChatGPTOAuthTokenProvider,
-        )
+        from langchain_openai.chat_models.codex import _ChatOpenAICodex
+
+        from .chatgpt_store import ChatGptTokenStore
 
         # THE STORE FILE, NOT A BARE TOKEN. An access token expires within the hour and cannot be
         # renewed; the store holds the refresh token, and this provider renews from it. A Bot given
@@ -131,7 +130,7 @@ def _model():
         # explain.
         return _ChatOpenAICodex(
             model=model,
-            token_provider=_FileChatGPTOAuthTokenProvider(path=store_path),
+            token_provider=ChatGptTokenStore(path=store_path),
         )
 
     _normalize_openai_base_url()

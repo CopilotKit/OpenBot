@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -492,34 +493,86 @@ def test_configured_chatgpt_auth_file_selects_codex_model(
         == "langchain_openai.chat_models.codex._ChatOpenAICodex"
     )
     assert model.model_name == request_model
-    assert type(model.token_provider).__name__ == "_FileChatGPTOAuthTokenProvider"
+    assert type(model.token_provider).__name__ == "ChatGptTokenStore"
     assert str(model.token_provider.path) == str(auth_file)
     assert token.access_token == "synthetic-access"
     assert token.refresh_token == "synthetic-refresh"
 
 
-def _docker_host_user_args():
-    if not hasattr(os, "getuid") or not hasattr(os, "getgid"):
-        pytest.skip("host UID/GID fixture requires a Unix Docker host")
-    return ["--user", f"{os.getuid()}:{os.getgid()}"]
+@pytest.mark.skipif(os.name != "posix", reason="POSIX private file ownership")
+def test_chatgpt_writer_sets_owner_before_replacement(monkeypatch, tmp_path):
+    path = tmp_path / "chatgpt-auth.json"
+    _write_synthetic_chatgpt_store(path)
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(path))
+    provider = main._model().token_provider
+    token = provider.get_token()
+    original = path.read_bytes()
+    owner = path.stat()
+    replace_path = Path.replace
+    published = []
+
+    def inspect_replace(staged, destination):
+        if Path(destination) == path:
+            metadata = staged.stat()
+            assert (metadata.st_uid, metadata.st_gid) == (owner.st_uid, owner.st_gid)
+            assert metadata.st_mode & 0o777 == 0o600
+            assert path.read_bytes() == original
+            assert provider.path == path
+            published.append(staged)
+        return replace_path(staged, destination)
+
+    monkeypatch.setattr(Path, "replace", inspect_replace)
+    provider.save(replace(token, access_token="synthetic-renewed"))
+
+    assert len(published) == 1
+    assert json.loads(path.read_text())["access_token"] == "synthetic-renewed"
+    assert sorted(item.name for item in tmp_path.iterdir()) == [
+        "chatgpt-auth.json", "chatgpt-auth.json.lock"
+    ]
 
 
-def _run_chatgpt_writer_container(
-    host_source: Path, container_target: str, container_store: str
-):
+@pytest.mark.skipif(os.name != "posix", reason="POSIX private file ownership")
+def test_chatgpt_writer_ownership_failure_keeps_original(monkeypatch, tmp_path):
+    path = tmp_path / "chatgpt-auth.json"
+    _write_synthetic_chatgpt_store(path)
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(path))
+    provider = main._model().token_provider
+    token = provider.get_token()
+    original = path.read_bytes()
+    before = path.stat()
+
+    def refuse_owner_change(*_args):
+        raise PermissionError("synthetic ownership refusal")
+
+    monkeypatch.setattr(os, "fchown", refuse_owner_change)
+    with pytest.raises(PermissionError, match="synthetic ownership refusal"):
+        provider.save(replace(token, access_token="synthetic-renewed"))
+
+    after = path.stat()
+    assert path.read_bytes() == original
+    assert (after.st_uid, after.st_gid, after.st_mode) == (
+        before.st_uid, before.st_gid, before.st_mode
+    )
+    assert provider.get_token().access_token == "synthetic-access"
+    assert sorted(item.name for item in tmp_path.iterdir()) == [
+        "chatgpt-auth.json", "chatgpt-auth.json.lock"
+    ]
+
+
+def _run_chatgpt_writer_container(host_source: Path, container_target: str):
     writer = host_source.parent / "writer.py"
     writer.write_text(
-        f"""
+        """
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
 from pathlib import Path
 from langchain_openai.chatgpt_oauth import _ChatGPTToken
-from langchain_openai.chat_models.codex import _FileChatGPTOAuthTokenProvider
+from chatgpt_store import ChatGptTokenStore
 
-store = Path({container_store!r})
-provider = _FileChatGPTOAuthTokenProvider(path=store)
+provider = ChatGptTokenStore(
+    path=Path('/root/.langchain/chatgpt-auth.json')
+)
 provider._write_to_disk(
     _ChatGPTToken(
         access_token='synthetic-access',
@@ -530,12 +583,10 @@ provider._write_to_disk(
         user_id='synthetic-user',
     )
 )
-print(json.dumps({{
+print(json.dumps({
     'version': version('langchain-openai'),
-    'writer_uid': os.getuid(),
-    'writer_gid': os.getgid(),
-    'written': json.loads(store.read_text()),
-}}))
+    'written': json.loads(Path('/root/.langchain/chatgpt-auth.json').read_text()),
+}))
 """,
         encoding="utf-8",
     )
@@ -544,19 +595,16 @@ print(json.dumps({{
             "docker",
             "run",
             "--rm",
-            *_docker_host_user_args(),
-            "--env",
-            "HOME=/tmp/openbot-home",
             "--mount",
             f"type=bind,source={host_source},target={container_target}",
             "--mount",
             f"type=bind,source={writer},target=/tmp/writer.py,readonly",
+            "--mount",
+            f"type=bind,source={Path(main.__file__).with_name('chatgpt_store.py')},target=/tmp/chatgpt_store.py,readonly",
             "python:3.12-slim",
             "sh",
             "-lc",
-            'mkdir -p "$HOME" /tmp/openbot-python && '
-            "python -m pip install --quiet --target /tmp/openbot-python langchain-openai==1.6.0 && "
-            "PYTHONPATH=/tmp/openbot-python python /tmp/writer.py",
+            "python -m pip install --quiet --root-user-action=ignore langchain-openai==1.6.0 && python /tmp/writer.py",
         ],
         check=False,
         text=True,
@@ -572,28 +620,21 @@ def test_chatgpt_token_provider_atomic_writer_survives_directory_mount():
         mount_dir.mkdir()
         token_file = mount_dir / "chatgpt-auth.json"
         token_file.write_text("{}", encoding="utf-8")
+        token_file.chmod(0o600)
 
-        result = _run_chatgpt_writer_container(
-            mount_dir,
-            "/tmp/openbot-langchain",
-            "/tmp/openbot-langchain/chatgpt-auth.json",
-        )
+        result = _run_chatgpt_writer_container(mount_dir, "/root/.langchain")
 
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout.splitlines()[-1])
         assert payload["version"] == "1.6.0"
-        assert payload["writer_uid"] == os.getuid()
-        assert payload["writer_gid"] == os.getgid()
         assert payload["written"]["access_token"] == "synthetic-access"
         assert payload["written"]["refresh_token"] == "synthetic-refresh"
         host_payload = json.loads(token_file.read_text(encoding="utf-8"))
         assert host_payload["access_token"] == "synthetic-access"
         assert host_payload["refresh_token"] == "synthetic-refresh"
-        host_stat = token_file.stat()
-        assert host_stat.st_uid == os.getuid()
-        if sys.platform != "darwin":
-            assert host_stat.st_gid == os.getgid()
-        assert host_stat.st_mode & 0o777 == 0o600
+        if os.name == "posix":
+            assert token_file.stat().st_uid == os.getuid()
+            assert token_file.stat().st_mode & 0o777 == 0o600
     finally:
         shutil.rmtree(root)
 
@@ -606,20 +647,11 @@ def test_chatgpt_token_provider_atomic_writer_fails_on_single_file_mount():
 
         result = _run_chatgpt_writer_container(
             host_file,
-            "/tmp/chatgpt-auth.json",
-            "/tmp/chatgpt-auth.json",
+            "/root/.langchain/chatgpt-auth.json",
         )
 
         assert result.returncode != 0
-        assert "_atomic_write_private_json" in result.stderr
-        assert "tmp.replace(path)" in result.stderr
-        assert "chatgpt-auth.json.tmp" in result.stderr
-        assert "chatgpt-auth.json" in result.stderr
-        assert (
-            "Device or resource busy" in result.stderr
-            or "Errno 16" in result.stderr
-            or "PermissionError: [Errno 1] Operation not permitted" in result.stderr
-        )
+        assert "Device or resource busy" in result.stderr or "Errno 16" in result.stderr
         assert host_file.read_text(encoding="utf-8") == "{}"
     finally:
         shutil.rmtree(root)
