@@ -157,9 +157,46 @@ RDS has `rds.force_ssl` on by default, and Cloud SQL and Azure Database do the s
 migration fails with `no pg_hba.conf entry for host ... no encryption`, which names the host and the
 user and not the actual problem.
 
-**The migrating role has to be able to create and drop the `vector` extension.** The first migration
-creates it and a later one drops it again. On a managed database, create it once as the
-administrative role; `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
+**The migrating role has to OWN the `vector` extension, not just be able to see it.** The first
+migration runs `CREATE EXTENSION IF NOT EXISTS vector` and migration `0010` runs
+`DROP EXTENSION IF EXISTS "vector"` once the document index is gone. `DROP EXTENSION` is an ownership
+check, and `IF EXISTS` does not waive it — it only makes a *missing* extension not an error. So a
+role that can see an extension somebody else owns gets through the create and fails the drop, and the
+migrations Job stops with:
+
+```
+must be owner of extension vector
+```
+
+In Postgres an extension's owner is whoever ran `CREATE EXTENSION`, and there is no
+`ALTER EXTENSION ... OWNER TO` to hand it over afterwards. The advice that used to stand here — have
+the administrative role create it once so `CREATE EXTENSION IF NOT EXISTS` passes for an ordinary
+user — is therefore exactly what produces the failure: it makes the admin the owner and the migrating
+role a bystander.
+
+Do one of these instead:
+
+- **Let the migrating role create it.** Simplest, and it needs no extra step: allow that role to run
+  `CREATE EXTENSION` (`GRANT rds_superuser` on RDS, `cloudsqlsuperuser` on Cloud SQL, `azure_pg_admin`
+  on Azure Database, plus whatever extension allow-list the vendor keeps), then leave the extension
+  absent and let migration `0000` create it. The migrating role owns it and `0010` drops it cleanly.
+- **Pre-create it AS the migrating role.** Where that grant is not on offer, the administrative role
+  can still do it on the other role's behalf, which is the whole trick:
+
+  ```sql
+  SET ROLE openbot_migrator;      -- the role in DATABASE_URL
+  CREATE EXTENSION IF NOT EXISTS vector;
+  RESET ROLE;
+  ```
+
+  Ownership follows the role that ran the statement, so this is equivalent to the first option.
+
+If you have already installed with the extension owned by somebody else, drop and recreate it under
+the migrating role before upgrading — `DROP EXTENSION vector;` as the owner, then the block above.
+Nothing of yours is in it: `vector` existed for the `embedding` column on `chunks`, which `0010`
+drops in the same transaction. A deployment that added a vector column of its own is the one case
+where that is not true, and `0010` is written to fail rather than take it; that deployment should
+keep the extension and apply only the table drops by hand.
 
 ## The five targets
 
@@ -312,6 +349,21 @@ server to be recognised as the worker rather than an arbitrary caller — and is
 turning it on with no secret set is a CronJob whose every run is refused. See the routines refusal
 below, and [docs/routines.md](../../docs/routines.md).
 
+A third CronJob **deletes data, is on by default, and is the only one of the three that does**:
+`attachments.culler` sweeps staged attachments that were never sent. A file uploaded into the
+composer is stored the moment it is pasted or dropped, before anybody presses send — so closing the
+tab, or changing your mind, leaves bytes in the database that no message will ever point at. The
+sweep removes those, hourly (`attachments.culler.schedule`), once they are older than
+`attachments.culler.olderThanHours` — **24 hours by default**.
+
+It is on by default where the other two are off, because it needs nothing but the database that
+every deployment already has, and because the alternative is a table of blobs that only grows. What
+it will never remove is an attachment that was sent: those are stamped when the message they ride on
+goes out, and the sweep asks only for unstamped rows. The window matters, though — a person who
+uploads a file, leaves it in the composer overnight and comes back to send it will find it gone.
+Raise `olderThanHours` if that is your deployment's shape, or set `attachments.culler.enabled:
+false` to keep every staged row for ever and reclaim them some other way.
+
 ## NetworkPolicy, and whether your cluster enforces one
 
 Off by default, because a NetworkPolicy on a cluster whose CNI does not enforce one is a resource
@@ -330,6 +382,23 @@ and the bundled database. **A managed database is an address this chart cannot k
 the policy on with an external database and no `networkPolicy.extraEgress` is refused: on an
 enforcing cluster it would fence the API off from its own database, which reads as the database
 being down.
+
+**`computers.mode: sandbox` now also requires `networkPolicy.kubernetesApiCidr`.** Two of these
+policies carry a rule for the Kubernetes API server, which is where a per-Bot computer is asked for,
+and the service range it answers on belongs to the cluster rather than to this release:
+
+```sh
+kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'   # then name the range it sits in
+```
+
+Usually `172.20.0.0/16` on EKS and `10.96.0.0/12` on GKE and kubeadm. Leaving it empty used to be
+allowed and meant "unscoped", which was not a looser version of the rule but the absence of one: an
+egress rule with ports and no destination matches everything in Kubernetes, so the default handed
+out 443 and 6443 to the private ranges the policy beside it goes to the trouble of excepting — and
+on the computer culler, whose only other egress is DNS and the database, it was that pod's entire
+reach. If your release has `networkPolicy.enabled` and `computers.mode: sandbox`, the next
+`helm upgrade` stops with a message naming this value. Nothing in the cluster changes when it does;
+set the range and run it again, and the policy is narrow for the first time.
 
 A Bot's computer is allowed 80 and 443 to public addresses and nothing else, which is what stops a
 browser reaching the cluster, the database, or the cloud's credential endpoint. A per-Bot egress
