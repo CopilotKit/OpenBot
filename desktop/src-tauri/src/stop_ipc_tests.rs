@@ -142,7 +142,7 @@ mod stop_ipc {
         }
     }
 
-    fn release_compose(listener: &std::net::TcpListener, result: u8, dispatch: &Dispatch) {
+    fn await_compose(listener: &std::net::TcpListener) -> std::net::TcpStream {
         let mut stream = None;
         wait_until(|| match listener.accept() {
             Ok((accepted, _)) => {
@@ -152,9 +152,14 @@ mod stop_ipc {
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
             Err(error) => panic!("owned Compose barrier failed: {error}"),
         });
+        stream.unwrap()
+    }
+
+    fn release_compose(listener: &std::net::TcpListener, result: u8, dispatch: &Dispatch) {
+        let mut stream = await_compose(listener);
         let pending = matches!(dispatch.response.try_recv(), Err(mpsc::TryRecvError::Empty));
         let runtime_progressed = async_runtime_progresses();
-        stream.unwrap().write_all(&[result]).unwrap();
+        stream.write_all(&[result]).unwrap();
         assert!(pending, "Stop resolved before Compose finished");
         assert!(
             runtime_progressed,
@@ -286,6 +291,66 @@ mod stop_ipc {
         assert_eq!(error.said, StartAttempt::cancelled().said);
         assert!(shell.children.lock().unwrap().is_empty());
         assert!(shell.root.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn menu_stop_retains_failure_for_setup_after_navigation() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::menu_stop_retains_failure_for_setup_after_navigation",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/menu-stop-failure";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+
+        stop_from_menu(fixture.app.handle().clone());
+        await_compose(&compose).write_all(&[71]).unwrap();
+
+        let shell = fixture.app.state::<Shell>();
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
+        let problem = last_failure(fixture.app.handle().clone())
+            .expect("menu Stop failure should be retained for setup");
+        assert_eq!(
+            problem.said,
+            "OpenBot could not finish stopping. Try Stop OpenBot again."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("Compose down failed:")
+                    && detail.contains("synthetic Compose refusal")),
+            "{problem:?}"
+        );
+        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(
+            recovery_required(&shell, &fixture.root),
+            "reading the retained notice must not clear recovery-required state"
+        );
+    }
+
+    #[test]
+    fn successful_menu_stop_leaves_no_retained_failure_or_recovery_marker() {
+        if crate::test_support::isolated_process(
+            "tests::stop_ipc::successful_menu_stop_leaves_no_retained_failure_or_recovery_marker",
+        ) {
+            return;
+        }
+        let fixture = Fixture::new();
+        let setup = "tauri://localhost/menu-stop-success";
+        *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let compose = fixture.compose_barrier();
+        stop_from_menu(fixture.app.handle().clone());
+        await_compose(&compose).write_all(&[0]).unwrap();
+
+        wait_until(|| fixture.window.url().unwrap().as_str() == setup);
+        assert_compose_down_ran_under(&fixture.root.join("commands.log"), &fixture.root);
+        let shell = fixture.app.state::<Shell>();
+        assert!(last_failure(fixture.app.handle().clone()).is_none());
+        assert!(!recovery_required(&shell, &fixture.root));
     }
 
     #[test]

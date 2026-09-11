@@ -2466,6 +2466,39 @@ fn restore_after_second_instance(app: &tauri::AppHandle) {
     }
 }
 
+fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    std::thread::spawn(move || {
+        let root = default_root();
+        let root_path = PathBuf::from(&root);
+        eprintln!("[menu] stopping the stack under {root}");
+        match stop_everything(&app, &root_path) {
+            Ok(()) => {
+                eprintln!("[menu] stopped");
+                report(&app, "stopped", true, "OpenBot has been stopped");
+            }
+            // Said rather than swallowed. A menu item that fails silently is worse than one
+            // that is not there: the person believes the stack is down and it is not.
+            Err(detail) => {
+                eprintln!("[menu] stop failed: {detail}");
+                let problem = Problem::with(
+                    "OpenBot could not finish stopping. Try Stop OpenBot again.",
+                    detail,
+                );
+                let shell = app.state::<Shell>();
+                {
+                    let _startup = shell.startup.lock().unwrap();
+                    let root = cleanup_root(&shell, &root_path);
+                    let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+                    mark_recovery_required(&shell, &root, generation);
+                    *shell.last_failure.lock().unwrap() = Some(problem.clone());
+                }
+                report(&app, "stopped", false, problem.said);
+            }
+        }
+        let _ = show_setup(app.clone());
+    });
+}
+
 /// What each of the three items does, wherever it was chosen from.
 ///
 /// The tray and the window menu carry the same items, so they share one function: two copies would
@@ -2475,26 +2508,7 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "open" => show_whichever_applies(app),
         // Stop without quitting: the stack is what costs something to leave running, and somebody
         // who wants it stopped does not necessarily want the application gone.
-        "stop" => {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                let root = default_root();
-                eprintln!("[menu] stopping the stack under {root}");
-                match stop_everything(&app, &PathBuf::from(root)) {
-                    Ok(()) => {
-                        eprintln!("[menu] stopped");
-                        report(&app, "stopped", true, "OpenBot has been stopped");
-                    }
-                    // Said rather than swallowed. A menu item that fails silently is worse than one
-                    // that is not there: the person believes the stack is down and it is not.
-                    Err(problem) => {
-                        eprintln!("[menu] stop failed: {problem}");
-                        report(&app, "stopped", false, problem);
-                    }
-                }
-                let _ = show_setup(app.clone());
-            });
-        }
+        "stop" => stop_from_menu(app.clone()),
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
         "quit" => {
