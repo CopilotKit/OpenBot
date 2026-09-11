@@ -493,8 +493,9 @@ describe("what a stored attachment becomes is decided by its bytes, not by the p
   });
 
   test("one id named twice in a message is read once and encoded twice", async () => {
-    // Two parts must not be handed the same object, but they must not cost two reads either — and
-    // under a budget, one file quoted twice must not be charged twice.
+    // Two parts must not be handed the same object, but they must not cost two reads either. What
+    // they DO cost twice is the budget, which the next test asserts: two encoded copies, two
+    // charges, one read.
     const reads: string[] = [];
     const content = [
       ...partOf("image", "twice1"),
@@ -512,48 +513,59 @@ describe("what a stored attachment becomes is decided by its bytes, not by the p
   });
 
   /*
-   * THE SECOND HALF OF THAT SENTENCE, WHICH THE TEST ABOVE DOES NOT REACH.
+   * THE OTHER HALF OF THAT SENTENCE, WHICH THE TEST ABOVE DOES NOT REACH: ONE READ, TWO CHARGES.
    *
-   * It passes no budget, so "must not be charged twice" was asserted by the comment and by nothing
-   * else — and it was false. `loadOnce` memoises the READ, so one id is fetched once, but the charge
-   * lives inside `resolvePart`, which runs once per PART. Two parts naming one 8-byte file spent 16.
+   * This test used to assert the opposite — "charged to the budget once", budget 20 minus one
+   * 8-byte file leaving 12 — and it was wrong in the direction that matters. Deduplicating the
+   * READ is a saving and stays; deduplicating the CHARGE made every copy after the first free,
+   * which took the ceiling off the one thing the budget bounds. Two parts naming one file really
+   * are two base64 strings live at once, so they are two charges.
    *
-   * Why it matters beyond the arithmetic: the budget is spent newest-first so the asked message is
-   * served in full, and a thread that quotes one image repeatedly is exactly the thread where that
-   * matters. Over-charging cuts real history off the end of the run for bytes that were never read.
+   * The two properties are asserted together here precisely because they were once collapsed into
+   * one claim ("one read per distinct id, and one charge") that read as coherent and was not.
    */
-  test("one id named twice is charged to the budget once", async () => {
+  test("one id named twice is read once and charged twice", async () => {
     const content = [
       ...partOf("image", "charged1"),
       ...partOf("image", "charged1"),
     ];
     const eightBytes = Buffer.from("12345678", "utf8");
     const budget = newInlineBudget(20);
+    const reads: string[] = [];
 
     const result = (await resolveAttachmentParts(
       content,
-      async () => ({
-        mimeType: "image/png",
-        name: "photo.png",
-        bytes: eightBytes,
-      }),
+      async (id) => {
+        reads.push(id);
+        return {
+          mimeType: "image/png",
+          name: "photo.png",
+          bytes: eightBytes,
+        };
+      },
       "note",
       budget,
     )) as Array<Record<string, unknown>>;
 
-    expect(budget.remaining).toBe(12);
-    // And both parts are really there: charging once must not mean including once.
+    // One trip to `bytea`: the memo is untouched by the fix.
+    expect(reads).toEqual(["charged1"]);
+    // Two copies emitted, so 16 of the 20 bytes are spent, not 8.
+    expect(budget.remaining).toBe(4);
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual(result[1]);
   });
 
   /*
-   * The consequence of the above, stated separately because it is the one a reader would doubt: an
-   * id already paid for is still included after the budget is gone. Cutting it would put the same
-   * file in front of the model twice over, once as itself and once as "not included", for bytes the
-   * run had already spent.
+   * The consequence, stated separately because it is the one a reader coming from the old behaviour
+   * would doubt: once the room is gone, a part naming an id that ALREADY FIT is cut like any other.
+   *
+   * The rejected argument was that its bytes are in the run already, so the second mention is free
+   * and cutting it puts one file in front of the model twice over — once as itself, once as a note.
+   * It is not free. The second mention is a second encoded copy, and exempting it is exactly what
+   * let a repeated id inline without limit. A note saying one of two mentions was left out is a
+   * true statement about a turn that ran out of room, and the file is still there on the first.
    */
-  test("an id already paid for survives the budget running out", async () => {
+  test("a repeated id is cut like any other once the budget is gone", async () => {
     const content = [
       ...partOf("image", "paid"),
       ...partOf("image", "big"),
@@ -573,10 +585,12 @@ describe("what a stored attachment becomes is decided by its bytes, not by the p
     )) as Array<Record<string, unknown>>;
 
     expect(budget.remaining).toBe(0);
+    // The first mention fit and was inlined.
+    expect(result[0]).toMatchObject({ source: { type: "data" } });
     // The oversized one is cut...
     expect(JSON.stringify(result[1])).toContain("not included");
-    // ...but the third part names bytes already in this run, so it is served like the first.
-    expect(result[2]).toEqual(result[0]);
+    // ...and so is the third, which names a paid id but would cost a second copy of it.
+    expect(JSON.stringify(result[2])).toContain("not included");
   });
 });
 
@@ -796,20 +810,19 @@ describe("a run's inlining budget", () => {
   });
 
   /*
-   * WHAT `charged` AND THE READ MEMO ARE SCOPED TO, ASSERTED RATHER THAN ASSUMED.
+   * WHAT THE READ MEMO IS SCOPED TO, ASSERTED RATHER THAN ASSUMED.
    *
-   * `resolveAttachmentParts` builds both per call, and it is called once per message, so an id
-   * quoted in two messages of one thread is read twice and charged twice against the one run
-   * budget. The comments on both once said "this run", which was simply false, and the fix was to
-   * the comments: per message is the intended scope. Hoisting the charge alone would bill once for
-   * bytes genuinely read N times, and hoisting the memo alongside it would pin every attachment's
-   * buffer live for the whole backward walk — worse for the heap this budget exists to protect than
-   * the second read is for the clock.
+   * `resolveAttachmentParts` builds `loadOnce` per call, and it is called once per message, so an
+   * id quoted in two messages of one thread is read twice. The comment on it once said "this run",
+   * which was simply false, and the fix was to the comment: per message is the intended scope. A
+   * run-scoped memo would pin every attachment's buffer live for the whole backward walk — worse
+   * for the heap this budget exists to protect than the second read is for the clock.
    *
-   * Pinned here so the next reader who notices the asymmetry with the within-message dedup finds a
-   * decision rather than an accident.
+   * The CHARGE has no scope question left to answer. It runs once per part emitted, here and
+   * everywhere, so two messages quoting one id pay for it twice for the same reason two parts of
+   * one message do: two encoded copies reach the run.
    */
-  test("an id quoted in two messages is read and charged once per message", async () => {
+  test("an id quoted in two messages is read once per message and charged once per part", async () => {
     const budget = newInlineBudget(20);
     const reads: string[] = [];
     const load = async (id: string) => {
@@ -857,5 +870,61 @@ describe("a run's inlining budget", () => {
     )) as Array<Record<string, unknown>>;
 
     expect(result[0].source).toMatchObject({ type: "data" });
+  });
+
+  /*
+   * THE BUDGET BOUNDS WHAT COMES OUT, NOT HOW MANY DISTINCT FILES WENT IN.
+   *
+   * This is the regression that made the whole number decorative. The charge was deduplicated per
+   * id, on the reasoning that one id is read once so it should be billed once — but this function
+   * emits a base64 part for EVERY OCCURRENCE of an id, and every one of those strings is live at the
+   * same time. Forty parts naming one 1 KiB file against a 1 KiB budget inlined 40 KiB and reported
+   * the budget spent exactly to zero. At the 8 MiB upload ceiling a hundred references came to about
+   * 1.04 GiB of base64 against a 32 MiB budget: the heap exhaustion the budget exists to prevent,
+   * with the counter insisting nothing was wrong.
+   *
+   * SO THIS ASSERTS ON DECODED OUTPUT BYTES AND NOT ON `budget.remaining`. The counter is precisely
+   * what lied: it read zero while forty copies went out. What a run can afford to hold is a fact
+   * about the parts it returns, so that is the thing measured — sum the bytes behind every `data`
+   * source that actually left this function.
+   *
+   * The read memo is asserted in the same breath, because the fix must not buy the bound back by
+   * giving up `loadOnce`: one id, one trip to `bytea`, many charges.
+   */
+  test("one id repeated past the budget inlines no more bytes than the budget", async () => {
+    const kilobyte = Buffer.alloc(1024, 0x41);
+    const budget = newInlineBudget(1024);
+    const reads: string[] = [];
+    const content = Array.from({ length: 40 }, () =>
+      imagePart("repeated", "chart.png"),
+    );
+
+    const result = (await resolveAttachmentParts(
+      content,
+      async (id) => {
+        reads.push(id);
+        return { mimeType: "image/png", name: "chart.png", bytes: kilobyte };
+      },
+      "note",
+      budget,
+    )) as Array<Record<string, unknown>>;
+
+    const inlinedBytes = result.reduce((total, part) => {
+      const source = part.source as
+        | { type?: unknown; value?: unknown }
+        | undefined;
+      if (source?.type !== "data" || typeof source.value !== "string") {
+        return total;
+      }
+      return total + Buffer.from(source.value, "base64").length;
+    }, 0);
+
+    // One read, because `loadOnce` still memoises: the fix is to the charge, not to the fetch.
+    expect(reads).toEqual(["repeated"]);
+    // The bound, measured where it matters: one copy's worth of bytes left this function.
+    expect(inlinedBytes).toBe(1024);
+    // Every part is still accounted for — the ones past the bound say so rather than vanishing.
+    expect(result).toHaveLength(40);
+    expect(JSON.stringify(result[1])).toContain("not included");
   });
 });
