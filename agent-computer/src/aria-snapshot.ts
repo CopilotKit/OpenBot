@@ -184,8 +184,15 @@ function toElement(
   // Playwright emits `[checked]` only when something is checked, so absence is ambiguous on its own: a
   // Bot cannot tell an unticked box from a control that does not tick. Reported as false for the roles
   // that can be checked, and left off entirely for the ones that cannot.
+  //
+  // `[checked=mixed]` is the third state and the one spelling Playwright gives the flag a value for:
+  // `aria-checked="mixed"`, which is what the box above a partly-ticked list carries. It is not
+  // ticked, and a Bot told it was left the rows underneath unselected and reported the job done. The
+  // contract this fills in is `checked?: boolean`, so "neither" has to be said as false — which is
+  // also the answer that gets the right action, since clicking a mixed box ticks it.
   if (descriptor.flags.has("checked")) {
-    element.checked = descriptor.flags.get("checked") !== "false";
+    const state = descriptor.flags.get("checked");
+    element.checked = state !== "mixed" && state !== "false";
   } else if (CHECKABLE_ROLES.has(descriptor.role)) {
     element.checked = false;
   }

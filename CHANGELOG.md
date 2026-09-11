@@ -8,6 +8,104 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `bun run dev` no longer starts a routines worker that cannot start
+
+`bun run dev` fanned out across every workspace, and one of them is the routines worker. That worker
+is handed `DATABASE_URL`, `SERVER_INTERNAL_URL` and `WORKER_SHARED_SECRET` by `scripts/start.sh` and
+by nothing else, so the copy this command started read none of them and threw at boot on every run,
+printing a stack trace in between the app's output and the server's. It has never started
+successfully. The command now starts the app and the server, which is what `README.md` and
+`docs/development.md` already say it does. Routines are unaffected: `scripts/start.sh` starts the
+worker exactly as before, and on Kubernetes the CronJob does.
+
+### Double-clicking works while a person is driving a Bot's browser
+
+A double click was sent to the Bot's browser as two separate first clicks, because every press said
+it was the first one. Chrome fires `dblclick` on the page only when the second press says it is the
+second, so the page never saw one at all and `event.detail` was always 1. Opening a row in a table,
+expanding a node in a tree and double-clicking a word to select it were all things a person holding
+the wheel simply could not do, with nothing on screen to say why — the clicks landed, they just each
+counted as the first. The count the person's own browser worked out is now the one that is sent, so a
+double click is a double click and a single one is unchanged.
+
+### Pressing Enter works while a person is driving a Bot's browser
+
+Taking the wheel of a Bot's browser is mostly for the sign-in it cannot do itself, and Enter is how a
+sign-in ends. Every keystroke reached the page, and Enter reached it as a key press that produces no
+character — which Chrome delivers to the page's own listeners and then does nothing further with. So
+the form did not submit, a new line in a text box did not start, and a button somebody had tabbed to
+was not pressed, while anything on the page listening for the key saw it arrive. There was nothing on
+screen to explain it: the keystroke was not refused, it simply had no effect, and the way out was to
+click the submit button instead. Enter now carries the carriage return a keyboard sends, which is
+what makes Chrome carry out what the key means. Measured against Chromium 151: every other editing
+key — Backspace, Delete, Tab, Home, End and the arrows — already did what it meant and is unchanged,
+and a single-line field still holds exactly what was typed into it.
+
+### A half-ticked box is no longer described to a Bot as ticked
+
+The snapshot a Bot reads before it acts on a page says whether each box is ticked, and Playwright
+writes that as `[checked]` for one that is and `[checked=mixed]` for one that is neither — which is
+what the "select all" above a partly-ticked list carries. The parser treated any value other than
+the string `false` as ticked, and `mixed` is one, so a half-ticked box was reported as done. A Bot
+asked to select everything read it as already selected, clicked nothing, and said the rows were
+chosen when most of them were not. `mixed` is now reported as not ticked, which is both the true
+half of a yes-or-no answer and the one that gets the right action: clicking a half-ticked box ticks
+it. An ordinary tick and an ordinary empty box are unchanged.
+
+### A Bot cannot end its turn by asking a person nothing
+
+`ask_person` is how a Bot stops and puts something to a person instead of guessing, and a call with
+no question in it was already meant to come back as a sentence telling it to say what it needs. That
+only happened when the field was missing altogether. A question that was present and empty was
+carried out: the Bot was told its question had been put to somebody, its turn ended there, and the
+trail took an escalation row with nothing in its question — the row an administrator counts these by,
+saying a person was asked something that was never said. On a deployment whose escalation route is a
+duty desk rather than the person already in the conversation, it is a page to somebody with no
+question on it. A blank question is now refused with the sentence that was already written for it,
+and a question typed with room around it is recorded as the question rather than as the spacing.
+### A routine scheduled for Sunday says Sundays, whichever number it was written with
+
+Crontab has always let Sunday be either 0 or 7, the scheduler here takes both, and a routine written
+with 7 is stored and fires on Sunday like any other. Only the 0 spelling was recognised by the
+sentence the Routines page draws and the Bot reads back, so a working weekend routine appeared on
+that page as `0 9 * * 7` while its neighbour said "Sundays at 09:00" — the same schedule, described
+two ways, with the raw one looking like something had gone wrong. Both spellings now read as Sunday,
+and a list that names the day under both of its numbers says it once.
+### A tenant package's theme may carry a comment
+
+A package's `theme.css` is checked at start-up against what it is allowed to define: the `:root` and
+`.dark` blocks, the approved variables, no imports and no URLs. A CSS comment defines none of those
+and was being read as though it did. One above the blocks — the line a hand-written stylesheet opens
+with, saying whose brand it is and where the colours came from — was left over once the blocks were
+set aside and refused as a second selector; one inside a block was split on the semicolons around it
+and refused as a variable name, with the comment quoted back as the name it was not. Because the
+package is read while the deployment starts, that was not a warning: the deployment did not come up,
+over a comment, saying nothing about comments. Comments are now taken out before the file is read as
+definitions, which also closes a comment wedged into the middle of `url(` as a way past the rule
+above it.
+### Test connection stops reading once it has seen the agent answer
+
+The button that checks an agent before it is registered sends it a real run and reads what comes
+back, needing only the opening of the stream to tell an AG-UI agent from a web server that happens to
+be reachable. It was reading the whole reply first and applying that limit afterwards, so the check
+took as long as the agent's run did. An agent that streams for more than fifteen seconds — a Bot
+working through a document, a model answering slowly — was given up on mid-answer and reported as
+`The agent started answering and the connection broke`, about a connection that had not broken and an
+agent that had answered correctly in its first two events. It now reads the opening it needs, closes
+the connection, and answers in the time the agent took to start rather than the time it took to
+finish.
+### A key pasted with a line break in it is now refused, instead of reported as an unreachable agent
+
+The box that holds an agent's key takes whatever is pasted into it, and what comes off a clipboard is
+not always what was on the screen: a long key copied out of a wrapped terminal line brings the wrap
+with it, and a hyphen copied out of a document has often been turned into an en dash on the way.
+Neither can be sent as an HTTP header — the runtime refuses the value outright — and neither was
+being looked at. On Test connection that refusal surfaced as "This server could not reach that
+address", with a suggestion about tunnels and firewalls, about an agent that was running perfectly
+well and had never been dialled. Stored on the Bot it was quieter and worse: the form said saved, and
+every turn that Bot took afterwards failed on a value nothing on screen said anything about. Both
+places now check the value before accepting it and say which kind of character is in the way. The
+character is named; the key never is.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

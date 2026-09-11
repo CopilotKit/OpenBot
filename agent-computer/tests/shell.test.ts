@@ -126,6 +126,24 @@ describe("what a command inherits", () => {
     expect(JSON.stringify(env)).not.toContain("p@ss");
   });
 
+  test("a proxy URL's userinfo does not pass when it was written without a scheme", () => {
+    // `HTTPS_PROXY=bot:s3cret@proxy.internal:8443` is a shape curl and wget accept. `new URL` reads
+    // it as the scheme `bot:` and a path, so the redaction above found no userinfo to strip and the
+    // password reached the Bot's shell, where `env` prints it.
+    const env = environmentForCommand(
+      source({
+        HTTP_PROXY: "bot:s3cret@proxy.internal:8080",
+        HTTPS_PROXY: "bot:p%40ss@proxy.internal:8443",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("proxy.internal:8080");
+    expect(env.HTTPS_PROXY).toBe("proxy.internal:8443");
+    expect(JSON.stringify(env)).not.toContain("s3cret");
+    expect(JSON.stringify(env)).not.toContain("p%40ss");
+    expect(JSON.stringify(env)).not.toContain("p@ss");
+  });
+
   test("a proxy without userinfo is left alone", () => {
     const env = environmentForCommand(source(), workspaceHome);
     expect(env.HTTP_PROXY).toBe(allowed.HTTP_PROXY);

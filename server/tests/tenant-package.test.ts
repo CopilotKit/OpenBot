@@ -150,6 +150,60 @@ describe("tenant theme validation", () => {
       "is not an approved theme variable",
     );
   });
+
+  /*
+   * A comment is not something a theme defines.
+   *
+   * The rule this enforces, as `docs/configuration.md` states it, is about what a theme may define:
+   * two blocks, approved variables, no imports and no URLs. A comment defines nothing, and a
+   * stylesheet written by hand has one at the top saying whose brand it is.
+   */
+  test("accepts a comment above the blocks", () => {
+    expect(() =>
+      validateThemeCss(`
+        /* Acme brand colours. Regenerate from the design tokens, do not hand-edit. */
+        :root { --primary: oklch(0.32 0.09 250); }
+      `),
+    ).not.toThrow();
+  });
+
+  test("accepts a comment inside a block", () => {
+    expect(() =>
+      validateThemeCss(`
+        :root {
+          /* The one colour everything else is derived from. */
+          --primary: oklch(0.32 0.09 250);
+          --border: oklch(0.9 0 0); /* deliberately flat */
+        }
+      `),
+    ).not.toThrow();
+  });
+
+  test("accepts a comment between the blocks", () => {
+    expect(() =>
+      validateThemeCss(`
+        :root { --primary: oklch(0.32 0.09 250); }
+        /* and the same again for dark mode */
+        .dark { --primary: oklch(0.87 0.03 250); }
+      `),
+    ).not.toThrow();
+  });
+
+  /*
+   * The guard against over-correcting. A comment must not become a way to smuggle in the two things
+   * this refuses, and a comment that is never closed is not a comment.
+   */
+  test("still refuses what a comment is wrapped around", () => {
+    expect(() =>
+      validateThemeCss(
+        ':root { --primary: url("https://example.com/x.png"); }',
+      ),
+    ).toThrow("must not contain imports or URLs");
+    expect(() => validateThemeCss("/* theme */ body { color: red; }")).toThrow(
+      "only define :root and .dark blocks",
+    );
+    expect(() => validateThemeCss(":root { /* --primary: red; }")).toThrow();
+  });
 });
 
 describe("a seeded Mastra Bot", () => {
