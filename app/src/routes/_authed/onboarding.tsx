@@ -36,6 +36,21 @@ function WelcomeStep() {
       </h1>
       <div className="h-32" />
       <AgentOrb size="72px" />
+      {/*
+       * A POSTER OF A COMPOSER, AND `pointer-events-none` IS WHAT MAKES IT ONE. Nothing here is
+       * meant to be typed in, clicked or dropped on: it is a picture of the thing the person is
+       * about to get, shown while they read a sentence about it.
+       *
+       * THE DROP THAT PASSES STRAIGHT THROUGH IT IS SOMEBODY ELSE'S TO CATCH, WHICH IS WORTH
+       * SAYING OUT LOUD. The composer guards its own form against a dropped file navigating the
+       * whole app away (`refuseDragOver` in `composer.tsx`), and that guard cannot fire here: an
+       * element with no pointer events is never the target of the drop, so the event goes past it
+       * to the document as if this composer were not on the page. What catches it is
+       * `useUnclaimedDropGuard` in `routes/__root.tsx`, which refuses every drop nobody claimed —
+       * the reason that guard lives at the root rather than in the composer, and the reason this
+       * wrapper does not need to change to be safe. Taking `pointer-events-none` off to "fix" the
+       * drop would turn the poster back into a live composer with nowhere to upload to.
+       */}
       <div className="max-w-md w-full mx-auto pointer-events-none mt-10">
         <Composer
           compact
