@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -420,6 +420,83 @@ async function waitForBlockedSession(
     await Bun.sleep(10);
   }
   throw new Error(`Timed out observing blocked session ${applicationName}.`);
+}
+
+/** The transaction handle drizzle hands a `db.transaction` callback, named so a helper can pass it on. */
+type HeldTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * Runs `markAttachmentsSent` into a row another transaction is already holding, and lets the caller
+ * decide what happens to that row while the stamp is stuck waiting for it.
+ *
+ * THIS IS THE GAP BETWEEN THE LOAD AND THE STAMP, MADE OBSERVABLE. `inlineAttachments` reads an
+ * attachment's bytes, then walks the rest of the history, and only then records the send — so
+ * anything that can take the row commits inside a window that is as long as the history is. A
+ * `SELECT … FOR UPDATE` holds the row without changing it, which is what puts the stamp in that
+ * window on purpose rather than hoping the two land in the right order; `pg_blocking_pids` is
+ * Postgres confirming the stamp really is waiting, so the interleaving is observed rather than
+ * assumed. Then `whileBlocked` runs in the holding transaction and it commits, and what the stamp
+ * does when it wakes is the whole of each test below.
+ *
+ * A CONNECTION OF ITS OWN, `{ max: 1 }` and named, for the reasons the upload and delete races give
+ * at length: `pg_blocking_pids` needs a session it can point at, every pool this suite opens is held
+ * for the whole run, and the stamp issues its statements one after another anyway.
+ *
+ * Hands back whatever `markAttachmentsSent` rejected with, or null when it resolved. Returned rather
+ * than rethrown so the caller can assert on either outcome, and captured in the handler rather than
+ * left on a floating promise so a rejection is never momentarily unhandled.
+ */
+async function stampWhileTheRowIsHeld(
+  db: Database,
+  turn: { actorId: string; threadId: string },
+  id: string,
+  whileBlocked: (held: HeldTransaction) => Promise<void>,
+): Promise<unknown> {
+  const applicationName = `attachment_stamp_race_${randomUUID()}`;
+  const namedUrl = new URL(databaseUrl);
+  namedUrl.searchParams.set("application_name", applicationName);
+  const namedDatabase = createDatabase(namedUrl.toString(), { max: 1 });
+
+  const rowHeld = deferred();
+  const release = deferred();
+  const holder = db.transaction(async (transaction) => {
+    await transaction
+      .select({ id: attachments.id })
+      .from(attachments)
+      .where(eq(attachments.id, id))
+      .for("update");
+    rowHeld.resolve();
+    await release.promise;
+    await whileBlocked(transaction);
+  });
+  void holder.catch(rowHeld.reject);
+
+  try {
+    await rowHeld.promise;
+    let settled = false;
+    let outcome: unknown = null;
+    const stamping = markAttachmentsSent(namedDatabase, turn, [id]).then(
+      () => {
+        settled = true;
+      },
+      (reason: unknown) => {
+        settled = true;
+        outcome = reason;
+      },
+    );
+
+    expect(await waitForBlockedSession(applicationName, () => settled)).toBe(
+      true,
+    );
+    release.resolve();
+    await holder;
+    await stamping;
+    return outcome;
+  } finally {
+    release.resolve();
+    await holder.catch(() => undefined);
+    await namedDatabase.$client.close();
+  }
 }
 
 /**
@@ -2797,7 +2874,35 @@ describe("loadAttachmentForTurn", () => {
     expect(
       await loadAttachmentForTurn(db, { actorId: otherMemberId, threadId }, id),
     ).toBeNull();
-    await markAttachmentsSent(db, { actorId: otherMemberId, threadId }, [id]);
+    /*
+     * AND THE WRITE NOW SAYS SO OUT LOUD, where it used to decline quietly. The row is not this
+     * person's to stamp and it is not recorded as sent by anybody, so the send cannot be recorded —
+     * which is exactly the state the verification refuses over. The property this test is named for
+     * is unchanged and is now stronger: not merely "the stamp did not land" but "the stamp did not
+     * land AND the turn was told".
+     *
+     * No real turn reaches this. The loader above returns null for the same row on the same actor,
+     * so `resolvePart`'s `"fail"` mode refuses that turn several steps earlier; a colleague's staged
+     * draft never gets as far as being recorded as sent. It is asserted here because the function is
+     * callable on its own and its answer to an id it cannot account for should not depend on who
+     * remembered to call the loader first.
+     */
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    let refused: unknown;
+    try {
+      refused = await markAttachmentsSent(
+        db,
+        { actorId: otherMemberId, threadId },
+        [id],
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message).toContain(id);
 
     expect(await attachedAtOf(db, id)).toBeNull();
 
@@ -2929,12 +3034,33 @@ describe("markAttachmentsSent", () => {
       text: "staged in the first channel",
     });
 
-    // The send happens in the OTHER conversation, naming this channel's file.
-    await markAttachmentsSent(
-      db,
-      { actorId: memberId, threadId: other.threadId },
-      [id],
-    );
+    /*
+     * The send happens in the OTHER conversation, naming this channel's file — and it is now
+     * REFUSED rather than quietly declined. The id names a row this conversation cannot account
+     * for, which is the whole of what the verification asks, and the answer to "I cannot record
+     * this send" is to say so before the turn is spent rather than to carry on as though it had
+     * been recorded.
+     *
+     * No real turn reaches this either: `loadAttachmentForTurn` carries the same channel term, so
+     * the bytes are already refused and `resolvePart`'s `"fail"` mode has failed the turn well
+     * before a stamp is attempted. What this pins is that the row in A is untouched, which was
+     * always the point and which the rollback below now also guarantees.
+     */
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    let elsewhere: unknown;
+    try {
+      elsewhere = await markAttachmentsSent(
+        db,
+        { actorId: memberId, threadId: other.threadId },
+        [id],
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(elsewhere).toBeInstanceOf(Error);
     expect(await attachedAtOf(db, id)).toBeNull();
 
     // And the row is untouched rather than merely unstamped: still staged, still withdrawable, and
@@ -3000,7 +3126,9 @@ describe("markAttachmentsSent", () => {
    * These ids are not path params that routing shaped: `attachmentIdFor` slices whatever follows
    * `/api/attachments/` out of a browser-supplied message part, so a query string, a second path
    * segment and the empty string all arrive as "ids". Compared against a `uuid` column each raises
-   * Postgres `22P02` and throws, and a throw here would be a failed send over bookkeeping.
+   * Postgres `22P02` and throws — and a throw out of this function now REFUSES THE TURN, so the
+   * guard matters more than it did when everything here was swallowed: a part that is not an
+   * attachment reference at all would otherwise fail the send of the real file beside it.
    */
   test("ids that could never name a row are dropped rather than asked about", async () => {
     const { database: db, channelId, memberId, threadId } = await harness();
@@ -3023,13 +3151,240 @@ describe("markAttachmentsSent", () => {
   });
 
   /*
+   * A WRITE THAT NEVER LANDED USED TO REPORT A SEND, and the turn carried on to the model.
+   *
+   * The statement was `.catch`ed and logged, so `markAttachmentsSent` resolved whatever the database
+   * did — and `inlineAttachments` had already read the bytes, so the Bot answered about a file whose
+   * `attachedAt` stayed null. The culler reclaims exactly those rows, so a day later the message was
+   * still displaying an attachment that no longer existed. Nobody was told at either end.
+   *
+   * Through the real driver rather than a stub that returns a rejected promise: the failures this
+   * has to answer for are a lost connection, an exhausted pool and a `statement_timeout`, all of
+   * which arrive as "the driver could not answer this query", which is what a closed port produces.
+   *
+   * The unstamped row is asserted on the REAL database, because "it raised" and "it raised and left
+   * the row alone" are different claims and only the second one makes the retry safe.
+   */
+  test("a write the database refuses is raised rather than reported as a send", async () => {
+    const { database: db, channelId, memberId, threadId } = await harness();
+    const id = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "receipt.txt",
+      text: "sent into a database that cannot be reached",
+    });
+
+    // Collected into a local rather than read off the spy, because `mockRestore` clears the recorded
+    // calls and the assertion below would then be made against an empty log whatever happened.
+    const logged: string[] = [];
+    const consoleError = spyOn(console, "error").mockImplementation(
+      (...args: unknown[]) => {
+        logged.push(args.map(String).join(" "));
+      },
+    );
+    let raised: unknown;
+    try {
+      raised = await markAttachmentsSent(
+        unreachableDatabase,
+        { actorId: memberId, threadId },
+        [id],
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(raised).toBeInstanceOf(Error);
+    // A sentence somebody can act on, naming the file and saying the turn did not run — this leaves
+    // through the run as an AG-UI error and is shown to the person who was waiting.
+    expect((raised as Error).message).toContain(id);
+    expect((raised as Error).message).toContain("was not run");
+    expect((raised as Error).message).toContain("attach the file again");
+    // And named for whoever has to act on it from the other side. Every consequence of a missing
+    // stamp is about a specific person and a specific row.
+    expect(logged.join(" ")).toContain(memberId);
+    expect(logged.join(" ")).toContain(id);
+    // Still staged: still withdrawable, still countable against the cap, still stampable by a retry.
+    expect(await attachedAtOf(db, id)).toBeNull();
+  });
+
+  /*
+   * THE ROW DISAPPEARING BETWEEN THE LOAD AND THE STAMP, which is the failure a row count cannot see.
+   *
+   * Postgres reports an UPDATE that matched nothing as a successful command, so a withdrawal (or a
+   * cull) committing in that window left `markAttachmentsSent` resolving happily over a file that
+   * was no longer there. The window is not theoretical and it is not short: `inlineAttachments`
+   * reads the asked message's bytes FIRST and then walks the whole history behind it, so it is one
+   * database round trip per older message wide, and it is the sender's own composer — which goes on
+   * offering the file for withdrawal until the send is recorded — on the other side of it.
+   *
+   * Driven as a real race rather than by deleting the row beforehand, because the claim is about
+   * what Postgres does when the two statements actually contend: the stamp is blocked on the row,
+   * `pg_blocking_pids` says so, and only then does the withdrawal commit. The delete carries the
+   * same WHERE `DELETE /api/attachments/:id` carries, so what is racing the stamp is the withdrawal
+   * route's own statement and not a convenient approximation of it.
+   *
+   * The other direction is pinned by "a send landing mid-request cannot have its file deleted out
+   * from under it" above: stamp first, and the withdrawal's `attached_at is null` no longer holds so
+   * it takes nothing and answers 409. Between the two, neither can win twice.
+   */
+  test(
+    "a withdrawal landing between the load and the stamp refuses the send",
+    async () => {
+      const { database: db, channelId, memberId, threadId } = await harness();
+      const id = await uploadText(db, {
+        channelId,
+        uploadedBy: memberId,
+        name: "draft.txt",
+        text: "withdrawn while the turn was being prepared",
+      });
+
+      // The bytes really were readable when the turn started, which is what makes this a race rather
+      // than a send naming a file that was never there.
+      expect(
+        await loadAttachmentForTurn(db, { actorId: memberId, threadId }, id),
+      ).not.toBeNull();
+
+      const consoleError = spyOn(console, "error").mockImplementation(() => {});
+      let refusal: unknown;
+      try {
+        refusal = await stampWhileTheRowIsHeld(
+          db,
+          { actorId: memberId, threadId },
+          id,
+          async (held) => {
+            await held
+              .delete(attachments)
+              .where(
+                and(
+                  eq(attachments.id, id),
+                  eq(attachments.uploadedBy, memberId),
+                  isNull(attachments.attachedAt),
+                ),
+              );
+          },
+        );
+      } finally {
+        consoleError.mockRestore();
+      }
+
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as Error).message).toContain(id);
+      // `toBeUndefined` rather than `not.toBeNull`, which the three-valued helper would satisfy with
+      // the very absence being asserted. The withdrawal won; the point is that the send says so.
+      expect(await attachedAtOf(db, id)).toBeUndefined();
+    },
+    BLOCKED_SESSION_TIMEOUT_MS,
+  );
+
+  /*
+   * AND THE STAMP ANOTHER RUN ALREADY LANDED IS A RECORDED SEND, NOT A LOST RACE.
+   *
+   * This is the over-correction the check above has to avoid, and it is the reason the verification
+   * is a SECOND STATEMENT rather than a CTE reading beside the UPDATE. A data-modifying CTE and the
+   * query next to it share one snapshot, taken when the statement began, so a row a neighbour
+   * stamped a moment ago would be invisible to the read while the UPDATE's own re-check correctly
+   * declined to stamp it twice — and two runs of the same message would refuse each other. Under
+   * READ COMMITTED a separate statement takes a fresh snapshot and sees the commit.
+   *
+   * Reachable without anybody doing anything strange: a stopped run retried, or a second tab. Same
+   * race as the test above, with the holding transaction stamping instead of withdrawing.
+   */
+  test(
+    "a stamp another run landed first is a recorded send rather than a refusal",
+    async () => {
+      const { database: db, channelId, memberId, threadId } = await harness();
+      const id = await uploadText(db, {
+        channelId,
+        uploadedBy: memberId,
+        name: "retried.txt",
+        text: "sent twice at once",
+      });
+
+      const outcome = await stampWhileTheRowIsHeld(
+        db,
+        { actorId: memberId, threadId },
+        id,
+        async (held) => {
+          await held
+            .update(attachments)
+            .set({ attachedAt: new Date() })
+            .where(and(eq(attachments.id, id), isNull(attachments.attachedAt)));
+        },
+      );
+
+      expect(outcome).toBeNull();
+      expect(await attachedAtOf(db, id)).toBeInstanceOf(Date);
+    },
+    BLOCKED_SESSION_TIMEOUT_MS,
+  );
+
+  /*
+   * THE OTHER WAY A ROW COUNT LIES: A SENT FILE THIS PERSON DID NOT UPLOAD.
+   *
+   * Members are meant to see each other's sent files, so a message may perfectly well name one — and
+   * `uploadedBy` in the WHERE is what stops a sender freezing a colleague's row, so the UPDATE
+   * matching it is exactly what must NOT happen. One id in, zero rows out, and nothing wrong. A
+   * check that compared rows updated against ids requested would refuse this turn, which is why the
+   * verification asks whether each id IS recorded rather than whether this statement recorded it.
+   *
+   * Both ids at once, because the mixed message is the shape that catches a check applied per-list
+   * instead of per-id.
+   */
+  test("a colleague's already-sent file on this message does not refuse the send", async () => {
+    const { database: db, channelId, memberId, threadId } = await harness();
+    const colleagueId = `${testPrefix}-colleague-${randomUUID()}`;
+    await db.insert(users).values({
+      id: colleagueId,
+      email: `${colleagueId}@example.test`,
+    });
+    createdUserIds.push(colleagueId);
+    await db
+      .insert(channelMemberships)
+      .values({ channelId, userId: colleagueId });
+
+    const theirs = await uploadText(db, {
+      channelId,
+      uploadedBy: colleagueId,
+      name: "shared.txt",
+      text: "sent by somebody else, earlier",
+    });
+    await markAttachmentsSent(db, { actorId: colleagueId, threadId }, [theirs]);
+    const theirStamp = await attachedAtOf(db, theirs);
+    expect(theirStamp).toBeInstanceOf(Date);
+
+    const mine = await uploadText(db, {
+      channelId,
+      uploadedBy: memberId,
+      name: "mine.txt",
+      text: "staged by the person sending this message",
+    });
+
+    await expect(
+      markAttachmentsSent(db, { actorId: memberId, threadId }, [theirs, mine]),
+    ).resolves.toBeUndefined();
+
+    expect(await attachedAtOf(db, mine)).toBeInstanceOf(Date);
+    // Untouched rather than merely unrefused: the colleague's stamp still says when THEY sent it.
+    expect((await attachedAtOf(db, theirs)) as Date).toEqual(
+      theirStamp as Date,
+    );
+  });
+
+  /*
    * "NOT A QUERY" IS THE CLAIM, SO A QUERY IS WHAT THIS HAS TO CATCH.
    *
    * It used to assert `resolves.toBeUndefined()` against a real database, which
-   * `markAttachmentsSent` satisfies whatever it does: it returns `Promise<void>`, and it catches
-   * its own database failures and only logs them. Deleting the guard it claims to pin left it
-   * green — the ids would have gone to Postgres, raised `22P02` on the `uuid` column, been
+   * `markAttachmentsSent` satisfied whatever it did: it returns `Promise<void>`, and back when it
+   * caught its own database failures and only logged them, deleting the guard this claims to pin
+   * left it green — the ids would have gone to Postgres, raised `22P02` on the `uuid` column, been
    * swallowed, and still resolved `undefined`.
+   *
+   * A rejection would be visible now that the failure is raised, so that hole has closed on its own.
+   * The untouchable database stays, because it pins the STRONGER claim the sentence above actually
+   * makes: not that nothing broke, but that nothing was ASKED.
    *
    * A database that refuses to be touched is what makes the claim testable: any property this
    * function reads off it throws, so the assertion "this resolved quietly" can only be true if

@@ -227,6 +227,22 @@ export async function loadAttachmentForTurn(
 }
 
 /**
+ * The ids a send could not prove it had recorded, carried out of the transaction that has to roll
+ * back before anybody is told.
+ *
+ * A thrown value rather than a returned one because {@link markAttachmentsSent} must undo the stamps
+ * it DID write when any one of them is missing, and drizzle rolls a transaction back on a throw and
+ * on nothing else. It never leaves this module: the `.catch` below turns it into the sentence a
+ * person reads, so no caller has to know this type exists to handle the failure correctly.
+ */
+class UnrecordedSend extends Error {
+  constructor(readonly unrecorded: readonly string[]) {
+    super(`Attachments were not recorded as sent: ${unrecorded.join(", ")}.`);
+    this.name = "UnrecordedSend";
+  }
+}
+
+/**
  * Records that these attachments went out in a message, on behalf of the person who sent it.
  *
  * WRITTEN BY THE SENDER, NOT BY A READER. `attachedAt` means one thing — "this file rode in a
@@ -276,11 +292,86 @@ export async function loadAttachmentForTurn(
  * the culler deletes it a day later out from under a conversation that shows it. One rule, stated
  * once, is also one rule to keep true.
  *
- * Awaited, so the write has landed before the send is treated as recorded, but its own failure is
- * caught and only logged: a turn is a person waiting for an answer, and bookkeeping that could not
- * be written is not worth failing that answer over. The log names the actor and the ids, because
- * every consequence of a missing stamp — a file the sweeper reclaims, a slot that never frees — is
- * about a specific person and a specific row, and a line naming neither cannot be acted on.
+ * IT RAISES WHEN IT CANNOT PROVE THE STAMP LANDED, AND IT USED TO SWALLOW. The sentence that stood
+ * here said that a turn is a person waiting for an answer, and that bookkeeping which could not be
+ * written is not worth failing that answer over. The first half is true. The second rested on a
+ * premise that is false: that by the time this runs, the answer has been earned. It has not.
+ * `inlineAttachments` (copilot.ts) calls this BEFORE it hands the history back, and that history is
+ * what `super.run` / `next.run` is given afterwards — so at this moment no model has been called, no
+ * token has been spent, and the person's message is still in front of them. Raising here costs a
+ * retry of something that never started.
+ *
+ * Staying silent costs the FILE. The culler reclaims every row whose `attachedAt` is null, so a turn
+ * that answered happily about an attachment it never stamped leaves a message displaying a file the
+ * sweeper deletes a day later; the upload cap keeps counting the slot for ever in the meantime. That
+ * damage is permanent, silent, and lands on somebody who did nothing but send a file. An answer
+ * somebody can ask for again is the cheaper of the two losses, and this is called at the one point
+ * in the turn where that trade is still on offer — which is why the third option, refusing before
+ * the turn is spent, beats both halves of the dilemma rather than splitting it.
+ *
+ * Refusing here is also not a new KIND of outcome on this path. `resolvePart`'s `"fail"` mode
+ * already refuses this same turn at this same moment when the asked message names a file that
+ * cannot be loaded or cannot be afforded — same reason, same recovery, same sentence-shaped error.
+ *
+ * WHAT STILL DOES NOT RAISE, because the old swallow was not protecting nothing:
+ *
+ *  - AN ID THAT COULD NEVER NAME A ROW, dropped before the query as before. A browser part that is
+ *    not an attachment reference is not a failed send.
+ *  - NOTHING TO RECORD, which is still not a query at all.
+ *  - HISTORY. Only the asked message's ids are passed in, so nothing behind it is stamped or
+ *    checked, and a replayed thread does not acquire new ways to fail.
+ *  - A ROW THAT IS ALREADY SENT. An `attachedAt` that is already set is a SUCCESS here, not a race
+ *    lost: a stopped run retried and a message replayed are both ordinary, and a rule that failed
+ *    them would be failing people for doing nothing wrong.
+ *
+ * ZERO UPDATED ROWS IS NOT WHAT IT CHECKS. Postgres reports an UPDATE that matched nothing as a
+ * successful command (https://www.postgresql.org/docs/current/sql-update.html#SQL-UPDATE-OUTPUTS),
+ * so the count is silent about the failure that matters — and it is also the wrong question, in both
+ * directions. It reads zero for a row that was already stamped, which is a success, and zero for a
+ * colleague's already-sent file named on this message, which the `uploadedBy` term above correctly
+ * declines to touch. What has to be true is not "this statement changed something" but "this id is,
+ * NOW, durably recorded as sent in this conversation", so the UPDATE is followed by a SELECT asking
+ * exactly that, and every id that cannot answer it is named in the refusal.
+ *
+ * THAT SELECT DOES NOT REPEAT THE READER'S MEMBERSHIP JOIN, deliberately. Whether this actor may
+ * see these files was settled by {@link loadAttachmentForTurn} earlier in the same turn, and a
+ * second, subtly different copy of an access rule is a thing to keep in step rather than a check.
+ * What is asked here is only what this function is responsible for — the row still exists, it is
+ * stamped, and it is in this turn's channel.
+ *
+ * THE SELECT IS A SECOND STATEMENT, NOT A CTE HANGING OFF THE UPDATE, and that is the whole of the
+ * idempotence. A data-modifying CTE and the query reading beside it share one snapshot, taken when
+ * the statement began — so a row a neighbouring session stamped a moment ago is invisible to the
+ * read, while the UPDATE's own re-check correctly declines to stamp it twice. Two concurrent runs of
+ * the same message, or a retry overlapping the run it retries, would then refuse each other. Under
+ * READ COMMITTED a separate statement takes a fresh snapshot and sees the neighbour's commit, which
+ * is the answer that is actually true.
+ *
+ * IN A TRANSACTION, SO A REFUSED SEND LEAVES NO STAMPS BEHIND. A message may name several files and
+ * only one of them need be missing. Keeping the others' stamps would record a send for a turn that
+ * never ran, which is the exact freeze the paragraphs above are about: un-withdrawable, unsweepable,
+ * and referred to by nothing. Throwing inside the transaction rolls them back, so a refusal puts the
+ * rows back as the turn found them and the person's retry starts from a clean state.
+ *
+ * NO ADVISORY LOCK, AND THAT WAS CHECKED RATHER THAN ASSUMED. The upload route holds
+ * `pg_advisory_xact_lock` because it counts rows and then inserts against that count, which is two
+ * facts that must not drift apart. There is no count here. The stamp and the two things that can
+ * take the row out from under it — `DELETE /api/attachments/:id` and
+ * `server/scripts/cull-staged-attachments.ts`, both of which carry `attached_at is null` in their
+ * own WHERE — contend for the same ROW, and a row lock already serialises them: whichever commits
+ * second re-evaluates its own predicate against the row as it then stands. Withdrawal first, and
+ * this UPDATE matches nothing while the SELECT finds no row, so the send is refused. Stamp first,
+ * and the withdrawal's `attached_at is null` no longer holds so it deletes nothing, which is the 409
+ * pinned by "a send landing mid-request cannot have its file deleted out from under it" in
+ * attachment-routes.test.ts. They cannot both win. An advisory lock would be a second, weaker
+ * mechanism laid over the one Postgres already applies to the row itself.
+ *
+ * The log names the actor and the ids, because every consequence of a missing stamp — a file the
+ * sweeper reclaims, a slot that never frees — is about a specific person and a specific row, and a
+ * line naming neither cannot be acted on. The raised message names the ids as well. There is no
+ * `app.onError` behind this server, but this refusal never becomes a response status: it leaves
+ * through the run as an AG-UI error, the road `resolvePart`'s refusals already take, so what the
+ * composer receives is the sentence rather than a plain-text 500.
  */
 export async function markAttachmentsSent(
   database: Database,
@@ -290,24 +381,64 @@ export async function markAttachmentsSent(
   const known = ids.filter(isUuidShaped);
   if (known.length === 0) return;
 
-  await database
-    .update(attachments)
-    .set({ attachedAt: new Date() })
-    .where(
-      and(
-        inArray(attachments.id, known),
-        eq(attachments.uploadedBy, turn.actorId),
-        // The channel this send actually happened in. See {@link inTheTurnsChannel}.
-        inTheTurnsChannel(database, turn.threadId),
-        isNull(attachments.attachedAt),
-      ),
-    )
-    .catch((error) => {
+  const unrecorded = await database
+    .transaction(async (transaction) => {
+      await transaction
+        .update(attachments)
+        .set({ attachedAt: new Date() })
+        .where(
+          and(
+            inArray(attachments.id, known),
+            eq(attachments.uploadedBy, turn.actorId),
+            // The channel this send actually happened in. See {@link inTheTurnsChannel}.
+            inTheTurnsChannel(database, turn.threadId),
+            isNull(attachments.attachedAt),
+          ),
+        );
+
+      const recorded = await transaction
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(
+          and(
+            inArray(attachments.id, known),
+            inTheTurnsChannel(database, turn.threadId),
+            isNotNull(attachments.attachedAt),
+          ),
+        );
+
+      const durable = new Set(recorded.map((row) => row.id));
+      const missing = known.filter((id) => !durable.has(id));
+      // Thrown rather than returned, because the rollback is the point: see the paragraph above on
+      // what keeping a partial set of stamps would leave behind.
+      if (missing.length > 0) throw new UnrecordedSend(missing);
+      return [];
+    })
+    .catch((error: unknown) => {
+      /*
+       * A failure that is not the verification's own is a failure to reach the database at all — a
+       * lost connection, an exhausted pool, a `statement_timeout`. Nothing is known to have landed
+       * and the transaction took back anything that had, so every id is unrecorded.
+       */
+      const unrecorded: readonly string[] =
+        error instanceof UnrecordedSend ? error.unrecorded : known;
+      // The ids that are actually unaccounted for, not the whole list that was asked about: a
+      // message may name four files and have one of them go missing, and it is the one that has to
+      // be findable from a log line.
       console.error(
-        `Could not mark attachments as sent for ${turn.actorId} in ${turn.threadId}: ${known.join(", ")}.`,
+        `Could not record attachments as sent for ${turn.actorId} in ${turn.threadId}: ${unrecorded.join(", ")}.`,
         error,
       );
+      return unrecorded;
     });
+
+  if (unrecorded.length === 0) return;
+
+  const named = unrecorded.map((id) => `"${id}"`).join(", ");
+  throw new Error(
+    `This turn was not run, because ${unrecorded.length === 1 ? "an attachment on your message" : "attachments on your message"} could not be recorded as sent (${named}). ` +
+      "A file withdrawn while the turn was being prepared is the usual cause. Nothing was sent to the Bot — attach the file again and resend.",
+  );
 }
 
 /** The columns `POST /:channelId/attachments` hands back on success. */

@@ -2235,21 +2235,28 @@ describe("where an attachment reaches the model, and where it deliberately does 
     expect(markedOn).toEqual(["thread_1"]);
   });
 
-  test("a bookkeeping write that fails does not fail the person's turn", async () => {
+  test("a send that could not be recorded refuses the turn before the model sees it", async () => {
     /*
-     * `MarkAttachmentsSent` says so in its own docstring: "Its own failure is swallowed and logged
-     * rather than raised: a turn is somebody waiting for an answer, and bookkeeping that could not
-     * be written is not worth failing that answer over."
+     * THIS TEST USED TO ASSERT THE OPPOSITE, and the assertion it made was the bug.
      *
-     * The seam did not do that. `await markSent(ids)` was bare, and the promise was kept only by
-     * the single production implementation catching its own drizzle rejection internally — so
-     * anything that rejected before that `.catch` (a pool error raised while the statement is
-     * built) or any second wiring of this optional parameter, which `buildAgents`,
-     * `resolveRuntimeAgents`, `createRequestAgents` and `mountCopilotRuntime` all expose, turned a
-     * missed `attachedAt` into a failed answer for somebody who was waiting on one.
+     * `MarkAttachmentsSent` promised that a failure to record was swallowed, because "a turn is
+     * somebody waiting for an answer". The waiting is real. What the sentence quietly assumed is
+     * that by the time the stamp runs, the answer has been earned — and it has not. `markSent` is
+     * the last thing `inlineAttachments` does BEFORE returning the history, and the history is what
+     * the run is given afterwards. So the swallow bought an answer at the price of the FILE:
+     * `attachedAt` stayed null, the culler reclaimed the row a day later, and the message went on
+     * displaying an attachment that no longer existed.
      *
-     * The run completing is the assertion; the model still being handed the file is what says the
-     * turn was not merely swallowed whole.
+     * Refusing instead costs a turn that never started. The two assertions below are that trade,
+     * stated as facts rather than as an argument: the run errors, and `BuiltInAgent.run` was never
+     * reached — so no model was called, no token was spent, and the person's message is still in
+     * front of them to send again. `runToCompletion`'s spy standing in for the model is what makes
+     * the second one observable; `seen` staying empty is the whole claim about WHEN this happens.
+     *
+     * A readable sentence, because there is no `app.onError` behind this server: what a rejected run
+     * carries is what the composer shows, so an implementation's message has to name the file and
+     * say what to do. This one is the test's own, since the production wording lives in
+     * channels/attachments.ts and is pinned there.
      */
     const agents = await buildAgents(
       [assistant],
@@ -2266,43 +2273,76 @@ describe("where an attachment reaches the model, and where it deliberately does 
       undefined,
       undefined,
       async () => stored,
-      async () => {
-        throw new Error("db down");
+      async (ids: readonly string[]) => {
+        throw new Error(
+          `This turn was not run, because an attachment on your message could not be recorded as sent ("${ids.join('", "')}").`,
+        );
       },
     );
 
-    // Collected into a local rather than read back off `consoleError.mock.calls`, because
-    // `mockRestore` clears the recorded calls and the assertion below would then be made against an
-    // empty log whatever the seam did.
-    const logged: string[] = [];
-    const consoleError = spyOn(console, "error").mockImplementation(
-      (...args: unknown[]) => {
-        logged.push(args.map(String).join(" "));
-      },
-    );
     const seen: RunAgentInput[] = [];
-    let failed: Error[];
-    try {
-      failed = await runToCompletion(
-        built(agents, "general-assistant"),
-        input(twoTurns),
-        (received) => {
-          seen.push(received);
-        },
-      );
-    } finally {
-      consoleError.mockRestore();
-    }
+    const failed = await runToCompletion(
+      built(agents, "general-assistant"),
+      input(twoTurns),
+      (received) => {
+        seen.push(received);
+      },
+    );
 
-    expect(failed).toEqual([]);
-    expect(
-      (seen[0]?.messages?.[2] as { content?: { source?: unknown }[] })
-        ?.content?.[0]?.source,
-    ).toMatchObject({ type: "data" });
-    // Swallowed is not the same as unnoticed. Every consequence of a missing stamp — a file the
-    // sweeper reclaims, an upload slot that never frees — is about specific rows, so the log names
-    // them.
-    expect(logged.join(" ")).toContain("abc");
+    expect(failed.map((error) => error.message)).toEqual([
+      'This turn was not run, because an attachment on your message could not be recorded as sent ("abc").',
+    ]);
+    // The turn was not yet spent, which is the whole reason refusing here is the cheaper loss. Put
+    // the `markSent` call after the run instead of before it and this is the assertion that goes red.
+    expect(seen).toEqual([]);
+  });
+
+  /*
+   * AND THE SEAM DOES NOT DRESS THE REFUSAL UP, which is what the `try`/`catch` that used to stand
+   * around this call did to a synchronous throw as much as to a rejection.
+   *
+   * `MarkAttachmentsSent` is an optional parameter four wirings expose — `buildAgents`,
+   * `resolveRuntimeAgents`, `createRequestAgents` and `mountCopilotRuntime` — so an implementation
+   * that throws before it ever returns a promise is a shape this seam has to carry, and it has to
+   * carry it WITHOUT replacing the message: the words that reach the person are the ones from the
+   * implementation that knows which rows are involved.
+   */
+  test("an implementation that throws synchronously still refuses with its own words", async () => {
+    const agents = await buildAgents(
+      [assistant],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => stored,
+      // Not `async`: this throws on the call itself rather than returning a rejected promise, which
+      // is the case a `.catch()` on the result would never have seen at all.
+      (): Promise<void> => {
+        throw new Error("the pool had nothing left to give");
+      },
+    );
+
+    const seen: RunAgentInput[] = [];
+    const failed = await runToCompletion(
+      built(agents, "general-assistant"),
+      input(twoTurns),
+      (received) => {
+        seen.push(received);
+      },
+    );
+
+    expect(failed.map((error) => error.message)).toEqual([
+      "the pool had nothing left to give",
+    ]);
+    expect(seen).toEqual([]);
   });
 
   test("a stored image on a document part reaches the model as an image", async () => {
