@@ -501,7 +501,25 @@ afterAll(() => {
   expect(ReactCoreV2.useAttachments).toBe(realUseAttachments);
 });
 
-test("a drained turn whose send fails releases the rows it was carrying", async () => {
+/**
+ * THIS TEST USED TO ASSERT THE DATA LOSS AND CALL IT A RELEASE.
+ *
+ * It drove a drained turn whose send failed and expected exactly one DELETE, on the reasoning that
+ * the queue had emptied to build the draft and nothing pointed at those rows any more. That second
+ * half was never true. `channel-chat.tsx` adds the user message to the transcript BEFORE the run
+ * and leaves it there when the run fails, so the rows were pointed at by a message the person was
+ * looking at, and deleting them emptied the tiles underneath it.
+ *
+ * The reason the old shape could not see that is visible in what it renders: `messages={[]}` and an
+ * `onSubmit` that is a rejecting stub. There is no transcript to contradict, so the deletion looks
+ * free. The real-path coverage — a real `ChannelChat`, a real agent, a run answered with 503 — is
+ * in `failed-send-attachments.test.tsx`, which is where the two halves can be seen at once.
+ *
+ * WHAT IT IS WORTH KEEPING HERE ANYWAY. The stub submitter is the only way to fail a send without
+ * a runtime, so this file can still say the narrow thing it is for: the transition hands the queue
+ * back its own messages, and the rows behind them are not touched.
+ */
+test("a drained turn whose send fails puts the queue back instead of releasing its rows", async () => {
   const attempted: ComposerDraft[] = [];
   // Rejects rather than resolves: this is the drained turn failing after the queue has already
   // been emptied to build it.
@@ -539,24 +557,39 @@ test("a drained turn whose send fails releases the rows it was carrying", async 
   await waitFor(() => expect(attempted).toHaveLength(1));
   expect(attempted[0].attachments).toHaveLength(1);
 
-  // THE FINDING. The queue was emptied to build this draft and there is nothing to retry it, so
-  // once the send fails the row is referenced by nothing at all: not the composer's strip, which
-  // let go of it when the message parked, and not the queue, which drained to produce it. Unlike
-  // a failed send from the composer — which puts the chips back beside the restored words — there
-  // is no box for these to go back into, so releasing them is the only thing left that is not
-  // waiting a day for the sweeper.
+  // THE INVERSION. The parked message is back, carrying the same row, and nothing was deleted.
+  await waitFor(() =>
+    expect(
+      container.querySelector("[aria-label^='Remove queued message']"),
+    ).not.toBeNull(),
+  );
+  expect(deletes).toEqual([]);
+
+  // And it is not re-sent on its own. A restored queue that drained itself again would spin
+  // against a server that is refusing every request; the next turn is what carries it.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(attempted).toHaveLength(1);
+
+  // The one gesture that still releases the row: taking the restored message back by hand.
+  fireEvent.click(
+    container.querySelector(
+      "[aria-label^='Remove queued message']",
+    ) as HTMLElement,
+  );
   await waitFor(() =>
     expect(deletes).toEqual([attachmentUrl("stored-notes.txt")]),
   );
 });
 
 /**
- * THE FOURTH WAY A PARKED ROW LOSES ITS LAST REFERENCE, and the one that used to say nothing.
+ * THE THIRD WAY A PARKED ROW LOSES ITS LAST REFERENCE, and the one that used to say nothing.
  *
- * The three above go through the queue: a removal, the cap re-check, and a drained turn whose send
- * failed. This one goes through React. The composer clears its strip as a message is parked, so the
- * parked entry is the only thing holding those rows — and walking to another channel unmounts the
- * whole conversation, entry and all.
+ * The two above go through the queue: a removal, and the cap re-check. A drained turn whose send
+ * failed used to be a third — it is not one any more, because a failed run puts its messages back
+ * rather than deleting what they were carrying; see the test above. This one goes through React.
+ * The composer clears its strip as a message is parked, so the parked entry is the only thing
+ * holding those rows — and walking to another channel unmounts the whole conversation, entry and
+ * all, restored entries included.
  *
  * `queue.ts` is candid that switching channels "takes anything parked in it with it", but that
  * sentence is about the person's WORDS, which they watched land on screen and can retype. The
