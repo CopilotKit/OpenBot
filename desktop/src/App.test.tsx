@@ -741,6 +741,40 @@ test("mount leaves setup visible when the shared port answers without selected r
   );
 });
 
+for (const staleProbe of [false, true]) {
+  test(`recovery mount keeps setup available after ${staleProbe ? "a stale positive" : "a negative"} adoption probe`, async () => {
+    useRootConfigurationSetup("/tmp/openbot-worker-recovery", async () =>
+      emptyConfiguration(),
+    );
+    const setupHandler = invokeHandler;
+    const failure = {
+      said: "Part of OpenBot (worker) stopped and could not be started again. Try starting OpenBot once more.",
+    };
+    invokeHandler = async (command, args) => {
+      if (command === "already_running") return staleProbe;
+      if (command === "last_failure") return failure;
+      if (command === "show_openbot") throw failure;
+      return setupHandler(command, args);
+    };
+    const view = await renderApp();
+    await waitFor(() =>
+      expect(
+        invokeCalls.some((call) => call.command === "already_running"),
+      ).toBe(true),
+    );
+    if (staleProbe) {
+      await waitFor(() =>
+        expect(
+          invokeCalls.some((call) => call.command === "show_openbot"),
+        ).toBe(true),
+      );
+    }
+    expect(view.getByRole("button", { name: "Set up OpenBot" })).toBeTruthy();
+    expect(view.getByRole("alert").textContent).toContain(failure.said);
+    expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull();
+  });
+}
+
 test("saved startup credentials enable Start without raw protected secrets on mount", async () => {
   invokeHandler = async (command) => {
     if (command === "detect_engine") {

@@ -46,6 +46,8 @@ struct Shell {
     /// remounts with no progress and the sentence explaining what happened is lost at the one
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
+    /// Reading the notification must not make a partially running deployment adoptable again.
+    recovery_required: Mutex<Option<RecoveryRequired>>,
     selected_root: Mutex<Option<PathBuf>>,
     root: Mutex<Option<PathBuf>>,
     /// Containers may outlive a failed Start before any host root is published.
@@ -80,6 +82,45 @@ struct Shell {
 struct ContainerDeployment {
     root: PathBuf,
     address: engine::Address,
+}
+
+struct RecoveryRequired {
+    root: PathBuf,
+    generation: u64,
+}
+
+/// Callers serialize eligibility and any navigation with `startup`. A failed Start may advance
+/// the host generation while reclaiming survivors; that does not resolve their recovery state.
+fn recovery_required(shell: &Shell, root: &Path) -> bool {
+    shell
+        .recovery_required
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|recovery| {
+            recovery.root == root
+                && recovery.generation <= shell.generation.load(std::sync::atomic::Ordering::SeqCst)
+        })
+}
+
+/// Called under `startup` after validating the affected run. Does not retire survivor watchers.
+fn mark_recovery_required(shell: &Shell, root: &Path, generation: u64) {
+    *shell.recovery_required.lock().unwrap() = Some(RecoveryRequired {
+        root: root.to_path_buf(),
+        generation,
+    });
+}
+
+/// Only completed recovery or deliberate shutdown resolves the condition, never reading a notice.
+fn clear_recovery_required(shell: &Shell, root: &Path) {
+    let mut recovery = shell.recovery_required.lock().unwrap();
+    if recovery
+        .as_ref()
+        .is_some_and(|recovery| recovery.root == root)
+    {
+        *recovery = None;
+        *shell.last_failure.lock().unwrap() = None;
+    }
 }
 
 /// One ticket spans the whole initial Start, including deployment and dependency preparation.
@@ -1099,6 +1140,7 @@ where
     }
 
     if failures.is_empty() {
+        clear_recovery_required(shell, &root);
         Ok(())
     } else {
         Err(failures.join("\n"))
@@ -1398,6 +1440,7 @@ fn finish_host_start_locked(
         );
     }
     attempt.require_current()?;
+    clear_recovery_required(shell, root);
     Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst))
 }
 
@@ -1480,6 +1523,9 @@ where
     }
     if let Err(problem) = down_containers_with(shell, &root, down) {
         failures.push(format!("Compose down failed: {problem}"));
+    }
+    if failures.is_empty() {
+        clear_recovery_required(shell, &root);
     }
     failures
 }
@@ -1568,7 +1614,7 @@ where
 /// and naming one guesses wrong half the time. Never the word `localhost`: it does not resolve the
 /// same way on every operating system, which is the whole reason both are asked.
 #[tauri::command]
-fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
+fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     show_openbot_on(app, &openbot_env::Ports::default())
 }
 
@@ -1580,7 +1626,12 @@ fn show_openbot_on<R: tauri::Runtime>(
     // Where it answered, not where it was asked to listen. A dev server binds whichever loopback
     // its runtime resolved `localhost` to, and navigating to the other one shows a blank window
     // that looks like the app failing to start.
-    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    let root = cleanup_root(&shell, &stack::default_root());
+    if recovery_required(&shell, &root) {
+        return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
+    }
     let url = owned_app_url(&root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
@@ -1722,9 +1773,11 @@ where
 }
 
 #[tauri::command]
-fn already_running(root: String) -> bool {
+fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) -> bool {
     let root = stack::root_from(&root);
-    already_running_at(&root, &openbot_env::Ports::default())
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    !recovery_required(&shell, &root) && already_running_at(&root, &openbot_env::Ports::default())
 }
 
 fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
@@ -1745,7 +1798,9 @@ fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
 ///
 /// Cleared on reading so a failure from an hour ago does not greet somebody who has since fixed it.
 #[tauri::command]
-fn last_failure(app: tauri::AppHandle) -> Option<openbot_desktop_lib::problem::Problem> {
+fn last_failure<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Option<openbot_desktop_lib::problem::Problem> {
     app.state::<Shell>().last_failure.lock().unwrap().take()
 }
 
@@ -2239,6 +2294,9 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     continue;
                 };
                 if !watch.should_restart(std::time::Instant::now()) {
+                    // A restore already probing may finish first; publish recovery and its setup
+                    // navigation together after it, so that late probe cannot undo this transition.
+                    let _startup = shell.startup.lock().unwrap();
                     // Let go of it. A dead child left in the list is found dead again two seconds
                     // later, and forever after: the count climbs past what actually happened, the
                     // window is sent back to the setup screen on a loop, and the giving up that was
@@ -2246,6 +2304,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     {
                         let mut children = shell.children.lock().unwrap();
                         if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+                            || shell.root.lock().unwrap().as_deref() != Some(root.as_path())
                         {
                             return;
                         }
@@ -2253,6 +2312,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     }
 
                     let reason = watch.gave_up();
+                    mark_recovery_required(&shell, &root, generation);
                     report(&app, name, false, reason.clone());
                     /*
                      * Both registers here too. `gave_up` names the process and quotes the tail of
@@ -2358,10 +2418,14 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         return;
     };
     let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
-    if let Some(url) = owned_app_url(&root, ports) {
+    if let Some(url) = (!recovery_required(&shell, &root))
+        .then(|| owned_app_url(&root, ports))
+        .flatten()
+    {
         if let Ok(parsed) = url.parse() {
             let _ = window.navigate(parsed);
         }
@@ -6251,6 +6315,382 @@ fn main() {
 
     #[cfg(unix)]
     #[test]
+    fn worker_exhaustion_does_not_adopt_healthy_survivors() {
+        if crate::test_support::isolated_process(
+            "tests::worker_exhaustion_does_not_adopt_healthy_survivors",
+        ) {
+            return;
+        }
+        let host = InitialHostFixture::new("success");
+        write_installed_deployment(&host.root);
+        let source = host.base.join("worker-recovery-host.rs");
+        std::fs::write(&source, r#"
+use std::{fs,io::{Read,Write},net::TcpListener,time::Duration};
+fn main() {
+    let cwd=std::env::current_dir().unwrap();
+    let role=cwd.file_name().unwrap().to_str().unwrap();
+    fs::write("child.pid",std::process::id().to_string()).unwrap();
+    let mut starts=fs::OpenOptions::new().create(true).append(true).open("starts.log").unwrap();
+    writeln!(starts,"{}",std::process::id()).unwrap();
+    if role=="worker" {
+        loop {
+            if cwd.join("fail").exists() { std::process::exit(71); }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    let port=match role { "server"=>3001,"app"=>3010,_=>panic!("unexpected role") };
+    let listener=TcpListener::bind(("127.0.0.1",port)).unwrap();
+    for stream in listener.incoming() {
+        let mut stream=stream.unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut request=[0;2048];
+        if stream.read(&mut request).unwrap_or(0)>0 {
+            let _=stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+        }
+    }
+}
+"#).unwrap();
+        crate::test_support::compile_fixture(&source, &host.bun);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![
+                already_running,
+                show_openbot,
+                last_failure
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let mut fixture = SupervisionFixture {
+            host,
+            app,
+            watcher: None,
+        };
+        let shell = fixture.app.state::<Shell>();
+        let setup = "tauri://localhost/worker-recovery-setup";
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        let logs = fixture.host.root.join(".logs");
+        let wait_logs = logs.clone();
+        let generation = tauri::async_runtime::block_on(start_host_processes(
+            &attempt,
+            &fixture.host.root,
+            &logs,
+            &fixture.host.bun,
+            &stack::Secrets::new(),
+            |name| fixture.host.observe(name),
+            move |children| {
+                stack::wait_until_answering(
+                    children,
+                    &wait_logs,
+                    &stack::Ready {
+                        api: 3001,
+                        app: 3010,
+                    },
+                    std::time::Duration::from_secs(10),
+                )
+            },
+        ))
+        .unwrap();
+        drop(attempt);
+        fixture.watcher = Some(supervise_host_processes(
+            fixture.app.handle().clone(),
+            fixture.host.root.clone(),
+            logs,
+            fixture.host.bun.clone(),
+            stack::Secrets::new(),
+            generation,
+        ));
+        std::fs::write(fixture.host.root.join("worker/fail"), "").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
+        loop {
+            if shell
+                .last_failure
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| {
+                    p.said.contains("(worker)") && p.said.contains("could not be started again")
+                })
+                && window.url().unwrap().as_str() == setup
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not exhaust actual restart budget"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(server_capabilities_answer(3001));
+        assert!(stack::recorded_server_owns_port(&fixture.host.root, 3001).unwrap());
+        assert!(stack::recorded_process_owns_port(&fixture.host.root, "app", 3010).unwrap());
+        let invoke = |command: &str, body: serde_json::Value| {
+            tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+            .map(|response| response.deserialize::<serde_json::Value>().unwrap())
+        };
+        let result = invoke(
+            "already_running",
+            serde_json::json!({"root":fixture.host.root}),
+        )
+        .unwrap()
+        .as_bool()
+        .unwrap();
+        let children = shell.children.lock().unwrap();
+        let survivors: Vec<_> = children
+            .iter()
+            .map(|(name, child)| (*name, child.id()))
+            .collect();
+        drop(children);
+        let starts = std::fs::read_to_string(fixture.host.root.join("worker/starts.log")).unwrap();
+        let failure = shell.last_failure.lock().unwrap().clone();
+        println!(
+            "WORKER_RECOVERY_PROOF={}",
+            serde_json::json!({
+                "root":fixture.host.root,"base":fixture.host.base,"generation":generation,
+                "setupUrl":window.url().unwrap().as_str(),"alreadyRunning":result,
+                "survivors":survivors,"workerStarts":starts,"failure":failure,
+            })
+        );
+        assert_eq!(starts.lines().count(), supervise::MAX_RESTARTS as usize + 1);
+        assert!(
+            !result,
+            "exhausted worker was automatically adopted through generated already_running IPC"
+        );
+        let notification = invoke("last_failure", serde_json::json!({})).unwrap();
+        assert!(notification["said"].as_str().unwrap().contains("(worker)"));
+        assert!(invoke("last_failure", serde_json::json!({}))
+            .unwrap()
+            .is_null());
+        assert!(recovery_required(&shell, &fixture.host.root));
+        let show_error = invoke("show_openbot", serde_json::json!({})).unwrap_err();
+        assert!(show_error.as_str().unwrap().contains("needs recovery"));
+        restore_window_on(fixture.app.handle(), &openbot_env::Ports::default());
+        assert_eq!(window.url().unwrap().as_str(), setup);
+        println!(
+            "WORKER_RECOVERY_COMMANDS={}",
+            serde_json::json!({
+                "notification":notification,"generatedShowError":show_error,
+                "recoveryAfterNoticeRead":true,"restoreUrl":window.url().unwrap().as_str(),
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_transient_worker_restart_does_not_require_recovery() {
+        let host = InitialHostFixture::new("success");
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let mut fixture = SupervisionFixture {
+            host,
+            app,
+            watcher: None,
+        };
+        let shell = fixture.app.state::<Shell>();
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        let generation = tauri::async_runtime::block_on(start_host_processes(
+            &attempt,
+            &fixture.host.root,
+            &fixture.host.root.join(".logs"),
+            &fixture.host.bun,
+            &stack::Secrets::new(),
+            |name| fixture.host.observe(name),
+            |_| Ok(()),
+        ))
+        .unwrap();
+        drop(attempt);
+        fixture.watcher = Some(supervise_host_processes(
+            fixture.app.handle().clone(),
+            fixture.host.root.clone(),
+            fixture.host.root.join(".logs"),
+            fixture.host.bun.clone(),
+            stack::Secrets::new(),
+            generation,
+        ));
+        let original = {
+            let mut children = shell.children.lock().unwrap();
+            let (_, worker) = children
+                .iter_mut()
+                .find(|(name, _)| *name == "worker")
+                .unwrap();
+            worker.kill().unwrap();
+            worker.id()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        let replacement = loop {
+            let replacement = shell
+                .children
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|(name, child)| *name == "worker" && child.id() != original)
+                .and_then(|(_, child)| child.try_wait().unwrap().is_none().then_some(child.id()));
+            if let Some(pid) = replacement {
+                break pid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "transient worker was not restarted"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(!recovery_required(&shell, &fixture.host.root));
+        assert!(shell.last_failure.lock().unwrap().is_none());
+        println!(
+            "WORKER_TRANSIENT_PROOF={}",
+            serde_json::json!({"original":original,"replacement":replacement,"generation":generation,"recoveryRequired":false})
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_ready_start_and_completed_stop_resolve_condition() {
+        let host = InitialHostFixture::new("success");
+        let shell = Shell::default();
+        mark_recovery_required(&shell, &host.root, 0);
+        *shell.last_failure.lock().unwrap() = Some(Problem::plain("worker exhausted"));
+        assert!(recovery_required(&shell, &host.root));
+        assert!(!recovery_required(&shell, &host.base.join("other")));
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        tauri::async_runtime::block_on(start_host_processes(
+            &attempt,
+            &host.root,
+            &host.root.join(".logs"),
+            &host.bun,
+            &stack::Secrets::new(),
+            |name| host.observe(name),
+            |_| Ok(()),
+        ))
+        .unwrap();
+        drop(attempt);
+        assert!(!recovery_required(&shell, &host.root));
+        assert!(shell.last_failure.lock().unwrap().is_none());
+        mark_recovery_required(&shell, &host.root, 0);
+        assert!(
+            stop_everything_with(&shell, &host.root, stack::stop_processes_under, |_| Err(
+                "synthetic container cleanup refusal".into()
+            ))
+            .is_err()
+        );
+        assert!(
+            recovery_required(&shell, &host.root),
+            "failed Stop cannot resolve recovery"
+        );
+        stop_everything_with(&shell, &host.root, stack::stop_processes_under, |_| Ok(())).unwrap();
+        assert!(!recovery_required(&shell, &host.root));
+        assert!(host.alive().is_empty());
+    }
+
+    #[test]
+    fn recovery_notice_consumption_and_failed_retry_preserve_gate() {
+        let f = RestoreFixture::new();
+        let app = f.app(&f.owned, "tauri://localhost/recovery");
+        let shell = app.state::<Shell>();
+        *shell.root.lock().unwrap() = Some(f.owned.clone());
+        {
+            let _startup = shell.startup.lock().unwrap();
+            mark_recovery_required(&shell, &f.owned, 0);
+        }
+        *shell.last_failure.lock().unwrap() = Some(Problem::plain("worker exhausted"));
+        assert!(last_failure(app.handle().clone()).is_some());
+        assert!(last_failure(app.handle().clone()).is_none());
+        assert!(recovery_required(&shell, &f.owned));
+        let window = app.get_webview_window("main").unwrap();
+        let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
+            cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                "root": f.owned, "apiUrl": "https://intelligence.example.test",
+                "gatewayWsUrl": "wss://gateway.example.test", "apiKey": "synthetic-unused-key",
+                "model": {"provider": "synthetic-invalid-provider", "login": "api-key"}, "harness": null,
+            })), headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.into(),
+        }).expect_err("synthetic credential preflight must reject before store access");
+        assert!(problem["said"]
+            .as_str()
+            .unwrap()
+            .contains("synthetic-invalid-provider"));
+        assert_eq!(
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert!(recovery_required(&shell, &f.owned));
+        assert!(
+            owned_app_url(&f.owned, &f.ports).is_some(),
+            "survivors must still answer"
+        );
+        assert!(show_openbot_on(app.handle().clone(), &f.ports).is_err());
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(window.url().unwrap().as_str(), "tauri://localhost/recovery");
+        // Reclaim may advance the active generation before a later Start failure. It still
+        // cannot clear the recovery marker; only accepted readiness can do that.
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        cleanup_before_start(app.handle(), &attempt, &f.owned, |_| Ok(0)).unwrap();
+        assert!(recovery_required(&shell, &f.owned));
+    }
+
+    #[test]
+    fn recovery_publication_wins_over_restore_already_probing() {
+        let f = RestoreFixture::new();
+        let app = f.app(&f.owned, "tauri://localhost/recovery");
+        std::fs::write(f.owned.join("pause-response"), "").unwrap();
+        let restoring = app.handle().clone();
+        let ports = openbot_env::Ports {
+            server: f.ports.server,
+            app: f.ports.app,
+            ..Default::default()
+        };
+        let restore = std::thread::spawn(move || restore_window_on(&restoring, &ports));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !f.owned.join("response-entered").exists() {
+            assert!(
+                std::time::Instant::now() < until,
+                "restore did not reach owned responder"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // The actual probe holds startup until its navigation completes. Exhaustion publication
+        // uses that same lock, so it must follow the stale probe and leave setup as the destination.
+        assert!(app.state::<Shell>().startup.try_lock().is_err());
+        let recovering = app.handle().clone();
+        let root = f.owned.clone();
+        let recovery = std::thread::spawn(move || {
+            let shell = recovering.state::<Shell>();
+            let _startup = shell.startup.lock().unwrap();
+            mark_recovery_required(&shell, &root, 0);
+            show_setup(recovering.clone()).unwrap();
+        });
+        std::fs::remove_file(f.owned.join("pause-response")).unwrap();
+        restore.join().unwrap();
+        recovery.join().unwrap();
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .as_str(),
+            "tauri://localhost/recovery"
+        );
+        assert!(recovery_required(&app.state::<Shell>(), &f.owned));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn failed_retry_after_server_exhaustion_keeps_survivor_supervised() {
         failed_retry_keeps_survivor_supervised("server");
     }
@@ -6993,6 +7433,12 @@ fn serve(listener: TcpListener) {
         stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
         let mut request = [0; 2048];
         if stream.read(&mut request).unwrap_or(0) > 0 {
+            if std::path::Path::new("pause-response").exists() {
+                std::fs::write("response-entered", "").unwrap();
+                while std::path::Path::new("pause-response").exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
             let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
         }
     }
@@ -7097,6 +7543,7 @@ fn main() {
             *shell.setup_url.lock().unwrap() = Some(setup.into());
             let app = tauri::test::mock_builder()
                 .manage(shell)
+                .invoke_handler(tauri::generate_handler![start_stack])
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .unwrap();
             let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())

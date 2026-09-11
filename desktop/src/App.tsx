@@ -147,6 +147,9 @@ export function App() {
    * headline on a setup screen. See `problem.rs`.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
+  // A supervisor notice belongs to the interrupted run, not to the form being hydrated.
+  const [recoveryFailure, setRecoveryFailure] = useState<Problem | null>(null);
+  const displayedFailure = failure ?? recoveryFailure;
   const credentialContext = useRef([
     root,
     model,
@@ -237,9 +240,9 @@ export function App() {
             () => false,
           )
         ) {
-          setRunning(true);
           // Already up from a previous window: show it, rather than a screen about it.
-          await invoke("show_openbot").catch(() => undefined);
+          await invoke("show_openbot");
+          setRunning(true);
         }
       })
       .catch(() => undefined);
@@ -260,7 +263,7 @@ export function App() {
     // no indication that anything happened.
     invoke<Problem | null>("last_failure")
       .then((found) => {
-        if (found) setFailure(found);
+        if (found) setRecoveryFailure(found);
       })
       .catch(() => undefined);
     const stop = listen<Progress>("setup:progress", (event) => {
@@ -301,6 +304,7 @@ export function App() {
         harness,
       });
       setRunning(true);
+      setRecoveryFailure(null);
       /*
        * One screen short of the handover, on purpose.
        *
@@ -342,6 +346,7 @@ export function App() {
     try {
       await invoke("stop_stack", { root });
       setRunning(false);
+      setRecoveryFailure(null);
     } catch (error) {
       setFailure(asProblem(error));
     } finally {
@@ -355,6 +360,7 @@ export function App() {
     try {
       await invoke("stop_stack", { root });
       setRunning(false);
+      setRecoveryFailure(null);
       setStep("model");
     } catch (error) {
       setFailure(asProblem(error));
@@ -396,6 +402,7 @@ export function App() {
     return (
       <main>
         <Welcome onStart={() => setStep("harness")} />
+        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -440,7 +447,7 @@ export function App() {
           }}
           onBack={changeModelAfterAskFailure}
         />
-        {failure && <Failure problem={failure} />}
+        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -467,9 +474,11 @@ export function App() {
       {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-      <h1>{running && !failure ? "OpenBot is running" : "Set up OpenBot"}</h1>
+      <h1>
+        {running && !displayedFailure ? "OpenBot is running" : "Set up OpenBot"}
+      </h1>
       <p className="lede">
-        {running && !failure
+        {running && !displayedFailure
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
           : engine?.responding
             ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
@@ -672,7 +681,7 @@ export function App() {
         </div>
       )}
 
-      {failure && <Failure problem={failure} />}
+      {displayedFailure && <Failure problem={displayedFailure} />}
 
       {!running && (
         <button
