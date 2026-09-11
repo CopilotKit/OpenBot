@@ -58,6 +58,123 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s-%s" (include "openbot.fullname" .root) .component | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+The same name, under the shorter limit Kubernetes puts on a CronJob.
+
+FIFTY-TWO, NOT SIXTY-THREE. A CronJob is the one workload whose name is not the whole budget: the
+controller names each Job it creates `<cronjob>-<unix-minute>`, so the API server refuses a CronJob
+whose own name leaves no room for that suffix — "must be no more than 52 characters". Sixty-three is
+the right limit for every other object this chart writes and the wrong one here, and the failure is
+not a truncated name, it is `helm install` rejected outright.
+
+Reached at a 43-character release name, which is an ordinary length for a name that says the
+environment and the region. All three of this chart's CronJobs were built on the 63-character helper
+and all three were rejected together.
+
+THE RELEASE NAME IS TRUNCATED, NOT THE WHOLE STRING, so the component survives. Cutting the joined
+name at 52 would give a long release two CronJobs called the same thing — `...-routines` and
+`...-culler` both ending as the first 52 characters of the release name — which is a release that
+cannot install for a second, stranger reason. Trimming the prefix instead keeps the suffix that says
+which sweep this is, which is the part a person reads.
+*/}}
+{{- define "openbot.cronJobName" -}}
+{{- $room := int (max 1 (sub 51 (len .component))) -}}
+{{- $prefix := include "openbot.fullname" .root | trunc $room | trimSuffix "-" -}}
+{{- printf "%s-%s" $prefix .component | trunc 52 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Whether the staged-attachment sweep runs.
+
+ONE ANSWER FOR TWO TEMPLATES, because the CronJob and the NetworkPolicy that fences it must agree:
+a sweep with no policy is the one pod left unfenced on a cluster that enforces them, and a policy
+with no sweep is a resource selecting nothing. They were two copies of the same expression, which is
+the shape that drifts.
+
+GUARDED AT BOTH LEVELS, AND DEFAULTED TO ON. `attachments` is a key this chart did not have before,
+and `helm upgrade --reuse-values` takes the previous release's computed values rather than merging
+the new chart's defaults, so on every existing deployment the whole map is absent — and on a release
+installed between the two, `culler` is present without `enabled`. `(.Values.attachments).culler.enabled`
+parenthesises one level of that and reads the next two bare: with `enabled` missing the sweep and its
+policy silently did not render at all, and with `culler` missing the render died on a nil pointer,
+which fails the install rather than the feature.
+
+`kindIs "invalid"` rather than `| default true`, for the reason `commonEnv` gives above: sprig's
+`default` substitutes on EMPTY, and `false` is empty, so `| default true` would switch the sweep back
+on for the deployment that had deliberately switched it off.
+
+IT ANSWERS THE SAME QUESTION ITS SIBLINGS DO, WHICH IT USED NOT TO. This used to hand the value back
+untouched for its callers to compare against the string `"true"`, and a string comparison is not what
+`if .Values.routines.enabled` next door does. `--set attachments.culler.enabled=1` reaches a template
+as the integer 1, and `=yes` reaches it as the string "yes". Go's templating calls both of those
+true, so the routines CronJob renders for either — while this returned "1" or "yes", matched neither
+caller, and rendered NEITHER the CronJob NOR the NetworkPolicy that fences it. No error, no resource,
+and an operator with every reason to believe the sweep was on. Both spellings were driven through
+`helm template` before this changed and after. The answer is now the template engine's own notion of
+truth, which is the one the rest of the chart was already using.
+
+THE ONE VALUE IT REFUSES RATHER THAN HONOURS, because agreeing with the siblings here would have been
+a regression rather than a fix. That same notion of truth calls the non-empty string "false" TRUE, so
+`--set-string attachments.culler.enabled=false` would start the sweep for somebody who had just
+written the word false. The old string comparison happened to get that one case right, and a fix is
+not allowed to take a correct behaviour away. There is no reading of `--set-string ...=false` that
+means ON and no safe way to guess, so it fails the render with a message naming `--set` instead. That
+is a narrower rule than it looks: only a STRING spelling a falsehood ever reaches it, and `--set`,
+which parses `false` into a boolean, cannot produce one.
+*/}}
+{{- define "openbot.attachmentsCullerEnabled" -}}
+{{- $culler := (.Values.attachments | default dict).culler | default dict -}}
+{{- $enabled := $culler.enabled -}}
+{{- if kindIs "invalid" $enabled -}}
+true
+{{- else if and (kindIs "string" $enabled) (has (lower $enabled) (list "false" "no" "off" "n" "0")) -}}
+{{- fail (printf "attachments.culler.enabled is the string %q, and this chart will not guess which way you meant it. Helm's templating reads every non-empty string as true, so honouring it would turn the staged-attachment sweep ON, which is the opposite of what it spells. Pass a boolean instead: --set attachments.culler.enabled=false, or enabled: false in a values file. --set-string is what made it a string." $enabled) -}}
+{{- else if $enabled -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/*
+The service range the Kubernetes API server answers on, or a refusal to render a policy without it.
+
+ONE ANSWER FOR TWO TEMPLATES, for the same reason as the sweep gate above: the API server's policy
+and the computer culler's both need this rule, and both had it wrong in exactly the same way.
+
+WHY THIS REFUSES INSTEAD OF DEFAULTING. Both policies used to write the rule as
+`- {{ with .Values.networkPolicy.kubernetesApiCidr }}to: ...{{ end }}` and let the empty default fall
+straight through the `with`. What fell out was an egress rule carrying ports and NO PEER AT ALL, and
+in Kubernetes that is neither a narrow rule nor an inert one: an empty or absent `to` matches every
+destination. So the shipped default granted 443 and 6443 to everything, which cancelled the `10/8`,
+`172.16/12`, `192.168/16` and `169.254/16` exceptions the rule one line above it spells out. On the
+culler, whose only other egress is DNS and the database, that peerless rule WAS its entire reach: a
+pod holding the database credential could open an HTTPS socket to any address in the cluster or on
+the internet. Rendered and read back before any of this was believed.
+
+THE TWO ALTERNATIVES, AND WHY NEITHER. Rendering no rule at all when nobody has named a CIDR is safe
+and silent, and silent is the whole problem: on a cluster that enforces policy the API server can no
+longer ask for a Bot's computer, so every browser action fails and the deployment looks broken rather
+than fenced — which is the exact failure the comment two rules above this one warns about. Picking a
+default CIDR is worse: the range belongs to the cluster and not to the release, so `172.20.0.0/16` is
+right on EKS and an outage on GKE, and a wrong CIDR is that outage with a plausible-looking values
+file standing behind it. Refusing is the only one of the three that cannot be wrong quietly, and it
+is what this chart does everywhere else a value is unknowable and load-bearing. `helm upgrade`
+renders before it applies anything, so a release that hits this keeps running exactly as it was while
+its operator runs the single command in the message.
+
+SCOPED TO THE POLICIES THAT NEED IT. Reached only from inside `networkPolicy.enabled` and
+`computers.mode: sandbox`, so a deployment with no policies, or with `mode: shared`, never has to
+name it. Nothing else in the chart consults it.
+*/}}
+{{- define "openbot.kubernetesApiCidr" -}}
+{{- $cidr := .Values.networkPolicy.kubernetesApiCidr -}}
+{{- if not $cidr -}}
+{{- fail "networkPolicy.kubernetesApiCidr is required when networkPolicy.enabled is true and computers.mode is sandbox. It is the service range the Kubernetes API server answers on, which is where a per-Bot computer is asked for, and this chart cannot know it: the range belongs to the cluster rather than to this release. Find the address with: kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}' - then name the range it sits in, usually 172.20.0.0/16 on EKS and 10.96.0.0/12 on GKE and kubeadm. It was previously allowed to be empty, which rendered an egress rule with no destination at all: that permitted 443 and 6443 to every address rather than to the API server, so setting this narrows the policy that was already meant to be narrow." -}}
+{{- end -}}
+{{- $cidr -}}
+{{- end -}}
+
 {{- define "openbot.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "openbot.fullname" .) .Values.serviceAccount.name -}}
