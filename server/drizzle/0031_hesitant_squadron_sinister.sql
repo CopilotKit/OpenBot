@@ -1,0 +1,2 @@
+CREATE INDEX "attachments_channel_idx" ON "attachments" USING btree ("channel_id");--> statement-breakpoint
+CREATE INDEX "attachments_staged_idx" ON "attachments" USING btree ("created_at") WHERE "attachments"."attached_at" is null;
