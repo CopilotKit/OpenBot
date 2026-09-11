@@ -1,11 +1,13 @@
 import type { Message } from "@ag-ui/core";
 import {
+  type Attachment,
   UseAgentUpdate,
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
 import {
@@ -14,6 +16,7 @@ import {
   transcriptMessages,
 } from "@/components/channels/transcript-messages";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
   setChannelBusy,
@@ -124,6 +127,95 @@ function mergeStoredMessages(local: Message[], stored: Message[]): Message[] {
     ...local.flatMap((message) => [...(before.get(message.id) ?? []), message]),
     ...pending,
   ];
+}
+
+/**
+ * The uploaded id and filename an `Attachment` carries once it is `ready`, read from the
+ * `metadata` the composer's `onUpload` stamped on it — see `composer/attachments.ts`. Not the
+ * SDK's own `attachment.id`, which is a client-side handle for the upload placeholder rather than
+ * the id this deployment stored the file under.
+ */
+function uploadedAttachment(attachment: Attachment): {
+  attachmentId: string;
+  filename?: string;
+} {
+  const metadata = attachment.metadata as
+    | { attachmentId?: unknown; filename?: unknown }
+    | undefined;
+  const attachmentId = metadata?.attachmentId;
+  if (typeof attachmentId !== "string") {
+    throw new Error("Attachment is missing its uploaded id.");
+  }
+  const filename =
+    typeof metadata?.filename === "string" ? metadata.filename : undefined;
+  return filename ? { attachmentId, filename } : { attachmentId };
+}
+
+/**
+ * One attachment, turned into the part shape a stored message carries.
+ *
+ * THE MODALITY COMES FROM THE BYTES, NOT FROM `attachment.type`, AND THIS IS THE ONLY PLACE IT CAN.
+ *
+ * `attachment.type` is the browser's claim, fixed before the upload and never reconciled with what
+ * the file turned out to be. The server stopped trusting it — `resolvePart` decides an attachment's
+ * modality with `classifyAttachment` on its own sniffed `mimeType` — but that correction lives on
+ * the server and never comes back here. What this function writes IS the stored message, so a
+ * `document` written here is what every later render of that message reads, for ever: a screenshot
+ * whose part the browser mislabelled drew a grey file card over the picture, and the transcript's
+ * document probe then paid a whole-file read per render for the privilege.
+ *
+ * Narrowed through the source union rather than read straight off, for the reason `parkedTiles` in
+ * `chat-transcript.tsx` narrows the same field: a `data` source's `mimeType` is `file.type`, the
+ * very claim being refused, and only a `url` source has been past the server. `attachmentModality`
+ * falls back to the declared type when there is no corroborated one, so an attachment that somehow
+ * arrives unuploaded is written exactly as it used to be.
+ *
+ * The comment this replaces said only "image" and "document" reach here because the composer's
+ * upload config accepts no other kind of file. That reason is no longer true — the config's
+ * `accept` is now the wildcard, and it is `screenPickedFiles` that holds the line. The conclusion still
+ * holds; the justification had rotted, which is why the modality is now derived rather than cast.
+ */
+function toAttachmentPart(attachment: Attachment) {
+  const { attachmentId, filename } = uploadedAttachment(attachment);
+  const { source } = attachment;
+  const mimeType =
+    source.type === "url" && source.mimeType ? source.mimeType : undefined;
+  return {
+    type: attachmentModality(attachment.type, mimeType),
+    source: { type: "url" as const, value: attachmentUrl(attachmentId) },
+    metadata: filename ? { attachmentId, filename } : { attachmentId },
+  };
+}
+
+/**
+ * A plain string when there is nothing attached, exactly as every message in every channel has
+ * always been sent — never a single-element array wrapping the same text, which every existing
+ * reader would take a different path for no gain. With attachments, the text goes first as its
+ * own part and is left out entirely when empty, since an empty text part is noise the model has
+ * to read past.
+ *
+ * Exported for the test that pins this wire format. Reaching it through `deliver`/`say` would mean
+ * standing up `useAgent`'s runtime, the thread join and the ready/join gates around it just to
+ * observe a pure string-in-object-out mapping — none of that machinery bears on what this function
+ * decides, so a narrow export is the honest way to test the contract without restructuring the
+ * module around a test.
+ */
+export function toMessageContent(
+  trimmed: string,
+  attachments: readonly Attachment[],
+) {
+  if (attachments.length === 0) return trimmed;
+  const refs = attachments.map(toAttachmentPart);
+  return trimmed ? [{ type: "text" as const, text: trimmed }, ...refs] : refs;
+}
+
+/** What the roster's "last thing said" reads when a message carried no caption. */
+function describeAttachments(attachments: readonly Attachment[]): string {
+  if (attachments.length === 1) {
+    const { filename } = uploadedAttachment(attachments[0]);
+    return filename ? `Sent ${filename}` : "Sent an attachment";
+  }
+  return `Sent ${attachments.length} attachments`;
 }
 
 /**
@@ -466,7 +558,11 @@ export function ChannelChat({
    * Everything `say` does once it has something worth sending, split out so the counter it is
    * wrapped in covers every way out of here, a throw included.
    */
-  const deliver = async (trimmed: string, skillInstructions: string[]) => {
+  const deliver = async (
+    trimmed: string,
+    skillInstructions: string[],
+    attachments: Attachment[],
+  ) => {
     // Wait briefly for the runtime agent instance before adding the message.
     if (!isReadyRef.current) {
       await Promise.race([
@@ -518,11 +614,11 @@ export function ChannelChat({
     }
 
     target.addMessage({
-      content: trimmed,
+      content: toMessageContent(trimmed, attachments),
       id: newId(),
       role: "user",
     });
-    report(trimmed, null);
+    report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
     const repaired = repairUnansweredToolCalls(target.messages);
@@ -546,9 +642,16 @@ export function ChannelChat({
    * keeping here rather than in the view: the view sees only the turns it started itself, and a
    * queue that drains on the wrong one of those posts a correction into the middle of an answer.
    */
-  const say = async (text: string, skillInstructions: string[] = []) => {
+  const say = async (
+    text: string,
+    skillInstructions: string[] = [],
+    attachments: Attachment[] = [],
+  ) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // A pasted screenshot with no caption is still a message to send: `canSendDraft` already
+    // unlocks the button for exactly this case, so refusing it here would leave the button
+    // enabled and inert.
+    if (!trimmed && attachments.length === 0) return;
 
     turnsRef.current += 1;
     setTurnsInFlight(turnsRef.current);
@@ -556,7 +659,7 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      await deliver(trimmed, skillInstructions);
+      await deliver(trimmed, skillInstructions, attachments);
     } finally {
       turnsRef.current -= 1;
       setTurnsInFlight(turnsRef.current);
@@ -629,6 +732,7 @@ export function ChannelChat({
     <ConversationProvider ask={askFromComponent}>
       <ConversationView
         agents={toAgentOptions(agentProfiles, channel.agentIds)}
+        channelId={channel.id}
         /*
          * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
          * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
@@ -677,7 +781,7 @@ export function ChannelChat({
               Boolean(instruction),
             );
 
-          await say(draft.text, skillInstructions);
+          await say(draft.text, skillInstructions, draft.attachments);
         }}
         /**
          * Stop through the core so the abort signal reaches frontend tools; `say` repairs any
