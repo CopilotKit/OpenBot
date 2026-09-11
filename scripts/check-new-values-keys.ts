@@ -277,7 +277,21 @@ const targetValues = parse(await Bun.file(valuesFile).text()) as {
   externalSecrets?: { enabled?: boolean; data?: unknown[] };
 };
 function enableFor(component: string): string[] {
-  if (component === "culler") return ["--set", "computers.mode=sandbox"];
+  // On by default and needing nothing but the database, so nothing has to be switched on for it.
+  if (component === "attachments-culler") return [];
+  // Sandbox mode is what the computer culler belongs to, and on a target that also has
+  // `networkPolicy.enabled` it drags in the two policies carrying a rule for the Kubernetes API
+  // server. That rule's CIDR is required rather than defaulted — an empty one used to render an
+  // egress rule with no destination, which permitted 443 and 6443 everywhere — so flipping the mode
+  // on `self-hosted`, which ships the policies on, now has to name a range too. Any range: nothing
+  // here reads it, this is a fallback check for `activeDeadlineSeconds` and not a policy check.
+  if (component === "culler")
+    return [
+      "--set",
+      "computers.mode=sandbox",
+      "--set",
+      "networkPolicy.kubernetesApiCidr=10.96.0.0/12",
+    ];
   const on = ["--set", "routines.enabled=true"];
   if (!targetValues.externalSecrets?.enabled) {
     return [
@@ -298,6 +312,9 @@ function enableFor(component: string): string[] {
 
 /** One step of a dotted path through parsed YAML, without asserting a shape it may not have. */
 function at(value: unknown, key: string): unknown {
+  // A list step, because one fallback below is a positional command ARGUMENT rather than a field,
+  // and its path therefore has to index `containers` and `command`.
+  if (Array.isArray(value)) return value[Number(key)];
   return value !== null && typeof value === "object"
     ? (value as Record<string, unknown>)[key]
     : undefined;
@@ -339,6 +356,33 @@ const fieldFallbacks: ReadonlyArray<{
     path: "computers.sandbox.culler.activeDeadlineSeconds",
     component: "culler",
     field: ["spec", "jobTemplate", "spec", "activeDeadlineSeconds"],
+  },
+  {
+    path: "attachments.culler.schedule",
+    component: "attachments-culler",
+    field: ["spec", "schedule"],
+  },
+  {
+    path: "attachments.culler.activeDeadlineSeconds",
+    component: "attachments-culler",
+    field: ["spec", "jobTemplate", "spec", "activeDeadlineSeconds"],
+  },
+  // The retention window is a positional argument to `cull-staged-attachments.ts`, so it lands in
+  // `command`, where neither the env-var check nor a `spec.*` path can see it.
+  {
+    path: "attachments.culler.olderThanHours",
+    component: "attachments-culler",
+    field: [
+      "spec",
+      "jobTemplate",
+      "spec",
+      "template",
+      "spec",
+      "containers",
+      "0",
+      "command",
+      "2",
+    ],
   },
 ];
 
