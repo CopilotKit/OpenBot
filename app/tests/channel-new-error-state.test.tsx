@@ -11,7 +11,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { Route as ChannelNewRoute } from "@/routes/_authed/_app/channel/new";
 
@@ -122,6 +122,16 @@ function renderChannelNew(
   );
 }
 
+async function expectMessageComposerDisabled(
+  view: ReturnType<typeof render>,
+  disabled: boolean,
+) {
+  const editor = await view.findByRole("textbox", { name: "Message" });
+  await waitFor(() =>
+    expect(editor.getAttribute("aria-disabled") === "true").toBe(disabled),
+  );
+}
+
 const GENERAL_ASSISTANT = agent({
   id: "general-assistant",
   name: "General Assistant",
@@ -135,7 +145,7 @@ test("/channel/new reports a failed initial roster load", async () => {
     "Coworkers couldn't be loaded.",
   );
   expect(view.queryByText("No agents found.")).toBeNull();
-  expect(view.getByTestId("conversation-view").dataset.disabled).toBe("true");
+  await expectMessageComposerDisabled(view, true);
 });
 
 test("/channel/new reports a failed URL-selected hidden detail load", async () => {
@@ -150,16 +160,14 @@ test("/channel/new reports a failed URL-selected hidden detail load", async () =
     "Coworker couldn't be loaded.",
   );
   expect(view.queryByText("No agents found.")).toBeNull();
-  expect(view.getByTestId("conversation-view").dataset.disabled).toBe("true");
+  await expectMessageComposerDisabled(view, true);
 });
 
 test("/channel/new keeps a successful empty roster as an empty picker", async () => {
   const view = renderChannelNew(queryClientWithAgents([]));
 
   expect(view.queryByRole("alert")).toBeNull();
-  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
-    "true",
-  );
+  await expectMessageComposerDisabled(view, true);
 });
 
 test("/channel/new keeps a successful visible recipient enabled", async () => {
@@ -169,9 +177,7 @@ test("/channel/new keeps a successful visible recipient enabled", async () => {
   );
 
   expect(view.queryByRole("alert")).toBeNull();
-  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
-    "false",
-  );
+  await expectMessageComposerDisabled(view, false);
 });
 
 test("/channel/new ignores stale detail errors when the URL agent is listed", async () => {
@@ -189,9 +195,7 @@ test("/channel/new ignores stale detail errors when the URL agent is listed", as
   );
 
   expect(view.queryByRole("alert")).toBeNull();
-  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
-    "false",
-  );
+  await expectMessageComposerDisabled(view, false);
 });
 
 test("/channel/new keeps a successful hidden URL recipient enabled", async () => {
@@ -206,9 +210,7 @@ test("/channel/new keeps a successful hidden URL recipient enabled", async () =>
   const view = renderChannelNew(queryClient, "/channel/new?agent=hidden-bot");
 
   expect(view.queryByRole("alert")).toBeNull();
-  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
-    "false",
-  );
+  await expectMessageComposerDisabled(view, false);
 });
 
 test("/channel/new keeps a usable hidden detail when a background refetch fails", async () => {
@@ -229,7 +231,5 @@ test("/channel/new keeps a usable hidden detail when a background refetch fails"
   const view = renderChannelNew(queryClient, "/channel/new?agent=hidden-bot");
 
   expect(view.queryByRole("alert")).toBeNull();
-  expect((await view.findByTestId("conversation-view")).dataset.disabled).toBe(
-    "false",
-  );
+  await expectMessageComposerDisabled(view, false);
 });
