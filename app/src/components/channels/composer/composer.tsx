@@ -240,6 +240,26 @@ export type ComposerProps = {
 };
 
 /**
+ * A draft holding more files than one message may carry.
+ *
+ * A function rather than a comparison written twice, because the two readers must never disagree:
+ * the button that refuses the press, and `submitDraft`, which refuses the Enter key that never
+ * looks at the button. See `tooManyStaged` for how a strip gets over the cap at all.
+ */
+function overCap(draft: ComposerDraft): boolean {
+  return draft.attachments.length > MAX_ATTACHMENTS_PER_MESSAGE;
+}
+
+/** What the person is told when Send is held shut by the cap, and what to do about it. */
+function tooManyStagedReason(count: number): string {
+  return (
+    `${count} attachments are staged and a message can carry at most ` +
+    `${MAX_ATTACHMENTS_PER_MESSAGE}. Remove ` +
+    `${count - MAX_ATTACHMENTS_PER_MESSAGE} to send the rest.`
+  );
+}
+
+/**
  * One sentence per cause, and they say different things because different things happened.
  *
  * A merge names the cap, because that is the limit the person can work around — send fewer at once.
@@ -661,6 +681,12 @@ export function Composer({
         // What is on the composer, not what the hook is holding: an attachment riding on a send
         // in flight belongs to that message's count, not to the one being built now.
         //
+        // WHICH IS TRUE OF A SEND THAT LANDS AND NOT OF ONE THAT FAILS, and this number cannot
+        // tell them apart at the moment it is read — the send is still out. A failure hands the
+        // riding files back onto a strip that has filled up behind them, and the draft is then
+        // over the cap however carefully this counted. `tooManyStaged` is what catches that,
+        // because it asks about the strip as it actually is rather than predicting it.
+        //
         // PLUS WHAT IS PARKED, which is on nobody's strip and is still counted by the server —
         // see `queuedAttachmentCount`. Without the second half the client accepts a pick the
         // server then refuses with a 409 the person was given no chance to avoid.
@@ -989,6 +1015,30 @@ export function Composer({
   );
   const draft = useMemo(() => toDraft(value, staged), [staged, value]);
 
+  /**
+   * MORE FILES ON THIS STRIP THAN ONE MESSAGE MAY CARRY — a state the screening is supposed to make
+   * unreachable, and does not.
+   *
+   * HOW THE STRIP GETS HERE. `sending` hides an outgoing message's attachments from `staged`, and
+   * `stagedCount` resyncs off `staged`, so while a send is out the client-side count reads zero and
+   * a second full batch is accepted behind the first. That is deliberate and right for a send that
+   * lands: those files belong to the message that went, not to the one being built now. It is only
+   * wrong when the send FAILS, because the `finally` then hands the first batch back — onto a strip
+   * that has since filled up — and one draft is holding two messages' worth of files.
+   *
+   * WHY THE CAP AND NOT `canSendDraft`. That function asks about upload status and emptiness, which
+   * are facts about each attachment; this is a fact about the draft as a whole, and it belongs
+   * beside the other thing the composer knows and the draft model does not — see `stageFiles`,
+   * which screens against the same number.
+   *
+   * NOTHING IS DROPPED TO RESOLVE IT, and that is the whole reason this is a gate rather than a
+   * slice. Trimming the strip back to the cap would delete files somebody picked, on a path they
+   * did not ask for, with the rows behind them released behind their back — which is verbatim the
+   * failure every other release in this file exists to avoid. So every chip stays, every one is
+   * removable by hand, and Send says no with a sentence naming the limit until it is.
+   */
+  const tooManyStaged = overCap(draft);
+
   const handleChange = useCallback(
     (next: Segment[]) => {
       const { segments, actions } = applyCommandChips(
@@ -1015,8 +1065,12 @@ export function Composer({
     async (segments: Segment[]) => {
       // `canSendDraft` rather than `isEmpty`: a screenshot with no words is a message, and an
       // upload still in flight is not one yet, whatever is typed alongside it.
+      //
+      // `overCap` is asked here as well as at the button, and not only there: Enter reaches this
+      // function through prompt-area's own `onSubmit`, which has never looked at `canSend`. A gate
+      // drawn on the button alone would refuse the press and accept the keystroke.
       const submitted = toDraft(segments, staged);
-      if (!canSendDraft(submitted) || disabled) {
+      if (!canSendDraft(submitted) || overCap(submitted) || disabled) {
         return;
       }
 
@@ -1199,7 +1253,7 @@ export function Composer({
    * one yet. Both buttons read it, so Send and Queue can never disagree about whether there is
    * anything to do.
    */
-  const sendable = canSendDraft(draft);
+  const sendable = canSendDraft(draft) && !tooManyStaged;
   /** Something to send, mid-turn, with a queue to put it in. */
   const parking = canQueue && sendable;
   const canSend = !disabled && sendable && (!isBusy || canQueue);
@@ -1283,6 +1337,25 @@ export function Composer({
     />
   ) : null;
 
+  /**
+   * WHY SEND IS SHUT WITH A FULL STRIP IN FRONT OF IT — drawn wherever the refusals are, because it
+   * is the same kind of sentence and answers the same question.
+   *
+   * NOT DISMISSABLE, unlike `RejectedFiles`. A refusal is news about a file that is already gone,
+   * so it is read once and cleared; this is a live description of the strip, and it goes away by
+   * removing a chip rather than by being acknowledged. A dismiss would leave a dead Send button
+   * with nothing on screen explaining it.
+   *
+   * `role="status"` and not `alert`: nothing happened at this instant — the person did not just do
+   * something refusable — and interrupting a screen reader mid-sentence to describe a button's
+   * state is not what an alert is for.
+   */
+  const tooManyStagedNotice = tooManyStaged ? (
+    <p className="pb-2 text-sm text-muted-foreground" role="status">
+      {tooManyStagedReason(draft.attachments.length)}
+    </p>
+  ) : null;
+
   if (compact) {
     return (
       /*
@@ -1299,6 +1372,7 @@ export function Composer({
        */
       <div className="flex flex-col" ref={containerRef} {...dropZone}>
         <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
+        {tooManyStagedNotice}
         <form
           aria-busy={isBusy}
           className={cn(
@@ -1418,6 +1492,7 @@ export function Composer({
       {...dropZone}
     >
       <RejectedFiles onDismiss={dismissRejections} rejected={rejected} />
+      {tooManyStagedNotice}
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
