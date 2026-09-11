@@ -134,8 +134,8 @@ async function auditRowsFor(targetId: string, botId: string, actorId: string) {
       and(
         eq(auditEvents.targetType, "mcp_tool"),
         eq(auditEvents.targetId, targetId),
-        sql`${auditEvents.payload} ->> 'bot' = ${botId}`,
-        sql`${auditEvents.payload} ->> 'actor' = ${actorId}`,
+        eq(sql<string>`${auditEvents.payload} ->> 'bot'`, botId),
+        eq(sql<string>`${auditEvents.payload} ->> 'actor'`, actorId),
       ),
     );
 }
