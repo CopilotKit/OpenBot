@@ -1,4 +1,8 @@
 [test]
 # See server/scripts/test-preload.ts: makes the module graph deterministic so a test file cannot fail to
 # import depending on the order the suite happened to be walked.
+#
+# This applies to `bun test` run from the repository root. Bun reads bunfig.toml from the current
+# working directory only, so server/bunfig.toml repeats the declaration for `bun test` run from
+# inside server/, and server/tests/bunfig-preload.test.ts keeps the two in agreement.
 preload = ["./server/scripts/test-preload.ts"]
