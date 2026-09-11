@@ -219,6 +219,10 @@ jobs:
       # from that Bot's own dependency tree.
       - run: bun install
         working-directory: agent-mastra
+      # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is
+      # pinned by the desktop lockfile rather than the root one.
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts
