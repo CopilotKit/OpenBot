@@ -32,6 +32,17 @@ import type { ComposerDraft } from "./draft";
  * while a turn is in flight, so a reload finds no queue and shows none, which is better than a list
  * of messages quietly promising to run and never running.
  *
+ * A DRAIN THAT DOES NOT LAND PUTS EVERYTHING BACK. Settling is keyed on the turn ending, not on the
+ * turn succeeding, and the same is true one level down: the send the drain starts can fail, and for
+ * a while what that cost was the whole queue. The messages were gone — emptied to build the draft —
+ * and the files under them were deleted outright, while the transcript went on showing the message
+ * the failed run had already added to it. So a run built out of this queue that never becomes a
+ * message hands its messages back, whole, through `restoreIfRunFails`; they are parked again, they
+ * go out with the next turn, and the only thing that deletes their rows is somebody removing one.
+ * The retry waits for a turn somebody asks for rather than going again on its own — see
+ * `conversation-view.tsx` — because a queue that re-sent itself would spin against a server that is
+ * refusing every request.
+ *
  * THE FILES UNDER THOSE WORDS ARE NOT COVERED BY THAT PARAGRAPH, and reading them into it was a
  * leak. Words a person watched land on screen can be retyped; a staged attachment is a row on the
  * server that the parked entry holds the only reference to, and letting it die with the mount left
@@ -74,6 +85,19 @@ export type QueueAction =
   | { type: "submit"; id: string; draft: ComposerDraft; busy: boolean }
   /** The turn is over, however it ended: finished, failed, or stopped. */
   | { type: "settle" }
+  /**
+   * A RUN THIS QUEUE EMPTIED ITSELF TO BUILD NEVER BECAME A MESSAGE. Put its messages back.
+   *
+   * The caller supplies `restoreIfRunFails` from the transition that emptied the queue — see the
+   * field for why that list, and not `run.attachments`, is the honest one. They go back at the
+   * FRONT: they were typed before anything that has parked since, and the whole reason this queue
+   * exists is that a correction must not be read after the sentence correcting it.
+   *
+   * It produces no run of its own. A failed send that immediately re-sent itself would spin against
+   * a server that is down, so restoring is where this stops and the next turn is what carries them;
+   * `conversation-view.tsx` holds the drain back until one starts.
+   */
+  | { type: "restore"; messages: readonly QueuedMessage[] }
   /** Second thoughts, before it has run. */
   | { type: "remove"; id: string };
 
@@ -104,34 +128,45 @@ export type QueueTransition = {
    */
   droppedAttachments: readonly Attachment[];
   /**
-   * OF THE ROWS `run` IS CARRYING, THE ONES NOTHING ELSE IS HOLDING — so a caller whose run never
-   * becomes a message knows which of them it has to give back. Empty when there is no run, and
-   * empty when every attachment on it has somewhere to return to.
+   * OF WHAT `run` IS CARRYING, THE PART NOTHING ELSE IS HOLDING — as the messages it came from, so
+   * a caller whose run never becomes a message can put them back rather than having to decide what
+   * to do with a bag of orphaned files. Empty when there is no run, and empty when everything on it
+   * has somewhere to return to.
    *
-   * `droppedAttachments` is about files this transition REFUSED to carry; this is about files it
-   * DID carry, named against the possibility that carrying them turns out to have been the last
-   * anybody sees of them. The two lists never overlap: an attachment is either kept by the cap or
-   * bumped by it.
+   * IT USED TO BE THE ATTACHMENTS ALONE, AND THAT SHAPE ONLY ALLOWED ONE ANSWER. A list of files
+   * with no words around them cannot be re-queued — nothing says which message each belonged to,
+   * what was typed beside it, or which `/` skills it was invoked with — so the only thing a caller
+   * could do with it was delete the rows, and that is what `conversation-view.tsx` did. Deleting
+   * them is wrong for the reason the whole area keeps rediscovering: `channel-chat.tsx` adds the
+   * user message to the transcript BEFORE the run, and nothing removes it when the run fails, so
+   * the release destroyed the files behind a message that is still on screen. Handing back the
+   * messages instead makes restoring possible, and restoring is what the caller now does.
+   *
+   * `droppedAttachments` is about files this transition REFUSED to carry; this is about what it DID
+   * carry, named against the possibility that carrying it turns out to have been the last anybody
+   * sees of it. The two never overlap: an attachment is either kept by the cap or bumped by it —
+   * which is also why the messages here carry only the SURVIVORS. A restored message pointing at a
+   * row the cap already gave back would be a retry of a file that no longer exists.
    *
    * WHY THE QUEUE HAS TO ANSWER THIS AND NOT THE CALLER. A drained turn is built out of messages
    * the composer let go of as they were parked, so nothing but this queue ever held them; a live
    * send joining a non-empty queue is built out of BOTH — the parked messages, held by nobody now
    * that the queue has emptied, and the draft in the box, which the composer puts back beside the
-   * restored words when the send fails. Releasing the second kind would delete the rows behind
-   * chips that are on screen again and still sendable. Only the transition knows which attachment
-   * came from where, so it is the transition that says.
+   * restored words when the send fails. Restoring the second kind would put a message back in the
+   * queue whose words and chips are also sitting in the composer, and send it twice. Only the
+   * transition knows which message came from where, so it is the transition that says.
    *
    * Which makes the answer per-case rather than "everything on the run":
-   * - `settle` — every one of them, the whole run came out of the queue.
-   * - `submit` joining a non-empty queue — the parked ones only; the live draft's own are the
-   *   composer's to restore.
+   * - `settle` — every message in it, the whole run came out of the queue.
+   * - `submit` joining a non-empty queue — the parked ones only; the live draft is the composer's
+   *   to restore.
    * - `submit` with nothing waiting — none, the run IS the live draft.
-   * - `remove`, and a park — none, there is no run.
+   * - `remove`, a park, and a `restore` — none, there is no run.
    *
    * THE CALLER IS WHAT ACTS ON IT, and only on failure. See `conversation-view.tsx`, where both
    * paths that can produce a run answer this list from the same rule.
    */
-  strandedIfRunFails: readonly Attachment[];
+  restoreIfRunFails: readonly QueuedMessage[];
 };
 
 /**
@@ -164,7 +199,7 @@ export function reduceQueue(
             queue,
             run: action.draft,
             droppedAttachments: [],
-            strandedIfRunFails: [],
+            restoreIfRunFails: [],
           };
         }
         /*
@@ -190,24 +225,21 @@ export function reduceQueue(
         );
         /*
          * THE PARKED HALF OF WHAT THIS RUN IS CARRYING, AND ONLY THAT HALF. The queue is emptied
-         * here, so nothing holds the parked rows any more; the live draft's own attachments are
-         * still the composer's, which puts them back on the strip beside the restored words when
-         * the send fails. Releasing those would delete the rows behind chips somebody can see and
-         * press send on again.
+         * here, so nothing holds the parked messages any more; the live draft's words, chips and
+         * attachments are still the composer's, which puts them back beside each other when the
+         * send fails. Restoring those as well would queue a second copy of a message somebody can
+         * already see in their box.
          *
-         * By identity against the messages that were waiting BEFORE this send joined them, rather
-         * than by position: the cap keeps the earliest, so the survivors happen to be the parked
-         * ones first today, and a rule that reads that off the slice would quietly go wrong the
-         * day the ordering does.
+         * The messages that were waiting BEFORE this send joined them, rather than a slice of what
+         * went out: the cap keeps the earliest, so the survivors happen to be the parked ones first
+         * today, and a rule that read that off a slice would quietly go wrong the day the ordering
+         * does. `carrying` filters by identity against what the join actually kept.
          */
-        const parked = queue.flatMap((message) => message.attachments);
         return {
           queue: [],
           run: joined.draft,
           droppedAttachments: joined.dropped,
-          strandedIfRunFails: joined.draft.attachments.filter((attachment) =>
-            parked.includes(attachment),
-          ),
+          restoreIfRunFails: carrying(queue, joined.draft.attachments),
         };
       }
       /*
@@ -254,7 +286,26 @@ export function reduceQueue(
         ],
         run: null,
         droppedAttachments: [],
-        strandedIfRunFails: [],
+        restoreIfRunFails: [],
+      };
+    }
+
+    case "restore": {
+      if (action.messages.length === 0) {
+        return {
+          queue,
+          run: null,
+          droppedAttachments: [],
+          restoreIfRunFails: [],
+        };
+      }
+      return {
+        // At the front: these were typed before anything that has parked while the failed run was
+        // out, and the order somebody typed in is the order the Bot has to read.
+        queue: [...action.messages, ...queue],
+        run: null,
+        droppedAttachments: [],
+        restoreIfRunFails: [],
       };
     }
 
@@ -264,7 +315,7 @@ export function reduceQueue(
           queue,
           run: null,
           droppedAttachments: [],
-          strandedIfRunFails: [],
+          restoreIfRunFails: [],
         };
       }
       /*
@@ -277,10 +328,13 @@ export function reduceQueue(
         queue: [],
         run: joined.draft,
         droppedAttachments: joined.dropped,
-        // ALL OF THEM. Every message in this drain was parked, which means the composer let go of
-        // its attachments at the time, and the queue has just emptied itself to build this. There
-        // is no box for a failed drain to put anything back into.
-        strandedIfRunFails: joined.draft.attachments,
+        /*
+         * ALL OF THEM. Every message in this drain was parked, which means the composer let go of
+         * its words and its attachments at the time, and the queue has just emptied itself to build
+         * this. There is no box for a failed drain to put anything back into — so the queue is the
+         * box, and a failure puts them back in it.
+         */
+        restoreIfRunFails: carrying(queue, joined.draft.attachments),
       };
     }
 
@@ -294,7 +348,7 @@ export function reduceQueue(
           queue,
           run: null,
           droppedAttachments: [],
-          strandedIfRunFails: [],
+          restoreIfRunFails: [],
         };
       }
       /*
@@ -311,10 +365,47 @@ export function reduceQueue(
         queue: queue.filter((message) => message.id !== action.id),
         run: null,
         droppedAttachments: removed.flatMap((message) => message.attachments),
-        strandedIfRunFails: [],
+        restoreIfRunFails: [],
       };
     }
   }
+}
+
+/**
+ * The messages a run is carrying, carrying only the rows it actually took.
+ *
+ * ONE RULE FOR BOTH PATHS THAT CAN PRODUCE A RUN, which is the whole reason this is a function. A
+ * drain and a live send joining a queue answer `restoreIfRunFails` from the same question — of the
+ * messages the queue gave up, what is restorable — and two call sites each filtering for themselves
+ * is two places for the cap's survivors and the cap's casualties to be confused with one another.
+ *
+ * BY IDENTITY AGAINST WHAT THE JOIN KEPT, not by count or by position. The cap keeps the earliest
+ * files, so a restored message may have handed over three attachments and get one back; the other
+ * two were bumped, reported through `droppedAttachments`, and released by the caller as the run was
+ * built. Restoring those would put a message back pointing at rows that no longer exist.
+ *
+ * A MESSAGE LEFT WITH NOTHING AT ALL IS NOT RESTORED. A wordless, skill-less message whose only
+ * attachments the cap bumped has nothing left to send and nothing to show: re-queueing it would
+ * draw a blank row with a Remove button and no content, for a message that is genuinely gone.
+ */
+function carrying(
+  queue: readonly QueuedMessage[],
+  kept: readonly Attachment[],
+): readonly QueuedMessage[] {
+  const survivors = new Set(kept);
+  return queue
+    .map((message) => ({
+      ...message,
+      attachments: message.attachments.filter((attachment) =>
+        survivors.has(attachment),
+      ),
+    }))
+    .filter(
+      (message) =>
+        message.text.trim().length > 0 ||
+        message.commandIds.length > 0 ||
+        message.attachments.length > 0,
+    );
 }
 
 /** The draft a drain produces, plus whatever the cap re-check would not let it keep. */

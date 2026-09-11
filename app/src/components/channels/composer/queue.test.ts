@@ -532,21 +532,25 @@ describe("attachments", () => {
 });
 
 /**
- * WHICH OF A RUN'S ATTACHMENTS HAVE NOWHERE TO GO BACK TO IF THE RUN NEVER BECOMES A MESSAGE.
+ * WHAT A RUN TAKES OUT OF THE QUEUE, AND WHAT COMES BACK IF THE RUN NEVER BECOMES A MESSAGE.
  *
  * `droppedAttachments` covers the files a transition refused to carry. These cases are about the
- * other half of the same worry: the files it DID carry, and whether carrying them was the last
- * anybody sees of them. A drained turn is built out of messages the composer let go of as they
- * were parked, so a failed drain strands every row it was holding; a live send that joins a
- * non-empty queue is built out of both kinds at once, and the composer puts its OWN chips back
- * beside the restored words — so releasing those would delete rows behind chips somebody can see
- * and press send on again.
+ * other half of the same worry: what it DID carry, and whether carrying it was the last anybody
+ * sees of it. A drained turn is built out of messages the composer let go of as they were parked,
+ * so a failed drain has to give every one of them back; a live send that joins a non-empty queue is
+ * built out of both kinds at once, and the composer restores its OWN draft — so re-queueing that
+ * one as well would send the same words twice.
  *
- * The distinction is only visible here, in the transition. By the time `conversation-view.tsx`
- * has a rejected promise in hand, the queue that knew where each attachment came from is empty.
+ * MESSAGES AND NOT ATTACHMENTS, which is the change these cases pin. The field used to name the
+ * files alone, and a bag of files with no words around them can only be deleted — which is what
+ * `conversation-view.tsx` did with them, destroying the rows behind a message the transcript was
+ * still showing. Handing back the messages is what makes restoring possible at all.
+ *
+ * The distinction is only visible here, in the transition. By the time `conversation-view.tsx` has
+ * a rejected promise in hand, the queue that knew where each message came from is empty.
  */
-describe("stranding", () => {
-  test("a drain strands everything it drained, because nothing else was holding it", () => {
+describe("restoring a failed run", () => {
+  test("a drain gives back every message it drained, because nothing else was holding them", () => {
     const first = attachment("first");
     const second = attachment("second");
     let queue = park([], "one", "the invoices", [], [first]);
@@ -554,19 +558,21 @@ describe("stranding", () => {
 
     const result = reduceQueue(queue, { type: "settle" });
 
-    expect(result.strandedIfRunFails).toEqual([first, second]);
+    // The entries themselves, words and all — not a flat list of the two files. Putting these back
+    // is a queue again, in the order they were typed.
+    expect(result.restoreIfRunFails).toEqual(queue);
   });
 
-  test("a settle with nothing waiting strands nothing", () => {
+  test("a settle with nothing waiting restores nothing", () => {
     const result = reduceQueue([], { type: "settle" });
 
-    expect(result.strandedIfRunFails).toEqual([]);
+    expect(result.restoreIfRunFails).toEqual([]);
   });
 
-  test("an idle send with nothing waiting strands nothing: the composer still holds its own", () => {
+  test("an idle send with nothing waiting restores nothing: the composer still holds its own", () => {
     // THE CASE THAT MUST STAY EMPTY. The run here IS the draft in the box; a failed send hands the
-    // words and the chips straight back, so releasing them would delete the rows behind chips that
-    // are on screen again and still sendable.
+    // words and the chips straight back, so re-queueing them would put a second copy of the
+    // message on screen and send it again behind the one somebody is editing.
     const own = attachment("own");
     const result = reduceQueue([], {
       busy: false,
@@ -575,10 +581,10 @@ describe("stranding", () => {
       type: "submit",
     });
 
-    expect(result.strandedIfRunFails).toEqual([]);
+    expect(result.restoreIfRunFails).toEqual([]);
   });
 
-  test("an idle send that empties a queue strands the parked half and not its own", () => {
+  test("an idle send that empties a queue restores the parked half and not its own", () => {
     const parked = attachment("parked");
     const own = attachment("own");
     const waiting = park([], "one", "no, the other one", [], [parked]);
@@ -590,16 +596,15 @@ describe("stranding", () => {
       type: "submit",
     });
 
-    // Both ride out on the same run — the queue was emptied to build it — but only one of them
-    // has nobody left to give it back.
+    // Both ride out on the same run — the queue was emptied to build it — but only one of them has
+    // nobody left to give it back.
     expect(result.run?.attachments).toEqual([parked, own]);
-    expect(result.strandedIfRunFails).toEqual([parked]);
+    expect(result.restoreIfRunFails).toEqual(waiting);
   });
 
-  test("what the cap already bumped off is not stranded a second time", () => {
-    // The excess is reported through `droppedAttachments` and released there. Naming it here too
-    // would issue a second DELETE for a row that is already gone, on the one path that produces
-    // both lists at once.
+  test("a restored message carries only the rows the run actually took", () => {
+    // The excess is reported through `droppedAttachments` and released there. A restored message
+    // still pointing at it would be a retry of a file that no longer exists.
     const own = attachment("own");
     const parked = Array.from(
       { length: MAX_ATTACHMENTS_PER_MESSAGE },
@@ -615,11 +620,33 @@ describe("stranding", () => {
     });
 
     expect(result.droppedAttachments).toEqual([own]);
-    expect(result.strandedIfRunFails).toEqual(parked);
-    expect(result.strandedIfRunFails).not.toContain(own);
+    expect(result.restoreIfRunFails).toEqual(waiting);
+    expect(
+      result.restoreIfRunFails.flatMap((message) => message.attachments),
+    ).not.toContain(own);
   });
 
-  test("parking strands nothing: there is no run, and the queue is still holding them", () => {
+  test("a message the cap emptied of everything it had is not restored", () => {
+    // Wordless and skill-less, and every file it was carrying was bumped: there is nothing left to
+    // send and nothing to draw. Re-queueing it would put a blank row with a Remove button on
+    // screen for a message that is genuinely gone — and the files it stood for were released as
+    // `droppedAttachments`, with the composer saying so.
+    const kept = Array.from(
+      { length: MAX_ATTACHMENTS_PER_MESSAGE },
+      (_, index) => attachment(`kept-${index}`),
+    );
+    const bumped = attachment("bumped");
+    let queue = park([], "one", "here are the invoices", [], kept);
+    queue = park(queue, "two", "", [], [bumped]);
+
+    const result = reduceQueue(queue, { type: "settle" });
+
+    expect(result.droppedAttachments).toEqual([bumped]);
+    expect(result.restoreIfRunFails).toHaveLength(1);
+    expect(result.restoreIfRunFails[0]?.id).toBe("one");
+  });
+
+  test("parking restores nothing: there is no run, and the queue is still holding it", () => {
     const file = attachment("receipt");
     const result = reduceQueue([], {
       busy: true,
@@ -629,16 +656,40 @@ describe("stranding", () => {
     });
 
     expect(result.run).toBeNull();
-    expect(result.strandedIfRunFails).toEqual([]);
+    expect(result.restoreIfRunFails).toEqual([]);
   });
 
-  test("taking a queued message back strands nothing: those rows go out as dropped instead", () => {
+  test("taking a queued message back restores nothing: those rows go out as dropped instead", () => {
     const file = attachment("receipt");
     const queue = park([], "one", "here's the file", [], [file]);
 
     const result = reduceQueue(queue, { id: "one", type: "remove" });
 
     expect(result.droppedAttachments).toEqual([file]);
-    expect(result.strandedIfRunFails).toEqual([]);
+    expect(result.restoreIfRunFails).toEqual([]);
+  });
+
+  test("a restore puts messages back at the front, ahead of anything parked since", () => {
+    // THE ORDER IS THE POINT. The restored message was typed before whatever was parked while the
+    // failed run was out, and running a correction after the sentence correcting it is the exact
+    // reordering this queue exists to prevent.
+    const failed = attachment("failed");
+    const later = attachment("later");
+    const drained = park([], "one", "use the invoices", [], [failed]);
+    const since = park([], "two", "actually, hold on", [], [later]);
+
+    const result = reduceQueue(since, { messages: drained, type: "restore" });
+
+    expect(result.queue.map((message) => message.id)).toEqual(["one", "two"]);
+    expect(result.run).toBeNull();
+    expect(result.droppedAttachments).toEqual([]);
+  });
+
+  test("restoring nothing leaves the queue identical, so no render is spent", () => {
+    const queue = park([], "one", "still waiting", [], []);
+
+    const result = reduceQueue(queue, { messages: [], type: "restore" });
+
+    expect(result.queue).toBe(queue);
   });
 });
