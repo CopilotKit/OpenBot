@@ -18,7 +18,9 @@ use openbot_desktop_lib::{
 /// names them has to be too, and an app that fetches whatever shipped this morning is not a version
 /// anybody can be given. Moved deliberately, with the app.
 const DEPLOYMENT_VERSION: &str = "v0.0.8";
-use serde::Serialize;
+const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 /// What the shell is running, so the window and the tray say the same thing.
@@ -1504,6 +1506,140 @@ fn problem_detail(problem: openbot_desktop_lib::problem::Problem) -> String {
     }
 }
 
+fn quit_cleanup_notice_path(root: &Path) -> PathBuf {
+    root.join(QUIT_CLEANUP_NOTICE_FILE)
+}
+
+#[derive(Deserialize, Serialize)]
+struct QuitCleanupNotice {
+    version: u8,
+    failures: Vec<QuitCleanupFailure>,
+}
+
+#[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum QuitCleanupFailure {
+    HostProcesses,
+    Containers,
+}
+
+fn known_safe_quit_cleanup_failure(line: &str) -> QuitCleanupFailure {
+    if line.starts_with("[exit] cleanup failed: Compose down failed:") {
+        QuitCleanupFailure::Containers
+    } else {
+        QuitCleanupFailure::HostProcesses
+    }
+}
+
+fn quit_cleanup_failure_summary(failure: QuitCleanupFailure) -> &'static str {
+    match failure {
+        QuitCleanupFailure::HostProcesses => "OpenBot could not confirm all app processes stopped.",
+        QuitCleanupFailure::Containers => "OpenBot could not confirm all containers stopped.",
+    }
+}
+
+fn write_quit_cleanup_notice(root: &Path, lines: &[String]) -> Result<(), String> {
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let notice = QuitCleanupNotice {
+        version: 1,
+        failures: lines
+            .iter()
+            .map(|line| known_safe_quit_cleanup_failure(line))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    };
+    let bytes = serde_json::to_vec(&notice)
+        .map_err(|error| format!("could not serialize shutdown notice: {error}"))?;
+    if bytes.len() > QUIT_CLEANUP_NOTICE_LIMIT {
+        return Err("shutdown notice exceeded its size limit".into());
+    }
+    std::fs::create_dir_all(root).map_err(|error| {
+        format!(
+            "{}: could not create shutdown notice directory: {error}",
+            root.display()
+        )
+    })?;
+    let path = quit_cleanup_notice_path(root);
+    std::fs::write(&path, &bytes).map_err(|error| {
+        format!(
+            "{}: could not write shutdown notice: {error}",
+            path.display()
+        )
+    })
+}
+
+fn read_quit_cleanup_notice(root: &Path) -> Result<Option<Problem>, Problem> {
+    let path = quit_cleanup_notice_path(root);
+    let file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            ))
+        }
+    };
+    let size = file
+        .metadata()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not read its previous shutdown notice.",
+                format!("{}: {error}", path.display()),
+            )
+        })?
+        .len();
+    if size > QUIT_CLEANUP_NOTICE_LIMIT as u64 {
+        return Err(Problem::with(
+            "OpenBot could not read its previous shutdown notice.",
+            format!(
+                "{}: shutdown notice exceeded its size limit",
+                path.display()
+            ),
+        ));
+    }
+    let notice: QuitCleanupNotice = serde_json::from_reader(file).map_err(|error| {
+        Problem::with(
+            "OpenBot could not read its previous shutdown notice.",
+            format!("{}: {error}", path.display()),
+        )
+    })?;
+    std::fs::remove_file(&path).map_err(|error| {
+        Problem::with(
+            "OpenBot could not clear its previous shutdown notice.",
+            format!("{}: {error}", path.display()),
+        )
+    })?;
+    let detail = notice
+        .failures
+        .iter()
+        .map(|failure| quit_cleanup_failure_summary(*failure))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Problem::with(
+        "OpenBot had trouble shutting down last time.",
+        detail,
+    )))
+}
+
+fn recovery_required_or_pending_quit_notice(shell: &Shell, root: &Path) -> bool {
+    if recovery_required(shell, root) {
+        return true;
+    }
+    if !quit_cleanup_notice_path(root).exists() {
+        return false;
+    }
+    let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+    mark_recovery_required(shell, root, generation);
+    true
+}
+
 fn exit_cleanup_with<C, D>(shell: &Shell, fallback_root: &Path, cleanup: C, down: D) -> Vec<String>
 where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
@@ -1530,13 +1666,19 @@ where
     failures
 }
 
-fn report_exit_cleanup_failures<F>(failures: Vec<String>, mut sink: F)
+fn report_exit_cleanup_failures<F>(failures: Vec<String>, sink: F) -> Result<(), String>
 where
-    F: FnMut(&str),
+    F: FnOnce(Vec<String>) -> Result<(), String>,
 {
-    for failure in failures {
-        sink(&format!("[exit] cleanup failed: {failure}"));
+    if failures.is_empty() {
+        return Ok(());
     }
+    let lines = failures
+        .into_iter()
+        .map(|failure| format!("[exit] cleanup failed: {failure}"))
+        .collect::<Vec<_>>();
+    let preserved = lines.join("\n");
+    sink(lines).map_err(|error| format!("{error}\n\n{preserved}"))
 }
 
 #[derive(Default)]
@@ -1554,21 +1696,31 @@ enum QuitPhase {
 
 type QuitWork = Box<dyn FnOnce() + Send + 'static>;
 
-fn request_quit_with<C, D, E, S>(
+struct QuitDiagnostics<D, F> {
+    sink: D,
+    failed: F,
+}
+
+fn request_quit_with<C, D, F, E, S>(
     state: std::sync::Arc<QuitState>,
     code: Option<i32>,
     prevent_exit: impl FnOnce(),
     cleanup: C,
-    mut diagnostic: D,
+    diagnostic: QuitDiagnostics<D, F>,
     exit: E,
     spawn: S,
 ) -> std::io::Result<()>
 where
     C: FnOnce() -> Vec<String> + Send + 'static,
-    D: FnMut(&str) + Send + 'static,
+    D: FnOnce(Vec<String>) -> Result<(), String> + Send + 'static,
+    F: FnMut(String) + Send + 'static,
     E: FnOnce(i32) + Send + 'static,
     S: FnOnce(QuitWork) -> std::io::Result<()>,
 {
+    let QuitDiagnostics {
+        sink: diagnostic,
+        failed: mut diagnostic_failed,
+    } = diagnostic;
     let start = {
         let mut phase = state.phase.lock().unwrap();
         match *phase {
@@ -1588,7 +1740,11 @@ where
     let completing = std::sync::Arc::clone(&state);
     let code = code.unwrap_or(0);
     let work = Box::new(move || {
-        report_exit_cleanup_failures(cleanup(), &mut diagnostic);
+        if let Err(error) = report_exit_cleanup_failures(cleanup(), diagnostic) {
+            *completing.phase.lock().unwrap() = QuitPhase::Idle;
+            diagnostic_failed(error);
+            return;
+        }
         *completing.phase.lock().unwrap() = QuitPhase::Complete(code);
         exit(code);
     });
@@ -1629,7 +1785,7 @@ fn show_openbot_on<R: tauri::Runtime>(
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
-    if recovery_required(&shell, &root) {
+    if recovery_required_or_pending_quit_notice(&shell, &root) {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
     }
     let url = owned_app_url(&root, ports).ok_or_else(|| {
@@ -1739,6 +1895,22 @@ fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String>
         .map_err(|error| format!("could not go back to setup: {error}"))
 }
 
+fn show_setup_and_focus<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    show_setup(app.clone())?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    window
+        .show()
+        .map_err(|error| format!("could not show setup: {error}"))?;
+    window
+        .unminimize()
+        .map_err(|error| format!("could not unminimize setup: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("could not focus setup: {error}"))
+}
+
 /// Is a deployment this app manages already running?
 ///
 /// The shell keeps what it started in memory, so closing the window and opening it again forgets a
@@ -1777,7 +1949,8 @@ fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) ->
     let root = stack::root_from(&root);
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
-    !recovery_required(&shell, &root) && already_running_at(&root, &openbot_env::Ports::default())
+    !recovery_required_or_pending_quit_notice(&shell, &root)
+        && already_running_at(&root, &openbot_env::Ports::default())
 }
 
 fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
@@ -1801,7 +1974,20 @@ fn owned_app_url(root: &Path, ports: &openbot_env::Ports) -> Option<String> {
 fn last_failure<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Option<openbot_desktop_lib::problem::Problem> {
-    app.state::<Shell>().last_failure.lock().unwrap().take()
+    let shell = app.state::<Shell>();
+    if let Some(problem) = shell.last_failure.lock().unwrap().take() {
+        return Some(problem);
+    }
+    let _startup = shell.startup.lock().unwrap();
+    let root = cleanup_root(&shell, &stack::default_root());
+    if !quit_cleanup_notice_path(&root).exists() {
+        return None;
+    }
+    recovery_required_or_pending_quit_notice(&shell, &root);
+    match read_quit_cleanup_notice(&root) {
+        Ok(problem) => problem,
+        Err(problem) => Some(problem),
+    }
 }
 
 #[tauri::command]
@@ -2422,7 +2608,7 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let root = cleanup_root(&shell, &stack::default_root());
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
-    if let Some(url) = (!recovery_required(&shell, &root))
+    if let Some(url) = (!recovery_required_or_pending_quit_notice(&shell, &root))
         .then(|| owned_app_url(&root, ports))
         .flatten()
     {
@@ -2464,6 +2650,19 @@ fn restore_after_second_instance(app: &tauri::AppHandle) {
             format!("OpenBot could not show the existing window: {error}"),
         );
     }
+}
+
+fn publish_quit_notice_failure<R: tauri::Runtime>(app: tauri::AppHandle<R>, error: String) {
+    let problem = Problem::with("OpenBot could not record a shutdown problem.", error);
+    let shell = app.state::<Shell>();
+    {
+        let _startup = shell.startup.lock().unwrap();
+        let root = cleanup_root(&shell, &stack::default_root());
+        let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+        mark_recovery_required(&shell, &root, generation);
+        *shell.last_failure.lock().unwrap() = Some(problem);
+    }
+    let _ = show_setup_and_focus(app);
 }
 
 fn stop_from_menu<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
@@ -2663,6 +2862,8 @@ fn main() {
                     // inventory or Compose made Quit show "Not Responding". Keep the loop alive
                     // until cleanup finishes, then allow its final exit without repeating work.
                     let cleaning_app = app.clone();
+                    let notice_app = app.clone();
+                    let notice_failure_app = app.clone();
                     let exiting_app = app.clone();
                     if let Err(error) = request_quit_with(
                         std::sync::Arc::clone(&app.state::<Shell>().quit),
@@ -2677,7 +2878,19 @@ fn main() {
                                 |root| down_owned_containers(&shell, root),
                             )
                         },
-                        |failure| eprintln!("{failure}"),
+                        QuitDiagnostics {
+                            sink: move |failures: Vec<String>| {
+                                for failure in &failures {
+                                    eprintln!("{failure}");
+                                }
+                                let shell = notice_app.state::<Shell>();
+                                let root = cleanup_root(&shell, &stack::default_root());
+                                write_quit_cleanup_notice(&root, &failures)
+                            },
+                            failed: move |error: String| {
+                                publish_quit_notice_failure(notice_failure_app.clone(), error)
+                            },
+                        },
                         move |code| exiting_app.exit(code),
                         |work| {
                             std::thread::Builder::new()
@@ -2733,7 +2946,12 @@ mod tests {
                         during.lock().unwrap().push("cleanup-finished");
                         Vec::new()
                     },
-                    |_| panic!("successful cleanup must not report a failure"),
+                    QuitDiagnostics {
+                        sink: |_: Vec<String>| {
+                            panic!("successful cleanup must not report a failure")
+                        },
+                        failed: |_: String| panic!("successful cleanup must not fail diagnostics"),
+                    },
                     move |code| {
                         after.lock().unwrap().push("exit");
                         exiting.send(code).unwrap();
@@ -2774,7 +2992,10 @@ mod tests {
             Some(37),
             || panic!("completed Quit must allow its final exit request"),
             || panic!("final exit must not repeat cleanup"),
-            |_| panic!("final exit must not repeat diagnostics"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("final exit must not repeat diagnostics"),
+                failed: |_: String| panic!("final exit must not fail diagnostics"),
+            },
             |_| panic!("final exit must not request another exit"),
             |_| panic!("final exit must not launch another worker"),
         )
@@ -2793,7 +3014,10 @@ mod tests {
             Some(23),
             || prevented.set(prevented.get() + 1),
             Vec::new,
-            |_| panic!("no cleanup failure"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("no cleanup failure"),
+                failed: |_: String| panic!("successful cleanup must not fail diagnostics"),
+            },
             move |code| exiting.send(code).unwrap(),
             |task| {
                 *work.borrow_mut() = Some(task);
@@ -2806,7 +3030,10 @@ mod tests {
             Some(0),
             || prevented.set(prevented.get() + 1),
             || panic!("duplicate Quit must not run cleanup"),
-            |_| panic!("duplicate Quit must not report"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("duplicate Quit must not report"),
+                failed: |_: String| panic!("duplicate Quit must not fail diagnostics"),
+            },
             |_| panic!("duplicate Quit must not replace the saved exit code"),
             |_| panic!("duplicate Quit must not launch another worker"),
         )
@@ -2823,7 +3050,10 @@ mod tests {
             None,
             || prevented.set(prevented.get() + 1),
             || panic!("a late Quit must not repeat cleanup"),
-            |_| panic!("a late Quit must not report"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("a late Quit must not report"),
+                failed: |_: String| panic!("a late Quit must not fail diagnostics"),
+            },
             |_| panic!("a late Quit must not replace the saved exit code"),
             |_| panic!("a late Quit must not launch another worker"),
         )
@@ -2849,7 +3079,13 @@ mod tests {
                     "Compose down failed: synthetic".into(),
                 ]
             },
-            move |line| diagnostics.lock().unwrap().push(line.to_string()),
+            QuitDiagnostics {
+                sink: move |lines: Vec<String>| {
+                    diagnostics.lock().unwrap().extend(lines);
+                    Ok(())
+                },
+                failed: |_: String| panic!("diagnostics should be recorded"),
+            },
             move |code| exiting.lock().unwrap().push(format!("exit:{code}")),
             |task| {
                 *work.borrow_mut() = Some(task);
@@ -2882,7 +3118,10 @@ mod tests {
             Some(7),
             || prevented.set(prevented.get() + 1),
             || panic!("failed launch must not run cleanup"),
-            |_| panic!("failed launch must not report cleanup errors"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("failed launch must not report cleanup errors"),
+                failed: |_: String| panic!("failed launch must not fail diagnostics"),
+            },
             |_| panic!("failed launch must not exit"),
             |_| Err(std::io::Error::other("synthetic worker launch failure")),
         );
@@ -2898,7 +3137,10 @@ mod tests {
             Some(9),
             || prevented.set(prevented.get() + 1),
             Vec::new,
-            |_| panic!("retry cleanup succeeded"),
+            QuitDiagnostics {
+                sink: |_: Vec<String>| panic!("retry cleanup succeeded"),
+                failed: |_: String| panic!("retry cleanup must not fail diagnostics"),
+            },
             move |code| exiting.send(code).unwrap(),
             |task| {
                 *work.borrow_mut() = Some(task);
@@ -2914,6 +3156,98 @@ mod tests {
         work.into_inner().expect("retry launches a worker")();
         assert_eq!(exited.recv().unwrap(), 9);
     }
+
+    #[test]
+    fn quit_cleanup_notice_is_known_safe_bounded_and_consumed_once() {
+        let root = temp_root("openbot-quit-cleanup-notice");
+        let lines = vec![
+            "[exit] cleanup failed: Compose down failed: /Users/alice/OpenBot/docker-compose.yml refused token=secret".to_string(),
+            "[exit] cleanup failed: C:\\Users\\alice\\OpenBot\\owned.exe OAuth password".to_string(),
+        ];
+
+        write_quit_cleanup_notice(&root, &lines).unwrap();
+        let first = read_quit_cleanup_notice(&root)
+            .unwrap()
+            .expect("notice should be present");
+        let detail = first.detail.unwrap();
+        assert_eq!(first.said, "OpenBot had trouble shutting down last time.");
+        assert!(detail.contains("containers stopped"), "{detail}");
+        assert!(detail.contains("app processes stopped"), "{detail}");
+        assert!(!detail.contains("Compose down failed"), "{detail}");
+        assert!(!detail.contains("/Users/alice"), "{detail}");
+        assert!(!detail.contains("C:\\Users\\alice"), "{detail}");
+        assert!(!detail.contains("token=secret"), "{detail}");
+        assert!(!detail.contains("OAuth"), "{detail}");
+        assert!(read_quit_cleanup_notice(&root).unwrap().is_none());
+    }
+
+    #[test]
+    fn diagnostic_sink_failure_keeps_quit_from_completing_exit() {
+        use std::sync::Arc;
+        let state = Arc::new(QuitState::default());
+        let work = std::cell::RefCell::new(None);
+        let failures = Arc::new(Mutex::new(Vec::new()));
+        let captured = failures.clone();
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let first_exit = exited.clone();
+        request_quit_with(
+            state.clone(),
+            None,
+            || {},
+            || vec!["raw cleanup failure".into()],
+            QuitDiagnostics {
+                sink: |_: Vec<String>| Err("notice file is unavailable".into()),
+                failed: move |error: String| captured.lock().unwrap().push(error),
+            },
+            move |_| {
+                first_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+            |task| {
+                *work.borrow_mut() = Some(task);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        work.into_inner().expect("cleanup worker")();
+        assert!(
+            !exited.load(std::sync::atomic::Ordering::SeqCst),
+            "Quit exited after losing its notice sink"
+        );
+        let reported = failures.lock().unwrap().join("\n");
+        assert!(
+            reported.contains("notice file is unavailable"),
+            "{reported}"
+        );
+        assert!(
+            reported.contains("[exit] cleanup failed: raw cleanup failure"),
+            "{reported}"
+        );
+        let second_exit = exited.clone();
+        request_quit_with(
+            state,
+            None,
+            || {},
+            Vec::new,
+            QuitDiagnostics {
+                sink: |_: Vec<String>| Ok(()),
+                failed: |_: String| panic!("diagnostics now succeed"),
+            },
+            move |_| {
+                second_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+            |task| {
+                task();
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            exited.load(std::sync::atomic::Ordering::SeqCst),
+            "Quit did not retry after diagnostic failure"
+        );
+    }
+
     #[test]
     fn ask_transport_regressions_do_not_load_from_the_vault() {
         let source = include_str!("main.rs");
@@ -4320,7 +4654,17 @@ fn main() {
                             |root| down_owned_containers(&app.state::<Shell>(), root),
                         )
                     },
-                    move |error| reported.send(error.to_owned()).unwrap(),
+                    QuitDiagnostics {
+                        sink: move |errors: Vec<String>| {
+                            for error in errors {
+                                reported.send(error).unwrap();
+                            }
+                            Ok(())
+                        },
+                        failed: |_: String| {
+                            panic!("container fixture diagnostics should be recorded")
+                        },
+                    },
                     move |code| sent.send(code).unwrap(),
                     |work| std::thread::Builder::new().spawn(work).map(|_| ()),
                 )
@@ -6631,6 +6975,24 @@ fn main() {
         assert!(last_failure(app.handle().clone()).is_some());
         assert!(last_failure(app.handle().clone()).is_none());
         assert!(recovery_required(&shell, &f.owned));
+        write_quit_cleanup_notice(
+            &f.owned,
+            &["[exit] cleanup failed: Compose down failed: synthetic".into()],
+        )
+        .unwrap();
+        let notice = last_failure(app.handle().clone()).expect("persisted Quit notice");
+        assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
+        assert!(notice
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("containers stopped"));
+        assert!(!quit_cleanup_notice_path(&f.owned).exists());
+        assert!(
+            recovery_required(&shell, &f.owned),
+            "consuming the persisted notice cannot make survivors adoptable"
+        );
+        assert!(last_failure(app.handle().clone()).is_none());
         let window = app.get_webview_window("main").unwrap();
         let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
             cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
@@ -6662,6 +7024,78 @@ fn main() {
         let attempt = StartAttempt::begin(&shell).unwrap();
         cleanup_before_start(app.handle(), &attempt, &f.owned, |_| Ok(0)).unwrap();
         assert!(recovery_required(&shell, &f.owned));
+    }
+
+    #[test]
+    fn pending_quit_notice_blocks_restore_before_react_consumes_it() {
+        let f = RestoreFixture::new();
+        let setup = if cfg!(any(windows, target_os = "android")) {
+            "http://tauri.localhost/recovery"
+        } else {
+            "tauri://localhost/recovery"
+        };
+        write_quit_cleanup_notice(
+            &f.owned,
+            &["[exit] cleanup failed: Compose down failed: synthetic".into()],
+        )
+        .unwrap();
+        let app = f.app(&f.owned, setup);
+        let shell = app.state::<Shell>();
+        let window = app.get_webview_window("main").unwrap();
+        assert!(
+            owned_app_url(&f.owned, &f.ports).is_some(),
+            "survivors must still answer before restore"
+        );
+        assert!(!recovery_required(&shell, &f.owned));
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(window.url().unwrap().as_str(), setup);
+        assert!(recovery_required(&shell, &f.owned));
+        assert!(
+            quit_cleanup_notice_path(&f.owned).exists(),
+            "restore must not consume the persisted notice before React asks for it"
+        );
+        let notice = last_failure(app.handle().clone()).expect("persisted Quit notice");
+        assert_eq!(notice.said, "OpenBot had trouble shutting down last time.");
+        assert!(notice
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("containers stopped"));
+        assert!(!quit_cleanup_notice_path(&f.owned).exists());
+        assert!(recovery_required(&shell, &f.owned));
+    }
+
+    #[test]
+    fn quit_notice_sink_failure_marks_recovery_and_shows_setup() {
+        let f = RestoreFixture::new();
+        let setup = if cfg!(any(windows, target_os = "android")) {
+            "http://tauri.localhost/recovery"
+        } else {
+            "tauri://localhost/recovery"
+        };
+        let app = f.app(&f.owned, setup);
+        let shell = app.state::<Shell>();
+        *shell.root.lock().unwrap() = Some(f.owned.clone());
+        let window = app.get_webview_window("main").unwrap();
+        window
+            .navigate("http://127.0.0.1:3010/running".parse().unwrap())
+            .unwrap();
+        window.hide().unwrap();
+
+        publish_quit_notice_failure(app.handle().clone(), "notice path is unavailable".into());
+
+        assert!(recovery_required(&shell, &f.owned));
+        let failure = last_failure(app.handle().clone()).expect("volatile sink failure");
+        assert_eq!(failure.said, "OpenBot could not record a shutdown problem.");
+        assert!(failure
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("notice path is unavailable"));
+        assert_eq!(window.url().unwrap().as_str(), setup);
+        assert!(window.is_visible().unwrap());
     }
 
     #[test]
