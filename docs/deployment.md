@@ -4,15 +4,21 @@ OpenBot ships as one container. It carries the app, the API that serves it, and 
 drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
 
 ```sh
-docker build -t openbot .
+# Every release publishes this image, so a deployment needs no clone and no build.
+# `latest` is the most recent; a version tag such as `:v0.0.9` pins one.
+image=ghcr.io/copilotkit/openbot:latest
 
 # A database you already run.
-docker run -p 3001:3001 --env-file .env openbot
+docker run -p 3001:3001 --env-file .env "$image"
 
 # Or one inside the container. Nothing else to provision.
 docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql "$image"
 ```
+
+`docker build -t openbot .` from a clone produces the same thing, for anyone deploying a tree of
+their own. What a release publishes is digest-pinned in its `container-images.json`, and deploying
+those digests rather than a moving tag is what [releasing.md](releasing.md) recommends.
 
 ## What is in the image, and what is not
 

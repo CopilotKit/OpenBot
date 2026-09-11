@@ -45,6 +45,18 @@ Use `bun run dev` only when you want the app and API server without starting the
 
 `start.sh` leaves existing matching services alone and reports when a port is held by another process.
 
+**Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
+message is sent, and the only thing that reclaims the ones never sent is
+`bun scripts/cull-staged-attachments.ts` from `server/`, which the Helm chart runs hourly and which
+neither `docker-compose.yml` nor `start.sh` starts. It needs only `DATABASE_URL`, and takes a
+retention window in hours as its one optional argument, defaulting to 24. On a laptop that is
+usually nothing, because the rows are small and the database is yours. It stops being nothing at
+thirty-two: one person may hold that many unsent files across every channel at once, the refusal on
+the next one promises they are cleared within a day, and where nothing sweeps they are not, so a
+long-lived local deployment can reach a state where attaching anything is refused. Removing a file
+in the composer deletes it outright, so it takes abandoned drafts rather than ordinary use.
+[deployment.md](deployment.md) says the same for a real deployment.
+
 ## Migrations
 
 After changing the Drizzle schema:
@@ -107,10 +119,11 @@ reports. Point `DATABASE_URL` at a database of their own to keep the two apart.
 
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
 
-`bun run test:smoke` is separate and needs a deployment that is up:
+`bun run test:smoke` is separate and needs a deployment that is up, and a session on it:
 
 ```sh
 bash scripts/start.sh
+export OPENBOT_SMOKE_COOKIE='better-auth.session_token=...'
 bun run test:smoke
 ```
 
@@ -118,6 +131,13 @@ It drives one journey over HTTP against the running stack, so it covers the join
 suite cannot reach: server to supervisor to computer, the gateway deciding before the browser acts,
 and the audit row landing. Point it elsewhere with `OPENBOT_API_URL`. Without a deployment it is
 skipped by `bun run test` and says what to start when asked for by name.
+
+The session is not optional and not a convenience. Every route the journey proves is behind
+`requireUser`, so without one the three tests that act on a computer answer 401 and the run reports
+a broken deployment when nothing is broken. Take the cookie from a browser already signed in to the
+deployment under test, from DevTools under Application, Cookies. It is a credential with that
+person's reach: it belongs in the environment of the run, not in a file or a pull request comment.
+Asked for without it, the run stops before the first test and names the variable.
 
 `bun run test:live-screen` is separate for a related reason and needs no deployment, only this
 directory's own dependencies:

@@ -120,8 +120,13 @@ the release PR:
 
 ```sh
 bash scripts/start.sh
+export OPENBOT_SMOKE_COOKIE='better-auth.session_token=...'   # from a signed-in browser
 bun run test:smoke
 ```
+
+The session is the second half of "a machine with real credentials": the routes the journey proves
+are behind `requireUser`, so a run without one answers 401 three times and says nothing about the
+release. See [development.md](development.md#quality-checks) for where the cookie comes from.
 
 The release PR asks for the result in a comment. That is deliberately a person rather than a robot:
 it is the one gate that cannot be automated, so it is the one gate worth naming.
