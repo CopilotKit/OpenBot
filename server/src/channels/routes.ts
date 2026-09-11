@@ -137,7 +137,8 @@ function decodeChannelCursor(
  *
  * The browser repeats the recency half when the socket patches a row, and lifts pinned rows at
  * render; both must agree with this, or the list reorders itself on the next event. See `byRecency`
- * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx.
+ * in use-channel-events.ts and `conversationRoster` in app-sidebar/roster.ts, which sorts the
+ * channels and the Slack threads it merges them with by the same rule.
  */
 const PINNED_RANK = sql`case when ${channelMemberships.pinnedAt} is not null then 1 else 0 end`;
 const RECENCY = sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`;

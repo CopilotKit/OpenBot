@@ -46,6 +46,8 @@ import {
 import type { ComputerProvider } from "./provider";
 import type {
   ActionResult,
+  AssistanceCancellationResult,
+  AssistanceStatus,
   ClickInput,
   ComputerStatus,
   ControlState,
@@ -184,13 +186,22 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
     reason: string,
+    requestId?: string,
   ): Promise<ControlState>;
+  cancelAssistance(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+    signal?: AbortSignal,
+  ): Promise<AssistanceCancellationResult>;
+  assistanceStatus(botId: string, requestId: string): Promise<AssistanceStatus>;
   takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
   releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
   requestSecret(
     botId: string,
     actor: ActionActor,
     input: SecretRequest,
+    requestId?: string,
   ): Promise<ControlState>;
   supplySecret(
     botId: string,
@@ -639,9 +650,15 @@ export function createComputerGateway(
      * row and do not ask. What IS recorded is the period: who, when, and why the Bot asked, the fact
      * an investigator wants is that a human drove this browser between two times.
      */
-    async requestHelp(botId: string, actor: ActionActor, reason: string) {
+    async requestHelp(
+      botId: string,
+      actor: ActionActor,
+      reason: string,
+      requestId = crypto.randomUUID(),
+    ) {
       const state = await post<ControlState>(botId, "/control/request", {
         reason,
+        requestId,
       });
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
@@ -649,6 +666,37 @@ export function createComputerGateway(
         reason,
       });
       return state;
+    },
+
+    async cancelAssistance(
+      botId: string,
+      actor: ActionActor,
+      requestId: string,
+      signal?: AbortSignal,
+    ) {
+      const result = await post<AssistanceCancellationResult>(
+        botId,
+        "/control/assistance/cancel",
+        { requestId },
+        signal,
+      );
+      if (result.cancelled) {
+        await writeControlEvent(auditStore, "computer.assistance_cancelled", {
+          botId,
+          actor,
+          reason: "the pending assistance request was cancelled",
+        });
+      }
+      return result;
+    },
+
+    async assistanceStatus(botId: string, requestId: string) {
+      const result = await post<{ status: AssistanceStatus }>(
+        botId,
+        "/control/assistance/status",
+        { requestId },
+      );
+      return result.status;
     },
 
     async takeControl(botId: string, actor: ActionActor) {
@@ -761,8 +809,12 @@ export function createComputerGateway(
       botId: string,
       actor: ActionActor,
       input: SecretRequest,
+      requestId = crypto.randomUUID(),
     ) {
-      const state = await post<ControlState>(botId, "/control/secret", input);
+      const state = await post<ControlState>(botId, "/control/secret", {
+        ...input,
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.secret_requested", {
         botId,
         actor,
@@ -1179,6 +1231,7 @@ async function writeControlEvent(
   auditStore: AuditStore,
   eventType:
     | "computer.help_requested"
+    | "computer.assistance_cancelled"
     | "computer.control_taken"
     | "computer.control_released"
     | "computer.secret_requested"

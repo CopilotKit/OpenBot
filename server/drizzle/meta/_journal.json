@@ -204,6 +204,13 @@
       "when": 1788548093782,
       "tag": "0028_audit_initiator",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788902292130,
+      "tag": "0029_slack_channels",
+      "breakpoints": true
     }
   ]
 }

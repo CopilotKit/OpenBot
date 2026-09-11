@@ -153,7 +153,7 @@ export function applyChannelEvent(
    *
    * The spread below would carry this event's null message onto the row and wipe the preview the
    * roster renders. No re-sort either: a pin is not activity, and pinned rows are lifted at render
-   * time by `pinnedFirst`, not by the order they sit in here.
+   * time by `conversationRoster`, not by the order they sit in here.
    */
   if (activity.pinned !== undefined) {
     if (previous.pinned === activity.pinned) return data;

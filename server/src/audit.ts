@@ -202,6 +202,7 @@ export const auditEventTypes = [
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.
   "computer.help_requested",
+  "computer.assistance_cancelled",
   "computer.control_taken",
   "computer.control_released",
   // A credential a person entered by hand. The row records that it happened, what it was called and
@@ -324,6 +325,7 @@ export const auditEventTypes = [
    */
   "identity_provider.registered",
   "identity_provider.removed",
+  "external_identity.linked",
   /*
    * What a Bot is and what it may reach.
    *
@@ -437,6 +439,15 @@ export type AuditStore = {
   insert: (event: AuditEventInput) => Promise<void>;
 };
 
+export type AuditTransaction = Parameters<
+  Parameters<Database["transaction"]>[0]
+>[0];
+
+/** An audit writer rebound to a caller's transaction, so the event commits with its subject. */
+export type TransactionalAuditStore = AuditStore & {
+  inTransaction: (transaction: AuditTransaction) => AuditStore;
+};
+
 export type AuditEvent = {
   id: string;
   actorUserId: string | null;
@@ -529,15 +540,32 @@ function initiatorColumns(initiator: AuditInitiator | undefined) {
   return { initiatorKind: initiator.kind, initiatorId: initiator.id };
 }
 
-export function createAuditStore(database: Database): AuditStore {
+/**
+ * The row as it is stored, from the event as it was reported.
+ *
+ * One projection for both writers. A transactional writer that built its own row skipped the
+ * redaction and, once initiators arrived, the initiator columns too — so an event committed with
+ * its subject would have been written with an unredacted payload and recorded as though a person
+ * had caused it. Neither is a difference a caller asked for by choosing a transaction.
+ */
+function auditRow({ initiator, ...event }: AuditEventInput) {
   return {
-    insert: async ({ initiator, ...event }) => {
-      await database.insert(auditEvents).values({
-        ...event,
-        ...initiatorColumns(initiator),
-        payload: redactAuditPayload(event.payload) as Record<string, unknown>,
-      });
+    ...event,
+    ...initiatorColumns(initiator),
+    payload: redactAuditPayload(event.payload) as Record<string, unknown>,
+  };
+}
+
+export function createAuditStore(database: Database): TransactionalAuditStore {
+  return {
+    insert: async (event) => {
+      await database.insert(auditEvents).values(auditRow(event));
     },
+    inTransaction: (transaction) => ({
+      insert: async (event) => {
+        await transaction.insert(auditEvents).values(auditRow(event));
+      },
+    }),
   };
 }
 
