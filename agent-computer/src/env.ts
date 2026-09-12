@@ -1,9 +1,20 @@
 /**
- * A positive number from the environment, or the fallback.
+ * A positive whole number from the environment, or the fallback.
  *
  * `Number.parseInt(process.env.X ?? "default")` is not enough: an unset variable declared in a
  * compose file arrives as an empty string rather than as absent, so `??` never fires and the parse
  * yields `NaN`. Empty, absent, non-numeric and non-positive all mean "not set" and take the fallback.
+ *
+ * Whole numbers only: every reader is a port, a timeout in milliseconds, or a count of browsers,
+ * and none of them has a fractional answer. `Number("80.5")` is finite and greater than zero, so
+ * without this `PORT=80.5` bound nothing usable, `ACTION_TIMEOUT_MS=0.5` fired before any action
+ * could finish, and `COMPUTER_MAX_BROWSERS=2.5` reached eviction math as a fraction. Scientific
+ * notation and hex are not whole numbers on sight either, for the same reason `listenPort` on the
+ * supervisor refuses them rather than reading part of one.
+ *
+ * `min`/`max` bound the value where the setting has a range, which is the port: `PORT=99999`
+ * parsed fine and then misbound at boot, a deployment failure instead of the documented fallback.
+ * Timeouts and counts carry no range and stay unbounded above, like before.
  *
  * `zeroSwitchesItOff` is for the one setting where zero is an answer rather than a mistake.
  * `COMPUTER_BROWSER_IDLE_MS=0` is documented as "keeps them resident", and `chooseIdle` reads a
@@ -23,12 +34,18 @@
 export function numberFromEnv(
   name: string,
   fallback: number,
-  { zeroSwitchesItOff = false }: { zeroSwitchesItOff?: boolean } = {},
+  {
+    zeroSwitchesItOff = false,
+    min,
+    max,
+  }: { zeroSwitchesItOff?: boolean; min?: number; max?: number } = {},
 ): number {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return fallback;
+  if (!/^\d+$/.test(raw)) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (min !== undefined && value < min) return fallback;
+  if (max !== undefined && value > max) return fallback;
   return (zeroSwitchesItOff ? value >= 0 : value > 0) ? value : fallback;
 }
 
