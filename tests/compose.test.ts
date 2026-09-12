@@ -17,6 +17,17 @@ function composeFile() {
   );
 }
 
+function rootDockerfile() {
+  return readFileSync(join(import.meta.dir, "..", "Dockerfile"), "utf8");
+}
+
+function agentComputerDockerfile() {
+  return readFileSync(
+    join(import.meta.dir, "..", "agent-computer", "Dockerfile"),
+    "utf8",
+  );
+}
+
 function runLangGraphAguiModelProbe(
   openaiBaseUrl: string | undefined,
   options: {
@@ -416,6 +427,41 @@ test("runs migrations after PostgreSQL becomes healthy", () => {
   expect(compose).toContain("migrate:");
   expect(compose).toContain("condition: service_healthy");
   expect(compose).toContain('"drizzle-kit", "migrate"');
+});
+
+test("builds the deployment image with Playwright's Chromium payload only", () => {
+  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
+    expect(dockerfile).toContain(
+      "FROM node:24.18.1-bookworm-slim AS node-toolchain",
+    );
+    expect(dockerfile).toContain("FROM ubuntu:24.04");
+    expect(dockerfile).not.toContain("mcr.microsoft.com/playwright");
+    expect(dockerfile).toContain("ARG PLAYWRIGHT_VERSION=1.62.1");
+    expect(dockerfile).toContain("ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright");
+    expect(dockerfile).toContain(
+      "COPY --from=node-toolchain /usr/local /usr/local",
+    );
+    expect(dockerfile).toContain(
+      'bunx --bun "playwright@' +
+        "$" +
+        "{PLAYWRIGHT_VERSION}" +
+        '" install --with-deps chromium',
+    );
+    expect(dockerfile).not.toMatch(/\bnodejs\b|\bnpm\b/);
+    expect(dockerfile).not.toMatch(
+      /\binstall(?:\s+--with-deps)?\s+(firefox|webkit)\b/,
+    );
+  }
+
+  const compose = composeFile();
+  expect(compose).toContain(
+    [
+      "agent-computer:",
+      "    build:",
+      "      context: .",
+      "      dockerfile: agent-computer/Dockerfile",
+    ].join("\n"),
+  );
 });
 
 /**

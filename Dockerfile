@@ -14,23 +14,30 @@
 #   no serverless container platform permits. Without it every Bot shares the browser below, exactly
 #   as they do on a laptop with no supervisor configured. Per-Bot isolation is A6.
 #
-# THE BASE IS PLAYWRIGHT'S, not Bun's, because Chromium and its system libraries have to stay
-# matched and that image is the only place that is guaranteed. The tag must move with the
-# `playwright` dependency in `agent-computer/package.json`. Bump both or neither.
+# Chromium comes from Playwright's own installer, but the final image is not Playwright's all-browser
+# image. Keep this version matched to `agent-computer/package.json`: bump both or neither.
 
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
+FROM node:24.18.1-bookworm-slim AS node-toolchain
 
-# unzip is not in the Playwright image and bun's installer needs it.
+FROM ubuntu:24.04 AS base
+
 # Bun is pinned. The installer takes whatever is newest otherwise, so the runtime drifts from the
 # one the lockfile was resolved against and an image built next month is not the image built today.
 ARG BUN_VERSION=1.3.14
+ARG PLAYWRIGHT_VERSION=1.62.1
 # Into /usr/local rather than /root/.bun, because the runtime stage runs as `pwuser` and cannot read
 # root's home. Set before the install, or the installer has already chosen the wrong directory.
 ENV BUN_INSTALL=/usr/local
 ENV PATH="/usr/local/bin:${PATH}"
-RUN apt-get update && apt-get install -y --no-install-recommends unzip xz-utils \
-  && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --from=node-toolchain /usr/local /usr/local
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl unzip xz-utils \
+  && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" \
+  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+  && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/* \
+  && useradd --create-home --shell /bin/bash pwuser
 
 
 FROM base AS deps

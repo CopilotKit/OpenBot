@@ -16,6 +16,7 @@ use openbot_desktop_lib::{
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -2799,6 +2800,10 @@ fn chose(app: &tauri::AppHandle, item: &str) {
     }
 }
 
+fn quit_menu_accelerator() -> Option<&'static str> {
+    Some(QUIT_MENU_ACCELERATOR)
+}
+
 fn main() {
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
@@ -2872,7 +2877,7 @@ fn main() {
 
             let open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
             let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
 
             TrayIconBuilder::with_id("openbot")
@@ -2893,7 +2898,8 @@ fn main() {
             use tauri::menu::Submenu;
             let window_open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
             let window_stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let window_quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let window_quit =
+                MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
             // A submenu, because a top-level entry in a menu bar has to be one to open at all.
             let openbot = Submenu::with_items(
                 app,
@@ -3004,6 +3010,11 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+
+    #[test]
+    fn quit_menu_uses_the_standard_quit_shortcut() {
+        assert_eq!(quit_menu_accelerator(), Some("CmdOrCtrl+KeyQ"));
+    }
 
     #[test]
     fn responsive_quit_returns_while_cleanup_is_blocked_then_exits_in_order() {
