@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Bot in the box and the LangGraph Bot read a message that has a file attached
+
+A message with a file attached reached both Bots as `[object Object],[object Object]`, in place of
+what the person typed and the file both: they read a message as a string, and one carrying a file is
+a list of parts. Each part now reaches the model as what it is — the words, the text of an attached
+file, an attached image — and a part neither can read is named rather than dropped.
+
 ### A fractional or out-of-range computer setting takes the fallback instead of breaking the boot
 
 `numberFromEnv` accepted anything `Number` called finite and positive, so `PORT=80.5` bound
