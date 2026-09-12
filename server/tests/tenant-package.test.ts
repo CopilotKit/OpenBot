@@ -26,13 +26,9 @@ import {
   validateTenantPackage,
   validateThemeCss,
 } from "../src/tenant-package";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
 const createdPackageIds: string[] = [];

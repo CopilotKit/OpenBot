@@ -5,6 +5,7 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
+import { testDatabaseUrl } from "./support/database";
 import { agentProfiles, agents, credentials, users } from "../src/db/schema";
 
 /**
@@ -23,11 +24,7 @@ import { agentProfiles, agents, credentials, users } from "../src/db/schema";
  * effect, so one connection is the honest setting for the question being asked.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  { max: 1 },
-);
+const database = createDatabase(testDatabaseUrl(), { max: 1 });
 
 const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const store = createCredentialStore(database);

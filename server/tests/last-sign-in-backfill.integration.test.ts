@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The migration that gives an existing deployment its answer, run against a real database.
@@ -26,11 +26,7 @@ const entry = JOURNAL.entries.find((candidate) =>
   candidate.tag.endsWith("_backfill_last_signed_in_at"),
 );
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const PREFIX = "backfill-test-";
 const NEWEST = new Date("2026-09-05T09:00:00.000Z");

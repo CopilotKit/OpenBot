@@ -15,7 +15,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Whose credential a call to a `user-oauth` server goes out with.
@@ -31,11 +31,7 @@ import { TEST_POOL } from "./support/database";
  * property: a call with no grant behind it must not leave the building.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const botId = `agent_oauth_bot_${suite}`;

@@ -13,7 +13,7 @@ import {
   suspendClaimedComputers,
 } from "../src/work/culler";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Spinning a computer down when nobody is using it, which is the whole reason the fleet does not
@@ -23,11 +23,7 @@ import { TEST_POOL } from "./support/database";
  * computer nothing is known about. Suspending either takes a person's session away mid-task, and
  * both are easy to get wrong in a way no error ever reports.
  */
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const queue = createWorkQueue(database);
 const suite = randomUUID().slice(0, 8);
 const botOf = (name: string) => `cull-${suite}-${name}`;

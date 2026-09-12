@@ -187,18 +187,19 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_DB: openbot
+          POSTGRES_DB: openbot_test
           POSTGRES_USER: openbot
           POSTGRES_PASSWORD: openbot
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U openbot -d openbot"
+          --health-cmd "pg_isready -U openbot -d openbot_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot
+      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
+      TEST_DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
