@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A skill written with a non-string slug or summary is refused instead of failing the insert
+
+`POST /api/plugins/skills` checked presence with truthiness and then ran the slug regex, which
+coerces: `{"slug":123}` tested the string `"123"` and passed validation, and `{"summary":{}}` had
+no check at all. Both reached the store, where the insert threw an uncaught error — a 500 for a
+caller error. A slug, a title and instructions must be non-empty strings now, the slug pattern is
+tested only after that, and a summary must be absent or a string; anything else is a 400 naming
+the field, before any refusal check, store write, or audit row.
 ### Generated interfaces, tables and forms
 
 Generative UI is enabled by default; set `OPENBOT_GENERATIVE_UI=false` or `0` to disable it.
