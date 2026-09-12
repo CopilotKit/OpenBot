@@ -1,4 +1,4 @@
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useFrontendTool, useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
@@ -174,6 +174,12 @@ export function outputOf(result: ToolOutcome): string {
 /**
  * Parse the SDK-render result string so the transcript can distinguish success, refusal, and failure.
  */
+/** How many things a listing came back with, as the pane's one-line summary. */
+function entriesCountFor(outcome: ComputerOutcome): string {
+  const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
+  return `${entries.length} item${entries.length === 1 ? "" : "s"}`;
+}
+
 function outcomeOf(result: string | undefined): ComputerOutcome {
   if (!result) return {};
   try {
@@ -240,60 +246,13 @@ function didNotWork(outcome: ComputerOutcome): boolean {
 export function ComputerTools() {
   const bot = useActiveBotHolder();
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_navigate",
-    description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
-    handler: async (
-      { url }: { url: string },
-      // Context is optional in the SDK.
-      {
-        signal,
-        toolCall,
-      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
-    ) => {
-      const computerId = bot.current;
-      const result = await callComputer(
-        computerId,
-        "/navigate",
-        {
-          method: "POST",
-          /*
-           * Which turn is asking, so the server can file the picture under it.
-           *
-           * The handler's context carries the tool call, which is worth saying because assuming it
-           * did not is how the frame ended up keyed on the page instead: two visits to one address
-           * then collided, and resolving that by letting the newer win made a past turn's picture
-           * change under the person reading it.
-           */
-          body: { url, ...(toolCall?.id ? { toolCallId: toolCall.id } : {}) },
-        },
-        signal,
-      );
-      /*
-       * This Bot has a page of its own now, so the pane may default to the screen.
-       *
-       * Until it does, the screen shows whatever the shared computer had open last, which may be
-       * another Bot's page from an hour ago. Captioning that as this Bot's screen is confidently
-       * wrong, and worse than showing nothing.
-       */
-      if (result.ok) noteBrowsed(computerId);
-      return result.ok
-        ? {
-            ok: true,
-            title: result.title,
-            url: result.url,
-            text: result.text,
-            truncated: result.truncated,
-          }
-        : result;
-    },
     render: ({ result, status, toolCallId }) => {
+      if (status === "complete") noteBrowsed(bot.current);
       /*
        * The page this turn left open, so reopening the conversation shows what it browsed rather
        * than what the Bot has open now. Only once the turn is finished: while it runs, the live
@@ -339,27 +298,16 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_read",
-    description:
-      "Read the page currently open on your computer, without opening anything. Use this after you " +
-      "click something that changes the page, such as submitting a form, to find out what it now says.",
     parameters: z.object({}),
-    handler: async () => callComputer(bot.current, "/read"),
-    render: () => null,
+    // Nothing to draw: a fragment rather than null, which this hook's signature refuses.
+    render: () => <></>,
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_snapshot",
-    description:
-      "List the things on the current page you can act on: fields, buttons, links and checkboxes, " +
-      "each with a ref, its label and its current value. Call this BEFORE clicking or typing, and " +
-      "use the refs it returns. Always send back the snapshotId it gives you. If an action reports " +
-      "that your refs are stale, the page changed: call this again and use the new refs.",
     parameters: z.object({}),
-    handler: async () =>
-      callComputer(bot.current, "/snapshot", { method: "POST" }),
-    // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
       const elements = Array.isArray(outcome.elements) ? outcome.elements : [];
@@ -377,12 +325,8 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_type",
-    description:
-      "Enter text into a field on the page. Give the ref of the field from your most recent " +
-      "snapshot and the snapshotId it came from. This replaces whatever the field already contains. " +
-      "Set submit to true to press Enter afterwards.",
     parameters: z.object({
       ref: z
         .string()
@@ -394,25 +338,7 @@ export function ComputerTools() {
         .optional()
         .describe("Press Enter after typing, to submit a single-field form"),
     }),
-    handler: async (
-      input: {
-        ref: string;
-        snapshotId: number;
-        text: string;
-        submit?: boolean;
-      },
-      { signal }: { signal?: AbortSignal } = {},
-    ) =>
-      callComputer(
-        bot.current,
-        "/type",
-        {
-          method: "POST",
-          body: input,
-        },
-        signal,
-      ),
-    render: ({ args, result, status }) => (
+    render: ({ parameters: args, result, status }) => (
       <ActionLine
         running={status !== "complete"}
         label="Filled in"
@@ -427,11 +353,8 @@ export function ComputerTools() {
     ),
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_click",
-    description:
-      "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref " +
-      "from your most recent snapshot and the snapshotId it came from.",
     parameters: z.object({
       ref: z
         .string()
@@ -440,20 +363,7 @@ export function ComputerTools() {
         ),
       snapshotId: z.number().describe("The snapshotId that ref came from"),
     }),
-    handler: async (
-      input: { ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
-    ) =>
-      callComputer(
-        bot.current,
-        "/click",
-        {
-          method: "POST",
-          body: input,
-        },
-        signal,
-      ),
-    render: ({ args, result, status }) => {
+    render: ({ parameters: args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
@@ -473,11 +383,8 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_key",
-    description:
-      "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
-      "is focused, or omit the ref to press it on the page.",
     parameters: z.object({
       key: z.string().describe("Key name, such as Enter, Tab or Escape"),
       ref: z.string().optional().describe("Optional ref to press the key on"),
@@ -486,24 +393,7 @@ export function ComputerTools() {
         .optional()
         .describe("The snapshotId the ref came from, required if ref is given"),
     }),
-    handler: async (
-      input: {
-        key: string;
-        ref?: string;
-        snapshotId?: number;
-      },
-      { signal }: { signal?: AbortSignal } = {},
-    ) =>
-      callComputer(
-        bot.current,
-        "/key",
-        {
-          method: "POST",
-          body: input,
-        },
-        signal,
-      ),
-    render: ({ args, result, status }) => (
+    render: ({ parameters: args, result, status }) => (
       <ActionLine
         running={status !== "complete"}
         label="Pressed"
@@ -573,14 +463,8 @@ export function ComputerTools() {
   });
 
   /** Self-reported model declines: audit evidence, not an enforcement control. */
-  useFrontendTool({
+  useRenderTool({
     name: "report_refusal",
-    description:
-      "Record that you DECLINED something you were asked to do, because it looked unsafe, was outside " +
-      "what you are for, or you judged you should not. Call this whenever you say no to a request, in " +
-      "addition to telling the person. It changes nothing about your answer; it exists so an " +
-      "administrator can see what this Bot is being asked to do. Do not call it when you simply could " +
-      "not do something, only when you chose not to.",
     parameters: z.object({
       reason: z
         .string()
@@ -590,24 +474,8 @@ export function ComputerTools() {
         .optional()
         .describe("What you were asked to do, in a few words"),
     }),
-    handler: async (
-      input: { reason: string; request?: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
-      try {
-        const response = await tryClient(
-          `/api/agents/${encodeURIComponent(bot.current)}/declined`,
-          { method: "POST", body: input, signal },
-        );
-        return response.ok
-          ? "Recorded. Now tell the person what you decided and why."
-          : "That could not be recorded. Tell the person what you decided anyway.";
-      } catch {
-        // Audit bookkeeping must not prevent the Bot from answering.
-        return "That could not be recorded. Tell the person what you decided anyway.";
-      }
-    },
-    render: () => null,
+    // Nothing to draw: a fragment rather than null, which this hook's signature refuses.
+    render: () => <></>,
   });
 
   useFrontendTool({
@@ -663,34 +531,24 @@ export function ComputerTools() {
     render: () => null,
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_list_files",
-    description:
-      "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
-      "FIRST when you are asked what files you have, or before reading a file whose exact name you " +
-      "are not sure of. Never guess a filename.",
     parameters: z.object({
       path: z
         .string()
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/list", {
-        method: "POST",
-        body: input ?? {},
-      });
-      recordActivity(computerId, {
-        kind: "list_files",
-        subject: input?.path ?? "the workspace",
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
-    render: ({ result, status }) => {
+    render: ({ result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
+      if (status === "complete") {
+        recordActivity(bot.current, toolCallId, {
+          kind: "list_files",
+          subject: "the workspace",
+          output: `${entriesCountFor(outcome)}`,
+          ...(outcome.refused === true ? { refused: true } : {}),
+        });
+      }
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
       return (
         <ActionLine
@@ -710,33 +568,24 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_read_file",
-    description:
-      "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
-      "such as notes.md or reports/august.csv. Your workspace survives between conversations, so use " +
-      "this to pick up notes you made before.",
     parameters: z.object({
       path: z
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/read", {
-        method: "POST",
-        body: input,
-      });
-      recordActivity(computerId, {
-        kind: "read_file",
-        subject: input.path,
-        output: outputOf(result),
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
-    render: ({ args, result, status }) => {
+    render: ({ parameters: args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
+      if (status === "complete") {
+        recordActivity(bot.current, toolCallId, {
+          kind: "read_file",
+          subject: typeof args?.path === "string" ? args.path : "a file",
+          output: typeof outcome.text === "string" ? outcome.text : "",
+          ...(outcome.refused === true ? { refused: true } : {}),
+          ...(outcome.truncated === true ? { truncated: true } : {}),
+        });
+      }
       return (
         <ActionLine
           running={status !== "complete"}
@@ -755,54 +604,28 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_run_command",
-    description:
-      "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
-      "installing a tool you need, processing a file you saved, running a script. The working " +
-      "directory is your workspace, so paths are relative to it and files you write here are the " +
-      "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
-      "truncated from the start, and a command that runs too long is stopped. " +
-      "You are not the root user, so anything that writes outside your workspace needs sudo, " +
-      "which asks for no password: installing a package is " +
-      "`sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this " +
-      "computer does not grant it, so say so rather than retrying.",
     parameters: z.object({
       command: z
         .string()
         .describe("The command to run, such as: sudo apt-get install -y jq"),
     }),
-    handler: async (
-      input: { command: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
-      const computerId = bot.current;
-      const result = await callComputer(
-        computerId,
-        "/exec",
-        { method: "POST", body: input },
-        signal,
-      );
-      /*
-       * Recorded here rather than in `render`, which runs again on every re-render and would append
-       * the same command each time. This is the only place that runs once per call and has both the
-       * command and what it printed.
-       */
-      recordActivity(computerId, {
-        kind: "command",
-        subject: input.command,
-        output: outputOf(result),
-        ...(typeof result.exitCode === "number"
-          ? { exitCode: result.exitCode }
-          : {}),
-        ...(result.refused === true ? { refused: true } : {}),
-        ...(result.truncated === true ? { truncated: true } : {}),
-        ...(result.timedOut === true ? { timedOut: true } : {}),
-      });
-      return result;
-    },
-    render: ({ args, result, status }) => {
+    render: ({ parameters: args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
+      if (status === "complete") {
+        recordActivity(bot.current, toolCallId, {
+          kind: "command",
+          subject: typeof args?.command === "string" ? args.command : "",
+          output: outputOf(outcome as ToolOutcome),
+          ...(typeof outcome.exitCode === "number"
+            ? { exitCode: outcome.exitCode }
+            : {}),
+          ...(outcome.refused === true ? { refused: true } : {}),
+          ...(outcome.truncated === true ? { truncated: true } : {}),
+          ...(outcome.timedOut === true ? { timedOut: true } : {}),
+        });
+      }
       /*
        * The command on the line, its output behind the chevron.
        *
@@ -840,12 +663,8 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_write_file",
-    description:
-      "Save a file in your own workspace so you still have it later. Paths are relative to your " +
-      "workspace and folders are created as needed. Set append to true to add to the end of an " +
-      "existing file rather than replacing it. Text only.",
     parameters: z.object({
       path: z
         .string()
@@ -858,36 +677,17 @@ export function ComputerTools() {
         .optional()
         .describe("Add to the end of the file instead of replacing it"),
     }),
-    handler: async (input: {
-      path: string;
-      contents: string;
-      append?: boolean;
-    }) => {
-      const computerId = bot.current;
-      const result = await callComputer(computerId, "/files/write", {
-        method: "POST",
-        body: input,
-      });
-      /*
-       * The path and the size, never the contents. A Bot may well be saving something it was told in
-       * confidence, and the write route declines to echo it back for exactly that reason; putting it
-       * in a pane would undo that.
-       */
-      recordActivity(computerId, {
-        kind: "write_file",
-        subject: input.path,
-        output:
-          result.refused === true
-            ? outputOf(result)
-            : typeof result.bytes === "number"
-              ? `${result.bytes} bytes${input.append === true ? ", appended" : ""}`
-              : "",
-        ...(result.refused === true ? { refused: true } : {}),
-      });
-      return result;
-    },
-    render: ({ args, result, status }) => {
+    render: ({ parameters: args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
+      if (status === "complete") {
+        recordActivity(bot.current, toolCallId, {
+          kind: "write_file",
+          subject: typeof args?.path === "string" ? args.path : "a file",
+          // Never the contents: this pane is on screen beside the browser holding somebody's logins.
+          output: "",
+          ...(outcome.refused === true ? { refused: true } : {}),
+        });
+      }
       return (
         <ActionLine
           running={status !== "complete"}
@@ -907,29 +707,14 @@ export function ComputerTools() {
     },
   });
 
-  useFrontendTool({
+  useRenderTool({
     name: "computer_scroll",
-    description:
-      "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",
     parameters: z.object({
       deltaY: z
         .number()
         .optional()
         .describe("Pixels to scroll; positive is down. Defaults to 600."),
     }),
-    handler: async (
-      input: { deltaY?: number },
-      { signal }: { signal?: AbortSignal } = {},
-    ) =>
-      callComputer(
-        bot.current,
-        "/scroll",
-        {
-          method: "POST",
-          body: input,
-        },
-        signal,
-      ),
     render: ({ result, status }) => (
       <ActionLine
         running={status !== "complete"}

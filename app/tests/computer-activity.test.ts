@@ -82,8 +82,12 @@ describe("the activity a pane shows", () => {
   });
 
   test("keeps what a Bot ran, in the order it ran it", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "a\nb" });
-    recordActivity("bot-1", {
+    recordActivity("bot-1", "call-1", {
+      kind: "command",
+      subject: "ls",
+      output: "a\nb",
+    });
+    recordActivity("bot-1", "call-2", {
       kind: "command",
       subject: "pwd",
       output: "/workspace",
@@ -96,7 +100,11 @@ describe("the activity a pane shows", () => {
   });
 
   test("keeps one Bot's work out of another's", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
+    recordActivity("bot-1", "call-3", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
 
     expect(activityFor("bot-2")).toEqual([]);
   });
@@ -108,7 +116,11 @@ describe("the activity a pane shows", () => {
   test("wiping a computer forgets what ran on it", () => {
     // Reset deletes the machine those commands ran on, so leaving them on screen would describe
     // something that no longer exists.
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
+    recordActivity("bot-1", "call-4", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
     clearActivity("bot-1");
 
     expect(activityFor("bot-1")).toEqual([]);
@@ -116,7 +128,7 @@ describe("the activity a pane shows", () => {
 
   test("stops growing, because this is a pane and not an archive", () => {
     for (let index = 0; index < 250; index += 1) {
-      recordActivity("bot-1", {
+      recordActivity("bot-1", `call-${index}`, {
         kind: "command",
         subject: `command-${index}`,
         output: "",
@@ -131,10 +143,53 @@ describe("the activity a pane shows", () => {
   });
 
   test("every entry is distinguishable, so two identical commands both show", () => {
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
-    recordActivity("bot-1", { kind: "command", subject: "ls", output: "" });
+    recordActivity("bot-1", "call-6", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
+    recordActivity("bot-1", "call-7", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
 
     const [first, second] = activityFor("bot-1");
     expect(first?.id).not.toBe(second?.id);
+  });
+
+  test("one call is one entry, however many times a render records it", () => {
+    /*
+     * The property the whole keyed signature exists for. The handlers moved to the server, so the
+     * only place the browser still sees a call is `render` — which runs on every paint. Before the
+     * key, a Bot that ran one command grew a fresh copy of it in the pane on each one.
+     */
+    for (let paint = 0; paint < 5; paint += 1) {
+      recordActivity("bot-1", "one-call", {
+        kind: "command",
+        subject: "bun test",
+        output: "ok",
+      });
+    }
+
+    expect(activityFor("bot-1")).toHaveLength(1);
+  });
+
+  test("a wiped computer can record the same call id again", () => {
+    // Reset gives the Bot a new machine. The key must not outlive the thing it was about, or the
+    // first command on the new computer is silently dropped as a duplicate of one on the old.
+    recordActivity("bot-1", "call-8", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
+    clearActivity("bot-1");
+    recordActivity("bot-1", "call-8", {
+      kind: "command",
+      subject: "ls",
+      output: "",
+    });
+
+    expect(activityFor("bot-1")).toHaveLength(1);
   });
 });

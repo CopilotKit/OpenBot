@@ -12,8 +12,12 @@
  * and it is allowed to be gone when the tab is closed. Keeping it in the browser means no new
  * endpoint, no polling, and no second copy of command output in the database.
  *
- * Written from the tool handlers, which run exactly once per call. A tool's `render` runs on every
- * re-render, so recording from there would append the same command repeatedly.
+ * Written from the tools' `render`, which is now the only place in the browser that sees a call at
+ * all: the handlers moved to the server so that a Bot with no tab open still has a computer.
+ *
+ * `render` runs on every re-render, so recording from it needs an identity to be idempotent, and the
+ * tool call has one. Entries are keyed by `toolCallId`; a second record under a key already held is
+ * dropped. Without that the pane grew a fresh copy of the same command on every paint.
  */
 
 /** One thing a Bot did on its computer. */
@@ -44,25 +48,44 @@ export type ComputerActivity = {
 const LIMIT = 200;
 
 const byComputer = new Map<string, ComputerActivity[]>();
+/** Every tool call already recorded, so a repeated `render` adds nothing. */
+const seen = new Set<string>();
 const listeners = new Set<() => void>();
 
 /** A stable empty array, so `useSyncExternalStore` does not see a new value on every render. */
 const NONE: ComputerActivity[] = [];
 
-let counter = 0;
-
+/**
+ * Record one thing a Bot did, at most once.
+ *
+ * `id` is the tool call's own id. It is required rather than generated because the caller is a
+ * `render` that runs repeatedly for one call, and an id minted here would make every paint a new
+ * entry. Recording under a key already present is a no-op, including after the entry has aged out
+ * of the window: `seen` is what remembers, and it is the thing that keeps a long-running Bot's pane
+ * from redrawing its oldest command as its newest.
+ */
 export function recordActivity(
   computerId: string,
+  id: string,
   entry: Omit<ComputerActivity, "id" | "at">,
 ): void {
-  counter += 1;
+  const key = `${computerId}:${id}`;
+  if (seen.has(key)) return;
+  seen.add(key);
   const existing = byComputer.get(computerId) ?? [];
-  const next = [
-    ...existing,
-    { ...entry, id: `activity-${counter}`, at: Date.now() },
-  ];
+  const next = [...existing, { ...entry, id, at: Date.now() }];
   byComputer.set(computerId, next.slice(-LIMIT));
-  for (const listener of listeners) listener();
+  /*
+   * Deferred, because the caller is now a `render`.
+   *
+   * Notifying synchronously from inside one component's render sets state in the pane subscribed
+   * through `useSyncExternalStore`, which React reports as updating a component while rendering a
+   * different one. The store is already updated by the line above, so the only thing a microtask
+   * delays is the repaint.
+   */
+  queueMicrotask(() => {
+    for (const listener of listeners) listener();
+  });
 }
 
 export function activityFor(computerId: string): ComputerActivity[] {
@@ -105,5 +128,8 @@ export function subscribeToActivity(listener: () => void): () => void {
 export function clearActivity(computerId: string): void {
   byComputer.delete(computerId);
   browsed.delete(computerId);
+  for (const key of seen) {
+    if (key.startsWith(`${computerId}:`)) seen.delete(key);
+  }
   for (const listener of listeners) listener();
 }
