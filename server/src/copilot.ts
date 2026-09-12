@@ -25,6 +25,7 @@ import {
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import { desktopTelemetryProperties } from "./desktop-telemetry";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -2063,9 +2064,10 @@ export function mountCopilotRuntime(
     licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
-    ...(config.accessibility
-      ? { telemetryProperties: { accessibility_title: "OpenBot" } }
-      : {}),
+    telemetryProperties: {
+      ...(config.accessibility ? { accessibility_title: "OpenBot" } : {}),
+      ...desktopTelemetryProperties(),
+    },
     /*
      * What lets a Bot answer with an interface it wrote itself.
      *
