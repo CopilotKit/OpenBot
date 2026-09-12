@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 
@@ -129,6 +135,53 @@ test("setup records only model categories and reaches Ask when telemetry is unav
     expect(serialized).not.toContain(privateValue);
   }
   expect(view.queryByText(/Nothing here leaves this computer/)).toBeNull();
+});
+
+/**
+ * Setup finished and the question box on screen, focused as a person's typing would be. Call
+ * `useCompatibleEndpointSetup` first, as every test here does.
+ */
+async function reachAsk() {
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "record_setup_event") return null;
+    if (command === "ask_the_bot") return "391";
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const question = await view.findByLabelText("Your question");
+  // Keys go to the input that has focus, so the field is entered first.
+  await userEvent.click(question);
+  const asked = () =>
+    invokeCalls.filter((call) => call.command === "ask_the_bot");
+  return { question, asked };
+}
+
+test("the Enter that finishes a composed character does not ask the Bot", async () => {
+  useCompatibleEndpointSetup({});
+  const { question, asked } = await reachAsk();
+
+  // Japanese, Chinese and Korean are typed through an input method, and Enter is how a character is
+  // confirmed. That Enter is still a keydown: Chromium marks it `isComposing`, and WebKit — the
+  // macOS webview — sends it after `compositionend` with the key code 229 instead.
+  await act(async () => {
+    fireEvent.keyDown(question, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(question, { key: "Enter", keyCode: 229 });
+  });
+  expect(asked()).toEqual([]);
+});
+
+test("an ordinary Enter in the question box asks the Bot, once", async () => {
+  // Unchanged by the test above, and pinned so it stays that way.
+  useCompatibleEndpointSetup({});
+  const { question, asked } = await reachAsk();
+
+  await act(async () => {
+    fireEvent.keyDown(question, { key: "Enter", keyCode: 13 });
+  });
+  await waitFor(() => expect(asked()).toHaveLength(1));
 });
 
 type StartStackPayload = {

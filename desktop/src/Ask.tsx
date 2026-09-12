@@ -70,7 +70,20 @@ export function Ask({
           }}
           disabled={asking}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !asking) {
+            /*
+             * NOT THE ENTER THAT FINISHES A COMPOSED CHARACTER. Japanese, Chinese and Korean are
+             * typed through an input method, and Enter is how the character being built is
+             * confirmed. That press is still a keydown: Chromium marks it `isComposing`, and WebKit,
+             * which the macOS webview is, sends it after `compositionend` with the key code 229. Read
+             * as a plain Enter, it sent the question with the last character still unconfirmed. The
+             * chat composer's own Enter already skips it; this one did not.
+             */
+            if (
+              event.key === "Enter" &&
+              !asking &&
+              !event.nativeEvent.isComposing &&
+              event.keyCode !== 229
+            ) {
               ask();
             }
           }}
