@@ -26,6 +26,14 @@ export function Welcome({ onStart }: { onStart: () => void }) {
         Takes a few minutes. OpenBot installs what it needs and asks you to sign
         in to the AI plan you already have.
       </p>
+      <p className="footnote">
+        OpenBot sends setup and usage statistics to CopilotKit by default: a
+        random installation ID, setup steps, platform and engine details,
+        download performance, and Bot and connection choices. Telemetry does not
+        include prompts, files, credentials, email addresses, or server URLs. To
+        turn it off, launch OpenBot with COPILOTKIT_TELEMETRY_DISABLED=1 or
+        DO_NOT_TRACK=1.
+      </p>
     </div>
   );
 }

@@ -13,7 +13,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A skill saying which tools it needs, and that saying so grants nothing.
@@ -24,11 +24,7 @@ import { TEST_POOL } from "./support/database";
  * callable, writing a skill would be a way to grant yourself one.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 

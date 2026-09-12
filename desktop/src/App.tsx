@@ -15,6 +15,12 @@ import {
 } from "./ProviderPicker";
 import { Welcome } from "./Welcome";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
+import {
+  harnessChoiceEvent,
+  modelChoiceEvent,
+  recordSetupEvent,
+  type SetupStep,
+} from "./telemetry";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -129,14 +135,22 @@ export function App() {
       setSigningIn(false);
     }
   }
-  const [step, setStep] = useState<
-    "welcome" | "harness" | "model" | "install" | "ask"
-  >("welcome");
+  const [step, setStep] = useState<SetupStep>("welcome");
   const [apiUrl, setApiUrl] = useState(MANAGED_INTELLIGENCE_API_URL);
   const [wsUrl, setWsUrl] = useState(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const visibleSetupStep =
+    blockerFailure || blocker || (running && step !== "ask") ? null : step;
+  const lastViewedStep = useRef<SetupStep | null>(null);
+  useEffect(() => {
+    if (visibleSetupStep === lastViewedStep.current) return;
+    lastViewedStep.current = visibleSetupStep;
+    if (visibleSetupStep !== null) {
+      recordSetupEvent({ kind: "step_viewed", step: visibleSetupStep });
+    }
+  }, [visibleSetupStep]);
   const configuredRunRef = useRef(0);
   /*
    * A failure, in both registers.
@@ -414,6 +428,9 @@ export function App() {
           chosen={harness}
           onChoose={setHarness}
           onContinue={() => {
+            recordSetupEvent(
+              harnessChoiceEvent(harness?.id ?? DEFAULT_HARNESS),
+            );
             setHarness((choice) =>
               choice?.id === "byo-url"
                 ? { ...choice, agentUrl: choice.agentUrl?.trim() }
@@ -460,6 +477,7 @@ export function App() {
           root={root}
           chosen={model}
           onChoose={(choice) => {
+            recordSetupEvent(modelChoiceEvent(choice));
             setModel(choice);
             setStep("install");
           }}

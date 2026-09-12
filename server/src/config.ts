@@ -251,9 +251,8 @@ export type DeploymentConfig = {
    * Narrowing the middleware to some Bots would leave the rest able to call the tool and draw
    * nothing at all, which is a worse answer than never offering it.
    *
-   * Off until a deployment sets OPENBOT_GENERATIVE_UI. A capability that runs code a model wrote is
-   * one an operator should choose, not one they should discover after an upgrade — and a deployment
-   * that builds its default branch automatically would otherwise acquire it without a decision.
+   * On by default. A deployment that cannot allow generated interfaces can explicitly opt out with
+   * OPENBOT_GENERATIVE_UI=false or OPENBOT_GENERATIVE_UI=0.
    *
    * What it runs is sandboxed by the SDK, in an iframe with no same-origin access to this app, so a
    * generated interface reaches this deployment's data only through what the host hands it. This
@@ -900,16 +899,12 @@ function accessibilityEnabled(environment: Environment): boolean {
 /**
  * Whether a Bot may draw an interface it wrote itself.
  *
- * ASKED FOR, NOT INHERITED, which is the one place this deliberately breaks the symmetry with
- * OPENBOT_ACCESSIBILITY_DISABLED above it. That flag names a deployment out of an analytics label,
- * so defaulting it on costs a fork nothing it would mind. This one decides whether a model may put
- * code it wrote on somebody's screen and pull libraries from a CDN to run it. Written as a disable
- * switch, absence would be the permissive answer, and a deployment acquires the capability by
- * upgrading rather than by choosing it — which is exactly how a deployment that auto-deploys its
- * default branch would find out.
+ * Default-on, matching the product capability the browser can already render. Operators who cannot
+ * allow generated interfaces can explicitly opt out. `false` is the documented spelling and `0` is
+ * accepted alongside it as the conventional off value used by environment-driven switches.
  *
- * Only "true" or "1" turn it on. Anything else is not a way of saying yes, and a value nobody
- * intended should leave a capability off rather than on.
+ * Anything else leaves the capability on. A typo should not silently become an opt-out, and the
+ * capability must stay consistent between runtime and browser projection.
  *
  * The answer has to reach the browser as well as the runtime, which is why it ends up on
  * /api/capabilities rather than staying server-side. Enabling only the runtime half would leave the
@@ -917,8 +912,8 @@ function accessibilityEnabled(environment: Environment): boolean {
  * interface that nothing renders. See DeploymentConfig.generativeUi.
  */
 function generativeUiEnabled(environment: Environment): boolean {
-  const on = optional(environment, "OPENBOT_GENERATIVE_UI");
-  return on === "true" || on === "1";
+  const value = optional(environment, "OPENBOT_GENERATIVE_UI");
+  return value !== "false" && value !== "0";
 }
 
 /**

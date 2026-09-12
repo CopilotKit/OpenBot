@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createDatabase } from "../src/db/client";
+import { testDatabaseUrl } from "./support/database";
 
 /**
  * The address goes to Bun in parts, and `$DATABASE_URL` does not survive the call.
@@ -112,16 +113,19 @@ describe("the database address", () => {
 
 describe("connection parameters on the URL", () => {
   test("survive, because a dropped application_name turns a lock test into a timeout", async () => {
-    const named = createDatabase(
-      "postgres://openbot:openbot@127.0.0.1:5432/openbot?application_name=db_client_address_probe",
-    );
+    const address = new URL(testDatabaseUrl());
+    address.searchParams.set("application_name", "db_client_address_probe");
+    const named = createDatabase(address.toString());
 
-    const rows = await named.execute(
-      "select application_name from pg_stat_activity where pid = pg_backend_pid()",
-    );
-
-    expect(
-      (rows as Array<{ application_name: string }>)[0]?.application_name,
-    ).toBe("db_client_address_probe");
+    try {
+      const rows = await named.execute(
+        "select application_name from pg_stat_activity where pid = pg_backend_pid()",
+      );
+      expect(
+        (rows as Array<{ application_name: string }>)[0]?.application_name,
+      ).toBe("db_client_address_probe");
+    } finally {
+      await named.$client.close();
+    }
   });
 });

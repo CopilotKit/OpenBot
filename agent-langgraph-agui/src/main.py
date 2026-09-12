@@ -15,7 +15,13 @@ from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
-from .tool_runtime import ToolAwareAgent, bind_tools, execute_tools, next_step
+from .tool_runtime import (
+    ToolAwareAgent,
+    bind_tools,
+    execute_tools,
+    model_messages,
+    next_step,
+)
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -152,7 +158,8 @@ def _model():
 
 
 async def answer(state: MessagesState):
-    return {"messages": [await bind_tools(_model()).ainvoke(state["messages"])]}
+    messages = model_messages(state["messages"])
+    return {"messages": [await bind_tools(_model()).ainvoke(messages)]}
 
 
 builder = StateGraph(MessagesState)

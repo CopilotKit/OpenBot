@@ -6,7 +6,7 @@ import {
 } from "../src/computer/policy-store";
 import { createDatabase } from "../src/db/client";
 import { actionPolicy } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The boundary has to survive a restart.
@@ -20,11 +20,7 @@ import { TEST_POOL } from "./support/database";
  * one store would only prove it remembers what it was told a moment ago.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const configured = DEFAULT_ACTION_POLICY;
 const rule = 'intent == "activate" && contains(element.name, "submit")';

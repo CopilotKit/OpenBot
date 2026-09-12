@@ -126,8 +126,9 @@ export function Ask({
       </div>
 
       <p className="footnote">
-        Nothing here leaves this computer except the question, which goes to the
-        AI provider you connected.
+        Your question goes to the AI provider you connected. Setup telemetry
+        records whether your Bot answered, without including your question or
+        its answer.
       </p>
     </div>
   );

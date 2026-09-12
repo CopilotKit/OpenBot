@@ -10,7 +10,7 @@ import {
   CustomServerRefusedError,
   createPluginStore,
 } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Which credential a curated server is allowed to be pointed at.
@@ -28,11 +28,7 @@ import { TEST_POOL } from "./support/database";
  * which the catalogue's own comment invites.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const store = createPluginStore({
   database,
