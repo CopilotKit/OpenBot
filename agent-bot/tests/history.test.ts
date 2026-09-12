@@ -31,6 +31,37 @@ function withoutGuidance(messages: ReturnType<typeof toProviderMessages>) {
   return messages.slice(1);
 }
 
+test("passes AG-UI catalog context to the model while preserving prompt and history order", () => {
+  const run = input([
+    { id: "standing", role: "system", content: "Help with travel planning." },
+    { id: "request", role: "user", content: "Draw a trip card." },
+  ]);
+  const withoutContext = toProviderMessages(run);
+  const catalog = JSON.stringify({
+    components: { Card: { properties: { component: { const: "Card" } } } },
+  });
+  run.context = [
+    { description: "A2UI Component Schema", value: catalog },
+    {
+      description: "A2UI render tool usage guide",
+      value: "Actions use event.name.",
+    },
+  ];
+
+  expect(toProviderMessages(run)).toEqual([
+    withoutContext[0],
+    { role: "system", content: `A2UI Component Schema\n${catalog}` },
+    {
+      role: "system",
+      content: "A2UI render tool usage guide\nActions use event.name.",
+    },
+    ...withoutContext.slice(1),
+  ]);
+  expect(run.messages).toHaveLength(2);
+  run.context = [];
+  expect(toProviderMessages(run)).toEqual(withoutContext);
+});
+
 describe("a tool call nothing ever answered", () => {
   test("is answered, so the next turn is not refused outright", () => {
     const messages = withoutGuidance(
@@ -241,13 +272,10 @@ describe("a tool call restored from the thread store", () => {
       ],
     } as never);
 
-    const withCalls = messages.find(
-      (message: Record<string, unknown>) => message.tool_calls,
-    ) as Record<string, unknown>;
-    const call = (withCalls.tool_calls as Array<Record<string, unknown>>)[0];
-    const fn = call.function as Record<string, unknown>;
+    const withCalls = messages.find((message) => message.role === "assistant");
+    const fn = withCalls?.tool_calls?.[0]?.function;
 
-    expect(fn.name).toBe("computer_navigate");
-    expect(fn.arguments).toBe('{"url":"https://news.ycombinator.com"}');
+    expect(fn?.name).toBe("computer_navigate");
+    expect(fn?.arguments).toBe('{"url":"https://news.ycombinator.com"}');
   });
 });

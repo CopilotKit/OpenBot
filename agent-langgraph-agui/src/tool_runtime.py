@@ -13,8 +13,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 import httpx
-from ag_ui.core import EventType, RunAgentInput, RunErrorEvent, Tool
-from langchain_core.messages import ToolMessage
+from ag_ui.core import Context, EventType, RunAgentInput, RunErrorEvent, Tool
+from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END
 
 from .parallel_tools import ParallelToolAgent
@@ -23,6 +23,7 @@ from .parallel_tools import ParallelToolAgent
 @dataclass(frozen=True)
 class RunTools:
     tools: tuple[Tool, ...] = ()
+    context: tuple[Context, ...] = ()
     deployment: frozenset[str] = frozenset()
     assertion: str = field(default="", repr=False)
 
@@ -45,6 +46,7 @@ class ToolAwareAgent(ParallelToolAgent):
         assertion = props.get("openbotRun", "")
         context = RunTools(
             tools=tuple(input.tools or []),
+            context=tuple(input.context or []),
             deployment=frozenset(name for name in names if isinstance(name, str))
             if isinstance(names, list)
             else frozenset(),
@@ -79,6 +81,22 @@ class ToolAwareAgent(ParallelToolAgent):
             )
         finally:
             _current.reset(token)
+
+
+def model_messages(messages):
+    """Pass AG-UI application context to the model without checkpointing it.
+
+    The maintained integration carries context separately from messages. Our
+    graph uses MessagesState, so its answer node must explicitly include the
+    current catalog/guidelines instead of silently discarding them.
+    """
+    return [
+        *[
+            SystemMessage(content=f"{entry.description}\n{entry.value}")
+            for entry in current_tools().context
+        ],
+        *messages,
+    ]
 
 
 def bind_tools(model):

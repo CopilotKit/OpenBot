@@ -85,8 +85,11 @@ const DEFAULT_PAGE = 50;
  *
  * A ceiling rather than a suggestion, because the limit arrives over HTTP and the whole point of
  * paging is that no single request can be made to read the entire deployment.
+ *
+ * Exported so the route parses against the same ceiling the store enforces, rather than the two
+ * drifting apart unnoticed.
  */
-const MAX_PAGE = 200;
+export const MAX_PAGE = 200;
 
 /** Where a page stopped. Both halves of the sort, because either alone is ambiguous. */
 type Cursor = { lastSignedInAt: string | null; email: string };

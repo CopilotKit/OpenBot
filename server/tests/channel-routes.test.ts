@@ -41,7 +41,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {
@@ -155,6 +155,62 @@ describe("channel input parser", () => {
         active: false,
       }),
     ).toEqual({ ok: true, value: { agentIds: ["agent-1", "agent-2"] } });
+  });
+});
+
+describe("channel list limit", () => {
+  /**
+   * `?limit=` used to be read with `Number.parseInt`, which coerces: `"12abc"` arrived as 12
+   * and `"3.9"` as 3, and every one of them answered 200 with a silently coerced page. A run of
+   * digits is clamped into range like the store already does; anything else is a 400 naming the
+   * parameter, before the store is reached.
+   */
+  function listApp(calls: { queries: unknown[] }) {
+    const store = fakeStore({
+      async list(_actor, query) {
+        calls.queries.push(query);
+        return { channels: [], nextCursor: null };
+      },
+    });
+    return appFor(store);
+  }
+
+  test.each([["12abc"], ["3.9"], ["-5"], ["0x10"], ["%2B5"]])(
+    "refuses a coerced limit %p with 400 and never reaches the store",
+    async (limit) => {
+      const calls = { queries: [] as unknown[] };
+      const response = await listApp(calls).request(
+        `http://openbot.test/?limit=${limit}`,
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: 'Query parameter "limit" must be a positive integer.',
+      });
+      expect(calls.queries).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["10", { limit: 10 }],
+    ["999999", { limit: 200 }],
+    ["0", { limit: 1 }],
+  ])("passes a well-formed limit %p through as %p", async (limit, query) => {
+    const calls = { queries: [] as unknown[] };
+    const response = await listApp(calls).request(
+      `http://openbot.test/?limit=${limit}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.queries).toEqual([query]);
+  });
+
+  test("leaves an absent limit to the store default", async () => {
+    const calls = { queries: [] as unknown[] };
+    const response = await listApp(calls).request("http://openbot.test/");
+
+    expect(response.status).toBe(200);
+    expect(calls.queries).toEqual([{}]);
   });
 });
 
@@ -678,9 +734,7 @@ describe("channel route composition", () => {
   });
 });
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,

@@ -18,11 +18,9 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const managedEndpoint = new URL("https://managed.example.test/ag-ui");
 const mastraManagedEndpoint = new URL("https://managed.example.test/mastra");

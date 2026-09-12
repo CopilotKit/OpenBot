@@ -755,34 +755,31 @@ describe("accessibility", () => {
  * renders rather than merely leaving a capability on.
  */
 describe("generated interfaces", () => {
-  /*
-   * The default is the whole point of this block. Written as a disable switch, an upgrade would hand
-   * every existing deployment the ability to run code a model wrote, and a deployment that builds
-   * its default branch automatically would acquire it without anybody deciding to.
-   */
-  test("are off when nothing is set", () => {
-    expect(loadConfig(baseEnvironment).generativeUi).toBe(false);
+  test("are on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).generativeUi).toBe(true);
   });
 
-  test.each(["true", "1"])("are on for OPENBOT_GENERATIVE_UI=%p", (value) => {
+  test.each(["true", "1"])("stay on for OPENBOT_GENERATIVE_UI=%p", (value) => {
     expect(
       loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
         .generativeUi,
     ).toBe(true);
   });
 
-  /*
-   * Anything else is not a way of saying yes. A value nobody intended — a stray "false", an empty
-   * variable left behind by a template — should leave the capability off, which is the direction
-   * that cannot surprise anybody.
-   */
-  test.each(["false", "no", "", "yes", "TRUE", "on"])(
-    "stay off for OPENBOT_GENERATIVE_UI=%p",
+  test.each(["false", "0"])("are off for OPENBOT_GENERATIVE_UI=%p", (value) => {
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
+        .generativeUi,
+    ).toBe(false);
+  });
+
+  test.each(["no", "", "yes", "TRUE", "on"])(
+    "stay on for OPENBOT_GENERATIVE_UI=%p",
     (value) => {
       expect(
         loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
           .generativeUi,
-      ).toBe(false);
+      ).toBe(true);
     },
   );
 
@@ -794,7 +791,7 @@ describe("generated interfaces", () => {
         ...baseEnvironment,
         OPENBOT_GENERATIVE_UI_DISABLED: "false",
       }).generativeUi,
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 
