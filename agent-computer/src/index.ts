@@ -91,7 +91,11 @@ console.info(
   }),
 );
 
-const PORT = numberFromEnv("PORT", 4100);
+/*
+ * A whole port in range, or the default: a fraction never binds and an out-of-range one
+ * misbinds at boot, which is a deployment failure instead of the documented fallback.
+ */
+const PORT = numberFromEnv("PORT", 4100, { min: 1, max: 65535 });
 const NAVIGATION_TIMEOUT_MS = numberFromEnv("NAVIGATION_TIMEOUT_MS", 30000);
 
 /**

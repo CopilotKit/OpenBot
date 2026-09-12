@@ -15,6 +15,15 @@ final setup screen that Enter also sent the question, with its last character st
 box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
 still asks.
 
+### A fractional or out-of-range computer setting takes the fallback instead of breaking the boot
+
+`numberFromEnv` accepted anything `Number` called finite and positive, so `PORT=80.5` bound
+nothing usable, `PORT=99999` misbound at boot, a fractional timeout fired before any action could
+finish, and `COMPUTER_MAX_BROWSERS=2.5` reached eviction math as a fraction — each reading as a
+broken computer rather than a mistaken variable. Every reader is a port, a timeout, or a count,
+so only whole numbers on sight are values now and anything else takes the documented fallback;
+the port additionally keeps its 1–65535 range, the way the supervisor's own port parser already
+does. Zero semantics are unchanged: `COMPUTER_BROWSER_IDLE_MS=0` still keeps browsers resident.
 ### A malformed page size is refused instead of silently coerced
 
 `GET /channels` and `GET /api/admin/people` read `?limit=` with `Number.parseInt`, which
