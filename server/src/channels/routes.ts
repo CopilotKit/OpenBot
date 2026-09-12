@@ -20,6 +20,7 @@ import type { AgentActor, AgentProfile } from "../agents/profile-types";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
+import { parsePageLimit } from "../paging";
 import {
   agentProfiles,
   channelAgents,
@@ -1064,12 +1065,21 @@ export function createChannelRoutes(
   routes.get("/", requireUser, async (context) => {
     try {
       const url = new URL(context.req.url);
-      const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      /*
+       * Parsed strictly, not coerced: `Number.parseInt` reads `"12abc"` as 12 and `"3.9"`
+       * as 3, so a typo silently returned the wrong page. A run of digits is clamped into
+       * range like the store already does; anything else is a 400 naming the parameter.
+       */
+      const parsed = parsePageLimit(
+        url.searchParams.get("limit"),
+        MAX_CHANNEL_PAGE,
+      );
+      if (!parsed.ok) return context.json({ error: parsed.error }, 400);
       const page = await store.list(context.var.actor, {
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
       return context.json({

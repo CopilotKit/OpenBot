@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A malformed page size is refused instead of silently coerced
+
+`GET /channels` and `GET /api/admin/people` read `?limit=` with `Number.parseInt`, which
+coerces: `?limit=12abc` arrived as 12, `?limit=3.9` as 3, and each answered 200 with a silently
+wrong page. Both now share one strict parser with the audit list's rule: absent or blank leaves
+the store default alone, a run of digits is clamped into range against the same ceiling the store
+enforces, and anything else is a 400 naming the parameter, before the database is reached.
 ### A skill written with a non-string slug or summary is refused instead of failing the insert
 
 `POST /api/plugins/skills` checked presence with truthiness and then ran the slug regex, which
