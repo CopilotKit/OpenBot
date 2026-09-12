@@ -233,6 +233,51 @@ def snapshot(events):
 
 
 @pytest.mark.asyncio
+async def test_a2ui_catalog_context_reaches_model_without_entering_history(boundary):
+    body = run_input(
+        [],
+        messages=[{
+            "id": "context-request", "role": "user", "content": "Draw a trip card"
+        }],
+    )
+    catalog = json.dumps({
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
+        "components": {"Card": {"properties": {"component": {"const": "Card"}}}},
+    })
+    body["context"] = [
+        {
+            "description": (
+                "A2UI Component Schema — available components for generating UI surfaces. "
+                "Use these component names and properties when creating A2UI operations."
+            ),
+            "value": catalog,
+        },
+        {
+            "description": "A2UI render tool usage guide",
+            "value": "Use component: Card, not type: card. Actions use event.name.",
+        },
+    ]
+
+    events = await run_protocol(body)
+    model_messages = boundary["model"][0]["messages"]
+    system = [
+        message["content"] for message in model_messages
+        if message["role"] == "system"
+    ]
+    assert any(catalog in content for content in system)
+    assert any("Actions use event.name." in content for content in system)
+    assert catalog not in json.dumps(snapshot(events))
+    assert "synthetic-run-assertion" not in json.dumps(model_messages)
+
+    # A later request on the same graph thread uses its current context, not a checkpointed catalog.
+    body["runId"] = str(uuid4())
+    body["messages"] = [{"id": "context-next", "role": "user", "content": "Continue"}]
+    body["context"] = []
+    await run_protocol(body)
+    assert catalog not in json.dumps(boundary["model"][-1]["messages"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["computer_navigate", "computer_run_command"])
 async def test_surface_tool_calls_end_then_consume_actual_client_result(boundary, name):
     body = run_input([name])

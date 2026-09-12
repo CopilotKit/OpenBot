@@ -217,6 +217,7 @@ async function inspectOwned(names: ComputerNames): Promise<{
   port?: number;
   image?: string;
   startedAt?: string;
+  token?: string;
 } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
@@ -230,6 +231,9 @@ async function inspectOwned(names: ComputerNames): Promise<{
       // The resolved image, not the tag it was started from. A tag moves when the image is
       // rebuilt; this is what the container is actually running.
       ...(info.Image ? { image: info.Image } : {}),
+      // The token this container was born holding, which is the one it will check callers against
+      // for the rest of its life. See `holdsCurrentToken`.
+      token: tokenIn(info.Config?.Env),
       /*
        * When this run of the container began, which is what tells two runs apart.
        *
@@ -279,6 +283,46 @@ async function runsCurrentImage(
   } catch {
     return true;
   }
+}
+
+/** `COMPUTER_TOKEN=...` out of a list of `KEY=value`, which is how both sides carry an environment. */
+function tokenIn(environment: string[] | undefined): string | undefined {
+  const entry = environment?.find((line) => line.startsWith(`${TOKEN_NAME}=`));
+  return entry?.slice(TOKEN_NAME.length + 1);
+}
+
+const TOKEN_NAME = "COMPUTER_TOKEN";
+
+/**
+ * Whether the computer that exists will accept the token this deployment now hands out.
+ *
+ * A computer is checked against the `COMPUTER_TOKEN` it was created with, and it holds that one for
+ * as long as the container lives. Normally that is nothing to worry about, because the shell mints
+ * the generated secrets once per deployment and deliberately does not rotate them: a computer
+ * outliving a restart is the reason it does not.
+ *
+ * The token does change, though, on exactly the occasion nobody tests: a machine set up again from
+ * nothing. Emptying the credential store, or installing over a deployment whose secrets are gone,
+ * mints a new one. Compose then rebuilds everything it owns with it, the supervisor included, and
+ * the computers are the one thing compose does not own. They survive, holding the old token, and
+ * every call to them comes back 401.
+ *
+ * What that looks like to a person is the reason this is a defect rather than an inconvenience: the
+ * gateway allows the action and the trail records it as carried out, the computer refuses it, and
+ * the screen says "Not authorised" while naming nothing. Found on a first run of v0.0.9 against a
+ * computer container created by the install before it, five days earlier.
+ *
+ * A deployment that sets no token is not a mismatch. That is a computer with no door on it, which is
+ * a choice the environment makes, and replacing a working browser over it would be this function
+ * inventing a policy of its own.
+ */
+function holdsCurrentToken(
+  existingToken: string | undefined,
+  environment: string[],
+): boolean {
+  const wanted = tokenIn(environment);
+  if (wanted === undefined) return true;
+  return existingToken === wanted;
 }
 
 /** Long enough for a cold start with a large image, short enough that a caller is not left hanging. */
@@ -440,7 +484,11 @@ export async function ensure(
      * ended, and a Bot carrying an hour-old handover prompt into a new conversation is the symptom
      * that found this.
      */
-    if (existing && !(await runsCurrentImage(existing.image, options.image))) {
+    if (
+      existing &&
+      (!(await runsCurrentImage(existing.image, options.image)) ||
+        !holdsCurrentToken(existing.token, options.environment))
+    ) {
       try {
         await docker
           .getContainer(names.container)

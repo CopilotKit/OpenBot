@@ -567,14 +567,27 @@ export function createPluginRoutes(
    */
   routes.post("/skills", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
-      slug?: string;
-      title?: string;
-      summary?: string;
-      instructions?: string;
+      slug?: unknown;
+      title?: unknown;
+      summary?: unknown;
+      instructions?: unknown;
       global?: boolean;
       tools?: unknown;
     } | null;
-    if (!body?.slug || !body?.title?.trim() || !body?.instructions?.trim()) {
+    /*
+     * The body is JSON, so the annotations are wishes: `{"slug":123}` passes a truthiness
+     * check and `RegExp.test` then coerces it to `"123"`, and `{"summary":{}}` reaches the
+     * store where the insert throws a 500. A slug, a title and instructions are non-empty
+     * strings here, and a summary is absent or a string. Anything else is a 400 before
+     * any refusal check, store write, or audit row.
+     */
+    if (
+      typeof body?.slug !== "string" ||
+      typeof body?.title !== "string" ||
+      !body.title.trim() ||
+      typeof body?.instructions !== "string" ||
+      !body.instructions.trim()
+    ) {
       return context.json(
         { error: "A slug, a title and instructions are required." },
         400,
@@ -583,6 +596,12 @@ export function createPluginRoutes(
     if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(body.slug)) {
       return context.json(
         { error: "A slug is lower-case letters, numbers and hyphens." },
+        400,
+      );
+    }
+    if (body.summary !== undefined && typeof body.summary !== "string") {
+      return context.json(
+        { error: "A summary is text when it is present." },
         400,
       );
     }

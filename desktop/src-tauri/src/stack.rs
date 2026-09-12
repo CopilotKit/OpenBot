@@ -179,6 +179,36 @@ fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command 
     command
 }
 
+/// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
+/// Keep this separate from `up`: image transfer must not include container startup or migrations.
+/// Older providers without a missing-only pull policy retain the existing implicit pull in `up`;
+/// no pull metric is reported for that unmeasurable path.
+pub fn pull(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    bots: BundledBots,
+    secrets: &Secrets,
+    on_complete: impl FnOnce(crate::pull_metrics::PullMetrics),
+) -> Result<(), Problem> {
+    let Some(json_progress) = crate::pull_metrics::compose_pull_progress(engine) else {
+        return Ok(());
+    };
+    let mut requested = selected_services(harness, bots);
+    requested.push("migrate");
+    let mut command = compose_command(engine, root, secrets);
+    if json_progress {
+        command.args(["--progress", "json"]);
+    }
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    command
+        .args(["pull", "--policy", "missing", "--include-deps"])
+        .args(&requested);
+    crate::pull_metrics::run(command, None, json_progress, on_complete)
+}
+
 /// Raise the containers.
 ///
 /// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,

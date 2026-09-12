@@ -65,6 +65,103 @@ describe("POST /api/plugins/grants", () => {
   });
 });
 
+describe("POST /api/plugins/skills", () => {
+  function skillsApp(calls: { installs: unknown[] }) {
+    const store = {
+      grant: async () => ({ ok: true }),
+      callTool: async () => ({ ok: true }),
+      skillOwner: async () => null,
+      installSkill: async (input: unknown) => {
+        calls.installs.push(input);
+      },
+      listSkills: async () => [],
+    } as unknown as PluginStore;
+    const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+      context,
+      next,
+    ) => {
+      context.set("actor", {
+        id: "user-1",
+        email: "user@openbot.test",
+        role: "admin",
+      });
+      await next();
+    };
+    const canUseBot: BotAccessCheck = async () => true;
+    return createPluginRoutes(store, requireUser, canUseBot);
+  }
+
+  /**
+   * The body is JSON, so the annotations are wishes.
+   *
+   * `{"slug":123,...}` is truthy and `RegExp.test` coerces it to `"123"`, so it used to pass
+   * validation; `{"summary":{}}` reached the store where the insert threw a 500. Both are caller
+   * errors and answer 400 before any refusal check, store write, or audit row.
+   */
+  test.each([
+    ["a number slug", { slug: 123, title: "t", instructions: "i" }],
+    ["an object slug", { slug: {}, title: "t", instructions: "i" }],
+    ["a number title", { slug: "ok-slug", title: 42, instructions: "i" }],
+    [
+      "a number instructions",
+      { slug: "ok-slug", title: "t", instructions: 42 },
+    ],
+    [
+      "an object summary",
+      { slug: "ok-slug", title: "t", instructions: "i", summary: {} },
+    ],
+    [
+      "an array summary",
+      { slug: "ok-slug", title: "t", instructions: "i", summary: [] },
+    ],
+    [
+      "a number summary",
+      { slug: "ok-slug", title: "t", instructions: "i", summary: 42 },
+    ],
+    [
+      "a whitespace title",
+      { slug: "ok-slug", title: "   ", instructions: "i" },
+    ],
+    [
+      "a whitespace instructions",
+      { slug: "ok-slug", title: "t", instructions: "  " },
+    ],
+  ])("refuses %s with 400 and never reaches the store", async (_n, body) => {
+    const calls = { installs: [] as unknown[] };
+    const response = await skillsApp(calls).request(
+      "http://openbot.test/skills",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.installs).toEqual([]);
+  });
+
+  test("a well-formed skill still installs", async () => {
+    const calls = { installs: [] as unknown[] };
+    const response = await skillsApp(calls).request(
+      "http://openbot.test/skills",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug: "ok-slug",
+          title: "t",
+          instructions: "i",
+          summary: "s",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.installs).toHaveLength(1);
+  });
+});
+
 describe("POST /api/plugins/call", () => {
   test.each([
     ["a number ref", { ref: 123, agentId: "bot-1" }],
