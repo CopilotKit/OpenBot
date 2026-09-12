@@ -297,6 +297,66 @@ describe("a computer built from an older image", () => {
     expect(kept.map(createdAt)).toEqual(volumes.map(createdAt));
   }, 180_000);
 
+  /*
+   * The install that reached the containers but not the computers.
+   *
+   * A computer checks callers against the `COMPUTER_TOKEN` it was created with and keeps that one
+   * for the life of the container. Setting a machine up again from nothing mints a new token:
+   * compose rebuilds everything it owns with it, and the computers, which the supervisor makes
+   * rather than compose, survive holding the old one. Every call to them is then a 401 that no
+   * screen can account for, because the gateway allowed the action and the trail says it was
+   * carried out.
+   *
+   * Found on a first run of v0.0.9 against a computer container the install before it had made.
+   */
+  test("is replaced when it holds a token this deployment no longer uses", async () => {
+    await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [`COMPUTER_TOKEN=${"old-token"}`],
+    });
+    const before = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    const state = await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [`COMPUTER_TOKEN=${"new-token"}`],
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    expect(state).not.toBeNull();
+    expect(after.Id).not.toBe(before.Id);
+    expect(after.Config.Env).toContain("COMPUTER_TOKEN=new-token");
+    expect(after.State.Health?.Status).toBe("healthy");
+  }, 180_000);
+
+  test("is left alone when it holds the token asked for", async () => {
+    /*
+     * The half that keeps this from replacing a working browser on every request, which is the same
+     * risk the image comparison beside it carries. A deployment that sets no token at all is also
+     * not a mismatch: that is a choice the environment made, not something to act on.
+     */
+    const environment = ["COMPUTER_TOKEN=steady"];
+    await withDocker().supervisor.ensure(names, { image: IMAGE, environment });
+    const before = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    await withDocker().supervisor.ensure(names, { image: IMAGE, environment });
+    const withNone = await withDocker().supervisor.ensure(names, {
+      image: IMAGE,
+      environment: [],
+    });
+    const after = await withDocker()
+      .docker.getContainer(names.container)
+      .inspect();
+
+    expect(withNone).not.toBeNull();
+    expect(after.Id).toBe(before.Id);
+  }, 180_000);
+
   test("is left alone when it is already the image asked for", async () => {
     /*
      * The other half, and the one that keeps this from being a fix that restarts every computer on

@@ -4,12 +4,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_telemetry;
+
 #[cfg(test)]
 mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, install,
-    problem::Problem, provider, quiet, stack, supervise, tray, windows as win,
+    problem::Problem, provider, pull_metrics, quiet, stack, supervise, telemetry, tray,
+    windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -259,6 +262,17 @@ fn report<R: tauri::Runtime>(
     ok: bool,
     detail: impl Into<String>,
 ) {
+    if !ok {
+        let error_class = match step {
+            "install-engine" => telemetry::SetupErrorClass::EngineInstallFailed,
+            "engine" | "create-machine" | "start-machine" | "health-gate" => {
+                telemetry::SetupErrorClass::EngineUnavailable
+            }
+            "env" | "ports" => telemetry::SetupErrorClass::InvalidConfiguration,
+            _ => telemetry::SetupErrorClass::Unknown,
+        };
+        desktop_telemetry::failure(app, error_class);
+    }
     let _ = app.emit(
         "setup:progress",
         Progress {
@@ -292,13 +306,46 @@ fn cleanup_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 }
 
 #[tauri::command]
-fn detect_engine() -> engine::EngineStatus {
-    engine::detect()
+fn detect_engine<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> engine::EngineStatus {
+    let status = engine::detect();
+    desktop_telemetry::observe_engine(&app, &status);
+    status
 }
 
 #[tauri::command]
-fn windows_blocker() -> Result<Option<win::Blocker>, Problem> {
-    win::blocker()
+fn windows_blocker<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<win::Blocker>, Problem> {
+    let result = win::blocker();
+    if cfg!(target_os = "windows") {
+        use telemetry::WindowsStageOutcome as Outcome;
+        let outcome = match &result {
+            Ok(None) => Outcome::Ready,
+            Ok(Some(win::Blocker::WslAbsent)) => Outcome::WslAbsent,
+            Ok(Some(win::Blocker::WslOne)) => Outcome::WslOne,
+            Ok(Some(win::Blocker::WslNoKernel)) => Outcome::WslNoKernel,
+            Ok(Some(win::Blocker::VirtualMachinePlatformDisabled)) => {
+                Outcome::VirtualMachinePlatformDisabled
+            }
+            Ok(Some(win::Blocker::VirtualizationDisabled)) => Outcome::VirtualizationDisabled,
+            Ok(Some(win::Blocker::NotAdministrator)) => Outcome::NotAdministrator,
+            Err(_) => Outcome::CheckFailed,
+        };
+        desktop_telemetry::record(&app, telemetry::EventData::WindowsStage { outcome });
+    }
+    result
+}
+
+#[tauri::command]
+fn record_setup_event<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: serde_json::Value) {
+    if let Ok(
+        event @ (telemetry::EventData::StepViewed { .. }
+        | telemetry::EventData::HarnessChosen { .. }
+        | telemetry::EventData::ModelChosen { .. }),
+    ) = serde_json::from_value(event)
+    {
+        desktop_telemetry::record(&app, event);
+    }
 }
 
 #[tauri::command]
@@ -327,6 +374,7 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
 /// nothing moving in it reads as a hang.
 async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem> {
     let found = engine::detect();
+    desktop_telemetry::observe_engine(app, &found);
     let root = stack::default_root();
     let existing = tauri::async_runtime::spawn_blocking(move || {
         ready_responding_engine_after_compose_repair(
@@ -370,17 +418,33 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
         true,
         "Looking for the software OpenBot runs on.",
     );
-    let installed =
-        tauri::async_runtime::spawn_blocking(|| install::install_engine(&stack::default_root()))
-            .await
-            .map_err(|error| {
-                Problem::with(
-                    "OpenBot could not install the software it needs. Try again.",
-                    format!("the install task did not run: {error}"),
-                )
-            })?;
+    let telemetry_app = app.clone();
+    let installed = tauri::async_runtime::spawn_blocking(move || {
+        install::install_engine_observed(&stack::default_root(), |success| {
+            desktop_telemetry::record(
+                &telemetry_app,
+                telemetry::EventData::EngineInstalled {
+                    engine: telemetry::Engine::Podman,
+                    outcome: if success {
+                        telemetry::EngineInstallOutcome::Success
+                    } else {
+                        telemetry::EngineInstallOutcome::Failure
+                    },
+                },
+            );
+        })
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not install the software it needs. Try again.",
+            format!("the install task did not run: {error}"),
+        )
+    })?;
     match installed {
-        Ok(said) => report(app, "install-engine", true, said),
+        Ok(said) => {
+            report(app, "install-engine", true, said);
+        }
         Err(problem) => {
             report(app, "install-engine", false, problem.said.clone());
             return Err(problem);
@@ -409,6 +473,7 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
     }
 
     let ready = engine::detect();
+    desktop_telemetry::observe_engine(app, &ready);
     ready
         .address
         .clone()
@@ -881,7 +946,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * store, and travel from there to the processes that need them as environment, which is where
          * a secret can live without being written down. See `vault` for what each platform gets.
          */
-        let (settings, secrets) = openbot_desktop_lib::vault::split(settings);
+        let (settings, mut secrets) = openbot_desktop_lib::vault::split(settings);
         /*
          * The credentials, plus any setting this answer dropped.
          *
@@ -904,6 +969,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
             &credential,
         )?;
         report(&app, "env", true, "settings written, credentials stored");
+        // Set before Bun imports the runtime, and retained for supervised restarts.
+        secrets.extend(desktop_telemetry::runtime_env(&app));
 
         // Said before rather than after. On a machine that has never run OpenBot this pulls five
         // images, and a person watching a button that says "Working" has no way to tell a download
@@ -954,6 +1021,17 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
          */
         let bundled_bots = stack::BundledBots::for_credential(&credential);
+        attempt.require_current()?;
+        stack::pull(
+            &found,
+            &root,
+            installed_harness,
+            bundled_bots,
+            &secrets,
+            |metrics| {
+                desktop_telemetry::pull_completed(&app, metrics);
+            },
+        )?;
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -2007,11 +2085,17 @@ facts about the deployment, and a window carrying them would be a second copy to
 */
 #[tauri::command]
 async fn ask_the_bot<R: tauri::Runtime>(
-    _app: tauri::AppHandle<R>,
+    app: tauri::AppHandle<R>,
     root: String,
     question: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    ask_the_bot_inner(stack::root_from(&root), question).await
+    let result = ask_the_bot_inner(stack::root_from(&root), question).await;
+    if result.is_ok() {
+        desktop_telemetry::record(&app, telemetry::EventData::Activated);
+    } else {
+        desktop_telemetry::failure(&app, telemetry::SetupErrorClass::Unknown);
+    }
+    result
 }
 
 async fn ask_the_bot_inner(root: PathBuf, question: String) -> Result<String, Problem> {
@@ -2224,8 +2308,12 @@ async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<Str
     // installed either yet.
     let address = engine_ready(&app).await?;
     let image = sign_in_image(&app, &root, openbot_desktop_lib::plan::SIGN_IN_IMAGE).await?;
+    let telemetry_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        openbot_desktop_lib::plan::SigningIn::begin(&address, &image)
+        pull_metrics::pull_image(&address, &image, |metrics| {
+            desktop_telemetry::pull_completed(&telemetry_app, metrics);
+        })?;
+        openbot_desktop_lib::plan::SigningIn::begin(&address, &image).map_err(Problem::from)
     })
     .await
     .map_err(|error| {
@@ -2285,7 +2373,11 @@ async fn begin_chatgpt_sign_in(
         openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
     )
     .await?;
+    let telemetry_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
+        pull_metrics::pull_image(&address, &image, |metrics| {
+            desktop_telemetry::pull_completed(&telemetry_app, metrics);
+        })?;
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
     .await
@@ -2719,6 +2811,7 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
+            record_setup_event,
             detect_engine,
             windows_blocker,
             windows_blocker_instruction,
@@ -2764,6 +2857,7 @@ fn main() {
             }
         })
         .setup(|app| {
+            desktop_telemetry::initialize(app.handle());
             // Where the Compose provider OpenBot installs itself lives, told once so every engine
             // command can put it on the child's PATH. Before anything asks for an engine.
             engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
@@ -2860,6 +2954,7 @@ fn main() {
                         code,
                         || api.prevent_exit(),
                         move || {
+                            desktop_telemetry::shutdown(&cleaning_app);
                             let shell = cleaning_app.state::<Shell>();
                             exit_cleanup_with(
                                 &shell,

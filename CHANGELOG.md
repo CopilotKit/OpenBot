@@ -16,6 +16,59 @@ match, still wrote a `plugin_revoked` audit row naming whitespace, and answered 
 `POST` twin already required trimmed non-empty strings. `DELETE` requires the same now and acts
 on the trimmed values, so a blank ref or Bot is a 400 with the same message, no delete, and no
 audit row.
+### A fractional or out-of-range computer setting takes the fallback instead of breaking the boot
+
+`numberFromEnv` accepted anything `Number` called finite and positive, so `PORT=80.5` bound
+nothing usable, `PORT=99999` misbound at boot, a fractional timeout fired before any action could
+finish, and `COMPUTER_MAX_BROWSERS=2.5` reached eviction math as a fraction — each reading as a
+broken computer rather than a mistaken variable. Every reader is a port, a timeout, or a count,
+so only whole numbers on sight are values now and anything else takes the documented fallback;
+the port additionally keeps its 1–65535 range, the way the supervisor's own port parser already
+does. Zero semantics are unchanged: `COMPUTER_BROWSER_IDLE_MS=0` still keeps browsers resident.
+### A malformed page size is refused instead of silently coerced
+
+`GET /channels` and `GET /api/admin/people` read `?limit=` with `Number.parseInt`, which
+coerces: `?limit=12abc` arrived as 12, `?limit=3.9` as 3, and each answered 200 with a silently
+wrong page. Both now share one strict parser with the audit list's rule: absent or blank leaves
+the store default alone, a run of digits is clamped into range against the same ceiling the store
+enforces, and anything else is a 400 naming the parameter, before the database is reached.
+### A skill written with a non-string slug or summary is refused instead of failing the insert
+
+`POST /api/plugins/skills` checked presence with truthiness and then ran the slug regex, which
+coerces: `{"slug":123}` tested the string `"123"` and passed validation, and `{"summary":{}}` had
+no check at all. Both reached the store, where the insert threw an uncaught error — a 500 for a
+caller error. A slug, a title and instructions must be non-empty strings now, the slug pattern is
+tested only after that, and a summary must be absent or a string; anything else is a 400 naming
+the field, before any refusal check, store write, or audit row.
+### Generated interfaces, tables and forms
+
+Generative UI is enabled by default; set `OPENBOT_GENERATIVE_UI=false` or `0` to disable it.
+Bots can render A2UI interfaces, compare records in sortable tables, and collect related answers in
+a form that waits for submission. LangGraph receives the component schemas needed to draw these
+interfaces correctly.
+
+The playground rejects invalid JSON before saving or publishing, confirms successful saves, and
+shows published custom components in the administrator's gallery.
+
+### A Bot's computer is rebuilt when it holds a token the deployment has stopped using
+
+A computer checks every caller against the `COMPUTER_TOKEN` it was created with, and holds that one
+for the life of the container. The shell mints the generated secrets once per deployment and does
+not rotate them, precisely because a computer outlives a restart, so ordinarily there is nothing
+here to go wrong. Setting a machine up again from nothing is the occasion where the token really
+does change: the credential store is emptied, a new one is minted, compose rebuilds everything it
+owns with it, and the computers, which the supervisor makes rather than compose, survive holding the
+old one.
+
+Everything then refuses, and nothing says why. The gateway allows the action and the trail records it
+as carried out, the computer answers 401, and the screen says "Not authorised" while naming no token
+and no container. Measured on a first run of v0.0.9 against a computer made by the install before it,
+five days earlier: every page the Bot tried to open, and the live screen beside it, failed that way.
+
+The supervisor now replaces a computer whose token is not the one it is handing out, the same way it
+already replaces one built from an older image, keeping the profile and workspace volumes so the Bot
+comes back with its logins and its files. A deployment that sets no token is left alone, because a
+computer with no door on it is a choice the environment made rather than a mismatch to act on.
 
 ## 0.0.9
 

@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The one mechanism suspending idle computers, running routines and handing work between Bots all
@@ -14,11 +14,7 @@ import { TEST_POOL } from "./support/database";
  * the database makes about two transactions racing, and a stub that returns rows in order would pass
  * every test below while the real thing handed one item to two replicas.
  */
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const queue = createWorkQueue(database);
 const kind = `test.${randomUUID().slice(0, 8)}`;
 

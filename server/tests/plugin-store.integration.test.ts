@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -42,7 +42,7 @@ import {
   TokenRefusedError,
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -53,11 +53,7 @@ import { TEST_POOL } from "./support/database";
  * the vendor, so there is nothing to stub.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_plugin_holder_${suite}`;
@@ -76,8 +72,9 @@ let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
  * The id is a real catalogue key rather than a suite-scoped one, because what is under test includes
  * the vendor's own read/write classification. On a database somebody is using, that key is their
  * configured server, so it is removed only when the test is what created it.
+ * Assume it belongs to the deployment until setup has checked, including when setup fails early.
  */
-let serverWasAlreadyConfigured = false;
+let serverWasAlreadyConfigured = true;
 /**
  * Whether this deployment already advertised the tool this suite inserts.
  *
@@ -85,10 +82,12 @@ let serverWasAlreadyConfigured = false;
  * vendor rather than the suite's fixture. Deleting by name regardless would take a real one; leaving
  * it always would leave a fixture that reads on screen as a tool the vendor offers.
  */
-let toolWasAlreadyAdvertised = false;
+let toolWasAlreadyAdvertised = true;
 
 const revokedCredentialIds: string[] = [];
 const issuedCredentialIds: string[] = [];
+const removalServerIds = new Set<string>();
+const removalUserIds = new Set<string>();
 const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
@@ -206,6 +205,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // removeServer is under test, so teardown must not depend on it succeeding. Delete the exact
+  // attempted fixtures before their credentials, including when setup failed partway through.
+  if (removalServerIds.size > 0) {
+    await database
+      .delete(mcpServers)
+      .where(inArray(mcpServers.id, [...removalServerIds]));
+  }
+  if (removalUserIds.size > 0) {
+    await database.delete(users).where(inArray(users.id, [...removalUserIds]));
+  }
   /*
    * Scoped to this suite's own Bots, never to the ref alone.
    *
@@ -604,6 +613,7 @@ describe("removing an MCP server", () => {
     // `credentials_active_key_idx`. The audit trail also carries the
     // revocation with `reason: mcp_server_removed`.
     const removalServerId = `removal-target-${suite}`;
+    removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
     const [credentialRow] = await database
       .insert(credentialRows)
@@ -667,6 +677,8 @@ describe("removing an MCP server", () => {
   test("revokes every person's grant for the server it removes", async () => {
     const removalServerId = `removal-target-people-${suite}`;
     const connectedUserId = `user_removal_${suite}`;
+    removalServerIds.add(removalServerId);
+    removalUserIds.add(connectedUserId);
     revokedCredentialIds.length = 0;
 
     await database
@@ -742,6 +754,7 @@ describe("removing an MCP server", () => {
 
   test("does not call revoke when the server had no credential", async () => {
     const removalServerId = `removal-target-nocred-${suite}`;
+    removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
     await database.insert(mcpServers).values({
       id: removalServerId,
@@ -1136,14 +1149,14 @@ describe("refresh token rotation", () => {
     sent.length = 0;
   }
 
-  let notionWasAlreadyConfigured = false;
+  let notionWasAlreadyConfigured = true;
   /**
    * The OAuth client this deployment had before the suite ran, restored afterwards.
    *
-   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restored
-   * unconditionally, because the delete below removes the row it would otherwise still address.
+   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restore the
+   * snapshot before deleting our credentials; an early setup failure has no snapshot to restore.
    */
-  let clientBefore: string | null = null;
+  let clientBefore: string | null | undefined;
 
   beforeAll(async () => {
     await database
@@ -1212,10 +1225,12 @@ describe("refresh token rotation", () => {
         ),
       );
     // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, rotationServerId));
+    if (clientBefore !== undefined) {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: clientBefore })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
     for (const id of vaultRows) {
       await database.delete(credentials).where(eq(credentials.id, id));
     }
@@ -2116,7 +2131,7 @@ describe("a dynamic client the vendor has evicted", () => {
       actorId: dynamicUserId,
     });
 
-  let notionWasAlreadyConfigured = false;
+  let notionWasAlreadyConfigured = true;
 
   // The vendor refuses the ordinary way unless a test says otherwise, so a test that varies the
   // refusal cannot leave the next one asserting against somebody else's setup.
@@ -2968,7 +2983,15 @@ describe("a custom server may only be pointed at its own kind of credential", ()
    */
   const upsertCredentialId = randomUUID();
   const customServerId = `custom-cred-${suffix}`;
-  const madeServerIds: string[] = [];
+  const attemptedServerIds = new Set<string>();
+
+  function addCustomFixture(
+    input: Parameters<typeof store.addCustomServer>[0],
+  ) {
+    // Refusal tests may fail because the write succeeded. Track the attempt before calling it.
+    attemptedServerIds.add(input.id);
+    return store.addCustomServer(input);
+  }
 
   beforeAll(async () => {
     const encrypted = await encryptSecret(
@@ -3014,11 +3037,11 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   });
 
   afterAll(async () => {
-    // By prefix, not by the ids this suite meant to make: before the fix the refused adds succeed,
-    // and a row left behind holds a foreign key onto the credentials deleted just below.
-    await database
-      .delete(mcpServers)
-      .where(like(mcpServers.id, `${customServerId}%`));
+    if (attemptedServerIds.size > 0) {
+      await database
+        .delete(mcpServers)
+        .where(inArray(mcpServers.id, [...attemptedServerIds]));
+    }
     await database
       .delete(credentialRows)
       .where(
@@ -3034,7 +3057,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   test("somebody else's connector token is refused, and no server is written", async () => {
     const id = `${customServerId}-personal`;
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -3057,7 +3080,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // client secret as a bearer token is the mistake `refreshTools` was already changed to avoid.
     const id = `${customServerId}-client`;
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -3071,7 +3094,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // Same message as the wrong-kind refusal on purpose. A caller who can tell "wrong kind" from
     // "no such row" can ask this endpoint which ids are real, which is a vault oracle.
     const id = `${customServerId}-missing`;
-    const missing = store.addCustomServer({
+    const missing = addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -3080,15 +3103,13 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
     await expect(missing).rejects.toBeInstanceOf(CustomServerRefusedError);
 
-    const wrongKind = store
-      .addCustomServer({
-        id: `${customServerId}-kind-message`,
-        title: "Collector",
-        url: "https://collector.example/mcp",
-        credentialId: personalCredentialId,
-        by: "admin@example.com",
-      })
-      .catch((error: Error) => error.message);
+    const wrongKind = addCustomFixture({
+      id: `${customServerId}-kind-message`,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: personalCredentialId,
+      by: "admin@example.com",
+    }).catch((error: Error) => error.message);
     const missingMessage = await missing.catch((error: Error) => error.message);
     expect(await wrongKind).toBe(missingMessage);
   });
@@ -3096,8 +3117,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   test("the server's own token still works", async () => {
     // The case that must keep passing, so the refusal above is a rule and not a wall. The URL is
     // unreachable and that is fine: a failed refresh is recorded on the row rather than thrown.
-    madeServerIds.push(customServerId);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id: customServerId,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -3118,7 +3138,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // route passes the body field through untouched, so this is reachable with one curl.
     for (const notAnId of ["not-a-uuid", "' OR 1=1 --"]) {
       await expect(
-        store.addCustomServer({
+        addCustomFixture({
           id: `${customServerId}-shape`,
           title: "Collector",
           url: "https://collector.example/mcp",
@@ -3133,8 +3153,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // Not the same as a wrong one. An empty string used to reach the insert and break the foreign
     // key; the honest reading is that the administrator named nothing.
     const id = `${customServerId}-empty`;
-    madeServerIds.push(id);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -3155,8 +3174,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // already holds its own token can be re-added naming somebody else's. The guard has to run
     // before the write, and the pointer already on the row has to survive the refusal.
     const id = `${customServerId}-upsert`;
-    madeServerIds.push(id);
-    await store.addCustomServer({
+    await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -3165,7 +3183,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
 
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -3183,8 +3201,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
 
   test("a custom server with no credential at all still works", async () => {
     const id = `${customServerId}-none`;
-    madeServerIds.push(id);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",

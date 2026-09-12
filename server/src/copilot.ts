@@ -25,6 +25,7 @@ import {
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import { desktopTelemetryProperties } from "./desktop-telemetry";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -2063,9 +2064,10 @@ export function mountCopilotRuntime(
     licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
-    ...(config.accessibility
-      ? { telemetryProperties: { accessibility_title: "OpenBot" } }
-      : {}),
+    telemetryProperties: {
+      ...(config.accessibility ? { accessibility_title: "OpenBot" } : {}),
+      ...desktopTelemetryProperties(),
+    },
     /*
      * What lets a Bot answer with an interface it wrote itself.
      *
@@ -2083,6 +2085,9 @@ export function mountCopilotRuntime(
      * has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
+    // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
+    // server too, so stale clients cannot reactivate a deployment's generative UI opt-out.
+    a2ui: { enabled: config.generativeUi },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(

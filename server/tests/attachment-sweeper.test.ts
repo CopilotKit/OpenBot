@@ -5,11 +5,9 @@ import { eq, inArray, notInArray, sql } from "drizzle-orm";
 import { cullStagedAttachments } from "../scripts/cull-staged-attachments";
 import { createDatabase, type Database } from "../src/db/client";
 import { attachments, channels, users } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 
 const testPrefix = `attachment-sweeper-${randomUUID()}`;

@@ -111,11 +111,9 @@ bun run test
 bun run build
 ```
 
-Integration tests expect a PostgreSQL database with pgvector. Use `start.sh` or point `DATABASE_URL` at a compatible database.
+Integration tests expect a PostgreSQL database with pgvector. Point `TEST_DATABASE_URL` at a dedicated database such as `postgres://openbot:openbot@localhost:5432/openbot_test` before running them.
 
-They write to whichever database `DATABASE_URL` names and leave their rows behind, so running
-them against a deployment you are using puts test Bots in its audit trail and its activity
-reports. Point `DATABASE_URL` at a database of their own to keep the two apart.
+They refuse to use the application `openbot` database. `DATABASE_URL` is still the application setting, and the database client removes it from the process environment after opening a connection to preserve the Windows Bun connection fix, so tests use `TEST_DATABASE_URL` as their immutable fixture address. Running them against a deployment you are using puts test Bots in its audit trail and its activity reports, so create a separate database and migrate that before running the integration suite.
 
 CI uses `bun run test:ci` to verify the expected test count in addition to normal tests.
 

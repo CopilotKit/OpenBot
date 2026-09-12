@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -47,29 +47,90 @@ const STARTER = {
 
 type Draft = typeof STARTER;
 
+type JsonObjectResult =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; message: string };
+
+type PlaygroundValidation =
+  | { ok: true; input: SandboxedDraftInput }
+  | {
+      ok: false;
+      fields: { argumentSchema?: string; sampleArguments?: string };
+    };
+
+function jsonKind(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+export function parseJsonObject(raw: string, label: string): JsonObjectResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch (thrown) {
+    const reason =
+      thrown instanceof SyntaxError ? thrown.message : "invalid JSON";
+    return { ok: false, message: `${label} must be valid JSON: ${reason}` };
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      message: `${label} must be a JSON object, not ${jsonKind(value)}.`,
+    };
+  }
+
+  return { ok: true, value: value as Record<string, unknown> };
+}
+
+export function validatePlaygroundDraft(draft: Draft): PlaygroundValidation {
+  const schema = parseJsonObject(
+    draft.argumentSchema,
+    "Arguments (JSON Schema)",
+  );
+  const sample = parseJsonObject(draft.sampleArguments, "Sample arguments");
+  if (!schema.ok || !sample.ok) {
+    return {
+      ok: false,
+      fields: {
+        ...(!schema.ok ? { argumentSchema: schema.message } : {}),
+        ...(!sample.ok ? { sampleArguments: sample.message } : {}),
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    input: {
+      slug: draft.slug,
+      title: draft.title,
+      description: draft.description,
+      html: draft.html,
+      css: draft.css,
+      jsFunctions: draft.jsFunctions,
+      argumentSchema: schema.value,
+      sampleArguments: sample.value,
+    },
+  };
+}
+
 function PlaygroundPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { data: components } = useQuery(sandboxedListQueryOptions());
   const [draft, setDraft] = useState<Draft>(STARTER);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const set = (field: keyof Draft) => (value: string) =>
+  const set = (field: keyof Draft) => (value: string) => {
+    setError(null);
+    setNotice(null);
     setDraft((current) => ({ ...current, [field]: value }));
-
-  const parsed = (raw: string): Record<string, unknown> | null => {
-    try {
-      const value = JSON.parse(raw);
-      return typeof value === "object" && value !== null
-        ? (value as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
   };
 
-  const sample = parsed(draft.sampleArguments);
-  const schema = parsed(draft.argumentSchema);
+  const validation = validatePlaygroundDraft(draft);
+  const sample = validation.ok ? validation.input.sampleArguments : null;
 
   /* Every write here reports into the same banner, so they share one failure handler. */
   const report = { onError: (thrown: Error) => setError(thrown.message) };
@@ -85,26 +146,37 @@ function PlaygroundPage() {
     ...deleteSandboxedMutationOptions(queryClient),
     ...report,
   });
-  /** What the editors currently describe, in the shape the server accepts. */
-  const input = (): SandboxedDraftInput => ({
-    slug: draft.slug,
-    title: draft.title,
-    description: draft.description,
-    html: draft.html,
-    css: draft.css,
-    jsFunctions: draft.jsFunctions,
-    argumentSchema: schema ?? {},
-    sampleArguments: sample ?? {},
-  });
+  const busy =
+    saveDraft.isPending || publishDraft.isPending || removeComponent.isPending;
+  const canWrite = Boolean(draft.slug && draft.title) && validation.ok && !busy;
+
+  const input = (): SandboxedDraftInput | null => {
+    const current = validatePlaygroundDraft(draft);
+    if (!current.ok) {
+      setNotice(null);
+      setError(
+        Object.values(current.fields)[0] ??
+          "Fix the JSON fields before saving.",
+      );
+      return null;
+    }
+    return current.input;
+  };
 
   const save = () => {
     setError(null);
-    saveDraft.mutate(input());
+    setNotice(null);
+    const payload = input();
+    if (!payload) return;
+    saveDraft.mutate(payload, { onSuccess: () => setNotice("Draft saved.") });
   };
 
   const publish = () => {
     setError(null);
-    publishDraft.mutate(input());
+    setNotice(null);
+    const payload = input();
+    if (!payload) return;
+    publishDraft.mutate(payload, { onSuccess: () => setNotice("Published.") });
   };
 
   const load = (component: SandboxedRecord) =>
@@ -143,7 +215,7 @@ function PlaygroundPage() {
         </div>
         <div className="flex gap-2">
           <Button
-            disabled={!(draft.slug && draft.title)}
+            disabled={!canWrite}
             onClick={save}
             size="sm"
             type="button"
@@ -153,7 +225,7 @@ function PlaygroundPage() {
           </Button>
           <Button
             /* `publish` saves first, since publishing acts on the stored draft, not the editors. */
-            disabled={!(draft.slug && draft.title)}
+            disabled={!canWrite}
             onClick={publish}
             size="sm"
             type="button"
@@ -169,6 +241,14 @@ function PlaygroundPage() {
           role="alert"
         >
           {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div
+          className="border-border border-b bg-emerald-50 px-6 py-2 text-emerald-700 text-sm"
+          role="status"
+        >
+          {notice}
         </div>
       ) : null}
 
@@ -202,13 +282,17 @@ function PlaygroundPage() {
             value={draft.jsFunctions}
           />
           <CodeField
-            invalid={schema === null}
+            error={
+              !validation.ok ? validation.fields.argumentSchema : undefined
+            }
             label="Arguments (JSON Schema)"
             onChange={set("argumentSchema")}
             value={draft.argumentSchema}
           />
           <CodeField
-            invalid={sample === null}
+            error={
+              !validation.ok ? validation.fields.sampleArguments : undefined
+            }
             label="Sample arguments"
             onChange={set("sampleArguments")}
             value={draft.sampleArguments}
@@ -220,8 +304,10 @@ function PlaygroundPage() {
             <div className="mb-2 text-sm font-medium">Preview</div>
             {sample === null ? (
               <p className="text-sm text-destructive">
-                The sample arguments are not valid JSON, so there is nothing to
-                draw with.
+                {validation.ok
+                  ? "The sample arguments are not available."
+                  : (validation.fields.sampleArguments ??
+                    "Fix the JSON fields before previewing.")}
               </p>
             ) : (
               <OpenGenerativeUIActivityRenderer
@@ -377,30 +463,31 @@ function CodeField({
   label,
   value,
   onChange,
-  invalid,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  invalid?: boolean;
+  error?: string;
 }) {
   const id = useId();
   return (
-    <Field data-invalid={invalid}>
-      <FieldLabel htmlFor={id}>
-        {label}
-        {invalid ? (
-          <span className="ml-2 text-destructive">not valid JSON</span>
-        ) : null}
-      </FieldLabel>
+    <Field data-invalid={Boolean(error)}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Textarea
-        aria-invalid={invalid}
+        aria-describedby={error ? `${id}-error` : undefined}
+        aria-invalid={Boolean(error)}
         className="h-32 font-mono text-xs"
         id={id}
         onChange={(event) => onChange(event.target.value)}
         spellCheck={false}
         value={value}
       />
+      {error ? (
+        <FieldDescription className="text-destructive" id={`${id}-error`}>
+          {error}
+        </FieldDescription>
+      ) : null}
     </Field>
   );
 }

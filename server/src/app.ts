@@ -47,7 +47,8 @@ import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { createIntelligenceClient } from "./intelligence-client";
 import type { OnboardingStore } from "./people/onboarding";
-import type { PeopleStore } from "./people/store";
+import { parsePageLimit } from "./paging";
+import { type PeopleStore, MAX_PAGE } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
@@ -580,12 +581,17 @@ export function createApp(
     /*
      * A page, not the deployment.
      *
-     * `limit` is clamped by the store, so a caller cannot ask for everybody by naming a large
-     * number. `search` is what makes paging usable: an administrator looking for one colleague
-     * should not have to walk pages to reach them.
+     * `limit` is parsed strictly and clamped into range at the edge, against the same ceiling the
+     * store enforces, so a caller cannot ask for everybody by naming a large number and a typo
+     * like `12abc` is a 400 rather than a silently coerced page. `search` is what makes paging
+     * usable: an administrator looking for one colleague should not have to walk pages to reach
+     * them.
      */
     const url = new URL(context.req.url);
-    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+    const parsed = parsePageLimit(url.searchParams.get("limit"), MAX_PAGE);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
 
     return context.json(
       await peopleStore.list({
@@ -595,7 +601,7 @@ export function createApp(
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       }),
     );
   });
