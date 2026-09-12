@@ -14,6 +14,12 @@ Enter confirms a character being typed through an input method (Japanese, Chines
 final setup screen that Enter also sent the question, with its last character still unconfirmed. The
 box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
 still asks.
+### The Bot in the box and the LangGraph Bot read a message that has a file attached
+
+A message with a file attached reached both Bots as `[object Object],[object Object]`, in place of
+what the person typed and the file both: they read a message as a string, and one carrying a file is
+a list of parts. Each part now reaches the model as what it is — the words, the text of an attached
+file, an attached image — and a part neither can read is named rather than dropped.
 
 ### A fractional or out-of-range computer setting takes the fallback instead of breaking the boot
 

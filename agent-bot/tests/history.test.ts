@@ -279,3 +279,66 @@ describe("a tool call restored from the thread store", () => {
     expect(fn?.arguments).toBe('{"url":"https://news.ycombinator.com"}');
   });
 });
+
+/**
+ * A message somebody attached a file to.
+ *
+ * The composer sends it as a list of parts rather than a string: what the person typed, then the
+ * file. `copilot.ts` resolves the file before the run leaves the server, so a text file arrives here
+ * as a text part and an image as an `image` part carrying its bytes. `String()` of that list is
+ * `[object Object],[object Object]`, and that is what the model was sent in place of the question and
+ * the file both.
+ */
+describe("a message with a file attached", () => {
+  const typed = { type: "text", text: "How many rows say failed?" };
+  const csv = 'Attached file "runs.csv":\n\nid,status\n1,failed\n2,ok';
+
+  function userContent(content: unknown) {
+    const [user] = withoutGuidance(
+      toProviderMessages(
+        input([{ id: "1", role: "user", content } as unknown as Message]),
+      ),
+    );
+    return user?.content;
+  }
+
+  test("keeps what the person typed and the text of the file", () => {
+    expect(userContent([typed, { type: "text", text: csv }])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      { type: "text", text: csv },
+    ]);
+  });
+
+  test("puts an attached image in front of the model", () => {
+    const image = {
+      type: "image",
+      source: { type: "data", value: "iVBORw0KGgo=", mimeType: "image/png" },
+      metadata: { attachmentId: "a1", filename: "chart.png" },
+    };
+    expect(userContent([typed, image])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,iVBORw0KGgo=" },
+      },
+    ]);
+  });
+
+  test("names a part it cannot read rather than dropping it", () => {
+    // A model told "[audio]" can say something was attached that it cannot hear. A model handed
+    // nothing answers as though nothing was attached.
+    const audio = {
+      type: "audio",
+      source: { type: "data", value: "UklGRg==", mimeType: "audio/wav" },
+    };
+    expect(userContent([typed, audio])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      { type: "text", text: "[audio]" },
+    ]);
+  });
+
+  test("sends a message that is only text exactly as it was typed", () => {
+    // Nearly every message. Unchanged by this, and pinned so it stays that way.
+    expect(userContent("What is 17 times 3?")).toBe("What is 17 times 3?");
+  });
+});
