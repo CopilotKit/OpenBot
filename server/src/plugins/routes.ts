@@ -823,22 +823,36 @@ export function createPluginRoutes(
     const kind = asGrantKind(context.req.query("kind"));
     const ref = context.req.query("ref");
     const agentId = context.req.query("agentId");
-    if (!kind || !ref || !agentId) {
+    /*
+     * Query params are always strings, so truthiness is not enough: `"   "` is truthy and used
+     * to pass this check, delete zero rows by exact match, still write a `plugin_revoked` audit
+     * row naming whitespace, and answer `ok:true`. The POST twin already requires non-empty
+     * strings; this requires the same and acts on the trimmed values.
+     */
+    if (
+      !kind ||
+      typeof ref !== "string" ||
+      !ref.trim() ||
+      typeof agentId !== "string" ||
+      !agentId.trim()
+    ) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
       );
     }
+    const trimmedRef = ref.trim();
+    const trimmedAgentId = agentId.trim();
     const refusal = await enablementRefusal(
       context,
       kind,
-      ref,
-      agentId,
+      trimmedRef,
+      trimmedAgentId,
       "revoke",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.revoke(kind, ref, agentId, actorEmail(context));
+    await store.revoke(kind, trimmedRef, trimmedAgentId, actorEmail(context));
     return context.json({ ok: true });
   });
 

@@ -5,11 +5,18 @@ import type { BotAccessCheck } from "../src/plugins/routes";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { PluginStore } from "../src/plugins/store";
 
-function appWith(calls: { grants: unknown[]; toolCalls: unknown[] }) {
+function appWith(calls: {
+  grants: unknown[];
+  toolCalls: unknown[];
+  revokes?: unknown[];
+}) {
   const store = {
     grant: async (kind: unknown, ref: unknown, agentId: unknown) => {
       calls.grants.push({ kind, ref, agentId });
       return { ok: true };
+    },
+    revoke: async (kind: unknown, ref: unknown, agentId: unknown) => {
+      calls.revokes?.push({ kind, ref, agentId });
     },
     callTool: async (input: unknown) => {
       calls.toolCalls.push(input);
@@ -62,6 +69,79 @@ describe("POST /api/plugins/grants", () => {
       error: "A kind, a ref and a Bot are required.",
     });
     expect(calls.grants).toEqual([]);
+  });
+});
+
+describe("DELETE /api/plugins/grants", () => {
+  /**
+   * Query params are always strings, so truthiness is not enough.
+   *
+   * `?ref=%20%20` is truthy and used to pass the presence check, delete zero rows by exact
+   * match, still write a `plugin_revoked` audit row naming whitespace, and answer `ok:true`.
+   * The POST twin already requires trimmed non-empty strings; DELETE requires the same and
+   * acts on the trimmed values.
+   */
+  test.each([
+    ["a whitespace ref", "?kind=mcp&ref=%20%20%20&agentId=bot-1"],
+    ["a whitespace agentId", "?kind=mcp&ref=tool&agentId=%20%20"],
+    ["a missing ref", "?kind=mcp&agentId=bot-1"],
+    ["a missing agentId", "?kind=mcp&ref=tool"],
+    ["a missing kind", "?ref=tool&agentId=bot-1"],
+  ])("refuses %s with 400 and never reaches the store", async (_n, query) => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      revokes: [] as unknown[],
+    };
+    const response = await appWith(calls).request(
+      `http://openbot.test/grants${query}`,
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "A kind, a ref and a Bot are required.",
+    });
+    expect(calls.revokes).toEqual([]);
+  });
+
+  test("a valid revoke still deletes and trims the values it acts on", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      revokes: [] as unknown[],
+    };
+    const response = await appWith(calls).request(
+      "http://openbot.test/grants?kind=mcp&ref=%20tool%20&agentId=%20bot-1%20",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.revokes).toEqual([
+      { kind: "mcp", ref: "tool", agentId: "bot-1" },
+    ]);
+  });
+});
+
+describe("POST /api/plugins/call", () => {
+  test.each([
+    ["a number ref", { ref: 123, agentId: "bot-1" }],
+    ["an object ref", { ref: {}, agentId: "bot-1" }],
+    ["a number agentId", { ref: "tool", agentId: 456 }],
+    ["a whitespace ref", { ref: "  ", agentId: "bot-1" }],
+  ])("refuses %s with 400 and never reaches the store", async (_n, body) => {
+    const calls = { grants: [] as unknown[], toolCalls: [] as unknown[] };
+    const response = await appWith(calls).request("http://openbot.test/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "A tool and a Bot are required.",
+    });
+    expect(calls.toolCalls).toEqual([]);
   });
 });
 
@@ -159,27 +239,5 @@ describe("POST /api/plugins/skills", () => {
 
     expect(response.status).toBe(200);
     expect(calls.installs).toHaveLength(1);
-  });
-});
-
-describe("POST /api/plugins/call", () => {
-  test.each([
-    ["a number ref", { ref: 123, agentId: "bot-1" }],
-    ["an object ref", { ref: {}, agentId: "bot-1" }],
-    ["a number agentId", { ref: "tool", agentId: 456 }],
-    ["a whitespace ref", { ref: "  ", agentId: "bot-1" }],
-  ])("refuses %s with 400 and never reaches the store", async (_n, body) => {
-    const calls = { grants: [] as unknown[], toolCalls: [] as unknown[] };
-    const response = await appWith(calls).request("http://openbot.test/call", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "A tool and a Bot are required.",
-    });
-    expect(calls.toolCalls).toEqual([]);
   });
 });

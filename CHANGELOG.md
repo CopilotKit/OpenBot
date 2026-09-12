@@ -14,6 +14,14 @@ Enter confirms a character being typed through an input method (Japanese, Chines
 final setup screen that Enter also sent the question, with its last character still unconfirmed. The
 box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
 still asks.
+### Revoking a grant with a blank ref or Bot is refused instead of reported as done
+
+`DELETE /api/plugins/grants` checked its query params with truthiness, and a query param is
+always a string: `?ref=%20%20` is truthy, so it skipped the 400, deleted zero rows by exact
+match, still wrote a `plugin_revoked` audit row naming whitespace, and answered `ok:true`. The
+`POST` twin already required trimmed non-empty strings. `DELETE` requires the same now and acts
+on the trimmed values, so a blank ref or Bot is a 400 with the same message, no delete, and no
+audit row.
 ### The Bot in the box and the LangGraph Bot read a message that has a file attached
 
 A message with a file attached reached both Bots as `[object Object],[object Object]`, in place of
