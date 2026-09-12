@@ -8,6 +8,7 @@
 import type { RunAgentInput } from "@ag-ui/core";
 import type OpenAI from "openai";
 import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { userContent } from "../../shared/user-content";
 
 export { NO_ANSWER_CAME };
 
@@ -58,7 +59,7 @@ export function toProviderMessages(
     // Placed with the call they answer, below, rather than wherever they arrived.
     if (message.role === "tool") continue;
     if (message.role === "user") {
-      messages.push({ role: "user", content: String(message.content ?? "") });
+      messages.push({ role: "user", content: userContent(message.content) });
       continue;
     }
     if (message.role === "system" || message.role === "developer") {
