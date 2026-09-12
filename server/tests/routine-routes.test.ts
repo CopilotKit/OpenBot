@@ -62,6 +62,10 @@ function fakeStore(
     async dueRoutines() {
       return [];
     },
+    async recordSweep() {},
+    async lastSweptAt() {
+      return new Date();
+    },
     async advanceNextRun() {
       return false;
     },
@@ -113,7 +117,8 @@ describe("GET /", () => {
     const response = await appFor(store).request("http://openbot.test/");
 
     expect(response.status).toBe(200);
-    expect(await json(response)).toEqual({
+    const body = (await json(response)) as Record<string, unknown>;
+    expect({ routines: body.routines }).toEqual({
       routines: [
         {
           id: "routine-1",
