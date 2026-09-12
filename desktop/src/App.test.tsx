@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 
@@ -1869,4 +1875,31 @@ test("Start credential failures do not expose a restore action", async () => {
       (c) => c.command === ["cancel", "_credential", "_reco", "very"].join(""),
     ),
   ).toEqual([]);
+});
+
+test("the Enter that finishes a composed character does not ask the Bot", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "ask_the_bot") return "42";
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const question = await view.findByLabelText("Your question");
+  // Keys land on the focused field.
+  await userEvent.click(question);
+
+  // Japanese, Chinese and Korean are typed through an input method, where Enter confirms the
+  // character being built. Chromium marks that keydown `isComposing`; the macOS WebKit webview
+  // sends it after compositionend with key code 229. Neither should send the question.
+  await act(async () => {
+    fireEvent.keyDown(question, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(question, { key: "Enter", keyCode: 229 });
+  });
+
+  expect(invokeCalls.filter((call) => call.command === "ask_the_bot")).toEqual(
+    [],
+  );
 });

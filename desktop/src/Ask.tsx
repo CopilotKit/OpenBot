@@ -70,7 +70,16 @@ export function Ask({
           }}
           disabled={asking}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !asking) {
+            // Enter also confirms a character being composed through an input method (Japanese,
+            // Chinese, Korean). Asking on that Enter would send the question with its last character
+            // still unconfirmed. Chromium marks that keydown `isComposing`; the macOS WebKit webview
+            // instead sends it after compositionend with key code 229. Wait for either.
+            if (
+              event.key === "Enter" &&
+              !asking &&
+              !event.nativeEvent.isComposing &&
+              event.nativeEvent.keyCode !== 229
+            ) {
               ask();
             }
           }}

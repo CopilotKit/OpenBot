@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop setup's question box waits for a composed character before it asks
+
+Enter confirms a character being typed through an input method (Japanese, Chinese, Korean). On the
+final setup screen that Enter also sent the question, with its last character still unconfirmed. The
+box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
+still asks.
+
 ### A malformed page size is refused instead of silently coerced
 
 `GET /channels` and `GET /api/admin/people` read `?limit=` with `Number.parseInt`, which
