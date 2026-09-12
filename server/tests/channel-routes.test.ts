@@ -41,7 +41,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {
@@ -678,9 +678,7 @@ describe("channel route composition", () => {
   });
 });
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,

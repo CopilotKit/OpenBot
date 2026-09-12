@@ -7,11 +7,9 @@ import {
 } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const store = createAuditStore(database);
 const reader = createAuditReader(database);
