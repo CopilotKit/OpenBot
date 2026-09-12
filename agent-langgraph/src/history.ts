@@ -23,7 +23,15 @@ export { NO_ANSWER_CAME };
 
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
 export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
-  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
+  const messages: BaseMessage[] = [
+    new SystemMessage(COMPUTER_GUIDANCE),
+    // AG-UI carries application context separately from conversation history. CopilotKit puts
+    // the A2UI catalog and tool instructions here; dropping it leaves the model guessing the
+    // component schema and can strand the renderer on an invalid, never-painted surface.
+    ...(input.context ?? []).map(
+      ({ description, value }) => new SystemMessage(`${description}\n${value}`),
+    ),
+  ];
 
   /*
    * Which calls in this history were ever answered.
