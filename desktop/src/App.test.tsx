@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
 type Deferred<T> = {
@@ -48,6 +49,87 @@ async function renderApp() {
 
   return view;
 }
+
+function setupEvents() {
+  return invokeCalls
+    .filter((call) => call.command === "record_setup_event")
+    .map((call) => call.args);
+}
+
+test("setup discloses default telemetry without a consent gate and deduplicates viewed steps", async () => {
+  useRootConfigurationSetup("/tmp/private-setup-root", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "record_setup_event") return null;
+    return previous(command, args);
+  };
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+  });
+
+  expect(view.getByText(/COPILOTKIT_TELEMETRY_DISABLED=1/)).toBeTruthy();
+  expect(view.getByText(/DO_NOT_TRACK=1/)).toBeTruthy();
+  expect(view.queryByRole("checkbox")).toBeNull();
+  expect(view.queryByRole("switch")).toBeNull();
+  expect(setupEvents()).toEqual([
+    { event: { kind: "step_viewed", step: "welcome" } },
+  ]);
+  await userEvent.click(view.getByRole("button", { name: "Set up OpenBot" }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(setupEvents()).toEqual([
+    { event: { kind: "step_viewed", step: "welcome" } },
+    { event: { kind: "step_viewed", step: "harness" } },
+    { event: { kind: "harness_chosen", harness: "langgraph" } },
+    { event: { kind: "step_viewed", step: "model" } },
+  ]);
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  expect(setupEvents().at(-1)).toEqual({
+    event: { kind: "step_viewed", step: "harness" },
+  });
+});
+
+test("setup records only model categories and reaches Ask when telemetry is unavailable", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "record_setup_event") throw new Error("offline");
+    return previous(command, args);
+  };
+  const privateUrl = "https://private-model.example/v1";
+  const privateKey = "synthetic-secret-endpoint-key";
+  const view = await enterCompatibleEndpoint(privateUrl, privateKey);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(setupEvents()).toContainEqual({
+    event: {
+      kind: "model_chosen",
+      provider: "compatible",
+      credential_path: "api_key",
+      custom_base_url: true,
+    },
+  });
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await view.findByRole("button", { name: "Ask" });
+  expect(setupEvents().at(-1)).toEqual({
+    event: { kind: "step_viewed", step: "ask" },
+  });
+  const serialized = JSON.stringify(setupEvents());
+  for (const privateValue of [
+    privateUrl,
+    privateKey,
+    "local-model",
+    "/tmp/openbot-app-test",
+  ]) {
+    expect(serialized).not.toContain(privateValue);
+  }
+  expect(view.queryByText(/Nothing here leaves this computer/)).toBeNull();
+});
 
 type StartStackPayload = {
   root?: unknown;

@@ -208,6 +208,14 @@ fn digest_of(bytes: &[u8]) -> String {
 /// somebody presses Start. Answers with the sentence for the step row, or a failure in both
 /// registers.
 pub fn install_engine(cache: &Path) -> Result<String, Problem> {
+    install_engine_observed(cache, |_| {})
+}
+
+/// Observe an actual Podman installer invocation, excluding existing engines and Compose repair.
+pub fn install_engine_observed(
+    cache: &Path,
+    mut installed: impl FnMut(bool),
+) -> Result<String, Problem> {
     let into = crate::acquire::download_dir(cache);
 
     // An engine somebody already has is theirs. This only ever adds what is missing.
@@ -215,7 +223,9 @@ pub fn install_engine(cache: &Path) -> Result<String, Problem> {
         return place_compose(&into);
     }
 
-    install_podman(&into)?;
+    let result = install_podman(&into);
+    installed(result.is_ok());
+    result?;
 
     // Installed is not found. The MSI extends the *user's* PATH and this process was started with
     // the old one, so the engine is looked for where the installer puts it rather than on PATH. If
