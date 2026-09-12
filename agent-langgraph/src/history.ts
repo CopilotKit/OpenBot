@@ -14,6 +14,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { userContent } from "../../shared/user-content";
 
 /*
  * Re-exported so this module's own tests and callers keep reading it from here, while the wording
@@ -57,7 +58,9 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
 
   for (const message of input.messages) {
     if (message.role === "user") {
-      messages.push(new HumanMessage(String(message.content ?? "")));
+      messages.push(
+        new HumanMessage({ content: userContent(message.content) }),
+      );
       continue;
     }
     if (message.role === "system" || message.role === "developer") {
