@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop setup's question box waits for a composed character before it asks
+
+Enter confirms a character being typed through an input method (Japanese, Chinese, Korean). On the
+final setup screen that Enter also sent the question, with its last character still unconfirmed. The
+box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
+still asks.
 ### Revoking a grant with a blank ref or Bot is refused instead of reported as done
 
 `DELETE /api/plugins/grants` checked its query params with truthiness, and a query param is
