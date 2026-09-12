@@ -52,6 +52,7 @@ function runLangGraphAguiModelProbe(
         "tools = ModuleType('src.tool_runtime')",
         "tools.ToolAwareAgent = LangGraphAgent",
         "tools.bind_tools = tools.execute_tools = tools.next_step = lambda *args: None",
+        "tools.model_messages = lambda messages: messages",
         "sys.modules['src.tool_runtime'] = tools",
         "from src import main",
         "chosen = main._model()",

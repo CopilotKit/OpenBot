@@ -2085,6 +2085,9 @@ export function mountCopilotRuntime(
      * has; see DeploymentConfig.generativeUi.
      */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
+    // A browser catalog enables the public A2UI middleware/tool. Explicitly disable it on the
+    // server too, so stale clients cannot reactivate a deployment's generative UI opt-out.
+    a2ui: { enabled: config.generativeUi },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(

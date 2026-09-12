@@ -26,9 +26,9 @@ describe("runtime capabilities", () => {
     await expect(response.json()).resolves.toEqual({
       mode: "intelligence",
       durableHistory: true,
-      // Off until a deployment asks for it. The browser reads this to decide whether to offer the
-      // tool that generates an interface, so it has to be here and not only in the runtime.
-      generativeUi: false,
+      // Default-on. The browser reads this to decide whether to offer the tool that generates an
+      // interface, so it has to be here and not only in the runtime.
+      generativeUi: true,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
@@ -66,17 +66,17 @@ describe("runtime capabilities", () => {
    * to end up in: runtime-only means the tool is never offered, browser-only means a Bot writes a
    * whole interface that nothing renders.
    */
-  test("reports generated interfaces as on when the deployment asked for them", async () => {
-    const enabled = createApp(
-      loadConfig(testEnvironment({ OPENBOT_GENERATIVE_UI: "true" })),
+  test("reports generated interfaces as off when the deployment opts out", async () => {
+    const disabled = createApp(
+      loadConfig(testEnvironment({ OPENBOT_GENERATIVE_UI: "false" })),
     );
 
-    const response = await enabled.request(
+    const response = await disabled.request(
       "http://openbot.local/api/capabilities",
     );
 
     expect(response.status).toBe(200);
-    expect((await response.json()).generativeUi).toBe(true);
+    expect((await response.json()).generativeUi).toBe(false);
   });
 });
 

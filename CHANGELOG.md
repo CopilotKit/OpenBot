@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Generated interfaces, tables and forms
+
+Generative UI is enabled by default; set `OPENBOT_GENERATIVE_UI=false` or `0` to disable it.
+Bots can render A2UI interfaces, compare records in sortable tables, and collect related answers in
+a form that waits for submission. LangGraph receives the component schemas needed to draw these
+interfaces correctly.
+
+The playground rejects invalid JSON before saving or publishing, confirms successful saves, and
+shows published custom components in the administrator's gallery.
+
 ### A Bot's computer is rebuilt when it holds a token the deployment has stopped using
 
 A computer checks every caller against the `COMPUTER_TOKEN` it was created with, and holds that one
