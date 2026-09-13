@@ -466,6 +466,12 @@ impl Inner {
         }
         let accepted = {
             let mut state = self.state.lock().expect("host state poisoned");
+            // A native approval may outlast the server's delivery lease. The original
+            // worker still owns this operation and will post its result; redelivery
+            // must neither run it twice nor reject that original request.
+            if state.active_by_operation.contains(&operation.operation_id) {
+                return;
+            }
             if state.stopped || state.canceled_operations.contains(&operation.operation_id) {
                 Err("Host access is stopped.".to_string())
             } else if state.active_by_operation.len() >= MAX_ACTIVE_OPERATIONS {
@@ -1553,6 +1559,121 @@ mod tests {
     use super::*;
     use crate::engine::{Address, Engine};
     use crate::quiet::command as quiet_command;
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+
+    struct BlockingFolderApprovalUi {
+        root: PathBuf,
+        calls: AtomicUsize,
+        called_tx: Mutex<mpsc::Sender<()>>,
+        release_rx: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl HostApprovalUi for BlockingFolderApprovalUi {
+        fn choose_folder(&self, _: &ChooseFolderPrompt) -> HostAccessResult<ApprovedFolder> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.called_tx.lock().unwrap().send(()).unwrap();
+            self.release_rx.lock().unwrap().recv().unwrap();
+            Ok(ApprovedFolder {
+                root: self.root.clone(),
+            })
+        }
+
+        fn confirm_write(&self, _: &WritePrompt) -> HostAccessResult<()> {
+            unreachable!("choose_folder regression must not ask for write approval")
+        }
+
+        fn confirm_command(&self, _: &CommandPrompt) -> HostAccessResult<()> {
+            unreachable!("choose_folder regression must not ask for command approval")
+        }
+    }
+
+    struct ResultCollector {
+        base_url: String,
+        bodies: Arc<Mutex<Vec<String>>>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl ResultCollector {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let bodies = Arc::new(Mutex::new(Vec::new()));
+            let worker_bodies = bodies.clone();
+            let thread = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let mut reader = BufReader::new(stream.try_clone().unwrap());
+                            let mut content_length = 0_usize;
+                            loop {
+                                let mut line = String::new();
+                                reader.read_line(&mut line).unwrap();
+                                let trimmed = line.trim_end();
+                                if trimmed.is_empty() {
+                                    break;
+                                }
+                                if let Some(value) = trimmed.strip_prefix("content-length: ") {
+                                    content_length = value.parse().unwrap();
+                                } else if let Some(value) = trimmed.strip_prefix("Content-Length: ")
+                                {
+                                    content_length = value.parse().unwrap();
+                                }
+                            }
+                            let mut body = vec![0_u8; content_length];
+                            reader.read_exact(&mut body).unwrap();
+                            worker_bodies
+                                .lock()
+                                .unwrap()
+                                .push(String::from_utf8(body).unwrap());
+                            stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                                .unwrap();
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if Instant::now() >= deadline {
+                                return;
+                            }
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => return,
+                    }
+                }
+            });
+            Self {
+                base_url,
+                bodies,
+                thread: Some(thread),
+            }
+        }
+
+        fn wait_for_posts(&self, count: usize) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                if self.bodies.lock().unwrap().len() >= count {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            panic!("timed out waiting for {count} host result posts");
+        }
+
+        fn bodies(&self) -> Vec<String> {
+            self.bodies.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for ResultCollector {
+        fn drop(&mut self) {
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
 
     fn temp_root(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -1669,6 +1790,80 @@ mod tests {
     }
 
     #[test]
+    fn redelivered_active_operation_does_not_reject_or_duplicate_native_approval() {
+        let root = temp_root("host-access-redelivery");
+        let collector = ResultCollector::start();
+        let (called_tx, called_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let approval = Arc::new(BlockingFolderApprovalUi {
+            root: root.clone(),
+            calls: AtomicUsize::new(0),
+            called_tx: Mutex::new(called_tx),
+            release_rx: Mutex::new(release_rx),
+        });
+        let config = HostAccessConfig::new(
+            collector.base_url.clone(),
+            "token",
+            Address::new(Engine::Docker, None),
+            DEFAULT_IMAGE,
+            vec![],
+        );
+        let inner = Arc::new(Inner {
+            config,
+            approval: approval.clone(),
+            instance_label: "test-instance".into(),
+            effect_lock: Mutex::new(()),
+            state: Mutex::new(State {
+                stopped: false,
+                thread: None,
+                grants: HashMap::new(),
+                running: HashMap::new(),
+                completed: HashSet::new(),
+                canceled_operations: HashSet::new(),
+                active_by_operation: HashSet::new(),
+                active_by_bot: HashSet::new(),
+            }),
+        });
+        fn redelivered_operation() -> DesktopOperation {
+            DesktopOperation {
+                operation_id: "op-redelivered".into(),
+                kind: HostOperationKind::ChooseFolder,
+                bot_id: "bot-a".into(),
+                actor_id: "actor-a".into(),
+                bot_name: Some("Research Bot".into()),
+                grant_id: None,
+                target_operation_id: None,
+                relative_path: None,
+                content: None,
+                command: None,
+                writable: Some(false),
+                expires_at: None,
+                received_at_ms: now_millis(),
+            }
+        }
+        let client = Client::new();
+
+        inner.spawn_operation(client.clone(), redelivered_operation());
+        called_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        inner.spawn_operation(client, redelivered_operation());
+        thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(approval.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(collector.bodies(), Vec::<String>::new());
+
+        release_tx.send(()).unwrap();
+        collector.wait_for_posts(1);
+        thread::sleep(Duration::from_millis(50));
+        let posts = collector.bodies();
+        assert_eq!(posts.len(), 1);
+        let posted: serde_json::Value = serde_json::from_str(&posts[0]).unwrap();
+        assert_eq!(posted["operationId"], "op-redelivered");
+        assert_eq!(posted["ok"], true);
+        assert!(posted["grant"].is_object());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn grant_binding_refuses_wrong_bot_or_actor() {
         let config = HostAccessConfig::new(
             "http://127.0.0.1:3001",
@@ -1739,10 +1934,12 @@ mod tests {
             container_path(Path::new("nested/file.txt")),
             "/approved/nested/file.txt"
         );
-        assert_eq!(
-            container_path(Path::new("nested\\file.txt")),
+        let expected = if cfg!(windows) {
+            "/approved/nested/file.txt"
+        } else {
             "/approved/nested\\file.txt"
-        );
+        };
+        assert_eq!(container_path(Path::new("nested\\file.txt")), expected);
     }
 
     #[test]
