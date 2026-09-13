@@ -31,6 +31,7 @@ tar = "0.4"
 tauri-plugin-single-instance = "2.0.0-rc.5"
 portable-pty = "0.9.0"
 tauri-plugin-opener = "2.5.5"
+tauri-plugin-dialog = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

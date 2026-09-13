@@ -3,13 +3,18 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { MAX_IMAGE_BYTES } from "../../shared/attachments";
-import { authoriseAgentCall, sameToken } from "./agents/callback-token";
+import {
+  authoriseAgentCall,
+  parseAgentToolCallInput,
+  sameToken,
+} from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
   AuditQueryError,
   type AuditEventType,
+  type AuditInitiator,
   type AuditReader,
   type AuditStore,
   auditQueryFromUrl,
@@ -45,6 +50,8 @@ import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
+import type { HostAccessBroker } from "./host-access/broker";
+import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
 import type { OnboardingStore } from "./people/onboarding";
 import { parsePageLimit } from "./paging";
@@ -102,6 +109,14 @@ export const UPLOAD_BODY_LIMIT_BYTES =
  * The address is on the row rather than only the user id, because the id means nothing to a person
  * reading the trail a year later and the user row may be gone by then.
  */
+export type DeploymentToolCaller = (input: {
+  name: string;
+  args: Record<string, unknown>;
+  botId: string;
+  actorId: string;
+  initiator?: AuditInitiator;
+}) => Promise<{ text: string; isError: boolean } | null>;
+
 async function recordPersonEvent(
   auditStore: AuditStore | undefined,
   context: { var: AppVariables },
@@ -273,6 +288,12 @@ export function createApp(
    * database has no door for this at all, not a locked one.
    */
   attachmentDatabase?: Database,
+  /** Session-only broker for native owner-approved host folder access. */
+  hostAccessBroker?: HostAccessBroker,
+  /** Fresh desktop-only bearer token for the native host worker poll/result channel. */
+  desktopHostToken?: string,
+  /** Server-owned tools that are not MCP but use the same signed agent callback route. */
+  deploymentToolCaller?: DeploymentToolCaller,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -1022,6 +1043,23 @@ export function createApp(
     );
   }
 
+  if (hostAccessBroker) {
+    app.route(
+      "/api/host-access",
+      createHostAccessRoutes({
+        broker: hostAccessBroker,
+        desktopToken: desktopHostToken,
+        requireUser,
+        canUseBot,
+        auditStore,
+        botName: agentProfileStore
+          ? async (botId, actor) =>
+              (await agentProfileStore.get(actor, botId))?.name ?? null
+          : undefined,
+      }),
+    );
+  }
+
   if (agentProfileStore) {
     app.route(
       "/api/agents",
@@ -1222,7 +1260,7 @@ export function createApp(
    * no person behind it. Absent secret means the route does not exist: a deployment that has not
    * configured this refuses rather than accepting anybody who can reach the port.
    */
-  if (pluginStore) {
+  if (pluginStore || deploymentToolCaller) {
     const legacyToken = config.agentToolToken ?? "";
     app.post("/api/agent-tools/call", async (context) => {
       /*
@@ -1285,18 +1323,35 @@ export function createApp(
         return context.json({ error: verdict.reason }, verdict.status);
       }
 
-      if (!body?.name) {
-        return context.json({ error: "A tool is required." }, 400);
+      const parsedCall = parseAgentToolCallInput(body);
+      if (!parsedCall.ok) {
+        return context.json({ error: parsedCall.error }, 400);
       }
 
       try {
+        const deploymentResult = await deploymentToolCaller?.({
+          name: parsedCall.value.ref,
+          args: parsedCall.value.args,
+          botId: verdict.botId,
+          actorId: verdict.actorId,
+          initiator: verdict.initiator,
+        });
+        if (deploymentResult) return context.json(deploymentResult);
+
+        if (!pluginStore) {
+          return context.json({
+            text: `${REFUSAL_MARKER} That tool is not registered in this deployment.`,
+            isError: true,
+          });
+        }
+
         const result = await pluginStore.callTool({
-          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
-          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
-          args: body.args ?? {},
+          ref: parsedCall.value.ref,
+          args: parsedCall.value.args,
           botId: verdict.botId,
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
+          ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
         });
         return context.json({ text: result.text, isError: result.isError });
       } catch (error) {

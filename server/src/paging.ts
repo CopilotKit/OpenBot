@@ -2,9 +2,8 @@
  * A page size from a `?limit=` query param, parsed strictly.
  *
  * `Number.parseInt` coerces: `"12abc"` reads as 12, `"3.9"` as 3, `"0x10"` as 0, so a typo
- * silently returns the wrong page and there is no 400 path at all. The audit list already parses
- * strictly (`auditQueryFromUrl` trims and requires `/^\d+$/`); this is the same rule factored out
- * so every paged list answers the same way.
+ * silently returns the wrong page and there is no 400 path at all. The audit list, the channel
+ * list and the people list all share this rule, so every paged list answers the same way.
  *
  * Absent or blank means the caller did not ask, and the store's own default applies. A run of
  * digits is clamped into `1..max`, because the store clamps that way too and the edge saying the

@@ -718,6 +718,15 @@ fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) -> Result<(), Probl
     Ok(())
 }
 
+/// The desktop approval transport belongs only to the API server. In particular it must never
+/// reach the worker running model tools or the frontend development server.
+fn configure_host_process_env(command: &mut Command, name: &str, secrets: &Secrets) {
+    command.envs(secrets);
+    if name != "server" {
+        command.env_remove("OPENBOT_DESKTOP_HOST_TOKEN");
+    }
+}
+
 pub fn spawn_host_process(
     process: &HostProcess,
     root: &Path,
@@ -738,7 +747,7 @@ pub fn spawn_host_process(
      * the file either way, so a machine still holding an older run's copy is overridden rather than
      * fought with.
      */
-    command.envs(secrets);
+    configure_host_process_env(&mut command, process.name, secrets);
     if process.script.is_empty() {
         command.args(["run", process.package_script]);
     } else {
@@ -2549,6 +2558,28 @@ fn dirs_home() -> PathBuf {
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+
+    #[test]
+    fn desktop_approval_transport_credential_reaches_only_the_server() {
+        let secrets = Secrets::from([
+            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "fixture-only".into()),
+            ("INTELLIGENCE_API_KEY".into(), "other-fixture".into()),
+        ]);
+        for name in ["server", "worker", "app"] {
+            let mut command = Command::new("unused");
+            configure_host_process_env(&mut command, name, &secrets);
+            let vars: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+            assert_eq!(
+                vars[std::ffi::OsStr::new("OPENBOT_DESKTOP_HOST_TOKEN")],
+                (name == "server").then_some(std::ffi::OsStr::new("fixture-only")),
+                "approval credential exposure to {name}"
+            );
+            assert_eq!(
+                vars[std::ffi::OsStr::new("INTELLIGENCE_API_KEY")],
+                Some(std::ffi::OsStr::new("other-fixture"))
+            );
+        }
+    }
 
     #[cfg(unix)]
     fn unix_fixture(pid: u32, parent: u32) -> UnixProcess {

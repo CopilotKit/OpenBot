@@ -681,8 +681,27 @@ export function createComputerRoutes(
 
     // Bounded, and biased to recency: the question is what this rule does to the traffic the
     // deployment actually has, and last week's traffic answers that better than a full scan.
-    const requested = typeof body?.limit === "number" ? body.limit : 200;
-    const limit = Math.min(Math.max(Math.trunc(requested), 1), 500);
+    //
+    // Strict on purpose. This used to read `typeof limit === "number" ? limit : 200` and clamp,
+    // so `"abc"`, `null` and `true` silently became 200, `Infinity` silently became 500, and
+    // `NaN` became `NaN` and travelled into `auditReader.list` as one. A what-if answered from
+    // the wrong slice of history is worse than no answer, because it is believed.
+    const rawLimit = body?.limit;
+    let limit = 200;
+    if (rawLimit !== undefined) {
+      if (
+        typeof rawLimit !== "number" ||
+        !Number.isInteger(rawLimit) ||
+        rawLimit < 1 ||
+        rawLimit > 500
+      ) {
+        return context.json(
+          { error: "limit must be a whole number between 1 and 500." },
+          400,
+        );
+      }
+      limit = rawLimit;
+    }
 
     const { events } = await auditReader.list({
       limit,
