@@ -139,21 +139,25 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 ## Main surfaces
 
-| Route                | Purpose                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| `/`                  | Start and browse channels.                                         |
-| `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
-| `/channel/:id`       | Converse with one coworker, watch its screen, and see what it ran. |
-| `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
-| `/skills`            | Create and enable personal skills.                                 |
-| `/settings`          | User preferences.                                                  |
-| `/admin/credentials` | Store write-only encrypted credentials.                            |
-| `/admin/computers`   | View, stop, and reset Bot computers.                               |
-| `/admin/boundaries`  | Configure browser/file/MCP action policy.                          |
-| `/admin/components`  | Publish components and govern which Bots may use them.             |
-| `/admin/playground`  | Draft and publish sandboxed components in the browser.             |
-| `/admin/plugins`     | Configure MCP servers, MCP grants, and deployment skills.          |
-| `/admin/audit`       | Review permitted, refused, and failed actions.                     |
+| Route                       | Purpose                                                            |
+| --------------------------- | ------------------------------------------------------------------ |
+| `/`                         | Start and browse channels.                                         |
+| `/agents`                   | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
+| `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
+| `/skills`                   | Create and enable personal skills.                                 |
+| `/routines`                 | See the routines that are standing, and stop one.                  |
+| `/settings`                 | User preferences.                                                  |
+| `/admin/credentials`        | Store write-only encrypted credentials.                            |
+| `/admin/computers`          | View, stop, and reset Bot computers.                               |
+| `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
+| `/admin/components`         | Publish components and govern which Bots may use them.             |
+| `/admin/playground`         | Draft and publish sandboxed components in the browser.             |
+| `/admin/plugins`            | Configure MCP servers and grant their tools to Bots.               |
+| `/admin/skills`             | Write deployment skills and grant them to Bots.                    |
+| `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
+| `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
+| `/admin/audit`              | Review permitted, refused, and failed actions.                     |
 
 ## Features
 

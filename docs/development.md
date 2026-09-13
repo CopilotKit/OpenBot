@@ -2,7 +2,9 @@
 
 ## Setup
 
-Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, and `curl`.
+Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, `openssl`, and `curl`. The
+Intelligence provisioning below also needs `npx` (Node); `scripts/start.sh` uses `openssl` to mint
+the generated secrets on a first run.
 
 ```sh
 cp .env.example .env
@@ -27,7 +29,7 @@ bash scripts/start.sh
 
 ## Running services
 
-Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server and app, and verifies health routes.
+Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server, the app, and the routine worker, and verifies health routes.
 
 Use `bash scripts/stop.sh` to take it down: the app, the routine worker, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
 

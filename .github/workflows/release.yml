@@ -103,6 +103,11 @@ jobs:
           ' -- "$BUMP" > /tmp/version
           version=$(cat /tmp/version)
 
+          # The chart's default image tag is its appVersion, so a release that moves package.json
+          # without moving this leaves a default `helm install` pulling the previous image, or an
+          # image tag that was never pushed. Move them together, every time.
+          sed -i -E "s/^appVersion:.*/appVersion: \"$version\"/" charts/openbot/Chart.yaml
+
           # Unreleased becomes the version, and a fresh empty Unreleased takes its place so the next
           # change has somewhere to go without anyone hand-editing a heading.
           bun -e '
@@ -139,7 +144,7 @@ jobs:
       - name: Preview
         if: inputs.dry_run
         run: |
-          git --no-pager diff -- package.json CHANGELOG.md
+          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml
           cat /tmp/pr-body.md
 
       # A pull request opened by a workflow does not trigger the pull_request workflows, so the

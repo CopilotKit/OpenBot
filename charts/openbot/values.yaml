@@ -12,7 +12,8 @@ fullnameOverride: ""
 
 image:
   repository: ghcr.io/copilotkit/openbot
-  # Empty means the chart's appVersion, so an upgrade of the chart moves the image with it.
+  # Empty means the chart's appVersion prefixed with `v` (the form published tags take), so an
+  # upgrade of the chart moves the image with it. A value set here is used verbatim.
   tag: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []

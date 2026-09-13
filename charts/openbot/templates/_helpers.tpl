@@ -183,9 +183,13 @@ name it. Nothing else in the chart consults it.
 {{- end -}}
 {{- end -}}
 
-{{/* The image, with the chart's appVersion as the tag unless one is named. */}}
+{{/*
+The image, with the chart's appVersion as the tag unless one is named. Published tags carry a `v`
+(`v0.0.9`), and appVersion is plain semver, so the default is prefixed with `v` to name a tag that
+actually exists. A named `image.tag` is used verbatim.
+*/}}
 {{- define "openbot.image" -}}
-{{- $tag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $tag := .Values.image.tag | default (printf "v%s" .Chart.AppVersion) -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end -}}
 

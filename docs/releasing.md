@@ -10,8 +10,9 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    the person reading the diff and these notes are for the person deciding whether to upgrade.
 2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Use
    `dry_run` first if you want to see the version and the notes without opening anything.
-3. Review the pull request it opens. It contains exactly two changes: the version in `package.json`
-   and the `## Unreleased` heading becoming `## X.Y.Z`.
+3. Review the pull request it opens. It contains exactly three changes: the version in `package.json`,
+   the `## Unreleased` heading becoming `## X.Y.Z`, and the Helm chart's `appVersion` moving to the
+   same number so a default `helm install` pulls the image this release builds.
 4. Merge it. That is the publish.
 
 Merging is the trigger, so a release is always a reviewed commit on `main`.
@@ -85,8 +86,10 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 
 | check | what it would catch |
 | --- | --- |
-| `format, lint, types` | the ordinary things |
+| `format, lint, types` | the ordinary things, across every workspace including `agent-computer` and the supervisor |
 | `tests` | a decision made wrongly, in isolation |
+| `chart` | a Helm values file that renders a server which cannot start, across the EKS, GKE, AKS and self-hosted targets |
+| `python harness regressions` | a provider-boundary regression in the Python Bot harnesses |
 | `build` | the app not compiling |
 | `migrations` | a schema change with no migration, or a snapshot that has drifted |
 | `image` | an image that builds but does not boot, or a supervised service that respawns |

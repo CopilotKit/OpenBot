@@ -17,12 +17,6 @@ tells its model the call was refused, with the status and the deployment's reaso
 Python LangGraph Bot already does, and the transcript draws it as a refusal. A tool that answered is
 passed on exactly as before.
 
-### The desktop setup's question box waits for a composed character before it asks
-
-Enter confirms a character being typed through an input method (Japanese, Chinese, Korean). On the
-final setup screen that Enter also sent the question, with its last character still unconfirmed. The
-box now waits for the character to be confirmed, the way a chat composer does, and an ordinary Enter
-still asks.
 ### Revoking a grant with a blank ref or Bot is refused instead of reported as done
 
 `DELETE /api/plugins/grants` checked its query params with truthiness, and a query param is
@@ -62,6 +56,21 @@ no check at all. Both reached the store, where the insert threw an uncaught erro
 caller error. A slug, a title and instructions must be non-empty strings now, the slug pattern is
 tested only after that, and a summary must be absent or a string; anything else is a 400 naming
 the field, before any refusal check, store write, or audit row.
+
+### More endpoints refuse a malformed request instead of coercing it or failing open
+
+The same treatment reached the rest of the write and query surface: the agent tool-call endpoint's
+name and arguments, the policy dry-run and audit-event list limits, a component's publication flag,
+the sandboxed-component fields, and a catalogue entry are each checked and answered with a 400 that
+names the bad field before the store is touched. The four hand-driven computer gestures — click,
+type, key and scroll — validate their own payloads the same way, so a click with no coordinates or a
+key with no key is refused rather than sent to the computer as a no-op.
+
+One of these closed a hole rather than tightening an edge. A component's list of decision functions
+was filtered to the strings in it, so `{"functions":[123,null,{}]}` became an empty list, the
+permission check ran over nothing, and the answer came back `allowed` for functions the caller had in
+fact named. The verdict is about the functions named now, or a 400; an absent list still means none.
+
 ### Generated interfaces, tables and forms
 
 Generative UI is enabled by default; set `OPENBOT_GENERATIVE_UI=false` or `0` to disable it.
