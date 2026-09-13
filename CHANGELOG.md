@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A long tool result or relayed answer is cut between characters, not through an emoji
+
+A tool result over 20,000 characters, and a Bot's answer over 12,000 relayed back through a handoff,
+were cut by UTF-16 code unit. When the cut landed inside an emoji or any other character outside the
+Basic Multilingual Plane, the text handed to the model ended on half of it: a lone surrogate that
+JSON carries as a bare `\ud83d` and UTF-8 turns into a replacement character. The cut now stops one
+unit short in that case, the way an attached text file's already did. Anything that fits is
+untouched, and the note saying the result was cut reads as before.
+
 ## 0.0.10
 
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing

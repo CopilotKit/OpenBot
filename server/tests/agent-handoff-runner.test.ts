@@ -518,6 +518,20 @@ describe("relaying the answer home", () => {
     expect(offered[0]?.task).toContain("[…the answer was cut here for length]");
     expect((offered[0]?.task ?? "").length).toBeLessThan(14_000);
   });
+
+  test("an answer cut inside a character loses the whole character, not half of it", async () => {
+    // 12,000 code units are kept, and an emoji is two: its high half on the last kept unit would
+    // reach the relaying run's prompt as a lone surrogate.
+    const { runner: sweeper, offered } = runner({
+      answer: `${"x".repeat(11_999)}😀tail`,
+    });
+
+    await sweeper.sweep();
+
+    expect(offered[0]?.task).toContain(
+      `${"x".repeat(11_999)}\n\n[…the answer was cut here for length]`,
+    );
+  });
 });
 
 /**

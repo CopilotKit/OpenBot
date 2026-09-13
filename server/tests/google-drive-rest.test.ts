@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { catalogueEntry } from "../src/plugins/catalogue";
 import { callTool, listTools } from "../src/plugins/google-drive-rest";
+import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 import { transportFor } from "../src/plugins/transport";
 
 /**
@@ -235,5 +236,35 @@ describe("reading a file asks Drive what it is first", () => {
 
     expect(result.isError).toBe(true);
     expect(calls).toHaveLength(0);
+  });
+
+  test("a file too long for one result is cut between characters, never through one", async () => {
+    // The name and a blank line lead the result, so the filler is sized to put an emoji's high half
+    // on the last code unit the limit keeps.
+    const heading = "notes.txt\n\n";
+    const filler = "a".repeat(MAX_RESULT_CHARS - 1 - heading.length);
+    let served = 0;
+    globalThis.fetch = (async () => {
+      served += 1;
+      return served === 1
+        ? new Response(
+            JSON.stringify({
+              id: "txt1",
+              name: "notes.txt",
+              mimeType: "text/plain",
+            }),
+            { headers: { "content-type": "application/json" } },
+          )
+        : new Response(`${filler}😀tail`, {
+            headers: { "content-type": "text/plain" },
+          });
+    }) as unknown as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "txt1",
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(result.text.split("\n\n[truncated")[0]).toBe(`${heading}${filler}`);
   });
 });

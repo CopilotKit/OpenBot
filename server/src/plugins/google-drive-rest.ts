@@ -1,3 +1,4 @@
+import { cutAtCodeUnits } from "../channels/text";
 import { MAX_RESULT_CHARS, type McpCallResult, type McpTool } from "./mcp";
 
 /**
@@ -292,7 +293,7 @@ function asResult(text: string): McpCallResult {
     return { text: joined, isError: false, truncated: false };
   }
   return {
-    text: `${joined.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
     isError: false,
     truncated: true,
   };
