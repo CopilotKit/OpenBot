@@ -53,14 +53,14 @@ export function createSandboxedRoutes(
     if (forbidden) return forbidden;
 
     const body = (await context.req.json().catch(() => null)) as {
-      slug?: string;
-      title?: string;
-      description?: string;
-      html?: string;
-      css?: string;
-      jsFunctions?: string;
-      argumentSchema?: Record<string, unknown>;
-      sampleArguments?: Record<string, unknown>;
+      slug?: unknown;
+      title?: unknown;
+      description?: unknown;
+      html?: unknown;
+      css?: unknown;
+      jsFunctions?: unknown;
+      argumentSchema?: unknown;
+      sampleArguments?: unknown;
     } | null;
 
     if (
@@ -72,16 +72,70 @@ export function createSandboxedRoutes(
       return context.json({ error: "A name and a title are required." }, 400);
     }
 
+    /*
+     * Every other field is optional, but none of them is untyped. This used to pass
+     * `body.description ?? ""` straight into `store.save`, so `{"description": 123}` or
+     * `{"argumentSchema": "not-an-object"}` travelled into a text/jsonb column and came
+     * back as an unhandled 500 from the database. Absent still means the default; a
+     * present value must be its type, else 400 naming the field.
+     */
+    for (const field of [
+      "description",
+      "html",
+      "css",
+      "jsFunctions",
+    ] as const) {
+      const value = body[field];
+      if (value !== undefined && typeof value !== "string") {
+        return context.json(
+          { error: `The component ${field} must be text.` },
+          400,
+        );
+      }
+    }
+    for (const field of ["argumentSchema", "sampleArguments"] as const) {
+      const value = body[field];
+      if (
+        value !== undefined &&
+        (!value ||
+          typeof value !== "object" ||
+          Array.isArray(value) ||
+          Object.getPrototypeOf(value) !== Object.prototype)
+      ) {
+        return context.json(
+          { error: `The component ${field} must be an object.` },
+          400,
+        );
+      }
+    }
+
+    const slug = body.slug as string;
+    const title = body.title as string;
+    const description =
+      body.description === undefined ? "" : (body.description as string);
+    const html = body.html === undefined ? "" : (body.html as string);
+    const css = body.css === undefined ? "" : (body.css as string);
+    const jsFunctions =
+      body.jsFunctions === undefined ? "" : (body.jsFunctions as string);
+    const argumentSchema =
+      body.argumentSchema === undefined
+        ? {}
+        : (body.argumentSchema as Record<string, unknown>);
+    const sampleArguments =
+      body.sampleArguments === undefined
+        ? {}
+        : (body.sampleArguments as Record<string, unknown>);
+
     try {
       const component = await store.save({
-        slug: body.slug.trim(),
-        title: body.title.trim(),
-        description: body.description ?? "",
-        html: body.html ?? "",
-        css: body.css ?? "",
-        jsFunctions: body.jsFunctions ?? "",
-        argumentSchema: body.argumentSchema ?? {},
-        sampleArguments: body.sampleArguments ?? {},
+        slug: slug.trim(),
+        title: title.trim(),
+        description,
+        html,
+        css,
+        jsFunctions,
+        argumentSchema,
+        sampleArguments,
         by: actorEmail(context),
       });
       return context.json({ component });
