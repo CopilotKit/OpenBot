@@ -87,8 +87,29 @@ export function createComponentRoutes(
       return context.json({ error: "A list of components is required." }, 400);
     }
 
-    const valid = entries.flatMap((entry) => {
-      if (!entry || typeof entry !== "object") return [];
+    /*
+     * All or nothing, and a 400 names the entry. This used to drop malformed entries and
+     * answer 200 with whatever was left, so a deploy that typo'd `kind` as an object or
+     * sent a blank `description` got a success response while publishing nothing: `{added: []}`
+     * is also what "already in sync" looks like. The operator found out from a missing
+     * component, not from the API. A build announcing an empty catalogue sends `[]`, which
+     * still syncs to nothing and answers 200.
+     */
+    const valid: {
+      name: string;
+      title: string;
+      kind: string;
+      description: string;
+    }[] = [];
+    for (const [index, entry] of entries.entries()) {
+      if (!entry || typeof entry !== "object") {
+        return context.json(
+          {
+            error: `Component at index ${index} needs a name, a title, a kind and a description.`,
+          },
+          400,
+        );
+      }
       const { name, title, kind, description } = entry as Record<
         string,
         unknown
@@ -103,22 +124,25 @@ export function createComponentRoutes(
         typeof description !== "string" ||
         !description.trim()
       ) {
-        return [];
+        return context.json(
+          {
+            error: `Component at index ${index} needs a name, a title, a kind and a description.`,
+          },
+          400,
+        );
       }
       // Trimmed, because that is the string the guard above just approved. A component's `name` is
       // its identity -- `syncCatalogue` compares it against what is already published, `decide` and
       // `listForAgent` look it up by it, and a grant names it -- so publishing " weatherPanel "
       // adds a second component beside `weatherPanel` that nobody has granted and no Bot can be
       // held back from by the name people use.
-      return [
-        {
-          name: name.trim(),
-          title: title.trim(),
-          kind: kind.trim(),
-          description: description.trim(),
-        },
-      ];
-    });
+      valid.push({
+        name: name.trim(),
+        title: title.trim(),
+        kind: kind.trim(),
+        description: description.trim(),
+      });
+    }
 
     const { added } = await store.syncCatalogue(valid);
     // Only arrivals are recorded. Announcing happens on every page load, and a row per load would

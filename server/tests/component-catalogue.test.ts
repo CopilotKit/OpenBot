@@ -95,9 +95,14 @@ describe("a build announcing what it can draw", () => {
     expect(published[0]?.kind).toBe("panel");
   });
 
-  test("still refuses an entry that is only whitespace", async () => {
+  test("refuses an entry that is only whitespace instead of dropping it", async () => {
     const { published, announce } = harness();
-    await announce([entry({ name: "   " })]);
+    const response = await announce([entry({ name: "   " })]);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Component at index 0 needs a name, a title, a kind and a description.",
+    });
     expect(published).toEqual([]);
   });
 
