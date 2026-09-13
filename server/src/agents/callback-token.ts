@@ -217,6 +217,65 @@ export type CallVerdict =
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
+ * What a framework Bot asks to run, parsed out of the request body.
+ *
+ * The route used to check `if (!body?.name)` and then call `body.name.replace`, so a
+ * non-string name (`123`, `{}`, `["mcp__x"]`) passed the truthiness guard and threw
+ * `TypeError: body.name.replace is not a function` inside the `try`, which the catch
+ * answered as a 200 tool refusal with the marker text. A caller error looked like a tool
+ * saying no, with no audit row and no 400. `args` had the same shape problem: anything
+ * non-null (`"str"`, `42`, `[]`) flowed straight into `callTool` as a `Record`.
+ *
+ * Parsed here, pure and unit-tested, so the route answers 400 before auth output or the
+ * store ever sees the values. The `mcp__server__tool` to `server/tool` mapping lives here
+ * too, so the route never calls a string method on untrusted input again.
+ */
+export type AgentToolCallInput = {
+  /** The store-shaped tool ref, with the `mcp__` prefix mapped. */
+  ref: string;
+  /** The tool arguments, defaulting to `{}` when absent. */
+  args: Record<string, unknown>;
+};
+
+export function parseAgentToolCallInput(
+  body: unknown,
+): { ok: true; value: AgentToolCallInput } | { ok: false; error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, error: "A tool is required." };
+  }
+  const name = (body as { name?: unknown }).name;
+  if (typeof name !== "string" || !name.trim()) {
+    return { ok: false, error: "A tool is required." };
+  }
+  const rawArgs = (body as { args?: unknown }).args;
+  if (rawArgs === undefined) {
+    return {
+      ok: true,
+      value: {
+        ref: name
+          .trim()
+          .replace(/^mcp__/, "")
+          .replace("__", "/"),
+        args: {},
+      },
+    };
+  }
+  if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) {
+    return { ok: false, error: "Tool arguments must be an object." };
+  }
+  return {
+    ok: true,
+    value: {
+      ref: name
+        .trim()
+        .replace(/^mcp__/, "")
+        .replace("__", "/"),
+      args: rawArgs as Record<string, unknown>,
+    },
+  };
+}
+
+/**
  * May this call proceed, and as whom?
  *
  * Pure, and separate from the route, because this is the whole of the security decision and it should

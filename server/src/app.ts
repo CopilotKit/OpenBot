@@ -3,7 +3,11 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { MAX_IMAGE_BYTES } from "../../shared/attachments";
-import { authoriseAgentCall, sameToken } from "./agents/callback-token";
+import {
+  authoriseAgentCall,
+  parseAgentToolCallInput,
+  sameToken,
+} from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
@@ -1285,15 +1289,15 @@ export function createApp(
         return context.json({ error: verdict.reason }, verdict.status);
       }
 
-      if (!body?.name) {
-        return context.json({ error: "A tool is required." }, 400);
+      const parsedCall = parseAgentToolCallInput(body);
+      if (!parsedCall.ok) {
+        return context.json({ error: parsedCall.error }, 400);
       }
 
       try {
         const result = await pluginStore.callTool({
-          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
-          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
-          args: body.args ?? {},
+          ref: parsedCall.value.ref,
+          args: parsedCall.value.args,
           botId: verdict.botId,
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
