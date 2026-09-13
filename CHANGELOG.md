@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Python LangGraph Bot tells its model why the deployment refused a tool call
+
+When the deployment would not run a tool call from the Python LangGraph Bot — a token it no longer
+accepts, one issued to another Bot, or a malformed call — it answered with the status and a reason
+under `error`, and the Bot told its model only "Refused. Tool callback returned HTTP 403." The model
+could say a call was refused but not why, and could not correct a call the deployment had named as
+malformed. The reason now follows the status, the way the TypeScript LangGraph Bot already passes it
+on. A refusal with no readable reason reads exactly as before.
+
 ## 0.0.10
 
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing
