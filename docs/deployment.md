@@ -206,6 +206,22 @@ are capped at 350 per instance on the basic tier.
 **Railway, Render, Fly.io.** All run this image directly and all provision PostgreSQL in a click,
 which makes them the shortest path from nothing to a running deployment.
 
+## Desktop folder access
+
+In the desktop app, open **Admin → Computers → Folders on this computer** and choose a folder for
+one Bot. The local owner confirms it in a native folder picker. Access belongs to that Bot and
+person for the current session; a web page or model response cannot approve it.
+
+Folders start read-only. Each file change and shell command requires a separate native confirmation.
+Commands use Linux tools in an isolated container, with networking disabled and a temporary writable
+workspace. They cannot run the Mac or Windows applications installed on the host. A command granted
+write access can change or delete files in its approved folder; commands are not automatically undoable.
+
+Use **Revoke** or **Stop folder access** to cancel folder work. **Stop OpenBot** and **Quit** also
+terminate the isolated jobs. If the desktop loses its server connection, its folder grants expire.
+Protected system, credential and browser-profile directories cannot be selected. Folder access requires
+the local desktop app and its container engine; it is unavailable on a standalone web deployment.
+
 ## Known costs
 
 **The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the

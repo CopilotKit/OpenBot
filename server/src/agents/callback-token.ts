@@ -213,7 +213,7 @@ function readInitiator(value: unknown): AuditInitiator {
 }
 
 export type CallVerdict =
-  | { ok: true; botId: string; actorId: string }
+  | { ok: true; botId: string; actorId: string; initiator?: AuditInitiator }
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
@@ -280,5 +280,10 @@ export async function authoriseAgentCall(options: {
     };
   }
 
-  return { ok: true, botId: assertion.botId, actorId: assertion.actorId };
+  return {
+    ok: true,
+    botId: assertion.botId,
+    actorId: assertion.actorId,
+    initiator: assertion.initiator,
+  };
 }

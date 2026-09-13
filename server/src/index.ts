@@ -32,6 +32,8 @@ import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
+import { createHostAccessBroker } from "./host-access/broker";
+import { hostAccessTools } from "./host-access/tools";
 import type { OpenBotRole } from "./auth/roles";
 import {
   loadAttachmentForTurn,
@@ -86,7 +88,7 @@ import { createPeopleStore } from "./people/store";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
-import { grantedSkills, grantedTools } from "./plugins/tools";
+import { grantedSkills, grantedTools, REFUSAL_MARKER } from "./plugins/tools";
 import { createTurnRunner } from "./routines/run-turn";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
@@ -527,12 +529,24 @@ const resolveRuntimeModelApiKey = () =>
     environment: process.env,
   });
 
-// Tools run here, not in the browser. Each one still executes through the plugin store, so the
-// grant, the policy and the audit row are exactly where they were.
+const hostAccessBroker = createHostAccessBroker();
+
+// Tools run here, not in the browser. Each connector still executes through the plugin store, so the
+// grant, the policy and the audit row are exactly where they were. Host-folder tools are also
+// server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
+// receives only opaque grant ids and relative paths.
 const loadToolsForActor =
   (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
-  (botId: string) =>
-    grantedTools({ store: pluginStore, botId, actorId, initiator });
+  async (botId: string) => [
+    ...(await grantedTools({ store: pluginStore, botId, actorId, initiator })),
+    ...hostAccessTools({
+      broker: hostAccessBroker,
+      botId,
+      actorId,
+      auditStore: bootAuditStore,
+      initiator,
+    }),
+  ];
 
 /** One person's standing instructions, for both the /api/settings routes and every run they start. */
 const userInstructionsStore = createUserInstructionsStore(database);
@@ -1222,6 +1236,28 @@ const app = createApp(
   // The same database every other store here is built from, so a channel's staged and sent files
   // live behind the same connection as the messages that reference them.
   database,
+  // Native host-folder sessions are session-only: grants disappear with this server process and the
+  // desktop worker must authenticate with a fresh token for this run.
+  hostAccessBroker,
+  process.env.OPENBOT_DESKTOP_HOST_TOKEN,
+  async ({ name, args, botId, actorId, initiator }) => {
+    if (!name.startsWith("host_")) return null;
+    const tool = hostAccessTools({
+      broker: hostAccessBroker,
+      botId,
+      actorId,
+      auditStore: bootAuditStore,
+      ...(initiator ? { initiator } : {}),
+    }).find((candidate) => candidate.name === name);
+    if (!tool) {
+      return {
+        text: `${REFUSAL_MARKER} That host tool is not available for this Bot right now.`,
+        isError: true,
+      };
+    }
+    const text = await tool.execute(args);
+    return { text, isError: text.startsWith(REFUSAL_MARKER) };
+  },
 );
 
 /**
