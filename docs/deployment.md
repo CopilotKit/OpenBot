@@ -206,11 +206,33 @@ are capped at 350 per instance on the basic tier.
 **Railway, Render, Fly.io.** All run this image directly and all provision PostgreSQL in a click,
 which makes them the shortest path from nothing to a running deployment.
 
+## Desktop folder access
+
+In the desktop app, open **Admin → Computers → Folders on this computer** and choose a folder for
+one Bot. The local owner confirms it in a native folder picker. Access belongs to that Bot and
+person for the current session; a web page or model response cannot approve it.
+
+Folders start read-only. Each file change and shell command requires a separate native confirmation.
+Commands use Linux tools in an isolated container, with networking disabled and a temporary writable
+workspace. They cannot run the Mac or Windows applications installed on the host. A command granted
+write access can change or delete files in its approved folder; commands are not automatically undoable.
+
+Use **Revoke** or **Stop folder access** to cancel folder work. **Stop OpenBot** and **Quit** also
+terminate the isolated jobs. If the desktop loses its server connection, its folder grants expire.
+Protected system, credential and browser-profile directories cannot be selected. Folder access requires
+the local desktop app and its container engine; it is unavailable on a standalone web deployment.
+
 ## Known costs
 
-**The image is 1.4 GB**, and 595 MB of that is Firefox and WebKit, which the Playwright base ships
-alongside the Chromium we use and nothing here ever launches. Deleting them afterwards does not help, because the bytes still ship in the layer
-below. Building Chromium-only onto a slim base would cut this substantially and is not done yet.
+**The browser images carry only the Chromium browser family.** The all-in-one Dockerfile and the
+published `agent-computer` Dockerfile both build from Ubuntu and run Playwright's pinned
+`install --with-deps chromium` path, so Firefox and WebKit are never introduced into the final image
+layers. Keep that Playwright version matched to `agent-computer/package.json`; changing one without
+the other can make the browser protocol and executable revision diverge. The images keep the
+baseline Node command-line tools (`node`, `npm`, and `npx`) from the official Node 24.18.1 image.
+Measured as local zstd OCI layer descriptors against the previous Playwright-base `agent-computer`
+image, the compressed desktop image fell from 884.2 MiB to 535.0 MiB on arm64 and from 894.6 MiB to
+518.1 MiB on amd64.
 
 **A strict content-security-policy needs a hash or a nonce.** `app/index.html` runs a small inline
 script that decides the theme before the first paint. Nothing in this repo sends a CSP header, so it

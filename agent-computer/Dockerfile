@@ -1,14 +1,25 @@
-# The Bot's computer uses Playwright's image so Chromium and its system libraries stay matched.
+# The Bot's computer installs only the Playwright browser it launches.
 #
 # The image tag and Playwright dependency must be pinned to the same exact version. Bump both or
 # neither.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble
+FROM node:24.18.1-bookworm-slim AS node-toolchain
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun-toolchain
 
-# unzip is not in the Playwright image and bun's installer needs it.
-RUN apt-get update && apt-get install -y --no-install-recommends unzip \
-  && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
+FROM ubuntu:24.04
+
+# The Bun image digest pins the amd64/arm64 release bytes, including if its tag changes.
+ARG PLAYWRIGHT_VERSION=1.62.1
+ENV BUN_INSTALL=/usr/local
+ENV PATH="/usr/local/bin:${PATH}"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --from=node-toolchain /usr/local /usr/local
+COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl unzip xz-utils \
+  && ln -s bun /usr/local/bin/bunx \
+  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+  && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/*
 
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh

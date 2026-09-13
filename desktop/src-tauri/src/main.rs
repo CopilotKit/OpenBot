@@ -4,18 +4,20 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_host_access;
 mod desktop_telemetry;
 
 #[cfg(test)]
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, deployment, deployment_release, engine, env as openbot_env, harness, install,
-    problem::Problem, provider, pull_metrics, quiet, stack, supervise, telemetry, tray,
+    acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
+    install, problem::Problem, provider, pull_metrics, quiet, stack, supervise, telemetry, tray,
     windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
+const QUIT_MENU_ACCELERATOR: &str = "CmdOrCtrl+KeyQ";
 const QUIT_CLEANUP_NOTICE_LIMIT: usize = 16 * 1024;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -23,6 +25,8 @@ use tauri::{Emitter, Manager};
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
+    /// Session-only local folder authority; shutdown retires it before stopping the API server.
+    host_access: Mutex<Option<host_access::HostAccess>>,
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
     /// Which run is the current one.
@@ -878,7 +882,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         ),
     })?;
 
-    let (logs, bun, secrets) = {
+    let (logs, bun, mut secrets) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -902,6 +906,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(status.detail.into());
         };
         let found = found.pin()?;
+        acquire::prepare_for_compose(&found)?;
 
         // Checked here as well as in the health gate, because the gate only runs when an engine had to
         // be installed. A machine that already had Podman skips all of that and arrives at Compose,
@@ -1100,6 +1105,13 @@ async fn start_stack_inner<R: tauri::Runtime>(
     }
     report(&app, "dependencies", true, "installed");
 
+    // Never persisted or passed to Compose. Only the server process receives this credential;
+    // model workers and frontend processes cannot impersonate the native approval transport.
+    use base64::Engine as _;
+    let host_token =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+    secrets.insert("OPENBOT_DESKTOP_HOST_TOKEN".into(), host_token.clone());
+
     let logs_for_wait = logs.clone();
     let generation = start_host_processes(
         &attempt,
@@ -1125,6 +1137,26 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // Stop must not finish between accepting readiness and reporting a successful Start.
     let _startup = attempt.lock_current()?;
     // Only a stack that answered successfully acquires a restart policy.
+    let address = shell
+        .containers
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|owned| owned.address.clone())
+        .ok_or_else(|| Problem::plain("The local container runtime is unavailable."))?;
+    let config = host_access::HostAccessConfig::new(
+        format!("http://127.0.0.1:{}", openbot_env::Ports::default().server),
+        host_token,
+        address,
+        deployment::reference(&root, "agent-computer")?,
+        vec![root.clone()],
+    );
+    let broker = host_access::HostAccess::start_with_approval(
+        config,
+        std::sync::Arc::new(desktop_host_access::NativeApproval(app.clone())),
+    )
+    .map_err(|error| Problem::with("Local folder access could not start.", error.to_string()))?;
+    *shell.host_access.lock().unwrap() = Some(broker);
     supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
 
     report(&app, "answering", true, "the API and the app are answering");
@@ -1345,6 +1377,18 @@ fn cleanup_host_state<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize
 where
     C: FnOnce(&Path) -> Result<usize, Problem>,
 {
+    // Also runs for startup replacement and failure recovery, so a retired authorization session
+    // cannot leave a job running beside a new server. Keep failed cleanup owned for a later Stop.
+    let host_access_result = {
+        let mut slot = shell.host_access.lock().unwrap();
+        let result = slot.as_ref().map_or(Ok(()), |broker| {
+            broker.stop().map_err(|error| error.to_string())
+        });
+        if result.is_ok() {
+            *slot = None;
+        }
+        result
+    };
     let mut children = shell.children.lock().unwrap();
     let selected = shell
         .root
@@ -1353,6 +1397,17 @@ where
         .clone()
         .unwrap_or_else(|| root.to_path_buf());
     let result = cleanup_host_children(&selected, &mut children, cleanup);
+    let result = match (host_access_result, result) {
+        (Ok(()), result) => result,
+        (Err(error), Ok(_)) => Err(Problem::with(
+            "OpenBot could not stop a folder operation.",
+            error,
+        )),
+        (Err(error), Err(problem)) => Err(Problem::with(
+            "OpenBot could not finish stopping its work.",
+            format!("{error}\n{}", problem_detail(problem)),
+        )),
+    };
     if result.is_ok() {
         *shell.root.lock().unwrap() = None;
     }
@@ -2799,6 +2854,10 @@ fn chose(app: &tauri::AppHandle, item: &str) {
     }
 }
 
+fn quit_menu_accelerator() -> Option<&'static str> {
+    Some(QUIT_MENU_ACCELERATOR)
+}
+
 fn main() {
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
@@ -2809,6 +2868,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             record_setup_event,
@@ -2872,7 +2932,7 @@ fn main() {
 
             let open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
             let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
 
             TrayIconBuilder::with_id("openbot")
@@ -2893,7 +2953,8 @@ fn main() {
             use tauri::menu::Submenu;
             let window_open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
             let window_stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
-            let window_quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let window_quit =
+                MenuItem::with_id(app, "quit", "Quit", true, quit_menu_accelerator())?;
             // A submenu, because a top-level entry in a menu bar has to be one to open at all.
             let openbot = Submenu::with_items(
                 app,
@@ -3004,6 +3065,11 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+
+    #[test]
+    fn quit_menu_uses_the_standard_quit_shortcut() {
+        assert_eq!(quit_menu_accelerator(), Some("CmdOrCtrl+KeyQ"));
+    }
 
     #[test]
     fn responsive_quit_returns_while_cleanup_is_blocked_then_exits_in_order() {

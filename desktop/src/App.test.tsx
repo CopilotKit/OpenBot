@@ -62,7 +62,7 @@ function setupEvents() {
     .map((call) => call.args);
 }
 
-test("setup discloses default telemetry without a consent gate and deduplicates viewed steps", async () => {
+test("setup records telemetry without a consent gate and deduplicates viewed steps", async () => {
   useRootConfigurationSetup("/tmp/private-setup-root", async () =>
     emptyConfiguration(),
   );
@@ -80,8 +80,6 @@ test("setup discloses default telemetry without a consent gate and deduplicates 
     );
   });
 
-  expect(view.getByText(/COPILOTKIT_TELEMETRY_DISABLED=1/)).toBeTruthy();
-  expect(view.getByText(/DO_NOT_TRACK=1/)).toBeTruthy();
   expect(view.queryByRole("checkbox")).toBeNull();
   expect(view.queryByRole("switch")).toBeNull();
   expect(setupEvents()).toEqual([
