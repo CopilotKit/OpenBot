@@ -273,6 +273,11 @@ fn configure_owned_windows_podman_for_compose(
     configure_host_gateway_after_start(&mut run, true)
 }
 
+/// Run before Compose even when an existing engine skipped the install/start steps.
+pub fn prepare_for_compose(address: &Address) -> Result<(), String> {
+    configure_owned_windows_podman_for_compose(address, podman, cfg!(target_os = "windows"))
+}
+
 fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
     target_is_windows
         && address.engine == Engine::Podman
@@ -301,10 +306,17 @@ fn validate_host_gateway_ip(ip: Ipv4Addr) -> Result<Ipv4Addr, String> {
 
 fn host_gateway_config_script(ip: Ipv4Addr) -> String {
     format!(
-        "mkdir -p \"$HOME/.config/containers/containers.conf.d\" && \
-         tmp=\"$HOME/{HOST_GATEWAY_CONFIG}.tmp\" && \
+        "set -e; \
+         mkdir -p \"$HOME/.config/containers/containers.conf.d\"; \
+         target=\"$HOME/{HOST_GATEWAY_CONFIG}\"; \
+         tmp=\"$target.tmp\"; \
          cat > \"$tmp\" <<'EOF'\n[containers]\nhost_containers_internal_ip=\"{ip}\"\nEOF\n\
-         mv \"$tmp\" \"$HOME/{HOST_GATEWAY_CONFIG}\""
+         if [ -f \"$target\" ] && cmp -s \"$tmp\" \"$target\"; then \
+           rm \"$tmp\"; \
+         else \
+           mv \"$tmp\" \"$target\"; \
+           systemctl --user try-restart podman.service; \
+         fi"
     )
 }
 
@@ -792,26 +804,52 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn joined_podman_ssh_write_command_creates_expected_host_config() {
-        let home = temp_root("openbot-host-gateway-home");
+    fn joined_podman_ssh_write_command_restarts_api_only_when_config_changes() {
+        let root = temp_root("openbot-host-gateway-home");
+        let home = root.join("home");
+        let bin = root.join("bin");
         std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let calls = root.join("systemctl-calls");
+        let fake_systemctl = bin.join("systemctl");
+        std::fs::write(
+            &fake_systemctl,
+            format!("#!/bin/sh\nprintf '%s\n' \"$*\" >> '{}'\n", calls.display()),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_systemctl, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
         let command = host_gateway_config_script("192.168.127.254".parse().unwrap());
         let joined_remote_command = [command.as_str()].join(" ");
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
 
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&joined_remote_command)
-            .env("HOME", &home)
-            .status()
-            .expect("execute joined remote command under sh");
+        for _ in 0..2 {
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&joined_remote_command)
+                .env("HOME", &home)
+                .env("PATH", &path)
+                .status()
+                .expect("execute joined remote command under sh");
 
-        assert!(status.success(), "joined command failed: {status}");
+            assert!(status.success(), "joined command failed: {status}");
+        }
+
         let written = std::fs::read_to_string(home.join(HOST_GATEWAY_CONFIG)).unwrap();
         assert_eq!(
             written,
             "[containers]\nhost_containers_internal_ip=\"192.168.127.254\"\n"
         );
-        let _ = std::fs::remove_dir_all(home);
+        let systemctl_calls = std::fs::read_to_string(&calls).unwrap();
+        assert_eq!(systemctl_calls, "--user try-restart podman.service\n");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -906,6 +906,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(status.detail.into());
         };
         let found = found.pin()?;
+        acquire::prepare_for_compose(&found)?;
 
         // Checked here as well as in the health gate, because the gate only runs when an engine had to
         // be installed. A machine that already had Podman skips all of that and arrives at Compose,
