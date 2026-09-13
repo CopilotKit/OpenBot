@@ -276,11 +276,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
+      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
+      # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
+      # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
+      # from a digest that lived in the other's repository, so the join failed with "not found".
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: digest-${{ matrix.image }}-*
+          name: digest-${{ matrix.image }}-amd64
           path: digests
-          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digest-${{ matrix.image }}-arm64
+          path: digests
       - id: merge
         name: Write the tags over both architectures
         env:
