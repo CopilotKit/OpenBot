@@ -464,6 +464,31 @@ test("builds the deployment image with Playwright's Chromium payload only", () =
   );
 });
 
+test("takes Bun from the same immutable release in both computer images", () => {
+  const { packageManager } = JSON.parse(
+    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
+  );
+  const bunVersion = packageManager.replace("bun@", "");
+  const sources = [];
+  for (const dockerfile of [rootDockerfile(), agentComputerDockerfile()]) {
+    const source = dockerfile.match(
+      /^FROM (oven\/bun:\S+) AS bun-toolchain$/m,
+    )?.[1];
+    expect(source).toMatch(
+      new RegExp(
+        `^oven/bun:${bunVersion.replaceAll(".", "\\.")}@sha256:[a-f0-9]{64}$`,
+      ),
+    );
+    expect(dockerfile).toContain(
+      "COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun",
+    );
+    expect(dockerfile).not.toContain("bun.sh/install");
+    expect(dockerfile).not.toMatch(/\b(?:curl|wget)\b[^\n]*\|\s*(?:bash|sh)\b/);
+    sources.push(source);
+  }
+  expect(sources[0]).toBe(sources[1]);
+});
+
 /**
  * Per-Bot egress reaches the processes that read it.
  *

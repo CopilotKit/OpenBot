@@ -1273,13 +1273,19 @@ struct ForbiddenPaths {
 }
 
 fn validate_grant_root(path: &Path, configured_forbidden: &[PathBuf]) -> HostAccessResult<PathBuf> {
+    validate_grant_root_with_forbidden(path, &forbidden_paths(configured_forbidden))
+}
+
+fn validate_grant_root_with_forbidden(
+    path: &Path,
+    forbidden: &ForbiddenPaths,
+) -> HostAccessResult<PathBuf> {
     let root = canonical(path)?;
     if root.parent().is_none() {
         return Err(HostAccessError::Denied(
             "The filesystem root cannot be granted.".into(),
         ));
     }
-    let forbidden = forbidden_paths(configured_forbidden);
     for denied in &forbidden.exact_or_ancestor_only {
         if &root == denied || path_contains(&root, denied) {
             return Err(HostAccessError::Denied(
@@ -1298,16 +1304,29 @@ fn validate_grant_root(path: &Path, configured_forbidden: &[PathBuf]) -> HostAcc
 }
 
 fn forbidden_paths(configured: &[PathBuf]) -> ForbiddenPaths {
+    forbidden_paths_with_home(configured, home_dir().as_deref())
+}
+
+fn forbidden_paths_with_home(configured: &[PathBuf], home: Option<&Path>) -> ForbiddenPaths {
     let mut exact_or_ancestor_only = Vec::new();
     let mut protected_subtrees = Vec::new();
     protected_subtrees.extend(configured.iter().filter_map(|path| canonical(path).ok()));
-    if let Some(home) = home_dir().and_then(|path| canonical(&path).ok()) {
+    if let Some(home) = home.and_then(|path| canonical(path).ok()) {
         exact_or_ancestor_only.push(home.clone());
         for relative in [
             ".ssh",
             ".gnupg",
             ".aws",
             ".config/gcloud",
+            ".config/gh",
+            ".local/share/keyrings",
+            ".claude",
+            ".codex",
+            ".cargo/credentials",
+            ".cargo/credentials.toml",
+            ".netrc",
+            ".git-credentials",
+            ".npmrc",
             ".docker",
             ".kube",
             "Library/Application Support/OpenBot",
@@ -1316,6 +1335,7 @@ fn forbidden_paths(configured: &[PathBuf]) -> ForbiddenPaths {
             "Library/Application Support/Firefox",
             "Library/Keychains",
             "AppData/Roaming/OpenBot",
+            "AppData/Roaming/GitHub CLI",
             "AppData/Local/Google/Chrome",
             "AppData/Local/BraveSoftware",
             "AppData/Roaming/Mozilla/Firefox",
@@ -1331,19 +1351,44 @@ fn forbidden_paths(configured: &[PathBuf]) -> ForbiddenPaths {
         "/private/etc",
         "/etc",
         "/var/run",
-        "C:\\Windows",
-        "C:\\Program Files",
-        "C:\\Program Files (x86)",
-        "C:\\ProgramData",
     ] {
         if let Ok(path) = canonical(Path::new(path)) {
             protected_subtrees.push(path);
         }
     }
+    #[cfg(windows)]
+    protected_subtrees.extend(
+        windows_environment_paths(|name| std::env::var_os(name))
+            .iter()
+            .filter_map(|path| canonical(path).ok()),
+    );
     ForbiddenPaths {
         exact_or_ancestor_only,
         protected_subtrees,
     }
+}
+
+#[cfg(any(windows, test))]
+fn windows_environment_paths(
+    mut get_env: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> Vec<PathBuf> {
+    // Installations may relocate these folders; ProgramW6432 also covers the native
+    // Program Files directory when this process runs under WOW64.
+    let mut paths: Vec<_> = [
+        "SystemRoot",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+        "ProgramData",
+    ]
+    .into_iter()
+    .filter_map(&mut get_env)
+    .map(PathBuf::from)
+    .collect();
+    if let Some(app_data) = get_env("AppData") {
+        paths.push(PathBuf::from(app_data).join("GitHub CLI"));
+    }
+    paths
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1696,6 +1741,178 @@ mod tests {
         assert!(validate_grant_root(&root, std::slice::from_ref(&forbidden)).is_err());
         assert!(validate_grant_root(&forbidden, std::slice::from_ref(&root)).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn grant_root_rejects_default_credential_directories_and_overlapping_folders() {
+        let home = temp_root("host-access-credential-home");
+        let forbidden = forbidden_paths_with_home(&[], Some(&home));
+        let mut allowed_secrets = Vec::new();
+        for relative in [
+            ".config/gh",
+            ".local/share/keyrings",
+            ".claude",
+            ".codex",
+            "AppData/Roaming/GitHub CLI",
+        ] {
+            let directory = home.join(relative);
+            let child = directory.join("nested");
+            fs::create_dir_all(&child).unwrap();
+            for candidate in [directory.as_path(), &child, directory.parent().unwrap()] {
+                if validate_grant_root_with_forbidden(candidate, &forbidden).is_ok() {
+                    allowed_secrets.push(candidate.to_path_buf());
+                }
+            }
+            let sibling = home.join(format!("{relative}-project"));
+            fs::create_dir_all(&sibling).unwrap();
+            assert!(validate_grant_root_with_forbidden(&sibling, &forbidden).is_ok());
+        }
+        fs::remove_dir_all(home).unwrap();
+        assert!(
+            allowed_secrets.is_empty(),
+            "credential folders allowed: {allowed_secrets:?}"
+        );
+    }
+
+    #[test]
+    fn grant_root_rejects_home_credential_files_but_allows_project_configuration() {
+        let home = temp_root("host-access-credential-files");
+        let forbidden = forbidden_paths_with_home(&[], Some(&home));
+        let mut allowed_secrets = Vec::new();
+        for relative in [
+            ".cargo/credentials",
+            ".cargo/credentials.toml",
+            ".netrc",
+            ".git-credentials",
+            ".npmrc",
+        ] {
+            let file = home.join(relative);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "test credential").unwrap();
+            for candidate in [file.as_path(), file.parent().unwrap()] {
+                if validate_grant_root_with_forbidden(candidate, &forbidden).is_ok() {
+                    allowed_secrets.push(candidate.to_path_buf());
+                }
+            }
+        }
+        for relative in ["projects/app", ".cargo/registry"] {
+            let project = home.join(relative);
+            fs::create_dir_all(&project).unwrap();
+            fs::write(
+                project.join(".npmrc"),
+                "registry=https://registry.npmjs.org",
+            )
+            .unwrap();
+            assert!(validate_grant_root_with_forbidden(&project, &forbidden).is_ok());
+            assert!(resolve_relative(&project, ".npmrc").is_ok());
+        }
+        fs::remove_dir_all(home).unwrap();
+        assert!(
+            allowed_secrets.is_empty(),
+            "credential files allowed: {allowed_secrets:?}"
+        );
+    }
+
+    #[test]
+    fn grant_root_rejects_relocated_windows_system_directories() {
+        let root = temp_root("host-access-windows-locations");
+        let locations = [
+            ("SystemRoot", root.join("relocated/Windows")),
+            ("ProgramFiles", root.join("relocated/Applications")),
+            ("ProgramFiles(x86)", root.join("relocated/Applications x86")),
+            ("ProgramW6432", root.join("relocated/Applications x64")),
+            ("ProgramData", root.join("relocated/Shared data")),
+        ];
+        for (_, directory) in &locations {
+            fs::create_dir_all(directory.join("nested")).unwrap();
+        }
+        let paths = windows_environment_paths(|name| {
+            locations
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, path)| path.join(".").into_os_string())
+        });
+        let forbidden = forbidden_paths_with_home(&paths, None);
+        let mut allowed_system_paths = Vec::new();
+        for (_, directory) in &locations {
+            for candidate in [
+                directory.clone(),
+                directory.join("nested"),
+                directory.parent().unwrap().to_path_buf(),
+            ] {
+                if validate_grant_root_with_forbidden(&candidate, &forbidden).is_ok() {
+                    allowed_system_paths.push(candidate);
+                }
+            }
+            let sibling = directory.with_file_name(format!(
+                "{}-project",
+                directory.file_name().unwrap().to_string_lossy()
+            ));
+            fs::create_dir_all(&sibling).unwrap();
+            assert!(validate_grant_root_with_forbidden(&sibling, &forbidden).is_ok());
+        }
+        fs::remove_dir_all(root).unwrap();
+        assert!(
+            allowed_system_paths.is_empty(),
+            "system folders allowed: {allowed_system_paths:?}"
+        );
+    }
+
+    #[test]
+    fn grant_root_rejects_github_cli_credentials_under_relocated_appdata() {
+        let root = temp_root("host-access-github-cli-appdata");
+        let app_data = root.join("relocated/Roaming");
+        let credentials = app_data.join("GitHub CLI");
+        let child = credentials.join("nested");
+        let sibling = app_data.join("GitHub CLI-project");
+        fs::create_dir_all(&child).unwrap();
+        fs::create_dir_all(&sibling).unwrap();
+        let paths = windows_environment_paths(|name| {
+            (name == "AppData").then(|| app_data.clone().into_os_string())
+        });
+        let forbidden = forbidden_paths_with_home(&paths, None);
+        let allowed_secrets: Vec<_> = [&credentials, &child, &app_data]
+            .into_iter()
+            .filter(|path| validate_grant_root_with_forbidden(path, &forbidden).is_ok())
+            .collect();
+        assert!(validate_grant_root_with_forbidden(&sibling, &forbidden).is_ok());
+        fs::remove_dir_all(root).unwrap();
+        assert!(
+            allowed_secrets.is_empty(),
+            "GitHub CLI folders allowed: {allowed_secrets:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn grant_root_rejects_windows_system_directories_from_process_environment() {
+        for name in [
+            "SystemRoot",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+            "ProgramData",
+        ] {
+            let Some(value) = std::env::var_os(name) else {
+                assert!(
+                    matches!(name, "ProgramFiles(x86)" | "ProgramW6432"),
+                    "missing {name}"
+                );
+                continue;
+            };
+            let path = PathBuf::from(value);
+            let canonical_path = canonical(&path).unwrap();
+            assert!(
+                forbidden_paths(&[])
+                    .protected_subtrees
+                    .contains(&canonical_path),
+                "system location missing: {name}"
+            );
+            assert!(
+                validate_grant_root(&path, &[]).is_err(),
+                "system location allowed: {name}"
+            );
+        }
     }
 
     #[test]
