@@ -1330,8 +1330,8 @@ export function createApp(
 
       try {
         const deploymentResult = await deploymentToolCaller?.({
-          name: body.name,
-          args: body.args ?? {},
+          name: parsedCall.value.ref,
+          args: parsedCall.value.args,
           botId: verdict.botId,
           actorId: verdict.actorId,
           initiator: verdict.initiator,
