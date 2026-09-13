@@ -485,6 +485,41 @@ export function createComputerRoutes(
       string,
       unknown
     > | null;
+    /*
+     * Shaped per gesture, like the Bot's acting routes shape theirs. Only scroll was checked:
+     * a click with `{"x": "ten"}`, a type with `{"text": 123}` or a key with `{}` travelled
+     * to the computer untouched, and the failure surfaced as whatever the computer returned
+     * for garbage — mapped here to a 500, or a 200 no-op. The shapes below are the ones the
+     * gateway's `HumanInput` type already promises the computer: coordinates in viewport
+     * pixels, text to enter, a key name. Scroll keeps its existing check, which allows an
+     * absent delta the computer reads as its own default distance.
+     */
+    if (kind === "click") {
+      if (
+        typeof body?.x !== "number" ||
+        !Number.isFinite(body.x) ||
+        typeof body?.y !== "number" ||
+        !Number.isFinite(body.y)
+      ) {
+        return context.json(
+          { error: "A click needs numeric x and y coordinates." },
+          400,
+        );
+      }
+    }
+    if (kind === "type") {
+      if (typeof body?.text !== "string") {
+        return context.json({ error: "The text to enter is required." }, 400);
+      }
+    }
+    if (kind === "key") {
+      if (typeof body?.key !== "string" || !body.key) {
+        return context.json(
+          { error: "A key name is required, such as Enter or Tab." },
+          400,
+        );
+      }
+    }
     if (kind === "scroll" && !usableDeltaY(body?.deltaY)) {
       return context.json(badDeltaY, 400);
     }
