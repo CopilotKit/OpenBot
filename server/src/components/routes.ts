@@ -397,7 +397,18 @@ export function createComponentRoutes(
     const body = (await context.req.json().catch(() => null)) as {
       published?: unknown;
     } | null;
-    const published = body?.published !== false;
+    /*
+     * A real boolean, not truthiness. This used to read `body?.published !== false`, so an
+     * empty body, invalid JSON, `{}`, `"no"`, `0` and `null` all evaluated to true and
+     * *published* the component with a 200 and a `component.published` audit row. A toggle
+     * that publishes on malformed input fails open on the endpoint that decides what every
+     * Bot may draw, and the sibling toggles (`PUT /routines/:id/enabled`, channel pin/busy)
+     * all answer 400 on non-boolean. Only an explicit true or false moves anything.
+     */
+    if (typeof body?.published !== "boolean") {
+      return context.json({ error: "published must be true or false." }, 400);
+    }
+    const published = body.published;
 
     try {
       if (published) {
