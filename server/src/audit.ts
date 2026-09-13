@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
+import { parsePageLimit } from "./paging";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -645,14 +646,17 @@ export function createAuditReader(database: Database): AuditReader {
 }
 
 export function auditQueryFromUrl(url: URL): AuditEventQuery {
-  const rawLimit = url.searchParams.get("limit") ?? "50";
-  const trimmedLimit = rawLimit.trim();
-  const requestedLimit = /^\d+$/.test(trimmedLimit)
-    ? Number.parseInt(trimmedLimit, 10)
-    : Number.NaN;
-  const limit = Number.isFinite(requestedLimit)
-    ? Math.min(Math.max(requestedLimit, 1), 100)
-    : 50;
+  /*
+   * Parsed strictly, like every other paged list. This used to trim and require `/^\d+$/`
+   * but fall back to 50 on anything else, so `?limit=abc`, `?limit=12abc`, `?limit=3.9`
+   * and `?limit=` all silently returned the default page while `?from=garbage` on the same
+   * endpoint answered 400. A typo in the page size is a caller error and names the parameter.
+   */
+  const parsedLimit = parsePageLimit(url.searchParams.get("limit"), 100);
+  if (!parsedLimit.ok) {
+    throw new AuditQueryError(parsedLimit.error);
+  }
+  const limit = parsedLimit.limit ?? 50;
   const optional = (name: string) => url.searchParams.get(name) ?? undefined;
 
   const from = optional("from");
