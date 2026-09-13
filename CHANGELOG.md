@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.10
+
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing
 
 When the deployment would not run a tool call from the LangGraph Bot — a token it no longer accepts,
