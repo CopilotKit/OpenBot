@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The LangGraph Bot says a refused tool call was refused, not that it found nothing
+
+When the deployment would not run a tool call from the LangGraph Bot — a token it no longer accepts,
+or one issued to another Bot — it answered 401 or 403 with a reason and no result, and the Bot told
+its model "The tool returned nothing." The model then told the person nothing was found. The Bot now
+tells its model the call was refused, with the status and the deployment's reason, the way the
+Python LangGraph Bot already does, and the transcript draws it as a refusal. A tool that answered is
+passed on exactly as before.
+
 ### The desktop setup's question box waits for a composed character before it asks
 
 Enter confirms a character being typed through an input method (Japanese, Chinese, Korean). On the

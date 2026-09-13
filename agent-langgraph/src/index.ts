@@ -17,6 +17,7 @@ import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
 import { apiKeyOrPlaceholder, KEY_VARIABLE, keyIsRequired } from "./model-key";
 import { streamRun } from "./stream";
+import { toolAnswer } from "./tool-answer";
 
 /**
  * The same Bot, on a framework.
@@ -267,8 +268,7 @@ async function callTool(
        */
       body: JSON.stringify({ name, args, run }),
     });
-    const body = (await response.json()) as { text?: string };
-    return body.text ?? "The tool returned nothing.";
+    return await toolAnswer(response);
   } catch (error) {
     // Reported to the model as a result rather than thrown: the run continues and says what broke.
     return `That tool could not be called: ${
