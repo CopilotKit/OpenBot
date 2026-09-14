@@ -1,6 +1,6 @@
 llama-index-core
 llama-index-protocols-ag-ui
-llama-index-llms-openai
+llama-index-llms-litellm
 fastapi
 python-multipart
 uvicorn[standard]

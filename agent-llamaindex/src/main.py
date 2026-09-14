@@ -6,9 +6,10 @@ FastAPI router. Mount it and stop.
 
 import os
 
+import litellm
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from llama_index.llms.openai import OpenAI
+from llama_index.llms.litellm import LiteLLM
 from llama_index.protocols.ag_ui.router import get_ag_ui_workflow_router
 
 TOKEN_HEADER = "x-openbot-agent-token"
@@ -18,6 +19,21 @@ def _model_id() -> str:
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-5.5").strip()
     return model if "/" in model else f"{provider}/{model}"
+
+
+def _llm() -> LiteLLM:
+    model = _model_id()
+    if not litellm.supports_function_calling(model):
+        litellm.register_model(
+            {
+                model: {
+                    "litellm_provider": model.split("/", 1)[0],
+                    "mode": "chat",
+                    "supports_function_calling": True,
+                }
+            }
+        )
+    return LiteLLM(model=model, additional_kwargs={"drop_params": True})
 
 
 app = FastAPI()
@@ -39,4 +55,4 @@ async def health():
     return {"ok": True, "harness": "llamaindex"}
 
 
-app.include_router(get_ag_ui_workflow_router(llm=OpenAI(model=(os.environ.get("BOT_MODEL") or "gpt-4o-mini"))))
+app.include_router(get_ag_ui_workflow_router(llm=_llm()))

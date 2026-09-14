@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The LlamaIndex Bot answers with the model the setup screen chose
+
+The LlamaIndex Bot built an OpenAI client from `BOT_MODEL` and ignored `BOT_PROVIDER`, so it only
+worked with an OpenAI model name sent to OpenAI. Picked with an Anthropic key, every run failed with
+`Unknown model 'claude-sonnet-4-5'`; picked with an OpenAI-compatible endpoint, every run failed
+with `Unknown model` for that endpoint's model, and an OpenAI model name went to api.openai.com
+instead of the address given, because the client read `OPENAI_API_BASE` and not the
+`OPENAI_BASE_URL` Compose passes. It now reaches the model through LiteLLM as `provider/model`, the
+way the Agno Bot does, so all three choices answer. A model LiteLLM does not know is treated as able
+to call tools, which the AG-UI workflow requires, and parameters a model does not accept, such as
+the temperature LlamaIndex sends to a reasoning model, are dropped rather than refused.
+
 ### The Routines page says when nothing is there to run them
 
 A routine needs a second process to fire it, and a deployment that never started one looked exactly
