@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createApp } from "../src/app";
 import {
   auditEventTypes,
@@ -32,18 +34,52 @@ const memberAuth = {
   },
 };
 
+/**
+ * Every event type this deployment declares, it can actually write.
+ *
+ * The taxonomy is the trail's vocabulary, and a name in it is a promise that this deployment can
+ * produce that row. Four of them could not: `connector.sync_succeeded`, `connector.sync_failed`,
+ * `knowledge.searched` and `agent.invoked` outlived the document-index and connector-sync code that
+ * wrote them, and stayed in the list for months because the test above named them explicitly and
+ * nothing else asked. An operator filtering for one got an empty page that reads as "nothing
+ * happened" rather than "nothing can".
+ *
+ * Read off the source rather than maintained by hand, because a hand-kept list is the thing that
+ * just failed. Literal strings only: every writer today passes the type as a literal, and one that
+ * computed it would fail here and should — a row type a reader cannot grep for is worse than this
+ * test being strict.
+ */
+describe("the audit event taxonomy", () => {
+  test("declares nothing this deployment cannot write", () => {
+    const root = join(import.meta.dir, "..", "src");
+    const sources: string[] = [];
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith(".ts") && entry.name !== "audit.ts") {
+          sources.push(readFileSync(path, "utf8"));
+        }
+      }
+    };
+    walk(root);
+    const everywhereElse = sources.join("\n");
+
+    const unwritable = auditEventTypes.filter(
+      (type) => !everywhereElse.includes(JSON.stringify(type)),
+    );
+    expect(unwritable).toEqual([]);
+  });
+});
+
 describe("audit payload redaction", () => {
-  test("defines the v1 audit event taxonomy", () => {
+  test("defines the audit event taxonomy", () => {
     expect(auditEventTypes).toEqual(
       expect.arrayContaining([
         "configuration.changed",
         "credential.created",
         "credential.rotated",
         "credential.revoked",
-        "connector.sync_succeeded",
-        "connector.sync_failed",
-        "knowledge.searched",
-        "agent.invoked",
         "mcp.call_succeeded",
         "mcp.call_rejected",
       ]),
