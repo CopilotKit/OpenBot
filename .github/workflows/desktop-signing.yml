@@ -15,6 +15,7 @@ on:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - desktop/**
+      - package.json
       - .github/workflows/desktop-signing.yml
       - docs/windows-signing.md
 
@@ -111,10 +112,13 @@ jobs:
         working-directory: desktop
       - run: bun run typecheck
         working-directory: desktop
+      - name: Prepare internal build version
+        run: bun scripts/desktop-version.ts internal
+        working-directory: desktop
       - name: Build and sign
         env:
           WINDOWS_SIGNING: keyvault
-        run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --bundles nsis
+        run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --config src-tauri/tauri.build-version.conf.json --bundles nsis
         working-directory: desktop
       # Tauri restores the unsigned build output after bundling. Verify the app
       # employees receive by extracting its signed payload from the installer.
@@ -125,7 +129,9 @@ jobs:
           & 7z e $installers[0].FullName '-odesktop/signed-app' '-r' '-y' 'openbot-desktop.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Could not extract signed app from NSIS installer.' }
       - name: Verify publisher, trust, and timestamp on both executables
-        run: ./desktop/scripts/verify-windows-signatures.ps1
+        run: |
+          $build = Get-Content desktop/build-version.json -Raw | ConvertFrom-Json
+          ./desktop/scripts/verify-windows-signatures.ps1 -ExpectedVersion $build.version
       - name: Retain verified binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -133,6 +139,7 @@ jobs:
           path: |
             desktop/signed-app/openbot-desktop.exe
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop/build-version.json
           if-no-files-found: error
           retention-days: 14
       - name: Retain verification evidence

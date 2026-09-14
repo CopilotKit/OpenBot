@@ -5,7 +5,8 @@ param(
     [string]$InstallerDirectory = "$PSScriptRoot/../src-tauri/target/release/bundle/nsis",
     [string]$EvidenceDirectory = "$PSScriptRoot/../signing-evidence",
     [string]$SignToolPath,
-    [string]$SourceSha = $env:SIGNING_SOURCE_SHA
+    [string]$SourceSha = $env:SIGNING_SOURCE_SHA,
+    [string]$ExpectedVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,10 @@ if (-not $SignToolPath) {
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 $records = @()
 foreach ($file in @((Get-Item -LiteralPath $AppPath), $installers[0])) {
+    $version = (Get-Item -LiteralPath $file.FullName).VersionInfo
+    if ($ExpectedVersion -and ($version.ProductVersion -cne $ExpectedVersion -or $version.FileVersion -cne $ExpectedVersion)) {
+        throw "Unexpected embedded version on $($file.Name): product=$($version.ProductVersion), file=$($version.FileVersion), expected=$ExpectedVersion"
+    }
     $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
     if ($signature.Status -ne 'Valid') {
         throw "Invalid Authenticode signature on $($file.Name): $($signature.Status)"
@@ -59,6 +64,8 @@ foreach ($file in @((Get-Item -LiteralPath $AppPath), $installers[0])) {
     }
     $records += [ordered]@{
         file = $file.Name
+        productVersion = $version.ProductVersion
+        fileVersion = $version.FileVersion
         sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
         status = [string]$signature.Status
         publisher = $publisher
@@ -72,6 +79,7 @@ foreach ($file in @((Get-Item -LiteralPath $AppPath), $installers[0])) {
 
 [ordered]@{
     sourceSha = $SourceSha
+    expectedVersion = $ExpectedVersion
     verifiedAtUtc = [DateTime]::UtcNow.ToString('o')
     files = $records
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'signatures.json')

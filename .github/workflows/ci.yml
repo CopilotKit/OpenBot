@@ -35,6 +35,8 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      - name: Desktop version tracks the release version
+        run: bun desktop/scripts/desktop-version.ts check
       # The chart's default image tag is its appVersion, and a release must move both together. They
       # drifted once, appVersion left pointing at a tag that was never published, and a default
       # `helm install` sat in ImagePullBackOff. This refuses a tree where package.json (the last

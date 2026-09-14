@@ -34,6 +34,23 @@ $global:SigningTestState = @{
     azExit = 0; signExit = 0; verifyExit = 0; token = 'synthetic-test-token'
     signCalls = 0; signArguments = @(); verifyCalls = @(); status = 'Valid'
     publisher = 'Tawkit, Inc.'; timestamp = $true; invalidFile = ''
+    productVersion = '0.0.10-internal.gabcdef012345'; fileVersion = '0.0.10-internal.gabcdef012345'; wrongVersionFile = ''
+}
+function global:Get-Item {
+    param([string]$LiteralPath)
+    $item = Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath
+    if ($item -is [System.IO.FileInfo]) {
+        $wrong = $LiteralPath -eq $global:SigningTestState.wrongVersionFile
+        return [pscustomobject]@{
+            Name = $item.Name
+            FullName = $item.FullName
+            VersionInfo = [pscustomobject]@{
+                ProductVersion = if ($wrong) { $global:SigningTestState.productVersion } else { '0.0.10-internal.gabcdef012345' }
+                FileVersion = if ($wrong) { $global:SigningTestState.fileVersion } else { '0.0.10-internal.gabcdef012345' }
+            }
+        }
+    }
+    $item
 }
 function global:az {
     $global:LASTEXITCODE = $global:SigningTestState.azExit
@@ -127,6 +144,22 @@ try {
         Assert-True (($call[0..4] -join ' ') -eq 'verify /pa /all /v /tw') 'Trust or timestamp verification was omitted.'
     }
     $passed++
+    $verifyParameters.ExpectedVersion = '0.0.10-internal.gabcdef012345'
+    foreach ($wrongFile in @($app, $installer)) {
+        $global:SigningTestState.wrongVersionFile = $wrongFile
+        foreach ($field in @('productVersion', 'fileVersion')) {
+            $global:SigningTestState[$field] = '0.0.0'
+            Assert-Throws { & $verify @verifyParameters } 'Unexpected embedded version'
+            $global:SigningTestState[$field] = $verifyParameters.ExpectedVersion
+        }
+    }
+    $global:SigningTestState.wrongVersionFile = ''
+    & $verify @verifyParameters | Out-Null
+    $versionReport = Get-Content -LiteralPath (Join-Path $evidenceDirectory 'signatures.json') -Raw | ConvertFrom-Json
+    foreach ($record in $versionReport.files) {
+        Assert-True ($record.productVersion -ceq $verifyParameters.ExpectedVersion -and $record.fileVersion -ceq $verifyParameters.ExpectedVersion) 'Evidence omitted the embedded version.'
+    }
+    $passed++
     Remove-Item -LiteralPath $app
     Assert-Throws { & $verify @verifyParameters } 'Application executable is missing'
     Set-Content -LiteralPath $app -Value 'restored fixture'
@@ -163,7 +196,7 @@ try {
     Write-Host "Passed $passed Windows signing regression cases."
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name]) }
-    Remove-Item Function:az, Function:AzureSignTool.exe, Function:Test-SignTool, Function:Get-AuthenticodeSignature
+    Remove-Item Function:az, Function:AzureSignTool.exe, Function:Test-SignTool, Function:Get-AuthenticodeSignature, Function:Get-Item
     Remove-Variable SigningTestState -Scope Global
     Remove-Item -LiteralPath $directory -Recurse -Force
 }

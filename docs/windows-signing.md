@@ -1,5 +1,9 @@
 # Windows desktop signing
 
+Builds use the root OpenBot release number plus `-internal.g<commit>`. The workflow verifies
+that both the packaged app and installer embed that version, and includes `build-version.json`
+with the binaries. See [desktop build versions](releasing.md#desktop-build-versions).
+
 The [Desktop Windows signing workflow](../.github/workflows/desktop-signing.yml)
 builds OpenBot and its NSIS installer with the existing DigiCert certificate in
 Azure Key Vault. It retains verified binaries and signature evidence as Actions

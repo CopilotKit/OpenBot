@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["vite/client", "bun-types"]
   },
-  "include": ["src"]
+  "include": ["src", "scripts/*.ts"]
 }

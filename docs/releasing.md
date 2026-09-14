@@ -10,12 +10,41 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
    the person reading the diff and these notes are for the person deciding whether to upgrade.
 2. Run **Create release PR** from the Actions tab, choosing `patch`, `minor` or `major`. Use
    `dry_run` first if you want to see the version and the notes without opening anything.
-3. Review the pull request it opens. It contains exactly three changes: the version in `package.json`,
-   the `## Unreleased` heading becoming `## X.Y.Z`, and the Helm chart's `appVersion` moving to the
-   same number so a default `helm install` pulls the image this release builds.
+3. Review the pull request it opens. It updates `package.json`, promotes the changelog's
+   `## Unreleased` heading to `## X.Y.Z`, and moves the Helm chart's `appVersion` and the desktop
+   Cargo package/lockfile to the same version. Tauri reads its version directly from the root
+   `package.json`.
 4. Merge it. That is the publish.
 
 Merging is the trigger, so a release is always a reviewed commit on `main`.
+
+## Desktop build versions
+
+The root `package.json` is the release version source. CI rejects drift in the desktop Cargo
+manifest or lockfile. The release workflow updates those files automatically; after a manual
+root version change, run `bun desktop/scripts/desktop-version.ts sync`.
+
+Internal desktop artifacts use `X.Y.Z-internal.g<commit>` so testers can identify the source
+revision. Both desktop CI and protected Windows signing prepare this version before compilation
+and packaging. The artifact includes `build-version.json` with the full commit and release version.
+
+To build locally, from the repository root:
+
+```sh
+bun desktop/scripts/desktop-version.ts internal
+cd desktop
+APPLE_SIGNING_IDENTITY=- bun run tauri build --config src-tauri/tauri.build-version.conf.json --bundles dmg
+```
+
+Use `release` instead of `internal` to prepare the plain release version. This only builds an
+artifact; it does not publish a release. macOS keeps numeric system version fields and stores
+the full internal identifier in `OpenBotBuildVersion` inside the app's `Info.plist`. Windows
+retains the full identifier in `ProductVersion` and `FileVersion`; its fixed numeric fields
+contain the release number. The protected signing job checks both embedded string versions.
+
+Ad-hoc signed Mac builds require the first-open exception described in
+[Apple's instructions](https://support.apple.com/en-us/102445). They are for internal testing
+and are not Apple-notarized. See [Windows signing](windows-signing.md) for signed NSIS builds.
 
 ## What merging does
 
