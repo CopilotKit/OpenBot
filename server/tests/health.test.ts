@@ -8,7 +8,7 @@ const app = createApp(
     ...testEnvironment(),
   }),
   // Every collaborator before the status projection, which is the last parameter.
-  ...(Array.from({ length: 25 }) as never[]),
+  ...(Array.from({ length: 29 }) as never[]),
   () => ({
     status: "setup_required",
     transport: "online",

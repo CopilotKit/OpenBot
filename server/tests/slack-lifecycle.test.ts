@@ -400,7 +400,7 @@ describe("managed Channels lifecycle", () => {
     const app = createApp(
       loadConfig(testEnvironment()),
       // Every collaborator before the status projection, which is the last parameter.
-      ...(Array.from({ length: 25 }) as never[]),
+      ...(Array.from({ length: 29 }) as never[]),
       () => projectSlackStatus(snapshot),
     );
     let live: { app: typeof app; stop(): Promise<void> } | undefined;

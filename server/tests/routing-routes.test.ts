@@ -37,12 +37,16 @@ const ROSTER = [
     name: "General Assistant",
     roleDescription: "everyday work",
     visibility: "public",
+    ownerUserId: null,
+    deletedAt: null,
   },
   {
     id: "picked-harness",
     name: "OpenBot",
     roleDescription: "the package-selected harness",
     visibility: "public",
+    ownerUserId: null,
+    deletedAt: null,
   },
   {
     id: "risk-analyst",

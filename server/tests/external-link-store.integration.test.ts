@@ -14,14 +14,7 @@ import {
   type ExternalLinkConflict,
   ExternalLinkConflictError,
 } from "../src/external/link-store";
-import { TEST_POOL } from "./support/database";
-
-function testDatabaseUrl(): string {
-  return (
-    process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot"
-  );
-}
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createExternalLinkStore(database);

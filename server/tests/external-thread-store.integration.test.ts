@@ -8,19 +8,17 @@ import {
   type ExternalThreadBindingInput,
   ExternalThreadConflictError,
 } from "../src/external/thread-store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
- * Captured once, at import, because `createDatabase` unsets `DATABASE_URL` on its first call.
+ * Resolved once, at import, and never from `DATABASE_URL`.
  *
- * The races below open pools of their own, and reading the variable when they do would find it
- * already gone and fall back to the default address — which is right on CI and wrong everywhere
- * Postgres is not on 5432, turning four assertions into an authentication failure that names
- * neither this file nor the reason.
+ * The races below open pools of their own, and `createDatabase` unsets `DATABASE_URL` on its first
+ * call, so reading it when they run would find it gone. `testDatabaseUrl` makes that shape
+ * impossible: it reads `TEST_DATABASE_URL` and refuses rather than falling back to whatever is on
+ * 5432, which on a developer's machine is the live application database.
  */
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 
 const database = createDatabase(databaseUrl, TEST_POOL);
 const store = createExternalThreadStore(database);
