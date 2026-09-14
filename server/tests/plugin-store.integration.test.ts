@@ -394,6 +394,7 @@ describe("the policy is asked as well as the grant", () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0].payload).toMatchObject({
       bot: holderId,
+      decision: { carriedOut: false },
       contentInspection: {
         reason: "sensitive_content",
         findings: [{ category: "credential_field", path: "$.nested.apiKey" }],

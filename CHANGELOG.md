@@ -20,6 +20,15 @@ way the Agno Bot does, so all three choices answer. A model LiteLLM does not kno
 to call tools, which the AG-UI workflow requires, and parameters a model does not accept, such as
 the temperature LlamaIndex sends to a reasoning model, are dropped rather than refused.
 
+### The Audit page says "not enforced" only under a dry-run refusal that went ahead
+
+On a deployment in `dry-run`, the Audit page printed "dry-run: recorded, not enforced" under every
+allowed action, because an allowed action is always carried out, and under a tool call content
+inspection had refused, because that row copied `carriedOut: true` from the policy step before the
+call was stopped. The line now appears only on a row the policy refused and dry-run let through,
+which is the one case it describes. A tool call refused for carrying credential material is now
+recorded with `carriedOut: false` in every mode. Rows already written keep their old value, and the
+page reads them correctly either way.
 ### The Routines page says when nothing is there to run them
 
 A routine needs a second process to fire it, and a deployment that never started one looked exactly
