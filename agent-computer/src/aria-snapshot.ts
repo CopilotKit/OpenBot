@@ -156,6 +156,20 @@ export function parseDescriptor(text: string): Descriptor | null {
   return { role, name, flags };
 }
 
+/**
+ * The first `limit` UTF-16 code units of `text`, one fewer when the cut would split a character.
+ *
+ * `slice` counts code units and an emoji is two, so a limit landing between the halves leaves a lone
+ * high surrogate last: JSON carries it as a bare `\ud83d` and UTF-8 as U+FFFD, and the Bot reads a
+ * broken character that is not on the page. The server's `cutAtCodeUnits` is the same rule; this
+ * process shares no code with the server, so it is repeated here rather than imported.
+ */
+function cutAtCodeUnits(text: string, limit: number): string {
+  const sliced = text.slice(0, limit);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
+}
+
 /** Build an element from a descriptor and whatever YAML gave as its value, or null if not actionable. */
 function toElement(
   descriptor: Descriptor,
@@ -170,13 +184,13 @@ function toElement(
   const element: SnapshotElement = {
     ref,
     role: descriptor.role,
-    name: descriptor.name.slice(0, 200),
+    name: cutAtCodeUnits(descriptor.name, 200),
   };
 
   // Values arrive as text, with quoting and escapes already resolved.
   if (typeof value === "string") {
     const text = value.trim();
-    if (text) element.value = text.slice(0, 200);
+    if (text) element.value = cutAtCodeUnits(text, 200);
   }
 
   if (descriptor.flags.has("disabled")) element.disabled = true;

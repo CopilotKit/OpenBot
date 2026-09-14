@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A long control name or value in a page snapshot is cut between characters
+
+The computer's page snapshot keeps the first 200 UTF-16 code units of each control's accessible
+name and value. When that limit fell between the two halves of an emoji, the Bot was handed text
+ending on half a character, which reads as U+FFFD: a broken character that is not on the page, often
+at the end of a message the Bot had just typed into a text box. The cut now stops one code unit
+short in that case, the same rule tool results and relayed answers already follow.
+
 ## 0.0.11
 
 ### The LlamaIndex Bot answers with the model the setup screen chose
