@@ -121,14 +121,58 @@ export function escalationTool(options: {
         return "That was not put to anybody: say what you need a person to answer.";
       }
 
-      const outcome = await route({
-        actorId: from.actorId,
-        botId: from.botId,
-        ...(from.threadId ? { threadId: from.threadId } : {}),
-        runId: from.runId,
-        question,
-        ...(parsed.data.why ? { why: parsed.data.why } : {}),
-      });
+      /*
+       * A route that throws is a route that refused, and the run has to survive it.
+       *
+       * `handoff.ts` says the rule for both of these tools at the top of its module: every refusal is
+       * an answer, not an error, because the asking Bot is mid-run with a person waiting and a thrown
+       * error ends the run with nothing said. This tool competes with that one for the same decision
+       * and did not follow it — the throw came straight back out of `execute`, which is the failure
+       * that reads to the person as the Bot ignoring them, on the tool whose entire job is to stop
+       * ignoring them.
+       *
+       * It looks unreachable and is not. `askTheirOwnPerson` is a pure function that cannot throw, so
+       * nothing in this repo or its tests ever takes this path — but the module comment above says
+       * WHO "A PERSON" IS, IS A SEAM, and every route a company actually hands in is a duty desk, a
+       * rota, a queue: a network call that times out, 502s, or resolves DNS to nothing. The one route
+       * that cannot fail is the one that ships, so the guard was missing exactly where the
+       * documentation invites a deployment to go.
+       *
+       * Recorded as `agent.escalation_failed`, which is what the comment below already promises for
+       * an escalation that could not be delivered and previously only delivered for a route polite
+       * enough to return its refusal.
+       */
+      /** What the route threw, if it did, for the row and never for the answer. */
+      let thrown: string | undefined;
+      let outcome: { reached: string } | { refusal: string };
+      try {
+        outcome = await route({
+          actorId: from.actorId,
+          botId: from.botId,
+          ...(from.threadId ? { threadId: from.threadId } : {}),
+          runId: from.runId,
+          question,
+          ...(parsed.data.why ? { why: parsed.data.why } : {}),
+        });
+      } catch (error) {
+        /*
+         * The thrown text goes in the trail and not into the answer.
+         *
+         * What a route throws is written for whoever operates the rota — a connection reset, a status
+         * line, a stack — and the answer here is paraphrased to the person who asked the question.
+         * `handoff-runner.ts` keeps the two apart for the same reason; this keeps the whole thing on
+         * the row, capped, and gives the Bot a sentence that is true whatever went wrong.
+         */
+        thrown = (error instanceof Error ? error.message : String(error)).slice(
+          0,
+          400,
+        );
+        outcome = {
+          refusal:
+            "That did not reach anybody: nobody could be asked just now. Say so plainly, answer " +
+            "only what you can settle yourself, and do not tell them a person has been asked.",
+        };
+      }
 
       /*
        * Recorded either way. An escalation that could not be delivered is the one worth finding
@@ -152,6 +196,9 @@ export function escalationTool(options: {
             ...("reached" in outcome
               ? { reached: outcome.reached }
               : { reason: outcome.refusal }),
+            // The route's own words, only when it threw them. `reason` above is the sentence the Bot
+            // was given; this is what actually went wrong, which is the pair `store.ts` keeps too.
+            ...(thrown ? { failure: thrown } : {}),
           },
         });
       }

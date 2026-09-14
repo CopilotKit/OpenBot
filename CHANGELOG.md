@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's question to a person survives a route that fails
+
+Who "a person" is, is a seam a deployment fills in with its own on-call rota or duty desk. If that
+route failed by throwing rather than by returning a refusal — a timeout, a 502, a name that does not
+resolve — the error came straight back out of the tool, so the Bot's run ended with nothing said to
+the person waiting, and no audit row recorded that the question had reached nobody. The Bot is now
+told, in a sentence it can say, that nobody could be asked and that it must not claim otherwise, and
+an `agent.escalation_failed` row goes down carrying what the route actually threw. Deployments using
+the shipped in-conversation route are unaffected: it cannot fail.
+
 ## 0.0.11
 
 ### The LlamaIndex Bot answers with the model the setup screen chose

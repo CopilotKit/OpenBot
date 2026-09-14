@@ -118,6 +118,76 @@ describe("asking a person", () => {
   });
 
   /*
+   * The route above refused politely. A real one fails by throwing.
+   *
+   * `askTheirOwnPerson` cannot throw, so every route this repo runs takes the happy path and the
+   * gap was invisible — but the module says who a person is is a seam, and every route a company
+   * hands in is a duty desk or a rota reached over a network. A timeout there used to come straight
+   * back out of `execute`, ending the run with nothing said on the one tool whose job is to stop
+   * the Bot falling silent, and leaving no row behind to say the person was never asked.
+   */
+  test("a route that throws is an answer, not the end of the run", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw new Error("connect ETIMEDOUT rota.internal:443");
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    expect(said).toContain("did not reach anybody");
+    // The Bot must not go on to tell the person their question is with somebody.
+    expect(said).not.toContain(PUT_TO);
+    expect(written[0]?.eventType).toBe("agent.escalation_failed");
+  });
+
+  test("what the route threw is on the row and not in the answer", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw new Error("connect ETIMEDOUT rota.internal:443");
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    // An internal address and error code are for whoever operates the rota, not for the person who
+    // asked the question and will read whatever the Bot paraphrases.
+    expect(said).not.toContain("rota.internal");
+    expect(written[0]?.payload).toMatchObject({
+      question: "which account?",
+      failure: "connect ETIMEDOUT rota.internal:443",
+    });
+  });
+
+  /*
+   * A route can throw something that is not an Error, and a run must survive that too rather than
+   * failing inside the handler written to keep it alive.
+   */
+  test("a route that throws something that is not an Error is still an answer", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw "the desk is closed";
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    expect(said).toContain("did not reach anybody");
+    expect(written[0]?.payload).toMatchObject({
+      failure: "the desk is closed",
+    });
+  });
+
+  /*
    * Mid-run with a person waiting: a throw ends the run with nothing said, which reads as the Bot
    * ignoring them.
    */
