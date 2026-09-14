@@ -69,8 +69,8 @@ scheduled runs as a class. `handoff` is its own kind, for a Bot that hands work 
 
 **Nothing is refused that was not refused before.** The field is neutral — `{kind: "person", id: ""}`
 — everywhere a person is driving, which is every path that does not carry an initiator today,
-including every action on a Bot'"'"'s computer: those are driven by the browser, so they really are
-somebody'"'"'s session. It is required rather than optional for the reason #115 exists: cel-js throws on
+including every action on a Bot's computer: those are driven by the browser, so they really are
+somebody's session. It is required rather than optional for the reason #115 exists: cel-js throws on
 an unbound identifier and a throw fails closed, so a field that were sometimes absent would turn one
 rule about routines into a deployment that refused every ordinary click.
 
