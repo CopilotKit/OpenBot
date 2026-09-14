@@ -8,6 +8,36 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A boundary rule can ask what started a run, not only whose authority it carries
+
+A routine's turn goes through exactly the path a person's chat turn does, as the routine's owner:
+their grants, their connections, their thread. That is the right design, and it is also why
+`actor.id` cannot tell a scheduled run at three in the morning from the same person typing. The
+trail already drew that distinction — `AuditInitiator` is signed into the run assertion and written
+onto the row, so an investigator can see a routine caused something. A rule could not ask the same
+question.
+
+The policy context now carries `initiator`, with the kind and id the trail already records, so this
+is writable:
+
+```
+deny: initiator.kind == "routine" && intent == "run_command"
+```
+
+A deployment happy for a Bot to run a shell while somebody watches, and not happy for it to do so
+unattended, can now say so. The id is there too, so a single routine can be named rather than
+scheduled runs as a class. `handoff` is its own kind, for a Bot that hands work to another Bot.
+
+**Nothing is refused that was not refused before.** The field is neutral — `{kind: "person", id: ""}`
+— everywhere a person is driving, which is every path that does not carry an initiator today,
+including every action on a Bot'"'"'s computer: those are driven by the browser, so they really are
+somebody'"'"'s session. It is required rather than optional for the reason #115 exists: cel-js throws on
+an unbound identifier and a throw fails closed, so a field that were sometimes absent would turn one
+rule about routines into a deployment that refused every ordinary click.
+
+Replaying a rule against history reads the initiator off the row when it is there and treats a row
+that predates the field, or carries a shape this version does not recognise, as a person.
+
 ## 0.0.10
 
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing

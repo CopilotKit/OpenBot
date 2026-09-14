@@ -15,6 +15,7 @@
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
  */
 import { evaluate } from "cel-js";
+import type { AuditInitiator, AuditInitiatorKind } from "../audit";
 
 export type PolicyMode = "dry-run" | "enforce";
 
@@ -150,7 +151,46 @@ export type PolicyContext = {
    * and no list catches them all. The boundary is the container the command runs in.
    */
   command?: string;
+  /**
+   * What caused this run, as distinct from whose authority it carries.
+   *
+   * `actor.id` answers "whose grants and connections is this spending", and for a routine that is
+   * its owner — asleep, at three in the morning, with the run going through exactly the path their
+   * own chat turn takes. That is the right design and it is also why `actor` cannot answer "was
+   * anybody there". The trail already draws the distinction: `AuditInitiator` is signed into the run
+   * assertion and written onto the row, with the docstring "what caused a row, where `actorUserId`
+   * is only whose authority it borrowed". A rule could not ask the same question.
+   *
+   * So `deny: initiator.kind == "routine" && intent == "run_command"` is now writable — a deployment
+   * that is happy for a Bot to run a shell while somebody watches, and not happy for it to do so
+   * unattended, can say so.
+   *
+   * REQUIRED, not optional, and flattened to two always-present strings. cel-js throws on an
+   * unbound identifier and a throw fails closed, so a rule naming this field would have refused
+   * every action built by a call site that forgot it — the failure #115 exists to prevent. `id` is
+   * `""` for `person` and `deployment`, which carry none, the same neutral `mcp.effect` uses.
+   */
+  initiator: { kind: AuditInitiatorKind; id: string };
 };
+
+/**
+ * The initiator as the policy sees it, defaulting to a person.
+ *
+ * A person is the honest default rather than a convenient one: every path that does not carry an
+ * initiator today is one a person drove. The computer gateway is the case worth naming — a Bot's
+ * computer is driven by frontend tools in the browser (`app/src/lib/copilot/computer-tools.tsx`), so
+ * every action reaching that gateway came from somebody's session. When that stops being true, the
+ * call site has to say so rather than inherit this.
+ */
+export function policyInitiator(
+  initiator?: AuditInitiator,
+): PolicyContext["initiator"] {
+  if (!initiator) return { kind: "person", id: "" };
+  return {
+    kind: initiator.kind,
+    id: "id" in initiator ? initiator.id : "",
+  };
+}
 
 export type PolicyDecision = {
   allowed: boolean;

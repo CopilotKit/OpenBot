@@ -12,12 +12,13 @@
  * behaves one way here and another way live would make this feature worse than absent.
  */
 
-import type { AuditEvent } from "../audit";
+import type { AuditEvent, AuditInitiator } from "../audit";
 import { describeFile, hostOf, intentOf } from "./gateway";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
+  policyInitiator,
 } from "./policy";
 
 /**
@@ -77,6 +78,23 @@ const CHANGES_CAP = 50;
  * Null when the row does not carry enough to replay — a row from before a field existed, or a
  * hand-inserted one. Skipped rather than guessed at.
  */
+/**
+ * The initiator an audit payload carries, narrowed back to the union.
+ *
+ * Its own reader rather than the one in `callback-token.ts`: that one narrows a value this
+ * deployment signed and can trust the shape of, and this one reads a stored row that may predate the
+ * field, have been written by an older version, or been inserted by hand. Anything it does not
+ * recognise reads as absent, and `policyInitiator` turns that into a person.
+ */
+function initiatorFromPayload(value: unknown): AuditInitiator | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "person" || kind === "deployment") return { kind };
+  if (kind !== "routine" && kind !== "handoff") return undefined;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id ? { kind, id } : undefined;
+}
+
 export function contextFromAuditPayload(
   payload: Record<string, unknown>,
 ): PolicyContext | null {
@@ -116,6 +134,13 @@ export function contextFromAuditPayload(
     file: file ? describeFile(file) : { path: "", name: "", extension: "" },
     command: text(payload.command),
     mcp: { server: "", tool: "", effect: "" },
+    /*
+     * Read off the row when it is there, neutral when it is not. The rows this replays are computer
+     * actions, which carry no initiator today, so in practice this is a person — but reading it
+     * rather than hardcoding it means a replay stays honest the day those rows do carry one, and a
+     * rule being tested against history is judged on what actually happened.
+     */
+    initiator: policyInitiator(initiatorFromPayload(payload.initiator)),
   };
 }
 

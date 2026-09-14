@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
+  policyInitiator,
   type PolicyContext,
 } from "../src/computer/policy";
 import { parseActionPolicy } from "../src/computer/policy-store";
@@ -22,6 +23,8 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     actor: { id: "dev-local-user" },
     page: { url: "https://example.com/order", host: "example.com" },
     element: { ref: "e13", role: "button", name: "Submit order" },
+    // A person, which is what every context the gateway builds carries today.
+    initiator: { kind: "person", id: "" },
     ...overrides,
   };
 }
@@ -670,5 +673,113 @@ describe("refusal wording under the context the gateway actually builds", () => 
     );
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toContain("search_notes on notes");
+  });
+});
+
+/**
+ * What started the run, as a thing a rule can ask about.
+ *
+ * `actor` says whose grants a run is spending, and for a routine that is its owner — which is
+ * correct and is also why it cannot answer "was anybody watching". The trail already separates the
+ * two through `AuditInitiator`; these pin that the boundary can now separate them too.
+ */
+describe("a rule about what started the run", () => {
+  const unattended = context({
+    tool: { name: "mcp__jira__createJiraIssue" },
+    intent: "write_tool",
+    initiator: { kind: "routine", id: "nightly-summary" },
+  });
+
+  test("a routine is refused by a rule naming it, and a person is not", () => {
+    const policy: ActionPolicy = {
+      mode: "enforce",
+      deny: ['initiator.kind == "routine" && intent == "write_tool"'],
+      allow: ["true"],
+    };
+
+    expect(evaluateActionPolicy(policy, unattended).allowed).toBe(false);
+
+    // The same action, with somebody in front of it. This is the whole point of the field: the rule
+    // separates when it happened from whose authority it carried, and `actor` is identical in both.
+    const watched = context({
+      tool: { name: "mcp__jira__createJiraIssue" },
+      intent: "write_tool",
+      initiator: { kind: "person", id: "" },
+    });
+    expect(evaluateActionPolicy(policy, watched).allowed).toBe(true);
+  });
+
+  test("one routine can be named without catching the others", () => {
+    // The id is on the context, so a deployment can exempt or target a single routine rather than
+    // being forced to decide about scheduled runs as a class.
+    const policy: ActionPolicy = {
+      mode: "enforce",
+      deny: ['initiator.id == "nightly-summary"'],
+      allow: ["true"],
+    };
+
+    expect(evaluateActionPolicy(policy, unattended).allowed).toBe(false);
+    expect(
+      evaluateActionPolicy(
+        policy,
+        context({ initiator: { kind: "routine", id: "weekly-digest" } }),
+      ).allowed,
+    ).toBe(true);
+  });
+
+  test("a rule naming the initiator does not refuse an action that has a person", () => {
+    /*
+     * The #115 property, for this field. cel-js throws on an unbound identifier and a throw fails
+     * closed, so a field that were optional-and-sometimes-absent would turn one rule about routines
+     * into a deployment that refuses every ordinary click. It is required on the type and neutral
+     * everywhere precisely so this stays true.
+     */
+    const policy: ActionPolicy = {
+      mode: "enforce",
+      deny: ['initiator.kind == "routine"'],
+      allow: ["true"],
+    };
+
+    const decision = evaluateActionPolicy(policy, context());
+    expect(decision.allowed).toBe(true);
+    expect(decision.source).toBe("allow");
+  });
+
+  test("a handoff is its own kind, not a person and not a routine", () => {
+    // A Bot handing work to another Bot has somebody behind it somewhere and nobody watching that
+    // run. Naming it separately is what lets a deployment decide about the two differently.
+    const policy: ActionPolicy = {
+      mode: "enforce",
+      deny: ['initiator.kind == "handoff"'],
+      allow: ["true"],
+    };
+
+    expect(
+      evaluateActionPolicy(
+        policy,
+        context({ initiator: { kind: "handoff", id: "risk-analyst" } }),
+      ).allowed,
+    ).toBe(false);
+    expect(evaluateActionPolicy(policy, unattended).allowed).toBe(true);
+  });
+});
+
+describe("policyInitiator", () => {
+  test("nothing is a person, because every path without one is driven by somebody", () => {
+    expect(policyInitiator()).toEqual({ kind: "person", id: "" });
+  });
+
+  test("a kind that carries no id still gets one, so a rule naming id cannot throw", () => {
+    expect(policyInitiator({ kind: "deployment" })).toEqual({
+      kind: "deployment",
+      id: "",
+    });
+  });
+
+  test("a routine keeps its id", () => {
+    expect(policyInitiator({ kind: "routine", id: "nightly" })).toEqual({
+      kind: "routine",
+      id: "nightly",
+    });
   });
 });
