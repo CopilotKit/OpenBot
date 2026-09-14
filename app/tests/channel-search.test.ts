@@ -1,24 +1,37 @@
 import { expect, test } from "bun:test";
-import { matchingChannels } from "../src/components/app-sidebar/app-sidebar";
+import {
+  matchingRoster,
+  type SidebarRosterRow,
+} from "../src/components/app-sidebar/roster";
 import type { ChannelSummary } from "../src/lib/channels/queries";
 
 /** A roster row as the search box sees it. */
-function channel(overrides: Partial<ChannelSummary>): ChannelSummary {
+function channel(overrides: Partial<ChannelSummary>): SidebarRosterRow {
   return {
-    id: "channel-1",
-    name: "Knowledge",
-    agentIds: ["agent-1"],
-    threadId: "thread-1",
-    active: true,
-    summary: null,
-    lastMessage: "The three flights and the hotel do.",
-    lastMessageAt: "2026-08-25T12:00:00.000Z",
-    lastMessageAgentId: "agent-1",
-    createdAt: "2026-08-25T11:00:00.000Z",
-    pinned: false,
-    lastReadAt: null,
-    ...overrides,
+    kind: "openbot",
+    channel: {
+      id: "channel-1",
+      name: "Knowledge",
+      agentIds: ["agent-1"],
+      threadId: "thread-1",
+      active: true,
+      summary: null,
+      lastMessage: "The three flights and the hotel do.",
+      lastMessageAt: "2026-08-25T12:00:00.000Z",
+      lastMessageAgentId: "agent-1",
+      createdAt: "2026-08-25T11:00:00.000Z",
+      pinned: false,
+      lastReadAt: null,
+      ...overrides,
+    },
   };
+}
+
+/** The id of every row that matched, whichever kind of conversation it is. */
+function matchedIds(rows: SidebarRosterRow[]): string[] {
+  return rows.map((row) =>
+    row.kind === "openbot" ? row.channel.id : row.thread.threadId,
+  );
 }
 
 test("an untitled channel is still found by its Bot's name", () => {
@@ -26,17 +39,13 @@ test("an untitled channel is still found by its Bot's name", () => {
   // that has not been named yet becomes unreachable from the search box.
   const rows = [channel({ id: "untitled" })];
 
-  expect(matchingChannels(rows, "knowl").map((row) => row.id)).toEqual([
-    "untitled",
-  ]);
+  expect(matchedIds(matchingRoster(rows, "knowl"))).toEqual(["untitled"]);
 });
 
 test("a titled channel is found by a word in its title", () => {
   const rows = [channel({ id: "titled", summary: "Travel receipt rules" })];
 
-  expect(matchingChannels(rows, "receipt").map((row) => row.id)).toEqual([
-    "titled",
-  ]);
+  expect(matchedIds(matchingRoster(rows, "receipt"))).toEqual(["titled"]);
 });
 
 test("a word from the last message still matches", () => {
@@ -44,14 +53,12 @@ test("a word from the last message still matches", () => {
   // still something the roster can show and therefore still something search must find.
   const rows = [channel({ id: "titled", summary: "Travel receipt rules" })];
 
-  expect(matchingChannels(rows, "hotel").map((row) => row.id)).toEqual([
-    "titled",
-  ]);
+  expect(matchedIds(matchingRoster(rows, "hotel"))).toEqual(["titled"]);
 });
 
 test("an empty query returns the very same array, not a copy", () => {
   // Identity matters: a new array on every keystroke restages the whole animated list.
   const rows = [channel({})];
 
-  expect(matchingChannels(rows, "   ")).toBe(rows);
+  expect(matchingRoster(rows, "   ")).toBe(rows);
 });

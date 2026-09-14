@@ -1,11 +1,26 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
-import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
 import { tryClient } from "@/lib/client";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { type ControlState, readControl } from "@/lib/computers/control";
+import {
+  computerClickContract,
+  computerKeyContract,
+  computerListFilesContract,
+  computerNavigateContract,
+  computerReadContract,
+  computerReadFileContract,
+  computerRequestHelpContract,
+  computerRequestSecretContract,
+  computerRunCommandContract,
+  computerScrollContract,
+  computerSnapshotContract,
+  computerTypeContract,
+  computerWriteFileContract,
+  reportRefusalContract,
+} from "../../../../shared/computer-tool-contracts";
 import { useActiveBotHolder } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
@@ -241,14 +256,7 @@ export function ComputerTools() {
   const bot = useActiveBotHolder();
 
   useFrontendTool({
-    name: "computer_navigate",
-    description:
-      "Open a web page on your own computer so the person can watch. Use this when asked to look " +
-      "at, visit, open or check a website. Returns the page title and its readable text, so answer " +
-      "from what comes back rather than telling the person to go and look.",
-    parameters: z.object({
-      url: z.string().describe("Full web address to open, including https://"),
-    }),
+    ...computerNavigateContract,
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
@@ -340,23 +348,13 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_read",
-    description:
-      "Read the page currently open on your computer, without opening anything. Use this after you " +
-      "click something that changes the page, such as submitting a form, to find out what it now says.",
-    parameters: z.object({}),
+    ...computerReadContract,
     handler: async () => callComputer(bot.current, "/read"),
     render: () => null,
   });
 
   useFrontendTool({
-    name: "computer_snapshot",
-    description:
-      "List the things on the current page you can act on: fields, buttons, links and checkboxes, " +
-      "each with a ref, its label and its current value. Call this BEFORE clicking or typing, and " +
-      "use the refs it returns. Always send back the snapshotId it gives you. If an action reports " +
-      "that your refs are stale, the page changed: call this again and use the new refs.",
-    parameters: z.object({}),
+    ...computerSnapshotContract,
     handler: async () =>
       callComputer(bot.current, "/snapshot", { method: "POST" }),
     // Snapshot renders a count only; navigate owns the screen view.
@@ -378,22 +376,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_type",
-    description:
-      "Enter text into a field on the page. Give the ref of the field from your most recent " +
-      "snapshot and the snapshotId it came from. This replaces whatever the field already contains. " +
-      "Set submit to true to press Enter afterwards.",
-    parameters: z.object({
-      ref: z
-        .string()
-        .describe("Ref of the field, from your most recent snapshot"),
-      snapshotId: z.number().describe("The snapshotId that ref came from"),
-      text: z.string().describe("The text to enter"),
-      submit: z
-        .boolean()
-        .optional()
-        .describe("Press Enter after typing, to submit a single-field form"),
-    }),
+    ...computerTypeContract,
     handler: async (
       input: {
         ref: string;
@@ -428,18 +411,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_click",
-    description:
-      "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref " +
-      "from your most recent snapshot and the snapshotId it came from.",
-    parameters: z.object({
-      ref: z
-        .string()
-        .describe(
-          "Ref of the element to click, from your most recent snapshot",
-        ),
-      snapshotId: z.number().describe("The snapshotId that ref came from"),
-    }),
+    ...computerClickContract,
     handler: async (
       input: { ref: string; snapshotId: number },
       { signal }: { signal?: AbortSignal } = {},
@@ -474,18 +446,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_key",
-    description:
-      "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
-      "is focused, or omit the ref to press it on the page.",
-    parameters: z.object({
-      key: z.string().describe("Key name, such as Enter, Tab or Escape"),
-      ref: z.string().optional().describe("Optional ref to press the key on"),
-      snapshotId: z
-        .number()
-        .optional()
-        .describe("The snapshotId the ref came from, required if ref is given"),
-    }),
+    ...computerKeyContract,
     handler: async (
       input: {
         key: string;
@@ -515,27 +476,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_request_secret",
-    description:
-      "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
-      "Focus the field first with computer_click, then call this with the ref of that field and a " +
-      "short label for what you need. They type it into a masked box that goes straight to the page. " +
-      "You will never see the value, and you must not ask for it any other way. Prefer this over a " +
-      "full takeover when you only need one field filled in. The value is only TYPED into the field: " +
-      "if the form needs submitting, do that yourself afterwards with computer_click.",
-    parameters: z.object({
-      label: z
-        .string()
-        .describe(
-          "What you need, in a few words, e.g. 'the code sent to your phone'",
-        ),
-      ref: z
-        .string()
-        .describe(
-          "Ref of the field it goes in, from your most recent snapshot",
-        ),
-      snapshotId: z.number().describe("The snapshotId that ref came from"),
-    }),
+    ...computerRequestSecretContract,
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
       { signal }: { signal?: AbortSignal } = {},
@@ -574,22 +515,7 @@ export function ComputerTools() {
 
   /** Self-reported model declines: audit evidence, not an enforcement control. */
   useFrontendTool({
-    name: "report_refusal",
-    description:
-      "Record that you DECLINED something you were asked to do, because it looked unsafe, was outside " +
-      "what you are for, or you judged you should not. Call this whenever you say no to a request, in " +
-      "addition to telling the person. It changes nothing about your answer; it exists so an " +
-      "administrator can see what this Bot is being asked to do. Do not call it when you simply could " +
-      "not do something, only when you chose not to.",
-    parameters: z.object({
-      reason: z
-        .string()
-        .describe("Why you declined, in one sentence and in your own words"),
-      request: z
-        .string()
-        .optional()
-        .describe("What you were asked to do, in a few words"),
-    }),
+    ...reportRefusalContract,
     handler: async (
       input: { reason: string; request?: string },
       { signal }: { signal?: AbortSignal } = {},
@@ -611,22 +537,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_request_help",
-    description:
-      "Ask the person to take control of your computer and do something you cannot: sign in, enter a " +
-      "password or a one-time code, or clear a CAPTCHA. Say specifically what you need done. They " +
-      "will drive the browser themselves and hand it back, and you carry on in the same session. " +
-      "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. " +
-      "This call is the only thing that reaches them: until you make it they are not looking at the " +
-      "page and have no way to help, so saying you need them to sign in, or asking whether they would " +
-      "like to proceed, hands over nothing and leaves the page where it is.",
-    parameters: z.object({
-      reason: z
-        .string()
-        .describe(
-          "What you need the person to do, in one sentence, e.g. 'This page is asking for a code sent to your phone.'",
-        ),
-    }),
+    ...computerRequestHelpContract,
     handler: async (
       input: { reason: string },
       { signal }: { signal?: AbortSignal } = {},
@@ -664,17 +575,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_list_files",
-    description:
-      "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
-      "FIRST when you are asked what files you have, or before reading a file whose exact name you " +
-      "are not sure of. Never guess a filename.",
-    parameters: z.object({
-      path: z
-        .string()
-        .optional()
-        .describe("Optional folder to list. Omit for the whole workspace."),
-    }),
+    ...computerListFilesContract,
     handler: async (input: { path?: string }) => {
       const computerId = bot.current;
       const result = await callComputer(computerId, "/files/list", {
@@ -711,16 +612,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_read_file",
-    description:
-      "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
-      "such as notes.md or reports/august.csv. Your workspace survives between conversations, so use " +
-      "this to pick up notes you made before.",
-    parameters: z.object({
-      path: z
-        .string()
-        .describe("Path relative to your workspace, such as notes.md"),
-    }),
+    ...computerReadFileContract,
     handler: async (input: { path: string }) => {
       const computerId = bot.current;
       const result = await callComputer(computerId, "/files/read", {
@@ -756,22 +648,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_run_command",
-    description:
-      "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
-      "installing a tool you need, processing a file you saved, running a script. The working " +
-      "directory is your workspace, so paths are relative to it and files you write here are the " +
-      "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
-      "truncated from the start, and a command that runs too long is stopped. " +
-      "You are not the root user, so anything that writes outside your workspace needs sudo, " +
-      "which asks for no password: installing a package is " +
-      "`sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this " +
-      "computer does not grant it, so say so rather than retrying.",
-    parameters: z.object({
-      command: z
-        .string()
-        .describe("The command to run, such as: sudo apt-get install -y jq"),
-    }),
+    ...computerRunCommandContract,
     handler: async (
       input: { command: string },
       { signal }: { signal?: AbortSignal } = {},
@@ -841,23 +718,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_write_file",
-    description:
-      "Save a file in your own workspace so you still have it later. Paths are relative to your " +
-      "workspace and folders are created as needed. Set append to true to add to the end of an " +
-      "existing file rather than replacing it. Text only.",
-    parameters: z.object({
-      path: z
-        .string()
-        .describe(
-          "Path relative to your workspace, such as reports/august.csv",
-        ),
-      contents: z.string().describe("The text to save"),
-      append: z
-        .boolean()
-        .optional()
-        .describe("Add to the end of the file instead of replacing it"),
-    }),
+    ...computerWriteFileContract,
     handler: async (input: {
       path: string;
       contents: string;
@@ -908,15 +769,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
-    name: "computer_scroll",
-    description:
-      "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",
-    parameters: z.object({
-      deltaY: z
-        .number()
-        .optional()
-        .describe("Pixels to scroll; positive is down. Defaults to 600."),
-    }),
+    ...computerScrollContract,
     handler: async (
       input: { deltaY?: number },
       { signal }: { signal?: AbortSignal } = {},

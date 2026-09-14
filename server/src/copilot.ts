@@ -1,5 +1,6 @@
 import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
+import type { Channel } from "@copilotkit/channels-core";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
   BuiltInAgent,
@@ -10,10 +11,8 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
 import { z } from "zod";
-import {
-  COMPUTER_GUIDANCE,
-  PROVENANCE_GUIDANCE,
-} from "../../shared/bot-prompt";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import type { ActorAgentResolver } from "./agents/agent-resolver";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import type { AgentActor } from "./agents/profile-types";
 import type { AuditInitiator } from "./audit";
@@ -835,6 +834,9 @@ async function buildAgent(
      * announce and never invoke. Granting one is refused at the door rather than stored dead: see
      * `enablementRefusal` in plugins/routes.ts.
      *
+     * The wrapper composes every direct `run(input)` too, which is the path a channel delegation
+     * takes, so a Slack turn reaches the same composition a browser turn does.
+     *
      * Making this work is a feature rather than a fix: the callback would have to carry a run
      * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
      * here, and worth knowing it is missing rather than assuming it is not.
@@ -863,7 +865,7 @@ async function buildAgent(
    * what keeps a narrowed run from being told it holds something it was not offered.
    */
   const withTools = (tools: GrantedTool[]) =>
-    new BuiltInAgentWithSaneHistory(
+    new GovernedBuiltInAgent(
       builtInAgentConfiguration(
         agent,
         model,
@@ -873,6 +875,9 @@ async function buildAgent(
         connectedVendors,
         standingInstructions,
       ),
+      agent,
+      tools,
+      signRun,
       loadAttachment,
       markAttachmentsSent,
     );
@@ -1098,16 +1103,8 @@ function remoteAgentWithStandingRole(
   /** As for the built-in path: what this deployment connects to, held or not. */
   connectedVendors: readonly string[] = [],
   /**
-   * Which of those tools this run is about, decided once the message is known.
-   *
-   * NARROWED HERE RATHER THAN BY WRAPPING THE AGENT, and the difference is not cosmetic. Middleware
-   * registered with `.use()` is applied by `runAgent`, not by `run`: an outer agent that delegated
-   * to `remote.run(input)` would skip this whole function's work, and the endpoint would receive a
-   * run with no standing role, no holdings message, no tools and no signed assertion. Every one of
-   * those is silent — the Bot simply answers worse — so the narrowing goes inside the middleware
-   * that is already here.
-   *
-   * Absent means no narrowing, which is the behaviour every deployment had before this existed.
+   * Which of those tools this run is about, decided once the message is known. The composed wrapper
+   * invokes it on subscription for both web `runAgent()` and direct delegated `run()` calls.
    */
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
   /*
@@ -1192,12 +1189,11 @@ function remoteAgentWithStandingRole(
           {}),
     };
     /*
-     * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
-     * remote Bot never passes through it: this middleware is the last thing between the browser's
+     * The same guard a built-in Bot gets in `GovernedBuiltInAgent`, applied here because a remote
+     * Bot never passes through it: this composition is the last thing between the browser's
      * `input.messages` and the endpoint. A framework at the other end that converts with the same
      * SDK refuses a dangling call for the same reason, and one that does not would still be
-     * shown a call nothing is going to answer. Done inside the middleware rather than by wrapping
-     * the agent, for the reason given above `remoteAgentWithStandingRole`: `run` skips `.use()`.
+     * shown a call nothing is going to answer.
      */
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
@@ -1282,15 +1278,20 @@ function remoteAgentWithStandingRole(
    * straight away. `defer` puts the work on the subscription, which is where the run actually
    * begins, so nothing happens until somebody is listening and a retried run chooses again.
    */
-  return new CloningRemoteAgent(remote, (target) => {
-    target.use((input, next) =>
-      defer(() =>
-        from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
-          switchMap((offered) => runWith(offered, input, next)),
-        ),
+  const composed = (input: RunAgentInput, next: AbstractAgent) =>
+    defer(() =>
+      from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
+        switchMap((offered) => runWith(offered, input, next)),
       ),
     );
-  });
+
+  return new CloningRemoteAgent(
+    remote,
+    (target) => {
+      target.use((input, next) => composed(input, next));
+    },
+    composed,
+  );
 }
 
 const RESERVED_MASTRA_CONTEXT_DESCRIPTIONS = new Set([
@@ -1359,6 +1360,18 @@ class CloningRemoteAgent extends AbstractAgent {
   constructor(
     remote: AbstractAgent,
     private readonly attachOpenBotMiddleware: (target: AbstractAgent) => void,
+    /**
+     * The same composition the middleware applies, reachable without `runAgent()`.
+     *
+     * `AbstractAgent` only runs `.use()` middleware inside `runAgent()`, and channel delegation
+     * calls `run(input)` directly so it can forward AG-UI events unchanged. Without this, a Slack
+     * turn reached the endpoint with no standing role, no granted tools, no inlined attachments and
+     * no signed run assertion — the web path composed and the channel path did not.
+     */
+    private readonly composed: (
+      input: RunAgentInput,
+      next: AbstractAgent,
+    ) => Observable<BaseEvent>,
   ) {
     super({
       agentId: remote.agentId,
@@ -1379,7 +1392,8 @@ class CloningRemoteAgent extends AbstractAgent {
     if (this.headers) {
       this.remote.headers = { ...this.headers };
     }
-    return this.remote.run(input);
+    // Composed here rather than forwarded raw, so both entrances are the same run. See `composed`.
+    return this.composed(input, this.remote);
   }
 
   async getCapabilities() {
@@ -1396,12 +1410,51 @@ class CloningRemoteAgent extends AbstractAgent {
     const clone = new CloningRemoteAgent(
       clonedRemote,
       this.attachOpenBotMiddleware,
+      this.composed,
     );
     if (this.headers) {
       clone.headers = { ...this.headers };
     }
     return clone;
   }
+}
+
+/**
+ * This deployment's own statement of what a run is, for the agent to hand back.
+ *
+ * The remote path builds the same fields inside its composition, where the attachment and Mastra
+ * work already lives; a built-in Bot has no middleware to build them in, so it gets them here.
+ */
+function governedRunForwardedProps(
+  input: RunAgentInput,
+  botId: string,
+  tools: GrantedTool[],
+  signRun?: SignRun,
+): Record<string, unknown> {
+  return {
+    ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),
+    // Who the Bot is calling back as, so the audit row names it rather than "an agent".
+    openbotBotId: botId,
+    /*
+     * Which of those tools this deployment runs, as opposed to the surface.
+     *
+     * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute here
+     * through the policy and the audit trail, and the components the browser draws. A Bot that ran
+     * the second kind through this deployment asked it to execute a chart, was told it could not,
+     * and then apologised to the person for not showing the chart that was on screen in front of
+     * them. Only this side knows which is which, so only this side can say.
+     */
+    openbotDeploymentTools: tools.map((tool) => tool.name),
+    /*
+     * Signed, short-lived, and naming the Bot and the person. Absent means this deployment cannot
+     * sign, so the agent is given nothing to hand back and its tool calls fail closed. Built-ins
+     * carry the same assertion in their private AG-UI input even though their granted tools execute
+     * locally rather than through the callback endpoint.
+     */
+    ...(signRun
+      ? { openbotRun: signRun(botId, input.runId, input.threadId) }
+      : {}),
+  };
 }
 
 /**
@@ -1509,6 +1562,79 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     (cloned as unknown as WithMiddlewares).middlewares = [
       ...(this as unknown as WithMiddlewares).middlewares,
     ];
+    return cloned;
+  }
+}
+
+/**
+ * Keep built-in and remote coworkers on the same actor-scoped AG-UI run boundary.
+ *
+ * Layered on the history guard above rather than beside it, so a built-in Bot cannot be governed
+ * and unsanitised at the same time: whichever of the two a caller reaches for, it gets both.
+ */
+class GovernedBuiltInAgent extends BuiltInAgentWithSaneHistory {
+  private governedConfiguration: BuiltInAgentConfiguration;
+  private registeredAgent: RegisteredBuiltInAgent;
+  private botId: string;
+  private deploymentTools: GrantedTool[];
+  private signRun?: SignRun;
+  /**
+   * The attachment seams, held so {@link clone} can pass them on.
+   *
+   * Carried rather than left to the parent, because a clone builds another one of THIS class and a
+   * seam lost in a clone is a seam that never runs — the same reason the configuration is held.
+   */
+  private governedLoadAttachment?: LoadAttachment;
+  private governedMarkAttachmentsSent?: MarkAttachmentsSent;
+  private governedMiddlewares: Parameters<AbstractAgent["use"]> = [];
+
+  constructor(
+    configuration: BuiltInAgentConfiguration,
+    agent: RegisteredBuiltInAgent,
+    tools: GrantedTool[],
+    signRun?: SignRun,
+    loadAttachment?: LoadAttachment,
+    markAttachmentsSent?: MarkAttachmentsSent,
+  ) {
+    super(configuration, loadAttachment, markAttachmentsSent);
+    this.governedLoadAttachment = loadAttachment;
+    this.governedMarkAttachmentsSent = markAttachmentsSent;
+    this.governedConfiguration = configuration;
+    this.registeredAgent = agent;
+    this.botId = agent.id;
+    this.deploymentTools = tools;
+    this.signRun = signRun;
+  }
+
+  use(...middlewares: Parameters<AbstractAgent["use"]>): this {
+    this.governedMiddlewares.push(...middlewares);
+    return super.use(...middlewares);
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    return super.run({
+      ...input,
+      forwardedProps: governedRunForwardedProps(
+        input,
+        this.botId,
+        this.deploymentTools,
+        this.signRun,
+      ),
+    });
+  }
+
+  clone(): GovernedBuiltInAgent {
+    const cloned = new GovernedBuiltInAgent(
+      this.governedConfiguration,
+      this.registeredAgent,
+      this.deploymentTools,
+      this.signRun,
+      this.governedLoadAttachment,
+      this.governedMarkAttachmentsSent,
+    );
+    if (this.governedMiddlewares.length > 0) {
+      cloned.use(...this.governedMiddlewares);
+    }
     return cloned;
   }
 }
@@ -1750,96 +1876,10 @@ export type LoadAgentsForActor = (
  */
 export function createRequestAgents(
   identifyActor: IdentifyActor,
-  loadAgents: LoadAgentsForActor,
-  model: RuntimeModel,
-  resolveModelApiKey: () => Promise<string | null>,
-  /**
-   * Shared across every request rather than built per run, because it is the thing that has to
-   * outlive one: the sweep that notices a silent stream has to still be running after the request
-   * that opened it has been answered.
-   */
-  stallGuard?: StallGuard,
-  /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
-  loadToolsForActor?: (
-    actorId: string,
-    initiator?: AuditInitiator,
-  ) => LoadToolsForBot,
-  /** Resolved per request, because what it signs is who this request turned out to be. */
-  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
-  /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
-  computerGuidance?: string,
-  /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
-  loadVendors?: () => Promise<readonly string[]>,
-  /**
-   * How a run's tools are narrowed, resolved for whoever is asking.
-   *
-   * Per actor like the tools themselves, because the skills a Bot holds are read through the same
-   * grants, and because the discovery row has to name the person the run belongs to.
-   */
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /**
-   * How a run gets its tool for handing work to another Bot, resolved for whoever is asking.
-   *
-   * Per actor for the same reason the tools are: which Bots may be reached is decided against the
-   * roster that person can see, so a Bot must never be able to address one they cannot.
-   */
-  handoffForActor?: (actorId: string) => HandoffForRun,
-  /**
-   * What this person has told every coworker they run, resolved for whoever is asking.
-   *
-   * Per actor, and through `identifyActor` rather than anything in the request body, for the same
-   * reason the grants are: this text goes into a prompt that then speaks as that person's coworker,
-   * so which person it belongs to has to be decided by the session and never by the caller.
-   */
-  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
-  /**
-   * How the files on a person's message are put in front of the model, resolved for whoever is
-   * asking.
-   *
-   * Per actor, and through `identifyActor` rather than anything in the request body, for the reason
-   * `loadInstructionsForActor` is: the ids arrive inside `input.messages`, which the browser wrote,
-   * so a turn can name an attachment in a channel the asker was never in. Which rows this may read
-   * has to be decided by the session, exactly as the fetch route decides it. Appended last for the
-   * positional reason above. Absent means nothing is inlined, which is what every deployment did
-   * before this existed.
-   */
-  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
-  /**
-   * How a send is recorded against the files it carried, resolved for whoever is asking.
-   *
-   * Per actor for a stricter reason than the reader beside it: this one WRITES `attachedAt`, and
-   * `markAttachmentsSent` will only stamp rows the acting person uploaded themselves. Deciding who
-   * that is from the session rather than from the request body is what keeps one member from
-   * recording a send against a colleague's staged file. Appended last, positionally. Absent means
-   * nothing is recorded.
-   */
-  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
+  resolver: ActorAgentResolver,
 ) {
   return async ({ request }: { request: Request }) => {
-    const actor = await identifyActor(request);
-    return resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id),
-      signRunForActor?.(actor.id),
-      computerGuidance,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-      // Every Bot this person can see, so no `onlyBotId` here; the instructions follow it.
-      undefined,
-      loadInstructionsForActor?.(actor.id),
-      // No initiator: a request is a person asking, which is the default this path has always
-      // carried. Named only so the attachments after it land in the right position.
-      undefined,
-      loadAttachmentForActor?.(actor.id),
-      markAttachmentsSentForActor?.(actor.id),
-    );
+    return resolver.resolveAgentsForActor(await identifyActor(request));
   };
 }
 
@@ -1929,67 +1969,21 @@ const THREAD_LOCK_TTL_SECONDS = 120;
 
 export function mountCopilotRuntime(
   config: DeploymentConfig,
-  model: RuntimeModel,
-  loadAgents: LoadAgentsForActor,
-  resolveModelApiKey: () => Promise<string | null>,
+  resolver: ActorAgentResolver,
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
-  /**
-   * The watch on Bot streams. Not optional, unlike the parameter it forwards to: a guard built from
-   * a timeout of zero already watches nothing, so an unconfigured deployment has one to hand and
-   * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
-   */
-  stallGuard: StallGuard,
-  loadToolsForActor?: (
-    actorId: string,
-    initiator?: AuditInitiator,
-  ) => LoadToolsForBot,
-  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
   basePath = "/api/copilotkit",
-  loadVendors?: () => Promise<readonly string[]>,
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
-  handoffForActor?: (actorId: string) => HandoffForRun,
   /**
    * Told when a run starts and ends on a thread, so a channel can show it is working.
    *
-   * The universal seam: every run the runtime processes — a person's own turn, a headless hop —
-   * takes and gives back the thread lock, and it does so on the server, so a person who sends a
-   * message and navigates away still lights the channel they left. A side effect only: it is never
-   * awaited in the lock path and a failure in it never touches whether the lock was taken.
+   * The universal seam: every run the runtime processes — a person's own turn, a headless hop, a
+   * Slack reply — takes and gives back the thread lock, and it does so on the server, so a person
+   * who sends a message and navigates away still lights the channel they left. A side effect only:
+   * it is never awaited in the lock path and a failure in it never touches whether the lock was
+   * taken.
    */
   onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
-  /**
-   * What the person asking has told every built-in coworker they run, resolved per person.
-   *
-   * Given to both the request path and `agentFor` below, so a hop delivered to a Bot at three in the
-   * morning carries the same standing instructions the Bot in front of the person does. A seam wired
-   * into only one of them would be the drift `agentFor` exists to prevent.
-   */
-  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
-  /**
-   * How the files on a message are put in front of the model, resolved per person, on both paths
-   * below.
-   *
-   * Given to the request path and to `agentFor` alike, for the reason `loadInstructionsForActor` is:
-   * a routine's turn at three in the morning has to inline exactly as a person's chat turn does, and
-   * a seam wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed for
-   * the same reason every other collaborator here is — the ids come out of browser-supplied message
-   * content, so the person the run belongs to is what decides which attachments it may read.
-   * Appended last because these are positional. Absent means nothing is inlined.
-   */
-  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
-  /**
-   * How a send is recorded against the files it carried, resolved per person, on both paths below.
-   *
-   * Given to the request path and to `agentFor` alike, for the reason `loadAttachmentForActor` is:
-   * a routine's turn at three in the morning sends exactly as a person's chat turn does, and a seam
-   * wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed because the
-   * write is scoped to rows that person uploaded. Appended last. Absent means nothing is recorded.
-   */
-  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
+  channels: Channel[] = [],
 ) {
   const { intelligence } = config.runtime;
 
@@ -2016,29 +2010,12 @@ export function mountCopilotRuntime(
     botId: string;
     initiator?: AuditInitiator;
   }): Promise<AbstractAgent | null> => {
-    const { actor } = input;
-    const agents = await resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id, input.initiator),
-      signRunForActor?.(actor.id, input.initiator),
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-      // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
-      // see is still absent; what this skips is constructing the other Bots and asking the database
-      // what each of them was granted, on every delivery and again on every retry.
-      input.botId,
-      loadInstructionsForActor?.(actor.id),
-      input.initiator,
-      loadAttachmentForActor?.(actor.id),
-      markAttachmentsSentForActor?.(actor.id),
-    );
-    return agents[input.botId] ?? null;
+    // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
+    // see is still absent; what this skips is constructing the other Bots and asking the database
+    // what each of them was granted, on every delivery and again on every retry.
+    return await resolver
+      .resolveAgentForActor(input.actor, input.botId, input.initiator)
+      .catch(() => null);
   };
 
   /*
@@ -2058,6 +2035,7 @@ export function mountCopilotRuntime(
     // returns, so omitting it puts every person in the deployment in the same thread space and one
     // person's conversations become another's.
     identifyUser,
+    channels,
     // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
     // See IntelligenceKnowingANewThread.
     intelligence: intelligenceClient,
@@ -2090,33 +2068,21 @@ export function mountCopilotRuntime(
     a2ui: { enabled: config.generativeUi },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
-    agents: createRequestAgents(
-      identifyActor,
-      loadAgents,
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor,
-      signRunForActor,
-      /*
-       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
-       * offered them without this and the guidance is what tells it how they go together: snapshot
-       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
-       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
-       */
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor,
-      agentFetch,
-      handoffForActor,
-      loadInstructionsForActor,
-      loadAttachmentForActor,
-      markAttachmentsSentForActor,
-    ) as never,
+    agents: createRequestAgents(identifyActor, resolver) as never,
   });
 
+  const honoHandler = createCopilotHonoHandler({ runtime, basePath });
+
   return {
-    handler: createCopilotHonoHandler({ runtime, basePath }),
+    handler: honoHandler,
+    /**
+     * The managed channel host, when a Channel was declared, and otherwise nothing.
+     *
+     * Handed back rather than started here: an outbound socket that has to be up before a Slack
+     * turn can reach a coworker, and down before this process exits, is process lifecycle rather
+     * than a route, and the caller is the only place that already owns the HTTP listener beside it.
+     */
+    channels: honoHandler.channels,
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.
      *

@@ -30,6 +30,8 @@ export type ControlState = {
    * doing, with the reason the Bot gave, written for whoever asked and rendered to whoever looked.
    */
   requestedAt?: string;
+  /** Opaque generation of the pending help request, used only for conditional cancellation. */
+  helpRequestId?: string;
   /**
    * A secret the Bot is waiting for, described by its label only.
    *
@@ -47,6 +49,23 @@ export type ControlState = {
    */
   secretRef?: string;
   secretSnapshotId?: number;
+  /** Opaque generation of the pending secret request, used only for conditional cancellation. */
+  secretRequestId?: string;
+};
+
+export type AssistanceStatus =
+  | "pending"
+  | "human"
+  | "completed"
+  | "expired"
+  | "cancelled"
+  | "superseded"
+  | "unknown";
+
+export type AssistanceCancellationResult = {
+  cancelled: boolean;
+  state: ControlState;
+  status: AssistanceStatus;
 };
 
 /** Refusal because a person is driving. Distinct from a failure, so the Bot can be told to wait. */
@@ -106,6 +125,66 @@ export function createControl(
     since: now(),
     requested: false,
   };
+  const terminalAssistance = new Map<string, AssistanceStatus>();
+  let humanAssistanceId: string | undefined;
+
+  const remember = (
+    requestId: string | undefined,
+    status: AssistanceStatus,
+  ) => {
+    if (!requestId) return;
+    terminalAssistance.delete(requestId);
+    terminalAssistance.set(requestId, status);
+    while (terminalAssistance.size > 128) {
+      const oldest = terminalAssistance.keys().next().value;
+      if (oldest === undefined) break;
+      terminalAssistance.delete(oldest);
+    }
+  };
+
+  const expirePending = () => {
+    const current = Date.parse(now());
+    if (
+      state.holder === "bot" &&
+      state.requested &&
+      state.requestedAt &&
+      current - Date.parse(state.requestedAt) > HELP_REQUEST_TTL_MS
+    ) {
+      remember(state.helpRequestId, "expired");
+      const {
+        helpRequestId: _requestId,
+        reason: _reason,
+        requestedAt: _at,
+        ...rest
+      } = state;
+      state = { ...rest, requested: false };
+    }
+    if (
+      state.holder === "bot" &&
+      state.secretWanted &&
+      secretRequestedAt &&
+      current - Date.parse(secretRequestedAt) > SECRET_REQUEST_TTL_MS
+    ) {
+      remember(state.secretRequestId, "expired");
+      secretRequestedAt = undefined;
+      const {
+        secretRequestId: _requestId,
+        secretWanted: _wanted,
+        secretRef: _ref,
+        secretSnapshotId: _snapshotId,
+        ...rest
+      } = state;
+      state = rest;
+    }
+  };
+
+  const assistanceRequestId = (candidate: unknown) =>
+    typeof candidate === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      candidate,
+    )
+      ? candidate
+      : crypto.randomUUID();
 
   /**
    * When the Bot asked for a secret, so an unanswered request can stop being shown.
@@ -115,39 +194,6 @@ export function createControl(
    * screen that is asking somebody for a password.
    */
   let secretRequestedAt: string | undefined;
-
-  /**
-   * Drop a secret request the run that made it has outlived.
-   *
-   * The same argument as the ask above, missed for the other half of it. Control belongs to the
-   * computer rather than to a conversation, so a request nobody answered sat on it for ever: the run
-   * that asked had ended, and every later conversation with that Bot still showed a masked box
-   * wanting "the six-digit code from your authenticator", written for whoever asked and rendered to
-   * whoever looked. The surface makes no distinction — `useNeedsYou` lights the same "needs you" on
-   * `requested` and on `secretWanted` — so expiring one and not the other left the Bot flagged
-   * anyway.
-   *
-   * Expired on read for the same reason the ask is: there is nothing to wake, and the only thing
-   * that cares is whoever looks next. Read by `pendingSecret` too, because that is what decides
-   * whether a value typed now is accepted, and a prompt that has stopped being shown must not still
-   * be answerable.
-   */
-  function dropStaleSecret(): void {
-    if (!state.secretWanted || !secretRequestedAt) return;
-    if (
-      Date.parse(now()) - Date.parse(secretRequestedAt) <=
-      SECRET_REQUEST_TTL_MS
-    ) {
-      return;
-    }
-    secretRequestedAt = undefined;
-    state = {
-      ...state,
-      secretWanted: undefined,
-      secretRef: undefined,
-      secretSnapshotId: undefined,
-    };
-  }
 
   return {
     /**
@@ -162,16 +208,7 @@ export function createControl(
      * than any stale prompt.
      */
     get(): ControlState {
-      if (
-        state.requested &&
-        state.holder === "bot" &&
-        state.requestedAt &&
-        Date.parse(now()) - Date.parse(state.requestedAt) > HELP_REQUEST_TTL_MS
-      ) {
-        const { reason: _reason, requestedAt: _at, ...rest } = state;
-        state = { ...rest, requested: false };
-      }
-      dropStaleSecret();
+      expirePending();
       return { ...state };
     },
 
@@ -181,11 +218,15 @@ export function createControl(
      * It does not take control: it says it is stuck and why, and a person decides. A Bot that could
      * hand itself to a human could also hand a human a page they never asked to see.
      */
-    requestHelp(reason: unknown): ControlState {
+    requestHelp(reason: unknown, requestId?: unknown): ControlState {
+      expirePending();
+      if (state.requested) remember(state.helpRequestId, "superseded");
+      const id = assistanceRequestId(requestId);
       state = {
         ...state,
         requested: true,
         requestedAt: now(),
+        helpRequestId: id,
         reason:
           typeof reason === "string" && reason.trim()
             ? reason.trim()
@@ -199,12 +240,15 @@ export function createControl(
       label?: unknown;
       ref?: unknown;
       snapshotId?: unknown;
+      requestId?: unknown;
     }): ControlState {
+      expirePending();
       if (typeof input.ref !== "string" || !input.ref.trim()) {
         throw new ControlRequestError(
           "Say which field the value goes in, using a ref from your snapshot.",
         );
       }
+      if (state.secretWanted) remember(state.secretRequestId, "superseded");
       secretRequestedAt = now();
       state = {
         ...state,
@@ -215,8 +259,66 @@ export function createControl(
         secretRef: input.ref.trim(),
         secretSnapshotId:
           typeof input.snapshotId === "number" ? input.snapshotId : undefined,
+        secretRequestId: assistanceRequestId(input.requestId),
       };
       return this.get();
+    },
+
+    /**
+     * Clear only the exact pending assistance generation while the Bot still owns the browser.
+     * A stale delivery timeout is therefore harmless after a newer request or human handoff.
+     */
+    cancelAssistance(requestId: string): AssistanceCancellationResult {
+      expirePending();
+      if (humanAssistanceId === requestId) {
+        return { cancelled: false, state: this.get(), status: "human" };
+      }
+      if (state.holder !== "bot") {
+        return {
+          cancelled: false,
+          state: this.get(),
+          status: terminalAssistance.get(requestId) ?? "unknown",
+        };
+      }
+      if (state.helpRequestId === requestId && state.requested) {
+        const {
+          helpRequestId: _requestId,
+          reason: _reason,
+          requestedAt: _requestedAt,
+          ...rest
+        } = state;
+        state = { ...rest, requested: false };
+        remember(requestId, "cancelled");
+        return { cancelled: true, state: this.get(), status: "cancelled" };
+      }
+      if (state.secretRequestId === requestId && state.secretWanted) {
+        const {
+          secretRequestId: _requestId,
+          secretWanted: _wanted,
+          secretRef: _ref,
+          secretSnapshotId: _snapshotId,
+          ...rest
+        } = state;
+        state = rest;
+        secretRequestedAt = undefined;
+        remember(requestId, "cancelled");
+        return { cancelled: true, state: this.get(), status: "cancelled" };
+      }
+      return {
+        cancelled: false,
+        state: this.get(),
+        status: terminalAssistance.get(requestId) ?? "unknown",
+      };
+    },
+
+    assistanceStatus(requestId: string): AssistanceStatus {
+      expirePending();
+      if (humanAssistanceId === requestId) return "human";
+      if (state.requested && state.helpRequestId === requestId)
+        return "pending";
+      if (state.secretWanted && state.secretRequestId === requestId)
+        return "pending";
+      return terminalAssistance.get(requestId) ?? "unknown";
     },
 
     /**
@@ -230,7 +332,7 @@ export function createControl(
      * open in an old tab still goes to a page whose run ended.
      */
     pendingSecret(): { ref: string; snapshotId?: number } | null {
-      dropStaleSecret();
+      expirePending();
       if (!state.secretWanted || !state.secretRef) return null;
       return { ref: state.secretRef, snapshotId: state.secretSnapshotId };
     },
@@ -242,12 +344,14 @@ export function createControl(
      * can try again.
      */
     secretSupplied(): void {
+      remember(state.secretRequestId, "completed");
       secretRequestedAt = undefined;
       state = {
         ...state,
         secretWanted: undefined,
         secretRef: undefined,
         secretSnapshotId: undefined,
+        secretRequestId: undefined,
       };
     },
 
@@ -259,8 +363,14 @@ export function createControl(
      * box left open behind them no longer corresponds to an active request.
      */
     take(): ControlState {
-      // With the pending secret, since the state below drops it: the timestamp is what says one is
-      // outstanding, and leaving it behind a request that is gone is how a stale one comes back.
+      expirePending();
+      if (state.holder === "bot") {
+        humanAssistanceId = state.requested ? state.helpRequestId : undefined;
+      }
+      if (state.secretWanted) remember(state.secretRequestId, "cancelled");
+      // The pending secret goes with the state below, and so does its timestamp: the timestamp
+      // is what says one is outstanding, and leaving it behind a request that is gone is how a
+      // stale one comes back.
       secretRequestedAt = undefined;
       state = {
         holder: "human",
@@ -280,6 +390,8 @@ export function createControl(
      * secret box left open afterwards is asking for a password nothing is waiting for.
      */
     release(): ControlState {
+      remember(humanAssistanceId, "completed");
+      humanAssistanceId = undefined;
       // As above: the request the state below drops takes its timestamp with it.
       secretRequestedAt = undefined;
       state = {

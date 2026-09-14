@@ -253,6 +253,13 @@
       "when": 1789162076466,
       "tag": "0035_backfill_last_signed_in_at",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789387454900,
+      "tag": "0036_slack_channels",
+      "breakpoints": true
     }
   ]
 }

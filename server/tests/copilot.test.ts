@@ -7,6 +7,7 @@ import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY } from "rxjs";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";
 import type { LoadAttachment } from "../src/copilot";
@@ -15,6 +16,7 @@ import {
   builtInAgentConfiguration,
   createRequestAgents,
   type LoadInstructions,
+  type mountCopilotRuntime,
   registeredAgentFromRow,
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
@@ -47,6 +49,12 @@ function built(
   if (!agent) throw new Error(`buildAgents returned no "${id}" to run`);
   return agent;
 }
+
+test("mountCopilotRuntime preserves the positional custom base path", () => {
+  const customBasePath: Parameters<typeof mountCopilotRuntime>[4] =
+    "/custom/copilotkit";
+  expect(customBasePath).toBe("/custom/copilotkit");
+});
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
 const assistantRow = {
@@ -360,13 +368,15 @@ describe("registered Copilot agents", () => {
    * goes.
    */
   test("dials a remote Bot with the fetch it was given, guarded or not", async () => {
-    const dialler = async () => new Response(null);
+    const dialler = async (_url: string, request: RequestInit) =>
+      completeAgUiResponse(request);
     const registered = [
       {
         id: "risk",
         name: "Risk",
         type: "remote_ag_ui" as const,
         endpoint: "http://risk.internal/ag-ui",
+        standingMessage: standingRoleMessage(riskRow),
       },
     ];
     const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
@@ -423,7 +433,8 @@ describe("registered Copilot agents", () => {
    * redirect anywhere.
    */
   test("carries the dialling fetch through resolveRuntimeAgents", async () => {
-    const dialler = async () => new Response(null);
+    const dialler = async (_url: string, request: RequestInit) =>
+      completeAgUiResponse(request);
     const agents = await resolveRuntimeAgents(
       async () => [
         {
@@ -431,6 +442,7 @@ describe("registered Copilot agents", () => {
           name: "Risk",
           type: "remote_ag_ui" as const,
           endpoint: "http://risk.internal/ag-ui",
+          standingMessage: standingRoleMessage(riskRow),
         },
       ],
       { provider: "openai" as const, defaultModel: "gpt-4.1" },
@@ -457,13 +469,15 @@ describe("registered Copilot agents", () => {
    * could have produced and then without one, and the two are compared.
    */
   test("leaves a remote Bot's fetch alone when no timeout is configured", async () => {
-    const sentinel = async () => new Response(null);
+    const sentinel = async (_url: string, request: RequestInit) =>
+      completeAgUiResponse(request);
     const registered = [
       {
         id: "risk",
         name: "Risk",
         type: "remote_ag_ui" as const,
         endpoint: "http://risk.internal/ag-ui",
+        standingMessage: standingRoleMessage(riskRow),
       },
     ];
     const model = {
@@ -710,12 +724,14 @@ describe("standing agent roles", () => {
         seen.request = request;
         return { id: "user-7", role: "user" as const };
       },
-      async (actor) => {
-        seen.actors.push(actor);
-        return [remoteAgent("http://coworker.internal/ag-ui")];
-      },
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async (actor) => {
+          seen.actors.push(actor);
+          return [remoteAgent("http://coworker.internal/ag-ui")];
+        },
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
 
     const request = new Request("http://openbot.test/api/copilotkit");
@@ -744,9 +760,13 @@ describe("standing agent roles", () => {
     let roleDescription = "Review receipts.";
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
-      async () => [remoteAgent(endpoint.url, { roleDescription })],
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async () => [
+          remoteAgent(endpoint.url, { roleDescription }),
+        ],
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
     const request = new Request("http://openbot.test/api/copilotkit");
 
@@ -1394,21 +1414,15 @@ describe("a person's standing instructions", () => {
     const asked: string[] = [];
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
-      async () => [assistant],
-      model,
-      async () => "openai-secret",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (actorId) => async () => {
-        asked.push(actorId);
-        return "Write in British English.";
-      },
+      createActorAgentResolver({
+        loadAgents: async () => [assistant],
+        model,
+        resolveModelApiKey: async () => "openai-secret",
+        loadInstructionsForActor: (actorId) => async () => {
+          asked.push(actorId);
+          return "Write in British English.";
+        },
+      }),
     );
 
     await factory({

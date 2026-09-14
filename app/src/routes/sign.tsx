@@ -14,6 +14,10 @@ import {
 } from "@/lib/auth/client";
 import { appConfig } from "@/lib/generated/application-config";
 import {
+  consumePendingAuthReturn,
+  signedInReturnRedirect,
+} from "../lib/auth/pending-return";
+import {
   type AuthProviderId,
   authProvidersQueryOptions,
   currentUserQueryOptions,
@@ -26,11 +30,16 @@ const ENTRANCE_STAGGER_SECONDS = 0.08;
 const ENTRANCE_OFFSET = "translateY(12px)";
 
 export const Route = createFileRoute("/sign")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
     if (user) {
+      if (typeof window !== "undefined") {
+        const pendingReturn = consumePendingAuthReturn(window.sessionStorage);
+        const returnTo = signedInReturnRedirect(location.href, pendingReturn);
+        if (returnTo) throw redirect({ href: returnTo });
+      }
       throw redirect({ to: "/" });
     }
     // Loaded here so the screen paints with its buttons rather than painting empty and then
