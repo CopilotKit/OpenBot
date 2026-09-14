@@ -35,6 +35,27 @@ describe("numberFromEnv", () => {
     process.env[NAME] = "-5";
     expect(numberFromEnv(NAME, 10000)).toBe(10000);
   });
+
+  /**
+   * Whole numbers only.
+   *
+   * Every reader is a port, a timeout in milliseconds, or a count of browsers, and none of them
+   * has a fractional answer. `Number("80.5")` is finite and greater than zero, so a fraction used
+   * to be returned verbatim: a fractional port misbound at boot and a fractional timeout fired
+   * before any action could finish, reading as a broken computer rather than a caller error.
+   */
+  test.each([["80.5"], ["0.5"], ["2.5"], ["30000.0"], ["1e3"], ["0x10"]])(
+    "falls back on %p, which is not a whole number on sight",
+    (raw) => {
+      process.env[NAME] = raw;
+      expect(numberFromEnv(NAME, 10000)).toBe(10000);
+    },
+  );
+
+  test("still takes a large whole number where the setting has no range", () => {
+    process.env[NAME] = "1800000";
+    expect(numberFromEnv(NAME, 10000)).toBe(1800000);
+  });
 });
 
 /**
@@ -80,4 +101,39 @@ describe("numberFromEnv where zero switches the setting off", () => {
     process.env[NAME] = "5000";
     expect(numberFromEnv(NAME, 10000, { zeroSwitchesItOff: true })).toBe(5000);
   });
+
+  test("still falls back on a fraction where zero switches the setting off", () => {
+    process.env[NAME] = "0.5";
+    expect(numberFromEnv(NAME, 10000, { zeroSwitchesItOff: true })).toBe(10000);
+  });
+});
+
+/**
+ * Settings with a range.
+ *
+ * A port parsed fine and then misbound at boot: `PORT=99999` was returned verbatim and the
+ * deployment failed instead of taking the documented fallback. The range rides on the same
+ * function so every integer setting keeps one rule, rather than the port growing its own parser
+ * that the next setting copies slightly wrong.
+ */
+describe("numberFromEnv with a range", () => {
+  const RANGE = { min: 1, max: 65535 };
+
+  test.each([
+    ["4300", 4300],
+    ["1", 1],
+    ["65535", 65535],
+    ["  4100  ", 4100],
+  ])("takes a whole port in range: %p", (raw, port) => {
+    process.env[NAME] = raw;
+    expect(numberFromEnv(NAME, 4100, RANGE)).toBe(port);
+  });
+
+  test.each([["0"], ["99999"], ["65536"], ["80.5"], ["-1"], ["soon"]])(
+    "falls back on %p, which is out of range or not a whole number",
+    (raw) => {
+      process.env[NAME] = raw;
+      expect(numberFromEnv(NAME, 4100, RANGE)).toBe(4100);
+    },
+  );
 });

@@ -12,7 +12,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { ComponentPreview } from "@/components/component-preview";
+import { AdminComponentPreview } from "@/components/component-preview";
 import {
   PageRows,
   PageSection,
@@ -266,7 +266,8 @@ function ComponentDetail({
   const [draft, setDraft] = useState(component.draftDescription);
   const withheld = new Set(component.withheldFrom);
   const heldFunctions = new Set(component.functions);
-  const renderable = RENDERABLE_NAMES.has(component.name);
+  const renderable =
+    RENDERABLE_NAMES.has(component.name) || component.kind === "sandboxed";
 
   const granted = bots.filter((bot) => !withheld.has(bot.id));
   const held = dataFunctions.filter((fn) => heldFunctions.has(fn.name));
@@ -305,7 +306,7 @@ function ComponentDetail({
           <SettingsItemBackground className="h-full w-full" />
         </div>
         <div className="absolute inset-0 z-10">
-          <ComponentPreview name={component.name} />
+          <AdminComponentPreview kind={component.kind} name={component.name} />
         </div>
       </div>
 

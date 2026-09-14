@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { Message } from "@ag-ui/core";
+import type { ExternalThreadSummary } from "../src/lib/external/queries";
 import {
   externalThreadKeys,
   externalThreadListQueryOptions,
@@ -47,7 +49,7 @@ describe("external Slack transcript target", () => {
 });
 
 describe("external Slack transcript list", () => {
-  const validThread = {
+  const validThread: ExternalThreadSummary = {
     threadId: "channels-thread-1",
     agentId: "risk",
     agentName: "Risk Analyst",
@@ -125,10 +127,14 @@ describe("external Slack transcript list", () => {
       nextCursor: null,
     });
 
-    expect(options.queryKey).toEqual(externalThreadKeys.list());
+    expect([...options.queryKey]).toEqual([...externalThreadKeys.list()]);
     expect(options.initialPageParam).toBe("");
-    expect(options.getNextPageParam?.(page, [], "")).toBe("opaque-next");
-    expect(options.getNextPageParam?.(finalPage, [], "")).toBeUndefined();
+    expect(options.getNextPageParam?.(page, [page], "", [""])).toBe(
+      "opaque-next",
+    );
+    expect(
+      options.getNextPageParam?.(finalPage, [finalPage], "", [""]),
+    ).toBeUndefined();
     expect(
       options.select?.({
         pages: [page, finalPage],
@@ -140,7 +146,10 @@ describe("external Slack transcript list", () => {
   test("fetches cursor pages with an encoded opaque cursor and validates the response", async () => {
     const requests: string[] = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       requests.push(String(input));
       expect(init?.credentials).toBe("include");
       return new Response(
@@ -153,7 +162,7 @@ describe("external Slack transcript list", () => {
           status: 200,
         },
       );
-    };
+    }) as unknown as typeof fetch;
 
     try {
       const options = externalThreadListQueryOptions();
@@ -189,11 +198,11 @@ describe("external Slack transcript list", () => {
 describe("reading a stored Slack transcript", () => {
   const respondWith = async (body: unknown) => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
+    globalThis.fetch = (async () =>
       new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" },
         status: 200,
-      });
+      })) as unknown as typeof fetch;
     try {
       return await readExternalThreadMessages("channels-thread-1");
     } finally {
@@ -202,7 +211,7 @@ describe("reading a stored Slack transcript", () => {
   };
 
   test("returns the stored turns", async () => {
-    const messages = [
+    const messages: Message[] = [
       { id: "m1", role: "user", content: "Is the filing clean?" },
       { id: "m2", role: "assistant", content: "Two rows disagree." },
     ];

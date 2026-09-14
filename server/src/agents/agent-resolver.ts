@@ -4,8 +4,10 @@ import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
   type HandoffForRun,
   type LoadAgentsForActor,
+  type LoadAttachment,
   type LoadInstructions,
   type LoadToolsForBot,
+  type MarkAttachmentsSent,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
@@ -63,6 +65,16 @@ export type ActorAgentResolverDependencies = {
    * never by the caller.
    */
   loadInstructionsForActor?: (actorId: string) => LoadInstructions;
+  /**
+   * How the files on a message are put in front of the model, resolved for whoever is asking.
+   *
+   * Per actor because the ids come out of browser-supplied message content, so the person the run
+   * belongs to is what decides which attachments it may read. Bound here rather than at one
+   * surface, so a routine's turn and a Slack reply inline exactly as a browser turn does.
+   */
+  loadAttachmentForActor?: (actorId: string) => LoadAttachment;
+  /** How a send is recorded against the files it carried. Per actor for the same reason. */
+  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
 };
 
 /**
@@ -103,6 +115,8 @@ export function createActorAgentResolver(
       onlyAgentId,
       deps.loadInstructionsForActor?.(actor.id),
       initiator,
+      deps.loadAttachmentForActor?.(actor.id),
+      deps.markAttachmentsSentForActor?.(actor.id),
     );
 
   const resolveAgentsForActor = async (actor: AgentActor) =>

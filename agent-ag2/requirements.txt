@@ -1,0 +1,4 @@
+ag2[ag-ui,openai]
+fastapi
+python-multipart
+uvicorn[standard]

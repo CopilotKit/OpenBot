@@ -13,6 +13,17 @@ const queryClient = {
   invalidateQueries: async () => undefined,
 } as unknown as QueryClient;
 
+/*
+ * The context TanStack Query hands a mutation callback alongside its variables. These tests drive
+ * the callbacks directly rather than through a MutationObserver, so they have to supply it. Both
+ * fields are the real thing rather than a stand-in: `meta` is undefined exactly as it is for a
+ * mutation declared without one, and `mutationKey` is optional and genuinely absent, because none
+ * of these options factories sets one.
+ */
+function mutationContext(queryClient: QueryClient) {
+  return { client: queryClient, meta: undefined };
+}
+
 beforeEach(() => {
   globalThis.fetch = (async () =>
     new Response(null, { status: 200 })) as unknown as typeof fetch;
@@ -33,7 +44,7 @@ afterEach(() => {
 async function run(action: "stop" | "reset") {
   const options = setComputerStateMutationOptions(queryClient);
   const variables = { action, botId: "general-assistant" } as const;
-  await options.mutationFn?.(variables);
+  await options.mutationFn?.(variables, mutationContext(queryClient));
   await options.onSuccess?.(
     undefined as never,
     variables,

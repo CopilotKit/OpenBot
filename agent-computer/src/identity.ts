@@ -14,6 +14,8 @@
  * supports it, not a condition of the computer running.
  */
 
+import { stat } from "node:fs/promises";
+
 const SOCKET = process.env.SPIFFE_ENDPOINT_SOCKET;
 
 export type Identity = {
@@ -88,6 +90,25 @@ export async function identity(): Promise<Identity | null> {
   if (!SOCKET) return null;
   if (cached || attempted) return cached;
   attempted = true;
+
+  // Compose can provide the optional agent's volume without running SPIRE. Do not construct a
+  // gRPC client against an absent endpoint: that connection crashed the computer during a native
+  // desktop health check. This is metadata availability, not the computer-token auth boundary.
+  // A socket can disappear after this check; firstSvid still handles the RPC's reported failure.
+  let unavailable: string | undefined;
+  try {
+    if (!(await stat(SOCKET)).isSocket()) unavailable = "not a Unix socket";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    unavailable =
+      code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unreadable";
+  }
+  if (unavailable) {
+    console.warn(
+      `This computer's optional SPIRE endpoint is ${unavailable}; workload identity is unavailable.`,
+    );
+    return null;
+  }
 
   cached = await firstSvid(SOCKET, 5_000);
   if (!cached) {

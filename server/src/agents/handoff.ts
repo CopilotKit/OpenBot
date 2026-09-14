@@ -326,6 +326,7 @@ export function createHandoffDesk(options: {
            * this, so the cap keeps counting across every pod the chain touches.
            */
           depth: depth + 1,
+          ...(from.initiator ? { initiator: from.initiator } : {}),
           /*
            * The asking Bot's display name, resolved here against the same roster the target was.
            *

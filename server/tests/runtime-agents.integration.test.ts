@@ -7,21 +7,23 @@ import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { standingRoleMessage } from "../src/copilot";
+import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  channelAgents,
+  channelMemberships,
   channels,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const managedEndpoint = new URL("https://managed.example.test/ag-ui");
+const mastraManagedEndpoint = new URL("https://managed.example.test/mastra");
 const profileStore = createAgentProfileStore(database, managedEndpoint);
 const channelStore = createChannelStore(
   database,
@@ -29,9 +31,11 @@ const channelStore = createChannelStore(
   createThreadIdentity("test-deployment"),
 );
 const managedAgentToken = "managed-agent-token";
+const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const loadAgents = createRuntimeAgentLoader(database, undefined, {
   endpoint: managedEndpoint,
   token: managedAgentToken,
+  alsoRun: mastraManagedEndpoint,
 });
 
 const testPrefix = `runtime-agents-${randomUUID()}`;
@@ -87,6 +91,16 @@ async function createCoworker(
   return profile;
 }
 
+async function setAgentRun(
+  id: string,
+  run: {
+    type: "remote_ag_ui" | "remote_mastra";
+    configuration: Record<string, unknown>;
+  },
+) {
+  await database.update(agents).set(run).where(eq(agents.id, id));
+}
+
 function idsOf(loaded: Awaited<ReturnType<typeof loadAgents>>) {
   return loaded.map((agent) => agent.id);
 }
@@ -112,6 +126,91 @@ describe("runtime agent loading", () => {
       standingMessage: standingRoleMessage({
         id: profile.id,
         name: "Expense Manager",
+        title: "Finance Operations",
+        roleDescription:
+          "Review receipts, categorize expenses, and prepare reimbursement reports.",
+      }),
+    });
+  });
+
+  test("carries the managed deployment token to a Mastra endpoint this deployment runs", async () => {
+    const owner = await createUser();
+    const profile = await createCoworker(owner);
+    await setAgentRun(profile.id, {
+      type: "remote_mastra",
+      configuration: {
+        endpoint: mastraManagedEndpoint.toString(),
+        remoteAgentId: "openbot",
+      },
+    });
+
+    const loaded = await loadAgents(owner);
+
+    expect(loaded).toContainEqual({
+      id: profile.id,
+      name: "Expense Manager",
+      type: "remote_mastra",
+      endpoint: mastraManagedEndpoint.toString(),
+      remoteAgentId: "openbot",
+      headers: { "x-openbot-agent-token": managedAgentToken },
+      standingMessage: standingRoleMessage({
+        id: profile.id,
+        name: "Expense Manager",
+        title: "Finance Operations",
+        roleDescription:
+          "Review receipts, categorize expenses, and prepare reimbursement reports.",
+      }),
+    });
+  });
+
+  test("resolves vault auth headers for a Mastra endpoint that names a credential", async () => {
+    const owner = await createUser();
+    const profile = await createCoworker(owner, { name: "Research Mastra" });
+    const vaultReads: string[] = [];
+    const credentialId = `credential-${randomUUID()}`;
+    const reader: CredentialSecretReader = {
+      readSecret: async (id) => {
+        vaultReads.push(id);
+        return id === credentialId
+          ? {
+              encryptedValue: await encryptSecret(
+                encryptionKey,
+                "Bearer mastra-secret",
+              ),
+              revokedAt: null,
+            }
+          : null;
+      },
+    };
+    await setAgentRun(profile.id, {
+      type: "remote_mastra",
+      configuration: {
+        endpoint: "https://customer-mastra.example.test",
+        remoteAgentId: "research",
+        auth: {
+          header: "Authorization",
+          credentialId,
+        },
+      },
+    });
+    const loadWithVault = createRuntimeAgentLoader(database, {
+      reader,
+      encryptionKey,
+    });
+
+    const loaded = await loadWithVault(owner);
+
+    expect(vaultReads).toEqual([credentialId]);
+    expect(loaded).toContainEqual({
+      id: profile.id,
+      name: "Research Mastra",
+      type: "remote_mastra",
+      endpoint: "https://customer-mastra.example.test",
+      remoteAgentId: "research",
+      headers: { Authorization: "Bearer mastra-secret" },
+      standingMessage: standingRoleMessage({
+        id: profile.id,
+        name: "Research Mastra",
         title: "Finance Operations",
         roleDescription:
           "Review receipts, categorize expenses, and prepare reimbursement reports.",
@@ -168,6 +267,103 @@ describe("runtime agent loading", () => {
     });
     // Somebody with no channel of their own gets no tombstone: history is what authorizes it.
     expect(idsOf(await loadAgents(otherUser))).not.toContain(profile.id);
+  });
+
+  test("authorizes deleted coworker tombstones only through live channels", async () => {
+    const owner = await createUser();
+    const otherUser = await createUser();
+    const deletedOnlyProfile = await createCoworker(owner, {
+      name: "Deleted Only Helper",
+    });
+    const preservedProfile = await createCoworker(owner, {
+      name: "Preserved Helper",
+    });
+    const deletedOnlyChannel = await channelStore.create(owner, [
+      deletedOnlyProfile.id,
+    ]);
+    const deletedPreservedChannel = await channelStore.create(owner, [
+      preservedProfile.id,
+    ]);
+    const livePreservedChannel = await channelStore.create(owner, [
+      preservedProfile.id,
+    ]);
+    createdChannelIds.push(
+      deletedOnlyChannel.id,
+      deletedPreservedChannel.id,
+      livePreservedChannel.id,
+    );
+
+    await profileStore.softDelete(owner, deletedOnlyProfile.id);
+    await profileStore.softDelete(owner, preservedProfile.id);
+    await channelStore.softDelete(owner, deletedOnlyChannel.id);
+    await channelStore.softDelete(owner, deletedPreservedChannel.id);
+
+    const retainedDeletedOnlyRows = await database
+      .select({
+        channelDeletedAt: channels.deletedAt,
+        memberUserId: channelMemberships.userId,
+        agentId: channelAgents.agentId,
+        profileDeletedAt: agentProfiles.deletedAt,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        eq(channelMemberships.channelId, channels.id),
+      )
+      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, channelAgents.agentId),
+      )
+      .where(eq(channels.id, deletedOnlyChannel.id));
+    expect(retainedDeletedOnlyRows).toHaveLength(1);
+    expect(retainedDeletedOnlyRows[0]).toMatchObject({
+      memberUserId: owner.id,
+      agentId: deletedOnlyProfile.id,
+    });
+    expect(retainedDeletedOnlyRows[0]?.channelDeletedAt).toBeInstanceOf(Date);
+    expect(retainedDeletedOnlyRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+
+    const retainedLivePreservedRows = await database
+      .select({
+        channelDeletedAt: channels.deletedAt,
+        memberUserId: channelMemberships.userId,
+        agentId: channelAgents.agentId,
+        profileDeletedAt: agentProfiles.deletedAt,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        eq(channelMemberships.channelId, channels.id),
+      )
+      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, channelAgents.agentId),
+      )
+      .where(eq(channels.id, livePreservedChannel.id));
+    expect(retainedLivePreservedRows).toHaveLength(1);
+    expect(retainedLivePreservedRows[0]).toMatchObject({
+      channelDeletedAt: null,
+      memberUserId: owner.id,
+      agentId: preservedProfile.id,
+    });
+    expect(retainedLivePreservedRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+
+    const ownerRoster = await loadAgents(owner);
+    expect(ownerRoster).not.toContainEqual(
+      expect.objectContaining({ id: deletedOnlyProfile.id }),
+    );
+    expect(ownerRoster).toContainEqual({
+      id: preservedProfile.id,
+      name: "Preserved Helper",
+      type: "unavailable",
+      reason:
+        "Preserved Helper has been deleted and can no longer run. Its conversations remain readable.",
+    });
+    expect(idsOf(await loadAgents(otherUser))).not.toEqual(
+      expect.arrayContaining([deletedOnlyProfile.id, preservedProfile.id]),
+    );
   });
 
   test("applies an edited role to the next load without a restart", async () => {

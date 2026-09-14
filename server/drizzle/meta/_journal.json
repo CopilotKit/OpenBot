@@ -208,8 +208,57 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1788902292130,
-      "tag": "0029_slack_channels",
+      "when": 1788911713422,
+      "tag": "0029_mastra_agent_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788989179914,
+      "tag": "0030_daffy_nighthawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788990260165,
+      "tag": "0031_hesitant_squadron_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789059537115,
+      "tag": "0032_rainy_lake",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789066859018,
+      "tag": "0033_attachments_uploaded_by_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789162066485,
+      "tag": "0034_last_signed_in_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789162076466,
+      "tag": "0035_backfill_last_signed_in_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789387454900,
+      "tag": "0036_slack_channels",
       "breakpoints": true
     }
   ]

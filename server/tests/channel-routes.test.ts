@@ -41,7 +41,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {
@@ -57,6 +57,7 @@ function channel(overrides: Partial<AgentChannel> = {}): AgentChannel {
     agentIds: ["agent-1", "agent-2"],
     threadId: "thread-1",
     active: true,
+    lastMessageAt: null,
     ...overrides,
   };
 }
@@ -157,6 +158,62 @@ describe("channel input parser", () => {
   });
 });
 
+describe("channel list limit", () => {
+  /**
+   * `?limit=` used to be read with `Number.parseInt`, which coerces: `"12abc"` arrived as 12
+   * and `"3.9"` as 3, and every one of them answered 200 with a silently coerced page. A run of
+   * digits is clamped into range like the store already does; anything else is a 400 naming the
+   * parameter, before the store is reached.
+   */
+  function listApp(calls: { queries: unknown[] }) {
+    const store = fakeStore({
+      async list(_actor, query) {
+        calls.queries.push(query);
+        return { channels: [], nextCursor: null };
+      },
+    });
+    return appFor(store);
+  }
+
+  test.each([["12abc"], ["3.9"], ["-5"], ["0x10"], ["%2B5"]])(
+    "refuses a coerced limit %p with 400 and never reaches the store",
+    async (limit) => {
+      const calls = { queries: [] as unknown[] };
+      const response = await listApp(calls).request(
+        `http://openbot.test/?limit=${limit}`,
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: 'Query parameter "limit" must be a positive integer.',
+      });
+      expect(calls.queries).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["10", { limit: 10 }],
+    ["999999", { limit: 200 }],
+    ["0", { limit: 1 }],
+  ])("passes a well-formed limit %p through as %p", async (limit, query) => {
+    const calls = { queries: [] as unknown[] };
+    const response = await listApp(calls).request(
+      `http://openbot.test/?limit=${limit}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.queries).toEqual([query]);
+  });
+
+  test("leaves an absent limit to the store default", async () => {
+    const calls = { queries: [] as unknown[] };
+    const response = await listApp(calls).request("http://openbot.test/");
+
+    expect(response.status).toBe(200);
+    expect(calls.queries).toEqual([{}]);
+  });
+});
+
 describe("channel routes", () => {
   test("attaches authentication middleware to every route before calling the store", async () => {
     const store = fakeStore();
@@ -221,10 +278,37 @@ describe("channel routes", () => {
         agentIds: ["agent-1"],
         threadId: "thread-1",
         active: true,
+        lastMessageAt: null,
       },
     });
     expect(fetched.status).toBe(200);
     expect(await json(fetched)).toEqual({ channel: channel() });
+  });
+
+  /**
+   * The date leaves as a string, and it has to leave at all.
+   *
+   * This is what lets the conversation screen tell an empty NEW conversation from one whose history
+   * this deployment cannot reach: null means nothing was ever said, a timestamp means something
+   * was. Dropping it from the DTO would put the screen back to rendering a blank window with no
+   * explanation for a conversation that plainly has a past.
+   */
+  test("carries when the channel was last spoken in, as a string", async () => {
+    const spokenAt = new Date("2026-09-07T20:25:48.391Z");
+    const store = fakeStore({
+      async get() {
+        return channel({ lastMessageAt: spokenAt });
+      },
+    });
+
+    const fetched = await appFor(store).request(
+      "http://openbot.test/channel-1",
+    );
+
+    expect(fetched.status).toBe(200);
+    expect(await json(fetched)).toEqual({
+      channel: { ...channel(), lastMessageAt: spokenAt.toISOString() },
+    });
   });
 
   test.each([
@@ -650,9 +734,7 @@ describe("channel route composition", () => {
   });
 });
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,
@@ -980,6 +1062,7 @@ describe("channel store integration", () => {
       agentIds: canonicalAgentIds,
       threadId: created.threadId,
       active: true,
+      lastMessageAt: null,
     });
     const persisted = await persistedChannel(created.id);
     expect(persisted.channelRow?.name).toBe("Zulu, Alpha");

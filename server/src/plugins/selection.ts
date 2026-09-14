@@ -180,11 +180,14 @@ export async function selectTools<Tool extends SelectableTool>(input: {
   text: string;
   choose: (
     prompt: string,
+    signal?: AbortSignal,
   ) => Promise<string | null> | (string | null) | Promise<never>;
+  signal?: AbortSignal;
   /** Overridable so a deployment that measured its own knee is not stuck with ours. */
   floor?: number;
 }): Promise<Selection<Tool>> {
   const { tools, skills, text } = input;
+  input.signal?.throwIfAborted();
   const floor = input.floor ?? SELECTION_FLOOR;
   const everything = (reason: SelectionReason): Selection<Tool> => ({
     offered: [...tools],
@@ -204,10 +207,16 @@ export async function selectTools<Tool extends SelectableTool>(input: {
 
   let chosen: string[] | null = null;
   try {
-    const answer = await input.choose(selectionPrompt(text, skills));
+    const answer = await input.choose(
+      selectionPrompt(text, skills),
+      input.signal,
+    );
+    input.signal?.throwIfAborted();
     chosen =
       typeof answer === "string" ? readChosenSkills(answer, skills) : null;
   } catch {
+    // A user stopping the run is not an unavailable selector. Never start a fallback model run.
+    input.signal?.throwIfAborted();
     // A selector that failed is not an error a person should ever see. It costs this run the
     // narrowing and nothing else, which is the behaviour that shipped before it existed.
     chosen = null;

@@ -82,9 +82,21 @@ describe("deciding a component", () => {
     expect(decision.allowed).toBe(false);
   });
 
-  test("ignores anything in the list that is not a name", async () => {
-    expect(
-      await decide({ agentId: "risk-analyst", functions: [1, null, {}] }),
-    ).toEqual({ allowed: true });
+  test("refuses a list with anything that is not a name instead of ignoring it", async () => {
+    const response = await app().request(
+      "http://openbot.local/components/showActivityReport/decision",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agentId: "risk-analyst",
+          functions: [1, null, {}],
+        }),
+      },
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Functions must be a list of function names.",
+    });
   });
 });

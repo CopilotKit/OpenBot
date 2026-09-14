@@ -97,15 +97,20 @@ spec:
       The Kubernetes API server, which is where a per-Bot computer is asked for.
 
       Its own rule because it sits on the private network the rule above cuts out, so nothing else
-      here reaches it. Unscoped unless a deployment says otherwise: the API server answers on a
-      ClusterIP from the service range, and a chart cannot know that range at template time. Name it
-      in `networkPolicy.kubernetesApiCidr` and this narrows to it.
+      here reaches it. The API server answers on a ClusterIP from the service range, and a chart
+      cannot know that range at template time, so `networkPolicy.kubernetesApiCidr` names it and
+      the chart refuses to render this policy until something does.
+
+      THAT REFUSAL REPLACED A DEFAULT THAT UNDID THE RULE ABOVE. This was written to fall through a
+      `with` when the value was empty, which left an egress rule holding ports and no peer — and an
+      egress rule with no `to` matches EVERY destination, so the shipped default permitted 443 and
+      6443 to all of the `10/8`, `172.16/12`, `192.168/16` and `169.254/16` that the rule directly
+      above goes to the trouble of excepting. See `openbot.kubernetesApiCidr` in `_helpers.tpl` for
+      why this refuses rather than rendering nothing or guessing a range.
     */}}
-    - {{- with .Values.networkPolicy.kubernetesApiCidr }}
-      to:
+    - to:
         - ipBlock:
-            cidr: {{ . }}
-      {{- end }}
+            cidr: {{ include "openbot.kubernetesApiCidr" . }}
       ports:
         - port: 443
           protocol: TCP
@@ -184,7 +189,7 @@ spec:
 {{- if and .Values.networkPolicy.enabled (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
 ---
 {{- $culler := "culler" -}}
-{{/* A pod no policy selects keeps the cluster default, so this one was the release's only unfenced one. */}}
+{{/* A pod no policy selects keeps the cluster default, so this one needs its own, same as the routines sweep below and the attachments culler after it. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -216,12 +221,21 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
-    {{- /* Empty kubernetesApiCidr permits these ports to any address, as the server's rule above does. */}}
-    - {{- with .Values.networkPolicy.kubernetesApiCidr }}
-      to:
+    {{- /*
+      The Kubernetes API server, which is the only thing this sweep asks anything of besides the
+      database: it lists Sandboxes and suspends the idle ones.
+
+      THE SAME RULE THE SERVER'S POLICY ABOVE CARRIES, AND IT USED TO BE WRONG IN A WORSE WAY HERE.
+      The comment that stood on this line said an empty `kubernetesApiCidr` permits these ports to
+      any address "as the server's rule above does", and treated that as a note rather than as the
+      hole it was. On the server it cancelled an exception list; on this pod, whose only other egress
+      is DNS and the database, it WAS the whole of the egress — a CronJob holding the database
+      credential with an unrestricted HTTPS socket, which is the opposite of what a policy on this
+      pod is for. `openbot.kubernetesApiCidr` now refuses an empty value for both of them.
+    */}}
+    - to:
         - ipBlock:
-            cidr: {{ . }}
-      {{- end }}
+            cidr: {{ include "openbot.kubernetesApiCidr" . }}
       ports:
         - port: 443
           protocol: TCP
@@ -233,7 +247,7 @@ spec:
     {{- end }}
 {{- end }}
 
-{{- if and .Values.networkPolicy.enabled .Values.routines.enabled }}
+{{- if and .Values.networkPolicy.enabled (.Values.routines).enabled }}
 ---
 {{- $routines := "routines" -}}
 {{/* Same reason as the culler; this pod holds no token and reaches only the database and the API server. */}}
@@ -278,6 +292,57 @@ spec:
           protocol: TCP
     {{- /* An external database, for the reason given on the culler's policy above. */}}
     {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.routinesExtraEgress) }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
+
+{{- if and .Values.networkPolicy.enabled (eq (include "openbot.attachmentsCullerEnabled" .) "true") }}
+---
+{{- $attachmentsCuller := "attachments-culler" -}}
+{{/*
+What the attachments culler may reach.
+
+Same shape as the routines sweep and the computer culler above: a CronJob nothing else selects, so
+without its own policy it would keep the cluster default rather than a fence. It holds the database
+credential, which is exactly the shape of pod a NetworkPolicy exists for.
+
+No Kubernetes-API rule, unlike the routines sweep and the computer culler: this pod's spec sets
+`automountServiceAccountToken: false` and its script only ever opens the database, so there is
+nothing here that would use a token even if one leaked in.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $attachmentsCuller) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $attachmentsCuller) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $attachmentsCuller) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules, which under an Ingress policyType denies all of it.
+  ingress: []
+  egress:
+    # DNS, or the database hostname does not resolve and the sweep reads as the database being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- /* An external database, for the reason given on the culler's policy above. */}}
+    {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.attachmentsCullerExtraEgress) }}
 {{ toYaml . | indent 4 }}
     {{- end }}
 {{- end }}

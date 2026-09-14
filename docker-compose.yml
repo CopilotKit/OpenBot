@@ -275,7 +275,7 @@ services:
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       # gpt-5.5, not the deployment default: this Bot writes /v1/chat/completions by hand, and
       # gpt-5.6-* rejects function tools there unless reasoning is turned off. Its own variable, so
       # a BOT_MODEL set for the framework Bot cannot silently take its tools away.
@@ -285,6 +285,58 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # The harness somebody picked during setup, whichever one it is.
+  #
+  # ONE SERVICE RATHER THAN TWELVE, because a picked harness is a choice and not twelve branches in
+  # this file. The image and the port come from `.env`, which the shell writes from the pick, and
+  # both are facts about the image: each harness fixes its own port in its own Dockerfile.
+  #
+  # Behind a profile so a deployment that has picked nothing does not try to start it. Without that
+  # an unset `PICKED_HARNESS_IMAGE` becomes a request to pull the empty string, which fails the
+  # whole `compose up` rather than the one service nobody asked for.
+  #
+  # No `build:`, so `pull_policy` cannot be `build` here as it is elsewhere: this image is only ever
+  # published, never built from this tree.
+  agent-harness:
+    profiles: ["harness"]
+    image: ${PICKED_HARNESS_IMAGE:-}
+    pull_policy: missing
+    ports:
+      # Loopback, and on the image's own port on both sides. The server is a host process, so it
+      # reaches this the same way it reaches agent-bot: over the published port, not the compose
+      # network.
+      - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+      - "[::1]:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+    environment:
+      # Every harness refuses without this; it is what makes the endpoint the server's alone.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      # Deployment-owned tools use the same signed callback as agent-langgraph.
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
+      # rest, and the ones the choice did not imply are written empty rather than left stale: see
+      # `ModelCredential`.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      BOT_PROVIDER: ${BOT_PROVIDER:-openai}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
+      # there either way; this variable is what tells the harness to read it.
+      CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # A bind mount, not a named volume, and read-write on purpose. The signed-in plan's access
+      # token expires within the hour and the harness renews it, so the renewal has to land back on
+      # this machine or every restart would replay a refresh token that had already been spent.
+      #
+      # The provider writes by atomically replacing the file with a sibling temporary file, so the
+      # mount has to be the containing directory rather than the file mount point.
+      - ./.langchain:/root/.langchain
 
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
@@ -305,7 +357,7 @@ services:
       # Same server-to-Bot request boundary as agent-bot above.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}

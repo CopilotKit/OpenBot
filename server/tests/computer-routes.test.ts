@@ -198,7 +198,7 @@ describe("human input", () => {
 
   test("a body naming its own kind cannot reach the shell either", async () => {
     const { calls } = await send(
-      { kind: "../exec", command: "cat /workspace/notes" },
+      { kind: "../exec", text: "cat /workspace/notes" },
       "type",
     );
 

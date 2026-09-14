@@ -11,9 +11,11 @@ import type { RuntimeModel } from "../copilot";
 export function createModelCompleter(deps: {
   model: RuntimeModel;
   resolveApiKey: () => Promise<string | null>;
-}): (prompt: string) => Promise<string> {
-  return async (prompt: string) => {
+}): (prompt: string, signal?: AbortSignal) => Promise<string> {
+  return async (prompt: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     const key = await deps.resolveApiKey();
+    signal?.throwIfAborted();
     if (!key) throw new Error("no model key");
     const response = await fetch(chatCompletionsUrl(process.env), {
       method: "POST",
@@ -40,7 +42,9 @@ export function createModelCompleter(deps: {
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
       }),
-      signal: AbortSignal.timeout(10_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+        : AbortSignal.timeout(10_000),
     });
     if (!response.ok)
       throw new Error(`router model answered ${response.status}`);

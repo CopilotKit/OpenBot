@@ -10,6 +10,7 @@
   },
   "include": [
     "src",
+    "tests",
     "vite.config.ts",
     "../shared/handoff-markers.ts",
     "../shared/listen-port.ts"

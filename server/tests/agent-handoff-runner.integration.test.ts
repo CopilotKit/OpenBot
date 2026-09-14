@@ -9,7 +9,7 @@ import type { AuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Two replicas and one batch of hops, against a real PostgreSQL.
@@ -18,11 +18,7 @@ import { TEST_POOL } from "./support/database";
  * whatever it was told to. The whole suite was green while the tail of every batch was delivered
  * twice, because a fake cannot let a lease quietly run out.
  */
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const queue = createWorkQueue(database);
 const kind = "bot.message";
 

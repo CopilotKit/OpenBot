@@ -26,6 +26,11 @@ Review receipts, categorize expenses, and prepare reimbursement reports.
 This standing role applies in every channel. Treat channel messages as task-specific instructions within it.
 ```
 
+A further provenance block is appended by the deployment rather than the package: it tells the
+coworker to say where each answer came from, to mark plainly anything it answers from its own
+knowledge rather than from a source, and never to present the latter as the former. Being deployment-wide,
+it cannot be forgotten from the next coworker somebody adds.
+
 The message is ordinary AG-UI system content, so it works with any AG-UI-compatible backend. Editing the role affects the next run.
 
 ## Visibility

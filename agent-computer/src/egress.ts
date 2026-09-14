@@ -41,29 +41,56 @@ export function egressFor(
 ): Egress | null {
   const raw = env[egressVariableFor(botId)] ?? env.EGRESS_PROXY_DEFAULT;
   if (!raw?.trim()) return null;
+  return splitProxyCredentials(raw);
+}
 
-  // Credentials commonly arrive inside the URL, which is how proxies are handed out. They are split
-  // out so that the server string this returns can be shown to a person without leaking a password.
+/**
+ * Split a proxy string into a server and its credentials.
+ *
+ * Credentials commonly arrive inside the URL, which is how proxies are handed out. They are split out
+ * so that the server string can be shown to a person without leaking a password.
+ *
+ * Two shapes reach here, and only one of them is a URL as far as the parser is concerned. A bare
+ * `host:port` is what an operator writes when they are not thinking about URLs, and Playwright and
+ * curl both take it; `new URL` reads `proxy.internal:8080` as the scheme `proxy.internal:` and the
+ * path `8080` with an empty host, rather than throwing. `username` and `password` come back empty for
+ * that shape, so a proxy written `bot:s3cret@proxy.internal:8080` would keep its password in the
+ * string it hands back. Re-parsing behind a synthetic scheme makes the split happen for both shapes;
+ * the synthetic scheme is then removed so the server reads the way it was written.
+ */
+export function splitProxyCredentials(raw: string): Egress {
+  const trimmed = raw.trim();
+
+  let url: URL | null = null;
+  let synthetic = "";
   try {
-    const url = new URL(raw.trim());
-    const username = url.username
-      ? decodeURIComponent(url.username)
-      : undefined;
-    const password = url.password
-      ? decodeURIComponent(url.password)
-      : undefined;
-    url.username = "";
-    url.password = "";
-    return {
-      server: url.toString().replace(/\/$/, ""),
-      ...(username ? { username } : {}),
-      ...(password ? { password } : {}),
-    };
-  } catch {
-    // Not a URL. Passed through as a bare `host:port`, which Playwright also accepts, so an operator
-    // who writes the obvious thing is not told they are wrong.
-    return { server: raw.trim() };
+    const asWritten = new URL(trimmed);
+    if (asWritten.host !== "") url = asWritten;
+  } catch (e) {
+    if (!(e instanceof TypeError)) throw e;
   }
+  if (!url) {
+    synthetic = "http://";
+    try {
+      url = new URL(`${synthetic}${trimmed}`);
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e;
+      // Not addressable either way. Passed through, so an operator who writes the obvious thing is
+      // not told they are wrong.
+      return { server: trimmed };
+    }
+  }
+
+  const username = url.username ? decodeURIComponent(url.username) : undefined;
+  const password = url.password ? decodeURIComponent(url.password) : undefined;
+  url.username = "";
+  url.password = "";
+
+  return {
+    server: url.toString().replace(/\/$/, "").slice(synthetic.length),
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+  };
 }
 
 /**

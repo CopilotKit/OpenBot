@@ -43,9 +43,25 @@ export type StoredThread = {
   messages: Message[];
   /** Zero on every ordinary read. Above zero means the history store holds something unreadable. */
   unreadable: number;
+  /**
+   * `"unavailable"` means the history endpoint failed or could not be read. It is not evidence that
+   * the thread is empty or belongs to another project.
+   */
+  availability: "ready" | "unavailable";
 };
 
-const NOTHING: StoredThread = { messages: [], unreadable: 0 };
+const UNAVAILABLE_THREAD: StoredThread = {
+  messages: [],
+  unreadable: 0,
+  availability: "unavailable",
+};
+
+const THREAD_MESSAGES_DEADLINE_MS = 1500;
+
+type ReadThreadMessagesOptions = {
+  /** Shorter only in tests; production uses the mount/send ordering deadline. */
+  deadlineMs?: number;
+};
 
 /**
  * The turns that parse, kept in order, and a count of the ones that did not.
@@ -73,7 +89,7 @@ export function readableTurns(stored: readonly unknown[]): StoredThread {
     }
   }
 
-  return { messages, unreadable };
+  return { messages, unreadable, availability: "ready" };
 }
 
 /**
@@ -162,15 +178,38 @@ function argumentsOf(args: unknown): string {
 export async function readThreadMessages(
   threadId: string,
   agentId: string,
+  options: ReadThreadMessagesOptions = {},
 ): Promise<StoredThread> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadlineMs = options.deadlineMs ?? THREAD_MESSAGES_DEADLINE_MS;
+
   try {
-    const response = await tryClient(
-      `/api/copilotkit/threads/${encodeURIComponent(threadId)}/messages?agentId=${encodeURIComponent(agentId)}`,
-    );
-    if (!response.ok) return NOTHING;
-    const stored = (await response.json())?.messages;
-    return Array.isArray(stored) ? readableTurns(stored) : NOTHING;
+    const read = async () => {
+      const response = await tryClient(
+        `/api/copilotkit/threads/${encodeURIComponent(threadId)}/messages?agentId=${encodeURIComponent(agentId)}`,
+        { signal: controller.signal },
+      );
+      if (!response.ok) return UNAVAILABLE_THREAD;
+      const body: unknown = await response.json();
+      const stored =
+        typeof body === "object" && body !== null && "messages" in body
+          ? body.messages
+          : null;
+      return Array.isArray(stored) ? readableTurns(stored) : UNAVAILABLE_THREAD;
+    };
+
+    const deadline = new Promise<StoredThread>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(UNAVAILABLE_THREAD);
+      }, deadlineMs);
+    });
+
+    return await Promise.race([read(), deadline]);
   } catch {
-    return NOTHING;
+    return UNAVAILABLE_THREAD;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

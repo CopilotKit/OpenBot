@@ -94,6 +94,13 @@ computers:
 # enforces it a wrong rule is an outage, so turning it on stays a deployment's decision.
 networkPolicy:
   enabled: true
+  # The only sandbox target, so the only one that renders the two policies carrying a rule for the
+  # Kubernetes API server — and the only one that has to name its service range. `172.20.0.0/16` is
+  # what EKS gives a cluster unless it was created with `--service-ipv4-cidr`. Named here rather than
+  # defaulted in the chart because the range is the cluster's and not the release's: the same line
+  # would be an outage on GKE. Leaving it out is now refused, which is the point of setting it here —
+  # the chart used to render a destination-less rule instead, permitting 443 and 6443 everywhere.
+  kubernetesApiCidr: 172.20.0.0/16
   # This target's database is RDS rather than a pod, so egress to it has to be named. The chart
   # refuses to render without this, which is how the omission was found: rendering the policies in CI
   # at all is what exercised the refusal.

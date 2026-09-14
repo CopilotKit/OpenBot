@@ -14,6 +14,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
+import { userContent } from "../../shared/user-content";
 
 /*
  * Re-exported so this module's own tests and callers keep reading it from here, while the wording
@@ -23,7 +24,15 @@ export { NO_ANSWER_CAME };
 
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
 export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
-  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
+  const messages: BaseMessage[] = [
+    new SystemMessage(COMPUTER_GUIDANCE),
+    // AG-UI carries application context separately from conversation history. CopilotKit puts
+    // the A2UI catalog and tool instructions here; dropping it leaves the model guessing the
+    // component schema and can strand the renderer on an invalid, never-painted surface.
+    ...(input.context ?? []).map(
+      ({ description, value }) => new SystemMessage(`${description}\n${value}`),
+    ),
+  ];
 
   /*
    * Which calls in this history were ever answered.
@@ -49,7 +58,9 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
 
   for (const message of input.messages) {
     if (message.role === "user") {
-      messages.push(new HumanMessage(String(message.content ?? "")));
+      messages.push(
+        new HumanMessage({ content: userContent(message.content) }),
+      );
       continue;
     }
     if (message.role === "system" || message.role === "developer") {

@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -42,7 +42,7 @@ import {
   TokenRefusedError,
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -53,11 +53,7 @@ import { TEST_POOL } from "./support/database";
  * the vendor, so there is nothing to stub.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_plugin_holder_${suite}`;
@@ -76,8 +72,9 @@ let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
  * The id is a real catalogue key rather than a suite-scoped one, because what is under test includes
  * the vendor's own read/write classification. On a database somebody is using, that key is their
  * configured server, so it is removed only when the test is what created it.
+ * Assume it belongs to the deployment until setup has checked, including when setup fails early.
  */
-let serverWasAlreadyConfigured = false;
+let serverWasAlreadyConfigured = true;
 /**
  * Whether this deployment already advertised the tool this suite inserts.
  *
@@ -85,10 +82,12 @@ let serverWasAlreadyConfigured = false;
  * vendor rather than the suite's fixture. Deleting by name regardless would take a real one; leaving
  * it always would leave a fixture that reads on screen as a tool the vendor offers.
  */
-let toolWasAlreadyAdvertised = false;
+let toolWasAlreadyAdvertised = true;
 
 const revokedCredentialIds: string[] = [];
 const issuedCredentialIds: string[] = [];
+const removalServerIds = new Set<string>();
+const removalUserIds = new Set<string>();
 const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
@@ -121,7 +120,7 @@ const store = createPluginStore({
   policy: () => policy,
 });
 
-async function auditRowsFor(targetId: string) {
+async function auditRowsFor(targetId: string, botId: string, actorId: string) {
   return database
     .select({
       eventType: auditEvents.eventType,
@@ -134,6 +133,8 @@ async function auditRowsFor(targetId: string) {
       and(
         eq(auditEvents.targetType, "mcp_tool"),
         eq(auditEvents.targetId, targetId),
+        eq(sql<string>`${auditEvents.payload} ->> 'bot'`, botId),
+        eq(sql<string>`${auditEvents.payload} ->> 'actor'`, actorId),
       ),
     );
 }
@@ -204,6 +205,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // removeServer is under test, so teardown must not depend on it succeeding. Delete the exact
+  // attempted fixtures before their credentials, including when setup failed partway through.
+  if (removalServerIds.size > 0) {
+    await database
+      .delete(mcpServers)
+      .where(inArray(mcpServers.id, [...removalServerIds]));
+  }
+  if (removalUserIds.size > 0) {
+    await database.delete(users).where(inArray(users.id, [...removalUserIds]));
+  }
   /*
    * Scoped to this suite's own Bots, never to the ref alone.
    *
@@ -248,68 +259,71 @@ afterAll(async () => {
 
 describe("a grant is the permission", () => {
   test("a Bot that was never granted a tool is refused, and the refusal is recorded", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { bot?: string }).bot === strangerId,
     );
-    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected.length).toBe(1);
     expect((rejected[0].payload as { refusal?: string }).refusal).toBe(
       "not_granted",
     );
   });
 
   test("a refusal names the routine that asked, not only the person it ran as", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
         initiator: { kind: "routine", id: "routine_standup" },
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { bot?: string }).bot === strangerId &&
         row.initiatorKind === "routine",
     );
-    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected.length).toBe(1);
     expect(rejected[0].initiatorId).toBe("routine_standup");
   });
 
   test("a call nobody said anything about is still filed as a person's", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     expect(
-      rows.some(
+      rows.filter(
         (row) =>
           row.eventType === "mcp.call_rejected" &&
           row.initiatorKind === "person" &&
           row.initiatorId === null,
       ),
-    ).toBe(true);
+    ).toHaveLength(1);
   });
 
   test("granting lets the same Bot past the grant check", async () => {
@@ -356,6 +370,7 @@ describe("a grant is the permission", () => {
 
 describe("the policy is asked as well as the grant", () => {
   test("credential material is refused and never copied into the audit trail", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     const secret = `sk-${"z".repeat(32)}`;
 
@@ -364,19 +379,20 @@ describe("the policy is asked as well as the grant", () => {
         ref,
         args: { query: "quarterly report", nested: { apiKey: secret } },
         botId: holderId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toThrow("credential material");
 
-    const rows = await auditRowsFor(ref);
-    const rejected = rows.find(
+    const rows = await auditRowsFor(ref, holderId, actorId);
+    const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
+        (row.payload as { bot?: string }).bot === holderId &&
         (row.payload as { refusal?: string }).refusal ===
           "sensitive_tool_arguments",
     );
-    expect(rejected).toBeDefined();
-    expect(rejected?.payload).toMatchObject({
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].payload).toMatchObject({
       bot: holderId,
       contentInspection: {
         reason: "sensitive_content",
@@ -387,6 +403,7 @@ describe("the policy is asked as well as the grant", () => {
   });
 
   test("a granted tool is still refused by a deny rule, and the rule is named", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     policy = {
       mode: "enforce",
@@ -400,7 +417,7 @@ describe("the policy is asked as well as the grant", () => {
         ref,
         args: {},
         botId: holderId,
-        actorId: "someone@openbot.local",
+        actorId,
       });
     } catch (error) {
       thrown = error;
@@ -414,14 +431,14 @@ describe("the policy is asked as well as the grant", () => {
       'mcp.server == "google-drive"',
     );
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, holderId, actorId);
     const refusedByPolicy = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { decision?: { rule?: string } }).decision?.rule ===
           'mcp.server == "google-drive"',
     );
-    expect(refusedByPolicy.length).toBeGreaterThan(0);
+    expect(refusedByPolicy.length).toBe(1);
   });
 
   test("a rule can speak about effect rather than about tool names", async () => {
@@ -461,6 +478,7 @@ describe("the policy is asked as well as the grant", () => {
   });
 
   test("a dry-run refusal is recorded, even though the call is let through", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     /*
      * The mode an operator switches on to size a rule before enforcing it, and the only mode in
@@ -476,7 +494,7 @@ describe("the policy is asked as well as the grant", () => {
           ref,
           args: {},
           botId: holderId,
-          actorId: "someone@openbot.local",
+          actorId,
         })
         // Forwarded past the policy, so what happens next is the vendor's business and not this
         // test's: nobody has connected an account, so it fails there. Swallowed deliberately.
@@ -485,14 +503,14 @@ describe("the policy is asked as well as the grant", () => {
       policy = { mode: "enforce", deny: [], allow: ["true"] };
     }
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, holderId, actorId);
     const recorded = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { decision?: { rule?: string } }).decision?.rule ===
           rule,
     );
-    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded.length).toBe(1);
     /*
      * What tells this row apart from a call this deployment actually stopped. `allowed` is the
      * policy's answer and `carriedOut` is what the mode did with it, so a reader counting what a
@@ -524,15 +542,13 @@ describe("the trail says what happened, not what was permitted", () => {
    */
   test("a call that is permitted and then fails is recorded as failed, not as succeeded", async () => {
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
-    const actorId = `trail_${suite}`;
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
 
     await expect(
       store.callTool({ ref, args: {}, botId: holderId, actorId }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const mine = (await auditRowsFor(ref)).filter(
-      (row) => (row.payload as { actor?: string }).actor === actorId,
-    );
+    const mine = await auditRowsFor(ref, holderId, actorId);
 
     const failed = mine.filter((row) => row.eventType === "mcp.call_failed");
     expect(failed.length).toBe(1);
@@ -597,6 +613,7 @@ describe("removing an MCP server", () => {
     // `credentials_active_key_idx`. The audit trail also carries the
     // revocation with `reason: mcp_server_removed`.
     const removalServerId = `removal-target-${suite}`;
+    removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
     const [credentialRow] = await database
       .insert(credentialRows)
@@ -660,6 +677,8 @@ describe("removing an MCP server", () => {
   test("revokes every person's grant for the server it removes", async () => {
     const removalServerId = `removal-target-people-${suite}`;
     const connectedUserId = `user_removal_${suite}`;
+    removalServerIds.add(removalServerId);
+    removalUserIds.add(connectedUserId);
     revokedCredentialIds.length = 0;
 
     await database
@@ -735,6 +754,7 @@ describe("removing an MCP server", () => {
 
   test("does not call revoke when the server had no credential", async () => {
     const removalServerId = `removal-target-nocred-${suite}`;
+    removalServerIds.add(removalServerId);
     revokedCredentialIds.length = 0;
     await database.insert(mcpServers).values({
       id: removalServerId,
@@ -752,11 +772,22 @@ describe("removing an MCP server", () => {
 
 describe("the trail can be read by a second reader", () => {
   test("a refusal names the bot, the server and the tool in queryable JSON", async () => {
-    const [row] = await database
+    const actorId = `audit-payload-${randomUUID()}@openbot.local`;
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId,
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await database
       .select({
         bot: sql<string>`payload ->> 'bot'`,
         server: sql<string>`payload ->> 'server'`,
         tool: sql<string>`payload ->> 'tool'`,
+        refusal: sql<string>`payload ->> 'refusal'`,
       })
       .from(auditEvents)
       .where(
@@ -764,15 +795,20 @@ describe("the trail can be read by a second reader", () => {
           eq(auditEvents.targetType, "mcp_tool"),
           eq(auditEvents.eventType, "mcp.call_rejected"),
           eq(auditEvents.targetId, ref),
+          // The catalogue ref is shared; only this call used this actor and suite-owned Bot.
+          eq(sql<string>`payload ->> 'actor'`, actorId),
+          eq(sql<string>`payload ->> 'bot'`, strangerId),
         ),
-      )
-      .limit(1);
+      );
 
     // Asserted in SQL rather than through the application, because the stored payload shape is the
     // property under test.
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
     expect(row?.server).toBe(serverId);
     expect(row?.tool).toBe(toolName);
-    expect(row?.bot).toBeTruthy();
+    expect(row?.bot).toBe(strangerId);
+    expect(row?.refusal).toBe("not_granted");
   });
 });
 
@@ -1113,14 +1149,14 @@ describe("refresh token rotation", () => {
     sent.length = 0;
   }
 
-  let notionWasAlreadyConfigured = false;
+  let notionWasAlreadyConfigured = true;
   /**
    * The OAuth client this deployment had before the suite ran, restored afterwards.
    *
-   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restored
-   * unconditionally, because the delete below removes the row it would otherwise still address.
+   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restore the
+   * snapshot before deleting our credentials; an early setup failure has no snapshot to restore.
    */
-  let clientBefore: string | null = null;
+  let clientBefore: string | null | undefined;
 
   beforeAll(async () => {
     await database
@@ -1189,10 +1225,12 @@ describe("refresh token rotation", () => {
         ),
       );
     // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, rotationServerId));
+    if (clientBefore !== undefined) {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: clientBefore })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
     for (const id of vaultRows) {
       await database.delete(credentials).where(eq(credentials.id, id));
     }
@@ -1458,7 +1496,379 @@ describe("refresh token rotation", () => {
       await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
     ).toBe("rt-3");
   });
+
+  /**
+   * A stored OAuth client whose decrypted bytes are not a client at all.
+   *
+   * CRITERION: neither the decrypted plaintext nor a parser's account of it may reach
+   * `audit_events` or `mcp_servers.last_error`. REASON: that plaintext IS the deployment's OAuth
+   * client secret, and `JSON.parse` reports failure by quoting the input it choked on — so an
+   * unguarded parse writes a fragment of the secret into two durable stores, both of which the
+   * Plugins page draws for an administrator.
+   *
+   * A corrupted row is not hypothetical: a partially written value, a row encrypted under a key
+   * this deployment no longer holds, or a hand-edited vault all produce bytes that decrypt and are
+   * not JSON.
+   *
+   * The refusal is asserted alongside the absence, because an unreadable client that produced
+   * nothing at all would be its own bug: the operator would see a connector failing with no reason
+   * given, and the credential is the reason.
+   */
+  describe("a stored OAuth client that does not read back as one", () => {
+    /*
+     * A bare secret where a client object belongs — the shape a wrongly encrypted row really has,
+     * and the worst case for the leak. It decrypts, so the vault is happy; it is not JSON, so the
+     * parse fails; and it is a single identifier token, which is what the parser quotes back
+     * WHOLE. Distinctive, so an assertion can look for the plaintext itself rather than a shape.
+     */
+    const UNREADABLE_PLAINTEXT = `secret_notJsonClient${suite}`;
+    /** What the person and the trail are told instead, which is the operator's signal. */
+    const UNUSABLE = "Notion has no usable OAuth client for this deployment.";
+
+    /** The client the suite registered, restored after each test repoints the server. */
+    let registeredClientId: string | null = null;
+
+    /** Point the server at a vault row that decrypts to something that is not a client. */
+    async function pointAtUnreadableClient() {
+      const [server] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, rotationServerId));
+      registeredClientId = server?.credentialId ?? null;
+
+      const [credential] = await database
+        .insert(credentials)
+        .values({
+          kind: "mcp_oauth_client",
+          provider: rotationServerId,
+          // Fresh per call, because `credentials_active_key_idx` holds one live row per
+          // (kind, provider, key_id) and the row this leaves behind is never revoked.
+          keyId: `oauth-client-unreadable-${randomUUID().slice(0, 8)}`,
+          metadata: {},
+          encryptedValue: await encryptSecret(
+            ROTATION_KEY,
+            UNREADABLE_PLAINTEXT,
+          ),
+        })
+        .returning({ id: credentials.id });
+      if (!credential) throw new Error("unreadable client was not stored");
+      vaultRows.push(credential.id);
+
+      await database
+        .update(mcpServers)
+        .set({ credentialId: credential.id })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
+
+    /** Put the readable client back, so the tests after this one still have one. */
+    async function restoreClient() {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: registeredClientId })
+        .where(eq(mcpServers.id, rotationServerId));
+    }
+
+    test("the trail of a refused call carries neither the plaintext nor the parser", async () => {
+      await connect();
+      await pointAtUnreadableClient();
+      try {
+        /*
+         * The throw is held rather than asserted on first, because what this test is about is the
+         * ROW. Asserting the thrown type up front would fail on the unguarded code before any
+         * durable store had been read, and report the wrong thing.
+         */
+        const refusal = await rotationStore
+          .callTool({
+            ref: rotationRef,
+            args: {},
+            botId: rotationBotId,
+            actorId: rotationUserId,
+          })
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+
+        const failures = (
+          await auditRowsFor(rotationRef, rotationBotId, rotationUserId)
+        ).filter((row) => row.eventType === "mcp.call_failed");
+        const written = JSON.stringify(failures);
+        expect(written).not.toContain(UNREADABLE_PLAINTEXT);
+        /*
+         * The parser's vocabulary as well as the plaintext. A parser quotes only a window of its
+         * input — how wide is the runtime's business, not ours — so a message could carry a
+         * fragment the assertion above would miss, and any of these words reaching the trail means
+         * a parse wrote it.
+         */
+        expect(written).not.toContain("JSON Parse error");
+        expect(written).not.toContain("SyntaxError");
+        expect(written).not.toContain("Unexpected");
+        // And the operator is still told which thing is broken, in the trail and to the caller.
+        expect(written).toContain(UNUSABLE);
+        expect(refusal).toBeInstanceOf(PluginRefusedError);
+      } finally {
+        await restoreClient();
+      }
+    });
+
+    test("a refresh leaves the same absence in the server's last error", async () => {
+      await connect();
+      const [before] = await database
+        .select({ lastError: mcpServers.lastError })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, rotationServerId));
+      await pointAtUnreadableClient();
+      try {
+        // Refuses before the vendor is asked, so nothing here needs a reachable Notion.
+        expect(
+          await rotationStore.refreshTools(rotationServerId, rotationUserId),
+        ).toEqual({ tools: 0 });
+
+        const [after] = await database
+          .select({ lastError: mcpServers.lastError })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, rotationServerId));
+        const written = after?.lastError ?? "";
+        expect(written).not.toContain(UNREADABLE_PLAINTEXT);
+        expect(written).not.toContain("JSON Parse error");
+        expect(written).not.toContain("SyntaxError");
+        expect(written).not.toContain("Unexpected");
+        expect(written).toContain(UNUSABLE);
+      } finally {
+        await restoreClient();
+        await database
+          .update(mcpServers)
+          .set({ lastError: before?.lastError ?? null })
+          .where(eq(mcpServers.id, rotationServerId));
+      }
+    });
+  });
 });
+
+/** Borrow a catalogue client's slot, then restore it after removing exactly our own vault rows. */
+function oauthClientFixture(serverId: string) {
+  const realVault = createCredentialStore(database);
+  const owned = new Set<string>();
+  const clientKey = and(
+    eq(credentials.kind, "mcp_oauth_client"),
+    eq(credentials.provider, serverId),
+    eq(credentials.keyId, `oauth-client-${serverId}`),
+  );
+  let before:
+    | {
+        credentialId: string | null;
+        updatedAt: string;
+        clients: { id: string; revokedAt: string | null; updatedAt: string }[];
+      }
+    | undefined;
+
+  return {
+    track: (id: string) => owned.add(id),
+    vault: {
+      ...realVault,
+      // Forward the caller's transaction: the credential and its pointer must commit together.
+      create: async (
+        value: Parameters<typeof realVault.create>[0],
+        executor?: Parameters<typeof realVault.create>[1],
+      ) => {
+        const row = await realVault.create(value, executor);
+        owned.add(row.id);
+        return row;
+      },
+      // rotate inserts directly; wrapping create alone misses every replacement it mints.
+      rotate: async (
+        value: Parameters<typeof realVault.rotate>[0],
+        executor?: Parameters<typeof realVault.rotate>[1],
+      ) => {
+        const row = await realVault.rotate(value, executor);
+        owned.add(row.id);
+        return row;
+      },
+    },
+    start: async () => {
+      before = await database.transaction(async (transaction) => {
+        const [server] = await transaction
+          .select({
+            credentialId: mcpServers.credentialId,
+            updatedAt: sql<string>`${mcpServers.updatedAt}::text`,
+          })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, serverId))
+          .for("update");
+        if (!server) throw new Error("fixture server was not stored");
+        // Dates round PostgreSQL microseconds to milliseconds. Keep the exact stamps as text.
+        const clients = await transaction
+          .select({
+            id: credentials.id,
+            revokedAt: sql<string | null>`${credentials.revokedAt}::text`,
+            updatedAt: sql<string>`${credentials.updatedAt}::text`,
+          })
+          .from(credentials)
+          .where(and(clientKey, sql`${credentials.revokedAt} IS NULL`))
+          .for("update");
+        await transaction
+          .update(mcpServers)
+          .set({ credentialId: null })
+          .where(eq(mcpServers.id, serverId));
+        if (clients.length > 0) {
+          await transaction
+            .update(credentials)
+            .set({ revokedAt: new Date(), updatedAt: new Date() })
+            .where(
+              inArray(
+                credentials.id,
+                clients.map((row) => row.id),
+              ),
+            );
+        }
+        return { ...server, clients };
+      });
+    },
+    retireClients: async () => {
+      if (owned.size === 0) return;
+      await database
+        .update(credentials)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            clientKey,
+            inArray(credentials.id, [...owned]),
+            sql`${credentials.revokedAt} IS NULL`,
+          ),
+        );
+    },
+    restore: async () => {
+      const snapshot = before;
+      if (!snapshot) return;
+      await database.transaction(async (transaction) => {
+        await transaction
+          .update(mcpServers)
+          .set({ credentialId: null })
+          .where(eq(mcpServers.id, serverId));
+        if (owned.size > 0) {
+          await transaction
+            .delete(credentials)
+            .where(inArray(credentials.id, [...owned]));
+        }
+        // Free the active key before reviving its original row, then restore the pointer atomically.
+        for (const row of snapshot.clients) {
+          await transaction
+            .update(credentials)
+            .set({
+              revokedAt: sql`${row.revokedAt}::timestamptz`,
+              updatedAt: sql`${row.updatedAt}::timestamptz`,
+            })
+            .where(eq(credentials.id, row.id));
+        }
+        await transaction
+          .update(mcpServers)
+          .set({
+            credentialId: snapshot.credentialId,
+            updatedAt: sql`${snapshot.updatedAt}::timestamptz`,
+          })
+          .where(eq(mcpServers.id, serverId));
+      });
+      before = undefined;
+      owned.clear();
+    },
+  };
+}
+
+test.each(["success", "failure"])(
+  "OAuth client fixture restores exact state after %s following create and rotate",
+  async (outcome) => {
+    const fixtureServerId = `oauth-fixture-${suite}-${outcome}`;
+    const originalId = randomUUID();
+    const sentinelId = randomUUID();
+    const fixture = oauthClientFixture(fixtureServerId);
+    const value: CredentialStoreValue = {
+      kind: "mcp_oauth_client",
+      provider: fixtureServerId,
+      keyId: `oauth-client-${fixtureServerId}`,
+      metadata: {},
+      encryptedValue: "synthetic-fixture-value",
+    };
+    const state = async () => ({
+      credentials: await database
+        .select({ row: sql`to_jsonb(${credentials})` })
+        .from(credentials)
+        .where(
+          inArray(credentials.provider, [
+            fixtureServerId,
+            `${fixtureServerId}-unrelated`,
+          ]),
+        )
+        .orderBy(credentials.id),
+      server: await database
+        .select({ row: sql`to_jsonb(${mcpServers})` })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, fixtureServerId)),
+    });
+    try {
+      await database.insert(credentials).values([
+        {
+          ...value,
+          id: originalId,
+          updatedAt: sql`'2020-01-02 03:04:05.123456+00'::timestamptz`,
+        },
+        { ...value, id: sentinelId, provider: `${fixtureServerId}-unrelated` },
+      ]);
+      await database.insert(mcpServers).values({
+        id: fixtureServerId,
+        title: fixtureServerId,
+        vendor: "Synthetic fixture",
+        url: "https://fixture.invalid/mcp",
+        credentialId: originalId,
+      });
+      const before = await state();
+      const exercise = async () => {
+        try {
+          await fixture.start();
+          await fixture.retireClients();
+          const created = await database.transaction((transaction) =>
+            fixture.vault.create(value, transaction),
+          );
+          const rotated = await database.transaction(async (transaction) => {
+            const row = await fixture.vault.rotate(
+              { ...value, previousCredentialId: created.id },
+              transaction,
+            );
+            await transaction
+              .update(mcpServers)
+              .set({ credentialId: row.id })
+              .where(eq(mcpServers.id, fixtureServerId));
+            return row;
+          });
+          expect(await fixture.vault.isLive(created.id)).toBe(false);
+          expect(await fixture.vault.isLive(rotated.id)).toBe(true);
+          if (outcome === "failure") {
+            throw new Error("fixture operation failed after rotation");
+          }
+        } finally {
+          await fixture.restore();
+        }
+      };
+      if (outcome === "failure") {
+        await expect(exercise()).rejects.toThrow(
+          "fixture operation failed after rotation",
+        );
+      } else {
+        await exercise();
+      }
+      // Full PostgreSQL rows catch timestamp rounding, leaked replacements and sentinel damage.
+      expect(await state()).toEqual(before);
+      expect(await fixture.vault.isLive(originalId)).toBe(true);
+    } finally {
+      await fixture.restore();
+      await database
+        .delete(mcpServers)
+        .where(eq(mcpServers.id, fixtureServerId));
+      await database
+        .delete(credentials)
+        .where(inArray(credentials.id, [originalId, sentinelId]));
+    }
+  },
+);
 
 /**
  * A client this deployment registered for itself, which the vendor has since forgotten.
@@ -1501,8 +1911,8 @@ describe("a dynamic client the vendor has evicted", () => {
   })();
   const SCOPE = "";
 
-  /** Every vault row this suite created, so the cleanup can take exactly those. */
-  const vaultRows: string[] = [];
+  const clientFixture = oauthClientFixture(dynamicServerId);
+  const vault = clientFixture.vault;
   /** Which client each exchange was offered, in order. One entry per call, never two. */
   const offered: string[] = [];
   /**
@@ -1523,35 +1933,6 @@ describe("a dynamic client the vendor has evicted", () => {
   /** What the vendor's registration endpoint hands back, installed per test. */
   let issue: () => OAuthClient | null = () => {
     throw new Error("no registration was installed for this test");
-  };
-
-  /*
-   * The real vault, with every row it mints written down.
-   *
-   * Genuine rather than stubbed, because what this suite asserts is that a re-registered client is
-   * KEPT — which is a write and a read back through the encryption, not a call that was made. The
-   * one wrapper is the bookkeeping that lets the cleanup take exactly this suite's rows.
-   */
-  const realVault = createCredentialStore(database);
-  const vault = {
-    ...realVault,
-    /*
-     * The executor is FORWARDED, and dropping it is not a detail.
-     *
-     * The store hands its own transaction to the vault so that a secret and the pointer that names it
-     * commit together. A wrapper that swallows it has the insert run on a second pooled connection
-     * instead — which, with the caller holding the first and a sibling holding the second, is not a
-     * slower write but a deadlock: the insert waits for a connection only a transaction that is
-     * waiting for the insert can release.
-     */
-    create: async (
-      value: Parameters<typeof realVault.create>[0],
-      executor?: Parameters<typeof realVault.create>[1],
-    ) => {
-      const row = await realVault.create(value, executor);
-      vaultRows.push(row.id);
-      return row;
-    },
   };
 
   /**
@@ -1660,17 +2041,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * One live client per key is law (`credentials_active_key_idx`), so planting a client the way a
      * registration would means retiring whatever live row the key still holds from an earlier test.
      */
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(credentials.kind, "mcp_oauth_client"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-          sql`${credentials.revokedAt} IS NULL`,
-        ),
-      );
+    await clientFixture.retireClients();
     const [row] = await database
       .insert(credentials)
       .values({
@@ -1686,7 +2057,7 @@ describe("a dynamic client the vendor has evicted", () => {
       })
       .returning({ id: credentials.id });
     if (!row) throw new Error("client was not stored");
-    vaultRows.push(row.id);
+    clientFixture.track(row.id);
     await database
       .update(mcpServers)
       .set({ credentialId: row.id })
@@ -1760,9 +2131,7 @@ describe("a dynamic client the vendor has evicted", () => {
       actorId: dynamicUserId,
     });
 
-  let notionWasAlreadyConfigured = false;
-  /** This deployment's own client, restored afterwards: the column is live configuration. */
-  let clientBefore: string | null = null;
+  let notionWasAlreadyConfigured = true;
 
   // The vendor refuses the ordinary way unless a test says otherwise, so a test that varies the
   // refusal cannot leave the next one asserting against somebody else's setup.
@@ -1791,11 +2160,10 @@ describe("a dynamic client the vendor has evicted", () => {
       .onConflictDoNothing();
 
     const [existing] = await database
-      .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
+      .select({ id: mcpServers.id })
       .from(mcpServers)
       .where(eq(mcpServers.id, dynamicServerId));
     notionWasAlreadyConfigured = existing !== undefined;
-    clientBefore = existing?.credentialId ?? null;
 
     await database
       .insert(mcpServers)
@@ -1807,6 +2175,7 @@ describe("a dynamic client the vendor has evicted", () => {
         provenance: "first-party",
       })
       .onConflictDoNothing();
+    await clientFixture.start();
     await database
       .insert(mcpTools)
       .values({
@@ -1832,14 +2201,7 @@ describe("a dynamic client the vendor has evicted", () => {
           eq(mcpUserCredentials.userId, dynamicUserId),
         ),
       );
-    // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, dynamicServerId));
-    for (const id of vaultRows) {
-      await database.delete(credentials).where(eq(credentials.id, id));
-    }
+    await clientFixture.restore();
     await database
       .delete(pluginGrants)
       .where(
@@ -2213,17 +2575,7 @@ describe("a dynamic client the vendor has evicted", () => {
     await clearClient();
     // No live row for the key either, so this really is a deployment holding nothing: `clearClient`
     // only drops the pointer, and it is the KEY the index constrains.
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(credentials.kind, "mcp_oauth_client"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-          sql`${credentials.revokedAt} IS NULL`,
-        ),
-      );
+    await clientFixture.retireClients();
     registrations.length = 0;
     // A distinct client per registration, so two registrations cannot be mistaken for one.
     let issued = 0;
@@ -2410,6 +2762,166 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * A stored client that parses cleanly and is not a client.
+   *
+   * The sibling of the unparseable row, and its worse half. Guarding the parse answers for SYNTAX
+   * only, and the `as OAuthClient` cast behind it answers for nothing — so a row holding
+   * snake_case keys, which is what a hand-repair or a half-written row leaves, yields a client
+   * whose `clientId` is `undefined` and is handed on as usable.
+   *
+   * WHAT MAKES IT WORSE THAN A SYNTAX ERROR is where it ends. The unparseable row is refused before
+   * the transaction; this one is not refused at all, so the `undefined` id goes to the vendor, the
+   * vendor answers `invalid_client`, and {@link refuseAndReplaceEvictedClient} reads that as the
+   * vendor having disowned this deployment's registration. A corrupt LOCAL row then buys a
+   * DEPLOYMENT-WIDE remedy: the client every existing consent was granted against is replaced, and
+   * the operator is told the vendor forgot us rather than which credential actually broke.
+   */
+  describe("a stored OAuth client whose shape is not a client's", () => {
+    /** Snake_case where the type is camelCase, with a secret distinctive enough to search for. */
+    const MISSHAPEN = JSON.stringify({
+      client_id: "dyn-snake",
+      client_secret: `shh_notAClient_${suite}`,
+    });
+    /** What the operator must be told instead: the credential named, and nothing else claimed. */
+    const UNUSABLE =
+      "Notion has no usable OAuth client for this deployment. Connect Notion again in Settings: the deployment registers itself with the vendor on the next connect.";
+
+    /**
+     * Plant arbitrary stored bytes as this server's client, the way {@link putClient} plants a real
+     * one — aged an hour, so the re-registration window is not what refuses the call. A row younger
+     * than the window would pass these tests for the wrong reason.
+     */
+    async function putStoredBytes(plaintext: string) {
+      await database
+        .update(credentials)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(credentials.kind, "mcp_oauth_client"),
+            eq(credentials.provider, dynamicServerId),
+            eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
+            sql`${credentials.revokedAt} IS NULL`,
+          ),
+        );
+      const [row] = await database
+        .insert(credentials)
+        .values({
+          kind: "mcp_oauth_client",
+          provider: dynamicServerId,
+          keyId: `oauth-client-${dynamicServerId}`,
+          metadata: {},
+          encryptedValue: await encryptSecret(DYNAMIC_KEY, plaintext),
+          createdAt: new Date(Date.now() - 60 * 60 * 1000),
+        })
+        .returning({ id: credentials.id });
+      if (!row) throw new Error("misshapen client was not stored");
+      clientFixture.track(row.id);
+      await database
+        .update(mcpServers)
+        .set({ credentialId: row.id })
+        .where(eq(mcpServers.id, dynamicServerId));
+      return row.id;
+    }
+
+    /**
+     * This tool's failure rows with their ids, so one call's can be told from the suite's.
+     *
+     * Every test in this describe calls the SAME tool, and the ones above this deliberately produce
+     * the eviction sentence — so an assertion that no failure row anywhere mentions it would be
+     * about its siblings rather than about this call. The ids are what separate them; there is no
+     * ordering finer than the millisecond these rows are written in.
+     */
+    async function failureRows() {
+      return database
+        .select({ id: auditEvents.id, payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "mcp.call_failed"),
+            eq(auditEvents.targetType, "mcp_tool"),
+            eq(auditEvents.targetId, dynamicRef),
+          ),
+        );
+    }
+
+    /** Which credential the server row names, which is the thing a re-registration replaces. */
+    async function pointedAt() {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+      return row?.credentialId ?? null;
+    }
+
+    test("a call is refused, and the deployment's client is not replaced", async () => {
+      const planted = await putStoredBytes(MISSHAPEN);
+      await connect();
+      const registeredBefore = await registeredRows();
+      // The vendor would honour a fresh client, so registering is available here and would look
+      // like a recovery. The point is that it is never reached: there is nothing in this row for a
+      // vendor to refuse, so there is nothing to read as an eviction.
+      accepted = new Set([FRESH.clientId]);
+      issue = () => FRESH;
+
+      await expect(call()).rejects.toThrow(UNUSABLE);
+
+      // Refused before the exchange, so the vendor is never offered an `undefined` client id and
+      // never gets to answer `invalid_client` about it.
+      expect(offered).toEqual([]);
+      // And so the destructive remedy never runs. These are the property: a corrupt local row costs
+      // this one call, not every consent in the deployment.
+      expect(registrations).toEqual([]);
+      expect(await pointedAt()).toBe(planted);
+      expect((await registeredRows()).length).toBe(registeredBefore.length);
+    });
+
+    test("the refusal names the credential rather than carrying it", async () => {
+      await putStoredBytes(MISSHAPEN);
+      await connect();
+      accepted = new Set([FRESH.clientId]);
+      issue = () => FRESH;
+
+      const before = new Set((await failureRows()).map((row) => row.id));
+      const refusal = await call().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const written = JSON.stringify(
+        (await failureRows()).filter((row) => !before.has(row.id)),
+      );
+      // The same absence the unparseable row is held to: a misshapen value is still the decrypted
+      // client, and half of this one IS a client secret.
+      expect(written).not.toContain(`shh_notAClient_${suite}`);
+      // Never the eviction sentence either. It would claim a re-registration that did not happen
+      // and point the operator at the vendor instead of at the row.
+      expect(written).not.toContain("no longer recognises");
+      expect(written).toContain(UNUSABLE);
+      expect(refusal).toBeInstanceOf(PluginRefusedError);
+    });
+
+    /**
+     * The readers answer none, which is their existing contract for a value they cannot read.
+     *
+     * `ensureOAuthClient` consults the stored client first and then again under the lock, so both
+     * reads are on this path. Unguarded, the first hands back the misshapen object and a consent
+     * URL is built with an `undefined` client id — the person reaches a vendor screen for a client
+     * that does not exist. None is the answer that instead gets them a client that works.
+     */
+    test("the consent flow reads it as none and obtains one that works", async () => {
+      await putStoredBytes(MISSHAPEN);
+      issue = () => FRESH;
+
+      expect(await dynamicStore.oauthClientFor(dynamicServerId)).toBeNull();
+      expect(
+        await dynamicStore.ensureOAuthClient(
+          dynamicServerId,
+          "admin@openbot.test",
+        ),
+      ).toEqual(FRESH);
+    });
+  });
+
+  /**
    * The vault row and the pointer that names it commit together, or neither does.
    *
    * They were two transactions, so a failure between them left `mcp_user_credentials` naming a
@@ -2471,7 +2983,15 @@ describe("a custom server may only be pointed at its own kind of credential", ()
    */
   const upsertCredentialId = randomUUID();
   const customServerId = `custom-cred-${suffix}`;
-  const madeServerIds: string[] = [];
+  const attemptedServerIds = new Set<string>();
+
+  function addCustomFixture(
+    input: Parameters<typeof store.addCustomServer>[0],
+  ) {
+    // Refusal tests may fail because the write succeeded. Track the attempt before calling it.
+    attemptedServerIds.add(input.id);
+    return store.addCustomServer(input);
+  }
 
   beforeAll(async () => {
     const encrypted = await encryptSecret(
@@ -2517,17 +3037,18 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   });
 
   afterAll(async () => {
-    // By prefix, not by the ids this suite meant to make: before the fix the refused adds succeed,
-    // and a row left behind holds a foreign key onto the credentials deleted just below.
-    await database
-      .delete(mcpServers)
-      .where(like(mcpServers.id, `${customServerId}%`));
+    if (attemptedServerIds.size > 0) {
+      await database
+        .delete(mcpServers)
+        .where(inArray(mcpServers.id, [...attemptedServerIds]));
+    }
     await database
       .delete(credentialRows)
       .where(
         inArray(credentialRows.id, [
           deploymentCredentialId,
           personalCredentialId,
+          upsertCredentialId,
           oauthClientCredentialId,
         ]),
       );
@@ -2536,7 +3057,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   test("somebody else's connector token is refused, and no server is written", async () => {
     const id = `${customServerId}-personal`;
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -2559,7 +3080,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // client secret as a bearer token is the mistake `refreshTools` was already changed to avoid.
     const id = `${customServerId}-client`;
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -2573,7 +3094,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // Same message as the wrong-kind refusal on purpose. A caller who can tell "wrong kind" from
     // "no such row" can ask this endpoint which ids are real, which is a vault oracle.
     const id = `${customServerId}-missing`;
-    const missing = store.addCustomServer({
+    const missing = addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -2582,15 +3103,13 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
     await expect(missing).rejects.toBeInstanceOf(CustomServerRefusedError);
 
-    const wrongKind = store
-      .addCustomServer({
-        id: `${customServerId}-kind-message`,
-        title: "Collector",
-        url: "https://collector.example/mcp",
-        credentialId: personalCredentialId,
-        by: "admin@example.com",
-      })
-      .catch((error: Error) => error.message);
+    const wrongKind = addCustomFixture({
+      id: `${customServerId}-kind-message`,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: personalCredentialId,
+      by: "admin@example.com",
+    }).catch((error: Error) => error.message);
     const missingMessage = await missing.catch((error: Error) => error.message);
     expect(await wrongKind).toBe(missingMessage);
   });
@@ -2598,8 +3117,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   test("the server's own token still works", async () => {
     // The case that must keep passing, so the refusal above is a rule and not a wall. The URL is
     // unreachable and that is fine: a failed refresh is recorded on the row rather than thrown.
-    madeServerIds.push(customServerId);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id: customServerId,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -2620,7 +3138,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // route passes the body field through untouched, so this is reachable with one curl.
     for (const notAnId of ["not-a-uuid", "' OR 1=1 --"]) {
       await expect(
-        store.addCustomServer({
+        addCustomFixture({
           id: `${customServerId}-shape`,
           title: "Collector",
           url: "https://collector.example/mcp",
@@ -2635,8 +3153,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // Not the same as a wrong one. An empty string used to reach the insert and break the foreign
     // key; the honest reading is that the administrator named nothing.
     const id = `${customServerId}-empty`;
-    madeServerIds.push(id);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -2657,8 +3174,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     // already holds its own token can be re-added naming somebody else's. The guard has to run
     // before the write, and the pointer already on the row has to survive the refusal.
     const id = `${customServerId}-upsert`;
-    madeServerIds.push(id);
-    await store.addCustomServer({
+    await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
@@ -2667,7 +3183,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     });
 
     await expect(
-      store.addCustomServer({
+      addCustomFixture({
         id,
         title: "Collector",
         url: "https://collector.example/mcp",
@@ -2685,8 +3201,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
 
   test("a custom server with no credential at all still works", async () => {
     const id = `${customServerId}-none`;
-    madeServerIds.push(id);
-    const added = await store.addCustomServer({
+    const added = await addCustomFixture({
       id,
       title: "Collector",
       url: "https://collector.example/mcp",

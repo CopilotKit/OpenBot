@@ -431,7 +431,10 @@ export function createComputerRoutes(
             "Say which field the value goes in, using a ref from your snapshot.",
         };
       }
-      if (typeof body?.snapshotId !== "number") {
+      if (
+        typeof body?.snapshotId !== "number" ||
+        !Number.isInteger(body.snapshotId)
+      ) {
         return { error: "The snapshotId the ref came from is required." };
       }
       return gateway.requestSecret(botId, actor, {
@@ -482,6 +485,41 @@ export function createComputerRoutes(
       string,
       unknown
     > | null;
+    /*
+     * Shaped per gesture, like the Bot's acting routes shape theirs. Only scroll was checked:
+     * a click with `{"x": "ten"}`, a type with `{"text": 123}` or a key with `{}` travelled
+     * to the computer untouched, and the failure surfaced as whatever the computer returned
+     * for garbage — mapped here to a 500, or a 200 no-op. The shapes below are the ones the
+     * gateway's `HumanInput` type already promises the computer: coordinates in viewport
+     * pixels, text to enter, a key name. Scroll keeps its existing check, which allows an
+     * absent delta the computer reads as its own default distance.
+     */
+    if (kind === "click") {
+      if (
+        typeof body?.x !== "number" ||
+        !Number.isFinite(body.x) ||
+        typeof body?.y !== "number" ||
+        !Number.isFinite(body.y)
+      ) {
+        return context.json(
+          { error: "A click needs numeric x and y coordinates." },
+          400,
+        );
+      }
+    }
+    if (kind === "type") {
+      if (typeof body?.text !== "string") {
+        return context.json({ error: "The text to enter is required." }, 400);
+      }
+    }
+    if (kind === "key") {
+      if (typeof body?.key !== "string" || !body.key) {
+        return context.json(
+          { error: "A key name is required, such as Enter or Tab." },
+          400,
+        );
+      }
+    }
     if (kind === "scroll" && !usableDeltaY(body?.deltaY)) {
       return context.json(badDeltaY, 400);
     }
@@ -678,8 +716,27 @@ export function createComputerRoutes(
 
     // Bounded, and biased to recency: the question is what this rule does to the traffic the
     // deployment actually has, and last week's traffic answers that better than a full scan.
-    const requested = typeof body?.limit === "number" ? body.limit : 200;
-    const limit = Math.min(Math.max(Math.trunc(requested), 1), 500);
+    //
+    // Strict on purpose. This used to read `typeof limit === "number" ? limit : 200` and clamp,
+    // so `"abc"`, `null` and `true` silently became 200, `Infinity` silently became 500, and
+    // `NaN` became `NaN` and travelled into `auditReader.list` as one. A what-if answered from
+    // the wrong slice of history is worse than no answer, because it is believed.
+    const rawLimit = body?.limit;
+    let limit = 200;
+    if (rawLimit !== undefined) {
+      if (
+        typeof rawLimit !== "number" ||
+        !Number.isInteger(rawLimit) ||
+        rawLimit < 1 ||
+        rawLimit > 500
+      ) {
+        return context.json(
+          { error: "limit must be a whole number between 1 and 500." },
+          400,
+        );
+      }
+      limit = rawLimit;
+    }
 
     const { events } = await auditReader.list({
       limit,
@@ -816,7 +873,18 @@ function asRef(
   body: Record<string, unknown> | null,
 ): { ref: string; snapshotId: number } | undefined {
   if (typeof body?.ref !== "string" || !body.ref) return undefined;
-  if (typeof body?.snapshotId !== "number") return undefined;
+  /*
+   * A snapshot id is an integer the snapshot store handed out. `typeof` alone accepts `1.5` and
+   * `Infinity` (valid JSON: `1e999` parses to it), which then never equals the stored integer, so
+   * the gateway reports a stale snapshot and the caller retries a request that was malformed.
+   * Malformed input is a 400 here, not a 409 staleness.
+   */
+  if (
+    typeof body?.snapshotId !== "number" ||
+    !Number.isInteger(body.snapshotId)
+  ) {
+    return undefined;
+  }
   return { ref: body.ref, snapshotId: body.snapshotId };
 }
 

@@ -14,7 +14,7 @@ import {
 import { createPluginStore } from "../src/plugins/store";
 import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import type { ActionPolicy } from "../src/policy/engine";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A tool call that happens with no browser involved.
@@ -29,11 +29,7 @@ import { TEST_POOL } from "./support/database";
  * else's server.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const holderId = `agent_tools_holder_${suite}`;

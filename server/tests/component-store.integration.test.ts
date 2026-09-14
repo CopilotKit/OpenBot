@@ -14,7 +14,7 @@ import {
   componentFunctions,
   components,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The grant surface, against a real database.
@@ -24,10 +24,7 @@ import { TEST_POOL } from "./support/database";
  * withholdings with it, a primary key that has to make withholding twice a no-op.
  */
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
-const database = createDatabase(databaseUrl, TEST_POOL);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store: ComponentStore = createComponentStore(database);
 
 const suite = randomUUID().slice(0, 8);
@@ -35,8 +32,11 @@ const componentName = `testComponent_${suite}`;
 const otherName = `testOther_${suite}`;
 const botA = `agent_test_a_${suite}`;
 const botB = `agent_test_b_${suite}`;
+const fixtureComponentNames = new Set<string>();
+const fixtureAgentIds = new Set([botA, botB]);
 
 async function makeComponent(name: string, published: boolean) {
+  fixtureComponentNames.add(name);
   await database.insert(components).values({
     name,
     title: `Test ${name}`,
@@ -60,20 +60,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Register before writes so a failed assertion or partially completed setup still has teardown.
+  const names = [...fixtureComponentNames];
   await database
     .delete(componentFunctions)
-    .where(
-      inArray(componentFunctions.componentName, [componentName, otherName]),
-    );
+    .where(inArray(componentFunctions.componentName, names));
   await database
     .delete(componentExclusions)
-    .where(
-      inArray(componentExclusions.componentName, [componentName, otherName]),
-    );
-  await database
-    .delete(components)
-    .where(inArray(components.name, [componentName, otherName]));
-  await database.delete(agents).where(inArray(agents.id, [botA, botB]));
+    .where(inArray(componentExclusions.componentName, names));
+  await database.delete(components).where(inArray(components.name, names));
+  await database.delete(agents).where(inArray(agents.id, [...fixtureAgentIds]));
 });
 
 describe("deciding whether a Bot may use a component", () => {
@@ -157,6 +153,7 @@ describe("withholding", () => {
 
   test("deleting a Bot takes its withholdings with it", async () => {
     const doomed = `agent_test_doomed_${suite}`;
+    fixtureAgentIds.add(doomed);
     await database.insert(agents).values({
       id: doomed,
       name: doomed,
@@ -244,6 +241,7 @@ describe("learning what a build ships", () => {
     kind: "card",
     description: "Arrived from a build rather than from a list on the server.",
   };
+  fixtureComponentNames.add(announced.name);
 
   test("a component the deployment has never seen is added, published and available to every Bot", async () => {
     const { added } = await store.syncCatalogue([announced]);
@@ -302,6 +300,7 @@ describe("learning what a build ships", () => {
       kind: "card",
       description: "Announced by two page loads at the same moment.",
     };
+    fixtureComponentNames.add(racer.name);
 
     const [first, second] = await Promise.all([
       store.syncCatalogue([racer]),
@@ -320,15 +319,6 @@ describe("learning what a build ships", () => {
     const before = (await store.list()).length;
     expect((await store.syncCatalogue([])).added).toEqual([]);
     expect((await store.list()).length).toBe(before);
-  });
-
-  afterAll(async () => {
-    await database
-      .delete(componentExclusions)
-      .where(eq(componentExclusions.componentName, announced.name));
-    await database
-      .delete(components)
-      .where(eq(components.name, announced.name));
   });
 });
 

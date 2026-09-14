@@ -1,15 +1,22 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
-import { authoriseAgentCall, sameToken } from "./agents/callback-token";
+import { MAX_IMAGE_BYTES } from "../../shared/attachments";
+import {
+  authoriseAgentCall,
+  parseAgentToolCallInput,
+  sameToken,
+} from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
+  AuditQueryError,
   type AuditEventType,
+  type AuditInitiator,
   type AuditReader,
   type AuditStore,
-  AuditQueryError,
   auditQueryFromUrl,
   DEPLOYMENT_INITIATOR,
   recordAuditEvent,
@@ -23,6 +30,10 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import {
+  createAttachmentRoutes,
+  createChannelAttachmentRoutes,
+} from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -38,9 +49,13 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
+import type { Database } from "./db/client";
+import type { HostAccessBroker } from "./host-access/broker";
+import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
 import type { OnboardingStore } from "./people/onboarding";
-import type { PeopleStore } from "./people/store";
+import { parsePageLimit } from "./paging";
+import { type PeopleStore, MAX_PAGE } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
@@ -58,11 +73,52 @@ import {
 } from "./user-instructions";
 
 /**
+ * How much of a multipart body is boundary, headers and other fields rather than file.
+ *
+ * Generous on purpose. Measured against what the composer actually sends — one `file` part and one
+ * `uploadGroup` field — the framing is 360 bytes for a short filename and 614 for a 255-character
+ * one; a filename full of non-ASCII percent-encodes to a few times that and is still nowhere near
+ * this. 64 KiB is therefore an allowance no honest request can exhaust, and it raises the amount of
+ * memory a hostile request can pin by 0.8%, which was never the number that mattered.
+ */
+const MULTIPART_FRAMING_ALLOWANCE = 64 * 1024;
+
+/**
+ * The ceiling on the whole POST body of a channel attachment upload.
+ *
+ * THIS IS NOT `MAX_IMAGE_BYTES`, AND THE DIFFERENCE IS THE POINT. Every other gate on this path —
+ * the composer's pre-check, `attachmentsConfigFor`'s `maxSize`, the handler's own 413 — measures
+ * THE FILE. This one measures THE ENVELOPE: `bodyLimit` runs before anything has parsed the
+ * multipart body, so all it can count is bytes on the wire, file and framing together.
+ *
+ * Set to `MAX_IMAGE_BYTES` exactly, those two units were silently treated as one, and the ~360
+ * bytes of boundary and headers wrapped around a file at the documented ceiling were enough to push
+ * the body over it: an 8,388,608-byte image — the exact number the composer publishes as the limit —
+ * was refused 413, while 8,388,308 bytes went through. A limit nobody can reach is a limit that is
+ * wrong, so the envelope's ceiling is the file's ceiling plus room for the envelope.
+ *
+ * The slack costs nothing it was protecting against. A body between the two numbers is still read
+ * into memory, and then still refused by the handler once `file.size` is a thing anybody can look
+ * at — which is where a text upload, whose real limit is `MAX_FILE_BYTES`, is refused too. What the
+ * door exists to stop is the 2GB body, and it still does.
+ */
+export const UPLOAD_BODY_LIMIT_BYTES =
+  MAX_IMAGE_BYTES + MULTIPART_FRAMING_ALLOWANCE;
+
+/**
  * One row for something an administrator did to somebody's access.
  *
  * The address is on the row rather than only the user id, because the id means nothing to a person
  * reading the trail a year later and the user row may be gone by then.
  */
+export type DeploymentToolCaller = (input: {
+  name: string;
+  args: Record<string, unknown>;
+  botId: string;
+  actorId: string;
+  initiator?: AuditInitiator;
+}) => Promise<{ text: string; isError: boolean } | null>;
+
 async function recordPersonEvent(
   auditStore: AuditStore | undefined,
   context: { var: AppVariables },
@@ -223,6 +279,23 @@ export function createApp(
    * shown an empty box, and the obvious thing to do with an empty box is fill it in again.
    */
   userInstructions?: UserInstructionsStore,
+  /**
+   * The database behind a channel's staged and sent files: upload, fetch, delete.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, the same
+   * degraded shape every other optional store here takes: a deployment that never built the
+   * database has no door for this at all, not a locked one.
+   */
+  attachmentDatabase?: Database,
+  /** Session-only broker for native owner-approved host folder access. */
+  hostAccessBroker?: HostAccessBroker,
+  /** Fresh desktop-only bearer token for the native host worker poll/result channel. */
+  desktopHostToken?: string,
+  /** Server-owned tools that are not MCP but use the same signed agent callback route. */
+  deploymentToolCaller?: DeploymentToolCaller,
   /**
    * Authenticated confirmation routes for identities that arrived from an external provider.
    *
@@ -552,12 +625,17 @@ export function createApp(
     /*
      * A page, not the deployment.
      *
-     * `limit` is clamped by the store, so a caller cannot ask for everybody by naming a large
-     * number. `search` is what makes paging usable: an administrator looking for one colleague
-     * should not have to walk pages to reach them.
+     * `limit` is parsed strictly and clamped into range at the edge, against the same ceiling the
+     * store enforces, so a caller cannot ask for everybody by naming a large number and a typo
+     * like `12abc` is a 400 rather than a silently coerced page. `search` is what makes paging
+     * usable: an administrator looking for one colleague should not have to walk pages to reach
+     * them.
      */
     const url = new URL(context.req.url);
-    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+    const parsed = parsePageLimit(url.searchParams.get("limit"), MAX_PAGE);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
 
     return context.json(
       await peopleStore.list({
@@ -567,7 +645,7 @@ export function createApp(
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       }),
     );
   });
@@ -988,6 +1066,23 @@ export function createApp(
     );
   }
 
+  if (hostAccessBroker) {
+    app.route(
+      "/api/host-access",
+      createHostAccessRoutes({
+        broker: hostAccessBroker,
+        desktopToken: desktopHostToken,
+        requireUser,
+        canUseBot,
+        auditStore,
+        botName: agentProfileStore
+          ? async (botId, actor) =>
+              (await agentProfileStore.get(actor, botId))?.name ?? null
+          : undefined,
+      }),
+    );
+  }
+
   if (agentProfileStore) {
     app.route(
       "/api/agents",
@@ -1022,10 +1117,10 @@ export function createApp(
           : undefined,
         // Whether "built-in" is a kind of coworker this deployment can actually make: the create
         // path falls back to the managed Bot's endpoint, so without one it can only refuse.
-        config.managedAgent !== undefined,
+        config.managedAgent?.endpoint !== undefined,
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
-        config.managedAgent?.endpoint.toString(),
+        config.managedAgent?.endpoint?.toString(),
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -1069,6 +1164,68 @@ export function createApp(
     app.route(
       "/api/channels",
       createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
+    );
+  }
+
+  if (attachmentDatabase) {
+    /*
+     * `bodyLimit` sits in front of the upload route itself, not beside the mount below: the handler
+     * in channels/attachments.ts calls `file.arrayBuffer()` before it has looked at a single byte of
+     * size, so an unbounded body is read into memory in full before anything gets the chance to
+     * refuse it. A person (or an attacker) posting a 2GB body would have it buffered in RAM before
+     * the 413 the handler already knows how to return. `MAX_IMAGE_BYTES` is the largest thing this
+     * route could ever legitimately accept — a text upload is refused smaller, inside the handler,
+     * once the sniffed type is known — so refusing anything larger at the door costs nothing a real
+     * upload was ever going to use.
+     *
+     * The ceiling is `UPLOAD_BODY_LIMIT_BYTES` and not `MAX_IMAGE_BYTES` itself because THIS GATE
+     * MEASURES A DIFFERENT THING FROM EVERY OTHER ONE. See that constant.
+     */
+    const channelAttachments = new Hono<{ Variables: AppVariables }>();
+    channelAttachments.use(
+      "*",
+      bodyLimit({
+        maxSize: UPLOAD_BODY_LIMIT_BYTES,
+        /*
+         * THE REFUSAL AT THE DOOR HAS TO LOOK LIKE THE HANDLER'S OWN.
+         *
+         * hono's default `onError` answers with the plain string "Payload Too Large". The composer
+         * (app/src/components/channels/composer/attachments.ts) reads `{ error }` off every failed
+         * upload and falls back to a generic `Could not upload "<name>"` when the body will not
+         * parse as JSON — so the default body cost the person the one sentence that would have told
+         * them what went wrong, on the single refusal where the reason is both knowable and
+         * actionable. This is the same `{ error }` shape and the same number the handler's own 413
+         * names, so the two paths are indistinguishable from the outside.
+         *
+         * THE FILENAME AND THE KIND ARE BOTH DELIBERATELY ABSENT, and for the same reason: nothing
+         * has parsed the multipart body at this point, which is the entire reason this middleware
+         * runs ahead of the handler. The handler's sentences can say `'notes.txt' is larger than the
+         * 1MB limit for files` because by then it has sniffed the bytes. This one cannot, and must
+         * not guess — a 9MB text file refused here as being over "the 8MB limit for images" would
+         * send somebody off to shrink it to 7MB, whereupon the handler would refuse it a second time
+         * with a different number. So the sentence names the only thing that is true of every body
+         * this gate rejects: none of them can be under the largest ceiling the route has.
+         */
+        onError: (context) =>
+          context.json(
+            {
+              // The same rounding as `megabytes` in channels/attachments.ts, so the door and the
+              // handler name one limit in one voice.
+              error: `That upload is larger than the ${(MAX_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB limit.`,
+            },
+            413,
+          ),
+      }),
+    );
+    channelAttachments.route(
+      "/",
+      createChannelAttachmentRoutes(attachmentDatabase, requireUser),
+    );
+    app.route("/api/channels", channelAttachments);
+
+    app.route(
+      "/api/attachments",
+      createAttachmentRoutes(attachmentDatabase, requireUser),
     );
   }
 
@@ -1132,7 +1289,7 @@ export function createApp(
    * no person behind it. Absent secret means the route does not exist: a deployment that has not
    * configured this refuses rather than accepting anybody who can reach the port.
    */
-  if (pluginStore) {
+  if (pluginStore || deploymentToolCaller) {
     const legacyToken = config.agentToolToken ?? "";
     app.post("/api/agent-tools/call", async (context) => {
       /*
@@ -1195,18 +1352,35 @@ export function createApp(
         return context.json({ error: verdict.reason }, verdict.status);
       }
 
-      if (!body?.name) {
-        return context.json({ error: "A tool is required." }, 400);
+      const parsedCall = parseAgentToolCallInput(body);
+      if (!parsedCall.ok) {
+        return context.json({ error: parsedCall.error }, 400);
       }
 
       try {
+        const deploymentResult = await deploymentToolCaller?.({
+          name: parsedCall.value.ref,
+          args: parsedCall.value.args,
+          botId: verdict.botId,
+          actorId: verdict.actorId,
+          initiator: verdict.initiator,
+        });
+        if (deploymentResult) return context.json(deploymentResult);
+
+        if (!pluginStore) {
+          return context.json({
+            text: `${REFUSAL_MARKER} That tool is not registered in this deployment.`,
+            isError: true,
+          });
+        }
+
         const result = await pluginStore.callTool({
-          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
-          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
-          args: body.args ?? {},
+          ref: parsedCall.value.ref,
+          args: parsedCall.value.args,
           botId: verdict.botId,
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
+          ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
         });
         return context.json({ text: result.text, isError: result.isError });
       } catch (error) {

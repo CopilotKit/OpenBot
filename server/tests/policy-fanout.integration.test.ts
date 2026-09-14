@@ -7,7 +7,7 @@ import {
 } from "../src/computer/policy-store";
 import { createDatabase } from "../src/db/client";
 import { actionPolicy } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A boundary an administrator changes has to reach every server, not the one that served the request.
@@ -27,9 +27,7 @@ import { TEST_POOL } from "./support/database";
  * prove it remembers what it was told a moment ago, which was never the failure.
  */
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 
 const RULE = 'contains(element.name, "submit")';

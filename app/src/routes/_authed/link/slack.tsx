@@ -9,7 +9,7 @@ type SlackClaim = { workspace: string; user: string; email?: string };
 type SlackLinkFailure = { kind: "error"; message: string };
 type SlackLinkCompletion = ReturnType<typeof slackLinkResult>;
 type SlackLinkReauth = { kind: "reauth" };
-type SlackLinkResponse =
+export type SlackLinkResponse =
   | SlackLinkCompletion
   | SlackLinkFailure
   | SlackLinkReauth;

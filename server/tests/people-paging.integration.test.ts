@@ -3,7 +3,7 @@ import { inArray } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { sessions, users } from "../src/db/schema";
 import { createPeopleStore } from "../src/people/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The people list has to stop growing with the company.
@@ -18,11 +18,7 @@ import { TEST_POOL } from "./support/database";
  * was written to return.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const store = createPeopleStore(database, []);
 const PREFIX = "paging-test-";
@@ -41,6 +37,7 @@ async function person(
     email: `${id}@openbot.test`,
     name: name ?? `Person ${index}`,
     emailVerified: true,
+    lastSignedInAt: signedInAt,
   });
   if (signedInAt) {
     await database.insert(sessions).values({

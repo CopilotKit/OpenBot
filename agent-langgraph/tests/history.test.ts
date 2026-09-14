@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { RunAgentInput } from "@ag-ui/core";
+import {
+  AIMessage,
+  SystemMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { NO_ANSWER_CAME, toLangChainMessages } from "../src/history";
 
 /**
@@ -29,6 +33,37 @@ const assistantAsking = {
     },
   ],
 };
+
+test("passes the caller's A2UI catalog and tool instructions to the model", () => {
+  // The live failure emitted `type: "card"` instead of `component: "Card"`: the model saw the
+  // permissive render_a2ui tool schema, but this adapter had discarded its actual catalog context.
+  const catalog = JSON.stringify({
+    catalogId: "https://a2ui.org/specification/v0_9/basic_catalog.json",
+    components: {
+      Card: {
+        properties: { component: { const: "Card" }, child: { type: "string" } },
+      },
+    },
+  });
+  const instructions =
+    "Use flat components with component names from the catalog. Button actions use event.name and event.context.";
+  const run = input([
+    { role: "user", content: "Show a Trip preferences card." },
+  ]);
+  run.context = [
+    { description: "A2UI Component Schema", value: catalog },
+    { description: "A2UI render tool usage guide", value: instructions },
+  ];
+  const messages = toLangChainMessages(run);
+  const system = messages.filter((message) => message instanceof SystemMessage);
+  expect(system.map((message) => message.content)).toContain(
+    `A2UI Component Schema\n${catalog}`,
+  );
+  expect(system.map((message) => message.content)).toContain(
+    `A2UI render tool usage guide\n${instructions}`,
+  );
+  expect(messages.at(-1)?.content).toBe("Show a Trip preferences card.");
+});
 
 describe("history with a tool call nobody answered", () => {
   test("closes it, so the next turn is not rejected", () => {
@@ -102,5 +137,64 @@ describe("history with a tool call nobody answered", () => {
     );
     expect(byId.get("answered")).toBe("real");
     expect(byId.get("orphan")).toBe(NO_ANSWER_CAME);
+  });
+});
+
+/**
+ * A message somebody attached a file to.
+ *
+ * The composer sends it as a list of parts rather than a string: what the person typed, then the
+ * file. `copilot.ts` resolves the file before the run leaves the server, so a text file arrives here
+ * as a text part and an image as an `image` part carrying its bytes. `String()` of that list is
+ * `[object Object],[object Object]`, and that is what the model was sent in place of the question and
+ * the file both.
+ */
+describe("a message with a file attached", () => {
+  const typed = { type: "text", text: "How many rows say failed?" };
+  const csv = 'Attached file "runs.csv":\n\nid,status\n1,failed\n2,ok';
+
+  function userContent(content: unknown) {
+    return toLangChainMessages(input([{ role: "user", content }])).at(-1)
+      ?.content;
+  }
+
+  test("keeps what the person typed and the text of the file", () => {
+    expect(userContent([typed, { type: "text", text: csv }])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      { type: "text", text: csv },
+    ]);
+  });
+
+  test("puts an attached image in front of the model", () => {
+    const image = {
+      type: "image",
+      source: { type: "data", value: "iVBORw0KGgo=", mimeType: "image/png" },
+      metadata: { attachmentId: "a1", filename: "chart.png" },
+    };
+    expect(userContent([typed, image])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,iVBORw0KGgo=" },
+      },
+    ]);
+  });
+
+  test("names a part it cannot read rather than dropping it", () => {
+    // A model told "[audio]" can say something was attached that it cannot hear. A model handed
+    // nothing answers as though nothing was attached.
+    const audio = {
+      type: "audio",
+      source: { type: "data", value: "UklGRg==", mimeType: "audio/wav" },
+    };
+    expect(userContent([typed, audio])).toEqual([
+      { type: "text", text: "How many rows say failed?" },
+      { type: "text", text: "[audio]" },
+    ]);
+  });
+
+  test("sends a message that is only text exactly as it was typed", () => {
+    // Nearly every message. Unchanged by this, and pinned so it stays that way.
+    expect(userContent("What is 17 times 3?")).toBe("What is 17 times 3?");
   });
 });

@@ -7,12 +7,15 @@
 //! **Windows cannot do this from a service.** `podman machine init` shells out to `wsl.exe`, and WSL
 //! refuses to run as LocalSystem: `Wsl/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`. Meanwhile `wsl --install`
 //! needs elevation. So the two halves run in different contexts, and the elevated half is the only
-//! part that may be handed to a helper. See `windows.rs`.
+//! part that may be handed to a helper. See `windows.rs`. Fetching and installing Podman itself is
+//! `install.rs`.
 
-use crate::quiet::{command, said as command_said};
+use crate::quiet::said as command_said;
+use std::net::Ipv4Addr;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::engine::{Address, Engine};
 
@@ -20,21 +23,53 @@ use crate::engine::{Address, Engine};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Step {
-    /// Not used. Installing an engine is designed and not built: nothing here downloads Podman,
-    /// and the screens no longer say it does. Kept so the sequence a person is shown reads the
-    /// same when it is.
-    InstallEngine,
     CreateMachine,
     StartMachine,
     HealthGate,
 }
 
+/// How a step went, in both registers when it went badly.
+///
+/// Two fields and not one for the reason `problem.rs` gives: `podman machine init` failing is
+/// exactly the case where the engine's own output was put in front of somebody as the headline.
+/// The row shows `said`; `detail` is the output, kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepOutcome {
     pub step: Step,
     pub ok: bool,
-    /// What to do about it, where there is something to do.
-    pub detail: String,
+    /// The sentence for the step row, and for the failure when there is one.
+    pub said: String,
+    /// What the command actually said, where a command said anything.
+    pub detail: Option<String>,
+}
+
+impl StepOutcome {
+    fn went(step: Step, said: impl Into<String>) -> Self {
+        Self {
+            step,
+            ok: true,
+            said: said.into(),
+            detail: None,
+        }
+    }
+
+    /// A failed step, with the engine's own words kept behind the sentence.
+    fn stopped(step: Step, output: &str) -> Self {
+        let problem = crate::problem::Problem::with(explain_machine_error(output), output);
+        Self {
+            step,
+            ok: false,
+            said: problem.said,
+            detail: problem.detail,
+        }
+    }
+
+    /// This step's failure, for a caller that has to return one.
+    pub fn problem(&self) -> crate::problem::Problem {
+        let mut problem = crate::problem::Problem::plain(self.said.clone());
+        problem.detail = self.detail.clone();
+        problem
+    }
 }
 
 /// The name of the machine this app owns.
@@ -44,20 +79,57 @@ pub struct StepOutcome {
 /// offered.
 pub const MACHINE: &str = "openbot";
 
+const USER_MODE_NETWORKING_FLAG: &str = "--user-mode-networking=true";
+const HOST_GATEWAY_CONFIG: &str = ".config/containers/containers.conf.d/90-openbot-host.conf";
+
 fn podman(args: &[&str]) -> Result<String, String> {
-    let output = command("podman")
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run podman: {error}"))?;
+    podman_with(args, || {
+        crate::engine::tool(Engine::Podman).args(args).output()
+    })
+}
+
+fn podman_with(
+    args: &[&str],
+    run: impl FnOnce() -> std::io::Result<std::process::Output>,
+) -> Result<String, String> {
+    // Resolved, not named: right after OpenBot installs it, `podman` is not yet on this process's
+    // PATH. See the PATH rule in `engine.rs`.
+    let output = run().map_err(|error| format!("could not run podman: {error}"))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
-    Err(command_said(&output.stderr))
+    Err(command_failure("podman", args, &output))
+}
+
+fn command_failure(binary: &str, args: &[&str], output: &std::process::Output) -> String {
+    let status = output.status.code().map_or_else(
+        || "terminated by signal".to_string(),
+        |code| code.to_string(),
+    );
+    let stdout = command_said(&output.stdout);
+    let stderr = command_said(&output.stderr);
+    let command = std::iter::once(binary)
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (true, true) => format!("{command} exited with status {status}"),
+        (false, true) => format!("{command} exited with status {status}; stdout: {stdout}"),
+        (true, false) => format!("{command} exited with status {status}; stderr: {stderr}"),
+        (false, false) => {
+            format!("{command} exited with status {status}; stdout: {stdout}; stderr: {stderr}")
+        }
+    }
+}
+
+fn machine_exists_with(run: impl FnOnce() -> Result<String, String>) -> Result<bool, String> {
+    let names = run()?;
+    Ok(names.lines().any(|name| name.trim() == MACHINE))
 }
 
 /// Does this app's machine already exist?
-pub fn machine_exists() -> bool {
-    podman(&["machine", "inspect", MACHINE]).is_ok()
+pub fn machine_exists() -> Result<bool, String> {
+    machine_exists_with(|| podman(&["machine", "list", "--quiet"]))
 }
 
 /// Create the machine.
@@ -66,55 +138,210 @@ pub fn machine_exists() -> bool {
 /// asks for what you already get. The libkrun bind-mount trouble that the pin was written for
 /// belonged to 5.7, where libkrun was the default.
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
-    if machine_exists() {
-        return StepOutcome {
-            step: Step::CreateMachine,
-            ok: true,
-            detail: format!("{MACHINE} already exists."),
-        };
+    create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
+}
+
+fn create_machine_with(
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    exists: impl FnOnce() -> Result<bool, String>,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> StepOutcome {
+    match exists() {
+        Ok(true) => {
+            return StepOutcome::went(Step::CreateMachine, format!("{MACHINE} already exists."));
+        }
+        Ok(false) => {}
+        Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    match podman(&[
-        "machine",
-        "init",
-        MACHINE,
-        "--cpus",
-        &cpus.to_string(),
-        "--memory",
-        &memory_mib.to_string(),
-        "--disk-size",
-        &disk_gib.to_string(),
-    ]) {
-        Ok(_) => StepOutcome {
-            step: Step::CreateMachine,
-            ok: true,
-            detail: format!("{MACHINE} created."),
-        },
-        Err(error) => StepOutcome {
-            step: Step::CreateMachine,
-            ok: false,
-            detail: explain_machine_error(&error),
-        },
+    let args = create_machine_args(cpus, memory_mib, disk_gib, cfg!(target_os = "windows"));
+    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    match run(&refs) {
+        Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
+        Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
     }
 }
 
-pub fn start_machine() -> StepOutcome {
-    match podman(&["machine", "start", MACHINE]) {
-        Ok(_) => StepOutcome {
-            step: Step::StartMachine,
-            ok: true,
-            detail: format!("{MACHINE} started."),
-        },
-        Err(error) if error.contains("already running") => StepOutcome {
-            step: Step::StartMachine,
-            ok: true,
-            detail: format!("{MACHINE} was already running."),
-        },
-        Err(error) => StepOutcome {
-            step: Step::StartMachine,
-            ok: false,
-            detail: explain_machine_error(&error),
-        },
+fn create_machine_args(
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    target_is_windows: bool,
+) -> Vec<String> {
+    let mut args = vec![
+        "machine".to_string(),
+        "init".to_string(),
+        MACHINE.to_string(),
+        "--cpus".to_string(),
+        cpus.to_string(),
+        "--memory".to_string(),
+        memory_mib.to_string(),
+        "--disk-size".to_string(),
+        disk_gib.to_string(),
+    ];
+    if target_is_windows {
+        args.push(USER_MODE_NETWORKING_FLAG.to_string());
     }
+    args
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct MachineNetworking {
+    state: String,
+    user_mode: bool,
+}
+
+fn prepare_user_mode_networking_before_start(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+) -> Result<(), String> {
+    if !target_is_windows {
+        return Ok(());
+    }
+
+    let listing = run(&["machine", "inspect", MACHINE])?;
+    let networking = owned_machine_networking(&listing)?;
+    if networking.state.eq_ignore_ascii_case("running") && !networking.user_mode {
+        return Err(format!(
+            "{MACHINE} is already running without Podman user-mode networking. Stop the OpenBot engine machine and start OpenBot again so host callbacks can be configured."
+        ));
+    }
+    if networking.state.eq_ignore_ascii_case("stopped") && !networking.user_mode {
+        run(&["machine", "set", USER_MODE_NETWORKING_FLAG, MACHINE])?;
+    }
+    Ok(())
+}
+
+fn owned_machine_networking(listing: &str) -> Result<MachineNetworking, String> {
+    let machines: Vec<Value> = serde_json::from_str(listing)
+        .map_err(|error| format!("could not inspect {MACHINE} networking: {error}"))?;
+    let machine = machines
+        .iter()
+        .find(|machine| machine.get("Name").and_then(Value::as_str) == Some(MACHINE))
+        .ok_or_else(|| format!("podman machine inspect did not return {MACHINE}"))?;
+    let state = machine
+        .get("State")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("podman machine inspect did not include {MACHINE} state"))?
+        .to_string();
+    let user_mode = machine
+        .get("UserModeNetworking")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            format!("podman machine inspect did not include {MACHINE} user-mode networking")
+        })?;
+    Ok(MachineNetworking { state, user_mode })
+}
+
+fn configure_host_gateway_after_start(
+    run: &mut impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+) -> Result<(), String> {
+    if !target_is_windows {
+        return Ok(());
+    }
+
+    let resolved = run(&[
+        "machine",
+        "ssh",
+        MACHINE,
+        "getent",
+        "ahostsv4",
+        "host.containers.internal",
+    ])?;
+    let ip = first_valid_host_gateway_ip(&resolved)?;
+    let script = host_gateway_config_script(ip);
+    run(&["machine", "ssh", MACHINE, &script]).map(|_| ())
+}
+
+fn configure_owned_windows_podman_for_compose(
+    address: &Address,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+) -> Result<(), String> {
+    if !owned_windows_podman_address(address, target_is_windows) {
+        return Ok(());
+    }
+    let listing = run(&["machine", "inspect", MACHINE])?;
+    let networking = owned_machine_networking(&listing)?;
+    if !networking.user_mode {
+        return Err(format!(
+            "{MACHINE} is running without Podman user-mode networking. Stop the OpenBot engine machine and start OpenBot again so host callbacks can be configured."
+        ));
+    }
+    configure_host_gateway_after_start(&mut run, true)
+}
+
+/// Run before Compose even when an existing engine skipped the install/start steps.
+pub fn prepare_for_compose(address: &Address) -> Result<(), String> {
+    configure_owned_windows_podman_for_compose(address, podman, cfg!(target_os = "windows"))
+}
+
+fn owned_windows_podman_address(address: &Address, target_is_windows: bool) -> bool {
+    target_is_windows
+        && address.engine == Engine::Podman
+        && address.connection.as_deref() == Some(MACHINE)
+}
+
+fn first_valid_host_gateway_ip(raw: &str) -> Result<Ipv4Addr, String> {
+    for field in raw.split_whitespace() {
+        if let Ok(ip) = field.parse::<Ipv4Addr>() {
+            return validate_host_gateway_ip(ip);
+        }
+    }
+    Err(format!(
+        "could not resolve host.containers.internal in the {MACHINE} VM as IPv4"
+    ))
+}
+
+fn validate_host_gateway_ip(ip: Ipv4Addr) -> Result<Ipv4Addr, String> {
+    if ip.is_unspecified() || ip.is_loopback() {
+        return Err(format!(
+            "resolved host.containers.internal in the {MACHINE} VM to unusable address {ip}"
+        ));
+    }
+    Ok(ip)
+}
+
+fn host_gateway_config_script(ip: Ipv4Addr) -> String {
+    format!(
+        "set -e; \
+         mkdir -p \"$HOME/.config/containers/containers.conf.d\"; \
+         target=\"$HOME/{HOST_GATEWAY_CONFIG}\"; \
+         tmp=\"$target.tmp\"; \
+         cat > \"$tmp\" <<'EOF'\n[containers]\nhost_containers_internal_ip=\"{ip}\"\nEOF\n\
+         if [ -f \"$target\" ] && cmp -s \"$tmp\" \"$target\"; then \
+           rm \"$tmp\"; \
+         else \
+           mv \"$tmp\" \"$target\"; \
+           systemctl --user try-restart podman.service; \
+         fi"
+    )
+}
+
+fn start_machine_with(
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+    target_is_windows: bool,
+) -> StepOutcome {
+    if let Err(error) = prepare_user_mode_networking_before_start(&mut run, target_is_windows) {
+        return StepOutcome::stopped(Step::StartMachine, &error);
+    }
+    let started = match run(&["machine", "start", MACHINE]) {
+        Ok(_) => format!("{MACHINE} started."),
+        Err(error) if error.contains("already running") => {
+            format!("{MACHINE} was already running.")
+        }
+        Err(error) => return StepOutcome::stopped(Step::StartMachine, &error),
+    };
+    if let Err(error) = configure_host_gateway_after_start(&mut run, target_is_windows) {
+        return StepOutcome::stopped(Step::StartMachine, &error);
+    }
+    StepOutcome::went(Step::StartMachine, started)
+}
+
+pub fn start_machine() -> StepOutcome {
+    start_machine_with(podman, cfg!(target_os = "windows"))
 }
 
 /// Turn Podman's own words into an instruction, where we know one.
@@ -159,35 +386,50 @@ pub fn health_gate(address: &Address) -> StepOutcome {
         .output();
     match output {
         Ok(out) if out.status.success() && !out.stdout.is_empty() => {
+            if let Err(error) = configure_owned_windows_podman_for_compose(
+                address,
+                podman,
+                cfg!(target_os = "windows"),
+            ) {
+                return StepOutcome::stopped(Step::HealthGate, &error);
+            }
             // An engine that answers is not an engine that can raise the stack. Asked here, where
             // there is a sentence to put it in, rather than left to Compose to discover.
             if !address.composes() {
                 return StepOutcome {
                     step: Step::HealthGate,
                     ok: false,
-                    detail: missing_compose(binary),
+                    said: missing_compose(binary),
+                    detail: None,
                 };
             }
-            StepOutcome {
-                step: Step::HealthGate,
-                ok: true,
-                detail: format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
-            }
+            StepOutcome::went(
+                Step::HealthGate,
+                format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
+            )
         }
-        Ok(out) => StepOutcome {
-            step: Step::HealthGate,
-            ok: false,
-            detail: format!("{binary} did not answer: {}", command_said(&out.stderr)),
-        },
-        Err(error) => StepOutcome {
-            step: Step::HealthGate,
-            ok: false,
-            detail: format!("{binary} could not be run: {error}"),
-        },
+        // The engine ran and refused. Its words are the evidence, and the sentence in front of
+        // them is chosen from what they say.
+        Ok(out) => StepOutcome::stopped(
+            Step::HealthGate,
+            &command_failure(
+                binary,
+                &["version", "--format", "{{.Server.APIVersion}}"],
+                &out,
+            ),
+        ),
+        Err(error) => StepOutcome::stopped(
+            Step::HealthGate,
+            &format!("{binary} could not be run: {error}"),
+        ),
     }
 }
 
 /// What to install, named, rather than seven errors about a file that is not there.
+///
+/// A last resort, not the plan: OpenBot installs a Compose provider itself, so somebody only reads
+/// this when that copy is missing or is not being found. The restart comes first for that reason,
+/// and the platform's own instruction is behind it.
 ///
 /// Compose v2 rather than `podman-compose`: v2 is what the stack was tested against, and it is what
 /// reads the healthchecks and `depends_on` conditions in `docker-compose.yml`. `podman-compose` is
@@ -207,7 +449,11 @@ pub fn missing_compose(binary: &str) -> String {
         "Install Compose v2: `brew install docker-compose`, or install Docker Desktop, and make \
          sure `docker-compose` is on PATH."
     };
-    format!("{binary} is answering, but it has no Compose to run the stack with. {install}")
+    format!(
+        "{binary} is answering, but it has no Compose to run the stack with, and OpenBot's own \
+         copy of one is not being found. Restart OpenBot and try again. If this comes back: \
+         {install}"
+    )
 }
 
 /// Where a downloaded installer is kept, so a failed run can be retried without downloading again.
@@ -218,6 +464,8 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::test_support::temp_root;
 
     /// Whatever platform the tests run on, the sentence must not send somebody to a tool that
     /// platform does not have. Windows measured this the hard way: the generic wording named a
@@ -250,6 +498,404 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn output(status: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(status << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    fn machine_inspect(state: &str, user_mode: bool) -> String {
+        serde_json::json!([
+            {
+                "Name": "openbot",
+                "State": state,
+                "UserModeNetworking": user_mode
+            }
+        ])
+        .to_string()
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_podman_commands_keep_status_stdout_and_stderr() {
+        let failure = podman_with(&["machine", "inspect", MACHINE], || {
+            Ok(output(125, "stdout diagnostic", "stderr diagnostic"))
+        })
+        .expect_err("nonzero podman must fail");
+
+        assert!(
+            failure.contains("podman machine inspect openbot"),
+            "{failure}"
+        );
+        assert!(failure.contains("status 125"), "{failure}");
+        assert!(failure.contains("stdout: stdout diagnostic"), "{failure}");
+        assert!(failure.contains("stderr: stderr diagnostic"), "{failure}");
+    }
+
+    #[test]
+    fn machine_existence_uses_the_quiet_machine_list_names() {
+        assert!(machine_exists_with(|| Ok("default\nopenbot\n".into())).unwrap());
+        assert!(!machine_exists_with(|| Ok("default\nopenbot-old\n".into())).unwrap());
+    }
+
+    #[test]
+    fn machine_list_failures_stop_create_before_init() {
+        let mut init_called = false;
+        let result = create_machine_with(
+            2,
+            4096,
+            20,
+            || Err("podman machine list exited with status 125; stdout: denied".into()),
+            |_args| {
+                init_called = true;
+                Ok(String::new())
+            },
+        );
+
+        assert!(!init_called, "machine init must not run after list failure");
+        assert!(!result.ok);
+        assert_eq!(result.step, Step::CreateMachine);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("stdout: denied")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn absent_machine_creates_with_requested_resources() {
+        let mut captured = Vec::new();
+        let result = create_machine_with(
+            4,
+            8192,
+            64,
+            || Ok(false),
+            |args| {
+                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                Ok(String::new())
+            },
+        );
+
+        assert!(result.ok, "{result:?}");
+        assert_eq!(
+            captured,
+            create_machine_args(4, 8192, 64, cfg!(target_os = "windows"))
+        );
+    }
+
+    #[test]
+    fn windows_machine_init_enables_user_mode_networking() {
+        assert_eq!(
+            create_machine_args(4, 8192, 64, true),
+            [
+                "machine",
+                "init",
+                "openbot",
+                "--cpus",
+                "4",
+                "--memory",
+                "8192",
+                "--disk-size",
+                "64",
+                "--user-mode-networking=true"
+            ]
+        );
+    }
+
+    #[test]
+    fn existing_stopped_windows_machine_is_configured_before_start() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = machine_inspect("stopped", false);
+
+        prepare_user_mode_networking_before_start(
+            &mut |args: &[&str]| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                if args == ["machine", "inspect", "openbot"] {
+                    return Ok(inspect.clone());
+                }
+                Ok(String::new())
+            },
+            true,
+        )
+        .expect("stopped owned machine should be configurable");
+
+        assert_eq!(
+            calls,
+            [
+                vec!["machine", "inspect", "openbot"],
+                vec!["machine", "set", "--user-mode-networking=true", "openbot"]
+            ]
+        );
+    }
+
+    #[test]
+    fn running_windows_machine_without_user_mode_fails_loud() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = machine_inspect("running", false);
+
+        let error = prepare_user_mode_networking_before_start(
+            &mut |args| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                Ok(inspect.clone())
+            },
+            true,
+        )
+        .expect_err("running machines without user-mode networking must not be treated as fixed");
+
+        assert_eq!(calls, [vec!["machine", "inspect", "openbot"]]);
+        assert!(
+            error.contains("without Podman user-mode networking"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn malformed_machine_inspect_fails_loud() {
+        let error = owned_machine_networking("not json")
+            .expect_err("new networking inspection must not ignore malformed output");
+
+        assert!(
+            error.contains("could not inspect openbot networking"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn non_windows_start_does_not_probe_podman_machine_networking() {
+        let mut called = false;
+
+        prepare_user_mode_networking_before_start(
+            &mut |_args| {
+                called = true;
+                Ok(String::new())
+            },
+            false,
+        )
+        .expect("non-Windows should not run the Windows-only networking fix");
+
+        assert!(!called);
+    }
+
+    #[test]
+    fn windows_start_writes_host_gateway_config_from_vm_resolution() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = machine_inspect("stopped", false);
+
+        let result = start_machine_with(
+            |args| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                    ["machine", "set", "--user-mode-networking=true", "openbot"] => {
+                        Ok(String::new())
+                    }
+                    ["machine", "start", "openbot"] => Ok(String::new()),
+                    ["machine", "ssh", "openbot", "getent", "ahostsv4", "host.containers.internal"] => {
+                        Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                    }
+                    ["machine", "ssh", "openbot", script]
+                        if script.contains("host_containers_internal_ip=\"192.168.127.254\"") =>
+                    {
+                        Ok(String::new())
+                    }
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+        );
+
+        assert!(result.ok, "{result:?}");
+        assert_eq!(result.said, "openbot started.");
+        assert_eq!(
+            calls,
+            vec![
+                vec!["machine", "inspect", "openbot"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["machine", "set", "--user-mode-networking=true", "openbot"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+                vec!["machine", "start", "openbot"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+                vec![
+                    "machine",
+                    "ssh",
+                    "openbot",
+                    "getent",
+                    "ahostsv4",
+                    "host.containers.internal",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+                vec![
+                    "machine".to_string(),
+                    "ssh".to_string(),
+                    "openbot".to_string(),
+                    host_gateway_config_script("192.168.127.254".parse().unwrap()),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn owned_windows_podman_health_gate_writes_host_gateway_config() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let inspect = machine_inspect("running", true);
+
+        configure_owned_windows_podman_for_compose(
+            &Address::new(Engine::Podman, Some("openbot".into())),
+            |args| {
+                calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                match args {
+                    ["machine", "inspect", "openbot"] => Ok(inspect.clone()),
+                    ["machine", "ssh", "openbot", "getent", "ahostsv4", "host.containers.internal"] => {
+                        Ok("192.168.127.254 STREAM host.containers.internal\n".into())
+                    }
+                    ["machine", "ssh", "openbot", script]
+                        if script.contains("host_containers_internal_ip=\"192.168.127.254\"") =>
+                    {
+                        Ok(String::new())
+                    }
+                    _ => Err(format!("unexpected args: {args:?}")),
+                }
+            },
+            true,
+        )
+        .expect("owned Windows Podman health gate should prepare host-gateway config");
+
+        assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn borrowed_podman_machine_health_gate_is_not_reconfigured() {
+        let mut called = false;
+
+        configure_owned_windows_podman_for_compose(
+            &Address::new(Engine::Podman, Some("somebody-else".into())),
+            |_args| {
+                called = true;
+                Ok(String::new())
+            },
+            true,
+        )
+        .expect("borrowed Podman machines are outside OpenBot's provisioning scope");
+
+        assert!(!called);
+    }
+
+    #[test]
+    fn loopback_host_gateway_resolution_is_rejected() {
+        let error = validate_host_gateway_ip("127.0.0.1".parse().unwrap())
+            .expect_err("loopback cannot be the container route to the Windows host");
+
+        assert!(error.contains("unusable address"), "{error}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn joined_podman_ssh_write_command_restarts_api_only_when_config_changes() {
+        let root = temp_root("openbot-host-gateway-home");
+        let home = root.join("home");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let calls = root.join("systemctl-calls");
+        let fake_systemctl = bin.join("systemctl");
+        std::fs::write(
+            &fake_systemctl,
+            format!("#!/bin/sh\nprintf '%s\n' \"$*\" >> '{}'\n", calls.display()),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_systemctl, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let command = host_gateway_config_script("192.168.127.254".parse().unwrap());
+        let joined_remote_command = [command.as_str()].join(" ");
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+
+        for _ in 0..2 {
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&joined_remote_command)
+                .env("HOME", &home)
+                .env("PATH", &path)
+                .status()
+                .expect("execute joined remote command under sh");
+
+            assert!(status.success(), "joined command failed: {status}");
+        }
+
+        let written = std::fs::read_to_string(home.join(HOST_GATEWAY_CONFIG)).unwrap();
+        assert_eq!(
+            written,
+            "[containers]\nhost_containers_internal_ip=\"192.168.127.254\"\n"
+        );
+        let systemctl_calls = std::fs::read_to_string(&calls).unwrap();
+        assert_eq!(systemctl_calls, "--user try-restart podman.service\n");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_health_gate_detail_keeps_stdout_as_well_as_stderr() {
+        let detail = command_failure(
+            "podman",
+            &["version", "--format", "{{.Server.APIVersion}}"],
+            &output(77, "server says no", "stderr says why"),
+        );
+
+        assert!(detail.contains("status 77"), "{detail}");
+        assert!(detail.contains("stdout: server says no"), "{detail}");
+        assert!(detail.contains("stderr: stderr says why"), "{detail}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_podman_process_boundary_keeps_stdout_stderr_and_status() {
+        let dir = temp_root("podman-process-proof");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("podman");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho stdout-from-podman\necho stderr-from-podman >&2\nexit 42\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let failure = podman_with(&["machine", "list", "--quiet"], || {
+            std::process::Command::new(&fake)
+                .args(["machine", "list", "--quiet"])
+                .output()
+        })
+        .expect_err("fake podman exits nonzero");
+
+        assert!(failure.contains("podman machine list --quiet"), "{failure}");
+        assert!(failure.contains("status 42"), "{failure}");
+        assert!(failure.contains("stdout: stdout-from-podman"), "{failure}");
+        assert!(failure.contains("stderr: stderr-from-podman"), "{failure}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn the_machine_this_app_starts_is_addressed_by_name_not_by_the_default_connection() {
         let addressed = address();
@@ -280,6 +926,25 @@ mod tests {
             explained.contains("restart"),
             "did not mention the restart: {explained}"
         );
+    }
+
+    /// A step that stopped keeps the engine's words, and does not make them the headline. This is
+    /// the case that put "exit status 0xffffffff" in front of somebody as the whole message.
+    #[test]
+    fn a_step_that_stopped_carries_both_registers() {
+        let stopped = StepOutcome::stopped(Step::CreateMachine, "exit status 0xffffffff");
+        assert!(!stopped.ok);
+        assert_eq!(stopped.detail.as_deref(), Some("exit status 0xffffffff"));
+        assert_eq!(stopped.problem().detail, stopped.detail);
+        assert_eq!(stopped.problem().said, stopped.said);
+    }
+
+    /// A step that worked has nothing behind it, because there is no failure to explain.
+    #[test]
+    fn a_step_that_worked_has_no_output_hidden_behind_it() {
+        let went = StepOutcome::went(Step::StartMachine, "openbot started.");
+        assert!(went.ok);
+        assert_eq!(went.detail, None);
     }
 
     #[test]

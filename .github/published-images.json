@@ -1,1 +1,19 @@
-["agent-computer", "supervisor", "agent-bot", "agent-langgraph", "server"]
+[
+  "agent-computer",
+  "supervisor",
+  "agent-bot",
+  "agent-langgraph",
+  "server",
+  "agent-crewai",
+  "agent-llamaindex",
+  "agent-agno",
+  "agent-langgraph-agui",
+  "agent-adk",
+  "agent-pydantic-ai",
+  "agent-microsoft",
+  "agent-claude-sdk",
+  "agent-strands",
+  "agent-ag2",
+  "agent-langroid",
+  "agent-mastra"
+]

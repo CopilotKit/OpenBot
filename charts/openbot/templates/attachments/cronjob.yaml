@@ -1,0 +1,202 @@
+{{- if eq (include "openbot.attachmentsCullerEnabled" .) "true" }}
+{{- $component := "attachments-culler" -}}
+{{/*
+Deleting attachments somebody staged and then never sent.
+
+A CronJob rather than a timer in the API, for the same reason the routines sweep and the computer
+culler beside it are: an interval in the server fires in every replica, so five replicas would each
+run the same delete. Unlike the computer culler this needs no lease and no claimed-by-this-pod
+bookkeeping — deleting a staged attachment twice is harmless, because the second sweep finds nothing
+left to delete. `attachedAt` is set the moment an attachment is actually sent, so a null attachment
+old enough that the tab is long closed is not spoken for by anything and is safe to delete.
+
+`concurrencyPolicy: Forbid` on top, because a schedule that overlaps itself is the cross-replica
+problem in one workload rather than across several.
+
+EVERY VALUE BELOW IS READ THROUGH `$culler`, which is `attachments.culler` with both levels made
+safe, for the reason `openbot.attachmentsCullerEnabled` gives: `--reuse-values` leaves the whole map
+absent on an existing release, and one parenthesis only covers one level of it.
+*/}}
+{{- $culler := (.Values.attachments | default dict).culler | default dict -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  {{- /* Fifty-two characters, not sixty-three; see `openbot.cronJobName`. */}}
+  name: {{ include "openbot.cronJobName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  {{- $schedule := "0 * * * *" -}}
+  {{- if not (kindIs "invalid" $culler.schedule) -}}
+  {{- $schedule = $culler.schedule -}}
+  {{- end }}
+  {{- /*
+    WHAT THE `kindIs "invalid"` GUARD ABOVE DOES NOT CATCH, checked here rather than left to the API
+    server.
+
+    That guard exists to tell an ABSENT value from a set one, because `--reuse-values` leaves a key
+    this release adds absent and `| default` would substitute on empty as well. It does its job: an
+    empty string is set, so it is taken. And an empty schedule is not a CronJob that runs on some
+    default — the API server refuses the object outright ("empty spec.schedule"), so the whole
+    release fails to apply, some way past the point where anybody is still reading values.
+
+    Refused here instead, naming the value, in keeping with `templates/validation.yaml`: an install
+    that stops and says which key is wrong beats one that stops with a schema error about an object
+    nobody hand-wrote. It lives in this template rather than in that one because the value only
+    matters when this CronJob is rendered at all — a deployment with the culler switched off should
+    not be blocked by a schedule it will never use.
+  */}}
+  {{- if not (trim (toString $schedule)) }}
+  {{- fail "attachments.culler.schedule is empty, and an empty schedule is not a default — Kubernetes rejects the CronJob and the release fails to apply. Remove the key to get the hourly default, or set a cron expression such as \"0 * * * *\"." }}
+  {{- end }}
+  # The fallback matches values.yaml. Hourly rather than the five-minute schedule the other two
+  # CronJobs use: nothing here is time-sensitive the way a due routine or an idle browser is, and the
+  # retention window below is measured in hours, not minutes.
+  schedule: {{ $schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      {{- /*
+        A CEILING ON ONE SWEEP, because `Forbid` above turns a hung one into a permanent stop.
+
+        Without it a wedged run is never killed, so Forbid suppresses every later sweep and staged
+        attachments accumulate for good, with only a Running job as evidence.
+
+        SETTABLE, though a backlog no longer needs it to be raised. The sweep deletes in bounded
+        batches, each its own transaction, so a run this ceiling kills has still reclaimed every
+        batch it committed and the next run starts from there — a deployment arriving with a month
+        of abandoned uploads drains over several sweeps rather than rolling back the same doomed
+        statement every hour. Raising it just makes that take fewer runs.
+
+        Defaulted through `kindIs "invalid"` rather than `| default`, because sprig substitutes on
+        EMPTY and zero is empty, and because `--reuse-values` leaves a key this release adds absent.
+      */}}
+      {{- $deadline := 300 -}}
+      {{- if not (kindIs "invalid" $culler.activeDeadlineSeconds) -}}
+      {{- $deadline = $culler.activeDeadlineSeconds -}}
+      {{- end }}
+      {{- /*
+        AND ZERO IS THE ONE VALUE THE GUARD ABOVE WAS WRITTEN FOR AND STILL LETS THROUGH.
+
+        `kindIs "invalid"` is there because zero is empty to sprig and `| default` would replace it.
+        It keeps a deliberate zero — and a deliberate zero is the worst number in this field.
+        Kubernetes validates `activeDeadlineSeconds` as merely non-negative, so the object applies
+        cleanly; the Job controller then compares the run's age against it and finds every run,
+        at every age, already over. Each hourly Job is killed as `DeadlineExceeded` before it
+        deletes a row, `backoffLimit: 1` retires it, and the sweep stops — with a green install, a
+        CronJob that is plainly scheduled, and Jobs that are plainly being created. Nothing here
+        looks broken except that `attachments` never gets smaller.
+
+        Refused rather than rounded up to something, because a ceiling is the operator's call and a
+        chart that quietly substituted its own would be lying about a number they set on purpose.
+
+        A fraction is refused for the reason a reader will not guess: the field is an integer, so
+        `0.5` renders `activeDeadlineSeconds: 0.5` and the API server rejects the whole object on a
+        type error. Comparing the value with its own integer conversion is what catches that.
+      */}}
+      {{- $deadlineSeconds := int64 $deadline -}}
+      {{- if or (le $deadlineSeconds 0) (ne (printf "%v" $deadline) (printf "%v" $deadlineSeconds)) }}
+      {{- fail (printf "attachments.culler.activeDeadlineSeconds must be a whole number of seconds of at least 1; got %v. Zero is accepted by Kubernetes and then kills every sweep as DeadlineExceeded before it deletes anything, which stops the culler without anything looking broken." $deadline) }}
+      {{- end }}
+      activeDeadlineSeconds: {{ $deadlineSeconds }}
+      template:
+        metadata:
+          labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 12 }}
+            {{- if .Values.postgresql.enabled }}
+            {{- /*
+              The bundled database admits pods carrying this label and nothing else, which this chart pins on.
+              Anything that opens the database needs it, and only the API server had it: this would have been
+              refused on any cluster that actually enforces a NetworkPolicy. Not caught by hand, because the
+              cluster it was driven on ships enforcement switched off.
+            */}}
+            {{ .Release.Name }}-postgresql-client: "true"
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "openbot.serviceAccountName" . }}
+          {{- /* This sweep only opens the database; it never asks the cluster for anything, so it gets no token. */}}
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          containers:
+            - name: attachments-culler
+              image: {{ include "openbot.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              workingDir: /app/server
+              {{- $olderThanHours := 24 -}}
+              {{- if not (kindIs "invalid" $culler.olderThanHours) -}}
+              {{- $olderThanHours = $culler.olderThanHours -}}
+              {{- end }}
+              {{- /*
+                A WINDOW THE SCRIPT ITSELF REFUSES, caught before it is handed to it.
+
+                `scripts/cull-staged-attachments.ts` throws on an argument that is not a positive
+                number, because a window of zero or less is "delete staged attachments that are
+                newer than now" — either nothing, or a request to take a file out from under the
+                composer that is still holding it. Rendered into this command it becomes an hourly
+                Job that exits non-zero on its first line, retried once and recorded as failed, for
+                as long as the release stands: a crash loop measured in days, whose message is in a
+                log nobody has opened, about a value sitting in plain sight in the values file.
+
+                `float64`, NOT `int64`, because fractions are meant here: `0.5` is thirty minutes,
+                the script builds its cutoff by multiplying an interval precisely so that works, and
+                there is a test that a half-hour window means thirty minutes. Only the sign is
+                wrong, so only the sign is checked.
+              */}}
+              {{- if le (float64 $olderThanHours) 0.0 }}
+              {{- fail (printf "attachments.culler.olderThanHours must be greater than 0; got %v. The sweep refuses a window that is not a positive number of hours, so this renders a CronJob that fails on every run. A fraction is allowed and means a fraction of an hour: 0.5 is thirty minutes." $olderThanHours) }}
+              {{- end }}
+              command: ["/usr/local/bin/bun", "scripts/cull-staged-attachments.ts", {{ $olderThanHours | quote }}]
+              {{- /*
+                NOT `openbot.commonEnv`, WHICH IS THE API SERVER'S ENVIRONMENT.
+
+                This pod deletes rows from one table. Through the shared helper it also carried the
+                licence token, the model API key, the computer token, the managed-Bot token and the
+                worker's shared secret — five credentials for a workload that opens a database
+                connection and closes it, in the pod with the least reason of any to hold them.
+
+                AND THEN, FOR A WHILE, IT CARRIED FIVE OTHERS. What replaced the helper was not the
+                sweep's needs but `loadConfig`'s boot contract: the script built the whole
+                `DeploymentConfig` before deleting anything, and that refuses to return without the
+                encryption key, the three Intelligence addressing values and a complete identity
+                provider — so this block held `KEY_ENCRYPTION_KEY`, the Intelligence API key, an
+                OAuth client secret and the session-signing secret purely to keep a `DELETE` from
+                dying at start-up. The narrow fix was named here and has now landed one directory
+                away: `server/scripts/cull-staged-attachments.ts` reads `DATABASE_URL` itself, the
+                way `scripts/migrate.ts` always has. What is below is what the sweep uses.
+
+                A variable added to `loadConfig`'s required set therefore no longer has to be added
+                here. If this CronJob ever starts crash-looping while the API server is healthy, the
+                cause is that script reaching for the deployment config again, and the answer is
+                there rather than another secret in this list.
+              */}}
+              env:
+{{ include "openbot.databaseUrlEnv" . | indent 16 }}
+                {{- /*
+                  Neither of these is required by the sweep. They are what any container of this
+                  image is run with, and `LOG_LEVEL` is the operator's own setting for it.
+                */}}
+                - name: NODE_ENV
+                  value: production
+                {{- if .Values.config.logLevel }}
+                - name: LOG_LEVEL
+                  value: {{ .Values.config.logLevel | quote }}
+                {{- end }}
+                {{- /* The operator's own environment, last so it wins, as it does on the server. */}}
+                {{- with .Values.config.extraEnv }}
+{{ toYaml . | indent 16 }}
+                {{- end }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+{{- end }}

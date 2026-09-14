@@ -2,10 +2,15 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
+import { createAgentProfileStore } from "../src/agents/profile-store";
+import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  channelAgents,
+  channelMemberships,
+  channels,
   deploymentPackages,
   pluginGrants,
   skills as skillsTable,
@@ -21,19 +26,19 @@ import {
   validateTenantPackage,
   validateThemeCss,
 } from "../src/tenant-package";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const createdAgentIds: string[] = [];
+const createdChannelIds: string[] = [];
 const createdPackageIds: string[] = [];
 const createdTenantIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
+  for (const channelId of createdChannelIds.splice(0)) {
+    await database.delete(channels).where(eq(channels.id, channelId));
+  }
   for (const agentId of createdAgentIds.splice(0)) {
     await database.delete(agents).where(eq(agents.id, agentId));
   }
@@ -81,6 +86,7 @@ function loadedPackage(
     productName: "Package Test",
     stylesheet: null,
     agents: [agent],
+    omittedAgentIds: [],
     channels: [],
     model: {
       provider: "openai",
@@ -139,6 +145,110 @@ describe("tenant theme validation", () => {
     expect(() => validateThemeCss(":root { --made-up: red; }")).toThrow(
       "is not an approved theme variable",
     );
+  });
+
+  /*
+   * A comment is not something a theme defines.
+   *
+   * The rule this enforces, as `docs/configuration.md` states it, is about what a theme may define:
+   * two blocks, approved variables, no imports and no URLs. A comment defines nothing, and a
+   * stylesheet written by hand has one at the top saying whose brand it is.
+   */
+  test("accepts a comment above the blocks", () => {
+    expect(() =>
+      validateThemeCss(`
+        /* Acme brand colours. Regenerate from the design tokens, do not hand-edit. */
+        :root { --primary: oklch(0.32 0.09 250); }
+      `),
+    ).not.toThrow();
+  });
+
+  test("accepts a comment inside a block", () => {
+    expect(() =>
+      validateThemeCss(`
+        :root {
+          /* The one colour everything else is derived from. */
+          --primary: oklch(0.32 0.09 250);
+          --border: oklch(0.9 0 0); /* deliberately flat */
+        }
+      `),
+    ).not.toThrow();
+  });
+
+  test("accepts a comment between the blocks", () => {
+    expect(() =>
+      validateThemeCss(`
+        :root { --primary: oklch(0.32 0.09 250); }
+        /* and the same again for dark mode */
+        .dark { --primary: oklch(0.87 0.03 250); }
+      `),
+    ).not.toThrow();
+  });
+
+  /*
+   * The guard against over-correcting. A comment must not become a way to smuggle in the two things
+   * this refuses, and a comment that is never closed is not a comment.
+   */
+  test("still refuses what a comment is wrapped around", () => {
+    expect(() =>
+      validateThemeCss(
+        ':root { --primary: url("https://example.com/x.png"); }',
+      ),
+    ).toThrow("must not contain imports or URLs");
+    expect(() => validateThemeCss("/* theme */ body { color: red; }")).toThrow(
+      "only define :root and .dark blocks",
+    );
+    expect(() => validateThemeCss(":root { /* --primary: red; }")).toThrow();
+  });
+});
+
+describe("a seeded Mastra Bot", () => {
+  const withAgent = (agent: string) =>
+    validateTenantPackage({
+      brand: "tenant: { id: fintech, product_name: Ledgerline }",
+      agents: `agents: [${agent}]`,
+      channels: "channels: []",
+      model:
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+      knowledge: "sources: []",
+      themeCss: "",
+    });
+
+  test("is seeded as its own kind, carrying the agent it names", () => {
+    const [agent] = withAgent(
+      "{ id: research, name: Research, title: Research, role_description: Look things up., type: remote-mastra, endpoint: http://mastra.internal, remote_agent_id: openbot }",
+    ).agents;
+    expect(agent?.type).toBe("remote_mastra");
+    expect(agent?.configuration).toEqual({
+      endpoint: "http://mastra.internal",
+      remoteAgentId: "openbot",
+    });
+  });
+
+  test("naming no agent is allowed, and means the only one there", () => {
+    const [agent] = withAgent(
+      "{ id: research, name: Research, title: Research, role_description: Look things up., type: remote-mastra, endpoint: http://mastra.internal }",
+    ).agents;
+    expect(agent?.configuration).toEqual({
+      endpoint: "http://mastra.internal",
+    });
+  });
+
+  test("an AG-UI Bot never picks up a remote agent id", () => {
+    // The field is Mastra's alone. Carried onto an AG-UI Bot it would be stored, read back, and
+    // mean nothing, which is the kind of dead configuration somebody later tries to honour.
+    const [agent] = withAgent(
+      "{ id: risk, name: Risk, title: Risk, role_description: Check things., type: remote-ag-ui, endpoint: http://risk.internal, remote_agent_id: ignored }",
+    ).agents;
+    expect(agent?.configuration).toEqual({ endpoint: "http://risk.internal" });
+  });
+
+  test("a kind nobody serves is refused by name", () => {
+    expect(() =>
+      withAgent(
+        "{ id: x, name: X, title: X, role_description: Y., type: remote-whatever, endpoint: http://x.test }",
+      ),
+    ).toThrow("agent.type must be built-in, remote-ag-ui or remote-mastra");
   });
 });
 
@@ -666,6 +776,149 @@ describe("tenant package agent profile synchronization", () => {
     });
   });
 
+  test("a package cannot take over a channel another package or user owns", async () => {
+    const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
+    const packageAAgent = packageAgent({ name: "Package A Agent" });
+    const packageBAgent = packageAgent({ name: "Package B Agent" });
+    const packageA = {
+      ...loadedPackage(packageAAgent),
+      channels: [
+        {
+          id: channelId,
+          name: "Package A Channel",
+          description: "Owned by package A.",
+          permittedAgents: [packageAAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+    const packageB = {
+      ...loadedPackage(packageBAgent),
+      channels: [
+        {
+          id: channelId,
+          name: "Package B Channel",
+          description: "Owned by package B.",
+          permittedAgents: [packageBAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+
+    createdAgentIds.push(packageAAgent.id, packageBAgent.id);
+    createdChannelIds.push(channelId);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageA)).id,
+    );
+
+    const snapshot = async () => ({
+      channel: (
+        await database
+          .select({
+            id: channels.id,
+            name: channels.name,
+            description: channels.description,
+            packageId: channels.packageId,
+          })
+          .from(channels)
+          .where(eq(channels.id, channelId))
+      )[0],
+      agents: (
+        await database
+          .select({ agentId: channelAgents.agentId })
+          .from(channelAgents)
+          .where(eq(channelAgents.channelId, channelId))
+      ).map((row) => row.agentId),
+    });
+
+    const beforePackageB = await snapshot();
+    await expect(synchronizeTenantPackage(database, packageB)).rejects.toThrow(
+      `Tenant package channel "${channelId}" collides with a channel this package does not own`,
+    );
+    expect(await snapshot()).toEqual(beforePackageB);
+
+    await database
+      .delete(channelAgents)
+      .where(eq(channelAgents.channelId, channelId));
+    await database.delete(channels).where(eq(channels.id, channelId));
+    await database.insert(channels).values({
+      id: channelId,
+      name: "User Channel",
+      description: "Owned by a user.",
+      allowedGroups: [],
+      packageId: null,
+    });
+    await database.insert(channelAgents).values({
+      channelId,
+      agentId: packageAAgent.id,
+    });
+
+    const beforeUserChannel = await snapshot();
+    await expect(synchronizeTenantPackage(database, packageB)).rejects.toThrow(
+      `Tenant package channel "${channelId}" collides with a channel this package does not own`,
+    );
+    expect(await snapshot()).toEqual(beforeUserChannel);
+  });
+
+  test("a redeploy updates and removes agents only for the package's own channel", async () => {
+    const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
+    const firstAgent = packageAgent({ name: "First Agent" });
+    const secondAgent = packageAgent({ name: "Second Agent" });
+    const firstPackage = {
+      ...loadedPackage(firstAgent),
+      agents: [firstAgent, secondAgent],
+      channels: [
+        {
+          id: channelId,
+          name: "First Name",
+          description: "Before redeploy.",
+          permittedAgents: [firstAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+    const secondPackage = {
+      ...firstPackage,
+      checksum: randomUUID(),
+      channels: [
+        {
+          id: channelId,
+          name: "Second Name",
+          description: "After redeploy.",
+          permittedAgents: [secondAgent.id],
+          allowedGroups: ["all", "support"],
+        },
+      ],
+    };
+
+    createdAgentIds.push(firstAgent.id, secondAgent.id);
+    createdChannelIds.push(channelId);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, firstPackage)).id,
+    );
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, secondPackage)).id,
+    );
+
+    const [channel] = await database
+      .select()
+      .from(channels)
+      .where(eq(channels.id, channelId));
+    const permittedAgents = (
+      await database
+        .select({ agentId: channelAgents.agentId })
+        .from(channelAgents)
+        .where(eq(channelAgents.channelId, channelId))
+    ).map((row) => row.agentId);
+
+    expect(channel).toMatchObject({
+      name: "Second Name",
+      description: "After redeploy.",
+      allowedGroups: ["all", "support"],
+    });
+    expect(permittedAgents).toEqual([secondAgent.id]);
+  });
+
   test("rejects a cross-package agent collision and rolls back both packages", async () => {
     const packageAAgent = packageAgent({
       name: "Package A Agent",
@@ -1164,6 +1417,57 @@ describe("pairing a package's coworkers with its skills", () => {
     expect(await grantsFor(agentId)).toHaveLength(0);
   });
 
+  test("a redeploy takes back only grants from the package being synchronized", async () => {
+    const slugA = `pkg-a-${randomUUID().slice(0, 8)}`;
+    const slugB = `pkg-b-${randomUUID().slice(0, 8)}`;
+    const userGrant = `user-grant-${randomUUID().slice(0, 8)}`;
+    const packageA = packageGiving([slugA]);
+    const packageB = packageGiving([slugB]);
+    createdSkillIds.push(userGrant);
+
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageA)).id,
+    );
+    const [packageAAgent] = packageA.agents;
+    if (!packageAAgent)
+      throw new Error("Expected package A to declare an agent.");
+    const agentA = packageAAgent.id;
+    expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([slugA]);
+
+    await database.insert(pluginGrants).values({
+      kind: "skill",
+      ref: userGrant,
+      agentId: agentA,
+      grantedBy: "an-administrator",
+    });
+
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageB)).id,
+    );
+    const [packageBAgent] = packageB.agents;
+    if (!packageBAgent)
+      throw new Error("Expected package B to declare an agent.");
+    const agentB = packageBAgent.id;
+
+    expect((await grantsFor(agentA)).map((row) => row.ref).sort()).toEqual(
+      [slugA, userGrant].sort(),
+    );
+    expect((await grantsFor(agentB)).map((row) => row.ref)).toEqual([slugB]);
+
+    const packageAWithoutSkill = {
+      ...packageA,
+      agents: [{ ...packageAAgent, skills: [] }],
+    };
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageAWithoutSkill)).id,
+    );
+
+    expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([
+      userGrant,
+    ]);
+    expect((await grantsFor(agentB)).map((row) => row.ref)).toEqual([slugB]);
+  });
+
   test("a grant an administrator made by hand survives a redeploy", async () => {
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const loaded = packageGiving([slug]);
@@ -1246,4 +1550,147 @@ describe("pairing a package's coworkers with its skills", () => {
       'agent "knowledge" names skill "no-such-skill", which this package does not ship',
     );
   });
+});
+
+test("blank package endpoint disables only its owned agent and restores it when configured again", async () => {
+  const suffix = randomUUID();
+  const actor = { id: `reader-${suffix}`, role: "user" as const };
+  const original = process.env.MANAGED_AGENT_AG_UI_URL;
+  const originalPicked = process.env.PICKED_HARNESS_URL;
+  let packageId: string | undefined;
+  let otherPackageId: string | undefined;
+  const ownedIds: string[] = [];
+  const historyId = `history-${suffix}`;
+  try {
+    process.env.MANAGED_AGENT_AG_UI_URL = "http://127.0.0.1:4201/ag-ui";
+    process.env.PICKED_HARNESS_URL = "http://127.0.0.1:4206/ag-ui";
+    const source = new URL("../../examples/fintech", import.meta.url).pathname;
+    const configured = await loadTenantPackage(source);
+    const rename = (id: string) => `${id}-${suffix}`;
+    const isolate = (loaded: LoadedTenantPackage): LoadedTenantPackage => ({
+      ...loaded,
+      tenantId: suffix,
+      skills: [],
+      channels: [],
+      agents: loaded.agents.map((agent) => ({
+        ...agent,
+        id: rename(agent.id),
+        skills: [],
+      })),
+      omittedAgentIds: (loaded.omittedAgentIds ?? []).map(rename),
+    });
+    const enabled = isolate(configured);
+    ownedIds.push(...enabled.agents.map((agent) => agent.id));
+    packageId = (await synchronizeTenantPackage(database, enabled)).id;
+    await database
+      .insert(users)
+      .values({ id: actor.id, email: `${suffix}@example.test` });
+    const target = rename("risk-analyst");
+    const picked = rename("picked-harness");
+    await database.insert(channels).values({
+      id: historyId,
+      name: "Historical conversation",
+      description: "Preserved",
+      allowedGroups: [],
+    });
+    await database
+      .insert(channelAgents)
+      .values({ channelId: historyId, agentId: target });
+    await database
+      .insert(channelMemberships)
+      .values({ channelId: historyId, userId: actor.id });
+    const profiles = createAgentProfileStore(database, undefined);
+    const runtime = createRuntimeAgentLoader(database);
+    expect((await profiles.get(actor, target))?.deletedAt).toBeNull();
+    expect(
+      (await runtime(actor)).find((agent) => agent.id === target)?.type,
+    ).toBe("remote_ag_ui");
+
+    const [otherPackage] = await database
+      .insert(deploymentPackages)
+      .values({
+        tenantId: `other-${suffix}`,
+        sourcePath: "/synthetic/other",
+        checksum: suffix,
+      })
+      .returning();
+    if (!otherPackage) throw new Error("missing synthetic package");
+    otherPackageId = otherPackage.id;
+    const controls = [
+      { id: `user-${suffix}`, packageId: null, ownerUserId: actor.id },
+      { id: `other-${suffix}`, packageId: otherPackageId, ownerUserId: null },
+      { id: `owned-profile-${suffix}`, packageId, ownerUserId: actor.id },
+      { id: `removed-yaml-${suffix}`, packageId, ownerUserId: null },
+    ];
+    for (const control of controls) {
+      ownedIds.push(control.id);
+      await database.insert(agents).values({
+        id: control.id,
+        name: control.id,
+        type: "remote_ag_ui",
+        configuration: { endpoint: "https://example.test/agent" },
+        packageId: control.packageId,
+      });
+      await database.insert(agentProfiles).values({
+        agentId: control.id,
+        title: "Control",
+        roleDescription: "Preserve ownership",
+        avatarSeed: control.id,
+        visibility: "public",
+        ownerUserId: control.ownerUserId,
+      });
+    }
+    process.env.MANAGED_AGENT_AG_UI_URL = "";
+    const omitted = isolate(await loadTenantPackage(source));
+    expect(omitted.agents.some((agent) => agent.id === target)).toBe(false);
+    // Explicitly omitted foreign/user-owned IDs must not acquire package ownership.
+    omitted.omittedAgentIds.push(
+      ...controls.slice(0, 3).map((control) => control.id),
+    );
+    await synchronizeTenantPackage(database, omitted);
+    expect(await profiles.get(actor, target)).toBeNull();
+    expect(
+      (await profiles.list(actor)).some((agent) => agent.id === target),
+    ).toBe(false);
+    expect(
+      (await runtime(actor)).find((agent) => agent.id === target)?.type,
+    ).toBe("unavailable");
+    expect(
+      (
+        await database
+          .select()
+          .from(channelAgents)
+          .where(eq(channelAgents.channelId, historyId))
+      ).length,
+    ).toBe(1);
+    expect(
+      (await database.select().from(agents).where(eq(agents.id, target)))
+        .length,
+    ).toBe(1);
+    expect((await profiles.get(actor, picked))?.deletedAt).toBeNull();
+    for (const control of controls)
+      expect((await profiles.get(actor, control.id))?.deletedAt).toBeNull();
+    await synchronizeTenantPackage(database, enabled);
+    expect((await profiles.get(actor, target))?.deletedAt).toBeNull();
+    expect(
+      (await runtime(actor)).find((agent) => agent.id === target)?.type,
+    ).toBe("remote_ag_ui");
+  } finally {
+    if (original === undefined) delete process.env.MANAGED_AGENT_AG_UI_URL;
+    else process.env.MANAGED_AGENT_AG_UI_URL = original;
+    if (originalPicked === undefined) delete process.env.PICKED_HARNESS_URL;
+    else process.env.PICKED_HARNESS_URL = originalPicked;
+    await database.delete(channels).where(eq(channels.id, historyId));
+    for (const id of ownedIds)
+      await database.delete(agents).where(eq(agents.id, id));
+    if (packageId)
+      await database
+        .delete(deploymentPackages)
+        .where(eq(deploymentPackages.id, packageId));
+    if (otherPackageId)
+      await database
+        .delete(deploymentPackages)
+        .where(eq(deploymentPackages.id, otherPackageId));
+    await database.delete(users).where(eq(users.id, actor.id));
+  }
 });

@@ -15,6 +15,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox";
+import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
@@ -39,7 +40,9 @@ function RouteComponent() {
   const { agent } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { startChosen, pending } = useStartChannel();
-  const { data: profiles } = useQuery(agentListQueryOptions());
+  const { data: profiles, isError: rosterError } = useQuery(
+    agentListQueryOptions(),
+  );
 
   const [error, setError] = useState<string | null>(null);
   // Optimistic seed shown before the first channel record exists.
@@ -51,16 +54,36 @@ function RouteComponent() {
    * Hidden coworkers are omitted from the roster but may still be valid recipients from a profile
    * link, so fetch the URL-selected coworker when it is absent from the visible list.
    */
-  const { data: fetched } = useQuery({
+  const {
+    data: fetched,
+    isError: detailError,
+    isPending: detailPending,
+  } = useQuery({
     ...agentQueryOptions(agent ?? ""),
-    enabled: Boolean(agent) && !listed,
+    enabled: Boolean(agent) && profiles !== undefined && !listed,
     retry: false,
   });
-  const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
+  const chosen =
+    listed ??
+    (fetched?.id === agent ? fetched : undefined) ??
+    (agent ? undefined : defaultAgentProfile(profiles));
+  const needsUrlAgentDetail =
+    Boolean(agent) && profiles !== undefined && !listed;
+  const waitingForUrlAgent =
+    needsUrlAgentDetail && detailPending && !detailError;
+  const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
+  const loadError =
+    rosterError && profiles === undefined
+      ? "Coworkers couldn't be loaded."
+      : urlAgentDetailFailed
+        ? "Coworker couldn't be loaded."
+        : null;
   const recipients: Recipient[] = chosen
     ? [{ id: chosen.id, name: chosen.name }]
     : [];
   const skillCommands = useSkillCommands(chosen?.id ?? "");
+
+  if (profiles === undefined && !rosterError) return null;
 
   return (
     <div className="flex h-full flex-col">
@@ -69,7 +92,7 @@ function RouteComponent() {
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Do not auto-open when the recipient came from the URL; the field is already answered.
-          defaultOpen={!agent}
+          defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
           autoHighlight
           items={profiles ?? []}
           isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
@@ -90,7 +113,7 @@ function RouteComponent() {
             // The popup opening is not enough on its own: typing filters through this input, so
             // the caret starts here whenever the recipient question is still open. Same condition
             // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
-            autoFocus={!agent}
+            autoFocus={!chosen}
             placeholder="Choose a coworker…"
             // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
             className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
@@ -118,12 +141,14 @@ function RouteComponent() {
         autoFocus
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
-        disabled={recipients.length === 0}
+        disabled={
+          Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
+        }
         messages={sent ? [sent] : []}
         notice={
-          error ? (
+          loadError || error ? (
             <p className="pb-2 text-sm text-destructive" role="alert">
-              {error}
+              {loadError ?? error}
             </p>
           ) : null
         }

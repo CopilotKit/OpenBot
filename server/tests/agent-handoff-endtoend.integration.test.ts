@@ -18,7 +18,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A hop from end to end: a Bot calls the tool, and another replica delivers it.
@@ -32,11 +32,7 @@ import { TEST_POOL } from "./support/database";
  * question the two files either side already answer.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const ASKER = `e2e-asker-${suite}`;

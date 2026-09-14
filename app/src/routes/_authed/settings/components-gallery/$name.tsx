@@ -130,7 +130,7 @@ function RouteComponent() {
           <SettingsItemBackground className="h-full w-full" />
         </div>
         <div className="absolute inset-0 z-10">
-          <ComponentPreview name={component.name} />
+          <ComponentPreview kind={component.kind} name={component.name} />
         </div>
       </div>
 

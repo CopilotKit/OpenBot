@@ -13,7 +13,10 @@ docs/plans/
 !.env.example
 # Per-Bot egress proxies. Carries credentials in the URL, like .env does.
 egress.env
-node_modules/
+# No trailing slash, deliberately. With one, this pattern matches a DIRECTORY only, and a symlink
+# named node_modules is not a directory — so a sandbox that links its dependencies at the repo root
+# leaves three links git will happily commit. That happened.
+node_modules
 **/dist/
 app/src/lib/generated/application-config.ts
 .logs/

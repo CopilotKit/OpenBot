@@ -1,0 +1,12 @@
+[test]
+# The same declaration as the bunfig.toml at the repository root, with the path written relative to
+# this directory.
+#
+# Bun reads bunfig.toml from the current working directory and nowhere else, so the root one applies
+# to `bun test server/` run from the root and not to `bun test` run from here. Without this file the
+# preload never loads from inside `server`, and the suite silently loses whichever test files lost
+# the race described in scripts/test-preload.ts.
+#
+# Both files name the same script, so its contents cannot drift. What could drift is this list, and
+# tests/bunfig-preload.test.ts fails if the two stop agreeing.
+preload = ["./scripts/test-preload.ts"]

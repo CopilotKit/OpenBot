@@ -20,13 +20,7 @@
         "resizable": true
       }
     ],
-    "security": { "csp": null },
-    "trayIcon": {
-      "id": "openbot",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "tooltip": "OpenBot"
-    }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,

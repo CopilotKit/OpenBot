@@ -1,6 +1,11 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
-import { type AgentProfile, type AgentVisibility, agentKeys } from "./queries";
+import {
+  type AgentProfile,
+  type AgentVisibility,
+  agentApiPath,
+  agentKeys,
+} from "./queries";
 
 export type AgentInput = {
   name: string;
@@ -39,7 +44,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
       agentId: string;
       input: AgentInput;
     }): Promise<AgentProfile> =>
-      client(`/api/agents/${variables.agentId}`, "agent", {
+      client(agentApiPath(variables.agentId), "agent", {
         method: "PATCH",
         body: variables.input,
         fallback: FALLBACK,
@@ -51,7 +56,7 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
 export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (agentId: string): Promise<AgentProfile> =>
-      client(`/api/agents/${agentId}/duplicate`, "agent", {
+      client(`${agentApiPath(agentId)}/duplicate`, "agent", {
         method: "POST",
         fallback: FALLBACK,
       }),
@@ -63,7 +68,7 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
       await client(
-        `/api/agents/${variables.agentId}/${variables.hidden ? "hide" : "unhide"}`,
+        `${agentApiPath(variables.agentId)}/${variables.hidden ? "hide" : "unhide"}`,
         { method: "POST", fallback: FALLBACK },
       );
     },
@@ -74,7 +79,7 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await client(`/api/agents/${agentId}`, {
+      await client(agentApiPath(agentId), {
         method: "DELETE",
         fallback: FALLBACK,
       });
@@ -93,7 +98,7 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
 export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (agentId: string): Promise<string> =>
-      client(`/api/agents/${agentId}/callback-token`, "token", {
+      client(`${agentApiPath(agentId)}/callback-token`, "token", {
         method: "POST",
         fallback: FALLBACK,
       }),
@@ -105,7 +110,7 @@ export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
 export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await client(`/api/agents/${agentId}/callback-token`, {
+      await client(`${agentApiPath(agentId)}/callback-token`, {
         method: "DELETE",
         fallback: FALLBACK,
       });

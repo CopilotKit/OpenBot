@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { splitProxyCredentials } from "./egress";
+
 /**
  * Running a command on the Bot's computer.
  *
@@ -188,16 +190,9 @@ function extraShellEnvNames(raw: string | undefined): readonly string[] {
  * the network without `env` printing a password. Same split `egress.ts` uses for the browser proxy.
  */
 function withoutUserinfo(raw: string): string {
-  try {
-    const url = new URL(raw.trim());
-    if (url.username === "" && url.password === "") return raw;
-    url.username = "";
-    url.password = "";
-    return url.toString().replace(/\/$/, "");
-  } catch (e) {
-    if (e instanceof TypeError) return raw;
-    throw e;
-  }
+  const { server, username, password } = splitProxyCredentials(raw);
+  if (username === undefined && password === undefined) return raw;
+  return server;
 }
 
 function clamp(text: string): { text: string; truncated: boolean } {

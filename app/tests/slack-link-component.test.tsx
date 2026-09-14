@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { StrictMode } from "react";
+import type { SlackLinkResponse } from "@/routes/_authed/link/slack";
 import { SlackLinkConfirmation } from "@/routes/_authed/link/slack";
 
 const originalFetch = globalThis.fetch;
@@ -45,13 +46,7 @@ function confirmation(
     workspace: string;
     user: string;
   }>,
-  complete?: (
-    token: string,
-    signal: AbortSignal,
-  ) => Promise<{
-    kind: "linked";
-    message: string;
-  }>,
+  complete?: (token: string, signal: AbortSignal) => Promise<SlackLinkResponse>,
 ) {
   return (
     <StrictMode>
@@ -104,7 +99,7 @@ test("double-click posts once and an unmounted post cannot update a new token", 
     signals.push(signal);
     return postA.promise.then(() => ({
       kind: "linked" as const,
-      message: "Slack is linked to your OpenBot account.",
+      message: "Slack is linked to your OpenBot account." as const,
     }));
   };
 
@@ -139,7 +134,8 @@ test("double-click posts once and an unmounted post cannot update a new token", 
 test("a 401 starts the auth-return recovery without rendering a token", async () => {
   const reauthenticate = () => calls++;
   let calls = 0;
-  globalThis.fetch = (() => Promise.resolve(response(401))) as typeof fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(response(401))) as unknown as typeof fetch;
 
   const view = render(confirmation("never-display-this", reauthenticate));
   await waitFor(() => expect(calls).toBeGreaterThan(0));

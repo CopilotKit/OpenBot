@@ -113,10 +113,19 @@ One image carries the app, the API, the browser the Bots drive, and optionally P
 `.env`, no Kubernetes.
 
 ```sh
+# The published image. Nothing to clone and nothing to build.
+docker run -p 3001:3001 --env-file .env \
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
+  ghcr.io/copilotkit/openbot:latest
+
+# Or the tree you have in front of you.
 docker build -t openbot .
 docker run -p 3001:3001 --env-file .env \
   -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
+
+Everything is on 3001 here, the app included, rather than the 3010 the clone uses. `latest` is the
+most recent release and a version tag such as `:v0.0.9` pins one.
 
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
 [docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and how it behaves behind more than one replica.
@@ -130,21 +139,25 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 ## Main surfaces
 
-| Route                | Purpose                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| `/`                  | Start and browse channels.                                         |
-| `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
-| `/channel/:id`       | Converse with one coworker, watch its screen, and see what it ran. |
-| `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
-| `/skills`            | Create and enable personal skills.                                 |
-| `/settings`          | User preferences.                                                  |
-| `/admin/credentials` | Store write-only encrypted credentials.                            |
-| `/admin/computers`   | View, stop, and reset Bot computers.                               |
-| `/admin/boundaries`  | Configure browser/file/MCP action policy.                          |
-| `/admin/components`  | Publish components and govern which Bots may use them.             |
-| `/admin/playground`  | Draft and publish sandboxed components in the browser.             |
-| `/admin/plugins`     | Configure MCP servers, MCP grants, and deployment skills.          |
-| `/admin/audit`       | Review permitted, refused, and failed actions.                     |
+| Route                       | Purpose                                                            |
+| --------------------------- | ------------------------------------------------------------------ |
+| `/`                         | Start and browse channels.                                         |
+| `/agents`                   | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
+| `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
+| `/skills`                   | Create and enable personal skills.                                 |
+| `/routines`                 | See the routines that are standing, and stop one.                  |
+| `/settings`                 | User preferences.                                                  |
+| `/admin/credentials`        | Store write-only encrypted credentials.                            |
+| `/admin/computers`          | View, stop, and reset Bot computers.                               |
+| `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
+| `/admin/components`         | Publish components and govern which Bots may use them.             |
+| `/admin/playground`         | Draft and publish sandboxed components in the browser.             |
+| `/admin/plugins`            | Configure MCP servers and grant their tools to Bots.               |
+| `/admin/skills`             | Write deployment skills and grant them to Bots.                    |
+| `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
+| `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
+| `/admin/audit`              | Review permitted, refused, and failed actions.                     |
 
 ## Features
 

@@ -20,6 +20,7 @@ import type { AgentActor, AgentProfile } from "../agents/profile-types";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
+import { parsePageLimit } from "../paging";
 import {
   agentProfiles,
   channelAgents,
@@ -42,6 +43,15 @@ export type AgentChannel = {
   agentIds: string[];
   threadId: string;
   active: boolean;
+  /**
+   * When something was last said here, or null for a conversation nobody has used.
+   *
+   * On the channel itself rather than only on the roster summary, because the conversation screen
+   * needs it: a thread the history store does not know about is an empty NEW conversation when this
+   * is null and a conversation whose history is unreachable when it is set, and those are different
+   * things to put on the screen. See the note in `channel-chat.tsx`.
+   */
+  lastMessageAt: Date | null;
 };
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
@@ -49,7 +59,6 @@ export type ChannelSummary = AgentChannel & {
   /** A few words about the conversation, or null. Readers fall back to the channel's name. */
   summary: string | null;
   lastMessage: string | null;
-  lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
   createdAt: Date;
   /** Whether the caller pinned this channel. A pin is per-member, so this is the caller's, only. */
@@ -290,7 +299,7 @@ export function createChannelStore(
       threadId,
     });
 
-    return { id, name, agentIds, threadId, active: true };
+    return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
   };
 
   const store: ChannelStore = {
@@ -373,6 +382,7 @@ export function createChannelStore(
           name: channels.name,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
+          lastMessageAt: channels.lastMessageAt,
           deletedAt: agentProfiles.deletedAt,
         })
         .from(channels)
@@ -407,6 +417,7 @@ export function createChannelStore(
         agentIds: rows.map((row) => row.agentId),
         threadId: first.threadId,
         active: rows.every((row) => row.deletedAt === null),
+        lastMessageAt: first.lastMessageAt,
       };
     },
 
@@ -1055,12 +1066,21 @@ export function createChannelRoutes(
   routes.get("/", requireUser, async (context) => {
     try {
       const url = new URL(context.req.url);
-      const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      /*
+       * Parsed strictly, not coerced: `Number.parseInt` reads `"12abc"` as 12 and `"3.9"`
+       * as 3, so a typo silently returned the wrong page. A run of digits is clamped into
+       * range like the store already does; anything else is a 400 naming the parameter.
+       */
+      const parsed = parsePageLimit(
+        url.searchParams.get("limit"),
+        MAX_CHANNEL_PAGE,
+      );
+      if (!parsed.ok) return context.json({ error: parsed.error }, 400);
       const page = await store.list(context.var.actor, {
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
       return context.json({
@@ -1170,13 +1190,20 @@ export function createChannelRoutes(
   return routes;
 }
 
-function channelDto(channel: AgentChannel): AgentChannel {
+/** A channel as it goes over the wire: the same shape, with the date serialised. */
+type ChannelWire = Omit<AgentChannel, "lastMessageAt"> & {
+  lastMessageAt: string | null;
+};
+
+function channelDto(channel: AgentChannel): ChannelWire {
   return {
     id: channel.id,
     name: channel.name,
     agentIds: channel.agentIds,
     threadId: channel.threadId,
     active: channel.active,
+    // ISO-8601 so the browser gets a string it can compare, like the roster's copy.
+    lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
   };
 }
 
@@ -1185,8 +1212,6 @@ function channelSummaryDto(channel: ChannelSummary) {
     ...channelDto(channel),
     summary: channel.summary,
     lastMessage: channel.lastMessage,
-    // Serialised as ISO-8601 so the browser gets a string it can sort and format.
-    lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
     lastMessageAgentId: channel.lastMessageAgentId,
     createdAt: channel.createdAt.toISOString(),
     pinned: channel.pinned,

@@ -184,6 +184,26 @@ type ExplicitOccurrence = {
 };
 
 /**
+ * The coworker a message goes to when nobody named one and the router has no better answer.
+ *
+ * The package-picked harness first, because setup ends by choosing a Bot and proving it answers, and
+ * the thing somebody just picked is the thing they expect to be talking to. Then the first public
+ * coworker, then whatever is on the roster at all. The composer shows the same order, so what the
+ * screen says is about to happen is what happens.
+ */
+const PICKED_HARNESS_AGENT_ID = "picked-harness";
+
+export function defaultRoutingProfile(
+  roster: readonly AgentProfile[],
+): AgentProfile | undefined {
+  return (
+    roster.find((agent) => agent.id === PICKED_HARNESS_AGENT_ID) ??
+    roster.find((agent) => agent.visibility === "public") ??
+    roster[0]
+  );
+}
+
+/**
  * Discard only aliases that a strictly longer explicit occurrence fully contains.
  *
  * Intervals are ordered by start, then widest first. A running maximum end therefore proves that a
@@ -334,8 +354,7 @@ export function createCoworkerRoutingService(
       return { result: explicit, undecided: null };
     }
 
-    const preferred =
-      roster.find(({ visibility }) => visibility === "public") ?? roster[0];
+    const preferred = defaultRoutingProfile(roster);
     if (!preferred) return { result: { kind: "none" }, undecided: null };
     const candidates: RoutingCandidate[] = await Promise.all(
       roster.map(async (profile) => ({

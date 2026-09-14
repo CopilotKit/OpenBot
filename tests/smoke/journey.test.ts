@@ -16,11 +16,36 @@ import { beforeAll, describe, expect, test } from "bun:test";
  *
  * `OPENBOT_API_URL` points it at a deployment on other ports. Without `OPENBOT_SMOKE` the file is
  * skipped, so `bun run test` stays honest on a machine with nothing running.
+ *
+ * IT ALSO NEEDS A SESSION, AND SAYS SO RATHER THAN FINDING OUT THREE TIMES.
+ *
+ * Everything this journey exists to prove is behind `requireUser`: minting a thread id, acting on a
+ * Bot's computer, reading the policy, reading the trail. This file sent no credentials, so on any
+ * deployment with an identity provider configured -- which is every deployment this repository will
+ * start -- three of its five tests answered `401 Authentication required`, and had since the guard
+ * was added. A release checklist that asks whether the journey passed was therefore asking for a
+ * result nobody could produce.
+ *
+ * So `OPENBOT_SMOKE_COOKIE` carries a signed-in session, sent verbatim as the `cookie` header. It is
+ * a cookie rather than a token because that is what this deployment issues: Better Auth is
+ * configured here with social and OIDC providers and no bearer plugin, so a session lives in a
+ * cookie and nothing else opens these routes. Take it from a browser already signed in to the
+ * deployment under test: DevTools, Application, Cookies, the `better-auth.session_token` entry, sent
+ * as `better-auth.session_token=<value>`. It is a credential with that person's reach, so treat it
+ * as one: it belongs in the environment of the run and not in a file, a log or a comment on a pull
+ * request.
+ *
+ *   OPENBOT_SMOKE_COOKIE='better-auth.session_token=...' bun run test:smoke
+ *
+ * Without it the run stops before the first test with a sentence naming it, rather than skipping the
+ * half that matters and reporting the other half as a pass. A journey that did not act on a computer
+ * has not been run.
  */
 
 const asked = process.env.OPENBOT_SMOKE === "1";
 const API = process.env.OPENBOT_API_URL ?? "http://localhost:3001";
 const BOT = process.env.OPENBOT_SMOKE_BOT ?? "risk-analyst";
+const COOKIE = process.env.OPENBOT_SMOKE_COOKIE ?? "";
 
 /** Long enough for a computer to be created and Chromium to answer on a cold deployment. */
 const COMPUTER_TIMEOUT_MS = 180_000;
@@ -28,7 +53,11 @@ const COMPUTER_TIMEOUT_MS = 180_000;
 async function api(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "content-type": "application/json",
+      ...(COOKIE ? { cookie: COOKIE } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
 }
 
@@ -50,6 +79,24 @@ beforeAll(async () => {
   if (!reachable) {
     throw new Error(
       `No deployment is answering at ${API}. Start one with \`bash scripts/start.sh\`, or set OPENBOT_API_URL.`,
+    );
+  }
+
+  if (!COOKIE) {
+    throw new Error(
+      "This journey acts as a person, and every route it proves is behind a session. Set " +
+        "OPENBOT_SMOKE_COOKIE to the `better-auth.session_token=...` cookie of a browser signed in " +
+        `to ${API}. See the comment at the top of this file.`,
+    );
+  }
+
+  // Asked once, here, so a session that is missing, expired or from another deployment is one
+  // sentence at the start rather than the same 401 read three different ways further down.
+  const accepted = await api("/api/computers/policy");
+  if (accepted.status === 401) {
+    throw new Error(
+      `The session in OPENBOT_SMOKE_COOKIE is not accepted by ${API}. It may have expired, or belong ` +
+        "to a different deployment. Sign in again and take a fresh one.",
     );
   }
 });

@@ -1,0 +1,6 @@
+llama-index-core
+llama-index-protocols-ag-ui
+llama-index-llms-openai
+fastapi
+python-multipart
+uvicorn[standard]

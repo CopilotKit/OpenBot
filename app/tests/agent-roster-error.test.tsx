@@ -49,7 +49,7 @@ beforeEach(() => {
   // response is not `ok`. A 500 with no body is the shape a broken server actually sends, and is
   // exactly what `client()`'s fallback message path exists for.
   global.fetch = (async () =>
-    new Response(null, { status: 500 })) as typeof fetch;
+    new Response(null, { status: 500 })) as unknown as typeof fetch;
 });
 
 afterEach(() => {
@@ -313,7 +313,8 @@ test("both /agents sections hold a skeleton while the roster is pending, not an 
   // A fetch that never settles is `isPending` forever — the state each section's loading arm
   // renders once the router has finished its own (also async) initial match, which is why this
   // still waits rather than reading `view.container` on the very next line.
-  global.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  global.fetch = (() =>
+    new Promise<Response>(() => {})) as unknown as typeof fetch;
 
   const view = renderAgents(failingQueryClient());
 

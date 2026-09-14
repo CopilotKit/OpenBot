@@ -62,6 +62,8 @@ export const agentKeys = {
   all: ["agents"] as const,
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
+  botRouteDetail: (agentId: string) =>
+    ["agents", "bot-route-detail", agentId] as const,
   handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
   capabilities: () => ["agents", "capabilities"] as const,
 };
@@ -117,11 +119,16 @@ export function agentListQueryOptions(hidden = false) {
   });
 }
 
+/** Package-defined IDs remain one path segment without changing their stored or cache identity. */
+export function agentApiPath(agentId: string): string {
+  return `/api/agents/${encodeURIComponent(agentId)}`;
+}
+
 export function agentQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.detail(agentId),
     queryFn: (): Promise<AgentProfile> =>
-      client(`/api/agents/${agentId}`, "agent", {
+      client(agentApiPath(agentId), "agent", {
         fallback: "Could not load this coworker",
       }),
   });
@@ -131,7 +138,7 @@ export function agentHandoffQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.handoff(agentId),
     queryFn: (): Promise<HandoffGrants> =>
-      client(`/api/agents/${agentId}/handoff`, "handoff", {
+      client(`${agentApiPath(agentId)}/handoff`, "handoff", {
         fallback: "Could not load which Bots this one may ask",
       }),
   });

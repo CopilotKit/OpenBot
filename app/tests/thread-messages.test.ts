@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readableTurns } from "../src/lib/copilot/thread-messages";
+import {
+  readableTurns,
+  readThreadMessages,
+} from "../src/lib/copilot/thread-messages";
 
 /**
  * Reading back a conversation that used a tool.
@@ -248,5 +251,148 @@ describe("shapes a real thread contains", () => {
     expect(read.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
     expect(read[0]?.content).toBe("one");
     expect(read[2]?.content).toBe("three");
+  });
+});
+
+describe("thread history retrieval outcomes", () => {
+  type FetchHandler = (
+    ...args: Parameters<typeof globalThis.fetch>
+  ) => ReturnType<typeof globalThis.fetch>;
+
+  const withFetch = async (handler: FetchHandler, run: () => Promise<void>) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = Object.assign(handler, {
+      preconnect: original.preconnect,
+    });
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+
+  test("HTTP failures are unavailable history, not valid empty history", async () => {
+    await withFetch(
+      async () => new Response("broken", { status: 500 }),
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test("network failures are unavailable history, not valid empty history", async () => {
+    await withFetch(
+      async () => {
+        throw new TypeError("network down");
+      },
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test.each([
+    { name: "missing messages field", body: {} },
+    { name: "non-array messages field", body: { messages: { id: "m1" } } },
+  ])("a 200 response with $name is unavailable history", async ({ body }) => {
+    await withFetch(
+      async () => Response.json(body),
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test.each([
+    {
+      name: "headers",
+      handler: ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<Response>((resolve) => {
+          signal?.addEventListener("abort", () =>
+            resolve(new Response("aborted", { status: 499 })),
+          );
+        }),
+    },
+    {
+      name: "body",
+      handler: ({ signal }: { signal?: AbortSignal }) =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                signal?.addEventListener("abort", () => controller.close());
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        ),
+    },
+  ])(
+    "a stalled $name read aborts and returns unavailable history",
+    async ({ handler }) => {
+      let capturedSignal: AbortSignal | undefined;
+      await withFetch(
+        (_input, init) => {
+          capturedSignal = init?.signal ?? undefined;
+          return handler({ signal: capturedSignal });
+        },
+        async () => {
+          const read = await readThreadMessages("thread-1", "agent-1", {
+            deadlineMs: 20,
+          });
+
+          expect(capturedSignal?.aborted).toBe(true);
+          expect(read).toEqual({
+            messages: [],
+            unreadable: 0,
+            availability: "unavailable",
+          });
+        },
+      );
+    },
+  );
+
+  test("a readable empty response remains a valid empty history", async () => {
+    await withFetch(
+      async () =>
+        Response.json({
+          messages: [],
+        }),
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "ready",
+        });
+      },
+    );
+  });
+
+  test("unreadable stored turns are still a ready retrieval with holes", () => {
+    expect(readableTurns([{ id: "m1", role: "user", content: null }])).toEqual({
+      messages: [],
+      unreadable: 1,
+      availability: "ready",
+    });
   });
 });

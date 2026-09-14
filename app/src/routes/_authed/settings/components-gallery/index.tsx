@@ -72,7 +72,10 @@ function RouteComponent() {
                   <SettingsItemBackground className="h-full w-full rounded-md" />
                 </div>
                 <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
-                  <ComponentPreview name={component.name} />
+                  <ComponentPreview
+                    kind={component.kind}
+                    name={component.name}
+                  />
                 </div>
               </div>
             </Link>

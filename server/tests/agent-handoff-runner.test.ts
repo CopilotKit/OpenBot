@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readRunAssertion } from "../src/agents/callback-token";
 import {
   createHandoffRunner,
   type HandoffWork,
 } from "../src/agents/handoff-runner";
+import { signHandoffDeliveryRun } from "../src/agents/handoff-signing";
 import type { AuditStore } from "../src/audit";
 import type { WorkItem, WorkQueue } from "../src/work/queue";
 
@@ -12,6 +14,8 @@ import type { WorkItem, WorkQueue } from "../src/work/queue";
  * Running the other Bot twice for one hop. Finishing work that is no longer this replica's. And
  * letting a lease lapse in the middle of a run, which is the same as the first with extra steps.
  */
+
+const KEY = "test-encryption-key-not-a-real-one";
 
 const WORK: HandoffWork = {
   fromBotId: "assistant",
@@ -88,7 +92,7 @@ function runner(options?: {
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
-      sign: (work) => `signed:${work.toBotId}:${work.depth}`,
+      sign: (work) => signHandoffDeliveryRun(work, KEY, "delivery-run"),
       auditStore,
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
@@ -135,7 +139,46 @@ describe("delivering a hop", () => {
 
     await sweep.sweep();
 
-    expect(delivered[0]?.assertion).toBe("signed:researcher:1");
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      depth: 1,
+    });
+  });
+
+  test("the delivery assertion preserves the run initiator across the queue", async () => {
+    const { runner: sweep, delivered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: {
+            ...WORK,
+            initiator: { kind: "routine", id: "routine_7" },
+          },
+          attempts: 1,
+        },
+      ],
+    });
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      actorId: "user-1",
+      threadId: "thread-1",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+  });
+
+  test("a legacy queued hop without an initiator is still read as a person's", async () => {
+    const { runner: sweep, delivered } = runner();
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)?.initiator).toEqual({
+      kind: "person",
+    });
   });
 
   /*
@@ -262,7 +305,12 @@ describe("a hop that failed for good", () => {
   test("the Bot that asked is sent back to tell the person", async () => {
     const { runner: sweeper, offered } = runner({
       claimed: [
-        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 5 },
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: { ...WORK, initiator: { kind: "routine", id: "routine_7" } },
+          attempts: 5,
+        },
       ] as unknown as WorkItem[],
       deliver: async () => {
         throw new Error("researcher did not finish within 300s");
@@ -278,6 +326,7 @@ describe("a hop that failed for good", () => {
       toBotId: "assistant",
       answerIn: "thread-1",
       threadId: "thread-1",
+      initiator: { kind: "routine", id: "routine_7" },
     });
     expect(offered[0]?.task).toContain("did not finish within 300s");
   });
@@ -390,6 +439,14 @@ describe("a hop that failed for good", () => {
 describe("relaying the answer home", () => {
   test("a delivered hop sends the answer back through the Bot that asked", async () => {
     const { runner: sweeper, offered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: { ...WORK, initiator: { kind: "routine", id: "routine_7" } },
+          attempts: 1,
+        },
+      ],
       answer: "The outage was Tuesday, 02:10 to 02:45.",
     });
 
@@ -402,6 +459,7 @@ describe("relaying the answer home", () => {
       answerIn: "thread-1",
       threadId: "thread-1",
       depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
     });
     expect(offered[0]?.task).toContain("find the outage window");
     expect(offered[0]?.task).toContain(

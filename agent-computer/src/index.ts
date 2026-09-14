@@ -19,7 +19,12 @@ import {
 } from "./control";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
-import { parseExecTimeout, parseNavigateUrl } from "./request-validation";
+import {
+  parseExecTimeout,
+  parseInputMessage,
+  parseNavigateUrl,
+  parseScrollDelta,
+} from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
 import { createShell } from "./shell";
 import { createViewerSlot, type ViewerSlot } from "./viewer";
@@ -86,7 +91,11 @@ console.info(
   }),
 );
 
-const PORT = numberFromEnv("PORT", 4100);
+/*
+ * A whole port in range, or the default: a fraction never binds and an out-of-range one
+ * misbinds at boot, which is a deployment failure instead of the documented fallback.
+ */
+const PORT = numberFromEnv("PORT", 4100, { min: 1, max: 65535 });
 const NAVIGATION_TIMEOUT_MS = numberFromEnv("NAVIGATION_TIMEOUT_MS", 30000);
 
 /**
@@ -498,7 +507,13 @@ serve<StreamData>({
       }
       let message: InputMessage;
       try {
-        message = JSON.parse(String(raw)) as InputMessage;
+        const parsed: unknown = JSON.parse(String(raw));
+        const validated = parseInputMessage(parsed);
+        if (!validated.ok) {
+          ws.send(JSON.stringify({ type: "error", error: validated.error }));
+          return;
+        }
+        message = validated.message;
       } catch {
         return;
       }
@@ -773,6 +788,12 @@ serve<StreamData>({
         string,
         unknown
       > | null;
+      if (url.pathname === "/human/scroll") {
+        const parsed = parseScrollDelta(body?.deltaY);
+        if (!parsed.ok) {
+          return json({ error: parsed.error }, 400);
+        }
+      }
       try {
         const target = await currentPage(botId);
         return json(await performHumanInput(target, url.pathname, body ?? {}));
@@ -1037,6 +1058,12 @@ serve<StreamData>({
       if (!body) {
         return json({ error: "An action needs a JSON body." }, 400);
       }
+      if (url.pathname === "/scroll") {
+        const parsed = parseScrollDelta(body.deltaY);
+        if (!parsed.ok) {
+          return json({ error: parsed.error }, 400);
+        }
+      }
 
       const startedAt = Date.now();
       try {
@@ -1165,7 +1192,11 @@ async function performHumanInput(
     return { action: "human_key", key: body.key, url: target.url() };
   }
 
-  const deltaY = typeof body.deltaY === "number" ? body.deltaY : 400;
+  const parsed = parseScrollDelta(body.deltaY);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const deltaY = parsed.deltaY ?? 400;
   await target.mouse.wheel(0, deltaY);
   return { action: "human_scroll", deltaY, url: target.url() };
 }
@@ -1243,7 +1274,11 @@ async function performAction(
 
   // Scroll. A plain wheel event on the page, which is what moves a long form, rather than scrolling a
   // specific element into view: the Bot asked to see further down, not to hunt for one control.
-  const deltaY = typeof body.deltaY === "number" ? body.deltaY : 600;
+  const parsed = parseScrollDelta(body.deltaY);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const deltaY = parsed.deltaY ?? 600;
   await target.mouse.wheel(0, deltaY);
   return { action: "scroll", deltaY, url: target.url() };
 }
@@ -1266,7 +1301,7 @@ function fileStatus(error: unknown): 400 | 403 | 500 {
   return 500;
 }
 
-console.info(`agent-computer listening on http://localhost:${PORT}`);
+console.info(`agent-computer listening on http://127.0.0.1:${PORT}`);
 
 /**
  * Hand the profile back before dying.

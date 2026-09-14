@@ -67,6 +67,35 @@ describe("resolving a Bot's proxy", () => {
       server: "proxy.internal:8080",
     });
   });
+
+  test("a bare host:port carrying credentials is split like any other", () => {
+    // The shape above, written the way a proxy is actually handed out. `new URL` reads it as the
+    // scheme `bot:` and a path, so username and password come back empty and the password rides
+    // along in `server` -- into the label, the admin page and the API.
+    const proxy = egressFor("sales", {
+      EGRESS_PROXY_SALES: "bot:s3cret@proxy.internal:8080",
+    });
+    expect(proxy).toEqual({
+      server: "proxy.internal:8080",
+      username: "bot",
+      password: "s3cret",
+    });
+    expect(proxy?.server).not.toContain("s3cret");
+  });
+
+  test("a bare host:port with an encoded password decodes it too", () => {
+    const proxy = egressFor("sales", {
+      EGRESS_PROXY_SALES: "bot:p%40ss%3Aword@proxy.internal:8080",
+    });
+    expect(proxy?.password).toBe("p@ss:word");
+    expect(proxy?.server).toBe("proxy.internal:8080");
+  });
+
+  test("something that is not addressable at all is still passed through", () => {
+    expect(egressFor("sales", { EGRESS_PROXY_SALES: "::::" })).toEqual({
+      server: "::::",
+    });
+  });
 });
 
 describe("what gets shown to people", () => {
@@ -84,5 +113,13 @@ describe("what gets shown to people", () => {
     expect(
       egressLabel("sales", { EGRESS_PROXY_SALES: "proxy.internal:8080" }),
     ).toBe("proxy.internal:8080");
+  });
+
+  test("a bare host:port with credentials labels as the host only", () => {
+    const label = egressLabel("sales", {
+      EGRESS_PROXY_SALES: "bot:s3cret@proxy.internal:8080",
+    });
+    expect(label).toBe("proxy.internal:8080");
+    expect(label).not.toContain("s3cret");
   });
 });

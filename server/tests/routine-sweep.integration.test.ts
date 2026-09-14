@@ -33,7 +33,7 @@ import {
   ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue, DEFAULT_MAX_ATTEMPTS } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Both halves of the sweep against a real PostgreSQL and the real `work_items` queue.
@@ -54,9 +54,7 @@ import { TEST_POOL } from "./support/database";
  * whether the consumer honours the booleans the queue hands back: a `renew` that says the lease has
  * gone, a `finish` that says the item was not ours, an attempt count that has reached its cap.
  */
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,

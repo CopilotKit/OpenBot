@@ -1,0 +1,5 @@
+agno[agui]
+litellm
+fastapi
+python-multipart
+uvicorn[standard]

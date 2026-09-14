@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { sweepAuditTrail } from "../src/audit-retention";
 import { createDatabase } from "../src/db/client";
 import { auditEvents } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The audit trail has to be able to stop growing.
@@ -18,9 +18,7 @@ import { TEST_POOL } from "./support/database";
  * server sweeps, the batching, and the interval arithmetic.
  */
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 
 /** The id column is a uuid, so the rows are found by their target rather than by a marker in the id. */

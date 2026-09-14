@@ -8,6 +8,438 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.10
+
+### The LangGraph Bot says a refused tool call was refused, not that it found nothing
+
+When the deployment would not run a tool call from the LangGraph Bot — a token it no longer accepts,
+or one issued to another Bot — it answered 401 or 403 with a reason and no result, and the Bot told
+its model "The tool returned nothing." The model then told the person nothing was found. The Bot now
+tells its model the call was refused, with the status and the deployment's reason, the way the
+Python LangGraph Bot already does, and the transcript draws it as a refusal. A tool that answered is
+passed on exactly as before.
+
+### Revoking a grant with a blank ref or Bot is refused instead of reported as done
+
+`DELETE /api/plugins/grants` checked its query params with truthiness, and a query param is
+always a string: `?ref=%20%20` is truthy, so it skipped the 400, deleted zero rows by exact
+match, still wrote a `plugin_revoked` audit row naming whitespace, and answered `ok:true`. The
+`POST` twin already required trimmed non-empty strings. `DELETE` requires the same now and acts
+on the trimmed values, so a blank ref or Bot is a 400 with the same message, no delete, and no
+audit row.
+### The Bot in the box and the LangGraph Bot read a message that has a file attached
+
+A message with a file attached reached both Bots as `[object Object],[object Object]`, in place of
+what the person typed and the file both: they read a message as a string, and one carrying a file is
+a list of parts. Each part now reaches the model as what it is — the words, the text of an attached
+file, an attached image — and a part neither can read is named rather than dropped.
+
+### A fractional or out-of-range computer setting takes the fallback instead of breaking the boot
+
+`numberFromEnv` accepted anything `Number` called finite and positive, so `PORT=80.5` bound
+nothing usable, `PORT=99999` misbound at boot, a fractional timeout fired before any action could
+finish, and `COMPUTER_MAX_BROWSERS=2.5` reached eviction math as a fraction — each reading as a
+broken computer rather than a mistaken variable. Every reader is a port, a timeout, or a count,
+so only whole numbers on sight are values now and anything else takes the documented fallback;
+the port additionally keeps its 1–65535 range, the way the supervisor's own port parser already
+does. Zero semantics are unchanged: `COMPUTER_BROWSER_IDLE_MS=0` still keeps browsers resident.
+### A malformed page size is refused instead of silently coerced
+
+`GET /channels` and `GET /api/admin/people` read `?limit=` with `Number.parseInt`, which
+coerces: `?limit=12abc` arrived as 12, `?limit=3.9` as 3, and each answered 200 with a silently
+wrong page. Both now share one strict parser with the audit list's rule: absent or blank leaves
+the store default alone, a run of digits is clamped into range against the same ceiling the store
+enforces, and anything else is a 400 naming the parameter, before the database is reached.
+### A skill written with a non-string slug or summary is refused instead of failing the insert
+
+`POST /api/plugins/skills` checked presence with truthiness and then ran the slug regex, which
+coerces: `{"slug":123}` tested the string `"123"` and passed validation, and `{"summary":{}}` had
+no check at all. Both reached the store, where the insert threw an uncaught error — a 500 for a
+caller error. A slug, a title and instructions must be non-empty strings now, the slug pattern is
+tested only after that, and a summary must be absent or a string; anything else is a 400 naming
+the field, before any refusal check, store write, or audit row.
+
+### More endpoints refuse a malformed request instead of coercing it or failing open
+
+The same treatment reached the rest of the write and query surface: the agent tool-call endpoint's
+name and arguments, the policy dry-run and audit-event list limits, a component's publication flag,
+the sandboxed-component fields, and a catalogue entry are each checked and answered with a 400 that
+names the bad field before the store is touched. The four hand-driven computer gestures — click,
+type, key and scroll — validate their own payloads the same way, so a click with no coordinates or a
+key with no key is refused rather than sent to the computer as a no-op.
+
+One of these closed a hole rather than tightening an edge. A component's list of decision functions
+was filtered to the strings in it, so `{"functions":[123,null,{}]}` became an empty list, the
+permission check ran over nothing, and the answer came back `allowed` for functions the caller had in
+fact named. The verdict is about the functions named now, or a 400; an absent list still means none.
+
+### Generated interfaces, tables and forms
+
+Generative UI is enabled by default; set `OPENBOT_GENERATIVE_UI=false` or `0` to disable it.
+Bots can render A2UI interfaces, compare records in sortable tables, and collect related answers in
+a form that waits for submission. LangGraph receives the component schemas needed to draw these
+interfaces correctly.
+
+The playground rejects invalid JSON before saving or publishing, confirms successful saves, and
+shows published custom components in the administrator's gallery.
+
+### A Bot's computer is rebuilt when it holds a token the deployment has stopped using
+
+A computer checks every caller against the `COMPUTER_TOKEN` it was created with, and holds that one
+for the life of the container. The shell mints the generated secrets once per deployment and does
+not rotate them, precisely because a computer outlives a restart, so ordinarily there is nothing
+here to go wrong. Setting a machine up again from nothing is the occasion where the token really
+does change: the credential store is emptied, a new one is minted, compose rebuilds everything it
+owns with it, and the computers, which the supervisor makes rather than compose, survive holding the
+old one.
+
+Everything then refuses, and nothing says why. The gateway allows the action and the trail records it
+as carried out, the computer answers 401, and the screen says "Not authorised" while naming no token
+and no container. Measured on a first run of v0.0.9 against a computer made by the install before it,
+five days earlier: every page the Bot tried to open, and the live screen beside it, failed that way.
+
+The supervisor now replaces a computer whose token is not the one it is handing out, the same way it
+already replaces one built from an older image, keeping the profile and workspace volumes so the Bot
+comes back with its logins and its files. A deployment that sets no token is left alone, because a
+computer with no door on it is a choice the environment made rather than a mismatch to act on.
+
+## 0.0.9
+
+### The People screen keeps a person's last sign-in when their sessions go away
+
+`Last signed in` was `max(sessions.created_at)`, so it disappeared whenever the session rows behind
+it did: on sign-out, on expiry, and when an administrator removed somebody. Restoring them did not
+bring it back, and the person moved to the bottom of the list as somebody who had never signed in.
+The moment of each sign-in is now recorded on the person, so the answer survives all three, and a
+removed person's row shows when they were last here instead of leaving it out. Existing deployments
+are backfilled from whatever sessions they still hold.
+
+### A message can carry files
+
+Pick them, drag them onto the composer or paste them in: up to eight files on one message, images up
+to 8 MiB and text files up to 1 MiB, in the four image formats a model reads (PNG, JPEG, GIF, WebP)
+and four text ones (plain text, Markdown, CSV and JSON). A file is uploaded as it is staged rather
+than when the message is sent, so the send is immediate and a send that fails keeps what was
+attached to it, instead of asking somebody to find eight files again. The bytes live in the
+deployment's own database and are served back from the app's own origin, which is also why the type
+is decided by reading the file rather than by believing what the browser called it: something that
+claims to be text and is not UTF-8 is refused rather than stored and served as accepted text on the
+client's word.
+
+What reaches the model is bounded separately from what may be uploaded, because the two limits pay
+for different things. An image goes whole. A text file is read up to 120,000 characters, roughly
+30,000 tokens, which is one attachment's share of a window that also holds the conversation and up
+to seven other files, and the part sent says where it was cut so the model is not left answering
+about a file it read only part of. A megabyte of text is therefore stored whole and read as its
+first eighth or so, and the person who attached it is not yet told that.
+
+### Unsent attachments have to be swept, or somebody who stages 32 can attach nothing again
+
+A file is stored when it is picked, not when it is sent, so every abandoned draft leaves bytes
+behind and nothing in the image reclaims them. The Helm chart runs the sweep hourly and deletes
+unsent files older than a day. Any other deployment has to run it:
+`bun scripts/cull-staged-attachments.ts` from `/app/server`, one pass then exit, with the retention
+window as its one optional argument. Unlike the routines sweep beside it, it needs only
+`DATABASE_URL`, so an external cron can run it with one variable set.
+
+This is not only about growth. A person may hold 32 unsent files across all their channels, which is
+what bounds a client that ignores the eight-per-message cap, and the refusal on the 33rd tells them
+anything still unsent is cleared within a day. That sentence is a promise made on the sweep's
+behalf: where nothing runs it, the files are never cleared and anybody who reaches 32 can attach
+nothing, in any channel, from then on. At 8 MiB a file, 32 staged files per person is the 256 MiB
+to size storage against.
+
+### Fresh desktop installs pin the latest published deployment
+
+The desktop app resolves GitHub's latest published release on first setup and downloads that exact
+tag's source and image manifest. It records the version after both downloads finish and reuses it
+on subsequent starts, so new installs no longer stay tied to the app's old v0.0.8 default.
+
+### The Bot computer refuses a malformed scroll or live input before the browser sees it
+
+A non-finite wheel delta travelled into Playwright and came back as a 502 that read as a broken
+computer, and any JSON object on the live-screen socket fell through to `Input.insertText` or
+forwarded wrong-typed coordinates to CDP. Scroll deltas must be finite numbers now, and live
+input must match its mouse, wheel, key, or text shape; anything else is a 400 naming the field.
+### A non-string plugin grant or tool call is refused before it reaches the store
+
+`POST /api/plugins/grants` and `POST /api/plugins/call` checked presence, not shape, so a JSON
+number, object, or whitespace string passed and failed inside the store as a 500. Refs and Bot
+ids must be non-empty strings now, and anything else is a 400 naming what is required.
+### A fractional or infinite snapshot id is refused as malformed, not stale
+
+A `snapshotId` of `1.5` or `Infinity` passed the acting routes and never matched the stored
+integer, so the answer was a 409 stale snapshot and the caller retried a request that was
+malformed. Non-integer ids are refused with a 400 naming the ref and its snapshot before any
+decision or audit row.
+### A `DATABASE_URL` with a port of zero is refused at start-up
+
+`postgres://…:0/…` parsed and booted, and every query then failed against a port nothing listens
+on. Ports outside 1-65535 are refused with a sentence naming `DATABASE_URL` before a socket is
+ever opened.
+
+### Setup installs the container engine, instead of telling somebody to go and get one
+
+Setup ended at "Install Podman Desktop or Docker Desktop first" on any machine that had neither,
+which is every machine this app is for: the step existed with nothing behind it, so the whole install
+stopped at a download page. It installs one now, and a Compose with it, because Podman ships no
+Compose implementation and a machine with a freshly installed Podman still cannot raise the stack.
+Both are pinned to the digest of the release they were tested against and refused if it does not
+match, because these are files this app then executes. Only what is missing is added: an engine
+somebody already has is theirs, and a Compose that already answers is left alone. Windows installs
+unattended; macOS and Linux each raise the platform's own authorization prompt, which is not
+something to route around. The two plan sign-ins set the engine up as well, since they run in a
+container themselves and previously named an obstacle with no way past it. Every engine command names
+a resolved path rather than trusting the PATH this process was started with, so an engine installed a
+minute ago can be used by the run that installed it.
+
+### Setup ends with a question the Bot has to answer
+
+Every step before the last one proves that something started, which is not the same as proving the
+answers work. A refused key, a lapsed plan or a model the account cannot use each give a stack that
+comes up clean and a Bot that cannot answer, and handing over at that point means somebody finds out
+later, inside the product, with no idea which of their answers caused it. Setup now ends on a
+question with one checkable answer and waits for it. A run that produces no text is a failure here
+rather than an empty answer, because the framework catches its own 401 and logs it, leaving the whole
+of a refusal in the container's log and nowhere else. The sentence on screen is OpenBot's own and
+names the choice to change, with the harness's log behind a disclosure for the developer half.
+
+### A subscription picks the Bot that can spend it
+
+A plan is not a key, and only one Bot speaks each vendor's subscription. Signing in to a Claude plan
+and keeping the default Bot gave a stack that came up clean and a Bot whose log read "Missing
+credentials. Please pass an `api_key`", after two screens the person had answered correctly and with
+no way to know which answer to change. A plan now re-points the Bot, and the model screen says which
+Bot that will be while there is still a screen to say it on. A signed-in ChatGPT plan gets the Codex
+model, because a plan token is a bearer for one address that langchain-openai pins on purpose and
+cannot be reached by pointing `OPENAI_BASE_URL` at it. The vendor's own token store is kept beside
+the `.env` as an owner-only file and mounted into the harness, so the renewals the provider makes
+outlast the container: the access token on its own expires within the hour and nothing can renew it,
+which would give a Bot that works in the morning and fails after lunch. The window also has an Edit
+menu now, so the shortcut works on the screen whose own instruction is "paste the code it shows you";
+macOS routes the clipboard through the menu bar, and a window without one has no Paste.
+
+### Signing in to CopilotKit from the window works
+
+The sign-in that creates a key for somebody had never been run end to end, and it failed four times
+in a row, each time silently or with a message that named nothing. The session is called `cliToken`,
+not `token`, so the first exchange failed with "error decoding response body" and no way to tell
+which field or which endpoint; a failure carries the response now, masked, because the one that
+diagnosed this also carried a live session token. Project ids are numbers, and requiring a string
+dropped every project, so the screen told somebody with ten of them that the account had none: an
+empty list and an unreadable one are told apart now, because one of them is a lie a person cannot
+argue with. The keys endpoint declares `project_id` as a number with no coercion, so the string "7"
+came back as a validation error on the last step of the flow. And the project tiles drew as blank
+white rectangles, because the tile rule overrode the background to white and not the colour, asking
+somebody to choose between six empty boxes. The sign-in address is kept on screen the way the plan
+sign-ins keep theirs, for the machine whose browser is not the one in front of the person.
+
+### An endpoint that needs no key can be connected
+
+The compatible row names Ollama and vLLM in its own summary and then refused to continue without an
+API key. Neither has one, so the two examples the screen offers by name were the two it would not
+accept, and the way out was to invent a key and hope the endpoint ignored it. An address and a model
+name are what that row needs. Both bundled Bots refused to start without `OPENAI_API_KEY` as well, so
+fixing the screen alone would have given two dead containers complaining about a key that person's
+server does not have: a base URL is a model and its key belongs to it, so a key is now required only
+when nothing else names the endpoint, and plain OpenAI still refuses without one. Because a
+deployment pulls the image the release pinned, and an image published before the Bots learned this
+still refuses, a placeholder string is sent to an endpoint that reads no key. Ollama, vLLM, LM Studio
+and llama.cpp all ignore the value. It is written in plain sight rather than put in the machine's
+credential store, because it is not a credential, and a key somebody actually typed is used
+unchanged. The model name reaches the bundled Bot too, which reads `AGENT_BOT_MODEL` and had been
+left on a pin chosen for OpenAI's own catalogue.
+
+### A model name no longer outlives the answer that chose it
+
+The compatible row is the only one that names a model, and switching away from it kept the name.
+Answering with an OpenAI key after trying a local endpoint left `BOT_MODEL=local-model`, so the Bot
+asked OpenAI for a model only that person's own server has, and the last screen said "That account
+cannot use the model that was chosen" about a model this run never chose. The name is removed rather
+than emptied, so the compose default applies, and taken out of the file as well, because the writer
+keeps the lines it did not write and that is what let it survive.
+
+### Credentials go to the machine's own credential store, not the `.env`
+
+The `.env` is a settings file, and a settings file is something somebody opens, reads out to support
+or pastes into a chat. A model key, a plan token and the tokens these services prove themselves to
+each other with are not settings. They go to the login Keychain on macOS, to DPAPI on Windows
+encrypted to the signed-in user, and on Linux to an owner-only file, which is said out loud rather
+than dressed up: no desktop Linux install can be assumed to be running a Secret Service daemon, and
+refusing to save a credential because gnome-keyring is missing would fail more people than it
+protects. The value never goes on a command line on any of them, since ps is readable by every
+process the person runs. macOS goes through the Keychain itself rather than the `security` command,
+whose password prompt truncates at 128 bytes with no error and an exit status of zero: an OpenAI
+project key is 164 characters, so every one of them was stored cut short and read back cut short on
+the next run, while the run that saved it worked fine. From the store the credentials reach the
+containers and the host processes as environment, which compose resolves before it reads the `.env`,
+so a secret arrives at exactly the services that declare it and is written down nowhere. What an
+earlier version already wrote in plaintext is moved and then purged, or the change would have bought
+nothing for anybody who already had OpenBot.
+
+### The credential store is asked once per run, not once per screen
+
+Four Keychain dialogs every time the setup screen mounted, each needing a click before the window
+would go on, and four more for navigating between setup and OpenBot. macOS authorizes every
+individual read of a stored password unless the application is signed with an identity the item's ACL
+already trusts; a development build is re-signed on every compile, so its ACL never matches, and the
+wizard reads four secrets to arrive filled in. The store is asked once per name per process now and
+the answer is held in memory, absence included, or a machine with nothing stored is asked on every
+mount for something that was never there. Writes go through the same memory and forgetting clears it,
+so the two cannot disagree. This does not remove the prompts on a first run, and nothing in this
+process can: that decision belongs to the operating system and to the signature.
+
+### Stop stops the Bot that was picked, and the next Start no longer refuses because of it
+
+Compose only acts on a profiled service when the profile is named, so Stop left the one container the
+person actually chose running on their laptop after they had stopped the app, still holding its port.
+The next Start then refused, saying something was already listening on 4206, about a container
+OpenBot itself had started, which the person never saw and could not find, and there was no way
+forward from that screen. A port this deployment already publishes is not a stranger on the port, so
+the check reclaims our own and keeps its teeth for somebody else's.
+
+### Stop stops the host processes on Windows
+
+Measured on Windows Server 2022: Stop took the containers down, reported success, and left the server
+answering on 3001, the routines worker up, and both halves of the app answering on 3010. Only the
+containers had gone. The handles a window holds cover what that window started and die with it, so a
+window stopping a stack an earlier one started held nothing, and the Windows arm returned success
+with a comment saying the host processes end with the session. They do not. The pids are written
+beside the logs when the processes start and Stop reads them, ending each process together with its
+children, since `bun run serve` starts the real server as a grandchild. A sweep of the ports this
+deployment publishes stays as a second pass for a stack whose pid file is gone. Separately, a
+byte-order mark in front of `package.json`, which `Set-Content -Encoding UTF8` writes freely, made
+the manifest unreadable and was reported as "the deployment is older than this version of OpenBot",
+sending somebody looking for a newer installer over three bytes.
+
+### The installed app is served without a development server
+
+"Show OpenBot" did nothing on a machine where the stack was up. The window said OpenBot was running,
+the button was there, and clicking it had no effect at all. The app host process was dead: it was
+started through `vite preview` under `bun --bun`, and Vite's proxy calls `socket.destroySoon()` when
+an upstream response ends, which bun's sockets do not implement, so the process died with a TypeError
+on the first call the app made. It served its page, exited, and nothing listened on 3010 from then
+on, while the shell went on reporting a stack that was up, because the containers were. The app is
+served by a small server of its own now: a directory and one forwarded prefix, which is all an
+install needs, with no Node and no Vite at runtime. The websocket upgrade the live screen needs is
+forwarded rather than answered with HTML, a miss under `/assets` is a 404 rather than the page, and
+paths are confined to the directory, since the deployment's `.env` sits two levels above it. The
+button also shows what it was told: the call behind it already answered "OpenBot is not answering on
+port 3010 yet, so there is nothing to show", and the click handler threw that sentence away, which is
+why a dead process looked like a dead button.
+
+### A conversation whose history this deployment cannot reach says so
+
+Clicking a conversation in the rail drew the coworker's name and then nothing at all. The rail comes
+from OpenBot's own database, so a channel is listed whatever the history store says, while the
+messages live in the Intelligence project: pointing a deployment at a different project leaves the
+platform answering `THREAD_NOT_FOUND`. That 404 is deliberately read as "no history" and has to stay
+that way, because a thread id is minted before the thread exists, so a brand-new conversation 404s as
+its normal opening move, and widening it would tell somebody their conversation was gone and invite
+them to start it over. The two are told apart by `lastMessageAt`, which is set only once something
+has been said: a conversation with none is genuinely new and silence is correct, while one that has
+been spoken in and comes back empty has a history this deployment cannot reach. That one now says so,
+in the notice slot beside the existing explanations for a deleted coworker and for turns that could
+not be parsed.
+
+### `bun run dev` no longer starts a routines worker that cannot start
+
+`bun run dev` fanned out across every workspace, and one of them is the routines worker. That worker
+is handed `DATABASE_URL`, `SERVER_INTERNAL_URL` and `WORKER_SHARED_SECRET` by `scripts/start.sh` and
+by nothing else, so the copy this command started read none of them and threw at boot on every run,
+printing a stack trace in between the app's output and the server's. It has never started
+successfully. The command now starts the app and the server, which is what `README.md` and
+`docs/development.md` already say it does. Routines are unaffected: `scripts/start.sh` starts the
+worker exactly as before, and on Kubernetes the CronJob does.
+
+### Double-clicking works while a person is driving a Bot's browser
+
+A double click was sent to the Bot's browser as two separate first clicks, because every press said
+it was the first one. Chrome fires `dblclick` on the page only when the second press says it is the
+second, so the page never saw one at all and `event.detail` was always 1. Opening a row in a table,
+expanding a node in a tree and double-clicking a word to select it were all things a person holding
+the wheel simply could not do, with nothing on screen to say why — the clicks landed, they just each
+counted as the first. The count the person's own browser worked out is now the one that is sent, so a
+double click is a double click and a single one is unchanged.
+
+### Pressing Enter works while a person is driving a Bot's browser
+
+Taking the wheel of a Bot's browser is mostly for the sign-in it cannot do itself, and Enter is how a
+sign-in ends. Every keystroke reached the page, and Enter reached it as a key press that produces no
+character — which Chrome delivers to the page's own listeners and then does nothing further with. So
+the form did not submit, a new line in a text box did not start, and a button somebody had tabbed to
+was not pressed, while anything on the page listening for the key saw it arrive. There was nothing on
+screen to explain it: the keystroke was not refused, it simply had no effect, and the way out was to
+click the submit button instead. Enter now carries the carriage return a keyboard sends, which is
+what makes Chrome carry out what the key means. Measured against Chromium 151: every other editing
+key — Backspace, Delete, Tab, Home, End and the arrows — already did what it meant and is unchanged,
+and a single-line field still holds exactly what was typed into it.
+
+### A half-ticked box is no longer described to a Bot as ticked
+
+The snapshot a Bot reads before it acts on a page says whether each box is ticked, and Playwright
+writes that as `[checked]` for one that is and `[checked=mixed]` for one that is neither — which is
+what the "select all" above a partly-ticked list carries. The parser treated any value other than
+the string `false` as ticked, and `mixed` is one, so a half-ticked box was reported as done. A Bot
+asked to select everything read it as already selected, clicked nothing, and said the rows were
+chosen when most of them were not. `mixed` is now reported as not ticked, which is both the true
+half of a yes-or-no answer and the one that gets the right action: clicking a half-ticked box ticks
+it. An ordinary tick and an ordinary empty box are unchanged.
+
+### A Bot cannot end its turn by asking a person nothing
+
+`ask_person` is how a Bot stops and puts something to a person instead of guessing, and a call with
+no question in it was already meant to come back as a sentence telling it to say what it needs. That
+only happened when the field was missing altogether. A question that was present and empty was
+carried out: the Bot was told its question had been put to somebody, its turn ended there, and the
+trail took an escalation row with nothing in its question — the row an administrator counts these by,
+saying a person was asked something that was never said. On a deployment whose escalation route is a
+duty desk rather than the person already in the conversation, it is a page to somebody with no
+question on it. A blank question is now refused with the sentence that was already written for it,
+and a question typed with room around it is recorded as the question rather than as the spacing.
+### A routine scheduled for Sunday says Sundays, whichever number it was written with
+
+Crontab has always let Sunday be either 0 or 7, the scheduler here takes both, and a routine written
+with 7 is stored and fires on Sunday like any other. Only the 0 spelling was recognised by the
+sentence the Routines page draws and the Bot reads back, so a working weekend routine appeared on
+that page as `0 9 * * 7` while its neighbour said "Sundays at 09:00" — the same schedule, described
+two ways, with the raw one looking like something had gone wrong. Both spellings now read as Sunday,
+and a list that names the day under both of its numbers says it once.
+### A tenant package's theme may carry a comment
+
+A package's `theme.css` is checked at start-up against what it is allowed to define: the `:root` and
+`.dark` blocks, the approved variables, no imports and no URLs. A CSS comment defines none of those
+and was being read as though it did. One above the blocks — the line a hand-written stylesheet opens
+with, saying whose brand it is and where the colours came from — was left over once the blocks were
+set aside and refused as a second selector; one inside a block was split on the semicolons around it
+and refused as a variable name, with the comment quoted back as the name it was not. Because the
+package is read while the deployment starts, that was not a warning: the deployment did not come up,
+over a comment, saying nothing about comments. Comments are now taken out before the file is read as
+definitions, which also closes a comment wedged into the middle of `url(` as a way past the rule
+above it.
+### Test connection stops reading once it has seen the agent answer
+
+The button that checks an agent before it is registered sends it a real run and reads what comes
+back, needing only the opening of the stream to tell an AG-UI agent from a web server that happens to
+be reachable. It was reading the whole reply first and applying that limit afterwards, so the check
+took as long as the agent's run did. An agent that streams for more than fifteen seconds — a Bot
+working through a document, a model answering slowly — was given up on mid-answer and reported as
+`The agent started answering and the connection broke`, about a connection that had not broken and an
+agent that had answered correctly in its first two events. It now reads the opening it needs, closes
+the connection, and answers in the time the agent took to start rather than the time it took to
+finish.
+### A key pasted with a line break in it is now refused, instead of reported as an unreachable agent
+
+The box that holds an agent's key takes whatever is pasted into it, and what comes off a clipboard is
+not always what was on the screen: a long key copied out of a wrapped terminal line brings the wrap
+with it, and a hyphen copied out of a document has often been turned into an en dash on the way.
+Neither can be sent as an HTTP header — the runtime refuses the value outright — and neither was
+being looked at. On Test connection that refusal surfaced as "This server could not reach that
+address", with a suggestion about tunnels and firewalls, about an agent that was running perfectly
+well and had never been dialled. Stored on the Bot it was quieter and worse: the form said saved, and
+every turn that Bot took afterwards failed on a value nothing on screen said anything about. Both
+places now check the value before accepting it and say which kind of character is in the way. The
+character is named; the key never is.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

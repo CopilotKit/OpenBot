@@ -93,6 +93,29 @@ const VIRTUAL_KEY_CODES: Record<string, number> = {
   "'": 222,
 };
 
+/**
+ * The character a key stands for, where Chrome will not act on the key without one.
+ *
+ * `Input.dispatchKeyEvent` has two kinds of key-down. `rawKeyDown` is a key that produces no
+ * character: Chrome delivers it to the page and stops there, so a listener fires and nothing else
+ * happens. `keyDown` carries text, and that is what makes Chrome perform the key's own default
+ * action.
+ *
+ * Sending text only for a printable character therefore left Enter as a key a page could hear and
+ * not act on. Measured against Chromium 151 through this file: with a person holding the wheel,
+ * Enter did not submit the form they had just filled in, did not start a new line in a textarea and
+ * did not press the button they had tabbed to, while the page's own `keydown` listener saw every
+ * one of them. Which is the sign-in at the end of almost every takeover.
+ *
+ * One key rather than a list, measured the same way: Backspace, Delete, Tab, Home, End and the four
+ * arrows all do what they mean as a `rawKeyDown`, because their default action is not the insertion
+ * of a character.
+ *
+ * A carriage return, which is what a keyboard's Enter carries. Chrome turns it into whatever the
+ * field it lands in needs, so a single-line input is left holding no extra character.
+ */
+const TEXT_FOR_KEY: Record<string, string | undefined> = { Enter: "\r" };
+
 function virtualKeyCode(key: string): number {
   if (VIRTUAL_KEY_CODES[key] !== undefined) return VIRTUAL_KEY_CODES[key];
   // A single printable character carries its own code point, upper-cased, which is what Chrome expects
@@ -204,19 +227,26 @@ export async function startScreencast(
           (offeredCode ?? 0) <= 255
             ? (offeredCode as number)
             : virtualKeyCode(message.key);
+        /*
+         * The text this key carries: the surface supplies it for a printable character, and
+         * `TEXT_FOR_KEY` fills in the keys whose default action Chrome will not perform without one.
+         *
+         * Only on the way down, because that is where a default action happens. A key going up
+         * carries whatever it was given and nothing more.
+         */
+        const text =
+          message.event === "up"
+            ? message.text
+            : (message.text ?? TEXT_FOR_KEY[message.key]);
         await client.send("Input.dispatchKeyEvent", {
           // `keyDown` only when there is text to insert; otherwise `rawKeyDown`, which is what Chrome
           // expects for keys that do not produce a character. Sending keyDown with no text makes
           // editing keys arrive as nothing.
           type:
-            message.event === "up"
-              ? "keyUp"
-              : message.text
-                ? "keyDown"
-                : "rawKeyDown",
+            message.event === "up" ? "keyUp" : text ? "keyDown" : "rawKeyDown",
           key: message.key,
           code: message.code,
-          ...(message.text ? { text: message.text } : {}),
+          ...(text ? { text } : {}),
           windowsVirtualKeyCode: code,
           nativeVirtualKeyCode: code,
           modifiers: message.modifiers ?? 0,

@@ -208,15 +208,15 @@ jobs:
       # the tag meant.
       #
       # zstd, not gzip. A pull is already a compressed transfer, so this is not about compressing
-      # something that was not; it is a better algorithm for the same job. Measured on
-      # `agent-computer`, the image that matters: 962 MB becomes 886 MB, and it inflates several
-      # times faster, which is worth more than the 8% on 2 GB of Chromium. `force-compression`
-      # is what reaches the layers that came from somebody else's registry, which is where almost
-      # all of the bytes are; without it only our own thin layers change and the saving rounds to
-      # nothing. The cost is that these images no longer share layers with a gzip pull of the same
-      # base, and that a client which cannot read zstd cannot read them, which is why this is here
-      # and not on the `openbot` image above: that one is pulled by servers with whatever they have,
-      # and these are pulled by an installer that ships Podman.
+      # something that was not; it is a better algorithm for the same job. `force-compression`
+      # reaches layers that came from somebody else's registry; without it only our own thin layers
+      # change and the saving rounds to nothing. The cost is that these images no longer share layers
+      # with a gzip pull of the same base, and that a client which cannot read zstd cannot read them,
+      # which is why this is here and not on the `openbot` image above: that one is pulled by servers
+      # with whatever they have, and these are pulled by an installer that ships Podman. After the
+      # Chromium-only `agent-computer` Dockerfile change, while keeping Node/npm/npx from the
+      # official Node 24.18.1 image, local zstd OCI layer descriptors measured 535.0 MiB on arm64
+      # and 518.1 MiB on amd64.
       - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -276,11 +276,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Exact artifact names, one per architecture, not a `digest-<image>-*` glob. An image whose
+      # name is a prefix of another — `agent-langgraph` of `agent-langgraph-agui` — would otherwise
+      # match the other's digest artifacts too, and `merge-multiple` would overwrite this image's own
+      # `amd64`/`arm64` file with the other's. That shipped once: this image's manifest list was built
+      # from a digest that lived in the other's repository, so the join failed with "not found".
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: digest-${{ matrix.image }}-*
+          name: digest-${{ matrix.image }}-amd64
           path: digests
-          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digest-${{ matrix.image }}-arm64
+          path: digests
       - id: merge
         name: Write the tags over both architectures
         env:

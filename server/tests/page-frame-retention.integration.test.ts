@@ -7,7 +7,7 @@ import {
 } from "../src/computer/page-frames";
 import { createDatabase } from "../src/db/client";
 import { computerPageFrame } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The screenshots have to be able to stop growing, in every deployment rather than in one.
@@ -20,9 +20,7 @@ import { TEST_POOL } from "./support/database";
  * Against a real database because the interval arithmetic and the batching are both SQL.
  */
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const store = createPageFrameStore(database);
 

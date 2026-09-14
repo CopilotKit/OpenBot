@@ -69,10 +69,28 @@ function addressOf(databaseUrl: string) {
    */
   const connection = Object.fromEntries(url.searchParams);
 
+  /*
+   * A port that is not a port is refused before a socket is ever opened.
+   *
+   * `new URL` already rejects `:65536` and above, but `:0` parses to `"0"` and would travel
+   * into `new SQL({ port: 0 })` as `0`. Boot then succeeds and every query fails against a port
+   * nothing listens on, instead of the start-up refusal every other malformed address here gets.
+   * Postgres ports are 1-65535, the same range the server's own `PORT`/`SERVER_PORT` enforces.
+   */
+  let port = 5432;
+  if (url.port !== "") {
+    port = Number(url.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new TypeError(
+        "DATABASE_URL names a port that is not between 1 and 65535.",
+      );
+    }
+  }
+
   return {
     adapter: "postgres" as const,
     hostname: url.hostname,
-    port: url.port === "" ? 5432 : Number(url.port),
+    port,
     username: decodePart(url.username, "username"),
     password: decodePart(url.password, "password"),
     database,

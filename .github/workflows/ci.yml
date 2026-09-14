@@ -35,6 +35,18 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      # The chart's default image tag is its appVersion, and a release must move both together. They
+      # drifted once, appVersion left pointing at a tag that was never published, and a default
+      # `helm install` sat in ImagePullBackOff. This refuses a tree where package.json (the last
+      # version published) and the chart's appVersion have come apart.
+      - name: Chart appVersion tracks the release version
+        run: |
+          pkg=$(bun -e 'console.log(require("./package.json").version)')
+          chart=$(bun -e 'console.log(require("yaml").parse(require("fs").readFileSync("charts/openbot/Chart.yaml","utf8")).appVersion)')
+          if [ "$pkg" != "$chart" ]; then
+            echo "::error::package.json is $pkg but charts/openbot/Chart.yaml appVersion is $chart. The release workflow moves them together; bring them back into line."
+            exit 1
+          fi
 
   # The two packages that are deployables in their own right rather than root workspaces. Root
   # `typecheck` is `bun run --filter '*' typecheck`, and `--filter '*'` enumerates `workspaces`, which
@@ -187,18 +199,19 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_DB: openbot
+          POSTGRES_DB: openbot_test
           POSTGRES_USER: openbot
           POSTGRES_PASSWORD: openbot
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U openbot -d openbot"
+          --health-cmd "pg_isready -U openbot -d openbot_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot
+      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
+      TEST_DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -215,6 +228,14 @@ jobs:
       # Bot's own tree and not in the root one.
       - run: bun install --frozen-lockfile
         working-directory: agent-langgraph
+      # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
+      # from that Bot's own dependency tree.
+      - run: bun install
+        working-directory: agent-mastra
+      # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is
+      # pinned by the desktop lockfile rather than the root one.
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts
@@ -222,6 +243,39 @@ jobs:
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
       - run: bun run test:ci
+
+  python-harness:
+    name: python harness regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: CrewAI provider-boundary regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-crewai
+          . .venv-crewai/bin/activate
+          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
+          python -m pytest agent-crewai/tests -q
+      - name: LangGraph AG-UI provider-boundary regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-langgraph-agui
+          . .venv-langgraph-agui/bin/activate
+          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
+          python -m pytest agent-langgraph-agui/tests -q
+      - run: bun install --frozen-lockfile
+      - run: bun test tests/compose.test.ts
+      - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
+        env:
+          PICKED_HARNESS_IMAGE: openbot-agent-langgraph-agui:test
 
   build:
     name: build
@@ -414,7 +468,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, chart, test, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

@@ -15,7 +15,9 @@ import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
+import { apiKeyOrPlaceholder, KEY_VARIABLE, keyIsRequired } from "./model-key";
 import { streamRun } from "./stream";
+import { toolAnswer } from "./tool-answer";
 
 /**
  * The same Bot, on a framework.
@@ -152,12 +154,6 @@ function defaultModelFor(provider: string): string {
  * a missing key should fail in front of whoever is deploying, not as a conversation that errors in
  * front of somebody trying to use it.
  */
-const KEY_VARIABLE: Record<string, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GOOGLE_API_KEY",
-};
-
 const keyVariable = KEY_VARIABLE[PROVIDER];
 if (!keyVariable) {
   console.error(
@@ -166,7 +162,8 @@ if (!keyVariable) {
   process.exit(1);
 }
 const API_KEY = process.env[keyVariable]?.trim();
-if (!API_KEY) {
+// Unless an endpoint was named to answer instead: see `keyIsRequired`.
+if (!API_KEY && keyIsRequired(PROVIDER, OPENAI_BASE_URL)) {
   console.error(
     `${keyVariable} is not set, and BOT_PROVIDER=${PROVIDER} needs it. This Bot cannot answer without a model.`,
   );
@@ -200,7 +197,7 @@ function buildModel() {
   if (PROVIDER === "anthropic") {
     return new ChatAnthropic({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
       ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
     });
@@ -208,14 +205,14 @@ function buildModel() {
   if (PROVIDER === "google") {
     return new ChatGoogleGenerativeAI({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
       ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
-    apiKey: API_KEY,
+    apiKey: apiKeyOrPlaceholder(API_KEY),
     streaming: true,
     ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
@@ -235,7 +232,9 @@ function buildModel() {
  * here, in this process, and every call it makes goes back through the deployment that granted it.
  */
 const TOOL_URL =
-  process.env.OPENBOT_TOOL_URL ?? "http://localhost:3001/api/agent-tools/call";
+  // Numeric, never `localhost`: it resolves to `::1` under Node and `127.0.0.1` under bun, so a
+  // name here reaches a different interface depending on what started the process.
+  process.env.OPENBOT_TOOL_URL ?? "http://127.0.0.1:3001/api/agent-tools/call";
 const TOOL_TOKEN = process.env.AGENT_TOOL_TOKEN ?? "";
 
 async function callTool(
@@ -269,8 +268,7 @@ async function callTool(
        */
       body: JSON.stringify({ name, args, run }),
     });
-    const body = (await response.json()) as { text?: string };
-    return body.text ?? "The tool returned nothing.";
+    return await toolAnswer(response);
   } catch (error) {
     // Reported to the model as a result rather than thrown: the run continues and says what broke.
     return `That tool could not be called: ${
@@ -457,4 +455,4 @@ serve({
   },
 });
 
-console.info(`agent-langgraph listening on http://localhost:${PORT}/ag-ui`);
+console.info(`agent-langgraph listening on http://127.0.0.1:${PORT}/ag-ui`);

@@ -2,11 +2,15 @@ import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AgentProfileStore } from "../src/agents/profile-store";
+import type { AgentProfile } from "../src/agents/profile-types";
 import type { AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import type { IntentRouter, RoutingUndecided } from "../src/routing/classify";
 import { createRoutingRoutes } from "../src/routing/routes";
-import { createCoworkerRoutingService } from "../src/routing/service";
+import {
+  createCoworkerRoutingService,
+  defaultRoutingProfile,
+} from "../src/routing/service";
 
 /**
  * Why a conversation went where it went, for every conversation.
@@ -29,6 +33,18 @@ const ACTOR = { id: "u1", email: "person@openbot.test", role: "user" } as const;
 
 const ROSTER = [
   {
+    id: "general-assistant",
+    name: "General Assistant",
+    roleDescription: "everyday work",
+    visibility: "public",
+  },
+  {
+    id: "picked-harness",
+    name: "OpenBot",
+    roleDescription: "the package-selected harness",
+    visibility: "public",
+  },
+  {
     id: "risk-analyst",
     name: "Risk Analyst",
     roleDescription: "regulatory and compliance questions",
@@ -46,6 +62,29 @@ const ROSTER = [
   },
 ];
 
+function profile(input: {
+  id: string;
+  name: string;
+  roleDescription: string;
+  visibility: AgentProfile["visibility"];
+}): AgentProfile {
+  return {
+    avatarSeed: input.id,
+    deletedAt: null,
+    endpoint: input.id === "picked-harness" ? "http://127.0.0.1:4201" : null,
+    hasAuth: false,
+    hasCallbackToken: false,
+    hidden: false,
+    id: input.id,
+    name: input.name,
+    ownerUserId: ACTOR.id,
+    roleDescription: input.roleDescription,
+    systemOwned: false,
+    title: input.name,
+    visibility: input.visibility,
+  };
+}
+
 type Recorded = {
   eventType: string;
   targetId: string | null;
@@ -56,6 +95,7 @@ function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
   const written: Recorded[] = [];
   /** Every call the router was asked to make, so "never asked" is an assertion and not a hope. */
   const asked: string[] = [];
+  const defaults: string[] = [];
 
   const asActor: MiddlewareHandler<{ Variables: AppVariables }> = async (
     context,
@@ -70,8 +110,9 @@ function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
   } as unknown as AgentProfileStore;
 
   const router = {
-    route: async (text: string) => {
+    route: async (text: string, _candidates: unknown, defaultId: string) => {
       asked.push(text);
+      defaults.push(defaultId);
       const chosen = options.routed ?? "knowledge";
       return {
         agentId: chosen,
@@ -97,7 +138,7 @@ function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
       asActor,
     ),
   );
-  return { server, written, asked };
+  return { server, written, asked, defaults };
 }
 
 async function post(
@@ -110,6 +151,54 @@ async function post(
     body: JSON.stringify(body),
   });
 }
+
+describe("choosing the default route target", () => {
+  test("prefers the package-picked harness over earlier public coworkers", () => {
+    expect(
+      defaultRoutingProfile([
+        profile({
+          id: "general-assistant",
+          name: "General Assistant",
+          roleDescription: "everyday work",
+          visibility: "public",
+        }),
+        profile({
+          id: "picked-harness",
+          name: "OpenBot",
+          roleDescription: "the package-selected harness",
+          visibility: "public",
+        }),
+      ])?.id,
+    ).toBe("picked-harness");
+  });
+
+  test("keeps the existing public then first fallback when no package pick exists", () => {
+    expect(
+      defaultRoutingProfile([
+        profile({
+          id: "private-bot",
+          name: "Private",
+          roleDescription: "private",
+          visibility: "private",
+        }),
+        profile({
+          id: "shared-bot",
+          name: "Shared",
+          roleDescription: "public",
+          visibility: "public",
+        }),
+      ])?.id,
+    ).toBe("shared-bot");
+  });
+
+  test("the route endpoint passes the package pick as the router default", async () => {
+    const { server, defaults } = app({ undecided: "unconfident" });
+
+    await post(server, { text: "show me hacker news" });
+
+    expect(defaults).toEqual(["picked-harness"]);
+  });
+});
 
 describe("recording which coworker a message went to", () => {
   test("a named coworker is recorded as the person's own choice", async () => {

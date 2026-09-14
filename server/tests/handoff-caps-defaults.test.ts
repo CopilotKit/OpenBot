@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import { parse } from "yaml";
 import { loadConfig } from "../src/config";
 import { testEnvironment } from "./support/environment";
@@ -17,11 +18,22 @@ import { testEnvironment } from "./support/environment";
  * operator debugging a refusal against a number their deployment never had.
  */
 
-const chart = parse(await Bun.file("charts/openbot/values.yaml").text()) as {
+/*
+ * Resolved from this file rather than from the working directory. Both reads are at the top level,
+ * so a relative path that misses takes the whole file's tests with it and reports nothing: the suite
+ * gets smaller and stays green. That is what `bun test` from inside `server/` used to do.
+ */
+const repositoryRoot = resolve(import.meta.dir, "..", "..");
+
+const chart = parse(
+  await Bun.file(resolve(repositoryRoot, "charts/openbot/values.yaml")).text(),
+) as {
   config?: { handoff?: { maxDepth?: number; maxPerRun?: number } };
 };
 
-const docs = await Bun.file("docs/configuration.md").text();
+const docs = await Bun.file(
+  resolve(repositoryRoot, "docs/configuration.md"),
+).text();
 
 /** What `handoffCaps` falls back to with nothing in the environment. */
 const code = loadConfig(testEnvironment()).handoff;

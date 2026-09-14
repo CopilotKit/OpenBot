@@ -1,5 +1,111 @@
-import { useEffect, useRef, useState } from "react";
+import { OpenGenerativeUIActivityRenderer } from "@copilotkit/react-core/v2";
+import { useQuery } from "@tanstack/react-query";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import {
+  type SandboxedRecord,
+  sandboxedListQueryOptions,
+} from "@/lib/sandboxed/queries";
+
+/** Sample arguments belong to the administrator's working copy, so only Admin fetches them. */
+export function AdminComponentPreview({
+  name,
+  kind,
+}: {
+  name: string;
+  kind: string;
+}) {
+  const sandboxed = useQuery({
+    ...sandboxedListQueryOptions(),
+    enabled: kind === "sandboxed",
+  });
+  if (kind === "sandboxed" && sandboxed.isPending) return null;
+  if (kind === "sandboxed" && sandboxed.error) {
+    return <PreviewNotice>Preview could not be loaded.</PreviewNotice>;
+  }
+  return (
+    <ComponentPreview
+      kind={kind}
+      name={name}
+      sandboxed={sandboxed.data?.find((component) => component.name === name)}
+    />
+  );
+}
+
+function PreviewNotice({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center p-4">
+      {/* The artwork stays pale in both themes, so this text must stay dark. */}
+      <p className="text-center text-neutral-700 text-xs">{children}</p>
+    </div>
+  );
+}
+
+export function ComponentPreview({
+  name,
+  kind,
+  sandboxed,
+  fill = PREVIEW_FILL,
+}: {
+  name: string;
+  kind?: string;
+  sandboxed?: SandboxedRecord;
+  fill?: number;
+}) {
+  const entry = galleryComponent(name);
+  if (entry?.preview) {
+    return (
+      <FittedPreview fill={fill}>
+        <entry.Component {...entry.preview} />
+      </FittedPreview>
+    );
+  }
+
+  if (sandboxed?.name === name) {
+    if (!sandboxed.published || sandboxed.publishedHtml === null) {
+      return (
+        <PreviewNotice>
+          Publish in the playground to see a preview.
+        </PreviewNotice>
+      );
+    }
+    const content = {
+      css: sandboxed.publishedCss ?? "",
+      cssComplete: true,
+      html: [sandboxed.publishedHtml],
+      htmlComplete: true,
+      jsFunctions: `window.__args = ${JSON.stringify(sandboxed.sampleArguments)};\n${sandboxed.publishedJsFunctions ?? ""}`,
+      jsFunctionsComplete: true,
+      generating: false,
+    };
+    return (
+      <FittedPreview fill={fill}>
+        <div
+          className="w-full"
+          title="Published component with saved sample arguments"
+        >
+          <OpenGenerativeUIActivityRenderer
+            activityType="open-generative-ui"
+            agent={null}
+            content={content}
+            key={JSON.stringify(content)}
+            message={null}
+          />
+        </div>
+      </FittedPreview>
+    );
+  }
+
+  return (
+    <PreviewNotice>
+      {entry
+        ? "This one is only drawn in a conversation."
+        : kind === "sandboxed"
+          ? "Published in the playground."
+          : "This build cannot draw this."}
+    </PreviewNotice>
+  );
+}
 
 /**
  * The width a gallery component is given to lay out against, standing in for the conversation
@@ -40,14 +146,13 @@ export const PREVIEW_FILL = 0.85;
  * card here has a real note field and real Approve and Decline buttons; nothing in Admin should be
  * able to reach them, and a screen reader should not find a second set of them on the page.
  */
-export function ComponentPreview({
-  name,
-  fill = PREVIEW_FILL,
+function FittedPreview({
+  children,
+  fill,
 }: {
-  name: string;
-  fill?: number;
+  children: ReactNode;
+  fill: number;
 }) {
-  const entry = galleryComponent(name);
   const box = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0);
@@ -88,26 +193,6 @@ export function ComponentPreview({
     return () => observer.disconnect();
   }, [fill]);
 
-  if (!entry?.preview) {
-    return (
-      <div className="flex h-full w-full items-center justify-center p-4">
-        {/*
-         * A fixed dark grey rather than `text-muted-foreground`. That token lightens in the dark
-         * theme — 0.5 to 0.708 — while the artwork behind this text does not: it is the same pale
-         * gradient either way, with no dark variant. Following the theme therefore moved the text
-         * towards its background exactly when it needed to move away from it.
-         */}
-        <p className="text-center text-neutral-700 text-xs">
-          {entry
-            ? "This one is only drawn in a conversation."
-            : "This build cannot draw this."}
-        </p>
-      </div>
-    );
-  }
-
-  const { Component } = entry;
-
   return (
     <div
       aria-hidden="true"
@@ -133,7 +218,7 @@ export function ComponentPreview({
           width: PREVIEW_LAYOUT_WIDTH,
         }}
       >
-        <Component {...entry.preview} />
+        {children}
       </div>
     </div>
   );

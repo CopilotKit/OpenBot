@@ -1,3 +1,5 @@
+export {};
+
 /**
  * The test run, with a floor under how much of it must actually execute.
  *
@@ -13,6 +15,12 @@
 
 const MINIMUM_TESTS = 400;
 
+async function writeStderr(text: string) {
+  if (!text) return;
+  if (process.stderr.write(text)) return;
+  await new Promise<void>((resolve) => process.stderr.once("drain", resolve));
+}
+
 // `bun run test` rather than `bun test`, so the pretest hook fires and the generated application
 // config exists before route imports need it.
 const proc = Bun.spawn(["bun", "run", "test"], {
@@ -22,30 +30,30 @@ const proc = Bun.spawn(["bun", "run", "test"], {
 
 // Bun writes its summary to stderr, so it is captured and echoed rather than inherited.
 const stderr = await new Response(proc.stderr).text();
-process.stderr.write(stderr);
+await writeStderr(stderr);
 
-const status = await proc.exited;
-if (status !== 0) process.exit(status);
+const exitStatus = await proc.exited;
+if (exitStatus !== 0) {
+  process.exitCode = exitStatus;
+} else {
+  const ran = stderr.match(/Ran (\d+) tests? across/);
+  const count = ran ? Number.parseInt(ran[1] as string, 10) : 0;
 
-const ran = stderr.match(/Ran (\d+) tests? across/);
-const count = ran ? Number.parseInt(ran[1] as string, 10) : 0;
-
-if (!ran) {
-  console.error(
-    "\nCould not read how many tests ran from bun's output. Refusing to report a pass on a run that cannot be counted.",
-  );
-  process.exit(1);
+  if (!ran) {
+    await writeStderr(
+      "\nCould not read how many tests ran from bun's output. Refusing to report a pass on a run that cannot be counted.\n",
+    );
+    process.exitCode = 1;
+  } else if (count < MINIMUM_TESTS) {
+    await writeStderr(
+      `\n${count} tests ran, and at least ${MINIMUM_TESTS} were expected.\n\n` +
+        "Every test passed, so this is not a failing test, it is a suite that got smaller. The usual\n" +
+        "cause is a file that threw while being imported, which takes its tests with it and reports\n" +
+        "nothing. Run `bun test` and look for an unhandled error between the file groups.\n\n" +
+        `If tests were deliberately removed, lower MINIMUM_TESTS in scripts/test-ci.ts and say why.\n`,
+    );
+    process.exitCode = 1;
+  } else {
+    await writeStderr(`\n${count} tests ran (floor ${MINIMUM_TESTS}).\n`);
+  }
 }
-
-if (count < MINIMUM_TESTS) {
-  console.error(
-    `\n${count} tests ran, and at least ${MINIMUM_TESTS} were expected.\n\n` +
-      "Every test passed, so this is not a failing test, it is a suite that got smaller. The usual\n" +
-      "cause is a file that threw while being imported, which takes its tests with it and reports\n" +
-      "nothing. Run `bun test` and look for an unhandled error between the file groups.\n\n" +
-      `If tests were deliberately removed, lower MINIMUM_TESTS in scripts/test-ci.ts and say why.`,
-  );
-  process.exit(1);
-}
-
-console.error(`\n${count} tests ran (floor ${MINIMUM_TESTS}).`);

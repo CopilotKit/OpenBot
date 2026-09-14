@@ -3,7 +3,7 @@ import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { AuditEventInput, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
@@ -37,6 +37,30 @@ async function record(
       JSON.stringify({
         type: "sign-in-audit-write-failed",
         eventType: event.eventType,
+        error: String(error),
+      }),
+    );
+  }
+}
+
+export async function stampSignIn(
+  database: Database,
+  userId: string,
+  at: Date,
+): Promise<void> {
+  try {
+    await database
+      .update(users)
+      .set({
+        lastSignedInAt: sql`greatest(coalesce(${users.lastSignedInAt}, ${at}), ${at})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "sign-in-stamp-write-failed",
+        userId,
         error: String(error),
       }),
     );
@@ -282,6 +306,8 @@ export function createAuth(
             return { data: session };
           },
           after: async (session) => {
+            await stampSignIn(database, session.userId, session.createdAt);
+
             /*
              * The configured floor, re-applied on every sign-in. Editing the list has to mean
              * something for people already in the table, or adding yourself after you first signed

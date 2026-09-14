@@ -114,9 +114,17 @@ export function configuredAuthProviders(
 }
 
 export type ManagedAgentConfig = {
-  endpoint: URL;
-  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  /** The bundled Bot, absent when this deployment's provider cannot run it. */
+  endpoint?: URL;
+  /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
   token: string;
+  /**
+   * The harness picked during setup, when there is one.
+   *
+   * Also an endpoint this deployment runs: its container was started by this deployment, on a port
+   * it chose, holding this token. It gets the same header for the same reason.
+   */
+  alsoRun?: URL;
 };
 
 /**
@@ -143,11 +151,10 @@ export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
   /**
-   * The Bot in the box, when this deployment has one.
+   * Authentication for the bundled Bot and/or the installed picked harness.
    *
-   * Absent is the one-container image: it carries no AG-UI process, and a required URL would
-   * register a coworker against a host that is not there. Set both the URL and the token together
-   * when a remote Bot is actually running.
+   * The bundled endpoint is optional: plan credentials can run a picked harness without it.
+   * Its presence, not this auth configuration, determines whether a bundled Bot is available.
    */
   managedAgent?: ManagedAgentConfig;
   /**
@@ -249,9 +256,8 @@ export type DeploymentConfig = {
    * Narrowing the middleware to some Bots would leave the rest able to call the tool and draw
    * nothing at all, which is a worse answer than never offering it.
    *
-   * Off until a deployment sets OPENBOT_GENERATIVE_UI. A capability that runs code a model wrote is
-   * one an operator should choose, not one they should discover after an upgrade — and a deployment
-   * that builds its default branch automatically would otherwise acquire it without a decision.
+   * On by default. A deployment that cannot allow generated interfaces can explicitly opt out with
+   * OPENBOT_GENERATIVE_UI=false or OPENBOT_GENERATIVE_UI=0.
    *
    * What it runs is sandboxed by the SDK, in an iframe with no same-origin access to this app, so a
    * generated interface reaches this deployment's data only through what the host hands it. This
@@ -437,16 +443,38 @@ function managedAgentConfig(
   environment: Environment,
 ): ManagedAgentConfig | undefined {
   const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
+  // BYO writes a URL too, but does not run our image or hold our deployment token.
+  const alsoRun = optional(environment, "PICKED_HARNESS_IMAGE")
+    ? optionalHttpUrl(environment, "PICKED_HARNESS_URL")
+    : undefined;
   const token = optional(environment, "MANAGED_AGENT_TOKEN");
   if (endpoint && !token) {
     throw new Error(
       "MANAGED_AGENT_TOKEN must be set when MANAGED_AGENT_AG_UI_URL is set",
     );
   }
-  if (!endpoint || !token) {
+  if (alsoRun && !token) {
+    throw new Error(
+      "MANAGED_AGENT_TOKEN must be set when an installed PICKED_HARNESS_URL is set",
+    );
+  }
+  if ((!endpoint && !alsoRun) || !token) {
     return undefined;
   }
-  return { endpoint, token };
+  /*
+   * The harness somebody picked during setup is also an endpoint this deployment runs.
+   *
+   * It is a container this deployment started, on a port this deployment chose, holding the token
+   * this deployment generated — the same relationship the Bot in the box has. It was not getting
+   * the token because that was attached by matching one endpoint exactly, so the picked Bot was
+   * registered, addressable, routed to, and answered every call with 401. Only visible by asking it
+   * something in the window.
+   */
+  return {
+    ...(endpoint ? { endpoint } : {}),
+    token,
+    ...(alsoRun ? { alsoRun } : {}),
+  };
 }
 
 function oauthClient(
@@ -536,7 +564,12 @@ function authConfig(
     secret,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
-      : ["http://localhost:3010"],
+      : /*
+         * All three spellings of the same place, because this is an allowlist of what a browser
+         * sends and not an address anything dials. `localhost` alone refused a browser pointed at
+         * `127.0.0.1:3010`, which is the address the rest of this deployment hands out.
+         */
+        ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
     initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
@@ -882,16 +915,12 @@ function slackTenantId(environment: Environment): string | undefined {
 /**
  * Whether a Bot may draw an interface it wrote itself.
  *
- * ASKED FOR, NOT INHERITED, which is the one place this deliberately breaks the symmetry with
- * OPENBOT_ACCESSIBILITY_DISABLED above it. That flag names a deployment out of an analytics label,
- * so defaulting it on costs a fork nothing it would mind. This one decides whether a model may put
- * code it wrote on somebody's screen and pull libraries from a CDN to run it. Written as a disable
- * switch, absence would be the permissive answer, and a deployment acquires the capability by
- * upgrading rather than by choosing it — which is exactly how a deployment that auto-deploys its
- * default branch would find out.
+ * Default-on, matching the product capability the browser can already render. Operators who cannot
+ * allow generated interfaces can explicitly opt out. `false` is the documented spelling and `0` is
+ * accepted alongside it as the conventional off value used by environment-driven switches.
  *
- * Only "true" or "1" turn it on. Anything else is not a way of saying yes, and a value nobody
- * intended should leave a capability off rather than on.
+ * Anything else leaves the capability on. A typo should not silently become an opt-out, and the
+ * capability must stay consistent between runtime and browser projection.
  *
  * The answer has to reach the browser as well as the runtime, which is why it ends up on
  * /api/capabilities rather than staying server-side. Enabling only the runtime half would leave the
@@ -899,8 +928,8 @@ function slackTenantId(environment: Environment): string | undefined {
  * interface that nothing renders. See DeploymentConfig.generativeUi.
  */
 function generativeUiEnabled(environment: Environment): boolean {
-  const on = optional(environment, "OPENBOT_GENERATIVE_UI");
-  return on === "true" || on === "1";
+  const value = optional(environment, "OPENBOT_GENERATIVE_UI");
+  return value !== "false" && value !== "0";
 }
 
 /**

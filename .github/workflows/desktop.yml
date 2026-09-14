@@ -2,7 +2,7 @@ name: Desktop
 
 # The shell is the one thing here that cannot be proved by running it on Linux: it is a macOS app, a
 # Windows app and a Linux app built from one tree, and the ways they differ are exactly the ways
-# this fails. So it builds on all three, on every change to it.
+# this fails. So it tests and builds on all three, on every change to it.
 on:
   pull_request:
     paths: ["desktop/**", ".github/workflows/desktop.yml"]
@@ -19,9 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Fast, and the only job that runs the assertions about what the shell writes into `.env` and
-  # which socket it names. Those are the parts that carry what the platforms taught us, and they are
-  # plain Rust: no window, no engine, no waiting.
+  # Fast formatting and lint checks. Rust regression tests run once per platform below.
   core:
     name: core
     runs-on: ubuntu-latest
@@ -43,8 +41,6 @@ jobs:
       - run: cargo fmt --check
         working-directory: desktop/src-tauri
       - run: cargo clippy --all-targets -- -D warnings
-        working-directory: desktop/src-tauri
-      - run: cargo test --lib
         working-directory: desktop/src-tauri
 
   # The three artifacts. Not `bundle`, which signs and notarizes: that is S7 and needs certificates
@@ -95,6 +91,11 @@ jobs:
       # which a compile would miss.
       - run: bun run tauri build
         working-directory: desktop
+      # Frontend assets and platform dependencies are ready after the packaged build.
+      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in.
+      - name: Rust regression tests
+        run: cargo test --locked --lib --bins
+        working-directory: desktop/src-tauri
       # Keep what was built. Without this the only way to try an installer is to build one on
       # the machine you are trying it on, which is not what anybody installs.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { SlackLinkConflict } from "@/routes/_authed/link/slack";
 import {
   slackLinkClaim,
   slackLinkConflict,
@@ -7,6 +8,13 @@ import {
   slackLinkResult,
   slackLinkToken,
 } from "@/routes/_authed/link/slack";
+
+/** The outcome's sentence, once it is the kind that has one. `reauth` carries no message. */
+function conflictMessage(status: number, conflict?: SlackLinkConflict): string {
+  const outcome = slackLinkResponseOutcome(status, conflict);
+  if (outcome.kind === "reauth") throw new Error("Expected a completion");
+  return outcome.message;
+}
 
 test("requires a token and maps completion responses", () => {
   expect(slackLinkToken({})).toBeNull();
@@ -126,13 +134,11 @@ test("classifies documented token, authentication, and transient responses", () 
     expect(slackLinkResponseOutcome(status).kind).toBe("invalid");
   }
   expect(slackLinkResponseOutcome(409).kind).toBe("conflict");
-  expect(
-    slackLinkResponseOutcome(409, "openbot_user_linked").message,
-  ).toContain("a different Slack user in this workspace");
-  // Status alone claims nothing, the same as an unrecognised body.
-  expect(slackLinkResponseOutcome(409).message).toBe(
-    slackLinkResult(409, "unknown").message,
+  expect(conflictMessage(409, "openbot_user_linked")).toContain(
+    "a different Slack user in this workspace",
   );
+  // Status alone claims nothing, the same as an unrecognised body.
+  expect(conflictMessage(409)).toBe(slackLinkResult(409, "unknown").message);
   expect(slackLinkResponseOutcome(401).kind).toBe("reauth");
 
   for (const status of [408, 418, 425, 429, 500, 502, 503]) {

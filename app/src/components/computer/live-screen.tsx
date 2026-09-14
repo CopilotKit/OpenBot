@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { pageCoordinates } from "./take-the-wheel";
 import { socketUrl } from "@/lib/socket-url";
+import { pageCoordinates } from "./take-the-wheel";
 
 /**
  * Low-latency screencast used while a human is driving the Bot's browser.
@@ -187,7 +187,21 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
               : event.button === 1
                 ? "middle"
                 : "left",
-          clickCount: kind === "moved" ? 0 : 1,
+          /*
+           * The browser's own count, not a fixed one.
+           *
+           * `MouseEvent.detail` is how many times in a row this button has been pressed in the same
+           * place, worked out by the browser to its own timing and distance rules. Chrome fires
+           * `dblclick` on the far page only when the second press says it is the second, so sending 1
+           * every time meant a double click arrived as two separate clicks: no `dblclick` ever
+           * reached the page, `event.detail` was always 1, and opening a row, expanding a node and
+           * selecting a word were all things a person holding the wheel could not do.
+           *
+           * At least one on a press, because the computer refuses a press of zero for the reason its
+           * own comment gives -- Chrome would see a move that happens to have a button set, and no
+           * click at all. `detail` is zero on an event a script dispatched rather than a person.
+           */
+          clickCount: kind === "moved" ? 0 : Math.max(1, event.detail),
           modifiers: modifierBits(event),
         });
       },

@@ -567,14 +567,27 @@ export function createPluginRoutes(
    */
   routes.post("/skills", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
-      slug?: string;
-      title?: string;
-      summary?: string;
-      instructions?: string;
+      slug?: unknown;
+      title?: unknown;
+      summary?: unknown;
+      instructions?: unknown;
       global?: boolean;
       tools?: unknown;
     } | null;
-    if (!body?.slug || !body?.title?.trim() || !body?.instructions?.trim()) {
+    /*
+     * The body is JSON, so the annotations are wishes: `{"slug":123}` passes a truthiness
+     * check and `RegExp.test` then coerces it to `"123"`, and `{"summary":{}}` reaches the
+     * store where the insert throws a 500. A slug, a title and instructions are non-empty
+     * strings here, and a summary is absent or a string. Anything else is a 400 before
+     * any refusal check, store write, or audit row.
+     */
+    if (
+      typeof body?.slug !== "string" ||
+      typeof body?.title !== "string" ||
+      !body.title.trim() ||
+      typeof body?.instructions !== "string" ||
+      !body.instructions.trim()
+    ) {
       return context.json(
         { error: "A slug, a title and instructions are required." },
         400,
@@ -583,6 +596,12 @@ export function createPluginRoutes(
     if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(body.slug)) {
       return context.json(
         { error: "A slug is lower-case letters, numbers and hyphens." },
+        400,
+      );
+    }
+    if (body.summary !== undefined && typeof body.summary !== "string") {
+      return context.json(
+        { error: "A summary is text when it is present." },
         400,
       );
     }
@@ -770,7 +789,18 @@ export function createPluginRoutes(
       agentId?: string;
     } | null;
     const kind = asGrantKind(body?.kind);
-    if (!kind || !body?.ref || !body.agentId) {
+    /*
+     * The body is JSON, so the annotation is a wish: `{"ref":123,"agentId":[]}` passes a
+     * truthiness check and then reaches the store, where Drizzle compares a text column against
+     * a number and the request answers 500. A ref and a Bot id are non-empty strings here.
+     */
+    if (
+      !kind ||
+      typeof body?.ref !== "string" ||
+      !body.ref.trim() ||
+      typeof body.agentId !== "string" ||
+      !body.agentId.trim()
+    ) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
@@ -793,22 +823,36 @@ export function createPluginRoutes(
     const kind = asGrantKind(context.req.query("kind"));
     const ref = context.req.query("ref");
     const agentId = context.req.query("agentId");
-    if (!kind || !ref || !agentId) {
+    /*
+     * Query params are always strings, so truthiness is not enough: `"   "` is truthy and used
+     * to pass this check, delete zero rows by exact match, still write a `plugin_revoked` audit
+     * row naming whitespace, and answer `ok:true`. The POST twin already requires non-empty
+     * strings; this requires the same and acts on the trimmed values.
+     */
+    if (
+      !kind ||
+      typeof ref !== "string" ||
+      !ref.trim() ||
+      typeof agentId !== "string" ||
+      !agentId.trim()
+    ) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
       );
     }
+    const trimmedRef = ref.trim();
+    const trimmedAgentId = agentId.trim();
     const refusal = await enablementRefusal(
       context,
       kind,
-      ref,
-      agentId,
+      trimmedRef,
+      trimmedAgentId,
       "revoke",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.revoke(kind, ref, agentId, actorEmail(context));
+    await store.revoke(kind, trimmedRef, trimmedAgentId, actorEmail(context));
     return context.json({ ok: true });
   });
 
@@ -841,7 +885,14 @@ export function createPluginRoutes(
       args?: Record<string, unknown>;
       agentId?: string;
     } | null;
-    if (!body?.ref || !body.agentId) {
+    // Same shape lie as `/grants` above: JSON numbers, objects and arrays are truthy, so they
+    // must be refused here rather than inside `canUseBot` or the tool call.
+    if (
+      typeof body?.ref !== "string" ||
+      !body.ref.trim() ||
+      typeof body.agentId !== "string" ||
+      !body.agentId.trim()
+    ) {
       return context.json({ error: "A tool and a Bot are required." }, 400);
     }
 

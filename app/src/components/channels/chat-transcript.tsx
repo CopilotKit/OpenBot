@@ -1,13 +1,34 @@
 import type { ActivityMessage, Message } from "@ag-ui/core";
+import type { Attachment } from "@copilotkit/react-core/v2";
 import {
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
-import { IconBox, IconClock } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconBox,
+  IconClock,
+  IconFile,
+  IconX,
+} from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Streamdown } from "streamdown";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   MessageContent,
   MessageFooter,
@@ -23,12 +44,19 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
+import { attachmentUrl } from "@/lib/channels/attachments";
 import { readFiring } from "@/lib/channels/routine-firing";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
 import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
-import { toVisibleChatItems } from "./chat-messages";
+import { cn } from "@/lib/utils";
+import {
+  attachmentModality,
+  type SentAttachment,
+  toVisibleChatItems,
+  type VisibleChatItem,
+} from "./chat-messages";
 import type { QueuedMessage } from "./composer";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -168,6 +196,83 @@ function Stopped({ reason }: { reason: string }) {
 }
 
 /**
+ * A file staged on the composer, described the way a sent one is.
+ *
+ * So that a parked message draws the SAME tiles the turn will draw once it runs, rather than a
+ * second rendering of an attachment that has to be kept in step with this one. The composer's
+ * `onUpload` has already put the row on the server and handed back its url — `canSendDraft` refuses
+ * to send, and therefore to park, anything still uploading — so there is always something to point
+ * at by the time one of these reaches here.
+ *
+ * Anything that is not a picture becomes a document tile, which is what the sent row does with the
+ * modalities it has no preview for: a card naming the file is the honest drawing of "this came
+ * along", and the alternative is a broken thumbnail.
+ *
+ * WHICH ONES ARE PICTURES IS ASKED OF THE SERVER'S ANSWER, NOT OF `attachment.type`, and this is
+ * the one surface in the browser where that answer is actually in hand. `attachment.type` is the
+ * SDK's `getModalityFromMimeType(file.type)` from before the upload, never revisited when the
+ * upload replies; `attachment.source.mimeType` is what OUR `onUpload` put there, and that is
+ * `body.mimeType` — the type the server earned from `sniffMimeType` over the bytes
+ * (`composer/attachments.ts`). A PNG the browser called `text/plain` has `type: "document"` and
+ * `source.mimeType: "image/png"`, and this used to draw a grey card over it.
+ *
+ * A PARKED MESSAGE HOLDS THE LIVE `Attachment`, WHICH IS WHY THIS CAN BE PUT RIGHT AND THE SENT ROW
+ * CANNOT. `QueuedMessage.attachments` is `Attachment[]` — the staged object itself, source and all
+ * — whereas a sent turn has been through `toAttachmentPart` (`channel-chat.tsx`), which rebuilds
+ * the source as `{ type: "url", value }` and drops the `mimeType` on the floor. So the two tiles
+ * genuinely can disagree for as long as that line stands: a mislabelled picture draws correctly
+ * here and reverts to a file card the moment the turn runs.
+ *
+ * That flip is a real cost and it is still the right way round. It is the symptom of the missing
+ * line rather than a reason to keep this tile wrong on purpose, and the alternative — throwing away
+ * an answer we hold so that both surfaces are wrong together — is the kind of consistency that
+ * hides the defect instead of paying it down. `attachmentModality` is shared with the sent path
+ * precisely so that fixing the source there needs no second change here.
+ */
+function parkedTiles(attachments: readonly Attachment[]): SentAttachment[] {
+  return attachments.map((attachment) => {
+    const attachmentId = (attachment.metadata as { attachmentId?: unknown })
+      ?.attachmentId;
+    /*
+     * Narrowed rather than read straight through, for the reason the sent path narrows the same
+     * field: `Attachment["source"]` is a union whose `data` member REQUIRES `mimeType` and whose
+     * `url` member does not, and a `data` source here carries `file.type` — the browser's claim,
+     * which is the very thing this is refusing to trust. Only a url source has been near the
+     * server. A staged attachment still uploading is exactly that case (`{ type: "data", value: "",
+     * mimeType: file.type }`), and while `canSendDraft` refuses to park one, this costs nothing and
+     * means the guard does not depend on that staying true.
+     */
+    const { source } = attachment;
+    const mimeType =
+      source.type === "url" && source.mimeType ? source.mimeType : undefined;
+
+    return {
+      id: attachment.id,
+      attachmentId:
+        typeof attachmentId === "string" ? attachmentId : attachment.id,
+      url: source.value,
+      ...(attachment.filename ? { filename: attachment.filename } : {}),
+      modality: attachmentModality(attachment.type, mimeType),
+    };
+  });
+}
+
+/** What a parked message is called, for somebody who cannot see it: its words, or else its files. */
+function describeParked(
+  text: string,
+  files: readonly SentAttachment[],
+): string {
+  if (text) {
+    return text;
+  }
+  const named = files
+    .map((file) => file.filename)
+    .filter((filename) => filename !== undefined);
+
+  return named.length > 0 ? named.join(", ") : "attachment";
+}
+
+/**
  * Something the person said while the Bot was working, waiting its turn.
  *
  * IT IS DRAWN AS THEIR MESSAGE, NOT AS A NOTICE ABOUT ONE. The whole point of letting somebody type
@@ -181,21 +286,42 @@ function Stopped({ reason }: { reason: string }) {
  * hover over the words it is offering to delete.
  */
 function Queued({
+  attachments,
   text,
   onRemove,
 }: {
+  attachments: readonly Attachment[];
   text: string;
   onRemove?: (() => void) | undefined;
 }) {
+  /*
+   * THE FILES COME WITH IT, and until they did they were on NO SURFACE IN THE APP AT ALL. Parking
+   * consumes the draft, so the composer's strip empties in the same beat this line appears; drawing
+   * only `text` meant somebody who attached a screenshot mid-turn watched it vanish from the
+   * composer and never show up anywhere else. Same tiles as a sent turn, in the same order —
+   * pictures above the words — because this IS their message, just not yet run.
+   */
+  const files = parkedTiles(attachments);
+
   return (
     <MessageRow align="end">
       <MessageContent>
-        <Bubble align="end" className="opacity-60" variant="muted">
-          <BubbleContent>
-            {/* Shown exactly as typed, for the same reason a sent message is. */}
-            <span className="whitespace-pre-wrap">{text}</span>
-          </BubbleContent>
-        </Bubble>
+        {files.length > 0 ? (
+          <AttachmentTiles attachments={files} className="opacity-60" />
+        ) : null}
+        {/*
+         * NO WORDS, NO BUBBLE. A screenshot pasted mid-turn with nothing typed is the ordinary way
+         * this gets used, and it drew an empty muted bubble above the footer — which reads as a
+         * message sent by mistake rather than as a file waiting its turn.
+         */}
+        {text ? (
+          <Bubble align="end" className="opacity-60" variant="muted">
+            <BubbleContent>
+              {/* Shown exactly as typed, for the same reason a sent message is. */}
+              <span className="whitespace-pre-wrap">{text}</span>
+            </BubbleContent>
+          </Bubble>
+        ) : null}
         <MessageFooter>
           {/*
            * `status` rather than `alert`, matching the thinking line: a person who has just chosen
@@ -209,8 +335,12 @@ function Queued({
                * called "Remove" in a row, and somebody reading by name alone is told what they can
                * do and nothing about which one it would happen to. The visible word stays short
                * because the bubble it sits under is the answer for everybody who can see it.
+               *
+               * With no sentence to name it by, the FILES are what it deletes — see
+               * `describeParked`. An attachment-only message named the label after an empty string
+               * and read as "Remove queued message:", which is the same nothing three times over.
                */
-              aria-label={`Remove queued message: ${text}`}
+              aria-label={`Remove queued message: ${describeParked(text, files)}`}
               className="ml-2 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               onClick={onRemove}
               type="button"
@@ -512,6 +642,517 @@ const TranscriptMessage = memo(function TranscriptMessage({
 });
 
 /**
+ * The one shape an attachment url is allowed to have, taken from the helper that builds it rather
+ * than written out again, so the check cannot drift from the route that serves the file.
+ */
+const ATTACHMENT_URL_PREFIX = attachmentUrl("");
+
+/**
+ * THE FILES A PERSON ATTACHED TO ONE TURN, drawn as a row where their own message would be.
+ *
+ * ALWAYS THE PERSON'S OWN, so it aligns end like their bubble does — `toVisibleChatItems` only ever
+ * produces this kind from a user turn's content, and there is no assistant equivalent to confuse it
+ * with. `justify-end` is what actually puts a short row against the right edge; `align="end"` gets
+ * the row there, not the tiles inside it.
+ *
+ * SQUARE, AND ALL THE SAME SIZE. Three photos of different shapes drawn at their own aspect ratios
+ * make a ragged row whose only signal is which camera took what, and a single tall screenshot drawn
+ * at its own aspect pushed the rest of the turn off the screen. A grid of equal tiles says "three
+ * files" at a glance, which is the thing worth saying here; the picture itself is one click away.
+ */
+type AttachmentRowProps = {
+  attachments: readonly SentAttachment[];
+  delay: number;
+};
+
+/**
+ * Whether two renders of this row are the same row, compared BY VALUE because identity says no
+ * every time.
+ *
+ * `toVisibleChatItems` runs on every render of the transcript — deliberately, and the comment on
+ * that call says why: the agent hands back the same array and mutates it, so a `useMemo` over it
+ * never invalidates and a reply never appears. The price is that `attachments` is a fresh array of
+ * fresh objects on every chunk of a streaming answer, and `memo`'s default `Object.is` on two
+ * different arrays is false however identical they are. So this memo missed EVERY time, and every
+ * tile in a channel's history — each one carrying an image `Dialog` — re-rendered on every token
+ * of an answer being typed further down. The memoised message rows above it were paying for this
+ * one's misses.
+ *
+ * Field by field, because the fields are what the tiles draw: a row whose files have the same ids,
+ * urls, names and kinds in the same order draws exactly the same pixels.
+ *
+ * Exported so it can be checked without mounting anything, the same reason `isPersonSentMessage`
+ * is.
+ */
+export function sameAttachmentRow(
+  previous: AttachmentRowProps,
+  next: AttachmentRowProps,
+): boolean {
+  if (previous.delay !== next.delay) {
+    return false;
+  }
+  if (previous.attachments.length !== next.attachments.length) {
+    return false;
+  }
+
+  return previous.attachments.every((attachment, index) => {
+    const other = next.attachments[index];
+    return (
+      other !== undefined &&
+      attachment.id === other.id &&
+      attachment.attachmentId === other.attachmentId &&
+      attachment.url === other.url &&
+      attachment.filename === other.filename &&
+      attachment.modality === other.modality
+    );
+  });
+}
+
+export const TranscriptAttachments = memo(function TranscriptAttachments({
+  attachments,
+  delay,
+}: AttachmentRowProps) {
+  return (
+    <MessageRow align="end">
+      <MessageContent>
+        <Arriving delay={delay}>
+          <AttachmentTiles attachments={attachments} />
+        </Arriving>
+      </MessageContent>
+    </MessageRow>
+  );
+}, sameAttachmentRow);
+
+/**
+ * The tiles themselves, as one row.
+ *
+ * Its own component because the QUEUE draws this row too, faded, for a message parked mid-turn —
+ * and two copies of a list of tiles is two places for the alignment below to be got right.
+ *
+ * `self-end` because `align="end"` does not reach this far on its own: both callers put this
+ * inside a `flex w-full flex-col` — `Arriving` for a sent turn, `MessageContent` for a parked one —
+ * so a block child stretches to the transcript's full width and its contents draw hard against the
+ * LEFT edge, under the person's own right-aligned bubble, reading as though the Bot had sent them.
+ * `Bubble` escapes this because it carries its own `group-data-[align=end]/message:self-end`.
+ */
+function AttachmentTiles({
+  attachments,
+  className,
+}: {
+  attachments: readonly SentAttachment[];
+  className?: string;
+}) {
+  return (
+    <ul
+      className={cn(
+        "flex w-fit flex-wrap items-start justify-end gap-2 self-end",
+        className,
+      )}
+    >
+      {attachments.map((attachment) => (
+        <li key={attachment.id}>
+          <SentAttachmentTile attachment={attachment} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One tile in that row, and all three shapes are the same size on purpose.
+ *
+ * A document used to draw as a `ToolLine`, which was the right call while an attachment was a row
+ * of its own: that component is one line for one thing a Bot did, and a filename beside a label is
+ * exactly that shape. It is the wrong thing inside a ROW. `ToolLine` has no width of its own, so
+ * two documents and a photo came out as a pair of bare sentences stretched across the empty half of
+ * the line with the picture stranded at the end — the same tiles, laid out as if they were prose.
+ *
+ * So a document gets a card the height of a thumbnail instead. What the row is saying is "these
+ * files came with this message", and it can only say it if every tile in it reads as a file.
+ *
+ * A BROKEN-IMAGE GLYPH SAYS NOTHING TO THE READER — the browser's placeholder tells them a box
+ * failed to load, not that a file is gone. `onError` catches that and swaps it for a sentence in the
+ * file's own name, in the same destructive vocabulary `Stopped` already uses for "the thing that was
+ * supposed to be here isn't." It borrows the LOOK and not the urgency: see the missing tile below
+ * for why the same absence is a note here and an alert there.
+ */
+/**
+ * The probes currently outstanding, so that two tiles asking the same question ask it once.
+ *
+ * ONE TURN CAN CARRY THE SAME FILE TWICE — `toVisibleChatItems` keys tiles on the PART index
+ * precisely so that it can — and a message parked mid-turn draws its files a second time beside the
+ * sent row while the queue holds it. Each of those tiles mounts its own effect, and each one used
+ * to send its own request for an answer that is the same by construction.
+ *
+ * WHAT THAT SHARING IS WORTH, CORRECTED. This comment used to say a duplicate probe was "a
+ * duplicate megabyte read, not a duplicate status line", because at the time a HEAD reached a
+ * handler whose single statement selected `attachments.bytes`. It does not any more: the route
+ * grew a branch that answers a HEAD from `name, mimeType, sizeBytes` and never touches the bytes.
+ * A duplicate probe is now exactly the duplicate status line this once said it was not.
+ *
+ * IT STILL EARNS ITS KEEP, FOR A REASON THAT DOES NOT DEPEND ON THE OLD COST. Nothing else in the
+ * stack will coalesce these: the route serves `private, no-cache`, so the browser's HTTP cache is
+ * required to revalidate every probe rather than answer one from the other, and two tiles for one
+ * file are two components with two effects and no knowledge of each other. Without this map the
+ * same question goes over the wire once per tile, every time the transcript mounts. It is a dozen
+ * lines to ask it once, and cheap-per-answer is not the same as free-per-answer.
+ *
+ * IN FLIGHT ONLY, AND DELIBERATELY NOT A CACHE OF THE ANSWERS — and THIS is the half the old cost
+ * model was never holding up. Holding onto "this file is still there" across remounts is exactly
+ * the lie this hook exists to stop: a file deleted while the reader has the app open would go on
+ * drawing as an intact card for as long as the tab lived, which is the "worse of the two lies" the
+ * comment below names. That was the argument then and it is the whole argument now. Holding onto
+ * "this file is GONE" is sound, deletion being terminal, but it buys nothing worth the branch.
+ */
+const probesInFlight = new Map<string, Promise<boolean>>();
+
+/**
+ * Asks the route whether this file is missing, and answers the SAME question only once at a time.
+ *
+ * Resolves true for 404 and false for every other answer; a fetch that never arrives rejects, and
+ * the caller declines to draw a conclusion from it.
+ */
+function probeDocument(url: string): Promise<boolean> {
+  const existing = probesInFlight.get(url);
+  if (existing) return existing;
+
+  const probe = fetch(url, { method: "HEAD", credentials: "include" })
+    .then((response) => response.status === 404)
+    .finally(() => {
+      // Cleared however it settled, so the next mount asks again rather than inheriting an answer
+      // that has had time to stop being true.
+      probesInFlight.delete(url);
+    });
+
+  probesInFlight.set(url, probe);
+  return probe;
+}
+
+/**
+ * Whether the row behind a document has been deleted, asked of the server that serves it.
+ *
+ * A DOCUMENT HAS NO OTHER WAY TO FIND OUT. The picture beside it learns its file is gone by
+ * fetching it: the `<img>` requests the url, the route answers 404, and `onError` fires. A document
+ * tile is a filename and a label — it requests nothing, so no event about the file can ever reach
+ * it — and `failedToLoad` was the only thing feeding the absent branch. A deleted document
+ * therefore kept drawing as an intact card naming a file the server was answering 404 for, which
+ * is the worse of the two lies: a broken picture at least looks broken.
+ *
+ * `HEAD` because the question is whether the row exists and the status line is the whole answer, so
+ * the reader is not made to download a PDF to learn it is still there. AND IT IS NOW CHEAP ON THE
+ * SERVER TOO, WHICH IT ONCE WAS NOT AND WHICH THIS COMMENT WENT ON ASSERTING AFTER IT STOPPED BEING
+ * TRUE. The old paragraph was right about the mechanism — Hono does answer a HEAD by dispatching
+ * the GET handler in full and dropping the body at the last step — and it concluded that the server
+ * therefore still read the whole file out of Postgres, and that a route which could answer "is it
+ * there" without the bytes "is not this file's to write". Somebody wrote it. The attachment route
+ * now branches on the method INSIDE the handler Hono actually dispatches, selects `sizeBytes`
+ * instead of `bytes`, and sets `Content-Length` by hand; the access join, the statuses and the
+ * revalidation are the GET's exactly, so a probe still learns nothing a fetch would not tell you.
+ *
+ * That is recorded here rather than quietly deleted because this file spent two review rounds being
+ * read as evidence that the cheap probe did not exist. A comment describing a path as broken, about
+ * a path that works, costs more than no comment at all.
+ *
+ * A REQUEST THAT NEVER ARRIVED IS NOT A DELETED FILE, so a rejected fetch — offline, a dropped
+ * connection, a proxy in the way — leaves the card alone rather than accusing the server of having
+ * lost somebody's file.
+ *
+ * AND NEITHER IS A REQUEST THE SERVER REFUSED, which is the same rule and was the bug. This asked
+ * `!response.ok`, which is every status outside 200-299, when exactly one of them means what the
+ * tile then says. The route collapses "no such row", "channel deleted" and "not a channel of
+ * yours" into 404 precisely so that probing ids learns nothing — that is the one status that means
+ * "there is no file here for you". Everything else is a fact about the request:
+ *
+ *   - 401 is a session that expired while the channel sat open, and it turned EVERY document tile
+ *     in the transcript into a red card asserting, in each file's own name, that somebody's files
+ *     had been deleted. Nothing had been; they need to sign in again.
+ *   - 500 is a bad moment on the server, and it stuck: the deps below are stable, so nothing asks
+ *     again and the accusation stands until the component remounts.
+ *   - 304 is the strongest proof of PRESENCE this route can give — the row was found AND the
+ *     membership join passed — and `Response.ok` is false for it.
+ *
+ * That is the same lie this hook exists to stop, pointing the other way, and it is the louder one:
+ * drawn in the destructive vocabulary, naming the file. So absence is claimed on 404 alone, which
+ * also puts a document back in step with the picture beside it — an `<img>` handed a 401 shows a
+ * broken image, not a sentence swearing the file was deleted.
+ */
+function useDocumentIsGone(url: string, ask: boolean): boolean {
+  const [gone, setGone] = useState(false);
+
+  useEffect(() => {
+    if (!ask) {
+      return;
+    }
+    // A tile reused at the same position for a different file starts the question over rather than
+    // inheriting the previous file's answer.
+    setGone(false);
+
+    let cancelled = false;
+    void probeDocument(url)
+      .then((missing) => {
+        if (!cancelled && missing) {
+          setGone(true);
+        }
+      })
+      .catch(() => {
+        // Deliberately nothing: see above. Not knowing is not the same as knowing it is gone.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ask, url]);
+
+  return gone;
+}
+
+function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
+  const [failedToLoad, setFailedToLoad] = useState(false);
+  const { filename, modality, url } = attachment;
+  /*
+   * An off-site url is treated as a missing file, whatever kind of file it says it is.
+   *
+   * `toVisibleChatItems` passes on whatever a `url` source carried, and nothing between here and
+   * the wire narrows it. A sent message only ever carries the relative form — `shared/attachments.ts`
+   * says the url "is never fetched by a provider", and `copilot.ts` swaps the source for the bytes
+   * as the run is built — so an absolute url arriving here did not come from this app's composer,
+   * and putting it in `src` would have the reader's browser fetch a third party the instant the
+   * transcript drew, announcing to whoever owns it that this person opened this channel.
+   */
+  const servable = url.startsWith(ATTACHMENT_URL_PREFIX);
+  /*
+   * ONLY OURS IS EVER ASKED ABOUT, and that is the same rule as the line above rather than a second
+   * one: a probe is a request like any other, so asking a third party whether a file is still there
+   * announces the reader exactly as fetching it would. An off-site url is already unavailable
+   * without anybody being asked.
+   */
+  const gone = useDocumentIsGone(url, servable && modality === "document");
+  const unavailable = failedToLoad || gone || !servable;
+
+  /*
+   * ABSENCE IS DECIDED BEFORE MODALITY IS, and that ordering is the whole point of this block
+   * sitting above the document card rather than below it. A document whose url is not ours to
+   * serve, or whose row `useDocumentIsGone` found deleted, drew as an intact card naming a file
+   * that is not there. A missing picture at least looked missing; a missing document looked
+   * present. Whether the file can be shown at all is the first question either kind asks.
+   */
+  if (unavailable) {
+    return (
+      /*
+       * `note`, NOT `alert`, AND THE DIFFERENCE IS WHO IS INTERRUPTED. An alert is an assertive
+       * live region: it cuts across whatever a screen reader is saying the moment it appears. That
+       * is right for `Stopped`, which reports something that just happened in answer to what
+       * somebody did, and wrong for every one of these — a transcript with three deleted files
+       * fired three interruptions on mount, before the reader had heard a word of the conversation,
+       * to report absences that predate their opening the channel.
+       *
+       * `note` is not a live region at all, so nothing is announced over anything; it still marks
+       * the tile as a thing to stop on, and the sentence inside it — unchanged, in the file's own
+       * name — is what says the file is gone when the reader reaches it.
+       */
+      <div
+        className="flex h-32 w-44 flex-col justify-center gap-2 rounded-xl border border-destructive border-dashed p-3 text-destructive"
+        role="note"
+      >
+        <IconAlertTriangle className="size-6" />
+        <p className="text-sm">{unavailableSentence(filename)}</p>
+      </div>
+    );
+  }
+
+  if (modality === "document") {
+    return (
+      <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
+        <IconFile className="size-6 text-muted-foreground" />
+        <div className="min-w-0">
+          {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
+          <p className="truncate font-medium text-sm" title={filename}>
+            {filename ?? "Untitled file"}
+          </p>
+          <p className="text-muted-foreground text-xs">Attachment</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <AttachmentLightbox filename={filename} url={url}>
+      <img
+        alt={filename ? `Attachment: ${filename}` : "Attachment"}
+        className="size-32 rounded-xl object-cover"
+        onError={() => setFailedToLoad(true)}
+        src={url}
+      />
+    </AttachmentLightbox>
+  );
+}
+
+/**
+ * What an absent file is called, in one place, because two surfaces now say it.
+ *
+ * The tile said it and the lightbox behind the tile said nothing at all. Sharing the wording rather
+ * than writing it twice is what keeps them from drifting into two different accounts of the same
+ * absence — the tile naming the file and the dialog saying something vaguer, or worse, later.
+ *
+ * A file with no name still gets a sentence rather than a blank: the reader clicked on something,
+ * and "this attachment" is the honest way to refer to a thing whose name we never had.
+ */
+function unavailableSentence(filename?: string): string {
+  return filename
+    ? `${filename} is unavailable.`
+    : "This attachment is unavailable.";
+}
+
+/**
+ * The full-size picture inside the lightbox, and what it draws when the file will not load.
+ *
+ * IT NEEDED A FAILURE STATE AND HAD NONE. The tile in front of it has had one from the start — an
+ * `onError` swapping the broken-image box for a sentence, with a comment above it about why the
+ * browser's own placeholder "says nothing to the reader" — and this `<img>`, the one drawn at full
+ * size against a dark backdrop with the reader's whole attention on it, had no `onError` at all. A
+ * file deleted between the tile painting and the reader clicking it opened a dialog containing
+ * exactly the placeholder the tile path exists to avoid.
+ *
+ * THE TILE CANNOT COVER THIS ONE. Its own `<img>` has already loaded by the time there is anything
+ * to click, and a loaded image does not fire `error` again because the file behind it went away; the
+ * request that finds out is this one. Nor can the probe beside it: `useDocumentIsGone` deliberately
+ * never asks about a picture, because a picture's own load is supposed to be the answer — and this
+ * is the load it meant.
+ *
+ * IT STAYS OPEN AND SAYS SO, rather than closing itself. The reader opened this deliberately, and a
+ * dialog that vanishes on its own leaves them looking at the transcript with no idea what happened
+ * and their focus wherever the close put it. The sentence in place answers the question they
+ * actually asked. Escape and the close button still work, and the state resets when the popup
+ * unmounts, so reopening genuinely tries again rather than remembering a failure.
+ *
+ * ITS OWN COMPONENT, AND EXPORTED, SO THE FAILURE CAN BE TESTED AT ALL: Base UI portals this popup
+ * and under happy-dom the portal never mounts — checked, and recorded in the test named "a thumbnail
+ * is a crop" — so there is no way to reach this `<img>` through the trigger. Same reason
+ * `sameAttachmentRow` is exported: the behaviour is worth pinning and the thing it lives inside
+ * cannot be mounted here.
+ */
+export function LightboxPicture({
+  filename,
+  url,
+}: {
+  filename?: string;
+  url: string;
+}) {
+  const [failedToLoad, setFailedToLoad] = useState(false);
+
+  if (failedToLoad) {
+    return (
+      /*
+       * `note` rather than `alert`, for the reason the tile's own missing card gives at length: an
+       * assertive live region cuts across whatever a screen reader is saying, and this is an answer
+       * to something the reader just did rather than an emergency. Light-on-dark because it is
+       * drawn against the lightbox's own backdrop, where `text-destructive` is unreadable.
+       */
+      <div
+        className="flex flex-col items-center gap-3 p-8 text-center text-white"
+        role="note"
+      >
+        <IconAlertTriangle className="size-8" />
+        <p className="text-sm">{unavailableSentence(filename)}</p>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      alt={filename ?? "Attachment"}
+      className="max-h-[88svh] max-w-[92vw] rounded-lg object-contain"
+      onError={() => setFailedToLoad(true)}
+      src={url}
+    />
+  );
+}
+
+/**
+ * The square, opened.
+ *
+ * The tile is a crop — that is the price of a tidy row — so there has to be a way to see the whole
+ * picture, and it used to be `target="_blank"`. A new tab is a worse answer than it looks: it drops
+ * the reader out of the conversation they were reading, the browser shows the raw file against its
+ * own chrome with no way back but the back button, and on a phone it is a context switch away from
+ * the channel entirely. A dialog closes on Escape and puts them back exactly where they were.
+ *
+ * Built on the app's `Dialog` so focus trapping, scroll locking and Escape behave the way they do
+ * everywhere else, but with its card stripped off: `max-w-none border-0 bg-transparent p-0
+ * shadow-none` leaves the picture as the only lit thing against a dark backdrop.
+ *
+ * THE CLOSE BUTTON IS FIXED TO THE VIEWPORT, not to the popup, which is why `showCloseButton` is
+ * off and this draws its own. Pinned to the popup it would sit on the picture — invisible over a
+ * pale one, and moving with every image's shape.
+ */
+function AttachmentLightbox({
+  children,
+  filename,
+  url,
+}: {
+  children: React.ReactNode;
+  filename?: string;
+  url: string;
+}) {
+  const label = filename ?? "Attachment";
+  /*
+   * Controlled only so that clicking the dark space around the picture closes it, the way every
+   * lightbox a reader has used does. The popup covers the viewport (see below), so it — not the
+   * backdrop underneath — is what receives that click, and Base UI's own dismiss never fires.
+   */
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      <DialogTrigger
+        // A button, not a link: it opens something on this page, and a middle-click offering a new
+        // tab to a raw image file is not the promise this makes. `block` so the tile is not sitting
+        // on a text baseline with a stray gap under it.
+        className="block cursor-zoom-in overflow-hidden rounded-xl"
+        render={<button aria-label={`Open ${label}`} type="button" />}
+      >
+        {children}
+      </DialogTrigger>
+      <DialogContent
+        /*
+         * THE CARD IS STRIPPED OFF AND THE POPUP IS MADE FULL-SCREEN, and the second half is not
+         * cosmetic. `DialogContent` centres itself with `-translate-x-1/2 -translate-y-1/2`, and a
+         * transform on an ancestor is what `position: fixed` resolves against — so a close button
+         * "fixed to the viewport" inside it landed 72px down and 30px in from the corner instead of
+         * at it. Measured, not guessed. A popup that already IS the viewport has no transform, and
+         * `absolute` in it means the corner it looks like it means.
+         *
+         * Centring by flex rather than by width also lets the picture keep its own shape: as a
+         * stretched flex child it was drawn 1012px wide for a 644px image, letterboxed inside a box
+         * far bigger than itself.
+         */
+        className="inset-0 top-0 left-0 h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 items-center justify-center rounded-none border-0 bg-transparent p-0 shadow-none"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setOpen(false);
+        }}
+        overlayClassName="bg-black/80 supports-backdrop-filter:backdrop-blur-sm"
+        showCloseButton={false}
+      >
+        {/* Named for a screen reader; the picture carries the same name in its alt text. */}
+        <DialogTitle className="sr-only">{label}</DialogTitle>
+        <LightboxPicture filename={filename} url={url} />
+        <DialogClose
+          render={
+            <button
+              aria-label="Close"
+              className="absolute top-4 right-4 grid size-9 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+              type="button"
+            />
+          }
+        >
+          <IconX className="size-5" />
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * What a failed activity is called on screen.
  *
  * An `activityType` is a protocol name and reads like one, so the boundary's sentence gets a phrase
@@ -680,6 +1321,70 @@ export function isPersonSentMessage(
   return role === "user" && readFiring(text) === null;
 }
 
+/**
+ * The turn a row belongs to.
+ *
+ * The attachments row is identified as `${messageId}:attachments` by `toVisibleChatItems`, so that
+ * it and the caption beneath it can be told apart while still belonging to one turn. The id of the
+ * message they were sent in is the part before the last colon.
+ */
+function turnOf(item: VisibleChatItem): string {
+  if (item.kind !== "attachments") {
+    return item.id;
+  }
+  const separator = item.id.lastIndexOf(":");
+  return separator === -1 ? item.id : item.id.slice(0, separator);
+}
+
+/**
+ * Which rows the scroller may lift to the top of the viewport: THE FIRST ROW OF EACH TURN THE
+ * PERSON SENT, and only that one.
+ *
+ * The scroller reads `data-scroll-anchor` off the rows appended in one go, takes the first it finds
+ * and scrolls it to the top with a peek of the answer above it — but finding MORE THAN ONE among
+ * that same batch it gives up on the ambiguity and jumps to the end instead. One turn is very often
+ * several rows: a caption and its screenshot, or three files pasted together, all arrive at once.
+ * So "every row a person sent" is not the rule; "the first row of every turn a person sent" is, and
+ * the difference between them is the whole anchoring behaviour of an ordinary captioned message.
+ *
+ * A Bot's prose is never an anchor — the anchor exists to hold the QUESTION at the top while the
+ * answer streams in underneath it — and neither is a routine firing, which arrived wearing
+ * `role: "user"` without anybody having typed anything.
+ *
+ * Order is `toVisibleChatItems`' order, which puts a turn's attachments before its caption, so a
+ * turn carrying a file is anchored on the first file and a plain one on its text. That is the right
+ * end to hold: the picture is the top of what the person sent, and anchoring on the caption
+ * underneath it would scroll the picture off the top of the pane.
+ */
+function anchorRowIds(items: readonly VisibleChatItem[]): Set<string> {
+  const anchors = new Set<string>();
+  const claimed = new Set<string>();
+
+  for (const item of items) {
+    const sent =
+      item.kind === "attachments" ||
+      (item.kind === "text" && isPersonSentMessage(item.role, item.text));
+    if (!sent) continue;
+
+    const turn = turnOf(item);
+    if (claimed.has(turn)) continue;
+    claimed.add(turn);
+    anchors.add(item.id);
+  }
+
+  return anchors;
+}
+
+/**
+ * The only way to actually enforce exhaustiveness over `VisibleChatItem`: the
+ * `item` parameter is typed `never`, so a branch that reaches here with a
+ * member of the union still unhandled fails to compile, rather than a
+ * trailing `: null` that accepts anything and renders nothing for it.
+ */
+function assertNever(_item: never): null {
+  return null;
+}
+
 const SEND_SCROLL_MS = 700;
 
 function useSmoothSendScroll(
@@ -747,15 +1452,34 @@ export function ChatTranscript({
    */
   const lastItem = items.at(-1);
   const waitingOnFirstToken =
-    busy && lastItem?.kind === "text" && lastItem.role === "user";
+    busy &&
+    ((lastItem?.kind === "text" && lastItem.role === "user") ||
+      /*
+       * A screenshot pasted with no caption is still a person sending something, and they are
+       * watching the same spot under it for the Bot's answer as they would under a typed question.
+       * `toVisibleChatItems` only ever produces an `attachment` item from a user turn, so seeing one
+       * last means the person went last — without this an attachment-only turn silently swallowed
+       * the Thinking indicator.
+       */
+      lastItem?.kind === "attachments");
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const newestUserMessageId =
     items.findLast(
       (item) =>
-        item.kind === "text" && isPersonSentMessage(item.role, item.text),
+        (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
+        /*
+         * Same reasoning as `waitingOnFirstToken` above: an attachment is always the person's own,
+         * so a turn that is only a file still counts as them sending something. This id decides
+         * nothing but whether the viewport scrolls smoothly for a beat; where it lands is
+         * `anchoredTurns` below.
+         */
+        item.kind === "attachments",
     )?.id ?? null;
   useSmoothSendScroll(viewportRef, newestUserMessageId);
+
+  /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
+  const anchorRows = anchorRowIds(items);
 
   /*
    * One decider per mounted transcript, so opening a different channel starts the cascade over and
@@ -790,6 +1514,54 @@ export function ChatTranscript({
             className="mx-auto w-full max-w-2xl px-4 py-6"
             spacerClassName="order-2"
           >
+            {/*
+             * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
+             * at this block, worked the mechanism out from the library's bundle, and reached the
+             * same place; it had no comment for any of them to read. This is that comment.
+             *
+             * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
+             * `order-2`, these children take `order-1`, and the transcript rows below keep the
+             * default `0`. Visual order is therefore items, then anything parked or in flight, then
+             * the spacer — while DOM order puts this block first.
+             *
+             * IT CANNOT SIMPLY BE MOVED DOWN. The scroller finds a newly appended row POSITIONALLY.
+             * On every content change it takes `Array.from(content.children)` minus the spacer,
+             * compares the length against the previous length, and when it grew scans FROM THE OLD
+             * LENGTH FORWARD for the next `data-scroll-anchor="true"` (`je(a, T)` in
+             * `@shadcn/react/dist/message-scroller`). A new row is only found when it lands at the
+             * very end of that list. Put this block after `items.map` and every appended row lands
+             * one slot short of the end, the scan finds this div instead, returns null, and the
+             * caller falls through to its follow-the-bottom branch — so a new turn stops aligning
+             * to the top of the viewport with a peek of the previous one, silently, with no test
+             * failing.
+             *
+             * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
+             * promotes these children to flex items of the column so they can carry `order`, while
+             * the div itself stays a single, always-present entry in `content.children` — one
+             * stable slot the row count can be offset by. Wrapping `items.map` the same way would
+             * be the natural symmetry and is fatal: the rows would leave `content.children`
+             * entirely and the scroller would see a transcript of two elements, neither carrying a
+             * `data-message-id`, so nothing would register, be tracked as visible, or anchor.
+             *
+             * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
+             * not the DOM, so it moves neither focus order nor the reading order of the enclosing
+             * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
+             * button of every parked message before any control in the conversation, though those
+             * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
+             * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
+             * follow on screen (WCAG 1.3.2).
+             *
+             * THAT IS A KNOWN, UNPAID DEBT AND NOT AN OVERSIGHT. The fixes available from inside
+             * this file were each tried on paper and each breaks something worse: `aria-owns` needs
+             * a generated id per row and re-sequences only the accessibility tree, leaving tab
+             * order inverted; positive `tabIndex` hijacks the tab sequence of the whole page;
+             * hoisting the queue out of `MessageScrollerContent` into a sibling region — the
+             * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
+             * outside a column that is `min-h-full`, so it lands below the fold on a short
+             * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
+             * Paying it properly means the scroller identifying new rows by identity rather than by
+             * position, which is the library's to change and is worth asking for.
+             */}
             <div className="contents [&>*]:order-1">
               {stopped ? (
                 <Stopped reason={stopped} />
@@ -798,6 +1570,7 @@ export function ChatTranscript({
               ) : null}
               {queued.map((message) => (
                 <Queued
+                  attachments={message.attachments}
                   key={message.id}
                   onRemove={
                     onRemoveQueued
@@ -827,11 +1600,11 @@ export function ChatTranscript({
                     message={item.message}
                   />
                 </MessageScrollerItem>
-              ) : (
+              ) : item.kind === "text" ? (
                 <MessageScrollerItem
                   key={item.id}
                   messageId={item.id}
-                  scrollAnchor={isPersonSentMessage(item.role, item.text)}
+                  scrollAnchor={anchorRows.has(item.id)}
                 >
                   <TranscriptMessage
                     commandNames={commandNames}
@@ -840,6 +1613,22 @@ export function ChatTranscript({
                     text={item.text}
                   />
                 </MessageScrollerItem>
+              ) : item.kind === "attachments" ? (
+                <MessageScrollerItem
+                  key={item.id}
+                  messageId={item.id}
+                  scrollAnchor={anchorRows.has(item.id)}
+                >
+                  <TranscriptAttachments
+                    attachments={item.attachments}
+                    delay={delays.delayFor(item.id, index, items.length)}
+                  />
+                </MessageScrollerItem>
+              ) : (
+                // Every member of the union is handled above. `assertNever` types `item` as
+                // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
+                // this call instead of silently falling into this branch and rendering nothing.
+                assertNever(item)
               ),
             )}
           </MessageScrollerContent>
