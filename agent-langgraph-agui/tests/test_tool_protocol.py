@@ -74,8 +74,11 @@ def boundary(monkeypatch):
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
+                reply = captured.get(
+                    "callback_body", {"text": "deployment result: public marker 43"}
+                )
                 self.wfile.write(
-                    json.dumps({"text": "deployment result: public marker 43"}).encode()
+                    reply if isinstance(reply, bytes) else json.dumps(reply).encode()
                 )
                 return
             captured["model"].append(body)
@@ -377,6 +380,36 @@ async def test_http_refusal_is_not_reported_as_tool_success(boundary):
     await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
     assert "403" in boundary["model"][-1]["messages"][-1]["content"]
     assert "deployment result" not in boundary["model"][-1]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "reply", "expected"),
+    [
+        (
+            403,
+            {"error": "That token is not for this Bot."},
+            "Refused. Tool callback returned HTTP 403. That token is not for this Bot.",
+        ),
+        (
+            400,
+            {"error": "  Tool args must be a JSON object.  "},
+            "Refused. Tool callback returned HTTP 400. Tool args must be a JSON object.",
+        ),
+        (401, {"error": "   "}, "Refused. Tool callback returned HTTP 401."),
+        (502, b"<html>Bad Gateway</html>", "Refused. Tool callback returned HTTP 502."),
+    ],
+)
+async def test_http_refusal_tells_the_model_the_deployments_reason(
+    boundary, status, reply, expected
+):
+    # `/api/agent-tools/call` answers a callback it will not run with the reason under `error`. The
+    # TypeScript LangGraph Bot passes that reason on (`agent-langgraph/src/tool-answer.ts`); without
+    # it the model knows only a status code, and cannot tell the person why or repair its call.
+    boundary["callback_status"] = status
+    boundary["callback_body"] = reply
+    await run_protocol(run_input(["granted_lookup"], deployment=["granted_lookup"]))
+    assert boundary["model"][-1]["messages"][-1]["content"] == expected
 
 
 @pytest.mark.asyncio

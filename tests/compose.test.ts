@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
@@ -205,6 +205,16 @@ function runComposeConfig(env: Record<string, string>) {
     >;
   };
 }
+
+// `docker compose config` pays a one-off cold start on the first call in a process — the Compose
+// plugin initialising and resolving every image reference — which is several seconds on a loaded CI
+// runner and a fraction of that once warm. A test that happened to be the first to call it was
+// eating that cost inside its own 5s timeout and flaking, while every later test ran in well under a
+// second. Absorb the cold start once here, under a timeout that has room for it, so no individual
+// test carries it.
+beforeAll(() => {
+  runComposeConfig({});
+}, 60_000);
 
 test("provides PostgreSQL with pgvector for local development", () => {
   const compose = composeFile();

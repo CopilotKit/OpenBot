@@ -37,6 +37,24 @@ rule about routines into a deployment that refused every ordinary click.
 
 Replaying a rule against history reads the initiator off the row when it is there and treats a row
 that predates the field, or carries a shape this version does not recognise, as a person.
+### The Python LangGraph Bot tells its model why the deployment refused a tool call
+
+When the deployment would not run a tool call from the Python LangGraph Bot — a token it no longer
+accepts, one issued to another Bot, or a malformed call — it answered with the status and a reason
+under `error`, and the Bot told its model only "Refused. Tool callback returned HTTP 403." The model
+could say a call was refused but not why, and could not correct a call the deployment had named as
+malformed. The reason now follows the status, the way the TypeScript LangGraph Bot already passes it
+on. A refusal with no readable reason reads exactly as before.
+### A tool argument that starts with "Basic" or "Bearer" is no longer refused as a credential
+
+Content inspection read any MCP tool argument whose first word was "basic" or "bearer", in any case,
+as an authorization header. A Bot searching Drive for "Basic onboarding checklist", or posting
+"Bearer of bad news" to a channel, was refused because its arguments "contain credential material".
+Those words are now refused only when what follows them is shaped like a credential: base64 that
+decodes to `user:password` after `Basic`, and a token of at least 16 characters with a digit,
+punctuation or mixed case after `Bearer`. A shorter bearer token, or a Basic value that does not
+decode to `user:password`, is no longer caught by this pattern; the same value under an
+`authorization` field is still refused by name.
 
 ## 0.0.10
 
