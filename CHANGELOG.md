@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Audit page says "not enforced" only under a dry-run refusal that went ahead
+
+On a deployment in `dry-run`, the Audit page printed "dry-run: recorded, not enforced" under every
+allowed action, because an allowed action is always carried out, and under a tool call content
+inspection had refused, because that row copied `carriedOut: true` from the policy step before the
+call was stopped. The line now appears only on a row the policy refused and dry-run let through,
+which is the one case it describes. A tool call refused for carrying credential material is now
+recorded with `carriedOut: false` in every mode. Rows already written keep their old value, and the
+page reads them correctly either way.
+
 ### A long tool result or relayed answer is cut between characters, not through an emoji
 
 A tool result over 20,000 characters, and a Bot's answer over 12,000 relayed back through a handoff,

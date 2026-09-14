@@ -3044,6 +3044,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
             ...decided,
+            decision: { ...decided.decision, carriedOut: false },
             refusal: "sensitive_tool_arguments",
             contentInspection: {
               reason: contentDecision.reason,
