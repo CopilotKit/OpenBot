@@ -104,10 +104,18 @@ jobs:
       - name: Verify packaged Mac version and ad-hoc signature
         if: matrix.platform.name == 'macos'
         run: |
+          # Tauri removes the temporary .app after producing a DMG. Check its payload.
+          images=(desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          mount="$RUNNER_TEMP/openbot-version-check"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "${images[0]}"
+          trap 'hdiutil detach "$mount"' EXIT
+          export OPENBOT_VERIFY_APP="$mount/OpenBot.app"
           python3 - <<'PY'
-          import json, pathlib, plistlib, subprocess
+          import json, os, pathlib, plistlib, subprocess
           build = json.loads(pathlib.Path('desktop/build-version.json').read_text())
-          app = pathlib.Path('desktop/src-tauri/target/release/bundle/macos/OpenBot.app')
+          app = pathlib.Path(os.environ['OPENBOT_VERIFY_APP'])
           info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
           for key, expected in {
               'CFBundleShortVersionString': build['releaseVersion'],
