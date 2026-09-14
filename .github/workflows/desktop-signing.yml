@@ -1,0 +1,145 @@
+name: Desktop Windows signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      signing-mode:
+        description: Opt in to signing with the protected Azure Key Vault certificate
+        type: choice
+        options: [none, keyvault]
+        default: none
+        required: true
+  # A label permits validation before this workflow exists on main. New pushes
+  # run only the checks: remove/reapply the label to request signing a new head.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - desktop/**
+      - .github/workflows/desktop-signing.yml
+      - docs/windows-signing.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-windows-signing-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Signing regressions (no Azure access)
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: PowerShell signing regressions
+        shell: pwsh
+        run: ./desktop/scripts/test-windows-signing.ps1
+
+  sign:
+    name: Sign and verify app and NSIS installer
+    needs: checks
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.signing-mode == 'keyvault') ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+       github.event.label.name == 'windows-signing' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_KEY_VAULT_URL: ${{ vars.AZURE_KEY_VAULT_URL }}
+      CODE_SIGNING_CERT_NAME: ${{ vars.CODE_SIGNING_CERT_NAME }}
+      SIGNING_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check signing configuration
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'AZURE_KEY_VAULT_URL', 'CODE_SIGNING_CERT_NAME')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing windows-signing environment variable: $name"
+            }
+          }
+          if ((git rev-parse HEAD) -ne $env:SIGNING_SOURCE_SHA) { throw 'Checkout does not match requested source SHA.' }
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Check certificate access
+        run: |
+          az keyvault certificate show --id "$env:AZURE_KEY_VAULT_URL/certificates/$env:CODE_SIGNING_CERT_NAME" --query id --output tsv --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read signing certificate.' }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+          key: windows-signing
+          save-if: false
+      - name: Install pinned AzureSignTool
+        run: |
+          $toolDirectory = Join-Path $env:RUNNER_TEMP 'azuresigntool-7.0.1'
+          New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
+          $tool = Join-Path $toolDirectory 'AzureSignTool.exe'
+          Invoke-WebRequest 'https://github.com/vcsjones/AzureSignTool/releases/download/v7.0.1/AzureSignTool-x64.exe' -OutFile $tool
+          if ((Get-FileHash -LiteralPath $tool -Algorithm SHA256).Hash -ne 'DC85A3F24BCD5978C63FCFD167A9B41313AF9116722B99B831400F05F387FCBA') {
+            throw 'AzureSignTool download hash mismatch.'
+          }
+          $toolDirectory | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck
+        working-directory: desktop
+      - name: Build and sign
+        env:
+          WINDOWS_SIGNING: keyvault
+        run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --bundles nsis
+        working-directory: desktop
+      # Tauri restores the unsigned build output after bundling. Verify the app
+      # employees receive by extracting its signed payload from the installer.
+      - name: Extract signed app from NSIS installer
+        run: |
+          $installers = @(Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
+          & 7z e $installers[0].FullName '-odesktop/signed-app' '-r' '-y' 'openbot-desktop.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract signed app from NSIS installer.' }
+      - name: Verify publisher, trust, and timestamp on both executables
+        run: ./desktop/scripts/verify-windows-signatures.ps1
+      - name: Retain verified binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openbot-windows-signed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            desktop/signed-app/openbot-desktop.exe
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain verification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openbot-windows-signatures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: desktop/signing-evidence/
+          if-no-files-found: warn
+          retention-days: 14
