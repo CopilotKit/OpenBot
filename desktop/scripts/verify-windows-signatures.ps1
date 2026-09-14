@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$AppPath = "$PSScriptRoot/../src-tauri/target/release/openbot-desktop.exe",
+    [string]$AppPath = "$PSScriptRoot/../signed-app/openbot-desktop.exe",
     [string]$InstallerDirectory = "$PSScriptRoot/../src-tauri/target/release/bundle/nsis",
     [string]$EvidenceDirectory = "$PSScriptRoot/../signing-evidence",
     [string]$SignToolPath,

@@ -136,6 +136,26 @@ try {
     Set-Content -LiteralPath (Join-Path $installerDirectory 'stale-setup.exe') -Value 'stale installer'
     Assert-Throws { & $verify @verifyParameters } 'Expected exactly one NSIS installer'
 
+    # Tauri restores the unsigned build output after packaging. Exercise the
+    # default paths against that real layout, without overriding AppPath.
+    $layout = Join-Path $directory 'packaged desktop'
+    $release = Join-Path $layout 'src-tauri/target/release'
+    foreach ($relative in @('scripts', 'signed-app', 'src-tauri/target/release/bundle/nsis')) {
+        New-Item -ItemType Directory -Path (Join-Path $layout $relative) -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $verify -Destination (Join-Path $layout 'scripts/verify-windows-signatures.ps1')
+    $restored = Join-Path $release 'openbot-desktop.exe'
+    $payload = Join-Path $layout 'signed-app/openbot-desktop.exe'
+    Set-Content -LiteralPath $restored -Value 'unsigned restored build output'
+    Set-Content -LiteralPath $payload -Value 'signed installer payload'
+    Set-Content -LiteralPath (Join-Path $release 'bundle/nsis/OpenBot test-setup.exe') -Value 'signed installer'
+    $global:SigningTestState.invalidFile = $restored
+    $global:SigningTestState.status = 'NotSigned'
+    & (Join-Path $layout 'scripts/verify-windows-signatures.ps1') -SignToolPath Test-SignTool -SourceSha test-source-sha | Out-Null
+    $payloadReport = Get-Content (Join-Path $layout 'signing-evidence/signatures.json') -Raw | ConvertFrom-Json
+    Assert-True ($payloadReport.files[0].sha256 -eq (Get-FileHash -LiteralPath $payload).Hash) 'Default verification selected restored build output instead of installer payload.'
+    $passed++
+
     $baseConfig = Get-Content "$PSScriptRoot/../src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json -AsHashtable
     Assert-True (-not $baseConfig.bundle.ContainsKey('windows') -or -not $baseConfig.bundle.windows.ContainsKey('signCommand')) 'Base Tauri build enables signing.'
     Assert-True (-not (Test-Path "$PSScriptRoot/../src-tauri/tauri.windows.conf.json")) 'Signing overlay could be loaded automatically.'

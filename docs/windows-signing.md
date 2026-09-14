@@ -24,14 +24,17 @@ ref to validate, and set `signing-mode` to `keyvault`. The default `none` runs
 only credential-free regressions. Environment reviewers should check the exact
 source SHA and workflow changes before approving access to the publisher's key.
 
-A successful signing run verifies **both** `openbot-desktop.exe` and the single
-`*-setup.exe` installer using Windows Authenticode and
+A successful signing run extracts `openbot-desktop.exe` from the NSIS installer
+with 7-Zip, then verifies **both** that payload and the single `*-setup.exe`
+installer using Windows Authenticode and
 `signtool verify /pa /all /v /tw`. Signatures must be valid, timestamped, and have
 publisher `Tawkit, Inc.`. Any warning or nonzero SignTool exit fails the job.
 `signatures.json` records the source SHA, artifact SHA-256 hashes, signer and
 timestamp certificates; the companion text files retain verbose SignTool output.
-The binaries upload only after both pass. These checks do not test SmartScreen
-reputation or exercise the app UI.
+The binaries upload only after both pass. The extracted app is retained from
+`desktop/signed-app/`: Tauri restores the unsigned build executable after bundling,
+so verifying `target/release/openbot-desktop.exe` would inspect the wrong copy.
+These checks do not test SmartScreen reputation or exercise the app UI.
 
 ## One-time infrastructure setup
 

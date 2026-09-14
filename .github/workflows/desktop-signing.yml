@@ -116,6 +116,14 @@ jobs:
           WINDOWS_SIGNING: keyvault
         run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --bundles nsis
         working-directory: desktop
+      # Tauri restores the unsigned build output after bundling. Verify the app
+      # employees receive by extracting its signed payload from the installer.
+      - name: Extract signed app from NSIS installer
+        run: |
+          $installers = @(Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
+          & 7z e $installers[0].FullName '-odesktop/signed-app' '-r' '-y' 'openbot-desktop.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract signed app from NSIS installer.' }
       - name: Verify publisher, trust, and timestamp on both executables
         run: ./desktop/scripts/verify-windows-signatures.ps1
       - name: Retain verified binaries
@@ -123,7 +131,7 @@ jobs:
         with:
           name: openbot-windows-signed-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            desktop/src-tauri/target/release/openbot-desktop.exe
+            desktop/signed-app/openbot-desktop.exe
             desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
           retention-days: 14
