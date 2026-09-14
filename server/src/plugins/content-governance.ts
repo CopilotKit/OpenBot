@@ -88,11 +88,37 @@ function normalizedFieldName(value: string): string {
   return normalized.startsWith("x_") ? normalized.slice(2) : normalized;
 }
 
+const basicCredential = /^\s*Basic\s+([A-Za-z0-9+/]+={0,2})(?![A-Za-z0-9+/=])/i;
+const bearerCredential =
+  /^\s*Bearer\s+([A-Za-z0-9._~+/-]{16,}=*)(?![A-Za-z0-9._~+/=-])/i;
+
+function isBasicCredential(encoded: string): boolean {
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(
+      Buffer.from(encoded, "base64"),
+    );
+    return decoded.includes(":") && !/\p{Cc}/u.test(decoded);
+  } catch {
+    return false;
+  }
+}
+
+function isAuthorizationHeader(value: string): boolean {
+  const basic = basicCredential.exec(value);
+  if (basic?.[1] && isBasicCredential(basic[1])) return true;
+  const token = bearerCredential.exec(value)?.[1];
+  if (!token) return false;
+  return (
+    /[0-9._~+/=-]/.test(token) ||
+    (/[a-z]/.test(token) && /[A-Z]/.test(token.slice(1)))
+  );
+}
+
 function categoryForValue(value: string): SensitiveArgumentCategory | null {
   if (/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/.test(value)) {
     return "private_key";
   }
-  if (/^\s*(?:Basic|Bearer)\s+\S+/i.test(value)) {
+  if (isAuthorizationHeader(value)) {
     return "authorization_header";
   }
   if (providerTokenPatterns.some((pattern) => pattern.test(value))) {

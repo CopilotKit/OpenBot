@@ -135,6 +135,21 @@ def next_step(state):
     return "tools"
 
 
+def _refusal_reason(response):
+    """The deployment's own reason for a callback it would not run, or nothing.
+
+    `/api/agent-tools/call` refuses with the reason under `error`, and the model can only tell the
+    person why, or correct a malformed call, if it is told. Read here rather than inside the
+    callback's error handler, so a body that is not JSON costs the reason and not the refusal.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    error = body.get("error") if isinstance(body, dict) else None
+    return f" {error.strip()}" if isinstance(error, str) and error.strip() else ""
+
+
 async def _call_tool(call, context):
     async def result():
         token = (os.environ.get("AGENT_TOOL_TOKEN") or "").strip()
@@ -166,7 +181,8 @@ async def _call_tool(call, context):
                 )
             if not response.is_success:
                 return (
-                    f"Refused. Tool callback returned HTTP {response.status_code}.",
+                    f"Refused. Tool callback returned HTTP {response.status_code}."
+                    f"{_refusal_reason(response)}",
                     True,
                 )
             body = response.json()

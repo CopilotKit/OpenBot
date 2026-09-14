@@ -41,6 +41,42 @@ const CLICK_SUBMIT = {
   element: { role: "button", name: "Submit order" },
 };
 
+describe("the initiator a replayed row carries", () => {
+  test("a row with no initiator replays as a person, not as an unbound identifier", () => {
+    // Every computer row written before this field existed. A rule naming the initiator has to judge
+    // them rather than throw, which fails closed and would report a boundary far stricter than the
+    // one being tested.
+    expect(contextFromAuditPayload(CLICK_SUBMIT)?.initiator).toEqual({
+      kind: "person",
+      id: "",
+    });
+  });
+
+  test("a row that names a routine replays as that routine", () => {
+    expect(
+      contextFromAuditPayload({
+        ...CLICK_SUBMIT,
+        initiator: { kind: "routine", id: "nightly-summary" },
+      })?.initiator,
+    ).toEqual({ kind: "routine", id: "nightly-summary" });
+  });
+
+  test("a shape this version does not recognise reads as a person rather than as itself", () => {
+    // A row from a later version, or one inserted by hand. Guessing at it would replay a rule
+    // against a kind no branch here knows, so it is read as absent and neutralised.
+    for (const initiator of [
+      { kind: "wat", id: "x" },
+      { kind: "routine" },
+      "routine",
+      null,
+    ]) {
+      expect(
+        contextFromAuditPayload({ ...CLICK_SUBMIT, initiator })?.initiator,
+      ).toEqual({ kind: "person", id: "" });
+    }
+  });
+});
+
 describe("contextFromAuditPayload", () => {
   test("rebuilds the element with the ref that is stored beside it", () => {
     const context = contextFromAuditPayload(CLICK_SUBMIT);
