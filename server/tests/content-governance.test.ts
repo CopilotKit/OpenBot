@@ -163,4 +163,35 @@ describe("MCP tool argument content governance", () => {
       safe: true,
     });
   });
+
+  test.each([
+    "Basic onboarding checklist",
+    "basic setup guide",
+    "Basic auth broken on staging",
+    "  basic training for new hires",
+    "Bearer of bad news: the launch slips a week",
+    "Bearer responsibilities",
+  ])(
+    "allows %s, which only starts with an authorization scheme name",
+    (text) => {
+      expect(inspectToolArguments({ title: text })).toEqual({ safe: true });
+    },
+  );
+
+  test.each([
+    ["a Basic credential", `Basic ${btoa("aladdin:open sesame")}`],
+    ["a lowercase basic credential", `basic ${btoa("user:pass")}`],
+    [
+      "a Bearer token followed by text",
+      "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature is the one to use",
+    ],
+    ["an opaque bearer token", `bearer ${"a1".repeat(12)}`],
+    ["a bearer token with no digits", "Bearer QmFzZVRva2VuV2l0aE5vRGlnaXRz"],
+  ])("still refuses %s", (_label, value) => {
+    expect(inspectToolArguments({ value })).toEqual({
+      safe: false,
+      reason: "sensitive_content",
+      findings: [{ category: "authorization_header", path: "$.value" }],
+    });
+  });
 });

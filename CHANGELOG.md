@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A tool argument that starts with "Basic" or "Bearer" is no longer refused as a credential
+
+Content inspection read any MCP tool argument whose first word was "basic" or "bearer", in any case,
+as an authorization header. A Bot searching Drive for "Basic onboarding checklist", or posting
+"Bearer of bad news" to a channel, was refused because its arguments "contain credential material".
+Those words are now refused only when what follows them is shaped like a credential: base64 that
+decodes to `user:password` after `Basic`, and a token of at least 16 characters with a digit,
+punctuation or mixed case after `Bearer`. A shorter bearer token, or a Basic value that does not
+decode to `user:password`, is no longer caught by this pattern; the same value under an
+`authorization` field is still refused by name.
+
 ## 0.0.10
 
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing
