@@ -662,7 +662,8 @@ describe("external Slack link confirmation routes", () => {
       loadConfig(testEnvironment()),
       undefined,
       undefined,
-      ...(Array.from({ length: 28 }) as never[]),
+      // Everything between the audit reader and the link routes, which are parameter 30.
+      ...(Array.from({ length: 26 }) as never[]),
       externalLinkRoutes,
     );
 
