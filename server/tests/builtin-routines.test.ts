@@ -5,6 +5,7 @@ import {
   type RoutineTools,
   useRoutineTools,
 } from "../src/plugins/builtin-routines";
+import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 import {
   type Routine,
   RoutineNotFoundError,
@@ -102,6 +103,33 @@ function recordingTools(overrides: Partial<RoutineTools> = {}): Recorded[] {
 // the store some other file's test unexpectedly reaches.
 afterEach(() => {
   useRoutineTools(null);
+});
+
+describe("a list too long for one result", () => {
+  test("is cut between characters, never through one", async () => {
+    const listing = (instruction: string) =>
+      recordingTools({
+        async listFor() {
+          return [{ ...SUMMARY, instruction }];
+        },
+      });
+
+    // Where the instruction starts in a listing, measured rather than assumed, so the emoji's high
+    // half lands on the last code unit the limit keeps whatever words surround it.
+    listing("MARKER");
+    const probe = await callTool(CONNECTION, "list_routines", {});
+    const before = probe.text.indexOf("MARKER");
+    expect(before).toBeGreaterThan(-1);
+
+    const filler = "a".repeat(MAX_RESULT_CHARS - 1 - before);
+    listing(`${filler}😀tail`);
+    const result = await callTool(CONNECTION, "list_routines", {});
+
+    expect(result.truncated).toBe(true);
+    expect(result.text.split("\n\n[truncated")[0]).toBe(
+      `${probe.text.slice(0, before)}${filler}`,
+    );
+  });
 });
 
 describe("the tool list", () => {

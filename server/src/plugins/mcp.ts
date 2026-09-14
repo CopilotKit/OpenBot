@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { cutAtCodeUnits } from "../channels/text";
 
 /**
  * The only place in this deployment that speaks MCP to somebody else's server.
@@ -74,7 +75,7 @@ export function resultText(content: unknown): {
     return { text: joined, truncated: false };
   }
   return {
-    text: `${joined.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
     truncated: true,
   };
 }

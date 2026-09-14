@@ -10,6 +10,25 @@
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /**
+ * The first `limit` UTF-16 code units of `text`, one fewer when the cut would split a character.
+ *
+ * `slice` counts code units, and every emoji, every astral-plane glyph and every CJK extension
+ * character is two of them. A limit landing between the two halves leaves a lone high surrogate as
+ * the last unit, which is not a character: `JSON.stringify` sends it as a bare `\ud83d` and UTF-8
+ * encodes it as U+FFFD, so whatever reads the cut text — a model, most often — is handed a broken
+ * character that was never in the source. `extractDocumentText` guards the same cut on attachments.
+ *
+ * The orphan is dropped rather than completed, so the result never exceeds the limit it was asked
+ * for. It cannot be a lone surrogate that was already in the text and happened to land last: only a
+ * high surrogate is dropped, and one followed by its pair in the source is exactly the split case.
+ */
+export function cutAtCodeUnits(text: string, limit: number): string {
+  const sliced = text.slice(0, limit);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
+}
+
+/**
  * One line a roster can draw: control characters stripped, whitespace collapsed, cut on grapheme
  * clusters so an emoji is never split. The caller supplies the cap; a preview and a title want
  * different ones.

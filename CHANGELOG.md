@@ -18,6 +18,14 @@ sweeping is told so — that no worker has ever checked in, or when the last one
 being shown a page that looks correct. The window is the fifteen minutes a routine's own schedule
 already has as its floor, so a gap longer than that is one no routine could have wanted.
 
+### A long tool result or relayed answer is cut between characters, not through an emoji
+
+A tool result over 20,000 characters, and a Bot's answer over 12,000 relayed back through a handoff,
+were cut by UTF-16 code unit. When the cut landed inside an emoji or any other character outside the
+Basic Multilingual Plane, the text handed to the model ended on half of it: a lone surrogate that
+JSON carries as a bare `\ud83d` and UTF-8 turns into a replacement character. The cut now stops one
+unit short in that case, the way an attached text file's already did. Anything that fits is
+untouched, and the note saying the result was cut reads as before.
 ### A boundary rule can ask what started a run, not only whose authority it carries
 
 A routine's turn goes through exactly the path a person's chat turn does, as the routine's owner:
