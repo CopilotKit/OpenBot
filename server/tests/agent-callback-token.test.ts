@@ -473,6 +473,67 @@ describe("the tool-call route a callback token guards", () => {
   });
 
   /**
+   * ONLY A REFUSAL IS MARKED AS ONE, because the marker is what the transcript draws.
+   *
+   * `chat-transcript.tsx` labels a tool result that starts with `REFUSAL_MARKER` as blocked, and the
+   * model reads "Refused." as "not allowed". `callTool` throws `PluginRefusedError` for a boundary
+   * holding, and rethrows a vendor that broke after recording `mcp.call_failed`. The in-process door
+   * keeps the two apart — "one means 'not allowed', the other means 'it broke'" — and this route
+   * put the marker in front of every throw, so on a Bot running its own loop a vendor outage and a
+   * database fault were both drawn as a policy refusal. Asked of both doors with the same store.
+   */
+  test("a throw is marked as a refusal only when it is one, the way the in-process door marks it", async () => {
+    const { grantedTools, REFUSAL_MARKER } = await import(
+      "../src/plugins/tools"
+    );
+    const throws: [string, unknown][] = [
+      ["vendor failure", new Error("fetch failed")],
+      ["deployment fault", queryFailure()],
+      [
+        "refusal",
+        new PluginRefusedError(
+          "No Bot holds linear/LINEAR_CREATE_ISSUE, so nothing was called.",
+          null,
+        ),
+      ],
+    ];
+
+    const seen: string[] = [];
+    for (const [kind, thrown] of throws) {
+      const callback = await toolResult(thrown);
+      const [tool] = await grantedTools({
+        store: {
+          callTool: async () => {
+            throw thrown;
+          },
+          listForAgent: async () => ({
+            tools: [
+              {
+                toolName: "mcp__linear__LINEAR_CREATE_ISSUE",
+                ref: "linear/LINEAR_CREATE_ISSUE",
+                description: "Create an issue.",
+                inputSchema: { type: "object" },
+              },
+            ],
+          }),
+        } as unknown as PluginStore,
+        botId: "knowledge",
+        actorId: "usr_7",
+      });
+      const inProcess = await tool?.execute({});
+      seen.push(
+        `${kind}: marked ${callback.startsWith(REFUSAL_MARKER)}, same as in-process ${callback === inProcess}`,
+      );
+    }
+
+    expect(seen).toEqual([
+      "vendor failure: marked false, same as in-process true",
+      "deployment fault: marked false, same as in-process true",
+      "refusal: marked true, same as in-process true",
+    ]);
+  });
+
+  /**
    * AND THE REFUSAL STILL SPEAKS, because a guard that silences everything is not the fix.
    *
    * A `PluginRefusedError` is this deployment telling a Bot it may not do something, and its

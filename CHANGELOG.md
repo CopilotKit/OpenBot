@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A vendor that broke no longer reads as a refusal to a Bot running its own loop
+
+When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
+whose vendor failed, or hit a fault in this deployment, the answer began "Refused." like a boundary
+holding. The conversation drew it as blocked and the model read it as not allowed, while the audit
+trail recorded a failed call. Only a refusal is marked now. A vendor that broke reads "That tool could
+not be called: …", the way it already did for a Bot running here, and a refusal reads as before.
+
 ## 0.0.12
 
 ### A deployment can broker its Bots into a few hundred apps through Composio

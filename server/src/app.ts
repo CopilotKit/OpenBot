@@ -59,7 +59,11 @@ import type { OnboardingStore } from "./people/onboarding";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
 import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
-import { isDeploymentFault, type PluginStore } from "./plugins/store";
+import {
+  isDeploymentFault,
+  PluginRefusedError,
+  type PluginStore,
+} from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
@@ -1409,13 +1413,24 @@ export function createApp(
          * sentence is allowed to contain. Today the two overlap on a query failure and this arm can
          * only be reached by something neither recognises — which is exactly the state the last two
          * findings in this area were found in, one predicate apart from a leak.
+         *
+         * AND ONLY A REFUSAL CARRIES THE MARKER, which is the in-process door's third question. The
+         * transcript draws an answer that starts with it as a boundary holding, and the model reads
+         * "Refused." as "not allowed". `callTool` throws `PluginRefusedError` for that, and rethrows
+         * a vendor that broke after recording `mcp.call_failed`; marking every throw drew a vendor
+         * outage, or a fault of this deployment's own, as a policy refusing.
          */
+        if (error instanceof PluginRefusedError) {
+          return context.json({
+            text: `${REFUSAL_MARKER} ${withoutStatement(error)}`,
+            isError: true,
+          });
+        }
         return context.json({
-          text: `${REFUSAL_MARKER} ${
+          text:
             error instanceof Error && !isDeploymentFault(error)
-              ? withoutStatement(error)
-              : "That tool could not be called."
-          }`,
+              ? `That tool could not be called: ${withoutStatement(error)}`
+              : "That tool could not be called.",
           isError: true,
         });
       }
