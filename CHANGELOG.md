@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.12
+
 ### A deployment can broker its Bots into a few hundred apps through Composio
 
 Composio holds a person's connections to a few hundred SaaS apps behind one account. A deployment
