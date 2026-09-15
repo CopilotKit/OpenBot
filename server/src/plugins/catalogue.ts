@@ -30,7 +30,7 @@
 // cloud credentials. `target.ts` imports nothing itself, so asking it here adds no dependency.
 import { isNeverAllowedHostname } from "../computer/target";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
-import type { TransportKind } from "./transport";
+import type { CuratedTransportKind } from "./transport";
 
 export type CatalogueAuth =
   /** Answers without any credential at all. */
@@ -116,8 +116,13 @@ export type CatalogueEntry = {
    * unknown tool as a write rather than as a read: a tool the server never advertised, so nothing
    * here could have named it, is safe to over-scrutinize as a write. The opposite direction is the
    * one that matters for this list: a tool the server DOES advertise but that is missing from here
-   * classifies as a read, so an incomplete list is the failure mode, not a safe default — this list
-   * has to lean over-inclusive.
+   * classifies as a read unless the vendor itself recorded an effect for it, so for a vendor that
+   * records nothing — which is every one here today — an incomplete list is the failure mode rather
+   * than a safe default, and this list has to lean over-inclusive.
+   *
+   * Nothing outside review can shorten it, either. A name this list holds is a write no matter what
+   * a vendor recorded for that action, because this list is what a person read and the recorded
+   * effect is whatever was last written into an unconstrained column.
    */
   writeTools: readonly string[];
   /**
@@ -127,8 +132,12 @@ export type CatalogueEntry = {
    * serves Drive over both an MCP endpoint and an ordinary REST API, and which one this deployment
    * uses is a decision about availability and risk rather than a property of the vendor. Naming it
    * here keeps that decision beside the host it applies to, and makes reversing it a one-line diff.
+   *
+   * NOT EVERY KIND, and the narrowing is the point: see {@link CuratedTransportKind}. The broker's
+   * transport is reached from a row's provenance and its url, never from an entry, and an entry
+   * naming it resolves to a Composio dial with no app and no brokered gate.
    */
-  transport?: TransportKind;
+  transport?: CuratedTransportKind;
   docsUrl: string;
 };
 
@@ -244,9 +253,11 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
      * The writing tools as the hosted server advertises them today. The hosted server advertises
      * its tools, so a name here that does not match an advertised tool is not the risk — an
      * advertised tool that is missing from this list is: {@link classifyTool} reads an unlisted
-     * but advertised name as a read, never as a write. That makes under-inclusion the failure
-     * mode, so this list has to lean over-inclusive rather than minimal, and reconciling it
-     * against the live tool list on the first Refresh tools is required, not cosmetic.
+     * but advertised name as a read, never as a write. Notion's MCP listing carries no per-action
+     * effect, so this list is the only thing that can say otherwise and nothing backstops it. That
+     * makes under-inclusion the failure mode, so this list has to lean over-inclusive rather than
+     * minimal, and reconciling it against the live tool list on the first Refresh tools is
+     * required, not cosmetic.
      */
     writeTools: Object.freeze([
       "notion-convert-page-to-skill",
@@ -361,25 +372,68 @@ export function resolveServerUrl(
 /**
  * What this tool does, in the only two categories a policy author cares about.
  *
- * Unknown counts as a write. A tool named in {@link CatalogueEntry.writeTools} is a write. A tool
- * the server never advertised at all is a write, because the only thing that produced the name was
- * a model. A server with no catalogue entry behind it is a write throughout, because nothing
- * reviewed says any tool of theirs only reads.
+ * A RECORDED EFFECT MAY NARROW WHAT A BOT MAY DO AND MAY NEVER WIDEN IT. That is the criterion the
+ * order below is built from, and it is why the reviewed write list is consulted FIRST. Both sources
+ * are trusted to make an action a write; only the reviewed one is trusted to make an action a read
+ * where the other says write. `writeTools` was read by a person before it shipped. A recorded effect
+ * arrives from a vendor listing into a plain `text` column with no check constraint, so it is
+ * whatever was last written there, by a refresh or by a hand on a psql prompt. A value in that column
+ * therefore cannot take an action off the reviewed list.
  *
- * Only a tool the server itself listed AND that is absent from the write list is treated as a read.
- * That is the one case where both sources agree, and it is the only one where guessing permissively
- * is recoverable.
+ * THREE SOURCES, CONSULTED IN THIS ORDER. Whether the server advertised the name at all: it did not,
+ * the name came from a model and the answer is write, and nothing later overrides that. Then the
+ * reviewed write list, which settles a name it holds as a write. Then what the vendor recorded, where
+ * exactly `read` is a read and every other value it holds — a recorded write, an unrecognised label,
+ * a different case, the empty string — is a write. Where the column holds nothing at all the reviewed
+ * list finishes the job: an advertised name it declines to call a write is a read.
+ *
+ * Unknown counts as a write throughout. A server with no catalogue entry behind it is a write unless
+ * the vendor recorded a read for that action — there is no reviewed list to consult, so an unlabelled
+ * action of theirs has nothing saying it is safe.
+ *
+ * So there are two ways to earn a read, and both require somebody to have said so. Either the vendor
+ * labelled the action a read and no reviewed list contradicts them, or the server advertised it and a
+ * reviewed list declined to call it a write. Guessing permissively is recoverable only in those two
+ * cases; everywhere else the answer is a write.
  */
 export function classifyTool(
   entry: CatalogueEntry | null,
   toolName: string,
   advertised: boolean,
+  /**
+   * What the vendor said about this action when it was listed, or null when nothing did.
+   *
+   * Consulted AFTER the entry's write list, so it can only agree with review or add to it. It is the
+   * only source that can exist for a broker's catalogue — Composio labels every one of Gmail's
+   * sixty-three actions, and no reviewed list here could keep pace with several hundred apps that
+   * change weekly — so where review said nothing it is the whole answer.
+   *
+   * PRESENCE, NOT TRUTHINESS, is what makes it consulted, and only the exact string `read` produces a
+   * read. A recorded write, an unrecognised value, a different case and the EMPTY STRING are all
+   * writes: the empty string is a value the column holds rather than a silence, and reading it as
+   * "nothing was recorded" would send an advertised action no reviewed list names down the read
+   * branch. Null and undefined are the column saying nothing, and fall through to the reviewed list.
+   * So a column somebody typed into by hand, or a label a vendor adds later that this code has never
+   * heard of, cannot widen what a Bot may do unasked.
+   */
+  recorded?: string | null,
 ): "read" | "write" {
+  // A name the server never listed came from a model, and nothing reviewed says it only reads —
+  // checked first, so neither later source can rescue a name that was never advertised.
+  if (!advertised) return "write";
+  // The reviewed list outranks the column, and only in this direction: a name a person reviewed as a
+  // write stays a write whatever the listing recorded about it.
+  if (entry?.writeTools.includes(toolName)) return "write";
+  // Anything the column holds settles the rest. `typeof` rather than truthiness so the empty string
+  // is treated as the value it is instead of as an absence of one.
+  if (typeof recorded === "string")
+    return recorded === "read" ? "read" : "write";
   // A server an administrator added by URL has no reviewed tool catalogue behind it, so nothing here
   // can say a tool of theirs only reads. Everything it offers is a write.
   if (!entry) return "write";
-  if (!advertised) return "write";
-  return entry.writeTools.includes(toolName) ? "write" : "read";
+  // Advertised, not on the reviewed write list, and nothing recorded. Two sources had the chance to
+  // call it a write and neither did.
+  return "read";
 }
 
 /**
