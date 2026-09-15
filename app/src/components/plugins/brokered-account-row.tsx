@@ -85,7 +85,7 @@ export type BrokeredAccount = {
    *
    * ON A CONSENT APP THERE IS NO PROBE BEHIND THIS. The confirm writes it true off the vendor's own
    * answer that the account is attached — a consent screen somebody completed is the check — and
-   * migration 0037 backfilled every consent row that came before. So nothing here may read `true`
+   * migration 0038 backfilled every consent row that came before. So nothing here may read `true`
    * as evidence that a call was spent, nor offer an act that needs one.
    *
    * AND `false` IS A PLACEHOLDER AS MUCH AS A VERDICT. The store writes it unconditionally on every
@@ -913,7 +913,7 @@ export function BrokeredAccountRow({
                 {/*
                  * OFFERED ONLY ON A KEY APP, BECAUSE THAT IS THE ONLY KIND A RE-CHECK IS AN ACT ON.
                  * A consent connection is written verified by the confirm, with no probe behind it,
-                 * and migration 0037 backfilled every consent row that came before — see
+                 * and migration 0038 backfilled every consent row that came before — see
                  * {@link BrokeredAccount.verified} — so a gate that asked only about a check would
                  * draw Re-check on every connected Gmail a deployment already had, where pressing it
                  * could only fail.

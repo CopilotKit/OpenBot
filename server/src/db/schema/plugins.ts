@@ -97,7 +97,7 @@ export const mcpServers = pgTable("mcp_servers", {
    * THE VENDOR'S OWN SCHEME LITERAL, NOT A {@link BrokerConnection} KIND — `OAUTH2`, `DCR_OAUTH`,
    * `API_KEY`, `BASIC`, `BEARER_TOKEN`, `BASIC_WITH_JWT`, `NO_AUTH`. Those two vocabularies name one
    * fact, and this column is where a reader comes to find out which of them is written down, so it
-   * says: somebody looking here for `consent` or `fields` is reading the other one. Migration 0037
+   * says: somebody looking here for `consent` or `fields` is reading the other one. Migration 0038
    * backfilled every row whose provenance is `composio` to `OAUTH2`, because managed OAuth was the
    * only config this deployment ever created and `addBrokeredApp` writes the row only after that
    * config stands. A null is therefore not an older brokered row this deployment WROTE.
@@ -235,9 +235,9 @@ export const composioConnections = pgTable(
     /**
      * Whether a real call was made with this connection and answered. See the verify path.
      *
-     * TRUE ON EVERY ROW THAT PREDATES THIS COLUMN WITHOUT A PROBE BEHIND IT. Migration 0037 —
-     * `server/drizzle/0037_composio_schemes.sql`, which is where this pair and `auth_scheme` are
-     * both added and both backfilled; every "0037" in this file names that one file —
+     * TRUE ON EVERY ROW THAT PREDATES THIS COLUMN WITHOUT A PROBE BEHIND IT. Migration 0038 —
+     * `server/drizzle/0038_composio_schemes.sql`, which is where this pair and `auth_scheme` are
+     * both added and both backfilled; every "0038" in this file names that one file —
      * backfilled them to true with `verified_at = connected_at`, and no call was made to earn it:
      * every one of the rows it touched is a consent connection, which is verified by construction,
      * because the only way it exists at all is that the vendor's own screen sent the person back
@@ -248,7 +248,7 @@ export const composioConnections = pgTable(
      * AND THE SAME NOW HOLDS OF EVERY CONSENT ROW AND NOT ONLY THE BACKFILLED ONES, because the
      * writer that records a connection sets `verified` itself: `recordBrokeredConnection` is the
      * one place a row is written, and `confirmBrokeredConnection` calls it with `verified: true` on
-     * the vendor's yes. So a consent connection made today carries the same true migration 0037
+     * the vendor's yes. So a consent connection made today carries the same true migration 0038
      * wrote and earns it the same way — the vendor answered that the account is attached — and its
      * `verified_at` is the moment of that answer: the consent itself on the first confirm, and the
      * vendor's yes again on every later one, because a confirm really does go and ask. What it used
@@ -349,7 +349,7 @@ export const composioConnections = pgTable(
      * AND NULL ON A ROW WRITTEN BEFORE THIS COLUMN EXISTED, which is the same null and deliberately
      * so. No backfill is possible or wanted: what a check spent in March is not recoverable, and
      * today's chooser answering for it is exactly the inference this column retires. The rows
-     * migration 0037 touched are consent rows, where null is permanently right; a key row that
+     * migration 0038 touched are consent rows, where null is permanently right; a key row that
      * predates it reads as unchecked, the mildest of the four states and the only safe direction to
      * be uncertain in — a name invented for it would be the false accusation above, written down.
      *

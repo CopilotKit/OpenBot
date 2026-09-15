@@ -4803,7 +4803,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      * reachable and it means something: never checked. Folding it into `""` would hand the page a
      * row that was checked at a time nobody recorded, which is a different fact and not one this
      * table ever holds. Note also what {@link composioConnections.verified} sets out about the rows
-     * migration 0037 backfilled: their `verifiedAt` is the moment of consent, not the moment of a
+     * migration 0038 backfilled: their `verifiedAt` is the moment of consent, not the moment of a
      * probe, so a caller must not read every timestamp here as "this connection answered then".
      */
     async brokeredConnectionsFor(userId: string): Promise<
