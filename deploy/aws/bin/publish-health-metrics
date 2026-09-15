@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 2 ]]; then
+  echo "usage: publish-health-metrics ROLE AWS_REGION" >&2
+  exit 64
+fi
+
+role="$1"
+aws_region="$2"
+if [[ "$role" != "control" && "$role" != "worker" ]]; then
+  echo "role must be control or worker" >&2
+  exit 65
+fi
+
+metric() {
+  local name="$1"
+  local value="$2"
+  local unit="$3"
+  aws cloudwatch put-metric-data \
+    --region "$aws_region" \
+    --namespace OpenBot/Personal \
+    --metric-data "MetricName=$name,Dimensions=[{Name=HostRole,Value=$role}],Value=$value,Unit=$unit"
+}
+
+disk_used="$(df --output=pcent "/srv/openbot-${role}" | tail -1 | tr -dc '0-9')"
+metric DiskUsedPercent "$disk_used" Percent
+
+if [[ "$role" == "control" ]]; then
+  healthy=0
+  if docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    openbot-control-openbot-1 2>/dev/null | grep -qx healthy; then
+    healthy=1
+  fi
+  metric ServiceReady "$healthy" Count
+  exit 0
+fi
+
+ready=1
+queue_depth=0
+active_runs=0
+for port in 4210 4212; do
+  status="$(curl --fail --silent --show-error "http://127.0.0.1:${port}/health")" || {
+    ready=0
+    continue
+  }
+  queue_depth=$((queue_depth + $(jq -er '.queueDepth | numbers' <<< "$status")))
+  active_runs=$((active_runs + $(jq -er '.activeRuns | numbers' <<< "$status")))
+  curl --fail --silent "http://127.0.0.1:${port}/ready" >/dev/null || ready=0
+done
+metric ServiceReady "$ready" Count
+metric QueueDepth "$queue_depth" Count
+metric ActiveRuns "$active_runs" Count

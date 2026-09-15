@@ -181,6 +181,8 @@ supervisor is still not in this image, so every replica shares the one browser i
 
 ## Platform notes
 
+**Private two-host AWS subscription workers.** This fork also has a personal EC2 deployment that keeps OpenBot on one control host and Codex and Grok on a separate worker host. It uses ECR digests, SSM, retained provider auth volumes, fixed concurrency, owner email admission, CloudWatch alerts, and AWS Backup. Claude is present but disabled until its release gate passes. See [the AWS deployment runbook](runbooks/aws-deployment.md). This is a private single-owner mode, not a way to share personal provider subscriptions.
+
 **Google Cloud Run.** Set memory to at least 2 GB. More than one instance is fine (see Replicas
 above); each instance has its own browser, so a Bot's logins stay on whichever instance served them.
 Cloud Run runs every

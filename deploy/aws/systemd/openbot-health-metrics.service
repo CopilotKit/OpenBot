@@ -1,0 +1,9 @@
+[Unit]
+Description=Publish OpenBot service health metrics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/openbot/metrics-ref
+ExecStart=/opt/openbot/deploy/aws/bin/publish-health-metrics ${OPENBOT_HOST_ROLE} ${AWS_REGION}

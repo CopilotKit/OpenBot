@@ -1,0 +1,23 @@
+default_permissions = "openbot-worker"
+
+[features]
+network_proxy = true
+
+[permissions.openbot-worker]
+description = "Write only in the active OpenBot job workspace."
+extends = ":workspace"
+
+[permissions.openbot-worker.filesystem]
+":root" = "deny"
+":minimal" = "read"
+glob_scan_max_depth = 4
+
+[permissions.openbot-worker.filesystem.":workspace_roots"]
+"." = "write"
+"**/*.env" = "deny"
+
+[permissions.openbot-worker.network]
+enabled = true
+
+[permissions.openbot-worker.network.domains]
+"*" = "allow"

@@ -79,6 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       components: ${{ steps.components.outputs.components }}
+      image_prefix: ${{ steps.registry.outputs.image_prefix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,13 +102,16 @@ jobs:
       # set that is tested and the set that is published cannot drift apart.
       - id: components
         run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
+      - id: registry
+        name: Select this fork's package namespace
+        run: echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openbot" >> "$GITHUB_OUTPUT"
 
   # The same checks CI runs, against the commit being published. This is the gate: nothing is built
   # or tagged unless they pass here, on this exact tree.
   checks:
     needs: [metadata, verify]
     if: needs.metadata.outputs.is_release == 'true'
-    uses: $/.github/workflows/ci.yml
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
@@ -146,20 +150,20 @@ jobs:
           # The version, the commit, and a moving latest. The version tag is the one to deploy; the
           # commit tag is how you find out what a running image actually contains.
           tags: |
-            ghcr.io/copilotkit/openbot:${{ needs.metadata.outputs.version }}
-            ghcr.io/copilotkit/openbot:${{ github.sha }}
-            ghcr.io/copilotkit/openbot:latest
+            ${{ needs.verify.outputs.image_prefix }}:${{ needs.metadata.outputs.version }}
+            ${{ needs.verify.outputs.image_prefix }}:${{ github.sha }}
+            ${{ needs.verify.outputs.image_prefix }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
       # BuildKit's own attestations above travel inside the image. This one is the record GitHub
-      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
-      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
+      # holds, and it is what `gh attestation verify oci://<owner>/openbot:vX.Y.Z` checks before
+      # anybody deploys it. Bound to the digest, never a tag,
       # because a tag can be moved to point at something else afterwards.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot
+          subject-name: ${{ needs.verify.outputs.image_prefix }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -226,7 +230,7 @@ jobs:
           # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
           # described by. It is buildx's default for this exporter and is stated rather than
           # assumed, since the push fails without it and the reason would not be obvious.
-          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
+          outputs: type=image,name=${{ needs.verify.outputs.image_prefix }}-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
           # Scoped per image and per architecture. One shared scope would have ten builds
           # overwriting each other's cache and none of them reading their own.
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
@@ -292,7 +296,7 @@ jobs:
       - id: merge
         name: Write the tags over both architectures
         env:
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.verify.outputs.image_prefix }}-${{ matrix.image }}
           VERSION: ${{ needs.metadata.outputs.version }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -319,7 +323,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          subject-name: ${{ needs.verify.outputs.image_prefix }}-${{ matrix.image }}
           subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true
       # For the same reason the digests above travel as files: a matrix cannot hand a value to a
@@ -327,7 +331,7 @@ jobs:
       - name: Record the manifest
         env:
           NAME: ${{ matrix.image }}
-          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          REPOSITORY: ${{ needs.verify.outputs.image_prefix }}-${{ matrix.image }}
           DIGEST: ${{ steps.merge.outputs.digest }}
         run: |
           set -euo pipefail
@@ -396,7 +400,7 @@ jobs:
             --arg version "$VERSION" \
             --arg digest "$DIGEST" \
             --arg commit "$COMMIT" \
-            --arg repository "ghcr.io/copilotkit/openbot" \
+            --arg repository "${{ needs.verify.outputs.image_prefix }}" \
             --argjson components "$components" \
             '{
               version: $version,

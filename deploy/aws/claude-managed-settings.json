@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "allowManagedHooksOnly": true,
+  "hooks": {},
+  "allowedHttpHookUrls": [],
+  "httpHookAllowedEnvVars": [],
+  "allowManagedMcpServersOnly": true,
+  "allowedMcpServers": [],
+  "allowManagedPermissionRulesOnly": true,
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "disableBypassPermissionsMode": "disable",
+    "allow": ["Agent", "Bash", "Edit", "Glob", "Grep", "Read", "Write"],
+    "deny": [
+      "Read(//home/gateway/.claude/**)",
+      "Read(//var/lib/openbot-gateway/**)",
+      "Read(//proc/**)",
+      "Read(//run/**)",
+      "Read(//sys/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(//home/gateway/.claude/**)",
+      "Edit(//var/lib/openbot-gateway/**)",
+      "Edit(//etc/**)",
+      "Edit(//usr/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "enableWeakerNestedSandbox": true,
+    "excludedCommands": [],
+    "filesystem": {
+      "denyRead": [
+        "/home/gateway/.claude",
+        "/var/lib/openbot-gateway",
+        "/proc",
+        "/run",
+        "/sys"
+      ],
+      "denyWrite": [
+        "/home/gateway/.claude",
+        "/var/lib/openbot-gateway",
+        "/bin",
+        "/etc",
+        "/sbin",
+        "/usr"
+      ],
+      "allowManagedReadPathsOnly": true
+    }
+  },
+  "disableClaudeAiConnectors": true,
+  "strictKnownMarketplaces": [],
+  "includeGitInstructions": false
+}

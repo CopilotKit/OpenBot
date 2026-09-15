@@ -71,6 +71,35 @@ then need their own endpoint, and a package agent whose endpoint expands to noth
 rather than registered against a missing host. A leftover token with no URL is ignored.
 Package-provided agents otherwise use their own `agents.yaml` configuration.
 
+## Cloud subscription coworkers
+
+The default tenant package has optional Codex, Claude, and Grok coworkers. Each one appears only
+when its own endpoint and gateway token pair is set. This supports a staged release: configure
+Codex, verify it, then add Claude, then Grok.
+
+```dotenv
+CODEX_AGENT_AG_UI_URL=http://subscription-workers.openbot.internal:4210/ag-ui
+CODEX_AGENT_TOKEN=...
+CLAUDE_AGENT_AG_UI_URL=http://subscription-workers.openbot.internal:4211/ag-ui
+CLAUDE_AGENT_TOKEN=...
+GROK_AGENT_AG_UI_URL=http://subscription-workers.openbot.internal:4212/ag-ui
+GROK_AGENT_TOKEN=...
+AGENT_ENDPOINT_ALLOWED_HOSTS=subscription-workers.openbot.internal:4210,subscription-workers.openbot.internal:4211,subscription-workers.openbot.internal:4212
+```
+
+The private Route 53 name is stable while the worker host changes. The port list is exact: listing
+`4210` does not admit `4211`, another host, or any other private address. Metadata addresses remain
+blocked under all settings.
+
+OpenBot holds only the gateway bearer values and sends each one only to its exact configured URL.
+Use deployment secrets for them. The official coding programs own their subscription login state on
+the worker host; do not put provider tokens or login files in OpenBot, the tenant package, or these
+gateway settings.
+
+These package coworkers are deployment-owned. Their endpoint and gateway token come from the
+environment, not from the coworker edit form. Customer-created remote coworkers keep using the
+write-only authorization header flow and encrypted credential vault described below.
+
 ## Register an external AG-UI agent
 
 In `agents.yaml`:

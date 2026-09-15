@@ -1,0 +1,5 @@
+default_permissions = "openbot-worker"
+allowed_approval_policies = ["never"]
+
+[allowed_permission_profiles]
+"openbot-worker" = true

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# IMDS remains available to root-owned host services. Containers cannot reach it.
+metadata_cidr="169.254.169.254/32"
+if ! iptables -C DOCKER-USER -d "$metadata_cidr" -j REJECT 2>/dev/null; then
+  iptables -I DOCKER-USER 1 -d "$metadata_cidr" -j REJECT
+fi

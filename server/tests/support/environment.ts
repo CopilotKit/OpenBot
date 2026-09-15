@@ -17,6 +17,7 @@ export function testEnvironment(
     GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
     BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
     BETTER_AUTH_URL: "http://localhost:3001",
+    OPENBOT_OWNER_EMAIL: "admin@openbot.test",
     // Required whenever a provider is configured: nothing else grants the administrator role.
     INITIAL_ADMIN_EMAILS: "admin@openbot.test",
     // Required. See server/src/config.ts: there is no runtime without Intelligence.

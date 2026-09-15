@@ -83,6 +83,7 @@ export type AuthConfig = {
   baseUrl: string;
   secret: string;
   trustedOrigins: string[];
+  ownerEmail: string;
   initialAdminEmails: string[];
   google?: OAuthClient;
   /**
@@ -117,7 +118,7 @@ export type ManagedAgentConfig = {
   /** The bundled Bot, absent when this deployment's provider cannot run it. */
   endpoint?: URL;
   /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
-  token: string;
+  token?: string;
   /**
    * The harness picked during setup, when there is one.
    *
@@ -125,6 +126,15 @@ export type ManagedAgentConfig = {
    * it chose, holding this token. It gets the same header for the same reason.
    */
   alsoRun?: URL;
+  subscriptionWorkers?: SubscriptionWorkerConfig[];
+};
+
+export type SubscriptionWorkerProvider = "codex" | "claude" | "grok";
+
+export type SubscriptionWorkerConfig = {
+  provider: SubscriptionWorkerProvider;
+  endpoint: URL;
+  token: string;
 };
 
 /**
@@ -436,6 +446,7 @@ function optionalHttpUrl(
  */
 function managedAgentConfig(
   environment: Environment,
+  allowedHosts: ReadonlySet<string>,
 ): ManagedAgentConfig | undefined {
   const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
   // BYO writes a URL too, but does not run our image or hold our deployment token.
@@ -453,7 +464,14 @@ function managedAgentConfig(
       "MANAGED_AGENT_TOKEN must be set when an installed PICKED_HARNESS_URL is set",
     );
   }
-  if ((!endpoint && !alsoRun) || !token) {
+  const subscriptionWorkers = subscriptionWorkerConfig(
+    environment,
+    allowedHosts,
+  );
+  if (
+    (!endpoint && !alsoRun && subscriptionWorkers.length === 0) ||
+    (!token && subscriptionWorkers.length === 0)
+  ) {
     return undefined;
   }
   /*
@@ -467,9 +485,36 @@ function managedAgentConfig(
    */
   return {
     ...(endpoint ? { endpoint } : {}),
-    token,
+    ...(token ? { token } : {}),
     ...(alsoRun ? { alsoRun } : {}),
+    subscriptionWorkers,
   };
+}
+
+function subscriptionWorkerConfig(
+  environment: Environment,
+  allowedHosts: ReadonlySet<string>,
+): SubscriptionWorkerConfig[] {
+  const providers = ["codex", "claude", "grok"] as const;
+  return providers.flatMap((provider) => {
+    const prefix = provider.toUpperCase();
+    const endpoint = optionalHttpUrl(environment, `${prefix}_AGENT_AG_UI_URL`);
+    const token = optional(environment, `${prefix}_AGENT_TOKEN`);
+    if (Boolean(endpoint) !== Boolean(token)) {
+      throw new Error(
+        `${prefix}_AGENT_AG_UI_URL and ${prefix}_AGENT_TOKEN must be set together`,
+      );
+    }
+    if (!endpoint || !token) return [];
+
+    const allowedHost = endpoint.host.toLowerCase();
+    if (!allowedHosts.has(allowedHost)) {
+      throw new Error(
+        `AGENT_ENDPOINT_ALLOWED_HOSTS must include ${allowedHost} for ${prefix}_AGENT_AG_UI_URL`,
+      );
+    }
+    return [{ provider, endpoint, token }];
+  });
 }
 
 function oauthClient(
@@ -554,6 +599,18 @@ function authConfig(
     );
   }
 
+  const ownerEmail = optional(environment, "OPENBOT_OWNER_EMAIL")
+    ?.trim()
+    .toLowerCase();
+  if (!ownerEmail) {
+    throw new Error(
+      "Sign-in requires OPENBOT_OWNER_EMAIL naming the one identity this private deployment admits",
+    );
+  }
+  if (!/^[^\s@]+@[^\s@]+$/.test(ownerEmail)) {
+    throw new Error("OPENBOT_OWNER_EMAIL must be a valid email address");
+  }
+
   return {
     baseUrl,
     secret,
@@ -565,6 +622,7 @@ function authConfig(
          * `127.0.0.1:3010`, which is the address the rest of this deployment hands out.
          */
         ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
+    ownerEmail,
     initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
@@ -994,7 +1052,8 @@ export function loadConfig(
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
-  const managedAgent = managedAgentConfig(environment);
+  const allowedAgentHosts = agentEndpointAllowedHosts(environment);
+  const managedAgent = managedAgentConfig(environment, allowedAgentHosts);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -1002,7 +1061,7 @@ export function loadConfig(
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
-    agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
+    agentEndpointAllowedHosts: allowedAgentHosts,
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl

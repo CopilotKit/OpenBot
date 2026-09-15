@@ -20,7 +20,8 @@ const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 async function runPicked(options: {
   bundled: boolean;
   installed: boolean;
-  target?: "picked" | "bundled" | "customer";
+  target?: "picked" | "bundled" | "customer" | "codex" | "claude" | "grok";
+  subscription?: "codex" | "claude" | "grok";
   customerAuth?: boolean;
   spelling?: "uppercase";
   configuredQuery?: string;
@@ -29,6 +30,9 @@ async function runPicked(options: {
   invalidCompanion?: boolean;
   packageProducer?: boolean;
 }) {
+  const expectedToken = options.subscription
+    ? `${options.subscription}-deployment-token`
+    : fixtureToken;
   const requests: {
     path: string;
     search: string;
@@ -44,9 +48,11 @@ async function runPicked(options: {
       const managed =
         options.expectedManaged ??
         (path.replace(/\/+$/, "") === "/bundled/ag-ui" ||
-          (path.replace(/\/+$/, "") === "/picked/ag-ui" && options.installed));
+          (path.replace(/\/+$/, "") === "/picked/ag-ui" && options.installed) ||
+          (options.subscription !== undefined &&
+            path.replace(/\/+$/, "") === `/${options.subscription}/ag-ui`));
       const authorized = managed
-        ? request.headers.get("x-openbot-agent-token") === fixtureToken
+        ? request.headers.get("x-openbot-agent-token") === expectedToken
         : options.customerAuth
           ? request.headers.get("Authorization") ===
               "Bearer synthetic-customer-key" &&
@@ -95,6 +101,12 @@ async function runPicked(options: {
       MANAGED_AGENT_AG_UI_URL: options.bundled ? endpoint("bundled") : "",
       PICKED_HARNESS_URL: endpoint("picked"),
       PICKED_HARNESS_KIND: "remote-ag-ui",
+      CODEX_AGENT_AG_UI_URL:
+        options.subscription === "codex" ? endpoint("codex") : "",
+      CLAUDE_AGENT_AG_UI_URL:
+        options.subscription === "claude" ? endpoint("claude") : "",
+      GROK_AGENT_AG_UI_URL:
+        options.subscription === "grok" ? endpoint("grok") : "",
     };
     const previous = new Map(
       Object.keys(publicEnvironment).map((key) => [key, process.env[key]]),
@@ -105,11 +117,13 @@ async function runPicked(options: {
         fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
       );
       const picked = tenant.agents.find(
-        (agent) => agent.id === "picked-harness",
+        (agent) => agent.id === (options.subscription ?? "picked-harness"),
       );
       if (!picked || typeof picked.configuration.endpoint !== "string")
         throw new Error("Expected endpoint from default package producer");
-      expect(picked.configuration.endpoint).toBe(endpoint("picked"));
+      expect(picked.configuration.endpoint).toBe(
+        endpoint(options.subscription ?? "picked"),
+      );
       storedEndpoint = picked.configuration.endpoint;
     } finally {
       for (const [key, value] of previous) {
@@ -129,6 +143,18 @@ async function runPicked(options: {
       PICKED_HARNESS_IMAGE: options.installed
         ? "localhost/synthetic-harness:fixture"
         : "",
+      AGENT_ENDPOINT_ALLOWED_HOSTS: options.subscription
+        ? `127.0.0.1:${server.port}`
+        : "",
+      ...(options.subscription
+        ? {
+            [`${options.subscription.toUpperCase()}_AGENT_AG_UI_URL`]: endpoint(
+              options.subscription,
+            ),
+            [`${options.subscription.toUpperCase()}_AGENT_TOKEN`]:
+              expectedToken,
+          }
+        : {}),
     }),
   );
   const database = createDatabase(config.databaseUrl);
@@ -159,7 +185,7 @@ async function runPicked(options: {
     }
     const rows = [
       {
-        id: "picked-harness",
+        id: options.subscription ?? "picked-harness",
         name: "Picked Harness",
         type: "remote_ag_ui",
         title: "Synthetic harness",
@@ -250,7 +276,7 @@ async function runPicked(options: {
       { provider: "openai", defaultModel: "unused" },
       null,
     );
-    const agent = agents["picked-harness"];
+    const agent = agents[options.subscription ?? "picked-harness"];
     if (!agent)
       throw new Error("Expected picked harness from production loader");
     agent.threadId = "synthetic-auth-thread";
@@ -329,6 +355,22 @@ test("an unrelated customer endpoint receives no deployment token", async () => 
     "x-openbot-agent-token",
   );
 });
+
+test.each(["codex", "claude", "grok"] as const)(
+  "the %s subscription coworker receives only its bound deployment token",
+  async (provider) => {
+    const result = await runPicked({
+      bundled: false,
+      installed: false,
+      target: provider,
+      subscription: provider,
+      packageProducer: true,
+    });
+    expect(result.requests.map((request) => request.status)).toEqual([200]);
+    expect(result.requests[0]?.headerNames).toContain("x-openbot-agent-token");
+    expect(result.failed).toBe(false);
+  },
+);
 
 test("a picked installed harness requires a token even when the bundled Bot is omitted", () => {
   expect(() =>

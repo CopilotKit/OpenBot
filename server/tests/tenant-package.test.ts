@@ -459,6 +459,50 @@ describe("tenant YAML validation", () => {
     });
   });
 
+  test("loads subscription coworkers independently in Codex, Claude, Grok order", async () => {
+    const names = [
+      "CODEX_AGENT_AG_UI_URL",
+      "CLAUDE_AGENT_AG_UI_URL",
+      "GROK_AGENT_AG_UI_URL",
+    ] as const;
+    const previous = new Map(names.map((name) => [name, process.env[name]]));
+    try {
+      process.env.CODEX_AGENT_AG_UI_URL =
+        "http://subscription-workers.openbot.internal:4210/ag-ui";
+      process.env.CLAUDE_AGENT_AG_UI_URL = "";
+      process.env.GROK_AGENT_AG_UI_URL = "";
+      const source = fileURLToPath(
+        new URL("../../examples/fintech", import.meta.url),
+      );
+      const codexOnly = await loadTenantPackage(source);
+      expect(
+        codexOnly.agents
+          .filter((agent) => ["codex", "claude", "grok"].includes(agent.id))
+          .map((agent) => agent.id),
+      ).toEqual(["codex"]);
+
+      process.env.CLAUDE_AGENT_AG_UI_URL =
+        "http://subscription-workers.openbot.internal:4211/ag-ui";
+      process.env.GROK_AGENT_AG_UI_URL =
+        "http://subscription-workers.openbot.internal:4212/ag-ui";
+      const allProviders = await loadTenantPackage(source);
+      expect(
+        allProviders.agents
+          .filter((agent) => ["codex", "claude", "grok"].includes(agent.id))
+          .map((agent) => [agent.id, agent.configuration.endpoint]),
+      ).toEqual([
+        ["codex", "http://subscription-workers.openbot.internal:4210/ag-ui"],
+        ["claude", "http://subscription-workers.openbot.internal:4211/ag-ui"],
+        ["grok", "http://subscription-workers.openbot.internal:4212/ag-ui"],
+      ]);
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   test("accepts the complete fintech package and normalizes agent types", () => {
     const tenantPackage = validateTenantPackage({
       brand: `tenant:\n  id: fintech\n  product_name: Ledgerline\nskin:\n  stylesheet: theme.css`,

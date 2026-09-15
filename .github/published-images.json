@@ -1,5 +1,6 @@
 [
   "agent-computer",
+  "agent-subscription-gateway",
   "supervisor",
   "agent-bot",
   "agent-langgraph",

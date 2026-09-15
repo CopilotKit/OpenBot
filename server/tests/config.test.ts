@@ -12,6 +12,7 @@ const baseEnvironment = {
   GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
   BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
   BETTER_AUTH_URL: "http://localhost:3001",
+  OPENBOT_OWNER_EMAIL: "Owner@OpenBot.Test ",
   INITIAL_ADMIN_EMAILS: "admin@openbot.test",
   INTELLIGENCE_API_URL: "http://localhost:7100",
   INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:7103",
@@ -67,6 +68,7 @@ describe("deployment configuration", () => {
     expect(config.managedAgent).toEqual({
       endpoint: new URL("http://localhost:4200/ag-ui"),
       token: "managed-agent-token",
+      subscriptionWorkers: [],
     });
     expect(config.tenantPackageDirectory).toBe("../examples/fintech");
   });
@@ -199,6 +201,85 @@ describe("deployment configuration", () => {
     ).toThrow("MANAGED_AGENT_AG_UI_URL");
   });
 
+  test("configures each subscription worker independently in release order", () => {
+    const workerHost = "subscription-workers.openbot.internal";
+    const config = loadConfig({
+      ...baseEnvironment,
+      AGENT_ENDPOINT_ALLOWED_HOSTS: [4210, 4211, 4212]
+        .map((port) => `${workerHost}:${port}`)
+        .join(","),
+      CODEX_AGENT_AG_UI_URL: `http://${workerHost}:4210/ag-ui`,
+      CODEX_AGENT_TOKEN: "codex-gateway-token",
+      CLAUDE_AGENT_AG_UI_URL: `http://${workerHost}:4211/ag-ui`,
+      CLAUDE_AGENT_TOKEN: "claude-gateway-token",
+      GROK_AGENT_AG_UI_URL: `http://${workerHost}:4212/ag-ui`,
+      GROK_AGENT_TOKEN: "grok-gateway-token",
+    });
+
+    expect(config.managedAgent?.subscriptionWorkers).toEqual([
+      {
+        provider: "codex",
+        endpoint: new URL(`http://${workerHost}:4210/ag-ui`),
+        token: "codex-gateway-token",
+      },
+      {
+        provider: "claude",
+        endpoint: new URL(`http://${workerHost}:4211/ag-ui`),
+        token: "claude-gateway-token",
+      },
+      {
+        provider: "grok",
+        endpoint: new URL(`http://${workerHost}:4212/ag-ui`),
+        token: "grok-gateway-token",
+      },
+    ]);
+  });
+
+  test.each(["CODEX", "CLAUDE", "GROK"])(
+    "refuses a half-configured %s subscription worker",
+    (provider) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          [`${provider}_AGENT_AG_UI_URL`]:
+            "http://subscription-workers.openbot.internal:4210/ag-ui",
+        }),
+      ).toThrow(`${provider}_AGENT_TOKEN`);
+    },
+  );
+
+  test("one configured provider does not require later providers", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      AGENT_ENDPOINT_ALLOWED_HOSTS:
+        "subscription-workers.openbot.internal:4210",
+      CODEX_AGENT_AG_UI_URL:
+        "http://subscription-workers.openbot.internal:4210/ag-ui",
+      CODEX_AGENT_TOKEN: "codex-gateway-token",
+    });
+
+    expect(
+      config.managedAgent?.subscriptionWorkers?.map(
+        (worker) => worker.provider,
+      ),
+    ).toEqual(["codex"]);
+  });
+
+  test("requires the exact private worker host and port in the endpoint allow-list", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        AGENT_ENDPOINT_ALLOWED_HOSTS:
+          "subscription-workers.openbot.internal:4211",
+        CODEX_AGENT_AG_UI_URL:
+          "http://subscription-workers.openbot.internal:4210/ag-ui",
+        CODEX_AGENT_TOKEN: "codex-gateway-token",
+      }),
+    ).toThrow(
+      "AGENT_ENDPOINT_ALLOWED_HOSTS must include subscription-workers.openbot.internal:4210",
+    );
+  });
+
   test("requires a base64-encoded 32-byte key-encryption key", () => {
     expect(() =>
       loadConfig({
@@ -291,6 +372,7 @@ describe("deployment configuration", () => {
         "http://[::1]:3010",
         "http://localhost:3010",
       ],
+      ownerEmail: "owner@openbot.test",
       initialAdminEmails: ["admin@openbot.test", "owner@openbot.test"],
     });
   });
@@ -413,6 +495,23 @@ describe("deployment configuration", () => {
     const { INITIAL_ADMIN_EMAILS: _none, ...withoutAdmins } = baseEnvironment;
 
     expect(() => loadConfig(withoutAdmins)).toThrow("INITIAL_ADMIN_EMAILS");
+  });
+
+  test("refuses sign-in without the one owner identity admission setting", () => {
+    const { OPENBOT_OWNER_EMAIL: _none, ...withoutOwner } = baseEnvironment;
+
+    expect(() => loadConfig(withoutOwner)).toThrow("OPENBOT_OWNER_EMAIL");
+  });
+
+  test("normalizes the owner email independently of administrator assignment", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      OPENBOT_OWNER_EMAIL: "  Owner@OpenBot.Test  ",
+      INITIAL_ADMIN_EMAILS: "admin@openbot.test",
+    });
+
+    expect(config.auth?.ownerEmail).toBe("owner@openbot.test");
+    expect(config.auth?.initialAdminEmails).toEqual(["admin@openbot.test"]);
   });
 
   test("asks for no administrator when nothing signs anybody in", () => {

@@ -1,0 +1,117 @@
+name: Deploy personal AWS stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Hosts to update
+        required: true
+        default: all
+        type: choice
+        options: [all, worker, control]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: openbot-personal-aws
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CONTROL_REPOSITORY: ${{ vars.AWS_OPENBOT_ECR_REPOSITORY_URL }}
+      GATEWAY_REPOSITORY: ${{ vars.AWS_GATEWAY_ECR_REPOSITORY_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check protected deployment settings
+        env:
+          ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          CONTROL_INSTANCE: ${{ vars.AWS_CONTROL_INSTANCE_ID }}
+          WORKER_INSTANCE: ${{ vars.AWS_WORKER_INSTANCE_ID }}
+          CONTROL_SECRET: ${{ vars.AWS_CONTROL_SECRET_ARN }}
+          WORKER_SECRET: ${{ vars.AWS_WORKER_SECRET_ARN }}
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION ROLE_ARN CONTROL_REPOSITORY GATEWAY_REPOSITORY CONTROL_INSTANCE WORKER_INSTANCE CONTROL_SECRET WORKER_SECRET; do
+            test -n "${!name:-}" || { echo "::error::$name is not set in the production environment"; exit 1; }
+          done
+          test "${CONTROL_REPOSITORY%%/*}" = "${GATEWAY_REPOSITORY%%/*}"
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@4625ce35226a7557230889aae2f52eb50ec3dcda # v2.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - id: control-image
+        name: Build and push OpenBot
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.CONTROL_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=aws-openbot-amd64
+          cache-to: type=gha,mode=max,scope=aws-openbot-amd64
+          provenance: true
+          sbom: true
+      - id: gateway-image
+        name: Build and push subscription gateway
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: agent-subscription-gateway/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GATEWAY_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha,scope=aws-gateway-amd64
+          cache-to: type=gha,mode=max,scope=aws-gateway-amd64
+          provenance: true
+          sbom: true
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      - name: Sign and scan immutable images
+        env:
+          CONTROL_DIGEST: ${{ steps.control-image.outputs.digest }}
+          GATEWAY_DIGEST: ${{ steps.gateway-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for ref in "$CONTROL_REPOSITORY@$CONTROL_DIGEST" "$GATEWAY_REPOSITORY@$GATEWAY_DIGEST"; do
+            cosign sign --yes "$ref"
+            docker run --rm \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              aquasec/trivy@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08 \
+              image --exit-code 1 --ignore-unfixed --severity CRITICAL "$ref"
+          done
+      - name: Pack the host files
+        run: tar -czf "$RUNNER_TEMP/openbot-aws-deploy.tgz" deploy/aws
+      - name: Deploy worker first
+        if: inputs.target == 'all' || inputs.target == 'worker'
+        env:
+          DEPLOY_BUNDLE: ${{ runner.temp }}/openbot-aws-deploy.tgz
+          WORKER_INSTANCE: ${{ vars.AWS_WORKER_INSTANCE_ID }}
+          WORKER_SECRET: ${{ vars.AWS_WORKER_SECRET_ARN }}
+          GATEWAY_DIGEST: ${{ steps.gateway-image.outputs.digest }}
+        run: |
+          deploy/aws/bin/deploy-via-ssm \
+            worker "$WORKER_INSTANCE" "$WORKER_SECRET" "$AWS_REGION" \
+            "${GATEWAY_REPOSITORY%%/*}" GATEWAY_IMAGE \
+            "$GATEWAY_REPOSITORY@$GATEWAY_DIGEST"
+      - name: Deploy control
+        if: inputs.target == 'all' || inputs.target == 'control'
+        env:
+          DEPLOY_BUNDLE: ${{ runner.temp }}/openbot-aws-deploy.tgz
+          CONTROL_INSTANCE: ${{ vars.AWS_CONTROL_INSTANCE_ID }}
+          CONTROL_SECRET: ${{ vars.AWS_CONTROL_SECRET_ARN }}
+          CONTROL_DIGEST: ${{ steps.control-image.outputs.digest }}
+        run: |
+          deploy/aws/bin/deploy-via-ssm \
+            control "$CONTROL_INSTANCE" "$CONTROL_SECRET" "$AWS_REGION" \
+            "${CONTROL_REPOSITORY%%/*}" OPENBOT_IMAGE \
+            "$CONTROL_REPOSITORY@$CONTROL_DIGEST"

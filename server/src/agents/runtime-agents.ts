@@ -63,15 +63,26 @@ export function createRuntimeAgentLoader(
         // Config parses URLs, while package rows retain their original spelling. Compare both
         // in canonical form so scheme/host case cannot silently drop the deployment token.
         const endpoint = managedEndpointIdentity(agent.endpoint);
-        const ours =
-          endpoint !== undefined &&
-          [managedAgent.endpoint, managedAgent.alsoRun]
-            .filter((url): url is URL => url !== undefined)
-            .some((url) => endpoint === managedEndpointIdentity(url));
-        if (ours) {
+        const deploymentEndpoint = endpoint
+          ? [
+              ...(managedAgent.token
+                ? [managedAgent.endpoint, managedAgent.alsoRun]
+                    .filter((url): url is URL => url !== undefined)
+                    .map((url) => ({
+                      endpoint: url,
+                      token: managedAgent.token as string,
+                    }))
+                : []),
+              ...(managedAgent.subscriptionWorkers ?? []),
+            ].find(
+              (candidate) =>
+                endpoint === managedEndpointIdentity(candidate.endpoint),
+            )
+          : undefined;
+        if (deploymentEndpoint) {
           agent.headers = {
             ...agent.headers,
-            "x-openbot-agent-token": managedAgent.token,
+            "x-openbot-agent-token": deploymentEndpoint.token,
           };
         }
       }

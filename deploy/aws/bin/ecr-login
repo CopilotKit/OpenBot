@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 1 ]]; then
+  echo "usage: ecr-login REFERENCE_FILE" >&2
+  exit 64
+fi
+
+reference_file="$1"
+registry="$(sed -n 's/^ECR_REGISTRY=//p' "$reference_file")"
+aws_region="$(sed -n 's/^AWS_REGION=//p' "$reference_file")"
+
+if [[ ! "$registry" =~ ^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$ || ! "$aws_region" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
+  echo "the registry reference is invalid" >&2
+  exit 65
+fi
+
+aws ecr get-login-password --region "$aws_region" \
+  | docker login --username AWS --password-stdin "$registry" >/dev/null

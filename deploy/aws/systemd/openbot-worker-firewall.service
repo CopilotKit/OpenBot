@@ -1,0 +1,13 @@
+[Unit]
+Description=Block OpenBot worker containers from EC2 instance metadata
+Requires=docker.service
+After=docker.service
+Before=openbot-worker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/openbot/deploy/aws/bin/worker-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

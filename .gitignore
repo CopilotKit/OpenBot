@@ -17,6 +17,7 @@ egress.env
 # named node_modules is not a directory — so a sandbox that links its dependencies at the repo root
 # leaves three links git will happily commit. That happened.
 node_modules
+.terraform/
 **/dist/
 app/src/lib/generated/application-config.ts
 .logs/

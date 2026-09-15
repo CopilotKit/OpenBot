@@ -50,11 +50,12 @@ jobs:
             exit 1
           fi
 
-  # The two packages that are deployables in their own right rather than root workspaces. Root
+  # The three packages that are deployables in their own right rather than root workspaces. Root
   # `typecheck` is `bun run --filter '*' typecheck`, and `--filter '*'` enumerates `workspaces`, which
   # is app, server and worker. So both of these ship a `typecheck` script that nothing has ever run:
   # `agent-computer` holds the only `spawn` in the deployment and `supervisor` is the only thing
-  # holding a Docker socket, which is a poor pair to leave untyped. Both are clean today, so this
+  # holding a Docker socket, and the subscription gateway holds provider processes. They are clean
+  # today, so this
   # changes nothing about main and only stops the next change being the first one a type checker sees.
   #
   # Not by adding them to `workspaces`: each is built from its own lockfile and the Dockerfile depends
@@ -68,7 +69,7 @@ jobs:
       # One red package must not hide whether the other is red too.
       fail-fast: false
       matrix:
-        package: [agent-computer, supervisor]
+        package: [agent-computer, supervisor, agent-subscription-gateway]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,6 +86,9 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: ${{ matrix.package }}
       - run: bun run typecheck
+        working-directory: ${{ matrix.package }}
+      - run: bun run test
+        if: matrix.package == 'agent-subscription-gateway'
         working-directory: ${{ matrix.package }}
 
   chart:
@@ -240,7 +244,7 @@ jobs:
         working-directory: desktop
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
-      - run: bunx drizzle-kit migrate --config=drizzle.config.ts
+      - run: bun x drizzle-kit migrate --config=drizzle.config.ts
         working-directory: server
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
@@ -317,7 +321,7 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       # Collisions and gaps between the migration files themselves.
-      - run: bunx drizzle-kit check --config=drizzle.config.ts
+      - run: bun x drizzle-kit check --config=drizzle.config.ts
         working-directory: server
       # And the other direction: a schema change with no migration written for it. `generate` writes a
       # file when it finds one, so the tree being dirty afterwards is the failure.
@@ -325,7 +329,7 @@ jobs:
         working-directory: server
         run: |
           set -euo pipefail
-          bunx drizzle-kit generate --config=drizzle.config.ts --name=ci_drift_probe
+          bun x drizzle-kit generate --config=drizzle.config.ts --name=ci_drift_probe
           if [ -n "$(git status --porcelain drizzle)" ]; then
             echo "::error::The schema has changed without a migration. Run drizzle-kit generate and commit it."
             git status --porcelain drizzle

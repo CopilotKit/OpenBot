@@ -1,0 +1,12 @@
+[Unit]
+Description=Render OpenBot worker environment from Secrets Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/openbot/deploy/aws/bin/render-secret-env /etc/openbot/worker-secret-ref /etc/openbot/worker.env
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

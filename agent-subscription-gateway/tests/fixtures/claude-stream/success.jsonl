@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"claude-session-new","model":"claude-sonnet","tools":["Read","Bash"]}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"PRIVATE_COMMAND","description":"Run focused tests"}}]}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Done"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"."}}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"PRIVATE_OUTPUT"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Done.","session_id":"claude-session-new"}

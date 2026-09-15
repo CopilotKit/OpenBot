@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ "$#" -ne 7 ]]; then
+  echo "usage: deploy-via-ssm ROLE INSTANCE_ID SECRET_ARN AWS_REGION ECR_REGISTRY IMAGE_KEY IMAGE_REFERENCE" >&2
+  exit 64
+fi
+
+role="$1"
+instance_id="$2"
+secret_arn="$3"
+aws_region="$4"
+registry="$5"
+image_key="$6"
+image_reference="$7"
+bundle="${DEPLOY_BUNDLE:?set DEPLOY_BUNDLE to the deploy/aws tar archive}"
+
+if [[ "$role" != "control" && "$role" != "worker" ]]; then
+  echo "role must be control or worker" >&2
+  exit 65
+fi
+if [[ ! "$instance_id" =~ ^i-[0-9a-f]+$ ]]; then
+  echo "the instance ID is invalid" >&2
+  exit 65
+fi
+if [[ "$image_key" != "OPENBOT_IMAGE" && "$image_key" != "GATEWAY_IMAGE" ]]; then
+  echo "the image key is invalid" >&2
+  exit 65
+fi
+if [[ ! "$image_reference" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[0-9a-f]{64}$ ]]; then
+  echo "the image reference must use an ECR digest" >&2
+  exit 65
+fi
+if [[ ! -s "$bundle" ]]; then
+  echo "the deployment bundle is missing" >&2
+  exit 66
+fi
+
+temporary="$(mktemp -d)"
+old_secret="$temporary/old-secret.json"
+new_secret="$temporary/new-secret.json"
+request="$temporary/request.json"
+updated=0
+command_id=""
+
+cleanup() {
+  rm -rf "$temporary"
+}
+
+rollback() {
+  status=$?
+  trap - ERR
+  set +e
+  if [[ "$updated" -eq 1 ]]; then
+    aws secretsmanager put-secret-value \
+      --region "$aws_region" \
+      --secret-id "$secret_arn" \
+      --secret-string "file://$old_secret" >/dev/null
+    aws ssm send-command \
+      --region "$aws_region" \
+      --document-name AWS-RunShellScript \
+      --instance-ids "$instance_id" \
+      --parameters "commands=systemctl restart openbot-${role}-env.service openbot-${role}.service" \
+      >/dev/null
+    echo "$role rollout failed; restored the prior image setting" >&2
+  fi
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap rollback ERR
+
+aws secretsmanager get-secret-value \
+  --region "$aws_region" \
+  --secret-id "$secret_arn" \
+  --query SecretString \
+  --output text > "$old_secret"
+jq -e 'type == "object"' "$old_secret" >/dev/null
+jq --arg key "$image_key" --arg image "$image_reference" '.[$key] = $image' \
+  "$old_secret" > "$new_secret"
+aws secretsmanager put-secret-value \
+  --region "$aws_region" \
+  --secret-id "$secret_arn" \
+  --secret-string "file://$new_secret" >/dev/null
+updated=1
+
+payload="$(base64 < "$bundle" | tr -d '\n')"
+if (( ${#payload} > 18000 )); then
+  echo "the deployment bundle is too large for one SSM command" >&2
+  false
+fi
+
+jq -n \
+  --arg instance "$instance_id" \
+  --arg payload "$payload" \
+  --arg role "$role" \
+  --arg secret "$secret_arn" \
+  --arg region "$aws_region" \
+  --arg registry "$registry" \
+  '{
+    DocumentName: "AWS-RunShellScript",
+    InstanceIds: [$instance],
+    Parameters: {commands: [
+      "set -euo pipefail",
+      "install -d -m 0755 /opt/openbot",
+      ("printf %s " + ($payload | @sh) + " | base64 --decode > /tmp/openbot-deploy.tgz"),
+      "tar -xzf /tmp/openbot-deploy.tgz -C /opt/openbot",
+      "rm -f /tmp/openbot-deploy.tgz",
+      ("/opt/openbot/deploy/aws/bin/install-host " + ([$role, $secret, $region, $registry] | map(@sh) | join(" ")))
+    ]}
+  }' > "$request"
+
+command_id="$(aws ssm send-command \
+  --region "$aws_region" \
+  --cli-input-json "file://$request" \
+  --query Command.CommandId \
+  --output text)"
+
+aws ssm wait command-executed \
+  --region "$aws_region" \
+  --command-id "$command_id" \
+  --instance-id "$instance_id"
+
+status="$(aws ssm get-command-invocation \
+  --region "$aws_region" \
+  --command-id "$command_id" \
+  --instance-id "$instance_id" \
+  --query Status \
+  --output text)"
+if [[ "$status" != "Success" ]]; then
+  aws ssm get-command-invocation \
+    --region "$aws_region" \
+    --command-id "$command_id" \
+    --instance-id "$instance_id" \
+    --query StandardErrorContent \
+    --output text >&2
+  false
+fi
+
+updated=0
+echo "$role deployed $image_reference"

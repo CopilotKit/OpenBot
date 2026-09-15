@@ -1,0 +1,9 @@
+[Unit]
+Description=Run one OpenBot routine sweep
+Requires=openbot-control.service
+After=openbot-control.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/openbot/deploy/aws
+ExecStart=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml --profile jobs run --rm --no-deps routine-sweep

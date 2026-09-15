@@ -38,6 +38,28 @@ coworker without its own endpoint is refused. A leftover token with no URL is ig
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at `agent-langgraph` on a laptop.
 
+Subscription coding workers use one URL and token pair per provider:
+
+| Provider | Endpoint | Gateway token |
+| -------- | -------- | ------------- |
+| Codex | `CODEX_AGENT_AG_UI_URL` | `CODEX_AGENT_TOKEN` |
+| Claude | `CLAUDE_AGENT_AG_UI_URL` | `CLAUDE_AGENT_TOKEN` |
+| Grok | `GROK_AGENT_AG_UI_URL` | `GROK_AGENT_TOKEN` |
+
+Each pair is optional. Set Codex first, then Claude, then Grok. A provider with neither value stays
+off the roster. A half-set pair stops startup. Each endpoint must also have its exact host and port
+in `AGENT_ENDPOINT_ALLOWED_HOSTS`. For example:
+
+```dotenv
+CODEX_AGENT_AG_UI_URL=http://subscription-workers.openbot.internal:4210/ag-ui
+CODEX_AGENT_TOKEN=...
+AGENT_ENDPOINT_ALLOWED_HOSTS=subscription-workers.openbot.internal:4210
+```
+
+In production, inject each token from AWS Secrets Manager into the OpenBot process. OpenBot sends
+the token only to its exact configured endpoint. These tokens authenticate OpenBot to the gateways;
+they are not Codex, Claude, or Grok login data. Provider login state stays on the worker host.
+
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |
@@ -176,6 +198,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API, plus every host in a registered OIDC provider's discovery document. |
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
+| `OPENBOT_OWNER_EMAIL`        | The only email admitted to this private deployment. **Required** with any provider. Normalized to lower case. |
 | `OPENBOT_PUBLIC_URL`         | Public address of this API. Defaults to `BETTER_AUTH_URL`.                              |
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
 
@@ -187,8 +210,13 @@ configuration at all.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires
-`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is
-refused at start-up rather than at somebody's first attempt to sign in.
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `OPENBOT_OWNER_EMAIL` and `INITIAL_ADMIN_EMAILS`. Every
+incomplete combination is refused at start-up rather than at somebody's first attempt to sign in.
+
+`OPENBOT_OWNER_EMAIL` is an admission check, not a role grant. OpenBot checks it before it creates a
+user or session. A valid account from the configured identity provider still gets a refusal when
+its normalized email differs. `INITIAL_ADMIN_EMAILS` separately decides who has the administrator
+role; the owner email can be listed there, but the settings do not replace each other.
 
 `INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
 address it names becomes an administrator at every sign-in and cannot be demoted from the People
@@ -250,7 +278,7 @@ then is a row nothing will read.
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. A deployment running with `NODE_ENV=production` refuses to start while it is set. Cloud metadata addresses are refused either way. |
-| `AGENT_ENDPOINT_ALLOWED_HOSTS`       | Private addresses an agent may be registered at, comma separated; unset (none) by default. Host, optionally with a port. Exact match; no wildcards. Never-allowed addresses cannot be named. |
+| `AGENT_ENDPOINT_ALLOWED_HOSTS`       | Private addresses an agent may be registered at, comma separated; unset (none) by default. Host, optionally with a port. Exact match; no wildcards. Subscription workers require their exact host and port. Never-allowed addresses cannot be named. |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |

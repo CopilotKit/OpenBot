@@ -1,0 +1,64 @@
+fail_closed = true
+disable_web_search = false
+
+[cli]
+auto_update = false
+use_leader = false
+
+[sandbox]
+profile = "strict"
+auto_allow_bash = true
+
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+include_only = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR", "USER"]
+
+[session]
+load_envrc = false
+
+[permission]
+deny = [
+  "Read(/home/gateway/.grok/**)",
+  "Edit(/home/gateway/.grok/**)",
+  "Write(/home/gateway/.grok/**)",
+  "Read(**/.env)",
+  "Read(**/.env.local)",
+  "Read(**/*.pem)",
+  "Read(**/*.key)",
+  "Bash(git push *)",
+  "Bash(gh *)",
+  "Bash(aws *)",
+  "Bash(docker *)",
+]
+
+[compat.claude]
+hooks = false
+mcps = false
+
+[compat.codex]
+hooks = false
+
+[compat.cursor]
+hooks = false
+mcps = false
+
+[managed_mcps]
+enabled = false
+gateway_tools_enabled = false
+
+[memory]
+enabled = false
+
+[relay]
+enabled = false
+
+[subagents]
+enabled = false
+
+[telemetry]
+otel_enabled = false
+trace_upload = false
+
+[tools]
+respect_gitignore = true

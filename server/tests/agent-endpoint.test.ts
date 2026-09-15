@@ -80,6 +80,28 @@ describe("what may be registered as an agent", () => {
   });
 });
 
+test("only the three exact private worker ports are allowed", () => {
+  const host = "10.0.0.5";
+  const allowedHosts = new Set(
+    [4210, 4211, 4212].map((port) => `${host}:${port}`),
+  );
+
+  for (const port of [4210, 4211, 4212]) {
+    expect(
+      checkAgentEndpoint(`http://${host}:${port}/ag-ui`, { allowedHosts })
+        .allowed,
+    ).toBe(true);
+  }
+  expect(
+    checkAgentEndpoint(`http://${host}:4213/ag-ui`, { allowedHosts }).allowed,
+  ).toBe(false);
+  expect(
+    checkAgentEndpoint("http://10.0.0.6:4210/ag-ui", {
+      allowedHosts,
+    }).allowed,
+  ).toBe(false);
+});
+
 describe("the agent form", () => {
   const base = {
     name: "Sales Bot",

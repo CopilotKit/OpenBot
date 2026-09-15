@@ -1,0 +1,154 @@
+name: openbot-control
+
+x-aws-logging: &aws-logging
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION:?set in the rendered control env file}
+    awslogs-group: ${CONTROL_LOG_GROUP:?set in the rendered control env file}
+    awslogs-stream: openbot-control
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?set a digest-qualified image reference}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openbot
+      POSTGRES_USER: openbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in the rendered control env file}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - type: bind
+        source: /srv/openbot-control/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openbot -d openbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [control-data]
+    logging: *aws-logging
+
+  openbot:
+    image: ${OPENBOT_IMAGE:?set a digest-qualified image reference}
+    restart: unless-stopped
+    env_file:
+      - path: ${CONTROL_ENV_FILE:?set the root-only rendered control env file}
+        required: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL:?set in the rendered control env file}
+      OPENBOT_SINGLE_USER: "false"
+      AGENT_ENDPOINT_ALLOWED_HOSTS: worker.openbot.internal:4210,worker.openbot.internal:4211,worker.openbot.internal:4212
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose: ["3001"]
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:3001/health').then(r => { if (!r.ok) process.exit(1) })\""]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    networks: [control-data, web]
+    logging: *aws-logging
+
+  caddy:
+    image: ${CADDY_IMAGE:?set a digest-qualified image reference}
+    restart: unless-stopped
+    environment:
+      OPENBOT_DOMAIN: ${OPENBOT_DOMAIN:?set the public OpenBot domain}
+    ports:
+      - target: 80
+        published: "80"
+        protocol: tcp
+      - target: 443
+        published: "443"
+        protocol: tcp
+      - target: 443
+        published: "443"
+        protocol: udp
+    volumes:
+      - type: bind
+        source: ./caddy/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: /srv/openbot-control/caddy/data
+        target: /data
+      - type: bind
+        source: /srv/openbot-control/caddy/config
+        target: /config
+    depends_on: [openbot]
+    networks: [web]
+    logging: *aws-logging
+
+  routine-sweep:
+    profiles: [jobs]
+    image: ${OPENBOT_IMAGE:?set a digest-qualified image reference}
+    restart: "no"
+    entrypoint: ["bun"]
+    command: ["scripts/fire-routines.ts"]
+    working_dir: /app/server
+    env_file:
+      - path: ${CONTROL_ENV_FILE:?set the root-only rendered control env file}
+        required: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set in the rendered control env file}
+      SERVER_INTERNAL_URL: http://openbot:3001
+      WORKER_SHARED_SECRET: ${WORKER_SHARED_SECRET:?set in the rendered control env file}
+    networks: [control-data, web]
+    logging: *aws-logging
+
+  migrate:
+    profiles: [jobs]
+    image: ${OPENBOT_IMAGE:?set a digest-qualified image reference}
+    restart: "no"
+    entrypoint: ["sh"]
+    command: ["-c", "cd /app/server && bun scripts/migrate.ts"]
+    env_file:
+      - path: ${CONTROL_ENV_FILE:?set the root-only rendered control env file}
+        required: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set in the rendered control env file}
+    networks: [control-data]
+    logging: *aws-logging
+
+  database-backup:
+    profiles: [jobs]
+    image: ${POSTGRES_IMAGE:?set a digest-qualified image reference}
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGDATABASE: openbot
+      PGUSER: openbot
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set in the rendered control env file}
+    entrypoint: ["sh"]
+    command:
+      - -c
+      - >-
+        umask 077 &&
+        pg_dump --format=custom --file=/backups/openbot-$$(date -u +%Y%m%dT%H%M%SZ).dump &&
+        find /backups -type f -name 'openbot-*.dump' -mtime +7 -delete
+    volumes:
+      - type: bind
+        source: /srv/openbot-control/backups
+        target: /backups
+    networks: [control-data]
+    logging: *aws-logging
+
+  attachment-cleanup:
+    profiles: [jobs]
+    image: ${OPENBOT_IMAGE:?set a digest-qualified image reference}
+    restart: "no"
+    entrypoint: ["bun"]
+    command: ["scripts/cull-staged-attachments.ts", "24"]
+    working_dir: /app/server
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set in the rendered control env file}
+    networks: [control-data]
+    logging: *aws-logging
+
+networks:
+  control-data:
+    internal: true
+  web: {}

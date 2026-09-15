@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenBot subscription worker services
+Requires=docker.service openbot-worker-env.service openbot-worker-firewall.service
+After=docker.service openbot-worker-env.service openbot-worker-firewall.service network-online.target
+RequiresMountsFor=/srv/openbot-worker /srv/openbot-auth/codex /srv/openbot-auth/claude /srv/openbot-auth/grok
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/openbot/deploy/aws
+ExecStartPre=/opt/openbot/deploy/aws/bin/ecr-login /etc/openbot/registry-ref
+ExecStartPre=/usr/bin/docker compose --env-file /etc/openbot/worker.env -f compose.worker.yml pull
+ExecStart=/usr/bin/docker compose --env-file /etc/openbot/worker.env -f compose.worker.yml up --detach --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/openbot/worker.env -f compose.worker.yml down
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

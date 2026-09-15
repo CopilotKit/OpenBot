@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dnf install -y docker jq
+systemctl enable --now docker
+
+volume_id="${data_volume_id}"
+device="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${volume_id//-/}"
+for _ in $$(seq 1 120); do
+  [[ -e "$${device}" ]] && break
+  sleep 2
+done
+[[ -e "$${device}" ]]
+
+if ! blkid "$${device}" >/dev/null 2>&1; then
+  mkfs.xfs "$${device}"
+fi
+mkdir -p /srv/openbot-control
+uuid="$$(blkid -s UUID -o value "$${device}")"
+grep -q "UUID=$${uuid}" /etc/fstab || echo "UUID=$${uuid} /srv/openbot-control xfs defaults,nofail 0 2" >> /etc/fstab
+mount /srv/openbot-control
+mkdir -p /srv/openbot-control/postgres /srv/openbot-control/backups /srv/openbot-control/caddy/data /srv/openbot-control/caddy/config
+chown -R 999:999 /srv/openbot-control/postgres /srv/openbot-control/backups
+chmod 0700 /srv/openbot-control/postgres /srv/openbot-control/backups
+mkdir -p /etc/openbot /opt/openbot
+chmod 0700 /etc/openbot

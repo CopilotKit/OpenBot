@@ -1,0 +1,11 @@
+[Unit]
+Description=Remove expired staged OpenBot attachments hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=openbot-attachment-cleanup.service
+
+[Install]
+WantedBy=timers.target

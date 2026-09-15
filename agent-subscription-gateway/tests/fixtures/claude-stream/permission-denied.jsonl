@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"claude-session-permission"}
+{"type":"result","subtype":"error_during_execution","is_error":true,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"cat /home/gateway/.claude/.credentials.json"}}],"session_id":"claude-session-permission"}

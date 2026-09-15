@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OpenBot routine sweeps every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+RandomizedDelaySec=5
+Unit=openbot-routines.service
+
+[Install]
+WantedBy=timers.target

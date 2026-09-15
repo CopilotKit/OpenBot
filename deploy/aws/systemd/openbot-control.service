@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenBot control services
+Requires=docker.service openbot-control-env.service
+After=docker.service openbot-control-env.service network-online.target
+RequiresMountsFor=/srv/openbot-control
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/openbot/deploy/aws
+ExecStartPre=/opt/openbot/deploy/aws/bin/ecr-login /etc/openbot/registry-ref
+ExecStartPre=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml pull
+ExecStartPre=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml up --detach --wait postgres
+ExecStartPre=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml --profile jobs run --rm --no-deps migrate
+ExecStart=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml up --detach --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/openbot/control.env -f compose.control.yml down
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

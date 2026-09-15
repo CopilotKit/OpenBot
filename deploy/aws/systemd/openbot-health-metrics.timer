@@ -1,0 +1,11 @@
+[Unit]
+Description=Check OpenBot service health each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+RandomizedDelaySec=10
+Unit=openbot-health-metrics.service
+
+[Install]
+WantedBy=timers.target

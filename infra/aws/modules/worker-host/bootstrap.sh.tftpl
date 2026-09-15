@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dnf install -y docker jq iptables
+systemctl enable --now docker
+
+mount_volume() {
+  local volume_id="$1"
+  local mount_path="$2"
+  local mode="$3"
+  local device="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${volume_id//-/}"
+  for _ in $$(seq 1 120); do
+    [[ -e "$${device}" ]] && break
+    sleep 2
+  done
+  [[ -e "$${device}" ]]
+  if ! blkid "$${device}" >/dev/null 2>&1; then
+    mkfs.xfs "$${device}"
+  fi
+  mkdir -p "$${mount_path}"
+  local uuid
+  uuid="$$(blkid -s UUID -o value "$${device}")"
+  grep -q "UUID=$${uuid}" /etc/fstab || echo "UUID=$${uuid} $${mount_path} xfs defaults,nofail 0 2" >> /etc/fstab
+  mount "$${mount_path}"
+  chmod "$${mode}" "$${mount_path}"
+}
+
+mount_volume "${data_volume_id}" /srv/openbot-worker 0700
+mount_volume "${codex_auth_id}" /srv/openbot-auth/codex 0700
+mount_volume "${claude_auth_id}" /srv/openbot-auth/claude 0700
+mount_volume "${grok_auth_id}" /srv/openbot-auth/grok 0700
+
+mkdir -p /srv/openbot-worker/state /srv/openbot-worker/workspaces/{codex,claude,grok}
+chown -R 10001:10001 /srv/openbot-worker /srv/openbot-auth
+chmod -R 0700 /srv/openbot-worker
+mkdir -p /etc/openbot /opt/openbot
+chmod 0700 /etc/openbot

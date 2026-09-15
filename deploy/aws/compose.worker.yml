@@ -1,0 +1,154 @@
+name: openbot-worker
+
+x-gateway: &gateway
+  image: ${GATEWAY_IMAGE:?set a digest-qualified image reference}
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 30s
+  env_file:
+    - path: ${WORKER_ENV_FILE:?set the root-only rendered worker env file}
+      required: true
+  environment: &gateway-environment
+    HOME: /home/gateway
+    REPOSITORY_URL: ${REPOSITORY_URL:?set the one allowed repository}
+    BASE_BRANCH: ${BASE_BRANCH:?set the allowed base branch}
+    QUEUE_CAPACITY: "1"
+    PROVIDER_CONCURRENCY: "1"
+    HOST_CONCURRENCY: "1"
+    HOST_SEMAPHORE_PATH: /var/lib/openbot-gateway/host-semaphore.sqlite
+    AWS_EC2_METADATA_DISABLED: "true"
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=256m
+    - /run:rw,noexec,nosuid,nodev,size=16m
+    - /home/gateway/.cache:rw,noexec,nosuid,nodev,size=256m
+  healthcheck:
+    test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:' + process.env.PORT + '/health').then(r => { if (!r.ok) process.exit(1) })\""]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 6g
+
+services:
+  codex-gateway:
+    <<: *gateway
+    # Codex uses Bubblewrap for its Linux file and network sandbox. Docker's default seccomp
+    # profile blocks the unprivileged namespace call. The outer container stays non-root,
+    # drops all capabilities, keeps no-new-privileges, and has no Docker socket.
+    security_opt: ["no-new-privileges:true", "seccomp=unconfined"]
+    environment:
+      <<: *gateway-environment
+      PROVIDER: codex
+      GATEWAY_TOKEN: ${CODEX_GATEWAY_TOKEN:?set in the rendered worker env file}
+      PORT: "4210"
+      JOB_ROOT: /workspaces
+      RUN_STORE_PATH: /var/lib/openbot-gateway/codex.sqlite
+      CODEX_HOME: /home/gateway/.codex
+      CODEX_VERSION: "0.154.0"
+      CODEX_DISABLE_AUTO_UPDATE: "true"
+    ports:
+      - target: 4210
+        published: "4210"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /srv/openbot-worker/state
+        target: /var/lib/openbot-gateway
+      - type: bind
+        source: /srv/openbot-worker/workspaces/codex
+        target: /workspaces
+      - type: bind
+        source: /srv/openbot-auth/codex
+        target: /home/gateway/.codex
+      - type: bind
+        source: ./codex-config.toml
+        target: /home/gateway/.codex/config.toml
+        read_only: true
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set in the rendered worker env file}
+        awslogs-group: ${WORKER_LOG_GROUP:?set in the rendered worker env file}
+        awslogs-stream: gateway-codex
+
+  claude-gateway:
+    <<: *gateway
+    profiles: ["claude-subscription"]
+    environment:
+      <<: *gateway-environment
+      PROVIDER: claude
+      GATEWAY_TOKEN: ${CLAUDE_GATEWAY_TOKEN:?set in the rendered worker env file}
+      PORT: "4211"
+      JOB_ROOT: /workspaces
+      RUN_STORE_PATH: /var/lib/openbot-gateway/claude.sqlite
+      CLAUDE_CONFIG_DIR: /home/gateway/.claude
+      CLAUDE_VERSION: "2.1.271"
+      CLAUDE_CODE_DISABLE_AUTO_UPDATER: "1"
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+    ports:
+      - target: 4211
+        published: "4211"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /srv/openbot-worker/state
+        target: /var/lib/openbot-gateway
+      - type: bind
+        source: /srv/openbot-worker/workspaces/claude
+        target: /workspaces
+      - type: bind
+        source: /srv/openbot-auth/claude
+        target: /home/gateway/.claude
+      - type: bind
+        source: ./claude-managed-settings.json
+        target: /etc/claude-code/managed-settings.json
+        read_only: true
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set in the rendered worker env file}
+        awslogs-group: ${WORKER_LOG_GROUP:?set in the rendered worker env file}
+        awslogs-stream: gateway-claude
+
+  grok-gateway:
+    <<: *gateway
+    # Grok's strict Linux sandbox uses an unprivileged user namespace. Docker's default seccomp
+    # profile blocks that call. The process stays non-root, has no capabilities, has no Docker
+    # socket, and keeps no-new-privileges while Grok installs its tighter file and network policy.
+    security_opt: ["no-new-privileges:true", "seccomp=unconfined"]
+    environment:
+      <<: *gateway-environment
+      PROVIDER: grok
+      GATEWAY_TOKEN: ${GROK_GATEWAY_TOKEN:?set in the rendered worker env file}
+      PORT: "4212"
+      JOB_ROOT: /workspaces
+      RUN_STORE_PATH: /var/lib/openbot-gateway/grok.sqlite
+      GROK_HOME: /home/gateway/.grok
+      GROK_VERSION: "1.0.30"
+      GROK_DISABLE_AUTOUPDATER: "1"
+    ports:
+      - target: 4212
+        published: "4212"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /srv/openbot-worker/state
+        target: /var/lib/openbot-gateway
+      - type: bind
+        source: /srv/openbot-worker/workspaces/grok
+        target: /workspaces
+      - type: bind
+        source: /srv/openbot-auth/grok
+        target: /home/gateway/.grok
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set in the rendered worker env file}
+        awslogs-group: ${WORKER_LOG_GROUP:?set in the rendered worker env file}
+        awslogs-stream: gateway-grok

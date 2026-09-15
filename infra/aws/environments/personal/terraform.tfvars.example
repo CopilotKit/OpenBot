@@ -1,0 +1,13 @@
+aws_region = "us-east-1"
+ami_id     = "ami-replace-with-one-fixed-al2023-x86-64-id"
+alert_email = "owner@example.com"
+github_repository = "Tbsheff/OpenBot"
+github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+
+# Store JSON objects in Secrets Manager. Terraform receives only their ARNs.
+control_secret_arns = [
+  "arn:aws:secretsmanager:us-east-1:123456789012:secret:openbot/control-replace",
+]
+worker_secret_arns = [
+  "arn:aws:secretsmanager:us-east-1:123456789012:secret:openbot/worker-replace",
+]

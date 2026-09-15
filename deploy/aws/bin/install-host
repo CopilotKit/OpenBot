@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 4 ]]; then
+  echo "usage: install-host ROLE SECRET_ARN AWS_REGION ECR_REGISTRY" >&2
+  exit 64
+fi
+
+role="$1"
+secret_arn="$2"
+aws_region="$3"
+registry="$4"
+
+if [[ "$role" != "control" && "$role" != "worker" ]]; then
+  echo "role must be control or worker" >&2
+  exit 65
+fi
+if [[ ! "$secret_arn" =~ ^arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret: ]]; then
+  echo "the secret ARN is invalid" >&2
+  exit 65
+fi
+if [[ ! "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]; then
+  echo "the AWS region is invalid" >&2
+  exit 65
+fi
+if [[ ! "$registry" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$ ]]; then
+  echo "the ECR registry is invalid" >&2
+  exit 65
+fi
+
+deploy_root="/opt/openbot/deploy/aws"
+install -d -m 0700 /etc/openbot
+install -m 0755 "$deploy_root/bin/ecr-login" /opt/openbot/deploy/aws/bin/ecr-login
+install -m 0755 "$deploy_root/bin/render-secret-env" /opt/openbot/deploy/aws/bin/render-secret-env
+install -m 0755 "$deploy_root/bin/worker-firewall" /opt/openbot/deploy/aws/bin/worker-firewall
+install -m 0755 "$deploy_root/bin/publish-health-metrics" /opt/openbot/deploy/aws/bin/publish-health-metrics
+
+printf 'SECRET_ARN=%s\nAWS_REGION=%s\n' "$secret_arn" "$aws_region" \
+  > "/etc/openbot/${role}-secret-ref"
+printf 'ECR_REGISTRY=%s\nAWS_REGION=%s\n' "$registry" "$aws_region" \
+  > /etc/openbot/registry-ref
+chmod 0600 "/etc/openbot/${role}-secret-ref" /etc/openbot/registry-ref
+printf 'OPENBOT_HOST_ROLE=%s\nAWS_REGION=%s\n' "$role" "$aws_region" > /etc/openbot/metrics-ref
+chmod 0600 /etc/openbot/metrics-ref
+install -m 0644 "$deploy_root/systemd/openbot-health-metrics.service" /etc/systemd/system/
+install -m 0644 "$deploy_root/systemd/openbot-health-metrics.timer" /etc/systemd/system/
+
+if [[ "$role" == "control" ]]; then
+  install -m 0644 "$deploy_root/systemd/openbot-control-env.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-control.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-routines.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-routines.timer" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-attachment-cleanup.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-attachment-cleanup.timer" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-database-backup.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-database-backup.timer" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable openbot-control-env.service openbot-control.service \
+    openbot-routines.timer openbot-attachment-cleanup.timer openbot-database-backup.timer \
+    openbot-health-metrics.timer
+  systemctl restart openbot-control-env.service
+  systemctl restart openbot-control.service
+  systemctl start openbot-routines.timer openbot-attachment-cleanup.timer \
+    openbot-database-backup.timer
+  expected_services=(caddy openbot postgres)
+else
+  install -m 0644 "$deploy_root/systemd/openbot-worker-env.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-worker-firewall.service" /etc/systemd/system/
+  install -m 0644 "$deploy_root/systemd/openbot-worker.service" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable openbot-worker-env.service openbot-worker-firewall.service openbot-worker.service
+  systemctl restart openbot-worker-env.service
+  systemctl restart openbot-worker-firewall.service
+  systemctl restart openbot-worker.service
+  expected_services=(codex-gateway grok-gateway)
+fi
+
+systemctl start openbot-health-metrics.timer
+
+for _ in $(seq 1 60); do
+  running="$(docker compose \
+    --env-file "/etc/openbot/${role}.env" \
+    -f "$deploy_root/compose.${role}.yml" \
+    ps --status running --services | sort)"
+  expected="$(printf '%s\n' "${expected_services[@]}" | sort)"
+  if [[ "$running" == "$expected" ]]; then
+    if [[ "$role" == "worker" ]]; then
+      curl --fail --silent --show-error http://127.0.0.1:4210/health >/dev/null \
+        && curl --fail --silent --show-error http://127.0.0.1:4212/health >/dev/null \
+        && exit 0
+    else
+      exit 0
+    fi
+  fi
+  sleep 2
+done
+
+docker compose \
+  --env-file "/etc/openbot/${role}.env" \
+  -f "$deploy_root/compose.${role}.yml" ps >&2
+echo "$role services did not become ready" >&2
+exit 1
