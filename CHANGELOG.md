@@ -8,6 +8,36 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A deployment can broker its Bots into a few hundred apps through Composio
+
+Composio holds a person's connections to a few hundred SaaS apps behind one account. A deployment
+that sets `COMPOSIO_API_KEY` now has that broker: each person connects their own accounts, a Bot is
+granted an app's tools the way it is granted any other, and every call is decided and recorded
+through the gateway like the rest. Unset, there is nothing to connect, nothing to grant and no
+Composio tool for a Bot to call, and the Plugins page says so under **More apps** rather than
+pretending otherwise. See [docs/plugins/composio.md](docs/plugins/composio.md).
+
+### A skill's grants are removed when it is uninstalled
+
+Uninstalling a skill deleted the skill but left its tool grants, which are keyed by its slug. A new
+skill created under the same slug then inherited them, and was offered on the Bots the old skill had
+been granted to with no grant ever made for it. Uninstalling now removes a skill's grants along with
+it, in one transaction, and an upgrade drops any grants already left orphaned this way.
+
+### Malformed requests are refused instead of coerced, and a fail-open is closed
+
+A pass across the write and query surface answers a malformed request with a 400 that names the bad
+field, rather than coercing it, failing at the store, or letting it through: the plugin server and
+tool-call endpoints, the admin people search and credential input, skill tools and grant ids, blank
+route ids on routines, host-access, agents and channels, the routing text length, routine dispatch
+and page-frame params, and the runtime env, tokens and model content the computer and supervisor
+read. The app reads these responses more defensively too, degrading rather than throwing on a shape
+it did not expect.
+
+One of these closed a hole rather than tightening an edge: a skill installed with a non-string entry
+in its `tools` list had that entry silently dropped, so the skill declared nothing and installed as a
+success. It is refused now.
+
 ### Naming a conversation asks the endpoint OPENAI_BASE_URL names, not OpenAI
 
 The job that names a conversation sent its request to api.openai.com whatever `OPENAI_BASE_URL` said,
