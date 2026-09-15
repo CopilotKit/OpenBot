@@ -882,7 +882,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         ),
     })?;
 
-    let (logs, bun, mut secrets) = {
+    let (logs, existing_bun, mut secrets) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -1087,7 +1087,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let logs = root.join(".logs");
-        let bun = which_bun().ok_or("bun was not found, so the API server cannot be started")?;
+        let bun = which_bun();
 
         (logs, bun, secrets)
     };
@@ -1095,14 +1095,17 @@ async fn start_stack_inner<R: tauri::Runtime>(
     // The source alone will not run: without this the server stops at a package it cannot resolve
     // and the app at a missing `vite`, neither of which mentions dependencies.
     report(&app, "dependencies", true, "installing");
-    {
+    let bun = {
         let target = root.clone();
-        let bun = bun.clone();
-        tauri::async_runtime::spawn_blocking(move || stack::install_dependencies(&target, &bun))
-            .await
-            .map_err(|error| format!("the install did not run: {error}"))?
-            .inspect_err(|error| report(&app, "dependencies", false, error.clone()))?;
-    }
+        tauri::async_runtime::spawn_blocking(move || {
+            let bun = install::ensure_bun(&target, existing_bun)?;
+            stack::install_dependencies(&target, &bun).map_err(Problem::plain)?;
+            Ok::<_, Problem>(bun)
+        })
+        .await
+        .map_err(|error| format!("the install did not run: {error}"))?
+        .inspect_err(|error| report(&app, "dependencies", false, problem_detail(error.clone())))?
+    };
     report(&app, "dependencies", true, "installed");
 
     // Never persisted or passed to Compose. Only the server process receives this credential;
