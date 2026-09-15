@@ -17,10 +17,23 @@ const reader = createAuditReader(database);
 // Nothing is cleaned up: the retention trigger refuses the delete, so each test takes its own target id.
 const target = () => `initiator-test-${crypto.randomUUID()}`;
 
-async function rowsFor(targetId: string, search = "") {
+/**
+ * The page a filter actually answers with, across every row in the trail.
+ *
+ * `rowsFor` narrows to one test's target afterwards, which is what makes the tests independent —
+ * but it also hides the difference between a filter that matched one row and a filter that matched
+ * the entire trail and was then cut down here. A filter that must narrow to nothing is only shown
+ * to have done so by reading the page before that cut.
+ */
+async function pageFor(search = "") {
   const { events } = await reader.list(
     auditQueryFromUrl(new URL(`https://openbot.test/audit${search}`)),
   );
+  return events;
+}
+
+async function rowsFor(targetId: string, search = "") {
+  const events = await pageFor(search);
   return events.filter((event) => event.targetId === targetId);
 }
 
@@ -172,7 +185,15 @@ describe("what started a run", () => {
     ]);
   });
 
-  test("a kind nothing writes is ignored rather than returning nothing", async () => {
+  /*
+   * The filter that fails closed.
+   *
+   * An unrecognised kind used to be dropped from the requested set, and a requested set left empty
+   * added no condition at all — so `?initiatorKind=nonsense` answered with the entire unfiltered
+   * trail, and nothing in the response said so. On a record of whose credential was spent on what,
+   * the wrong direction to fail is the one that hands back everything.
+   */
+  test("a kind nothing writes narrows to nothing, not to the whole trail", async () => {
     const TARGET = target();
     await store.insert({
       eventType: "mcp.call_succeeded",
@@ -181,9 +202,73 @@ describe("what started a run", () => {
       payload: { marker: "by-hand" },
     });
 
-    const rows = await rowsFor(TARGET, "?initiatorKind=nonsense");
+    const page = await pageFor("?initiatorKind=nonsense");
 
-    expect(rows.map((event) => event.payload.marker)).toEqual(["by-hand"]);
+    expect(page).toEqual([]);
+  });
+
+  test("an unknown kind beside a known one still answers for the known one", async () => {
+    const TARGET = target();
+    await store.insert({
+      eventType: "mcp.call_succeeded",
+      targetType: "mcp_tool",
+      targetId: TARGET,
+      payload: { marker: "by-hand" },
+    });
+    await store.insert({
+      eventType: "mcp.call_succeeded",
+      targetType: "mcp_tool",
+      targetId: TARGET,
+      initiator: { kind: "routine", id: "routine-7" },
+      payload: { marker: "by-routine" },
+    });
+
+    const rows = await rowsFor(TARGET, "?initiatorKind=routine,nonsense");
+
+    expect(rows.map((event) => event.payload.marker)).toEqual(["by-routine"]);
+  });
+
+  /*
+   * The same collapse, reached by punctuation rather than by a typo, on both comma-separated
+   * filters: a value that is nothing but separators narrows to an empty set the same way an
+   * unrecognised kind does, and an empty set must never widen back into no condition.
+   */
+  test("a filter that is only separators narrows to nothing on either column", async () => {
+    const TARGET = target();
+    await store.insert({
+      eventType: "mcp.call_succeeded",
+      targetType: "mcp_tool",
+      targetId: TARGET,
+      payload: { marker: "by-hand" },
+    });
+
+    expect(await pageFor("?initiatorKind=,")).toEqual([]);
+    expect(await pageFor("?eventType=,")).toEqual([]);
+  });
+
+  /*
+   * And the other direction, so the fix cannot overshoot: a blank value is a parameter nobody
+   * filled in, read as absent here the way a blank `?limit=` still reads as the default page.
+   */
+  test("a blank filter is an absent filter, not one that names nothing", async () => {
+    const TARGET = target();
+    await store.insert({
+      eventType: "mcp.call_succeeded",
+      targetType: "mcp_tool",
+      targetId: TARGET,
+      payload: { marker: "by-hand" },
+    });
+
+    expect(
+      (await rowsFor(TARGET, "?initiatorKind=")).map(
+        (event) => event.payload.marker,
+      ),
+    ).toEqual(["by-hand"]);
+    expect(
+      (await rowsFor(TARGET, "?eventType=%20")).map(
+        (event) => event.payload.marker,
+      ),
+    ).toEqual(["by-hand"]);
   });
 
   test("the trail stays append-only, so a row cannot be re-attributed later", async () => {

@@ -44,15 +44,23 @@ describe("which servers this deployment will talk to", () => {
     /*
      * WHAT THIS NO LONGER COVERS. ServiceNow was the only per-instance entry, and removing it took
      * the anchored-pattern assertions with it — that a prefix, a suffix and a subdomain are each
-     * refused. `PATTERNS` is compiled from the catalogue by key, so a synthetic entry cannot reach a
-     * pattern and there is no way left to exercise the matching itself through the public API.
+     * refused. `PATTERNS` is compiled from the catalogue by KEY, so an entry this build never
+     * compiled a pattern for reaches no pattern, and there is no way left to exercise the matching
+     * itself through the public API.
      *
      * What survives is the fail-closed half, which is worth keeping on its own: an entry claiming to
      * be per-instance that this build has no pattern for is refused rather than admitted. Whoever
      * adds the next per-instance vendor should restore the anchoring cases with it.
+     *
+     * THE KEY IS DELIBERATELY ONE NO ENTRY HOLDS, and asserted to be. This case used to borrow
+     * `google-drive`, which passed only because no catalogue entry declares a `hostPattern` today:
+     * `PATTERNS` is keyed, not identity-checked, so a synthetic entry that reuses a real key reaches
+     * whatever pattern that key compiled. Giving Drive a pattern made the old version admit
+     * `https://acme.service-now.com`. With an unheld key the lookup misses for the reason the test
+     * names, whatever the catalogue later declares.
      */
     const perInstance = {
-      key: "google-drive",
+      key: "no-entry-holds-this-key",
       title: "Per-instance vendor",
       vendor: "Example",
       summary: "",
@@ -65,8 +73,9 @@ describe("which servers this deployment will talk to", () => {
       docsUrl: "",
     } as const;
 
-    // `PATTERNS` is compiled from the catalogue by key, so a synthetic entry reaches no pattern and
-    // is refused outright. That is itself the fail-closed property: no pattern means no.
+    expect(catalogueEntry(perInstance.key)).toBeNull();
+    // No compiled pattern for this key, so the entry's own `hostPattern` is never consulted and the
+    // host is refused outright. That is itself the fail-closed property: no pattern means no.
     expect(hostAdmissible(perInstance, "https://acme.service-now.com")).toBe(
       false,
     );
@@ -542,4 +551,48 @@ describe("which credential a curated server is given", () => {
       serverCredentialKind({ ...sharedToken, auth: { kind: "none" } }),
     ).toBeNull();
   });
+});
+
+test("a curated entry keeps classifying from its write list when nothing was recorded", () => {
+  const notion = catalogueEntry("notion");
+  expect(notion).not.toBeNull();
+  if (!notion) return;
+
+  // The behaviour that shipped before the column existed, unchanged for every existing row.
+  expect(classifyTool(notion, "notion-fetch", true)).toBe("read");
+  expect(classifyTool(notion, "notion-update-page", true)).toBe("write");
+});
+
+test("a recorded write overrides a curated entry that omits the action", () => {
+  const notion = catalogueEntry("notion");
+  // Asserted rather than only guarded. The early return below reads as a pass, so a renamed or
+  // dropped key would retire this case silently instead of failing.
+  expect(notion).not.toBeNull();
+  if (!notion) return;
+
+  // The write list is known-incomplete. A vendor saying an action writes settles it, and the list
+  // being out of date stops mattering.
+  expect(classifyTool(notion, "notion-fetch", true, "write")).toBe("write");
+});
+
+test("a recorded read cannot take an action off a curated entry's write list", () => {
+  const notion = catalogueEntry("notion");
+  expect(notion).not.toBeNull();
+  if (!notion) return;
+
+  /*
+   * The mirror image of the case above, and the only direction that is refused. A recorded effect
+   * may NARROW what a Bot may do — the `write` case above — and may never widen it: `effect` is
+   * vendor-supplied text in an unconstrained column, `writeTools` was reviewed by a person, and a
+   * value in the column must not buy an action less scrutiny than review already gave it. The
+   * per-value cases live in composio-classify.test.ts; this pins the property beside the write list
+   * it protects, so dropping a name from that list fails here too.
+   */
+  expect(notion.writeTools).toContain("notion-update-page");
+  expect(classifyTool(notion, "notion-update-page", true, "read")).toBe(
+    "write",
+  );
+  // And the empty string is a recorded value rather than a silence, so it does not fall through to
+  // the write list and read as a read for an action the list omits.
+  expect(classifyTool(notion, "notion-fetch", true, "")).toBe("write");
 });

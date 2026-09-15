@@ -31,3 +31,22 @@ app/.tanstack/
 # it is what makes that fetch reproducible, and ignoring it meant every build resolved the dependency
 # afresh, so CI and a customer install could take different subchart versions with no diff to show it.
 charts/*/charts/
+
+# Python build and tool output. Eleven of the agent packages here are Python and this file had no
+# pattern for any of it, so a `git add -A` after running one of them swept a compiled `.pyc` into a
+# commit — which is how this section came to be written. The interpreter writes `__pycache__`
+# beside the source it imports, so it appears wherever a package has been RUN rather than only
+# where one is built, and that is every one of them on a machine that has tried them.
+#
+# The environments are here for the same reason and are the more expensive mistake: `.venv` is
+# hundreds of megabytes of platform-specific binaries that would be useless to anybody who cloned
+# them. `uv` makes `.venv` and the older tooling makes `venv`, and both spellings are in use across
+# these packages.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

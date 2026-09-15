@@ -108,16 +108,25 @@ test("granting one on its own still carries its refetch", async () => {
     },
     mutationContext(queryClient),
   );
-  await options.onSuccess?.(
-    undefined as never,
+  /*
+   * ON SETTLE RATHER THAN ON SUCCESS, which is where this refetch lives now and why this call
+   * changed. `POST /api/plugins/grants` upserts the grant and then files the trail row, with no
+   * catch over either, so a refusal from it is not evidence that the grant did not land — see
+   * `invalidatePlugins`, which makes the argument for the whole surface. `onSettled` is the one slot
+   * that runs on both outcomes; `plugin-mutation-refresh.test.ts` is where the refused half is
+   * pinned, for this write and the thirteen that share its shape.
+   */
+  await options.onSettled?.(
+    undefined,
+    null,
     {
       agentId: "agent-1",
       granted: true,
       kind: "mcp",
       ref: "notion/search",
     },
-    undefined as never,
-    undefined as never,
+    undefined,
+    mutationContext(queryClient),
   );
 
   expect(seen).toHaveLength(1);

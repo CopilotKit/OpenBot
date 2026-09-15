@@ -15,6 +15,16 @@ name and value. When that limit fell between the two halves of an emoji, the Bot
 ending on half a character, which reads as U+FFFD: a broken character that is not on the page, often
 at the end of a message the Bot had just typed into a text box. The cut now stops one code unit
 short in that case, the same rule tool results and relayed answers already follow.
+### A Bot's shell can no longer read the deployment's keys from a neighbouring process
+
+In the all-in-one image the API and the browser ran under one account, and a Bot's shell — a child
+of the browser — could read a same-account process's environment through `/proc`, whatever its own
+environment had been scrubbed to. One allowed `computer_run_command` returned `KEY_ENCRYPTION_KEY`,
+the session-signing secret and the database password, none of it on the audit trail. The API and its
+migrations now run as their own account, so the kernel refuses that read; the browser is handed only
+the variables it needs, so its own environment carries none of those keys; and the files under
+`/run/s6/container_environment` are closed to the shell. A deployment that runs each Bot in its own
+sandboxed computer, as the documentation asks for, was never exposed to this.
 
 ## 0.0.11
 
