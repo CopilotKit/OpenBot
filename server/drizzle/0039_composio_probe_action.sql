@@ -1,0 +1,1 @@
+ALTER TABLE "composio_connections" ADD COLUMN "probe_action" text;

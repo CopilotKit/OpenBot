@@ -33,15 +33,25 @@ export function userContent(content: unknown): string | UserContentPart[] {
       return { type: "text", text: item.text };
     }
     const source = item.source;
+    // The mime type reaches a `data:` URL sent to model providers. Allowlisted to images and
+    // base64-shape-checked, so `text/html` (or whitespace/quotes/CRLF smuggling) and empty values
+    // degrade to a named part instead of a provider payload.
     if (
       item.type === "image" &&
       source?.type === "data" &&
       typeof source.value === "string" &&
-      typeof source.mimeType === "string"
+      source.value.trim() &&
+      /^[A-Za-z0-9+/]*={0,2}$/.test(source.value.replace(/\s/g, "")) &&
+      typeof source.mimeType === "string" &&
+      ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+        source.mimeType.trim().toLowerCase(),
+      )
     ) {
       return {
         type: "image_url",
-        image_url: { url: `data:${source.mimeType};base64,${source.value}` },
+        image_url: {
+          url: `data:${source.mimeType.trim().toLowerCase()};base64,${source.value}`,
+        },
       };
     }
     const name =

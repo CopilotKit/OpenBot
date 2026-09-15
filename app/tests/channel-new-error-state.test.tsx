@@ -122,11 +122,28 @@ function renderChannelNew(
   );
 }
 
+/**
+ * `hidden: true` BECAUSE THE OPEN PICKER MAKES THE PAGE INERT, not because the composer is missing.
+ *
+ * `/channel/new` opens the recipient combobox by default whenever no recipient is settled, and Base
+ * UI marks everything outside its popup `data-base-ui-inert` while it is open — so the composer is
+ * removed from the accessibility tree and the default role query cannot see it at all. That is the
+ * real browser behaviour, and it only shows up in a test once `app/tests/preload.ts` has evaluated
+ * Base UI against a DOM: without it the isomorphic layout effect is a no-op, the popup never mounts,
+ * nothing is inert, and this query found the composer by accident.
+ *
+ * The assertion itself is unchanged and is still the property under test: `aria-disabled` says
+ * whether the composer would take a message. Being behind an open picker is a second reason it
+ * cannot be typed into, not a substitute for the first.
+ */
 async function expectMessageComposerDisabled(
   view: ReturnType<typeof render>,
   disabled: boolean,
 ) {
-  const editor = await view.findByRole("textbox", { name: "Message" });
+  const editor = await view.findByRole("textbox", {
+    hidden: true,
+    name: "Message",
+  });
   await waitFor(() =>
     expect(editor.getAttribute("aria-disabled") === "true").toBe(disabled),
   );

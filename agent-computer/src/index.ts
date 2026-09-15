@@ -204,7 +204,9 @@ function botIdOf(request: Request, fallback?: string | null): string {
  * would only add a syscall to every call. Everything about why confinement is harder than it looks
  * lives in workspace.ts.
  */
-const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
+const workspace = createWorkspace(
+  process.env.WORKSPACE_DIR?.trim() || "/workspace",
+);
 
 /**
  * Who has the wheel, as a state machine in its own module.
@@ -232,12 +234,12 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * meant to shrink.
  */
 const profiles = createProfiles(
-  process.env.PROFILES_DIR ?? "/profiles",
+  process.env.PROFILES_DIR?.trim() || "/profiles",
   (botId) => sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED),
 );
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
-const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
+const shell = createShell(process.env.WORKSPACE_DIR?.trim() || "/workspace");
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -515,6 +517,9 @@ serve<StreamData>({
         }
         message = validated.message;
       } catch {
+        // The validated-but-wrong branch above sends an error frame; unparseable input used to
+        // be dropped silently, so a buggy surface saw input "ignored" with no diagnostic.
+        ws.send(JSON.stringify({ type: "error", error: "Input is not JSON." }));
         return;
       }
       // A person's input is accepted only while they hold the wheel. The socket being open is not permission:

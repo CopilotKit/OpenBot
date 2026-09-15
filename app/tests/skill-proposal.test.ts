@@ -224,6 +224,7 @@ describe("the tool refs a skill may declare", () => {
             inputSchema: {},
             ref: "notion/notion-create",
             effect: "write",
+            destructive: false,
             grantedTo: [],
           },
         ],

@@ -7,6 +7,6 @@
 # preload never loads from inside `server`, and the suite silently loses whichever test files lost
 # the race described in scripts/test-preload.ts.
 #
-# Both files name the same script, so its contents cannot drift. What could drift is this list, and
+# Both files name the same scripts, so their contents cannot drift. What could drift is this list, and
 # tests/bunfig-preload.test.ts fails if the two stop agreeing.
-preload = ["./scripts/test-preload.ts"]
+preload = ["./scripts/test-preload.ts", "../app/tests/preload.ts"]
