@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A skill written under an uninstalled skill's name no longer inherits its Bots
+
+Uninstalling a skill removed the skill and kept every grant that put it on a Bot. A skill's name is
+shared across the deployment and a free name is anybody's, so the next person to write a skill under
+that name had it offered on every Bot the old one was on, including Bots they do not own and Bots the
+deployment shares with everybody, without anybody granting it. Uninstalling now removes the skill's
+grants in the same transaction, and migration `0040_drop_orphaned_skill_grants` deletes the grants an
+earlier uninstall already left behind. A grant naming a skill that does not exist was never listed or
+offered anywhere, so nothing a person can see changes.
+
 ### Naming a conversation asks the endpoint OPENAI_BASE_URL names, not OpenAI
 
 The job that names a conversation sent its request to api.openai.com whatever `OPENAI_BASE_URL` said,

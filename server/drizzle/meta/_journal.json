@@ -281,6 +281,13 @@
       "when": 1789389088622,
       "tag": "0039_composio_probe_action",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789489178047,
+      "tag": "0040_drop_orphaned_skill_grants",
+      "breakpoints": true
     }
   ]
 }
