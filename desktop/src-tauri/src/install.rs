@@ -363,7 +363,15 @@ fn installer_stopped(verb: &str, msi: &Path, failure: MsiexecFailure, log: &Path
             ),
         ),
         MsiexecFailure::Exit(code) => Problem::with(
-            "Installing the software OpenBot needs did not finish. Try again.",
+            if code == 1625 {
+                // ERROR_INSTALL_PACKAGE_REJECTED requires an administrator to resolve policy.
+                // https://learn.microsoft.com/en-us/windows/win32/msi/error-codes
+                "Windows policy blocks installing Podman, the container engine OpenBot needs. \
+                 Ask an administrator to allow the installation or install Podman for your \
+                 account, then try again."
+            } else {
+                "Installing the software OpenBot needs did not finish. Try again."
+            },
             format!(
                 "msiexec {verb} {} stopped with exit code {code}; its log is at {}",
                 msi.display(),
@@ -660,6 +668,38 @@ mod tests {
             .expect("developer detail keeps exit evidence");
         assert!(detail.contains("msiexec /i"), "{detail}");
         assert!(detail.contains("exit code 1619"), "{detail}");
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
+    }
+
+    #[test]
+    fn windows_msi_policy_rejection_needs_administrator_action_before_retry() {
+        let (msi, log) = synthetic_msi_paths("msi-policy-rejected");
+        let mut calls = Vec::new();
+        let result = install_podman_msi(&msi, &log, |verb, _msi, _log| {
+            calls.push(verb[0].to_string());
+            Err(MsiexecFailure::Exit(1625))
+        });
+
+        let problem = result.expect_err("policy rejection must be reported");
+        assert_eq!(
+            calls,
+            ["/i"],
+            "policy rejection must not trigger another attempt"
+        );
+        assert_eq!(
+            problem.said,
+            "Windows policy blocks installing Podman, the container engine \
+            OpenBot needs. Ask an administrator to allow the installation or install Podman for \
+            your account, then try again."
+        );
+        assert_eq!(
+            problem.detail,
+            Some(format!(
+                "msiexec /i {} stopped with exit code 1625; its log is at {}",
+                msi.display(),
+                log.display(),
+            )),
+        );
         let _ = std::fs::remove_dir_all(msi.parent().unwrap());
     }
 
