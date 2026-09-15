@@ -36,10 +36,12 @@ import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
 import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/admin/plugins/index'
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
+import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
+import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
 
 const AuthedRoute = AuthedRouteImport.update({
@@ -179,6 +181,12 @@ const AuthedAdminPluginsKeyRoute = AuthedAdminPluginsKeyRouteImport.update({
   path: '/plugins/$key',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminPluginsComposioRoute =
+  AuthedAdminPluginsComposioRouteImport.update({
+    id: '/plugins/composio',
+    path: '/plugins/composio',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 const AuthedSettingsComponentsGalleryIndexRoute =
   AuthedSettingsComponentsGalleryIndexRouteImport.update({
     id: '/components-gallery/',
@@ -202,6 +210,12 @@ const AuthedSettingsConnectedAccountsKeyRoute =
     id: '/connected-accounts/$key',
     path: '/connected-accounts/$key',
     getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedAdminPluginsKeyBotsAgentIdRoute =
+  AuthedAdminPluginsKeyBotsAgentIdRouteImport.update({
+    id: '/plugins/$key_/bots/$agentId',
+    path: '/plugins/$key/bots/$agentId',
+    getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
 const AuthedAdminPluginsKeyToolsToolRoute =
   AuthedAdminPluginsKeyToolsToolRouteImport.update({
@@ -233,6 +247,7 @@ export interface FileRoutesByFullPath {
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
@@ -240,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesByTo {
@@ -263,6 +279,7 @@ export interface FileRoutesByTo {
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
@@ -270,6 +287,7 @@ export interface FileRoutesByTo {
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesById {
@@ -298,6 +316,7 @@ export interface FileRoutesById {
   '/_authed/_app/channel/new': typeof AuthedAppChannelNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
+  '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
@@ -305,6 +324,7 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/_authed/admin/plugins/$key_/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRouteTypes {
@@ -332,6 +352,7 @@ export interface FileRouteTypes {
     | '/channel/new'
     | '/admin/components/$name'
     | '/admin/plugins/$key'
+    | '/admin/plugins/composio'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/agents/'
@@ -339,6 +360,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/'
     | '/settings/components-gallery/'
     | '/settings/connected-accounts/'
+    | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -362,6 +384,7 @@ export interface FileRouteTypes {
     | '/channel/new'
     | '/admin/components/$name'
     | '/admin/plugins/$key'
+    | '/admin/plugins/composio'
     | '/settings/components-gallery/$name'
     | '/settings/connected-accounts/$key'
     | '/agents'
@@ -369,6 +392,7 @@ export interface FileRouteTypes {
     | '/admin/plugins'
     | '/settings/components-gallery'
     | '/settings/connected-accounts'
+    | '/admin/plugins/$key/bots/$agentId'
     | '/admin/plugins/$key/tools/$tool'
   id:
     | '__root__'
@@ -396,6 +420,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/channel/new'
     | '/_authed/admin/components/$name'
     | '/_authed/admin/plugins/$key'
+    | '/_authed/admin/plugins/composio'
     | '/_authed/settings/components-gallery/$name'
     | '/_authed/settings/connected-accounts/$key'
     | '/_authed/_app/agents/'
@@ -403,6 +428,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
     | '/_authed/settings/connected-accounts/'
+    | '/_authed/admin/plugins/$key_/bots/$agentId'
     | '/_authed/admin/plugins/$key_/tools/$tool'
   fileRoutesById: FileRoutesById
 }
@@ -602,6 +628,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsKeyRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/plugins/composio': {
+      id: '/_authed/admin/plugins/composio'
+      path: '/plugins/composio'
+      fullPath: '/admin/plugins/composio'
+      preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/components-gallery/': {
       id: '/_authed/settings/components-gallery/'
       path: '/components-gallery'
@@ -630,6 +663,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsConnectedAccountsKeyRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/admin/plugins/$key_/bots/$agentId': {
+      id: '/_authed/admin/plugins/$key_/bots/$agentId'
+      path: '/plugins/$key/bots/$agentId'
+      fullPath: '/admin/plugins/$key/bots/$agentId'
+      preLoaderRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/plugins/$key_/tools/$tool': {
       id: '/_authed/admin/plugins/$key_/tools/$tool'
       path: '/plugins/$key/tools/$tool'
@@ -652,8 +692,10 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
   AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
+  AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
+  AuthedAdminPluginsKeyBotsAgentIdRoute: typeof AuthedAdminPluginsKeyBotsAgentIdRoute
   AuthedAdminPluginsKeyToolsToolRoute: typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 
@@ -669,8 +711,10 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
   AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
+  AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
+  AuthedAdminPluginsKeyBotsAgentIdRoute: AuthedAdminPluginsKeyBotsAgentIdRoute,
   AuthedAdminPluginsKeyToolsToolRoute: AuthedAdminPluginsKeyToolsToolRoute,
 }
 

@@ -1,6 +1,14 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
+/**
+ * Re-exported, not re-declared.
+ *
+ * The field list is asked for by a POST, so it lives beside its only producer in `./mutations` —
+ * a second copy here would be free to drift from the shape that write actually returns.
+ */
+export type { BrokerField } from "./mutations";
+
 /** A tool one server offers, as the Plugins page sees it. */
 export type PluginTool = {
   serverId: string;
@@ -11,6 +19,15 @@ export type PluginTool = {
   ref: string;
   /** Whether it changes something. Anything not positively known to be a read is a write. */
   effect: "read" | "write";
+  /**
+   * Whether the vendor warns that it destroys something.
+   *
+   * Beside {@link effect} rather than folded into it: the rule engine judges reads and writes and
+   * gains nothing from a third value, while a person deciding whether to switch an action on is
+   * asking a different question. Recorded from the vendor's own labels, so false is an absence of a
+   * claim rather than a claim of safety.
+   */
+  destructive: boolean;
   grantedTo: string[];
 };
 
@@ -47,6 +64,19 @@ export type PluginServer = {
    * administrator to paste one in.
    */
   dynamicClient: boolean;
+  /**
+   * How this server's authorization config was CREATED, for the brokered rows that have one.
+   *
+   * What was written down when somebody enabled the app, not what the catalogue publishes today.
+   * The catalogue is the vendor's, and an app it starts advertising under a different scheme has
+   * not moved the config this deployment already created — so a screen deciding what a live
+   * connection does reads this and never a fresh listing. The vocabulary is the vendor's own scheme
+   * literals (`OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH`, and the rest), so it is a string rather
+   * than a union this page would have to keep level with Composio's.
+   *
+   * Null is not an older brokered row. It is a row that is not brokered at all.
+   */
+  authScheme: string | null;
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];
@@ -93,6 +123,18 @@ export type CatalogueItem = {
   perInstance: boolean;
 };
 
+/** One app in Composio's directory, as the picker shows it. */
+export type ComposioApp = {
+  slug: string;
+  name: string;
+  description: string;
+  logo: string | null;
+  categories: string[];
+  /** The size of the decision, shown before enabling. */
+  actionCount: number;
+  enabled: boolean;
+};
+
 export type PluginsPage = {
   catalogue: CatalogueItem[];
   servers: PluginServer[];
@@ -114,6 +156,14 @@ export type PluginsPage = {
    * consent flow at all.
    */
   redirectUri: string | null;
+  /**
+   * Whether this deployment has Composio configured.
+   *
+   * A boolean about configuration and never the key: the page needs to know whether the directory
+   * can be browsed at all, and that question is answerable without the API key ever leaving the
+   * server.
+   */
+  composioConfigured: boolean;
 };
 
 /** What one Bot holds, which is all the runtime needs to offer it. */
@@ -137,14 +187,86 @@ export const pluginKeys = {
   page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
+  composioApps: (query: string) =>
+    ["plugins", "composio", "apps", query] as const,
 };
 
-/** One account this person has connected, from their own point of view. */
+/**
+ * One account this person has connected, from their own point of view.
+ *
+ * DELIBERATELY NON-UNIFORM, because `/api/plugins/connections` concatenates two reads: connections
+ * held in this deployment's own vault, and brokered ones Composio keeps on our behalf. The fields a
+ * settings row draws from — the server id, the scope, the date — line up across both, which is why
+ * one type covers both. The pair below does not, so it is optional rather than required: making it
+ * required would be a lie the compiler then enforced on every held row.
+ */
 export type PluginConnection = {
   serverId: string;
-  /** What the vendor actually granted, which is not always what was asked for. */
+  /** What the vendor actually granted, which is not always what was asked for. Empty for brokered. */
   scope: string;
   connectedAt: string;
+  /**
+   * Whether a real call was last made with this credential, present only on a BROKERED row.
+   *
+   * Only a brokered row has anything to re-check: this deployment holds no secret for it, only a
+   * note that Composio said yes, and that note can drift when somebody ends the connection in
+   * Composio's own dashboard. A held connection has no equivalent question, so its rows carry
+   * neither field, and the absence of the pair is what tells the two READS apart — nothing more.
+   *
+   * It is NOT how a reader learns how an app connects. That comes from {@link PluginServer.authScheme}
+   * on the server, and a page deriving it from a connection row instead would be a second answer to
+   * a question already carried.
+   */
+  verified?: boolean;
+  /**
+   * When {@link PluginConnection.verified} was last earned, present only on a brokered row.
+   *
+   * Null is reachable and means never checked, which is why it stays null rather than collapsing
+   * the way `connectedAt` does. For the rows an older migration backfilled it is the moment of
+   * consent rather than of a probe, so it is not read as "this connection answered then".
+   */
+  verifiedAt?: string | null;
+  /**
+   * Which action the last check of this key actually SPENT, present only on a brokered row.
+   *
+   * A RECORD READ OFF THE ROW, not a reading of what the app publishes now — which is why it
+   * survives a reload where the answer to a connect or a re-check cannot, and why nothing the
+   * catalogue does afterwards can move it. Read together with {@link PluginConnection.verified} it
+   * separates the three situations that share the one word `false`: no probe means nothing was
+   * tried, because at the time of the check the app published nothing safe to spend a key on; a
+   * probe with `verified` means the check ran and passed; and a probe WITHOUT it means the check
+   * ran and the vendor refused the key, over an account that is still standing.
+   *
+   * A PAST TENSE, AND ONLY THAT. It is what the SENTENCE beneath the row is drawn from. What it
+   * must never be asked is whether the key could be checked again — see
+   * {@link PluginConnection.checkable}, which is the present-tense answer and a different field
+   * because it is a different question.
+   *
+   * Optional for the same reason the pair above is: that endpoint concatenates two reads, and only
+   * the brokered one carries any of this. Undefined is the absence of the field and not a fourth
+   * state.
+   */
+  probe?: string | null;
+  /**
+   * Whether the app has anything to check this key against TODAY, present only on a brokered row.
+   *
+   * ASKED OF THE APP AND NOT OF THE CONNECTION, out of the same chooser a real check would use: has
+   * this app published an action safe to spend somebody's key on — a vendor-labelled read, not
+   * destructive, needing no arguments, recorded at a version that can be called. It is what the
+   * Re-check button is drawn from, and nothing else here is.
+   *
+   * SEPARATE FROM {@link PluginConnection.probe} BECAUSE COLLAPSING THEM DEADLOCKS THE PAGE. While
+   * the button read the record, a key connected to an app with nothing to try recorded null, for
+   * good — and the button stayed withheld however much the app published later, though pressing it
+   * is the only thing that could ever put an action in the record. The past and the present are two
+   * questions; the row asks them separately and answers them separately.
+   *
+   * Optional for the same reason as the fields above, and false and absent mean the same thing to
+   * the only reader there is: nothing to press. That is why a screen may flatten this where it
+   * passes `probe` through unflattened — a missing verdict and a null verdict are different
+   * sentences, while a missing gate and a closed gate are the same gate.
+   */
+  checkable?: boolean;
 };
 
 export type PluginConnections = {
@@ -177,6 +299,25 @@ export function pluginsPageQueryOptions() {
       const response = await client("/api/plugins", {
         fallback: "Plugins could not be loaded.",
       });
+      return response.json();
+    },
+  });
+}
+
+/**
+ * Composio's app directory, narrowed by a search term.
+ *
+ * The term goes to our own endpoint because the vendor's client drops a search parameter and
+ * answers with an unfiltered page, so filtering has to happen somewhere that admits to doing it.
+ */
+export function composioAppsQueryOptions(query: string) {
+  return queryOptions({
+    queryKey: pluginKeys.composioApps(query),
+    queryFn: async (): Promise<{ apps: ComposioApp[] }> => {
+      const response = await client(
+        `/api/plugins/composio/apps?q=${encodeURIComponent(query)}`,
+        { fallback: "Composio's app directory could not be read." },
+      );
       return response.json();
     },
   });
