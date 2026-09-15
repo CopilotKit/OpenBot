@@ -4335,7 +4335,14 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     async uninstallSkill(slug: string, by: string): Promise<void> {
-      await database.delete(skills).where(eq(skills.slug, slug));
+      await database.transaction(async (transaction) => {
+        await transaction
+          .delete(pluginGrants)
+          .where(
+            and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.ref, slug)),
+          );
+        await transaction.delete(skills).where(eq(skills.slug, slug));
+      });
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "skill",
