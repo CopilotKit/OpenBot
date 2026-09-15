@@ -3814,6 +3814,38 @@ test("a check that does not come back clean leaves the account standing, recorde
     action: probeAction,
     verified: false,
   });
+  /*
+   * AND THE CONNECT IS ON THE TRAIL TOO, WHICH IS THE ROW THIS PATH USED TO LOSE.
+   *
+   * CRITERION. A `complained` check files `mcp.account_connected` for the account it left standing,
+   * under the same id as everything else about this person's access to this app, and says it was a
+   * first connection rather than a replacement.
+   *
+   * REASON. Every way out of the branch above is a throw, and this row was written below it — so a
+   * rate limit or one refused scope left a live account at Composio, a `composio_connections` row
+   * and an `mcp.connection_verified` row saying the check did not come back clean, with nothing
+   * anywhere saying the account had ever been connected. The `mcp.account_disconnected` row filed
+   * when this person later presses Disconnect then had no counterpart to pair against, and the
+   * pairing is the whole of what the trail is asked for.
+   *
+   * ASSERTED AS A PAIR UNDER ONE ID rather than as a row that exists, because the defect this
+   * closes is a HALF of the story being present: a check that happened is already recorded above,
+   * and what was missing is the connect beside it.
+   */
+  const connected = recordedOfType("mcp.account_connected");
+  expect(connected).toHaveLength(1);
+  expect(connected[0].targetId).toBe(probedToolkit);
+  expect(connected[0].payload).toMatchObject({
+    actor: askerId,
+    server: probedToolkit,
+    scope: "",
+    reconnected: false,
+    // The names of what was filled in, never the values — the promise this path keeps on the
+    // failing outcome exactly as on the working one.
+    fields: ["generic_api_key"],
+  });
+  expect(JSON.stringify(connected)).not.toContain(typedKey);
+
   // And the key is in none of it, on the path that fails as much as on the one that works.
   expect(JSON.stringify(checked)).not.toContain(typedKey);
 });

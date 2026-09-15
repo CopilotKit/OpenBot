@@ -133,6 +133,39 @@ export function connectionKindFor(
   return auth ?? "deployment-bearer";
 }
 
+/**
+ * A row whose whole content is connection state, standing in for it when it could not be read.
+ *
+ * DRAWN BY BOTH ROWS THAT READ `/api/plugins/connections` — the brokered account and the
+ * `user-oauth` one — because the defaulting they suffer from is the same and so is the honest
+ * answer to it. Neither is drawn on a deployment-token server, which has no connection state to
+ * fail on.
+ *
+ * IN THE ROW'S OWN PLACE, so the card keeps its shape and the sentence sits where the thing it is
+ * about would have been. What it must not say is anything about whether an account exists: the
+ * whole defect is that a failed read defaulted to "not connected", and a second sentence guessing
+ * in the other direction would be the same mistake with better manners.
+ *
+ * `role="alert"` rather than plain text, because this appears in place of a row that carried
+ * buttons — somebody reading with a screen reader has to be told the controls are gone and why,
+ * not left to notice their absence.
+ */
+function ConnectionStateUnreadable() {
+  return (
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>Your account</ItemTitle>
+        <ItemDescription role="alert">
+          Whether you have connected an account here could not be loaded, so
+          nothing about it is shown rather than something that may be wrong.
+          Reload the page, and check this deployment&rsquo;s logs if it
+          persists.
+        </ItemDescription>
+      </ItemContent>
+    </Item>
+  );
+}
+
 function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
   const queryClient = useQueryClient();
@@ -156,6 +189,26 @@ function RouteComponent() {
     (row) => row.serverId === key,
   );
   const youConnected = connection !== undefined;
+  /*
+   * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
+   *
+   * Nothing read `connections.error` at all, so a 500 from `/api/plugins/connections` degraded an
+   * account whose last check did not come back clean to "not connected" — dropping the sentence and
+   * withdrawing both Re-check and Disconnect — with no error text anywhere on the page.
+   *
+   * WITHHELD PER ROW RATHER THAN PER PAGE, which is the difference between this screen and the
+   * personal one. There, the page's entire content IS connection state, so drawing nothing is the
+   * honest whole answer. Here the page also carries the tools, the grants, Refresh and Remove, none
+   * of which touch this read — and a deployment-token server has no connection state on it at all.
+   * Collapsing the page on this error took an administrator's Remove button away at the exact
+   * moment something was failing, for every plugin in the deployment rather than only the two kinds
+   * that read this.
+   *
+   * BOTH KINDS THAT READ IT, not just the brokered one: the `user-oauth` "Your account" row derives
+   * its whole sentence and its Connect button from {@link youConnected}, which is the same defaulted
+   * `false` the brokered row was getting.
+   */
+  const connectionsUnreadable = connections.error !== null;
   const nameFor = useBotNames();
 
   const [error, setError] = useState<string | null>(null);
@@ -347,28 +400,6 @@ function RouteComponent() {
    */
   if (plugins.isPending || connections.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
-  }
-  /*
-   * AND A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED. Nothing read
-   * `connections.error`, so a 500 from `/api/plugins/connections` degraded an account whose last
-   * check did not come back clean to "not connected" — dropping the sentence and withdrawing both
-   * Re-check and Disconnect — with no error text anywhere on the page. The row is not drawn at all
-   * rather than drawn wrong: its entire content is connection state.
-   */
-  if (connections.error) {
-    return (
-      <PageShell
-        backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
-        title={title}
-      >
-        <p className="mt-12 text-destructive text-sm" role="alert">
-          Whether accounts have been connected to this plugin could not be
-          loaded, so nothing about them is shown here rather than something that
-          may be wrong. Reload the page, and check this deployment&rsquo;s logs
-          if it persists.
-        </p>
-      </PageShell>
-    );
   }
   if (!(entry || server)) {
     return (
@@ -626,21 +657,25 @@ function RouteComponent() {
             {auth === "brokered" ? (
               <>
                 <Separator />
-                <BrokeredAccountRow
-                  account={brokeredAccount}
-                  /* Said beside the button rather than after it: disconnecting ends the account at
-                     Composio, so what it undoes is not the row here but the grant on this person's
-                     mailbox, and connecting again is a fresh consent. */
-                  connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. Disconnecting ends the account at Composio, not just here.`}
-                  disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
-                  /* The half of the line above that is true whichever way this app connects. An
-                     app whose key somebody types gets a different first sentence from the row —
-                     pressing Connect opens a form rather than leaving for a consent screen — and
-                     an administrator still has to be told they are not the step that finishes the
-                     connector. */
-                  disconnectedReassurance={reassurance}
-                  title={title}
-                />
+                {connectionsUnreadable ? (
+                  <ConnectionStateUnreadable />
+                ) : (
+                  <BrokeredAccountRow
+                    account={brokeredAccount}
+                    /* Said beside the button rather than after it: disconnecting ends the account
+                       at Composio, so what it undoes is not the row here but the grant on this
+                       person's mailbox, and connecting again is a fresh consent. */
+                    connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. Disconnecting ends the account at Composio, not just here.`}
+                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
+                    /* The half of the line above that is true whichever way this app connects.
+                       An app whose key somebody types gets a different first sentence from the
+                       row — pressing Connect opens a form rather than leaving for a consent
+                       screen — and an administrator still has to be told they are not the step
+                       that finishes the connector. */
+                    disconnectedReassurance={reassurance}
+                    title={title}
+                  />
+                )}
               </>
             ) : null}
 
@@ -648,45 +683,49 @@ function RouteComponent() {
             (server?.hasCredential || server?.dynamicClient) ? (
               <>
                 <Separator />
-                <Item size="sm">
-                  <ItemContent>
-                    <ItemTitle>Your account</ItemTitle>
-                    <ItemDescription>
-                      {youConnected
-                        ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
-                        : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    {youConnected ? (
-                      <>
-                        {/* Decorative: the word beside it already says which. */}
-                        <span
-                          aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
-                        />
-                        <span className="text-muted-foreground text-xs">
-                          Connected
-                        </span>
-                      </>
-                    ) : (
-                      /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
-                      <Button
-                        disabled={connectSelf.isPending}
-                        onClick={() => {
-                          setError(null);
-                          connectSelf.mutate(key);
-                        }}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Connect
-                        <IconArrowUpRight />
-                      </Button>
-                    )}
-                  </ItemActions>
-                </Item>
+                {connectionsUnreadable ? (
+                  <ConnectionStateUnreadable />
+                ) : (
+                  <Item size="sm">
+                    <ItemContent>
+                      <ItemTitle>Your account</ItemTitle>
+                      <ItemDescription>
+                        {youConnected
+                          ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
+                          : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      {youConnected ? (
+                        <>
+                          {/* Decorative: the word beside it already says which. */}
+                          <span
+                            aria-hidden="true"
+                            className="size-1.5 rounded-full bg-emerald-500"
+                          />
+                          <span className="text-muted-foreground text-xs">
+                            Connected
+                          </span>
+                        </>
+                      ) : (
+                        /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
+                        <Button
+                          disabled={connectSelf.isPending}
+                          onClick={() => {
+                            setError(null);
+                            connectSelf.mutate(key);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Connect
+                          <IconArrowUpRight />
+                        </Button>
+                      )}
+                    </ItemActions>
+                  </Item>
+                )}
               </>
             ) : null}
 

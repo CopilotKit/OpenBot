@@ -1968,6 +1968,51 @@ for (const [screen, renderScreen] of [
   });
 }
 
+/**
+ * AND THE ADMINISTRATOR'S PAGE KEEPS EVERYTHING THAT DOES NOT COME OFF THAT READ.
+ *
+ * CRITERION. On the same 500, the connector's admin page still draws the enable switch and the
+ * Refresh press, beside the sentence standing where the account row would have been.
+ *
+ * REASON. The withholding above was written once for both screens and the two are not the same
+ * page. On the personal one the entire content IS connection state, so drawing nothing is the whole
+ * honest answer. This one also carries the tools, the grants, Refresh and the switch that removes
+ * the server — none of which touch `/api/plugins/connections` — and it collapsed to the one
+ * sentence for EVERY plugin, a deployment-token server with no connection state to fail on
+ * included. So a transient 500 on one endpoint took away the administrator's Remove at the moment
+ * something was failing, which is the press they would most plausibly reach for.
+ *
+ * ASSERTED BESIDE THE ALERT rather than instead of it: the sentence is still required, and a page
+ * that simply ignored the error again would pass a test that only looked for the switch.
+ */
+test("the administrator's connector screen keeps the rest of the page when the connections read fails", async () => {
+  installDeployment({
+    authScheme: "API_KEY",
+    checkable: true,
+    composioConfigured: true,
+    confirms: true,
+    fields: [PERPLEXITY_KEY],
+    recorded: true,
+    verified: false,
+    verifiedAt: null,
+    probe: PROBE,
+    connectionsFail: true,
+  });
+
+  const view = renderAdminScreen(queryClient());
+
+  // The row is still withheld and still says why, which is the fix this one must not undo.
+  expect(await view.findByRole("alert")).toBeTruthy();
+  expect(view.getByRole("alert").textContent).toMatch(/could not be loaded/);
+
+  // AND THE PAGE IS STILL THERE. The switch is how a server is removed from this deployment, and
+  // its absence was the whole cost of collapsing the page.
+  expect(
+    view.getByRole("switch", { name: "Enable Gmail for this deployment" }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Refresh tools" })).toBeTruthy();
+});
+
 test("a rejected key still says so on a page that has only read, and still offers Re-check", async () => {
   /*
    * THE RELOAD, WHICH IS THE STATE THIS WHOLE FIELD WAS MISSING FROM. Nothing has been pressed

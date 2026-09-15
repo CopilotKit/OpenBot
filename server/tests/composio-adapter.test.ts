@@ -1311,6 +1311,45 @@ describe("telling this deployment's auth configs from anybody else's", () => {
   });
 
   /**
+   * AND THE OTHER ORDERING ANSWERS THE SAME, WHICH IS WHAT MAKES IT ONE CONFIG RATHER THAN ONE ROW.
+   *
+   * CRITERION. Where the UNREADABLE copy of a repeated id arrives first and the readable copy
+   * second, the config is still deleted and the removal still completes.
+   *
+   * REASON. The fix above dropped the repeat before the name was read, which closed
+   * good-copy-first and opened its mirror: the id was claimed by whichever copy came first, so an
+   * unreadable first copy took the slot, the readable second copy returned at the de-duplication
+   * test, and the config never reached `configs` at all. `deleteAuthConfig` then left standing a
+   * config the other ordering would have deleted — one listing, two answers, decided by which side
+   * of a page boundary the vendor happened to put the good row on.
+   *
+   * NEITHER ORDERING IS MORE LIKELY THAN THE OTHER. A rename in flight in Composio's dashboard, or
+   * a proxy stitching two partial reads, is as free to hand the half-written row over first as
+   * second, so a function whose verdict depends on that is deciding on a coin toss.
+   */
+  test("a repeated row read second is still the config, however the listing ordered the copies", async () => {
+    const deleted: string[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        authConfigs: {
+          list: async (query: unknown) =>
+            (query as { cursor?: string }).cursor === undefined
+              ? // The same config, named first with a name this deployment cannot read.
+                { items: [{ ...OURS, name: null }], nextCursor: "page_2" }
+              : { items: [OURS], nextCursor: null },
+          delete: async (id: string) => {
+            deleted.push(id);
+          },
+        },
+      }),
+    );
+
+    await broker.deleteAuthConfig("linear");
+
+    expect(deleted).toEqual(["ac_ours"]);
+  });
+
+  /**
    * A ROW THAT COULD NOT BE READ MUST NOT BLOCK THE CONNECTION IT HAS NOTHING TO DO WITH.
    *
    * Reading the configs used to throw on the first row it could not check, so one unreadable row
@@ -7067,6 +7106,27 @@ describe("the fields an app asks a person to fill in", () => {
     {
       what: "a mode that is not an object",
       detail: { auth_config_details: ["API_KEY"] },
+    },
+    /*
+     * THE ONE THAT IS AN OBJECT AND IS STILL UNCLASSIFIABLE, which the shape test above does not
+     * catch. `{ mode: null, fields: {…} }` is an object and not an array, so it passes that guard,
+     * and `textOf` then answers null — which never equals a scheme name, so the walk moved on and
+     * never collected the entry. With nothing in `unreadableModes`, the vendor-shape refusal was
+     * skipped and the administrator's "Composio no longer publishes a connection of this scheme"
+     * was reached — over an entry that MAY BE the mode, whose next reading is the same shape.
+     */
+    {
+      what: "a mode name that is not a name",
+      detail: {
+        auth_config_details: [
+          {
+            mode: null,
+            fields: {
+              connected_account_initiation: { required: [], optional: [] },
+            },
+          },
+        ],
+      },
     },
     {
       what: "fields that are not an object",

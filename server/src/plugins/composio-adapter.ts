@@ -1154,16 +1154,37 @@ function readableConfigs(
   rows: VendorAuthConfig[],
   toolkit: string,
 ): { configs: CheckedAuthConfig[]; unreadable: BrokerRefusalError[] } {
-  const configs: CheckedAuthConfig[] = [];
-  const alreadyRead = new Set<string>();
-  const unreadable: BrokerRefusalError[] = [];
+  /*
+   * ONE SLOT PER CONFIG, HOLDING WHICHEVER COPY OF IT COULD BE READ.
+   *
+   * ONE ID IS ONE CONFIG HOWEVER MANY TIMES THE LISTING NAMED IT, and the invariant is about the
+   * CONFIG rather than about the first row that happened to mention it. Two orderings of one
+   * repeated id therefore have to answer the same, and the previous shape — dedup on first
+   * sighting, then read the name — answered them differently: good copy first and unreadable
+   * repeat second was right, unreadable copy first and good copy second claimed the id for the
+   * unreadable one and the readable copy returned at the dedup test, so the config never reached
+   * `configs` at all. `deleteAuthConfig` then left standing a config the other ordering would have
+   * deleted.
+   *
+   * THE POSITION IS THE FIRST SIGHTING'S AND THE VERDICT IS THE BEST COPY'S, which is what a slot
+   * buys over a `Set`: a later readable copy REPLACES an unreadable one in place, so neither the
+   * order two callers see nor the count of what could not be read depends on which copy the paging
+   * happened to hand over first. A readable copy is never replaced — a second reading of a config
+   * this deployment has already read tells it nothing new.
+   *
+   * A ROW WITH NO ID HAS NO SLOT TO SHARE, because the id is the whole of what identifies a config:
+   * two id-less rows are two rows nothing can say are one, so each keeps its own place in the list
+   * and its own refusal.
+   */
+  const settled: (CheckedAuthConfig | BrokerRefusalError)[] = [];
+  const slotOf = new Map<string, number>();
 
   rows.forEach((row, position) => {
     const at = `row ${position + 1} of Composio's authorization configs for ${toolkit}`;
 
     const id = textOf(row.id);
     if (id === null) {
-      unreadable.push(
+      settled.push(
         new BrokerRefusalError(
           `Composio sent ${sent(row.id)} where the id of ${at} belongs, and the id is the whole of what a deletion names. Nothing was sent for that row, because a delete without one asks Composio to remove whatever it cares to while this deployment records that the app was withdrawn. ${VENDOR_SHAPE_REMEDY}`,
         ),
@@ -1172,38 +1193,54 @@ function readableConfigs(
     }
 
     /*
-     * THE REPEAT IS DROPPED BEFORE THE NAME IS READ, AND THE ORDER IS THE WHOLE OF IT.
+     * THE ID IS READ FIRST AND THE SLOT IS FOUND BEFORE ANYTHING ELSE IS ASKED OF THE ROW.
      *
-     * This test used to sit BELOW the name guard, so a second sighting of an id already accepted
-     * was still pushed into `unreadable` if THAT COPY's name was unreadable — which contradicts the
-     * invariant stated above, ONE ID IS ONE CONFIG HOWEVER MANY TIMES THE LISTING NAMED IT. The
-     * paged listing repeating `ac_1` across a page boundary is the exact race that comment is
-     * written for, and the repeat can perfectly well arrive as `{ id: "ac_1", name: null }` — a
-     * rename in flight in the dashboard, or a proxy stitching two partial reads.
-     *
-     * WHAT THAT COST IS A REFUSAL AFTER THE WORK WAS ALREADY DONE. `configs` held the one readable
+     * A repeat whose verdict is already settled readable is dropped here, which is the half that
+     * was already right: the listing repeating `ac_1` across a page boundary can perfectly well
+     * hand the repeat over as `{ id: "ac_1", name: null }` — a rename in flight in the dashboard,
+     * or a proxy stitching two partial reads — and counting that as a config this deployment could
+     * not read cost a refusal AFTER THE WORK WAS ALREADY DONE. `configs` held the one readable
      * `ac_1` and `unreadable.length` was 1, so `deleteAuthConfig` and `revoke` — which both act on
      * what they can name and then report the rest — deleted the config, succeeded, and THEN threw
      * "…and the app has not been fully withdrawn", over a config that was already gone.
      * `removeServer` therefore left the app's row standing behind a completed removal.
-     *
-     * Read the id, settle whether this row is new, and only then ask anything else of it.
      */
-    if (alreadyRead.has(id)) return;
-    alreadyRead.add(id);
-
-    const name = textOf(row.name);
-    if (name === null) {
-      unreadable.push(
-        new BrokerRefusalError(
-          `Composio sent ${sent(row.name)} where the name of ${at} belongs, and the name is the only thing that says whether this deployment made a config or an operator built it by hand in Composio's dashboard. Neither guess is safe: one splits this app's connections across two configs, and the other deletes a config nobody here chose along with every account connected against it. ${VENDOR_SHAPE_REMEDY}`,
-        ),
-      );
+    const slot = slotOf.get(id);
+    if (slot !== undefined && !(settled[slot] instanceof BrokerRefusalError)) {
       return;
     }
 
-    configs.push({ id, name, status: row.status });
+    const name = textOf(row.name);
+    if (name === null) {
+      // The first copy of this id that could not be read keeps the slot; a second one adds nothing
+      // to what a caller can act on and would count one config twice.
+      if (slot === undefined) {
+        slotOf.set(id, settled.length);
+        settled.push(
+          new BrokerRefusalError(
+            `Composio sent ${sent(row.name)} where the name of ${at} belongs, and the name is the only thing that says whether this deployment made a config or an operator built it by hand in Composio's dashboard. Neither guess is safe: one splits this app's connections across two configs, and the other deletes a config nobody here chose along with every account connected against it. ${VENDOR_SHAPE_REMEDY}`,
+          ),
+        );
+      }
+      return;
+    }
+
+    const config: CheckedAuthConfig = { id, name, status: row.status };
+    if (slot === undefined) {
+      slotOf.set(id, settled.length);
+      settled.push(config);
+      return;
+    }
+    // The readable copy of a config an earlier row could not describe, in that row's place.
+    settled[slot] = config;
   });
+
+  const configs: CheckedAuthConfig[] = [];
+  const unreadable: BrokerRefusalError[] = [];
+  for (const verdict of settled) {
+    if (verdict instanceof BrokerRefusalError) unreadable.push(verdict);
+    else configs.push(verdict);
+  }
 
   return { configs, unreadable };
 }
@@ -4007,6 +4044,27 @@ export function buildComposioClient(
           continue;
         }
         const entry = candidate as { mode?: unknown; fields?: unknown };
+        /*
+         * AND AN ENTRY WHOSE OWN MODE CANNOT BE READ IS UNREADABLE TOO, WHICH THE SHAPE TEST ABOVE
+         * DOES NOT CATCH. `{ mode: null, fields: {…} }` is an object and not an array, so it passes
+         * that guard, and `textOf` then answers null — which never equals a scheme name, so the
+         * loop simply moved on and the entry was never collected. With the wanted mode absent from
+         * the rest of the list, `unreadableModes` was empty, the vendor-shape refusal below was
+         * skipped, and control reached the ADMINISTRATOR'S refusal: Composio no longer publishes a
+         * connection of this scheme for this app. That is precisely the sentence this walk exists
+         * to keep off an entry that MAY BE the mode — it sends an administrator to remove and
+         * re-add against a list that reads identically next time.
+         *
+         * THE NAME IS WHAT MAKES AN ENTRY CLASSIFIABLE, so an entry without a readable one sits
+         * exactly where an entry that is not a document sits: this deployment cannot say whether it
+         * is the mode being looked for. A mode the vendor genuinely left out is a HOLE in the list,
+         * which is the `undefined`/`null` candidate skipped above, and is a different fact with a
+         * different true sentence.
+         */
+        if (textOf(entry.mode) === null) {
+          unreadableModes.push({ index, candidate });
+          continue;
+        }
         /*
          * THE MODE IS A SCHEME NAME, SO IT IS THE TRIMMED ONE — the rule {@link labelsOf} states
          * for every other scheme this file reads and the one site that was comparing the raw value.

@@ -5821,6 +5821,72 @@ export function createPluginStore(options: PluginStoreOptions) {
         accountId,
       });
 
+      // Read before the write, for `confirmBrokeredConnection`'s reason: the record below is an
+      // upsert, so it leaves nothing behind that tells a first key from a replacement, and whether
+      // a row was already here is the whole of what `reconnected` says. The route that reaches
+      // this today refuses a second account for the same app, which makes a constant `false`
+      // accidentally true — but the guard lives in another file and this method is callable
+      // without it, so the trail would be claiming, on that guard's word, something it never
+      // checked.
+      const existing = await this.brokeredConnection({
+        toolkit: input.toolkit,
+        userId: input.userId,
+      });
+
+      /*
+       * THE CONNECT IS ON THE TRAIL BEFORE THE OUTCOME IS READ, AND THAT IS WHAT MOVING IT BUYS.
+       *
+       * The account exists by this line — `connectWithFields` above either made it or threw — and
+       * from here the method has four ways out, one of which is the throw in the branch below.
+       * Filed after that branch, this row was written on three of the four: a `complained` check
+       * left a live account at Composio, a `composio_connections` row, and an
+       * `mcp.connection_verified` row saying a check did not come back clean, with NOTHING saying
+       * the account had ever been connected. `complained` is the ordinary outcome of a rate limit
+       * or of one refused scope rather than an exotic one, so the trail lost the connect on the
+       * path most likely to be walked — and the `mcp.account_disconnected` row filed when that
+       * person later presses Disconnect had no counterpart to pair against.
+       *
+       * ABOVE `recordBrokeredConnection` RATHER THAN BELOW IT, because what this row asserts is
+       * that the ACCOUNT was made, which the broker call above has already established, and not
+       * that this deployment finished writing its own row about it. The two arms below disagree
+       * about what that row says and agree about this.
+       */
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.account_connected",
+        targetType: "mcp_server",
+        // The app, the same id `confirmBrokeredConnection` and `retireConnectionsFor` file under,
+        // so one query answers what happened to one person's access to one app however it began
+        // and however it ended.
+        targetId: input.toolkit,
+        payload: {
+          actor: input.userId,
+          server: input.toolkit,
+          /*
+           * EMPTY, AND PRESENT, which is the whole of what this field does on a brokered row.
+           *
+           * All three writers of `mcp.account_connected` now agree on the key. {@link
+           * recordConnection} carries what a vendor granted a `user-oauth` grant, and both brokered
+           * writers carry `""` — a brokered connection has no scopes at all, because Composio holds
+           * the grant and never tells this deployment what it covers.
+           *
+           * WRITING NOTHING IS NOT THE SAME AS WRITING THAT. This one wrote no key, so the same app
+           * connected by two people came back as `''` from {@link confirmBrokeredConnection} and as
+           * NULL from here, in a table whose entire purpose is being queried — and with nothing in
+           * either row saying which writer made it, a reader cannot tell an absent scope from an
+           * empty one, or either from a row written before the field existed.
+           */
+          scope: "",
+          reconnected: existing !== null,
+          /*
+           * THE NAMES AND NEVER THE VALUES. What a reader of the trail needs is which app somebody
+           * connected and what it asked them for; the values are the credential itself, and an
+           * audit row is exactly the kind of long-lived, widely-readable record they must never
+           * reach.
+           */
+          fields: Object.keys(input.values).sort(),
+        },
+      });
+
       if (probed.outcome === "complained") {
         /*
          * THE ACCOUNT THIS CALL MADE IS LEFT STANDING, AND THAT REVERSES WHAT THIS BRANCH USED TO DO.
@@ -5926,18 +5992,6 @@ export function createPluginStore(options: PluginStoreOptions) {
       const probe = probed.probe;
       const verified = probed.outcome === "answered";
 
-      // Read before the write, for `confirmBrokeredConnection`'s reason: the record below is an
-      // upsert, so it leaves nothing behind that tells a first key from a replacement, and whether
-      // a row was already here is the whole of what `reconnected` says. The route that reaches
-      // this today refuses a second account for the same app, which makes a constant `false`
-      // accidentally true — but the guard lives in another file and this method is callable
-      // without it, so the trail would be claiming, on that guard's word, something it never
-      // checked.
-      const existing = await this.brokeredConnection({
-        toolkit: input.toolkit,
-        userId: input.userId,
-      });
-
       await this.recordBrokeredConnection({
         toolkit: input.toolkit,
         userId: input.userId,
@@ -5947,42 +6001,6 @@ export function createPluginStore(options: PluginStoreOptions) {
         // derived from this same value a few lines above, so the row cannot claim a check with an
         // action beside a flag that says nothing checked it, or the other way about.
         probeAction: probe,
-      });
-
-      await recordAuditEvent(auditStore, {
-        eventType: "mcp.account_connected",
-        targetType: "mcp_server",
-        // The app, the same id `confirmBrokeredConnection` and `retireConnectionsFor` file under,
-        // so one query answers what happened to one person's access to one app however it began
-        // and however it ended.
-        targetId: input.toolkit,
-        payload: {
-          actor: input.userId,
-          server: input.toolkit,
-          /*
-           * EMPTY, AND PRESENT, which is the whole of what this field does on a brokered row.
-           *
-           * All three writers of `mcp.account_connected` now agree on the key. {@link
-           * recordConnection} carries what a vendor granted a `user-oauth` grant, and both brokered
-           * writers carry `""` — a brokered connection has no scopes at all, because Composio holds
-           * the grant and never tells this deployment what it covers.
-           *
-           * WRITING NOTHING IS NOT THE SAME AS WRITING THAT. This one wrote no key, so the same app
-           * connected by two people came back as `''` from {@link confirmBrokeredConnection} and as
-           * NULL from here, in a table whose entire purpose is being queried — and with nothing in
-           * either row saying which writer made it, a reader cannot tell an absent scope from an
-           * empty one, or either from a row written before the field existed.
-           */
-          scope: "",
-          reconnected: existing !== null,
-          /*
-           * THE NAMES AND NEVER THE VALUES. What a reader of the trail needs is which app somebody
-           * connected and what it asked them for; the values are the credential itself, and an
-           * audit row is exactly the kind of long-lived, widely-readable record they must never
-           * reach.
-           */
-          fields: Object.keys(input.values).sort(),
-        },
       });
 
       /*

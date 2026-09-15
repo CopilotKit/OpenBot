@@ -300,56 +300,70 @@ beforeAll(async () => {
   if (!clock) throw new Error("the database would not say what time it is");
   runStartedAt = clock.now;
 
-  const [configuredServers, existingBots, existingConnections, existingPeople] =
-    await Promise.all([
-      database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(inArray(mcpServers.id, ["gmail", "notion"])),
-      database
-        .select({ id: agents.id })
-        .from(agents)
-        .where(eq(agents.id, "bot_helper")),
-      /*
-       * Brokered connections, keyed on the PAIR rather than on the person.
-       *
-       * CRITERION. This guard refuses on {@link ownedConnections} — two real apps crossed with
-       * three people — and on no other `composio_connections` row, because every pair this file
-       * inserts and every pair it deletes is inside that cross.
-       *
-       * REASON. Every connection row this file writes is at a real app, `gmail` or `linear` — the
-       * two people it invents and the anonymous actor alike — so the app is half of what makes a
-       * row this file's, and asking by person alone claims rows at every other app as well. Both
-       * spellings of that over-reach have already cost something. `user_id = ''` caught the
-       * anonymous row `composio-connections.test.ts` writes against its own run-suffixed app, so a
-       * run of that file killed before its cleanup refused every test here for good; `user_id IN
-       * (asker, leaver)` claims a `("slack", "user_asker")` row the same way, and `freshDatabase`
-       * would then DELETE it — a `composio_connections` row is the entire gate on a brokered
-       * call, and nothing else can find it again.
-       *
-       * The anonymous actor is one of the three people because `user_id` is notNull and notNull
-       * does not exclude the empty string, so `("gmail", "")` is a row a deployment can legally
-       * hold, which is the whole point of the test that inserts one.
-       */
-      database
-        .select({
-          toolkit: composioConnections.toolkit,
-          userId: composioConnections.userId,
-        })
-        .from(composioConnections)
-        .where(ownedConnections()),
-      /*
-       * The person, who was missing from this guard entirely.
-       *
-       * `user_leaver` is inserted at and deleted at by the Composio fixtures, and the delete used to
-       * run whatever the guard had decided — so a real row at that id was removed, with the ten
-       * cascades above behind it, on a run the guard had already refused.
-       */
-      database
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.id, "user_leaver")),
-    ]);
+  /*
+   * ONE AT A TIME RATHER THAN `Promise.all`, and the reason is the driver rather than the queries.
+   *
+   * {@link TEST_POOL} holds two connections, so four reads issued together are pipelined two to a
+   * connection, and Bun's postgres client names its prepared statements from the query text it is
+   * given. Two of these four collide on that name: the five-parameter `composio_connections` read
+   * binds against the statement prepared for the one-parameter `agents` read and Postgres refuses
+   * with `bind message supplies 5 parameters, but prepared statement ... requires 1`. The guard
+   * then throws out of the file's first hook, which takes every test in the file with it and
+   * reports as one unnamed failure with no test name in it.
+   *
+   * Nothing here is waiting on anything else and four sequential reads of four empty tables cost
+   * milliseconds, so there was never anything to win by issuing them together.
+   */
+  const configuredServers = await database
+    .select({ id: mcpServers.id })
+    .from(mcpServers)
+    .where(inArray(mcpServers.id, ["gmail", "notion"]));
+
+  const existingBots = await database
+    .select({ id: agents.id })
+    .from(agents)
+    .where(eq(agents.id, "bot_helper"));
+
+  /*
+   * Brokered connections, keyed on the PAIR rather than on the person.
+   *
+   * CRITERION. This guard refuses on {@link ownedConnections} — two real apps crossed with
+   * three people — and on no other `composio_connections` row, because every pair this file
+   * inserts and every pair it deletes is inside that cross.
+   *
+   * REASON. Every connection row this file writes is at a real app, `gmail` or `linear` — the
+   * two people it invents and the anonymous actor alike — so the app is half of what makes a
+   * row this file's, and asking by person alone claims rows at every other app as well. Both
+   * spellings of that over-reach have already cost something. `user_id = ''` caught the
+   * anonymous row `composio-connections.test.ts` writes against its own run-suffixed app, so a
+   * run of that file killed before its cleanup refused every test here for good; `user_id IN
+   * (asker, leaver)` claims a `("slack", "user_asker")` row the same way, and `freshDatabase`
+   * would then DELETE it — a `composio_connections` row is the entire gate on a brokered
+   * call, and nothing else can find it again.
+   *
+   * The anonymous actor is one of the three people because `user_id` is notNull and notNull
+   * does not exclude the empty string, so `("gmail", "")` is a row a deployment can legally
+   * hold, which is the whole point of the test that inserts one.
+   */
+  const existingConnections = await database
+    .select({
+      toolkit: composioConnections.toolkit,
+      userId: composioConnections.userId,
+    })
+    .from(composioConnections)
+    .where(ownedConnections());
+
+  /*
+   * The person, who was missing from this guard entirely.
+   *
+   * `user_leaver` is inserted at and deleted at by the Composio fixtures, and the delete used to
+   * run whatever the guard had decided — so a real row at that id was removed, with the ten
+   * cascades above behind it, on a run the guard had already refused.
+   */
+  const existingPeople = await database
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, "user_leaver"));
 
   const found = [
     ...configuredServers.map((row) => `the mcp_servers row '${row.id}'`),
