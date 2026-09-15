@@ -2,10 +2,8 @@
  * One model call for a few words. Not a Bot and not a turn: a title is not said to anybody and is
  * not part of the conversation it names, so there is no runtime work and no thread to hold.
  */
+import { chatCompletionsUrl } from "../routing/model";
 import { oneLine } from "./text";
-
-/** Where an OpenAI-compatible provider answers, overridable the way `agent-bot` overrides it. */
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 /** Rules, not an example: a model copies an example's subject as readily as its shape. */
 const INSTRUCTION = [
@@ -20,7 +18,7 @@ export type TitlerOptions = {
   model: string;
   /** Resolved per call, so a rotated credential is picked up without a restart. */
   resolveApiKey: () => Promise<string | null>;
-  baseUrl?: string;
+  environment?: Record<string, string | undefined>;
   /** Injectable so a test drives this without a network. */
   fetchImpl?: typeof fetch;
   /** How long one call may take before it is given up on. */
@@ -30,29 +28,31 @@ export type TitlerOptions = {
 /** No key resolves to null and is not retried; a provider error throws, so the queue retries it. */
 export function createChannelTitler(options: TitlerOptions) {
   const call = options.fetchImpl ?? fetch;
-  const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 
   return async (excerpt: string): Promise<string | null> => {
     const apiKey = await options.resolveApiKey();
     if (!apiKey) return null;
 
-    const response = await call(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+    const response = await call(
+      chatCompletionsUrl(options.environment ?? process.env),
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: options.model,
+          messages: [
+            { role: "system", content: INSTRUCTION },
+            { role: "user", content: excerpt },
+          ],
+          // Reasoning tokens come out of this budget, so a cap sized for the answer alone 400s.
+          max_completion_tokens: 512,
+        }),
+        signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
       },
-      body: JSON.stringify({
-        model: options.model,
-        messages: [
-          { role: "system", content: INSTRUCTION },
-          { role: "user", content: excerpt },
-        ],
-        // Reasoning tokens come out of this budget, so a cap sized for the answer alone 400s.
-        max_completion_tokens: 512,
-      }),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
-    });
+    );
 
     if (!response.ok) {
       // Capped: this lands on the work item's row, and an HTML error page would land there whole.

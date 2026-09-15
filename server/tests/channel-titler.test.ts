@@ -25,12 +25,50 @@ describe("asking the model for a title", () => {
     const answer = await createChannelTitler({
       model: "gpt-4.1-mini",
       resolveApiKey: async () => "key-123",
+      environment: {},
       fetchImpl,
     })("Asked: which receipts count as travel?");
 
     expect(answer).toBe("Travel receipt rules");
     expect(calls[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
     expect(calls[0]?.body.model).toBe("gpt-4.1-mini");
+  });
+
+  test("asks the endpoint OPENAI_BASE_URL names, not OpenAI", async () => {
+    const { calls, fetchImpl } = respondWith({
+      choices: [{ message: { content: "Travel receipt rules" } }],
+    });
+
+    await createChannelTitler({
+      model: "openai/gpt-5.6-terra",
+      resolveApiKey: async () => "gateway-key",
+      environment: { OPENAI_BASE_URL: "https://gateway.internal/v1" },
+      fetchImpl,
+    })("Asked: which receipts count as travel?");
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://gateway.internal/v1/chat/completions",
+    ]);
+  });
+
+  test("reads OPENAI_BASE_URL from the process when no environment is passed", async () => {
+    const { calls, fetchImpl } = respondWith({
+      choices: [{ message: { content: "Travel receipt rules" } }],
+    });
+    const previous = process.env.OPENAI_BASE_URL;
+    process.env.OPENAI_BASE_URL = "http://localhost:4010";
+    try {
+      await createChannelTitler({
+        model: "gpt-4.1-mini",
+        resolveApiKey: async () => "gateway-key",
+        fetchImpl,
+      })("Asked: anything?");
+    } finally {
+      if (previous === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = previous;
+    }
+
+    expect(calls[0]?.url).toBe("http://localhost:4010/v1/chat/completions");
   });
 
   test("asks nothing at all when the deployment has no key", async () => {
