@@ -147,7 +147,11 @@ jobs:
             $_.profile.test -and $_.executable
           } | ForEach-Object { $_.executable } | Select-Object -Unique)
           if ($executables.Count -ne 1) { throw 'Expected exactly one current desktop library test executable.' }
-          & ../scripts/test-windows-standard-user.ps1 -TestExecutable $executables[0]
+          # Windows PowerShell's credentialed launch matches the desktop and native validation.
+          # PowerShell Core inherited the CI runner's profile directories into the temporary user.
+          $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ../scripts/test-windows-standard-user.ps1 -TestExecutable $executables[0]
+          if ($LASTEXITCODE -ne 0) { throw 'The native standard-user setup test failed.' }
       # Keep what was built. Without this the only way to try an installer is to build one on
       # the machine you are trying it on, which is not what anybody installs.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
