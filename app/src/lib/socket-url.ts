@@ -27,6 +27,16 @@ function announcedPort(): string {
     : "";
 }
 
+function validPort(port: string): string {
+  // A whitespace, alphabetic, or out-of-range value used to be interpolated into the authority,
+  // so `new WebSocket()` threw synchronously inside the effects that open it. Only whole digits
+  // in range override same-origin.
+  if (!/^\d+$/.test(port.trim())) return "";
+  const n = Number(port.trim());
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return "";
+  return String(n);
+}
+
 export function socketUrl(
   path: string,
   location: {
@@ -39,6 +49,7 @@ export function socketUrl(
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   // A port only when a Vite runtime named one: the app is not same-origin with the server there.
   // Otherwise the browser's own host, which is the server's own origin in production.
-  const authority = port ? `${location.hostname}:${port}` : location.host;
+  const usable = validPort(port);
+  const authority = usable ? `${location.hostname}:${usable}` : location.host;
   return `${scheme}//${authority}${path}`;
 }

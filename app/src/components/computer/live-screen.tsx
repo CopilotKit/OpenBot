@@ -101,6 +101,29 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
         return;
       }
       if (message.type !== "frame" || !message.data) return;
+      // Live-run JSON only checks `typeof type === "string"` upstream. Non-finite or negative
+      // dimensions would poison frameSize and every coordinate scaled from it; a huge payload
+      // would hit `atob` before any bound. Both are dropped as corrupt frames.
+      const width = message.width ?? 1280;
+      const height = message.height ?? 800;
+      if (
+        typeof width !== "number" ||
+        typeof height !== "number" ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0 ||
+        width > 8192 ||
+        height > 8192
+      ) {
+        return;
+      }
+      if (
+        typeof message.data !== "string" ||
+        message.data.length > 20_000_000
+      ) {
+        return;
+      }
 
       const canvas = canvasRef.current;
       if (!canvas || closed) return;

@@ -30,7 +30,13 @@ async function callControl(
     method ? { method } : {},
   );
   if (!response.ok) return null;
-  return (await response.json()) as ControlState;
+  // A non-JSON or wrong-shaped body used to throw out of the readers and reject the panel's
+  // poll. Reads answer null on failure, so malformed succeeds as missing.
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const holder = (body as { holder?: unknown }).holder;
+  if (holder !== "bot" && holder !== "human") return null;
+  return body as ControlState;
 }
 
 export function readControl(computerId: string) {
