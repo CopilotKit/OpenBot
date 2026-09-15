@@ -355,6 +355,37 @@ fn probe_bool(operation: &str, output: &str) -> Result<bool, Problem> {
     }
 }
 
+/// Local WMI reads work in the signed-in user's token; the DISM cmdlet
+/// Get-WindowsOptionalFeature requires elevation even when it only reads state.
+fn optional_feature_probe_command(feature: &str) -> String {
+    format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $features = @(Get-CimInstance -ClassName Win32_OptionalFeature -Filter \"Name = '{feature}'\"); \
+         if ($features.Count -ne 1 -or $null -eq $features[0].InstallState) {{ \
+           throw '{feature} query did not return one feature state' \
+         }}; \
+         $features[0].InstallState"
+    )
+}
+
+fn probe_feature_enabled(operation: &str, output: &str) -> Result<bool, Problem> {
+    // https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-optionalfeature
+    // Unknown (4) is not evidence that a feature is disabled.
+    match output.trim() {
+        "1" => Ok(true),
+        "2" | "3" => Ok(false),
+        _ => Err(detection_failed(
+            operation,
+            format!("Expected InstallState 1 (enabled), 2 (disabled), or 3 (absent); probe returned: {output}"),
+        )),
+    }
+}
+
+fn modern_wsl_probe_command() -> &'static str {
+    "$ErrorActionPreference = 'Stop'; \
+     $null -ne (Get-CimInstance -ClassName Win32_Service -Filter \"Name = 'WslService'\")"
+}
+
 /// The native adapter above only supplies process execution and the legacy kernel-file check.
 /// Keeping the decision path shared lets failure tests run without touching Windows components.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -363,7 +394,7 @@ fn blocker_with(
     kernel_file_exists: impl FnOnce() -> Result<bool, Problem>,
 ) -> Result<Option<Blocker>, Problem> {
     // A running hypervisor is positive virtualization evidence even when firmware reports False.
-    // Stop converts CIM/DISM non-terminating errors into failed probes instead of partial answers.
+    // Stop converts CIM non-terminating errors into failed probes instead of partial answers.
     let virtualization = "Windows virtualization support (powershell)";
     let reported = probe_text(
         virtualization,
@@ -414,29 +445,66 @@ fn blocker_with(
     ]))?)?;
 
     let wsl_feature = "the WSL feature state (powershell)";
-    let enabled = probe_bool(wsl_feature, &probe_text(wsl_feature, run("powershell", &[
-        "-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; \
-         $state = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux).State; \
-         if ($null -eq $state) { throw 'WSL feature query returned no state' }; \
-         $state -eq 'Enabled'",
-    ]))?)?;
+    let enabled = probe_feature_enabled(
+        wsl_feature,
+        &probe_text(
+            wsl_feature,
+            run(
+                "powershell",
+                &[
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux"),
+                ],
+            ),
+        )?,
+    )?;
     if !enabled {
-        return Ok(Some(if elevated {
-            Blocker::WslAbsent
-        } else {
-            Blocker::NotAdministrator
-        }));
+        // Modern WSL2 uses WslService and does not require the legacy WSL1 optional component.
+        // https://learn.microsoft.com/en-us/windows/wsl/faq#was-lxssmanager-replaced-by-wslservice
+        // Service presence only establishes installation; VMP and kernel health are checked below.
+        let modern_wsl = "the WSL service (powershell)";
+        let installed = probe_bool(
+            modern_wsl,
+            &probe_text(
+                modern_wsl,
+                run(
+                    "powershell",
+                    &[
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        modern_wsl_probe_command(),
+                    ],
+                ),
+            )?,
+        )?;
+        if !installed {
+            return Ok(Some(if elevated {
+                Blocker::WslAbsent
+            } else {
+                Blocker::NotAdministrator
+            }));
+        }
     }
 
     let vmp_feature = "the Virtual Machine Platform feature state (powershell)";
-    let enabled = probe_bool(vmp_feature, &probe_text(vmp_feature, run("powershell", &[
-        "-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference = 'Stop'; \
-         $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
-         if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
-         $state -eq 'Enabled'",
-    ]))?)?;
+    let enabled = probe_feature_enabled(
+        vmp_feature,
+        &probe_text(
+            vmp_feature,
+            run(
+                "powershell",
+                &[
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &optional_feature_probe_command("VirtualMachinePlatform"),
+                ],
+            ),
+        )?,
+    )?;
     if !enabled {
         return Ok(Some(if elevated {
             Blocker::VirtualMachinePlatformDisabled
@@ -493,8 +561,8 @@ mod tests {
     const PROBE_OUTPUTS: [&str; 6] = [
         "hypervisor=True\nfirmware=False\n",
         "True\n",
-        "True\n",
-        "True\n",
+        "1\n",
+        "1\n",
         "2\n",
         "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2\n",
     ];
@@ -507,11 +575,14 @@ mod tests {
             match probe {
                 0 => assert!(args[3].contains("Get-CimInstance Win32_ComputerSystem")),
                 1 => assert!(args[3].contains("WindowsBuiltInRole]::Administrator")),
-                2 => assert!(args[3].contains("-FeatureName Microsoft-Windows-Subsystem-Linux")),
-                3 => assert_eq!(args[3], "$ErrorActionPreference = 'Stop'; \
-                    $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
-                    if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
-                    $state -eq 'Enabled'"),
+                2 => assert_eq!(
+                    args[3],
+                    optional_feature_probe_command("Microsoft-Windows-Subsystem-Linux")
+                ),
+                3 => assert_eq!(
+                    args[3],
+                    optional_feature_probe_command("VirtualMachinePlatform")
+                ),
                 4 => assert_eq!(args[3], default_wsl_version_probe_command()),
                 _ => unreachable!(),
             }
@@ -535,6 +606,191 @@ mod tests {
             stdout: stdout.as_bytes().to_vec(),
             stderr: stderr.as_bytes().to_vec(),
         }
+    }
+
+    #[test]
+    fn standard_user_with_working_wsl_does_not_need_elevated_feature_queries() {
+        let result = blocker_with(
+            |program, args| {
+                let command = args.join(" ");
+                let stdout = if command.contains("Get-WindowsOptionalFeature") {
+                    return Ok(probe_output(
+                        1,
+                        "",
+                        "Get-WindowsOptionalFeature : The requested operation requires elevation.",
+                    ));
+                } else if command.contains("Win32_ComputerSystem") {
+                    PROBE_OUTPUTS[0]
+                } else if command.contains("WindowsBuiltInRole]::Administrator") {
+                    "False"
+                } else if command.contains("Win32_OptionalFeature") {
+                    "1"
+                } else if program == "powershell" && args[3] == default_wsl_version_probe_command()
+                {
+                    "2"
+                } else if program == "wsl.exe" && args == ["--version"] {
+                    PROBE_OUTPUTS[5]
+                } else {
+                    panic!("unexpected standard-user probe: {program} {args:?}");
+                };
+                Ok(probe_output(0, stdout, ""))
+            },
+            || Ok(false),
+        );
+        assert_eq!(result, Ok(None));
+    }
+
+    fn probe_with_modern_wsl_service(
+        outputs: [&str; 6],
+        service: std::io::Result<std::process::Output>,
+    ) -> Result<Option<Blocker>, Problem> {
+        let mut service = Some(service);
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    return service.take().expect("queried the WSL service twice");
+                }
+                assert_probe_call(probe, program, args);
+                let output = probe_output(0, outputs[probe], "");
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert!(service.is_none(), "did not check modern WSL installation");
+        result
+    }
+
+    #[test]
+    fn modern_wsl_does_not_require_the_legacy_component_but_still_needs_vmp_and_a_kernel() {
+        for legacy in ["2", "3"] {
+            for (vmp, version, expected) in [
+                ("1", PROBE_OUTPUTS[5], None),
+                ("2", PROBE_OUTPUTS[5], Some(Blocker::NotAdministrator)),
+                ("3", PROBE_OUTPUTS[5], Some(Blocker::NotAdministrator)),
+                ("1", "WSL version: 2", Some(Blocker::WslNoKernel)),
+            ] {
+                let mut outputs = PROBE_OUTPUTS;
+                outputs[1] = "False";
+                outputs[2] = legacy;
+                outputs[3] = vmp;
+                outputs[5] = version;
+                assert_eq!(
+                    probe_with_modern_wsl_service(outputs, Ok(probe_output(0, "True", ""))),
+                    Ok(expected),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_modern_and_legacy_wsl_returns_install_guidance_for_standard_users() {
+        for legacy in ["2", "3"] {
+            let mut outputs = PROBE_OUTPUTS;
+            outputs[1] = "False";
+            outputs[2] = legacy;
+            assert_eq!(
+                probe_with_modern_wsl_service(outputs, Ok(probe_output(0, "False", ""))),
+                Ok(Some(Blocker::NotAdministrator)),
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_or_malformed_feature_states_are_detection_errors() {
+        for probe in [2, 3] {
+            for state in ["4", "0", "-1", "Enabled", "1\n2", ""] {
+                let error = fail_probe_at(probe, Ok(probe_output(0, state, ""))).unwrap_err();
+                assert!(error.said.contains("feature state"));
+                assert!(error.detail.unwrap().contains(state));
+            }
+        }
+    }
+
+    #[test]
+    fn modern_wsl_service_query_failures_are_not_missing_prerequisites() {
+        let mut outputs = PROBE_OUTPUTS;
+        outputs[1] = "False";
+        outputs[2] = "2";
+        for (failure, diagnostic) in [
+            (
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "service launch denied",
+                )),
+                "service launch denied",
+            ),
+            (
+                Ok(probe_output(1, "False", "service query denied")),
+                "service query denied",
+            ),
+            (
+                Ok(probe_output(0, "", "service returned no answer")),
+                "service returned no answer",
+            ),
+            (Ok(probe_output(0, "unknown", "")), "unknown"),
+        ] {
+            let error = probe_with_modern_wsl_service(outputs, failure).unwrap_err();
+            assert!(error.said.contains("the WSL service"));
+            assert!(error.detail.unwrap().contains(diagnostic));
+        }
+    }
+
+    /// Run explicitly under a normal Windows account. Read both features before blocker() so a
+    /// missing hypervisor cannot make this privilege-boundary check pass without querying them.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "requires a real Windows standard-user session"]
+    fn native_standard_user_setup_probe() {
+        let run = |command: &str| {
+            crate::quiet::command("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", command])
+                .output()
+        };
+        let elevated = probe_bool(
+            "native probe identity",
+            &probe_text("native probe identity", run(
+                "$ErrorActionPreference = 'Stop'; \
+                 ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+            )).unwrap(),
+        ).unwrap();
+        assert!(!elevated, "run this probe without administrator elevation");
+        println!(
+            "native setup identity: {}",
+            serde_json::json!({"elevated": elevated})
+        );
+        for feature in [
+            "Microsoft-Windows-Subsystem-Linux",
+            "VirtualMachinePlatform",
+        ] {
+            let state = probe_text(feature, run(&optional_feature_probe_command(feature))).unwrap();
+            let enabled = probe_feature_enabled(feature, &state).unwrap();
+            println!(
+                "native setup feature: {}",
+                serde_json::json!({
+                    "feature": feature, "installState": state, "enabled": enabled,
+                })
+            );
+        }
+        let modern_wsl = probe_bool(
+            "native WSL service probe",
+            &probe_text("native WSL service probe", run(modern_wsl_probe_command())).unwrap(),
+        )
+        .unwrap();
+        println!(
+            "native setup service: {}",
+            serde_json::json!({"modernWslInstalled": modern_wsl})
+        );
+        let result = blocker();
+        println!(
+            "native setup result: {}",
+            serde_json::to_string(&result).unwrap()
+        );
+        assert!(
+            result.is_ok(),
+            "normal-user setup detection failed: {result:?}"
+        );
     }
 
     #[derive(Deserialize)]
@@ -711,11 +967,11 @@ mod tests {
                 } else if args
                     .iter()
                     .any(|arg| arg.contains("VirtualMachinePlatform"))
-                {
-                    "False"
-                } else if program == "powershell" && args[3] == default_wsl_version_probe_command()
+                    || (program == "powershell" && args[3] == default_wsl_version_probe_command())
                 {
                     "2"
+                } else if args.iter().any(|arg| arg.contains("Win32_OptionalFeature")) {
+                    "1"
                 } else if program == "powershell" {
                     "True"
                 } else {
@@ -825,10 +1081,7 @@ mod tests {
                 assert_probe_call(probe, program, args);
                 let mut output = probe_output(0, PROBE_OUTPUTS[probe], "");
                 if probe == 3 {
-                    output.stdout = "True\r\n"
-                        .encode_utf16()
-                        .flat_map(u16::to_le_bytes)
-                        .collect();
+                    output.stdout = "1\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
                 }
                 probe += 1;
                 Ok(output)
@@ -935,8 +1188,8 @@ mod tests {
                 [
                     PROBE_OUTPUTS[0],
                     "True",
-                    "False",
-                    "True",
+                    "2",
+                    "1",
                     PROBE_OUTPUTS[4],
                     PROBE_OUTPUTS[5],
                 ],
@@ -946,30 +1199,23 @@ mod tests {
                 [
                     PROBE_OUTPUTS[0],
                     "False",
-                    "False",
-                    "True",
+                    "2",
+                    "1",
                     PROBE_OUTPUTS[4],
                     PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::NotAdministrator),
             ),
             (
-                [
-                    PROBE_OUTPUTS[0],
-                    "True",
-                    "True",
-                    "True",
-                    "1",
-                    PROBE_OUTPUTS[5],
-                ],
+                [PROBE_OUTPUTS[0], "True", "1", "1", "1", PROBE_OUTPUTS[5]],
                 Some(Blocker::WslOne),
             ),
             (
                 [
                     PROBE_OUTPUTS[0],
                     "True",
-                    "True",
-                    "True",
+                    "1",
+                    "1",
                     PROBE_OUTPUTS[4],
                     "WSL version: 2",
                 ],
@@ -980,6 +1226,9 @@ mod tests {
             let mut probe = 0;
             let result = blocker_with(
                 |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        return Ok(probe_output(0, "False", ""));
+                    }
                     assert_probe_call(probe, program, args);
                     let output = probe_output(0, outputs[probe], "");
                     probe += 1;
@@ -1092,37 +1341,37 @@ mod tests {
             (
                 "vmp-disabled-admin",
                 "True",
-                "True",
-                "False",
+                "1",
+                "2",
                 Some(Blocker::VirtualMachinePlatformDisabled),
                 4,
             ),
             (
                 "vmp-disabled-standard",
                 "False",
-                "True",
-                "False",
+                "1",
+                "2",
                 Some(Blocker::NotAdministrator),
                 4,
             ),
             (
                 "wsl-absent-admin",
                 "True",
-                "False",
-                "True",
+                "2",
+                "1",
                 Some(Blocker::WslAbsent),
-                3,
+                4,
             ),
             (
                 "wsl-absent-standard",
                 "False",
-                "False",
-                "True",
+                "2",
+                "1",
                 Some(Blocker::NotAdministrator),
-                3,
+                4,
             ),
-            ("healthy-admin", "True", "True", "True", None, 6),
-            ("healthy-standard", "False", "True", "True", None, 6),
+            ("healthy-admin", "True", "1", "1", None, 6),
+            ("healthy-standard", "False", "1", "1", None, 6),
         ] {
             let mut outputs = PROBE_OUTPUTS;
             outputs[1] = elevated;
@@ -1133,6 +1382,10 @@ mod tests {
             let result = blocker_with(
                 |program, args| {
                     let probe = calls.len();
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        calls.push(serde_json::json!({ "program": program, "args": args }));
+                        return child_probe_output("0", "False", "");
+                    }
                     assert_probe_call(probe, program, args);
                     calls.push(serde_json::json!({ "program": program, "args": args }));
                     stages.borrow_mut().push(probe);

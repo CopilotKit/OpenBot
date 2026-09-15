@@ -133,6 +133,21 @@ jobs:
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
         working-directory: desktop/src-tauri
+      # Hosted Windows runners are administrators. Exercise setup again with an actual Users-only
+      # account: DISM's feature reads worked as CI's administrator but refused ordinary app users.
+      - name: Windows standard-user setup regression
+        if: matrix.platform.name == 'windows'
+        shell: pwsh
+        working-directory: desktop/src-tauri
+        run: |
+          $messages = @(cargo test --locked --lib --no-run --message-format=json)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the native setup test.' }
+          $executables = @($messages | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
+            $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'openbot_desktop_lib' -and
+            $_.profile.test -and $_.executable
+          } | ForEach-Object { $_.executable } | Select-Object -Unique)
+          if ($executables.Count -ne 1) { throw 'Expected exactly one current desktop library test executable.' }
+          & ../scripts/test-windows-standard-user.ps1 -TestExecutable $executables[0]
       # Keep what was built. Without this the only way to try an installer is to build one on
       # the machine you are trying it on, which is not what anybody installs.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
