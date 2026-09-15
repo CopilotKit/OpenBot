@@ -8,6 +8,10 @@
 # last because they are made by the supervisor rather than by compose, so `docker compose down`
 # leaves them running and they are the heaviest thing here, one Chromium each.
 
+# Before anything else, and before the `set` line below, which is itself bash-only: this file is
+# bash, and being read by `sh` used to end it with exit 1 and no output at all. See that file.
+. "$(dirname "$0")/require-bash.sh"
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -41,7 +45,12 @@ done
 setting() {
   local name="$1" fallback="$2" value="${!1:-}"
   if [ -z "$value" ] && [ -f "$ROOT/.env" ]; then
-    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    # `|| true`, for `start.sh`'s reason: a key with a default here is routinely absent from `.env`
+    # — of the two this reads, `.env.example` lists `SERVER_PORT` and not `APP_PORT` — and `grep`
+    # finding nothing is an exit status of 1 that `pipefail` makes the pipeline's. The fallback on
+    # the next line is what the second argument promises, and it must not depend on whether the key
+    # happened to be written down.
+    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" || true)"
   fi
   printf '%s' "${value:-$fallback}"
 }

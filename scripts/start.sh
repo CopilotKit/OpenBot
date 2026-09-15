@@ -3,6 +3,10 @@
 # Start the local OpenBot stack and verify each service answers as OpenBot.
 # Safe to rerun: matching services are left running, and unrelated port holders are reported.
 
+# Before anything else, and before the `set` line below, which is itself bash-only: this file is
+# bash, and being read by `sh` used to end it with exit 1 and no output at all. See that file.
+. "$(dirname "$0")/require-bash.sh"
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -20,7 +24,20 @@ fi
 setting() {
   local name="$1" fallback="$2" value="${!1:-}"
   if [ -z "$value" ]; then
-    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    # `|| true`, BECAUSE A KEY THIS FUNCTION HAS A DEFAULT FOR IS ROUTINELY ABSENT FROM `.env`.
+    #
+    # That is the whole reason the second argument exists: `.env.example` does not list `APP_PORT`,
+    # so a perfectly ordinary `.env` has no line for it. `grep` finding nothing is an exit status of
+    # 1, `pipefail` makes it the pipeline's, and `set -e` then killed the script on the way to the
+    # fallback that was sitting right there — before the first line of output, so the failure
+    # named neither the key nor the file.
+    #
+    # Under bash that status did not escape the command substitution and the fallback won, which is
+    # why this stood for as long as it did: the bug was invisible until somebody ran the script with
+    # `sh`, where the same code exits 1 in silence. The refusal at the top of this file now names
+    # that, and this closes the trap underneath it — an absent key takes the default in either
+    # shell, which is what the argument always promised.
+    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" || true)"
   fi
   printf '%s' "${value:-$fallback}"
 }
