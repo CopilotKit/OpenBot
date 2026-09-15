@@ -17,6 +17,15 @@ conversation, to OpenAI; OpenAI refused the key, so no conversation was ever nam
 goes to the same endpoint as every other model call. A deployment that never set `OPENAI_BASE_URL`
 behaves as before.
 
+### A Bot's question to a person survives a route that fails
+
+Who "a person" is, is a seam a deployment fills in with its own on-call rota or duty desk. If that
+route failed by throwing rather than by returning a refusal — a timeout, a 502, a name that does not
+resolve — the error came straight back out of the tool, so the Bot's run ended with nothing said to
+the person waiting, and no audit row recorded that the question had reached nobody. The Bot is now
+told, in a sentence it can say, that nobody could be asked and that it must not claim otherwise, and
+an `agent.escalation_failed` row goes down carrying what the route actually threw. Deployments using
+the shipped in-conversation route are unaffected: it cannot fail.
 ### Resetting a Bot's computer while the Bot is acting signs it out
 
 On a deployment with one shared computer, which is what the published image and the Helm chart run by

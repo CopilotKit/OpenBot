@@ -50,9 +50,6 @@ export const auditEventTypes = [
    */
   "credential.rotation_refused",
   "credential.revoked",
-  "connector.sync_succeeded",
-  "connector.sync_failed",
-  "knowledge.searched",
   /**
    * Which coworker an untagged message was routed to, and why.
    *
@@ -72,7 +69,6 @@ export const auditEventTypes = [
    * `payload.mechanism` names how, so a later hard delete is distinguishable from this one.
    */
   "channel.deleted",
-  "agent.invoked",
   /**
    * An address this deployment declined to dial for a Bot, and why.
    *
