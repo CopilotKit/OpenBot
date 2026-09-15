@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot running its own loop is told a vendor's error is the vendor's
+
+A vendor that says no by answering with an error, the way an MCP server refuses a call, reached a Bot
+running here as "The vendor reported an error: …", and reached a Bot calling tools back from its own
+process, such as the LangGraph Bots, as the bare sentence. Those Bots pass the answer on as they
+receive it, so their model read something like Google's "The caller does not have permission" as an
+ordinary result, and could tell the person they had no access rather than that the vendor had refused.
+Both kinds of Bot are now told the same thing. A result that is not an error, and this deployment's
+own refusals, read as before.
+
 ## 0.0.12
 
 ### A deployment can broker its Bots into a few hundred apps through Composio

@@ -60,7 +60,7 @@ import { MAX_PAGE, type PeopleStore } from "./people/store";
 import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
 import { isDeploymentFault, type PluginStore } from "./plugins/store";
-import { REFUSAL_MARKER } from "./plugins/tools";
+import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
@@ -1382,7 +1382,12 @@ export function createApp(
           actorId: verdict.actorId,
           ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
         });
-        return context.json({ text: result.text, isError: result.isError });
+        // Worded by the helper the in-process door uses, so a framework Bot's model reads a vendor's
+        // error as the vendor's and not as a result. Neither Bot words it on its way through.
+        return context.json({
+          text: vendorAnswer(result),
+          isError: result.isError,
+        });
       } catch (error) {
         /*
          * A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
