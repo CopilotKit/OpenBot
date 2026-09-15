@@ -12,9 +12,9 @@ import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
-  AuditQueryError,
   type AuditEventType,
   type AuditInitiator,
+  AuditQueryError,
   type AuditReader,
   type AuditStore,
   auditQueryFromUrl,
@@ -50,14 +50,16 @@ import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
+import { withoutStatement } from "./db/query-failure";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
-import type { OnboardingStore } from "./people/onboarding";
 import { parsePageLimit } from "./paging";
-import { type PeopleStore, MAX_PAGE } from "./people/store";
+import type { OnboardingStore } from "./people/onboarding";
+import { MAX_PAGE, type PeopleStore } from "./people/store";
+import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
-import type { PluginStore } from "./plugins/store";
+import { isDeploymentFault, type PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
@@ -294,6 +296,19 @@ export function createApp(
   desktopHostToken?: string,
   /** Server-owned tools that are not MCP but use the same signed agent callback route. */
   deploymentToolCaller?: DeploymentToolCaller,
+  /**
+   * The broker behind apps a person connects through Composio rather than an administrator
+   * registering an MCP server.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Passed in already built, like the copilot handler and the intent router, so this module never
+   * imports the vendor's package. Absent leaves the plugin surface reporting that no broker is
+   * configured, which is the correct degraded behaviour: a deployment with no Composio API key has
+   * no app directory to offer, rather than one that lists apps nobody can connect.
+   */
+  composio?: { broker: ComposioBroker },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -1218,33 +1233,39 @@ export function createApp(
   if (pluginStore) {
     app.route(
       "/api/plugins",
-      createPluginRoutes(pluginStore, requireUser, canUseBot, {
-        encryptionKey: config.keyEncryptionKey,
-        /*
-         * Whether the person a consent was started for still has access, asked when the callback
-         * lands rather than when the flow began.
-         *
-         * The callback carries no session — identity comes from the state — so this is where the
-         * question gets asked at all. `find` answers both halves of it: no row means a user id that
-         * names nobody, and `revoked` means an administrator removed them while they were away at
-         * the vendor. Either way there is no live person for a fresh refresh token to belong to.
-         *
-         * No people store means this deployment cannot answer the question, so it refuses rather
-         * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
-         * would be a hole nothing else closes.
-         */
-        personHasAccess: async (userId) => {
-          if (!peopleStore) return false;
-          const person = await peopleStore.find(userId);
-          return person !== undefined && !person.revoked;
+      createPluginRoutes(
+        pluginStore,
+        requireUser,
+        canUseBot,
+        {
+          encryptionKey: config.keyEncryptionKey,
+          /*
+           * Whether the person a consent was started for still has access, asked when the callback
+           * lands rather than when the flow began.
+           *
+           * The callback carries no session — identity comes from the state — so this is where the
+           * question gets asked at all. `find` answers both halves of it: no row means a user id that
+           * names nobody, and `revoked` means an administrator removed them while they were away at
+           * the vendor. Either way there is no live person for a fresh refresh token to belong to.
+           *
+           * No people store means this deployment cannot answer the question, so it refuses rather
+           * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
+           * would be a hole nothing else closes.
+           */
+          personHasAccess: async (userId) => {
+            if (!peopleStore) return false;
+            const person = await peopleStore.find(userId);
+            return person !== undefined && !person.revoked;
+          },
+          // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
+          // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
+          // whether a Bot without its own credential has any way to call back.
+          botsMayCallBack: Boolean(config.agentToolToken),
+          publicUrl: config.publicUrl,
+          appUrl: config.appUrl,
         },
-        // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
-        // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
-        // whether a Bot without its own credential has any way to call back.
-        botsMayCallBack: Boolean(config.agentToolToken),
-        publicUrl: config.publicUrl,
-        appUrl: config.appUrl,
-      }),
+        composio,
+      ),
     );
   }
 
@@ -1355,10 +1376,38 @@ export function createApp(
         });
         return context.json({ text: result.text, isError: result.isError });
       } catch (error) {
-        // A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
-        // marker leads it so a transcript can draw a refusal without reading the wording.
+        /*
+         * A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
+         * marker leads it so a transcript can draw a refusal without reading the wording.
+         *
+         * AND THE SAME QUESTION THE IN-PROCESS DOOR ASKS, which this one asked of nothing at all.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf has its message relayed from here,
+         * and nothing leaving here carries a statement or a value bound to one.
+         *
+         * WHAT THIS SURFACE IS. The answer goes into the calling Bot's model as the tool result, so
+         * it is the widest audience an error message in this deployment reaches: a model repeats
+         * what it is handed — to the person asking, into whatever it writes next, and to the next
+         * tool it calls. `plugins/tools.ts` wraps the identical `callTool` for a Bot running in
+         * this process and has refused that shelf for exactly this reason since the
+         * `ServerRowAmbiguousError` finding; the two doors to one store disagreeing meant a query
+         * failure came back as `Failed query: … params: linear, usr_…` through one of them and as a
+         * fixed sentence through the other. Which door a Bot arrives at is a deployment topology
+         * decision and was never a disclosure decision.
+         *
+         * AND THROUGH {@link withoutStatement} AS WELL, because the two answer different questions
+         * and `isDeploymentFault` says so itself: it "settles who may be told, not what". The shelf
+         * decides whether this audience may hear a sentence at all; the door decides what any
+         * sentence is allowed to contain. Today the two overlap on a query failure and this arm can
+         * only be reached by something neither recognises — which is exactly the state the last two
+         * findings in this area were found in, one predicate apart from a leak.
+         */
         return context.json({
-          text: `${REFUSAL_MARKER} ${error instanceof Error ? error.message : "That tool could not be called."}`,
+          text: `${REFUSAL_MARKER} ${
+            error instanceof Error && !isDeploymentFault(error)
+              ? withoutStatement(error)
+              : "That tool could not be called."
+          }`,
           isError: true,
         });
       }
