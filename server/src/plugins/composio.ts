@@ -1,3 +1,4 @@
+import { cutAtCodeUnits } from "../channels/text";
 import { brokerSentence, flagOf } from "./broker";
 import { type ListedTool, MAX_RESULT_CHARS, type McpCallResult } from "./mcp";
 
@@ -1320,7 +1321,7 @@ function listingSentence(toolkit: string, error: unknown): string {
 function cap(text: string): { text: string; truncated: boolean } {
   if (text.length <= MAX_RESULT_CHARS) return { text, truncated: false };
   return {
-    text: `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated]`,
+    text: `${cutAtCodeUnits(text, MAX_RESULT_CHARS)}\n\n[truncated]`,
     truncated: true,
   };
 }

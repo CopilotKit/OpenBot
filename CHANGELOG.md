@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A long Composio result or failure is cut between characters, not through an emoji
+
+A Composio action's answer over 20,000 characters, and a failure sentence as long, were cut by UTF-16
+code unit. When the cut landed inside an emoji or any other character outside the Basic Multilingual
+Plane, the text handed to the model ended on half of it: a lone surrogate that JSON carries as a bare
+`\ud83d` and UTF-8 turns into a replacement character. The cut now stops one unit short in that case,
+the way the MCP and built-in transports' cuts already do. Anything that fits is untouched, and the
+note saying the answer was cut reads as before.
+
 ## 0.0.12
 
 ### A deployment can broker its Bots into a few hundred apps through Composio
