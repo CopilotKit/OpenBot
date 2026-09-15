@@ -8,6 +8,10 @@ import {
   readRunAssertion,
   sameToken,
 } from "../src/agents/callback-token";
+import { createApp } from "../src/app";
+import { loadConfig } from "../src/config";
+import { PluginRefusedError, type PluginStore } from "../src/plugins/store";
+import { testEnvironment } from "./support/environment";
 
 const KEY = "test-encryption-key-not-a-real-one";
 const RUN = { botId: "knowledge", actorId: "user_7", runId: "run_1" };
@@ -349,5 +353,147 @@ describe("how deep a run is", () => {
     expect(readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.threadId).toBe(
       undefined,
     );
+  });
+});
+
+/**
+ * WHAT THE ROUTE THIS TOKEN GUARDS HANDS BACK WHEN THE CALL FAILS, which nothing exercised at all.
+ *
+ * `/api/agent-tools/call` is where a Bot running its own loop in its own process calls a tool. What
+ * it answers with goes straight into that model's context as the tool result, so this surface is
+ * the widest audience any error message in this deployment reaches: a model repeats what it is
+ * given, to the person asking and into whatever it writes next.
+ *
+ * THE IN-PROCESS SIBLING ALREADY DECIDES THIS and decides it the other way. `plugins/tools.ts`
+ * wraps the identical `callTool` for a Bot running here, and its catch refuses to relay anything on
+ * the `isDeploymentFault` shelf — "a contradiction in this deployment's own tables says nothing to
+ * a model". The route below relayed `error.message` with no such question asked, so one of the two
+ * doors to one store answered a query failure with `Failed query: … params: …` and the other
+ * answered "That tool could not be called." Which door a Bot came through is a deployment topology
+ * decision, not a disclosure decision.
+ */
+describe("the tool-call route a callback token guards", () => {
+  /** The deployment-wide token, which authenticates without naming a Bot of its own. */
+  const DEPLOYMENT_TOKEN = "deployment-wide-agent-token";
+
+  const config = loadConfig(
+    testEnvironment({ AGENT_TOOL_TOKEN: DEPLOYMENT_TOKEN }),
+  );
+
+  /**
+   * The app with one thing in it: a store whose `callTool` throws what the test is about.
+   *
+   * `pluginStore` is the fifteenth positional argument, so the gap is spelled rather than guessed —
+   * a miscount here would silently hand the store to `componentStore` and leave the route absent.
+   */
+  function appWhoseToolThrows(thrown: unknown) {
+    return createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        callTool: async () => {
+          throw thrown;
+        },
+      } as unknown as PluginStore,
+    );
+  }
+
+  /** What the model is handed, as the route builds it. */
+  async function toolResult(thrown: unknown): Promise<string> {
+    const response = await appWhoseToolThrows(thrown).request(
+      "http://openbot.local/api/agent-tools/call",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-openbot-agent-token": DEPLOYMENT_TOKEN,
+        },
+        body: JSON.stringify({
+          name: "mcp__linear__LINEAR_CREATE_ISSUE",
+          args: {},
+          run: mintRunAssertion(
+            { botId: "knowledge", actorId: "usr_7", runId: "run_1" },
+            config.keyEncryptionKey,
+          ),
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { text: string; isError: boolean };
+    expect(body.isError).toBe(true);
+    return body.text;
+  }
+
+  /**
+   * The drizzle shape, spelled the way `plugin-store.integration.test.ts` spells it: the statement
+   * and every value bound to it in `message`, the driver's own error on `cause`, and `query` and
+   * `params` as own properties — which is what {@link isQueryFailure} recognises it by.
+   */
+  function queryFailure() {
+    return Object.assign(
+      new Error(
+        'Failed query: select "credential_id" from "mcp_user_credentials" where "server_id" = $1 and "user_id" = $2 params: linear, usr_7',
+      ),
+      {
+        query:
+          'select "credential_id" from "mcp_user_credentials" where "server_id" = $1 and "user_id" = $2',
+        params: ["linear", "usr_7"],
+        cause: new Error("canceling statement due to statement timeout"),
+      },
+    );
+  }
+
+  test("a query of this deployment's own never reaches the model that asked", async () => {
+    const text = await toolResult(queryFailure());
+
+    /*
+     * Not the statement, and not the values bound to it. On this path those are server ids, user
+     * ids and credential ids, and a model handed them can repeat them to the person asking, quote
+     * them into a document it writes, or send them to the next tool it calls — which is why this
+     * is the worst of the three places this shape has been found leaking.
+     */
+    expect(text).not.toContain("Failed query");
+    expect(text).not.toContain("params:");
+    expect(text).not.toContain("mcp_user_credentials");
+    expect(text).not.toContain("usr_7");
+    // The same thing the in-process door says about the same shelf, which is the property.
+    expect(text).toContain("That tool could not be called.");
+  });
+
+  /**
+   * AND THE REFUSAL STILL SPEAKS, because a guard that silences everything is not the fix.
+   *
+   * A `PluginRefusedError` is this deployment telling a Bot it may not do something, and its
+   * sentence is written for whoever reads the answer. Losing it would turn every policy boundary
+   * into an unexplained failure, which is what the marker on this route exists to prevent.
+   */
+  test("a refusal this deployment wrote is still relayed in full", async () => {
+    expect(
+      await toolResult(
+        new PluginRefusedError(
+          "No Bot holds linear/LINEAR_CREATE_ISSUE, so nothing was called.",
+          null,
+        ),
+      ),
+    ).toContain("No Bot holds linear/LINEAR_CREATE_ISSUE");
+  });
+
+  /** And a vendor's own words, which are the useful half of a 403 and are nobody's secret. */
+  test("a vendor's own sentence is still relayed", async () => {
+    expect(
+      await toolResult(new Error("The caller does not have permission.")),
+    ).toContain("The caller does not have permission.");
   });
 });

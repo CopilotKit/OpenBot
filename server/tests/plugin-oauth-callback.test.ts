@@ -54,9 +54,21 @@ function app(input: {
   personHasAccess?: (userId: string) => Promise<boolean>;
   /** What the vault does with the grant. Records it by default; a test may refuse instead. */
   recordConnection?: (connection: Recorded) => Promise<void>;
+  /**
+   * What the client read does. Answers a dynamic client by default; a test may throw instead.
+   *
+   * The callback asks it with no session in hand, so a throw here is the one failure on this route
+   * that nothing above it was ever going to catch.
+   */
+  oauthClientFor?: () => Promise<{ clientId: string; clientSecret: string }>;
 }) {
   const store = {
-    oauthClientFor: async () => ({ clientId: "dyn-1", clientSecret: "" }),
+    // The brokered read the connect handler makes before anything about the consent flow. This
+    // deployment has no brokered rows, so it answers nothing and the flow below is untouched.
+    serverAddress: async () => undefined,
+    oauthClientFor:
+      input.oauthClientFor ??
+      (async () => ({ clientId: "dyn-1", clientSecret: "" })),
     ensureOAuthClient: async () => ({ clientId: "dyn-1", clientSecret: "" }),
     recordConnection:
       input.recordConnection ??
@@ -457,5 +469,89 @@ describe("a token endpoint that is not a usable address", () => {
     expect(
       said.find((line) => line.includes("oauth-token-endpoint-unreachable")),
     ).toBeUndefined();
+  });
+});
+
+/**
+ * A check on this route that raised instead of answering.
+ *
+ * CRITERION. Every way out of `GET /oauth/callback` is a redirect. There is no request to this
+ * endpoint that ends without a `Location`.
+ *
+ * REASON. The route's own header says every failure ends the same way — back at Settings with a
+ * word about what happened, and nothing written — and it was true of every failure the handler
+ * ASKED for and of none of the failures its questions could raise. `personHasAccess` reaches the
+ * people store and `oauthClientFor` reaches the vault, and either throwing put the person who had
+ * just consented at another company on a bodyless 500 with no `Location` at all: no page, no
+ * notice, nothing to press, and a browser left on this API's origin, which locally serves no pages
+ * whatsoever. It is the exact answer this route was written to make impossible, and
+ * `redeemAuthorizationCode`'s own guard against the same thing names it in as many words.
+ */
+describe("a callback whose own checks failed", () => {
+  test("an access check that raised still ends at Settings", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({
+      recorded,
+      personHasAccess: async () => {
+        throw new Error("could not reach the people store");
+      },
+    });
+    const state = await sealConnectState(
+      { userId: "user-1", serverId: "notion", verifier: "v-1" },
+      KEY,
+    );
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+
+    try {
+      await withWillingVendor(async (asked) => {
+        const response = await hono.request(callbackUrl(state));
+        expect(response.status).toBe(302);
+        expect(response.headers.get("location")).toBe(FAILED);
+        // Refused before the code was redeemed, exactly as a deny-listed person is: a check that
+        // could not be made is not a check that passed.
+        expect(asked).toEqual([]);
+      });
+    } finally {
+      console.error = realError;
+    }
+
+    expect(recorded).toEqual([]);
+    // Told, for the reason the refused vault write is told: this one is the deployment's own fault
+    // and the person is being handed a sentence that deliberately says nothing about which.
+    expect(
+      said.find((line) => line.includes("oauth-callback-failed")),
+    ).toBeDefined();
+  });
+
+  test("a vault that would not answer for the client ends the same way", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({
+      recorded,
+      oauthClientFor: async () => {
+        throw new Error("could not reach the vault");
+      },
+    });
+    const state = await sealConnectState(
+      { userId: "user-1", serverId: "notion", verifier: "v-1" },
+      KEY,
+    );
+    const realError = console.error;
+    console.error = () => {};
+
+    try {
+      await withWillingVendor(async () => {
+        const response = await hono.request(callbackUrl(state));
+        expect(response.status).toBe(302);
+        expect(response.headers.get("location")).toBe(FAILED);
+      });
+    } finally {
+      console.error = realError;
+    }
+
+    expect(recorded).toEqual([]);
   });
 });

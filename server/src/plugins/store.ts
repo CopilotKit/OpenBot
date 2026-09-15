@@ -13,14 +13,22 @@ import {
   type CredentialExecutor,
   type CredentialSecretReader,
   type CredentialStore,
+  CredentialUnusableError,
   decryptCredentialForUse,
   decryptSecret,
   encryptSecret,
 } from "../credentials";
 import type { Database } from "../db/client";
 import {
+  databaseComplaint,
+  isQueryFailure,
+  reasonWithoutStatement,
+  withoutStatement,
+} from "../db/query-failure";
+import {
   agentProfiles,
   agents,
+  composioConnections,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -32,6 +40,22 @@ import {
   skillTools,
 } from "../db/schema";
 import {
+  accessFor,
+  type ServerAccess,
+  ServerUnresolvableError,
+} from "./access";
+import {
+  type BrokerConnection,
+  BrokerRefusalError,
+  BrokerUnconfiguredError,
+  type ComposioBroker,
+  type Decides,
+  isFieldScheme,
+  type RecordedScheme,
+  type SchemeKind,
+  schemeKind,
+} from "./broker";
+import {
   type CatalogueEntry,
   catalogueEntry,
   classifyTool,
@@ -39,8 +63,14 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
+import {
+  asksForArguments,
+  askAction as composioAskAction,
+  toolkitOf,
+  VERSION_ARG,
+} from "./composio";
 import { inspectToolArguments } from "./content-governance";
-import { McpServerError } from "./mcp";
+import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
 
@@ -87,6 +117,15 @@ export type ToolRecord = {
   /** `<serverId>/<name>`. What a grant names and what the model's tool name is derived from. */
   ref: string;
   effect: "read" | "write";
+  /**
+   * Whether the vendor warns that this action destroys something.
+   *
+   * Beside {@link ToolRecord.effect} rather than folded into it: the rule engine judges reads and
+   * writes and gains nothing from a third value, while a person deciding whether to switch an action
+   * on is asking a different question. Recorded from the vendor's own labels, so false is an absence
+   * of a claim rather than a claim of safety.
+   */
+  destructive: boolean;
   grantedTo: string[];
 };
 
@@ -131,6 +170,20 @@ export type ServerRecord = {
    * there is nothing for it to collect.
    */
   dynamicClient: boolean;
+  /**
+   * How this server's authorization config was created, for the brokered rows that have one.
+   *
+   * WHAT WAS WRITTEN DOWN WHEN SOMEBODY ENABLED THE APP, NOT WHAT THE CATALOGUE PUBLISHES TODAY.
+   * The catalogue is the vendor's, and an app it starts advertising under a different scheme has
+   * not moved the config this deployment already created — so a reader deciding what a live
+   * connection does must read this and not a fresh listing. The `authScheme` column carries the
+   * same fact and the same warning about which vocabulary it holds: the vendor's own scheme
+   * literals (`OAUTH2`, `DCR_OAUTH`, `API_KEY`, `NO_AUTH`, and the rest), never a
+   * {@link BrokerConnection} kind.
+   *
+   * Null is not an older brokered row. It is a row that is not brokered at all.
+   */
+  authScheme: string | null;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.
@@ -139,6 +192,36 @@ export type ServerRecord = {
    * about, which is why it is here rather than inferred by a screen comparing two lists.
    */
   withdrawn: WithdrawnGrant[];
+};
+
+/**
+ * A server row as the surfaces that only need to know where it is see it.
+ *
+ * Four columns of {@link ServerRecord} and none of what hangs off it, because the callers this is
+ * for ask one question: which vendor is this row addressed at. The title travels with the url
+ * because their refusals name it — "You already have an account connected to Linear" is the app's
+ * name, which is the only one of the two a person has ever seen on a screen.
+ */
+export type ServerAddress = {
+  id: string;
+  title: string;
+  url: string;
+  /**
+   * How this row's authorization config was created, for the brokered rows that have one.
+   *
+   * THE RECORDED SCHEME, NEVER A FRESH CATALOGUE READ. An app's config was created as one
+   * particular scheme and every connection standing against that config depends on it, so the
+   * connect path has to open the flow this column names rather than the one the catalogue
+   * publishes for the app today. Re-derived from a listing instead, a vendor that starts
+   * advertising a new scheme would silently move live connections onto a different flow — minting
+   * a consent link against a config that holds keys, or asking for a key where a consent screen is
+   * waiting.
+   *
+   * The same vocabulary the column holds, which the schema comment spells out: the vendor's own
+   * scheme literals, never a {@link BrokerConnection} kind. Null is not an older brokered row; it
+   * is a row that is not brokered.
+   */
+  authScheme: string | null;
 };
 
 export type SkillRecord = {
@@ -196,6 +279,151 @@ export type PluginDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 
+/**
+ * What one check of somebody's brokered account spent, and what came of it.
+ *
+ * FOUR OUTCOMES AND NOT A PAIR OF NULLABLE FIELDS, because the fourth one is what the pair could
+ * not say and its absence was destructive. `verified: false` used to cover both "the app published
+ * nothing safe to try" and "it ran and the vendor refused the key", which is why the action's name
+ * travels beside the verdict at all — and a THIRD thing was quietly landing in the second of those:
+ * a vendor nobody could reach. `callTool` never throws, so a Composio outage, a socket that closed
+ * and a package that cannot parse an answer all arrived as `isError: true` and were read as the
+ * vendor rejecting the key. See {@link ActionAnswer} in `./composio` for the reading that settles
+ * it, and {@link composioConnections.probeAction} for what each of these may be written down as.
+ *
+ * `probe` IS THE ACTION A CHECK CAN BE SHOWN TO HAVE SPENT, and it is null on both outcomes where
+ * nothing can be shown — which is the whole structural point of this shape rather than a nicety.
+ * That field is what the writer records in `probe_action`, and a name beside `verified: false` is
+ * the accusation "it ran and the vendor refused your key". An unreachable vendor therefore has no
+ * name to give the writer, and cannot make that claim even by mistake; what was attempted is
+ * carried separately, for the trail and for the sentence somebody reads.
+ */
+export type BrokeredProbe =
+  /** The app published nothing safe to call, or no row for it is left. Nothing was tried. */
+  | { outcome: "nothing"; probe: null }
+  /** It ran in this person's account and the vendor took the key. */
+  | { outcome: "answered"; probe: string }
+  /**
+   * It ran in this person's account and the app answered with a failure. `sentence` is Composio's
+   * own account of it.
+   *
+   * AND THAT IS THE WHOLE OF WHAT IT PROVES, WHICH IS WHY IT IS NOT CALLED `refused`. It was, and
+   * every reader took the name at its word: the connect path DELETED the account it had made
+   * seconds earlier and told the person what they entered did not work, and the re-check path
+   * wrote the named-probe-beside-`verified: false` pair, which the settings page draws as "your
+   * key was checked and rejected".
+   *
+   * NOTHING IN THE ENVELOPE SUPPORTS EITHER CLAIM. What arrives is Composio's
+   * `{ data, error, successful }` — no HTTP status, no error code, nothing structured about the
+   * credential — so a rate limit, a scope the key legitimately lacks for this one action, and a
+   * 404 for a resource the read action happens to name are all indistinguishable here from a key
+   * the vendor rejected. A person pasting a VALID key into an app that is rate-limiting had their
+   * brand-new working connection revoked with a message blaming them, and that is not recoverable
+   * by pressing anything: the key has to be fetched and typed again.
+   *
+   * SO THE TWO DESTRUCTIVE READINGS ARE GONE AND THE NAME NO LONGER INVITES THEM. The account
+   * stands, the row records the check as failed with the action it was spent on, and the sentence
+   * the person is shown is the app's own words rather than a verdict about their credential. If
+   * Composio ever publishes a status or an error code on this envelope, telling the two apart is
+   * a fifth outcome and the roster below is what will make somebody decide it everywhere.
+   */
+  | { outcome: "complained"; probe: string; sentence: string }
+  /**
+   * The vendor was not reached, or answered something nothing here can read, so NOTHING WAS
+   * LEARNED — about the key, and about whether the action ran at all. `attempted` is what would
+   * have been spent, which is a fact about this deployment's intent rather than about the account.
+   */
+  | {
+      outcome: "unreachable";
+      probe: null;
+      attempted: string;
+      sentence: string;
+    };
+
+/**
+ * The four outcomes as a ROSTER, which is what anything enumerating them is checked against.
+ *
+ * A union is a thing a fifth member can be added to in one line with nothing anywhere failing:
+ * every reader of this vocabulary asks `probed.outcome === "complained"` or `=== "unreachable"`, and a
+ * chain of equality tests has no opinion about the answer it was not written for. `unreachable` is
+ * itself the proof — it was added in round two and the screen that draws these outcomes went on
+ * rendering it with the sentence written for a different case. See {@link Decides}.
+ *
+ * PINNED TO THE UNION IN BOTH DIRECTIONS. `satisfies` holds this list inside the union, so a name
+ * misspelled here fails; {@link _ProbeRosterNamesTheWholeUnion} holds the union inside this list, so
+ * a member added to the union and not to this roster fails. Neither direction is worth having on its
+ * own: the pair is what makes the roster a restatement that cannot drift.
+ *
+ * SO A FIFTH OUTCOME COSTS TWO STEPS AND CANNOT SKIP EITHER. Adding it to the union fails `tsc`
+ * here and at every consumer's `Decides<…>` roster; adding it here to satisfy that then fails the
+ * table in `tests/composio-connection-kinds.test.ts`, which reads its rows off this list and has no
+ * cell for the new name. The compiler settles what must decide and the table settles what it does.
+ */
+export const BROKERED_PROBE_OUTCOMES = [
+  "nothing",
+  "answered",
+  "complained",
+  "unreachable",
+] as const satisfies readonly BrokeredProbe["outcome"][];
+
+/** The other direction of {@link BROKERED_PROBE_OUTCOMES}' pin. Type-only; erased entirely. */
+type _ProbeRosterNamesTheWholeUnion = Decides<
+  BrokeredProbe["outcome"],
+  Record<(typeof BROKERED_PROBE_OUTCOMES)[number], string>
+>;
+
+/**
+ * THE FOUR STATES A CONNECTION ROW MAY BE LEFT IN, named so the pair can be enumerated.
+ *
+ * `verified` and `probe_action` are one fact recorded in two columns, and
+ * {@link composioConnections.probeAction} enumerates the four readings of that pair in prose. Prose
+ * is what the client then modelled as three — the outage and the never-checked case share the
+ * mildest pair, and the screen drew one of them with the other's sentence. This is the same four
+ * with names, so a consumer that has to decide on them can be held to naming all four.
+ *
+ * NOT A COLUMN, NEVER WRITTEN ANYWHERE, AND NOT EXPORTED. The row carries the pair; this is the
+ * reading of it, and its one job is to be the value type {@link _ProbeOutcomeLeaves} is checked
+ * against.
+ *
+ *   `unchecked` — null probe, not verified. Nothing was tried, so nothing is known about the key.
+ *   `consented` — null probe, verified. A consent connection; the vendor's own yes is the evidence.
+ *   `checked`   — a named probe, verified. It ran in this account and the vendor took the key.
+ *   `failed`    — a named probe, not verified. It ran and the app answered with a failure, and the
+ *                 account still stands. The one state an operator has to act on.
+ *
+ * `failed` RATHER THAN `refuted`, AND THE RENAME IS THE FIX RATHER THAN A TIDY-UP. It was
+ * `refuted` — "the vendor refused the key", described in this file as "the accusation" — and
+ * nothing that writes this pair can establish that. See {@link BrokeredProbe}'s `complained`
+ * member: the envelope the verdict is read out of carries no status and no error code, so the
+ * pair says a check was spent and did not come back clean, and it stops there. Everything that
+ * renders it says the same, in the app's own words.
+ */
+type RecordedCheck = "unchecked" | "consented" | "checked" | "failed";
+
+/**
+ * WHICH OF THE FOUR A PROBE OUTCOME MAY EVER LEAVE BEHIND, the seam the two vocabularies meet at.
+ *
+ * Type-only and erased. It is a statement about {@link BrokeredProbe} rather than about any one
+ * writer, and it is here because `failed` is the state the whole shape of that type exists to
+ * withhold: an outcome carrying no probe name has no name to record, so it cannot reach that pair
+ * even by mistake. A fifth outcome has to say which of the four it may leave behind before anything
+ * compiles, which is precisely the question that went unasked when `unreachable` was added.
+ *
+ * THE ANSWERS ARE NARROWED TO {@link RecordedCheck} rather than left as free text, which is what
+ * makes this a contract and not a comment: a state invented here that the schema's four do not
+ * include fails, and so does one of the four renamed on one side of the seam only.
+ */
+type _ProbeOutcomeLeaves = Decides<
+  BrokeredProbe["outcome"],
+  {
+    nothing: "untouched";
+    answered: "checked";
+    complained: "failed";
+    unreachable: "untouched";
+  },
+  RecordedCheck | "untouched"
+>;
+
 export class PluginRefusedError extends Error {
   constructor(
     message: string,
@@ -219,6 +447,258 @@ export class CustomServerRefusedError extends Error {
     super(message);
     this.name = "CustomServerRefusedError";
   }
+}
+
+/**
+ * A state this deployment's own code says cannot exist, found existing.
+ *
+ * CRITERION. Nothing here is a vendor's doing, a credential's doing or anything a person asking can
+ * act on, so no path may record one of these as though a vendor had misbehaved.
+ *
+ * REASON. `refreshTools` wrapped the listing, the replace and both audit writes in one `catch` that
+ * copied every message into `lastError` and answered `{ tools: 0 }`. A plain `Error` is what the
+ * narrowing throws in {@link createPluginStore}'s `connectionTokenFor` raise, so a row that resolved
+ * to a brokered credential with no app in its url — or to a per-person credential with no
+ * `user-oauth` entry — came out on the Plugins page as a sentence about the vendor, next to a
+ * refresh that looked like it had merely failed. An operator reading that is sent to somebody else's
+ * status page over a contradiction in our own tables.
+ *
+ * A class rather than a message, because telling these apart by prose is telling them apart by a
+ * substring that a reword would silently change. Distinct from {@link PluginRefusedError}, which is
+ * a refusal somebody CAN act on and which does belong in `lastError` — an administrator who has not
+ * connected their account is the honest reason a listing did not happen.
+ */
+export class PluginInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PluginInvariantError";
+  }
+}
+
+/**
+ * Whether a throw is this deployment contradicting itself, rather than anything anybody asked for.
+ *
+ * CRITERION. Every audience boundary asks THIS instead of listing classes of its own. A fault it
+ * answers true for reaches an operator as its own sentence, on a surface only an operator can
+ * reach, and reaches everybody else as the fact that the call did not happen — no message, no
+ * column names, no instruction about a row.
+ *
+ * REASON. The distinction already existed and was drawn by hand, once, in each place that
+ * remembered to draw it: {@link PluginRefusedError} is relayed verbatim because it is a refusal
+ * the asker can act on, and everything else fell into a branch that copies `error.message`
+ * onwards. {@link ServerUnresolvableError} was caught by none of them — the refresh route rethrew
+ * it into the framework's default handler, which answers a bodiless 500, so the admin page said
+ * "That did not work" and named nothing; `grantedTools` put its message in a model's context,
+ * where a sentence telling an operator to correct a provenance column became a Bot's explanation
+ * to an end user of why their tool failed. Two audiences, one refusal, neither served.
+ *
+ * {@link PluginInvariantError} is on the same shelf and answers true for the same reason: it is
+ * this deployment finding a state its own code says cannot exist. That is not a vendor
+ * misbehaving and not a person's to act on mid-call, and its own docblock has said so since it
+ * was written — what it lacked was anywhere that asked.
+ *
+ * A PREDICATE RATHER THAN A SHARED BASE CLASS, because the two live in different modules and must
+ * keep doing so: `access.ts` is a leaf that `store.ts` imports, so the shelf cannot be declared
+ * once without one of them importing the other back.
+ */
+/**
+ * The one character no PostgreSQL `text` or `jsonb` value can hold, whatever the vendor sent.
+ *
+ * Not a length limit and not an encoding preference: the server rejects the statement outright,
+ * mid-transaction, and the rejection arrives as a query error rather than as anything about the
+ * value.
+ */
+const NUL = "\u0000";
+
+/**
+ * A schema this deployment cannot turn into a row, whatever the column would have said.
+ *
+ * Its own class so the one place that raises it and the one place that contains it are joined by
+ * something other than a substring: {@link storableSchema} is the only thrower, and the `try`
+ * around the call that turns a listing into rows is the only catcher. Nothing branches on the class
+ * — it is recorded the way anything else a vendor's answer could not be made into would be — but
+ * naming it keeps a later reader from mistaking it for a fault of this deployment's own.
+ */
+class SchemaUnstorableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SchemaUnstorableError";
+  }
+}
+
+/**
+ * The same JSON value with every U+0000 gone from it — out of the strings, and out of the keys
+ * above them.
+ *
+ * CRITERION ONE. What is removed is the CHARACTER. A string that merely SPELLS the escape — a
+ * backslash and then `u0000`, which is how a JSON Schema excludes control characters and is by far
+ * the commonest place those six letters legitimately appear — is handed back untouched.
+ *
+ * CRITERION TWO. Everything else is rebuilt identical: the same keys, the same nesting, the same
+ * scalars.
+ *
+ * WHAT THIS REPLACED, and why walking the DATA is not a stylistic preference. The strip used to run
+ * over the SERIALISED schema — `JSON.stringify(schema).replaceAll("\\u0000", "")` — which is
+ * escape-blind by construction. `JSON.stringify` writes a real backslash inside a string value as
+ * two of them, so a pattern such as `"[^\u0000-\u001f]"` reached the strip with its backslash
+ * doubled and had the TAIL of it eaten, leaving `\-`. That is not a JSON escape, so the
+ * `JSON.parse` wrapped around it threw a `SyntaxError` — from a line that sat outside BOTH `try`
+ * blocks in `refreshTools`. It left as a bodiless 500 with `lastError` still holding whatever it
+ * held before, and on the add path, which refreshes before it answers, it aborted the add AFTER the
+ * server row and its audit row had committed.
+ *
+ * Serialised text cannot tell the byte from the six letters that name it; parsed data can only ever
+ * hold one of them. So walking the data is what makes CRITERION ONE expressible at all.
+ *
+ * A SELF-REFERENTIAL VALUE IS REFUSED rather than quietly truncated, and `ancestors` holds only the
+ * chain currently being descended — so one object reached twice side by side is copied twice, which
+ * is what a plain JSON document does anyway. Nothing off a wire can be cyclic; a value built inside
+ * this process can, and it is a value `jsonb` would refuse in any case. Refused HERE it is a
+ * sentence the caller can record; left to the driver it is a statement dump.
+ */
+function withoutNul(value: unknown, ancestors: Set<object>): unknown {
+  if (typeof value === "string") return value.replaceAll(NUL, "");
+  if (typeof value !== "object" || value === null) return value;
+  if (ancestors.has(value)) {
+    throw new SchemaUnstorableError(
+      "The schema refers back to itself, so it is not a value JSON can hold.",
+    );
+  }
+
+  ancestors.add(value);
+  const stripped: unknown = Array.isArray(value)
+    ? value.map((item) => withoutNul(item, ancestors))
+    : Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [
+          key.replaceAll(NUL, ""),
+          withoutNul(nested, ancestors),
+        ]),
+      );
+  ancestors.delete(value);
+  return stripped;
+}
+
+/**
+ * {@link withoutNul} over a schema, answering in the type the column and the row builder use.
+ *
+ * The walk rebuilds an object as an object and a list as a list, so what comes back is the shape
+ * that went in — which is the same promise the `JSON.parse(JSON.stringify(...))` round trip this
+ * replaced made about everything except the escape it could not see. The narrowing says out loud
+ * what the parameter type already claims.
+ */
+function storableSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return withoutNul(schema, new Set()) as Record<string, unknown>;
+}
+
+/**
+ * What a vendor listed, as rows this database will actually take.
+ *
+ * CRITERION ONE. No two rows carry the same name, whatever the vendor listed.
+ *
+ * CRITERION TWO. No string reaching the insert contains U+0000, in a column or inside a schema —
+ * and nothing else about what the vendor wrote is altered to achieve it, which is a criterion of
+ * its own because the first attempt at this one failed it. See {@link storableSchema}.
+ *
+ * CRITERION THREE. Whatever this raises, its caller catches — see the `try` around the one call
+ * site. Everything here runs OUTSIDE the vendor `try` and before the transaction's own, so a throw
+ * from here left `refreshTools` unhandled: a bodiless 500, a `lastError` still holding whatever it
+ * held before, and an add aborted after its server row and its audit row had already committed.
+ *
+ * REASON. Both of these used to abort the replace from INSIDE the transaction and OUTSIDE the
+ * vendor `try` above it, so they came out of `refreshTools` as a raw `DrizzleQueryError` — whose
+ * message is `Failed query: <the whole statement>` followed by `params:` and every value bound to
+ * it. That reached an operator's page and the logs as a SQL dump, which is the same disclosure
+ * shape as a leaked credential one layer out, and it left `lastError` holding whatever was there
+ * before: stale, or null, on a refresh that had in fact failed.
+ *
+ * FIXED BY NOT REACHING THE DATABASE WITH IT, rather than by catching it better. A vendor that
+ * names one action twice is answering about one action — `mcp_tools`' `(server_id, name)` primary
+ * key says so, and the first listing is as good an answer as the second, so the duplicate is
+ * dropped rather than made into an error somebody has to act on. A control character in a
+ * description is not content anybody wants to keep either. What is left after this is a
+ * transaction that fails for reasons that are genuinely not the vendor's, which is what the
+ * comment on the replace has always claimed.
+ *
+ * FIRST OCCURRENCE WINS, and the order is the vendor's own. Anything else needs a rule for which
+ * of two identical names is the real one, and there is no such rule.
+ */
+function storableTools(serverId: string, listed: ListedTool[]) {
+  const byName = new Map<
+    string,
+    {
+      serverId: string;
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+      effect: "read" | "write" | null;
+      destructive: boolean;
+      version: string | null;
+    }
+  >();
+
+  for (const tool of listed) {
+    const name = tool.name.replaceAll(NUL, "");
+    if (byName.has(name)) continue;
+    byName.set(name, {
+      serverId,
+      name,
+      /*
+       * Defaulted where the COLUMN has a default, because that is what the previous mapping leaned
+       * on: it passed these two straight through, so a transport handing back undefined got the
+       * `""` and `{}` the schema declares. Reading a method off the value instead would turn the
+       * same absence into a TypeError thrown from outside the vendor `try`. Both fields are
+       * required by `McpTool` and supplied by every transport here; this keeps the tolerance the
+       * insert already had rather than adding a new answer.
+       */
+      description: (tool.description ?? "").replaceAll(NUL, ""),
+      /*
+       * By walking the parsed schema rather than its serialised text, because only one of those two
+       * can tell the character from the six letters that name it. See {@link storableSchema}: this
+       * used to strip the escape out of `JSON.stringify`'s output, which ate the tail of every
+       * legitimately-escaped backslash and left a string `JSON.parse` refused.
+       */
+      inputSchema: storableSchema(tool.inputSchema ?? {}),
+      /*
+       * What the vendor said, when the vendor said anything.
+       *
+       * Only Composio publishes an effect and a version, and an MCP server publishes a
+       * destructive hint — see `mcp.ts`. All three stay null or false for a transport that says
+       * nothing, and `classifyTool` reads null as silence rather than as a value, which is what
+       * leaves Notion and Drive classified by their reviewed write list exactly as they were.
+       */
+      effect: tool.effect ?? null,
+      destructive: tool.destructive ?? false,
+      version: tool.version?.replaceAll(NUL, "") ?? null,
+    });
+  }
+
+  return [...byName.values()];
+}
+
+export function isDeploymentFault(error: unknown): error is Error {
+  return (
+    error instanceof ServerUnresolvableError ||
+    error instanceof PluginInvariantError ||
+    /*
+     * A query this database refused is on the shelf for the reason the other two are: it is not a
+     * vendor's doing, it is not the asker's to act on, and its message is the one thing here that
+     * must not travel. The replace in `refreshTools` was fixed at its own site; every other query
+     * on the call path — the advertised-tool read, the connection gate, the vault read, the locked
+     * credential swap — throws the same shape into a `catch` that copies `error.message` onward,
+     * so answering it here is what makes the four audiences agree without four more branches.
+     *
+     * Callers that SHOW the sentence to an operator must still ask {@link withoutStatement} for
+     * it rather than reading `.message`; this predicate settles who may be told, not what.
+     */
+    isQueryFailure(error)
+  );
+}
+
+/** The operator-facing sentence for a fault on that shelf, with no statement in it. */
+export function deploymentFaultSentence(error: Error): string {
+  return withoutStatement(error);
 }
 
 /**
@@ -291,8 +771,11 @@ export function refFromToolName(toolName: string): string | null {
  * the vendor. Naming those would be noise in front of the one case that has no second barrier at all
  * — Notion, whose access is per-page on a consent screen and whose `scopes` are therefore empty.
  *
- * A server with no catalogue entry is not reconciled either, and for the opposite reason: nothing
- * reviewed says any tool of theirs only reads, so all of them are already writes.
+ * A server with no catalogue entry is not reconciled either, and the two shapes that reach here do
+ * so for different reasons. A brokered app's actions are classified from the vendor's own
+ * per-action label rather than from a list here, so there is no hand-written under-inclusion to
+ * find. A server an administrator added by URL has neither a label nor a list, so every tool it
+ * offers is already a write and there is no wrongly-permitted read to reconcile.
  *
  * Sorted, so two readings of the same listing produce the same row.
  */
@@ -312,21 +795,56 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
 /**
- * Whose credential reaches this server, as the trail names it.
+ * The two things an actor field says when the actor is not a person, and they are not the same
+ * thing.
  *
- * One definition, because this was two: `connectionTokenFor` returned it and the audit payload
- * recomputed the same condition a few lines later. Two expressions for one fact can disagree, and
- * the one place that would show is an audit row claiming a call ran as somebody it did not — which is
- * the row a per-person connector exists to be able to trust.
+ * CRITERION. A field whose purpose is to name who did something must never be written as the empty
+ * string. An absent field reads as absent; `""` reads as a value, so a reader grouping the trail by
+ * actor gets a person called nothing, and every count of "acts by X" is quietly wrong about them.
  *
- * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
- * `builtin` is the third case and the only one with no credential at all — the actor is not whose
- * token was used, it is whose rows were touched.
+ * `deployment` is a positive answer: nobody was asking because the deployment itself acted — a
+ * shared credential, a public endpoint, a refresh it ran on its own behalf immediately after an app
+ * was added. `unattributed` is the opposite, and the distinction is the whole point of having two:
+ * something happened that SHOULD have had a person behind it and this deployment could not say who.
+ * `identifyActor` answers `{ id: "" }` for exactly that, and the run is then refused — which is
+ * precisely the moment the trail is worth reading, so it must not be the moment it goes blank.
+ *
+ * Neither is an address, so neither can collide with a user id: every actor written here otherwise
+ * is `users.id` or the email a session resolved to.
+ *
+ * NOT THE SAME AXIS AS `initiator_kind`, and a row carrying both is not contradicting itself.
+ * `initiator_kind` answers what set a run in motion; this field answers whose account it reached
+ * and who can be named for it. So `initiator_kind: "person"` beside `actor: "unattributed"` reads
+ * correctly as a person-initiated request whose person this deployment could not identify. That is
+ * the honest reading, and it is the reason this is NOT recorded as `deployment`: that would assert
+ * the call went out on the deployment's own credential, and it did not go out at all.
+ *
+ * `DEPLOYMENT_INITIATOR`'s own doc claims the case of "refusing a caller it could not identify",
+ * which overlaps this one and would answer it the other way. Nothing sends it there — the tool path
+ * defaults its initiator to person and `identifyActor` returns an empty id rather than a deployment
+ * — so the overlap is in the prose, not in the behaviour. It is left alone deliberately rather than
+ * resolved by widening either vocabulary unilaterally; whoever owns that constant should narrow its
+ * sentence, or a third initiator kind should exist, and neither is this branch's call to make.
  */
-const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
-    ? actorId
-    : "deployment";
+const DEPLOYMENT_ACTOR = "deployment";
+const UNATTRIBUTED_ACTOR = "unattributed";
+
+/**
+ * Whose account this call went out as, for the trail.
+ *
+ * Reads the resolved descriptor rather than re-deriving from the entry's auth kind. That derivation
+ * had no answer for a Composio app — the entry is null, so it fell through to `deployment` for a call
+ * that ran in one person's own mailbox, which is the trail being wrong about the one thing a
+ * per-person connector exists for.
+ *
+ * A person-reached server with no actor is `unattributed` and never `deployment`: the call did not
+ * go out on a shared credential, it did not go out at all, and naming the deployment would assert
+ * an attribution that never happened. See {@link DEPLOYMENT_ACTOR}.
+ */
+const reachedAsFor = (access: ServerAccess, actorId: string): string =>
+  access.reachedAs === "person"
+    ? actorId || UNATTRIBUTED_ACTOR
+    : DEPLOYMENT_ACTOR;
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -535,6 +1053,21 @@ type StoredClient = { client: OAuthClient; registeredAt: Date | null };
  */
 const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
 
+/**
+ * The names that read as "tell me who this key belongs to".
+ *
+ * A PREFERENCE AND NOT THE RULE. What makes an action safe to probe with is decided by
+ * {@link createPluginStore}'s `probeActionFor` on the vendor's own labels; this is only which of the
+ * safe ones to reach for first. An identity call is the cheapest request an app has and the one
+ * whose failure most clearly means "this key is wrong" rather than "that record does not exist" —
+ * but sampling fifteen key-based apps in the live catalogue, only four publish one, so a chooser
+ * that INSISTED on this shape would refuse to probe most of the apps this deployment offers.
+ *
+ * Anchored at the end, because these are suffixes of a prefixed action name — `STRIPE_GET_ME`,
+ * `LINEAR_GET_ME` — and an unanchored match would take `SLACK_PROFILE_SET` for an identity read.
+ */
+const IDENTITY_ACTION = /(_GET_ME|_PROFILE|_CURRENT_USER|_USER_INFO|_WHOAMI)$/;
+
 /** What a vendor's token endpoint gave back for a refresh token. */
 export type AccessToken = {
   accessToken: string;
@@ -597,9 +1130,44 @@ export type PluginStoreOptions = {
     registrationUrl: string;
     redirectUri: string;
   }) => Promise<OAuthClient | null>;
+  /**
+   * Composio the broker, absent on a deployment that has not configured one.
+   *
+   * OPTIONAL BECAUSE ITS ABSENCE IS A STATE RATHER THAN A MISCONFIGURATION. An unset
+   * `COMPOSIO_API_KEY` is the documented default: where it is unset there is nothing to connect,
+   * nothing to grant and no brokered tool for a Bot to call, and what is left on screen is one row
+   * that goes nowhere under More apps on the admin Plugins page. So the store is constructible
+   * without one and every path that needs one says so by raising {@link BrokerUnconfiguredError}.
+   * A required field would make every caller that never enables an app — the routes, the tests
+   * above — invent a broker to get a store.
+   */
+  broker?: ComposioBroker;
   /** Where the vendor sends people back; needed to (re)register a dynamic client. */
   redirectUri?: string;
 };
+
+/**
+ * The literal recorded on the row, which is the scheme a later call must keep using.
+ *
+ * TYPED AS {@link RecordedScheme} RATHER THAN `string`, so that what this writes and what
+ * {@link schemeKind} recognises are held to one set by the compiler. A literal spelled here that
+ * the reader does not know would be read as `unreadable` — a key app that connects nobody, or a
+ * consent app no confirm can verify — and nothing but this annotation would say so.
+ */
+function schemeFor(connection: BrokerConnection): RecordedScheme | null {
+  switch (connection.kind) {
+    case "consent":
+      return "OAUTH2";
+    case "self-registering":
+      return "DCR_OAUTH";
+    case "fields":
+      return connection.authScheme;
+    case "no-auth":
+      return "NO_AUTH";
+    case "unsupported":
+      return null;
+  }
+}
 
 export function createPluginStore(options: PluginStoreOptions) {
   const { database, auditStore, credentials, encryptionKey } = options;
@@ -612,6 +1180,9 @@ export function createPluginStore(options: PluginStoreOptions) {
   const exchangeRefreshToken =
     options.exchangeRefreshToken ?? exchangeRefreshTokenOverHttp;
   const registerClient = options.registerClient ?? registerDynamicClient;
+  // No default, unlike the seams above: there is no real implementation in this tree to fall back
+  // to, and a deployment with no Composio key is supposed to have no broker. See `./broker`.
+  const broker = options.broker;
 
   /*
    * One exchange at a time per (server, person). A rotating vendor invalidates the refresh
@@ -731,6 +1302,24 @@ export function createPluginStore(options: PluginStoreOptions) {
    * two reach a person very differently: an error becomes "that tool could not be called", which is
    * what a vendor being down looks like, while a withdrawn grant is nobody's fault and has an
    * obvious next step. `reconnect` says which of the two to name.
+   *
+   * WHICH OF THE TWO IS DECIDED BY CLASS. {@link CredentialUnusableError} is the one thing the vault
+   * raises that means the credential is gone, and everything else that can come out of this call is
+   * a fault: a query this database refused, a connection it would not open, an envelope that would
+   * not decrypt. Those are rethrown untouched, which puts a query failure on the
+   * {@link isDeploymentFault} shelf where the four audiences already agree about it.
+   *
+   * WHAT THIS USED TO BE, and why the difference is not cosmetic. It asked whether `error.message`
+   * CONTAINED "revoked" or "not found". drizzle's message for a failed query begins `Failed query:
+   * select "encrypted_value", "revoked_at" from "credentials" …` — the column this very read selects
+   * — so every database fault on the vault read matched the first substring and was converted into
+   * `onRevoked`: a `PluginRefusedError`, which is the one class this codebase relays VERBATIM. A
+   * Postgres that was down told the model the credential had been withdrawn, told a browser the same
+   * through the routes that pass a refusal out as a 400, and wrote it into `mcp_servers.last_error`
+   * for an operator to act on — sending somebody to re-add a credential that was never the problem
+   * while the real fault was reported nowhere. The same argument {@link TokenRefusedError} carries a
+   * `code` for: a decision that reads prose is one rewording away from being wrong in silence, and
+   * this one did not even need the rewording.
    */
   async function secretFor(
     credentialId: string,
@@ -743,8 +1332,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         credentialId,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("revoked") || message.includes("not found")) {
+      if (error instanceof CredentialUnusableError) {
         throw new PluginRefusedError(onRevoked, null);
       }
       throw error;
@@ -752,28 +1340,190 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   /**
-   * The token one call goes out with, and whose it is.
+   * The token one call goes out with, and whose it is — decided from `access.credential`, so that
+   * this function and the audit row cannot disagree about whose account a call ran in.
    *
-   * For a `deployment-bearer` server this is what it always was: the one credential an administrator
-   * gave the server, used for everybody.
+   * For a `deployment-token` server this is what it always was: the one credential an administrator
+   * gave the server, used for everybody. A `none` server reaches the same branch and finds nothing
+   * to decrypt, which is the right answer for an endpoint that takes no credential at all.
    *
-   * For a `user-oauth` server it is the asker's own, and every branch that cannot prove it has the
+   * For a `brokered` server there is no token here AT ALL. The deployment's one key belongs to the
+   * transport and never travels through this function, so nothing here can leak it into a connection
+   * object, an error or an audit row. What this function contributes instead is the two refusals
+   * that have to happen before a call is spent at the broker: a run nobody is attributed for, and an
+   * asker who has not connected the app — so a person is told their own next step rather than shown
+   * the broker's error about an account it cannot find. A third refusal sits between those two, for
+   * a brokered row whose url names no Composio app; nothing in the product creates such a row, so no
+   * person's situation reaches it.
+   *
+   * For a `person-oauth` server it is the asker's own, and every branch that cannot prove it has the
    * asker's grant refuses. There is deliberately no fallback. A fallback is the one bug this design
    * exists to make impossible: answering out of whatever the deployment, or the last person to
    * connect, happened to be able to see — which returns a confident answer assembled from documents
    * the person asking cannot open, and looks exactly like a correct answer.
    *
-   * Nothing is cached. The refresh token is exchanged for an access token per call and the access
-   * token is thrown away, so there is no stored copy of anybody's access for a disconnect to have to
-   * find. That costs a round trip to the vendor's token endpoint on every call, which is the price
-   * of revocation being complete by construction rather than by cleanup.
+   * Nothing is cached on any path, and only on the `person-oauth` one is that a decision. There, the
+   * refresh token is exchanged for an access token per call and the access token is thrown away, so
+   * there is no stored copy of anybody's access for a disconnect to have to find. That costs a round
+   * trip to the vendor's token endpoint on every call, which is the price of revocation being
+   * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
+   * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
+   * here at all.
    */
   async function connectionTokenFor(
-    row: { id: string; url: string; credentialId: string | null },
+    row: {
+      id: string;
+      title: string;
+      credentialId: string | null;
+      /*
+       * NO `authScheme` HERE, DELIBERATELY. The scheme that decides whether a brokered call needs a
+       * connection row is the APP'S, read through `brokeredAppScheme` below — and this row's own
+       * column is the near-miss that reading replaced. A field kept here for convenience would be
+       * the wrong answer sitting in the parameter list of the function that must not use it.
+       */
+    },
     entry: CatalogueEntry | null,
     actorId: string,
+    access: ServerAccess,
   ): Promise<{ token?: string }> {
-    if (entry?.auth.kind !== "user-oauth") {
+    /*
+     * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
+     *
+     * Refused HERE rather than in the transport, for the two reasons the `user-oauth` branch below
+     * is: a person gets a sentence naming the step they can take, and no call is spent at the
+     * vendor finding out. The transport refuses an unattributed run again as a last line, so
+     * deleting either that guard or this one has to turn a test red. The unconnected case has no
+     * such twin: the transport has no notion of a connection at all, so the last line there is
+     * Composio itself — which is what refusing locally earns its place for, since it turns the
+     * broker's error about an account it cannot find into a sentence naming the person's own next
+     * step.
+     *
+     * The throw between the two is a third refusal, but not one anybody can act on: it fires only
+     * for a brokered row whose url names no Composio app, which nothing in the product can create.
+     * It is what keeps this gate keyed on the app the url names, and its own comment says why
+     * neither fallback is available.
+     *
+     * There is no token. The key belongs to the transport and never travels through this function, so
+     * nothing here can leak it into a connection object, an error or an audit row.
+     */
+    if (access.credential === "brokered") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+
+      /*
+       * Narrowing, and a refusal that is genuinely reachable.
+       *
+       * `access.toolkit` is the app slug read off this row's url in `access.ts`, and it is NULL
+       * whenever that url does not name a Composio app — `accessFor` still answers `brokered` for
+       * any row whose provenance column says composio, so `{ credential: "brokered", toolkit: null }`
+       * is a state a hand-edited or restored row really produces. The test beside `accessFor`
+       * asserts it, and `plugin-store.integration.test.ts` gates this branch end to end.
+       *
+       * A throw rather than a fallback, for the reason the `user-oauth` narrowing below throws: both
+       * alternatives fail open. Falling back to `row.id` checks the connection against a spelling
+       * nothing dials, and skipping the gate spends the deployment's shared key on a connector whose
+       * whole purpose is to keep one person's account out of another's. The compiler forces SOME
+       * narrowing here — drizzle's `eq` will not take `string | null` — but only the test named
+       * above stops that narrowing from being the fallback.
+       */
+      if (!access.toolkit) {
+        throw new PluginInvariantError(
+          `${row.id} resolves to a brokered credential with no Composio app in its url.`,
+        );
+      }
+
+      /*
+       * AN APP THAT NEEDS NO AUTHENTICATION HAS NO ROW TO FIND, AND CANNOT EVER HAVE ONE.
+       *
+       * `composio_connections` is the whole of the permission for a brokered call, and every row in
+       * it means one thing: this person granted this deployment access to their account at this
+       * app. A `NO_AUTH` app has no account and no consent — Composio refuses even to hold an
+       * authorization config for one — so nobody presses Connect and nothing could write the row.
+       *
+       * THE ALTERNATIVE WAS WRITING ONE ANYWAY, and it is worse than it looks. Offboarding reads
+       * this table to find what to revoke, the audit trail reads it to say what somebody had, and
+       * disconnect reads it to know what to end. Rows where no person consented and no account
+       * exists are indistinguishable, a year on, from rows where somebody did.
+       *
+       * The scheme is the one RECORDED when the app was enabled rather than a fresh read of the
+       * catalogue: a vendor that re-labels an app must not turn a gate off underneath a deployment
+       * that is already running.
+       *
+       * AND IT IS THE APP'S RECORDED SCHEME, NOT THIS ROW'S, WHICH IS THE SAME KEYING THE GATE
+       * BELOW ALREADY USES.
+       *
+       * CRITERION. Whether a brokered call needs a connection row is decided by the app the url
+       * names, out of the one row that answers for it — see {@link brokeredAppRow}.
+       *
+       * REASON. This read `row.authScheme`, the column on whichever row the call was dialled
+       * through, while the gate two lines down looks the connection up by TOOLKIT. Two rows may
+       * name one app, so the two halves of one decision were about different rows — and this half
+       * fails open: a duplicate row recording `NO_AUTH` at a key app's url skips the per-person gate
+       * entirely, and the deployment's own Composio key runs a call for somebody who connected
+       * nothing. The other direction merely refuses a call that could have gone through. A gate and
+       * its exemption have to be keyed on the same thing, and the gate's key is the app.
+       *
+       * ONE SMALL READ PER BROKERED CALL, which is the price of that. `mcp_servers` holds one row
+       * per connector on any deployment, and the call it guards is a network round trip to the
+       * vendor.
+       */
+      if ((await brokeredAppKind(access.toolkit)) === "none") return {};
+
+      /**
+       * WHAT THAT GATE ANSWERS FOR EACH KIND OF APP, WRITTEN DOWN BECAUSE THE LINE ABOVE DOES NOT.
+       *
+       * Type-only and erased; see {@link Decides}. This was the ONE scheme read in the file that
+       * compared a raw literal instead of asking {@link schemeKind}, so the vocabulary it decided on
+       * was not the vocabulary it read: `NO_AUTH` was a CONSENT-kind scheme, and this line exempted
+       * it from inside that member while every other consumer of `consent` demanded a row. One
+       * member answered two ways is the drift a closed vocabulary exists to make impossible, and the
+       * cost was paid next door — {@link confirmBrokeredConnection} asked the classifier, was told
+       * `consent`, and wrote the verified connection row this gate and the connect route both exist
+       * to keep out of that table. `none` is now its own member, and this asks for it by name.
+       */
+      type _NoAuthGateDecides = Decides<
+        SchemeKind,
+        {
+          key: "demands a connection row, because a key app has an account to hold one";
+          consent: "demands a connection row, because somebody consented and the row is that grant";
+          none: "lets the call through with no row at all — there is no account, so there is nothing anybody could have granted";
+          unreadable: "demands a connection row, which is the closed direction and the right one";
+        }
+      >;
+
+      /*
+       * Keyed on the app the call will run in, which is the one the url names.
+       *
+       * `row.id` is a display key and nothing holds it equal to the slug in the url, so a row named
+       * `gmail` at `composio://slack` passed this gate on a Gmail connection and then ran a Slack
+       * action — the person having connected an app they were never asked about.
+       */
+      const [connected] = await database
+        .select({ toolkit: composioConnections.toolkit })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, access.toolkit),
+            eq(composioConnections.userId, actorId),
+          ),
+        )
+        .limit(1);
+
+      if (!connected) {
+        throw new PluginRefusedError(
+          `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+          null,
+        );
+      }
+
+      return {};
+    }
+
+    if (access.credential !== "person-oauth") {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
@@ -781,6 +1531,24 @@ export function createPluginStore(options: PluginStoreOptions) {
           )
         : undefined;
       return { token };
+    }
+
+    /*
+     * Narrowing, not a second decision.
+     *
+     * `access.credential === "person-oauth"` is derived in `access.ts` from exactly this auth kind,
+     * so the branch above has already established it — but the derivation runs through a lookup
+     * table the compiler cannot follow back to `entry`. Nothing below re-decides whether this is a
+     * per-person server; it only reads the OAuth details that kind carries.
+     *
+     * A throw rather than a fallback. If the descriptor and the entry ever did disagree, answering
+     * out of the deployment's own credential is precisely the failure the comment above this function
+     * says must be impossible.
+     */
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new PluginInvariantError(
+        `${row.id} resolves to a per-person credential with no user-oauth catalogue entry.`,
+      );
     }
 
     /*
@@ -1577,6 +2345,49 @@ export function createPluginStore(options: PluginStoreOptions) {
     }
   }
 
+  /**
+   * A brokered app's row is not something another add path may write through.
+   *
+   * CRITERION. `addServer` and `addCustomServer` refuse outright when the id they are about to
+   * upsert already holds a row {@link accessFor} answers `brokered` for. Both of those paths write a
+   * url of their own choosing, and neither may write one over an app somebody is connected to.
+   *
+   * REASON. The url is the ONLY place the app slug is written down. `connectionTokenFor` reads it to
+   * decide whose account a call runs in, `removeServer` reads it to find the accounts to end at
+   * Composio, and `retireConnectionsFor` finds a person's rows by the same string — so the moment
+   * another path rewrites that url, every `composio_connections` row behind it stands for an app
+   * nothing in this deployment can name any more. Consent that no operation can withdraw is the one
+   * state this feature must not reach, and it is reachable by two ordinary administrative acts.
+   *
+   * REFUSED RATHER THAN REPAIRED, WHICH IS NOT THE ANSWER THE OTHER DIRECTION GETS.
+   * {@link addBrokeredApp} converts a row it lands on, because there the url it writes is the app
+   * and the row comes out saying so. Here the opposite is true: writing `provenance = "custom"`
+   * alongside the new url would make the row self-consistent and lose the accounts just the same.
+   * Consistent and orphaned is no better than contradictory and orphaned, so there is nothing to
+   * write — only an act to decline.
+   *
+   * AND THE ADMINISTRATOR IS LEFT A REAL STEP. Removing the app ends every account at the vendor on
+   * the way out and takes the row with it, after which the name is free for an endpoint. The
+   * refusal says that, because the alternative reading — "this name is taken forever" — is not true
+   * and would send somebody editing the database.
+   *
+   * ASKED WITH NO ENTRY, the reading {@link removeServer} uses, and for its reason: an entry can
+   * only ever SUPPRESS the brokered answer, so passing one a colliding id looked up would hide the
+   * brokered state of the very row most in need of protecting.
+   */
+  function requireNotBrokered(
+    serverId: string,
+    existing:
+      | { provenance: string; url: string; authScheme: string | null }
+      | undefined,
+  ) {
+    if (!existing) return;
+    if (accessFor(existing, null).credential !== "brokered") return;
+    throw new CustomServerRefusedError(
+      `${serverId} is a Composio app this deployment has enabled, and people may have connected their accounts to it. Remove the app first — which ends those accounts at Composio — and the name is then free.`,
+    );
+  }
+
   async function requireServer(serverId: string) {
     const [row] = await database
       .select()
@@ -1585,6 +2396,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       .limit(1);
     if (!row) throw new CatalogueEntryUnknownError(serverId);
 
+    // Null for a custom server, and every caller handles that by assuming the worst about it.
     const entry = catalogueEntry(row.id);
     if (row.provenance === "first-party" && !entry) {
       // The row outlived its catalogue entry, which means a build removed a vendor while a
@@ -1593,8 +2405,119 @@ export function createPluginStore(options: PluginStoreOptions) {
       // is one we agreed to talk to.
       throw new CatalogueEntryUnknownError(row.id);
     }
-    // Null for a custom server, and every caller handles that by assuming the worst about it.
-    return { row, entry };
+    /*
+     * Resolved here so every caller reads the same answer.
+     *
+     * Three call sites used to derive their own — the transport, the credential and the audit row —
+     * and a Composio app made all three of them wrong at once. One derivation means they cannot
+     * disagree, and `access.ts` is the only place a new kind of server has to be taught about.
+     */
+    return { row, entry, access: accessFor(row, entry) };
+  }
+
+  /** What a row that answers for an app is asked for: which row it is, and how the app connects. */
+  type BrokeredAppRow = { id: string; authScheme: string | null };
+
+  /**
+   * The one `mcp_servers` row that answers for the app a url names: its id, and its scheme.
+   *
+   * KEYED ON THE URL, which is where a brokered row records which app it is; `mcp_servers.id` is a
+   * display name and nothing holds the two equal. A row called `gmail` at `composio://slack` would
+   * have somebody's Slack key attached to a scheme read off Gmail's row — and, through the id this
+   * also answers, a probe chosen off Gmail's action list and spent on their Slack key. That stake is
+   * shared by every caller: {@link connectBrokeredWithFields}, {@link recheckBrokeredConnection},
+   * {@link confirmBrokeredConnection} and {@link disconnectBrokered} read the scheme,
+   * {@link probeBrokeredConnection} reads the id.
+   *
+   * AND ORDERED, BECAUSE THE URL IS NOT A KEY. `mcp_servers.url` has no unique index behind it, so
+   * two rows may name one app and `limit(1)` over them is the planner's choice rather than an
+   * answer. Each caller used to take it unordered and separately: the same person, the same app, and
+   * five readings free to disagree with each other and with themselves between two page loads. What
+   * that costs is a live key connection refused in words about a sign-in screen nobody used —
+   * "connect it the way it asks for", over an app connected exactly the way it asked — and, on the
+   * id, a Re-check the listing offers off the app's own row whose press resolves to the OTHER row,
+   * finds no action published there and reports that nothing could be tried: the `checkable`/`probe`
+   * deadlock, reached through the duplicate rather than through a composed id.
+   *
+   * SO THE READ IS ONE FUNCTION AND NOT A RULE EACH CALLER REPEATS. The lower id answers, which is
+   * the rule {@link brokeredConnectionsFor} names the app by, so the row the page shows an app under
+   * is the row every one of these reads off — and a sixth caller cannot re-derive the choice
+   * differently, because there is nothing here to re-derive.
+   *
+   * NULL FOR AN APP WITH NO ROW AT ALL, and that is an answer rather than a gap: a person can hold
+   * an account at an app this deployment has since removed, nothing names the scheme it was
+   * connected under any more, and every caller treats the null as "not an app we hold a key for" —
+   * or, for the probe, as "there is no app left to check".
+   */
+  async function brokeredAppRow(
+    toolkit: string,
+  ): Promise<BrokeredAppRow | null> {
+    const url = `composio://${toolkit}`;
+    return (await brokeredAppRowsAt([url])).get(url) ?? null;
+  }
+
+  /**
+   * The same answer for several urls at once, and the ONE PLACE the ordering rule is written.
+   *
+   * THE RULE IS SQL'S `order by id` AND THE FIRST ROW SEEN PER URL, which is what
+   * {@link brokeredAppRow} asks for one app and what {@link brokeredConnectionsFor} and
+   * {@link listServers} ask for many. Those three had their own spellings of it, and one of them —
+   * the listing — spelled it as a JavaScript `<` over rows it had already fetched. That is UTF-16
+   * code unit order; this is the deployment's collation. They agree for ASCII on a `C` database and
+   * are free to disagree anywhere else, and where they disagreed the settings page named an app
+   * under one row while every read behind its buttons was about another. So the rule is a function
+   * and the callers have nothing left to re-derive.
+   *
+   * A URL WITH NO ROW IS SIMPLY ABSENT from the map, which is the null {@link brokeredAppRow}
+   * answers and the connection {@link brokeredConnectionsFor} drops: a person can hold an account
+   * at an app this deployment has since removed, and there is no row to name it by.
+   *
+   * EMPTY IN, EMPTY OUT AND NO QUERY, because `inArray` with no values is a statement no database
+   * needs to be asked.
+   */
+  async function brokeredAppRowsAt(
+    urls: string[],
+  ): Promise<Map<string, BrokeredAppRow>> {
+    const answering = new Map<string, BrokeredAppRow>();
+    if (urls.length === 0) return answering;
+    const rows = await database
+      .select({
+        id: mcpServers.id,
+        url: mcpServers.url,
+        authScheme: mcpServers.authScheme,
+      })
+      .from(mcpServers)
+      .where(inArray(mcpServers.url, urls))
+      .orderBy(asc(mcpServers.id));
+    for (const row of rows) {
+      if (!answering.has(row.url)) {
+        answering.set(row.url, { id: row.id, authScheme: row.authScheme });
+      }
+    }
+    return answering;
+  }
+
+  /** {@link brokeredAppRow}'s scheme, for the callers that ask only what the app is connected with. */
+  async function brokeredAppScheme(toolkit: string): Promise<string | null> {
+    return (await brokeredAppRow(toolkit))?.authScheme ?? null;
+  }
+
+  /**
+   * What that scheme decides, which is what every caller actually branches on.
+   *
+   * ONE CLASSIFICATION OVER ONE ROW, and the second half of what {@link brokeredAppRow} is for.
+   * That function ends the disagreement about WHICH ROW answers for an app; this one ends the
+   * disagreement about what its column MEANS. They were separate questions and were answered
+   * separately: four callers each asked {@link isFieldScheme} and treated everything else — a
+   * consent scheme, a literal from another deployment, a null — as one answer, and only three of
+   * them could survive being wrong about it. The confirm is the fourth, and it WRITES.
+   *
+   * SO THE THIRD ANSWER TRAVELS, rather than being flattened at the call site. See
+   * {@link SchemeKind}: `unreadable` is what a caller needs in order to fail closed, and a boolean
+   * cannot carry it.
+   */
+  async function brokeredAppKind(toolkit: string): Promise<SchemeKind> {
+    return schemeKind(await brokeredAppScheme(toolkit));
   }
 
   return {
@@ -1636,6 +2559,28 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
+      /*
+       * Not over a brokered row. See {@link requireNotBrokered} for what such a row would lose.
+       *
+       * Unreachable from the shipped product as it stands — `addBrokeredApp` mints `composio-<slug>`
+       * and no catalogue entry is spelled that way — and asked anyway, because the row the check is
+       * about is by definition one that arrived some other way: a hand edit, a restore, a build
+       * whose catalogue named an app a past build brokered. This path writes the catalogue's url
+       * over whatever is there, which is exactly the write that strands the accounts.
+       */
+      const [existing] = await database
+        .select({
+          provenance: mcpServers.provenance,
+          url: mcpServers.url,
+          // Part of what `accessFor` resolves a row with — see there. Nothing on this path reads
+          // the answer's `reachedAs`, but the column travels with the other two so no caller has
+          // to know which of the four answers the one it wants depends on.
+          authScheme: mcpServers.authScheme,
+        })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, resolved.entry.key));
+      requireNotBrokered(resolved.entry.key, existing);
+
       await database
         .insert(mcpServers)
         .values({
@@ -1650,6 +2595,25 @@ export function createPluginStore(options: PluginStoreOptions) {
           target: mcpServers.id,
           set: {
             url: resolved.url,
+            /*
+             * THE WHOLE IDENTITY THE CATALOGUE DECIDES, not the url alone.
+             *
+             * These three columns and the url are one statement — this row is that reviewed entry —
+             * and an update that moved one of them and left the rest was a row describing two
+             * different servers at once. `provenance` is read by `requireServer`, which refuses a
+             * `first-party` row with no entry, and by `accessFor`, which reads it whenever there is
+             * no entry to overrule it; `vendor` is what the first-party rule is checked against.
+             * Left behind, a row that arrived by another path kept saying so at an address only the
+             * catalogue chose — so every surface that asks how a server got here answered with the
+             * way it USED to get here.
+             *
+             * The entry wins over the row everywhere else too (see `accessFor`), so this is that
+             * same order written down at the one moment the row is being established rather than
+             * read.
+             */
+            title: resolved.entry.title,
+            vendor: resolved.entry.vendor,
+            provenance: "first-party",
             /*
              * Left alone when the caller sends none, rather than cleared.
              *
@@ -1714,6 +2678,49 @@ export function createPluginStore(options: PluginStoreOptions) {
           `${input.id} is the name of a server this deployment already knows. Choose another.`,
         );
       }
+
+      /*
+       * Nor may it take the name of a screen. `/admin/plugins/composio` is a static route — the app
+       * directory's own page — and a static route is matched ahead of `/admin/plugins/$key`, so a
+       * server sitting at this id would be listed and then open somebody else's page instead of its
+       * own. Brokered servers are `composio-<slug>` and no catalogue entry is called this, which
+       * leaves a hand-typed id as the only way to reach it.
+       */
+      if (input.id === "composio") {
+        throw new CustomServerRefusedError(
+          "composio is the name of this deployment's own Composio screen, so a server added there could never be opened. Choose another.",
+        );
+      }
+
+      /*
+       * NOR THE NAMESPACE THE BROKERED ROWS ARE MINTED IN, which is the reservation above one step
+       * further out.
+       *
+       * CRITERION. No server added by URL may take an id beginning `composio-`, whether or not a row
+       * is sitting there today.
+       *
+       * REASON. {@link addBrokeredApp} composes its id as `composio-<slug>` from the app an
+       * administrator enabled, so that space is already spoken for by a path that writes
+       * `composio://` urls into it. Unreserved, the two paths write one row: enabling an app over a
+       * typed endpoint, or typing an endpoint over an app somebody is connected to. The second of
+       * those is the one that cannot be undone — see {@link requireNotBrokered} — and this is what
+       * stops either from arising in the first place, rather than catching them one row at a time.
+       *
+       * A PREFIX RATHER THAN A LOOKUP OF WHAT IS ENABLED TODAY. "Is there a brokered row at this id"
+       * is a question whose answer changes: an app removed this morning frees the name, and the next
+       * press of Add takes it back from whoever typed it in between. The namespace is what a reader
+       * of a grant or a policy rule can rely on without asking the database what year it is.
+       *
+       * It is the same objection the curated-slug refusal above makes, and the same one
+       * `addBrokeredApp` records for its own id: the id prefixes every tool name and is what a grant
+       * and a policy rule are written against, so a row shadowing another path's namespace inherits
+       * rules that were written about something else.
+       */
+      if (input.id.startsWith("composio-")) {
+        throw new CustomServerRefusedError(
+          `Names beginning composio- belong to the Composio apps this deployment enables, so ${input.id} is not a name a server added by URL can take. Choose another.`,
+        );
+      }
       if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(input.id)) {
         throw new CustomServerRefusedError(
           "A server name is lower-case letters, numbers and hyphens.",
@@ -1761,9 +2768,28 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       const credentialId = input.credentialId?.trim() || undefined;
       const [existing] = await database
-        .select({ url: mcpServers.url, credentialId: mcpServers.credentialId })
+        .select({
+          url: mcpServers.url,
+          credentialId: mcpServers.credentialId,
+          // Read for the refusal below. The namespace rule above already keeps this path away from
+          // every id `addBrokeredApp` mints; this is the same rule asked of the ROW, which is what
+          // covers one that arrived before the namespace was reserved, or by restore.
+          provenance: mcpServers.provenance,
+          // The third of what `accessFor` resolves a row with. See there.
+          authScheme: mcpServers.authScheme,
+        })
         .from(mcpServers)
         .where(eq(mcpServers.id, input.id));
+
+      /*
+       * Before the address rule below, because it is the stronger statement about the same write.
+       *
+       * That one is about a credential being carried to an address, and it lets an add through when
+       * no token is involved. This one is about the address ITSELF being the only record of which
+       * app a set of connections belongs to, and no absence of a credential makes that write
+       * survivable. See {@link requireNotBrokered}.
+       */
+      requireNotBrokered(input.id, existing);
 
       if (
         existing &&
@@ -1802,6 +2828,23 @@ export function createPluginStore(options: PluginStoreOptions) {
           set: {
             title: input.title,
             url: input.url,
+            /*
+             * WHAT THE ROW NOW IS, written beside the address that made it that.
+             *
+             * `vendor` is derived from the url on the way in, so leaving it behind while the url
+             * moved left the column naming a host this row no longer addresses — and it is what the
+             * first-party rule is checked against, not a caption. `provenance` is the same fact one
+             * level up: a row whose entry a build removed still reads `first-party`, and
+             * `requireServer` refuses exactly that shape as a vendor it can no longer check a pinned
+             * host for. Adding it by URL is what makes it a typed address rather than a reviewed
+             * one, so this is the act that settles the column.
+             *
+             * The one conversion this cannot make is out of a brokered row, which is refused above
+             * rather than written here: there the url is the only record of which app a set of
+             * consents belongs to, so a rewrite loses them whatever else is written alongside.
+             */
+            vendor: new URL(input.url).hostname,
+            provenance: "custom",
             /*
              * Kept when the caller names none, rather than cleared, for a reason beyond tidiness.
              *
@@ -1846,6 +2889,365 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * Enable one app of the broker's catalogue, which is a third way for a server to arrive.
+     *
+     * NO URL IS TAKEN FROM A CALLER, WHICH IS WHY THERE IS NO HOST RULE HERE. `addCustomServer`
+     * guards the address because the address is what an administrator typed and what a credential
+     * would then be spent at; this one composes `composio://<slug>` itself, and a brokered row is
+     * never dialled at a host at all — the transport reads the app off that url and asks Composio,
+     * over the deployment's own key. So the only thing left to check about the url is that it says
+     * what this call meant, and {@link toolkitOf} is what checks it: the slug goes in, the url comes
+     * back out through the very function `accessFor` will read it with, and a slug those two
+     * disagree about is refused rather than stored. A pattern written here instead would be a second
+     * opinion about the shape of an app name, and the reading that decides which app a call runs
+     * against is the one that has to be satisfied.
+     *
+     * THE AUTH CONFIG COMES BEFORE THE ROW, in that order and not the other. An auth config is what
+     * a person's connection is then created against, so a row written first is an app an
+     * administrator can see on the page, grant to a Bot and press Connect on, with nothing at the
+     * vendor for any of it to attach to. Asking first is also what makes a failure leave nothing
+     * behind: the broker throws, this call throws, and no row, no action and no audit entry claims
+     * an app was enabled. {@link ComposioBroker.ensureAuthConfig} is idempotent precisely so that
+     * enabling an app twice — two administrators, or a retried request — is allowed to do this.
+     *
+     * THE ID IS PREFIXED AND THE URL IS NOT. `composio-linear` is what prefixes tool names and what
+     * a grant and a policy rule are written against, so it must not land on a curated entry's key —
+     * which `accessFor` refuses outright as a row claiming to be two servers at once — nor on one of
+     * the ids the integration suite reserves for its own fixtures: `gmail`, `notion`, `bot_helper`.
+     * The prefix puts every brokered row out of reach of all of them. WHICH APP THE ROW IS still
+     * comes off the url and only off the url, because that is where `accessFor` and the brokered
+     * gate behind it both read it from; the id names the row and never the app, and nothing may
+     * start reading one as the other.
+     */
+    async addBrokeredApp(input: {
+      slug: string;
+      title: string;
+      by: string;
+      /**
+       * How this app connects, resolved from the catalogue row the administrator chose.
+       *
+       * Taken rather than derived here, because the caller has already read it off that row and a
+       * second derivation is a second answer — the one thing {@link BrokerConnection} exists to
+       * prevent. It decides what config is created at the vendor, and it is what this row records.
+       */
+      connection: BrokerConnection;
+    }): Promise<ServerRecord> {
+      // Before anything at all. A deployment with no key has no catalogue for this app to have been
+      // chosen from, so there is nothing here to half-do and nothing to say but the setting.
+      if (!broker) throw new BrokerUnconfiguredError();
+
+      const url = `composio://${input.slug}`;
+      if (toolkitOf(url) !== input.slug) {
+        throw new CustomServerRefusedError(
+          `${input.slug} is not a name a Composio app can have. An app is named in letters, numbers, underscores and hyphens, because that name is read back out of this row's url to decide which app a call is against.`,
+        );
+      }
+
+      /*
+       * WHAT THE ROW ALREADY SAYS, READ BEFORE ANYTHING IS WRITTEN, because after the upsert this
+       * question cannot be asked any more — the insert below would have answered it.
+       *
+       * It is the scheme the app's ANSWERING row records, which is what every brokered reader
+       * resolves and is not always the row the upsert names. See {@link brokeredAppRow}.
+       */
+      const recorded = await brokeredAppScheme(input.slug);
+
+      const configured = await broker.ensureAuthConfig({
+        toolkit: input.slug,
+        name: input.title,
+        connection: input.connection,
+      });
+
+      /*
+       * THE SCHEME THIS ENABLE MAY WRITE DOWN, WHICH IS NOT ALWAYS THE ONE THE CATALOGUE RESOLVES.
+       *
+       * CRITERION. What this row records is what the authorization config standing at Composio was
+       * created as — never what today's catalogue says the app could be connected with.
+       *
+       * REASON. {@link ComposioBroker.ensureAuthConfig} reuses a config of ours whatever scheme it
+       * holds, and it used to say nothing about having done so, so every path here wrote the
+       * catalogue's answer. An app enabled while Composio published only a key, and later given
+       * managed OAuth, came out of a second press of Add recording `OAUTH2` beside a config that is
+       * still `API_KEY`: `brokeredAppKind` then says `consent`, so `connectBrokeredWithFields`
+       * refuses every submission while `authorize` mints consent links against a key config — the
+       * exact "sent to a consent screen that had nothing to ask them for" failure that method's own
+       * comment describes. And pressing Add again could never repair it, because the reuse is what
+       * caused it.
+       *
+       * `standing` IS THEREFORE THE ONE ANSWER THAT KEEPS WHAT WAS THERE, and it falls back to the
+       * catalogue only where nothing was recorded at all — a row restored without the column, or an
+       * app whose config was made before this deployment recorded one. A guess is the best available
+       * answer there and it is no worse than what stood before; everywhere else the recorded word
+       * wins.
+       *
+       * AND `created` MAY WRITE FREELY, connections or no connections: the config those connections
+       * were made against is gone from Composio — that is why one had to be created — so the new
+       * scheme is the only true thing to record about the app.
+       */
+      const scheme =
+        configured === "standing"
+          ? (recorded ?? schemeFor(input.connection))
+          : schemeFor(input.connection);
+
+      /*
+       * THE COMPOSED NAME IS SPELLED WHERE IT IS MINTED AND IS GIVEN NO BINDING TO BE REUSED FROM.
+       *
+       * It used to be `const id`, and everything below this statement then had a plausible-looking
+       * server id to reach for — which is how four review rounds each moved one site onto the
+       * resolved row and left the next one standing. See {@link _EnableNamesTheRow}: after this
+       * statement there is exactly one id in scope, and it is the answering row's.
+       */
+      await database
+        .insert(mcpServers)
+        .values({
+          id: `composio-${input.slug}`,
+          title: input.title,
+          // The broker, whoever publishes the app behind it. `vendor` is what the first-party rule
+          // is checked against, and Composio is who this deployment is actually talking to.
+          vendor: "Composio",
+          url,
+          provenance: "composio",
+          // Nothing for the vault to hold. A brokered call runs as the person asking, on their own
+          // connection at the vendor, which is a `composio_connections` row rather than a secret.
+          credentialId: null,
+          /*
+           * What the config standing at Composio was created AS, which is the scheme every later
+           * connection against it has to keep using.
+           *
+           * THE RESOLVED ONE AND NOT THE CATALOGUE'S, WHICH THIS BRANCH USED TO WRITE UNGUARDED.
+           * The write-once rule below protects only the UPDATE, and this INSERT fires exactly when
+           * no row stands at the composed id — which is not the same as no row standing for the
+           * APP. In the two-rows-at-one-url state this method is built around, a restored or
+           * hand-added `gmail` at `composio://gmail` holding `API_KEY` and live key connections is
+           * untouched by the guard: the insert at `composio-gmail` fired, wrote `OAUTH2`, and
+           * `composio-gmail` sorts first, so `brokeredAppRowsAt` made the new row the answering
+           * one. `confirmBrokeredConnection` then classified the app `consent`, saw `verified:
+           * false` on a key row, and wrote `verified: true, probeAction: null` over it — erasing a
+           * recorded failed check on the next page load. See the derivation of `scheme` above.
+           */
+          authScheme: scheme,
+          addedBy: input.by,
+        })
+        .onConflictDoUpdate({
+          target: mcpServers.id,
+          set: {
+            title: input.title,
+            url,
+            /*
+             * WRITTEN BESIDE THE URL, BECAUSE THE TWO ARE ONE FACT AND A ROW HOLDING HALF OF IT IS
+             * NOT A SERVER AT ALL.
+             *
+             * CRITERION. Every row this method leaves behind says `composio`, whatever it said
+             * before. The url above and this column are what `accessFor` reads to answer that a call
+             * is brokered and which app it is against, and no path may write one without the other.
+             *
+             * REASON. This branch rewrote the url and left `provenance` standing, so enabling an app
+             * at an id a custom server already held produced a row reading `custom` at a
+             * `composio://` address. That is not a display inconsistency: `accessFor` answers
+             * `deployment-token` for it, so the transport dialled the row as an ordinary MCP
+             * endpoint on the deployment's own credential while the Composio screen went on
+             * attaching people's real accounts to the app its url named. The per-person gate was not
+             * weakened but SKIPPED — `connectionTokenFor` only ever asks for a connection down the
+             * brokered branch — which is the whole property this connector exists for. And
+             * `removeServer` finds the accounts to end at the vendor through that same answer, so it
+             * revoked nothing and reported the connector gone.
+             *
+             * A CONVERSION HERE, A REFUSAL IN THE OTHER DIRECTION, and the asymmetry is the point.
+             * What this method writes IS the app — the auth config stands at Composio before the row
+             * is touched, and the url names the app the connections will be keyed on — so a row it
+             * lands on comes out saying exactly what it now is, with nothing lost. Going the other
+             * way, the url being overwritten is the only record of which app a set of consents
+             * belongs to, and no column written alongside brings it back; see
+             * {@link requireNotBrokered}.
+             *
+             * `vendor` for the same reason one notch quieter: it is what the first-party rule is
+             * checked against, and a row reached over the broker whose vendor column still names the
+             * host somebody typed is answering that rule about a server this deployment no longer
+             * dials.
+             */
+            provenance: "composio",
+            vendor: "Composio",
+            addedBy: input.by,
+            updatedAt: new Date(),
+            /*
+             * `credential_id` is neither written here nor cleared here.
+             *
+             * Every row this method creates has none and no path in this module attaches one, so
+             * there is nothing for an enable to set. Clearing it anyway would matter in the single
+             * case it could apply — a pointer that arrived by hand edit or restore — because
+             * `removeServer` retires a server's secret by reading it off this column, and a null
+             * written over it leaves that secret live with nothing left to name it.
+             */
+            /*
+             * `auth_scheme` is not written here either, and for a neighbouring reason.
+             *
+             * This is the branch a second press of Add takes, and the scheme is the one thing on
+             * the row that live connections depend on rather than merely display. Rewriting it
+             * here would move them; the statement below rewrites it only where there are none.
+             */
+          },
+        });
+
+      /*
+       * WHICH ROW THIS DEPLOYMENT WILL ANSWER FOR THE APP WITH, RESOLVED ONCE AND FOR EVERYTHING
+       * BELOW.
+       *
+       * CRITERION. After the upsert, every act of this method — the scheme it records, the actions
+       * it lists, the row it files on the trail and the record it hands its caller back — is about
+       * the row {@link brokeredAppRow} names for this app. The composed `composio-<slug>` is what
+       * the statement above MINTS and is a stand-in for nothing.
+       *
+       * REASON. `mcp_servers.url` has no unique index, deliberately — see {@link brokeredAppRow} —
+       * so the row this method names and the row every brokered reader resolves are allowed to be
+       * different rows, and in the ordinary two-rows-at-one-url state they are. Every act keyed on
+       * the composed id was then an act performed somewhere nothing looks. FOUR ROUNDS OF REVIEW
+       * EACH MOVED ONE OF THEM AND LEFT THE NEXT STANDING: the probe was resolved by url, then
+       * `brokeredAppRow` was introduced and the probe and the confirm routed through it, then the
+       * scheme WRITE was moved here — and the actions went on being listed under the composed name
+       * the whole time. That last one is the deadlock the single-row rule exists to close: the
+       * chooser reads actions by server id, finds none on the answering row, so `checkable` is
+       * false on every page load, the browser draws no Re-check button, and the one press that
+       * could earn the app a verdict can never be made.
+       *
+       * THE ROW IS RE-READ RATHER THAN ASSUMED, because the upsert may have created it, found it,
+       * or landed beside an older row that sorts first — and which of those happened is exactly what
+       * decides the answer. The composed name is respelled as the fallback for the unreachable case
+       * of a row this method has just written not being found at its own url, which would mean the
+       * insert above and this read disagree about what was stored; it is respelled rather than held
+       * in a binding so that nothing below can take it by mistake.
+       */
+      const answering =
+        (await brokeredAppRow(input.slug))?.id ?? `composio-${input.slug}`;
+
+      /**
+       * WHICH ROW EACH ACT OF AN ENABLE NAMES, WRITTEN DOWN BECAUSE NOTHING ELSE CAN SAY IT.
+       *
+       * Type-only and erased; see {@link Decides}. Every other roster in this file is keyed on a
+       * vocabulary the compiler already knows — {@link SchemeKind}, {@link BrokeredProbe} — and
+       * this one is keyed on the acts of a single method, because the drift being pinned is not a
+       * branch that forgot a member but a SITE that reached for the wrong name. There is no type
+       * whose inhabitants are "the things an enable does", so the checklist is the union and the
+       * roster is what forces an answer out of it: a sixth act added to `BrokeredEnableAct` fails
+       * `tsc` here until somebody says which row it is about, and the two legal answers are a closed
+       * pair rather than free text so the seam cannot drift in the direction it has drifted four
+       * times.
+       *
+       * `minted` IS THE ANSWER FOR EXACTLY ONE ACT, and that is the whole shape of the rule. The
+       * upsert has to be keyed on the composed name — it is what converts a row an administrator
+       * typed at that id into the brokered app it now is, which is a property with its own test —
+       * and every act after it is about the row the readers read.
+       */
+      type BrokeredEnableAct =
+        | "upsert"
+        | "scheme"
+        | "actions"
+        | "trail"
+        | "answer";
+      type _EnableNamesTheRow = Decides<
+        BrokeredEnableAct,
+        {
+          upsert: "minted";
+          scheme: "answering";
+          actions: "answering";
+          trail: "answering";
+          answer: "answering";
+        },
+        "minted" | "answering"
+      >;
+
+      /*
+       * WRITTEN EXACTLY WHERE A CONFIG WAS MADE TO WRITE IT ABOUT, AND NEVER OVER A STANDING ONE.
+       *
+       * A row's scheme is what its authorization config was created as, and every connection made
+       * against that config depends on it. Re-enabling must not rewrite it underneath them: a
+       * vendor that starts publishing managed OAuth for an app somebody connected by key would,
+       * one press of Add later, leave this deployment minting consent links against a config full
+       * of keys.
+       *
+       * THE GUARD WAS "NOBODY HAS CONNECTED YET" ALONE, AND THAT HALF CANNOT SETTLE IT. It reasoned
+       * that with no connections there is nothing to strand, so the rewrite is safe and is how an
+       * operator picks up a vendor's change without removing and re-adding the app. The second
+       * clause was false, for one reason: {@link ComposioBroker.ensureAuthConfig} REUSES a config of
+       * ours whatever scheme it holds and creates nothing, so a press of Add does not pick the
+       * vendor's change up — it records a word beside a config that never moved. An app enabled as
+       * `API_KEY` and given managed OAuth by the vendor came out of that press recording `OAUTH2`
+       * against a key config, which makes `connectBrokeredWithFields` refuse every submission while
+       * `authorize` mints consent links that ask for nothing — and pressing Add again can never
+       * repair it, because the reuse is the cause.
+       *
+       * SO BOTH CLAUSES STAND, AND EACH CLOSES WHAT THE OTHER CANNOT. Nothing connected means no
+       * connection is moved by the write; a config this call actually CREATED means there is a
+       * config that was made as the word being written. `standing` writes nothing whatever the
+       * connection count, and remove-and-re-add is then the one act that genuinely changes an app's
+       * scheme, because it is the one that deletes the config.
+       *
+       * AND IT IS WRITTEN ON THE ROW THAT ANSWERS FOR THE APP, WHICH IS NOT ALWAYS THE ONE THE
+       * UPSERT NAMED.
+       *
+       * CRITERION. After this call, the scheme {@link brokeredAppScheme} answers with for the app is
+       * the scheme the authorization config standing at Composio was created as.
+       *
+       * REASON. The statement was keyed on the composed `composio-<slug>` while every reader of this
+       * column finds the app by its URL. Where those are two rows the write and the reads were about
+       * different rows: an app enabled with a key that every reader calls a consent app. What the
+       * person then meets is the connect form refusing them in a sentence about a sign-in screen
+       * that does not exist for this app, and a Re-check button that will not press. A writer keyed
+       * on a composed id has not recorded the fact; it has recorded it somewhere nothing looks.
+       */
+      const connections = await database
+        .select({ userId: composioConnections.userId })
+        .from(composioConnections)
+        .where(eq(composioConnections.toolkit, input.slug))
+        .limit(1);
+
+      if (configured !== "standing" && connections.length === 0) {
+        await database
+          .update(mcpServers)
+          .set({ authScheme: scheme, updatedAt: new Date() })
+          .where(eq(mcpServers.id, answering));
+      }
+
+      await recordAuditEvent(auditStore, {
+        eventType: "configuration.changed",
+        targetType: "mcp_server",
+        /*
+         * THE ROW A READER WOULD GO AND LOOK AT, which is the one this deployment answers for the
+         * app with and not the one the upsert happened to key on. Where those differ the composed
+         * row exists too, so a trail naming it would send somebody to a row whose scheme, whose
+         * actions and whose Re-check button are all somewhere else — and `url` below names the app
+         * itself, so nothing about which app was enabled is lost by naming the answering row here.
+         */
+        targetId: answering,
+        payload: {
+          actor: input.by,
+          change: "mcp_server_added",
+          server: answering,
+          url,
+          // Named for the same reason the custom path names its own: "who enabled an app whose
+          // actions nobody reviewed" is a question somebody will ask, and the answer should not
+          // require knowing how ids were spelled in a past build.
+          provenance: "composio",
+        },
+      });
+
+      /*
+       * Refreshed now for the reason the paths above are: the page that enabled the app can show
+       * what it offers, and a broker that will not list it says so here rather than at first use.
+       *
+       * ONTO THE ANSWERING ROW, which is the site this whole block is about. `mcp_tools.server_id`
+       * is what {@link probeActionFor} reads actions by and what {@link listServers} joins them on,
+       * and every brokered caller hands those the id resolved above — so actions written under the
+       * composed name are actions nothing in the brokered path can see.
+       */
+      await this.refreshTools(answering);
+      const added = (await this.listServers()).find(
+        (server) => server.id === answering,
+      );
+      if (!added) throw new CatalogueEntryUnknownError(answering);
+      return added;
+    },
+
+    /**
      * Remove a server, and stop every secret it was reached with being live.
      *
      * TWO KINDS OF SECRET, and both have to go. The server's own credential is whatever
@@ -1862,6 +3264,15 @@ export function createPluginStore(options: PluginStoreOptions) {
      *
      * Revoked rather than deleted, because the vault keeps revoked rows for audit.
      *
+     * A THIRD KIND OF ACCESS THAT IS NOT A SECRET. A brokered app holds no per-person secret at all
+     * — Composio keeps the accounts and the deployment sends a user id — so the only thing standing
+     * between a person and their mailbox is a `composio_connections` row, and that table references
+     * nothing that would cascade it. Removing the app therefore left every one of them behind, and
+     * adding the app back turned them live again without anybody being asked. That row goes too —
+     * and before it goes, the account it stands for is ended at Composio, because clearing the row
+     * alone shuts a gate and leaves the mailbox attached. The deployment's auth config for the app
+     * goes last, once nobody is connected to it any more.
+     *
      * The revokes go first. These are writes on two tables and the store exposes no transaction that
      * spans both, so the order decides what a failure between them leaves: revoke-then-delete leaves
      * a server whose secrets no longer work and which removing again will finish off, while
@@ -1869,7 +3280,15 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async removeServer(serverId: string, by: string): Promise<void> {
       const [existing] = await database
-        .select({ credentialId: mcpServers.credentialId })
+        .select({
+          credentialId: mcpServers.credentialId,
+          // Read so the brokered connections below can be keyed on the app the url names, which is
+          // the same key the call gate uses. See there for why the row id will not do.
+          provenance: mcpServers.provenance,
+          url: mcpServers.url,
+          // The third of what `accessFor` resolves a row with. See there.
+          authScheme: mcpServers.authScheme,
+        })
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId));
 
@@ -1948,9 +3367,148 @@ export function createPluginStore(options: PluginStoreOptions) {
              * access should see which of the three this was.
              */
             reason: "mcp_server_removed",
-            vendorRevoked: false,
+            vendorRevocationRequested: false,
           },
         });
+      }
+
+      /*
+       * The third kind of access, which is not a secret at all: everybody's brokered connection.
+       *
+       * CRITERION. Removing an app must leave nobody holding brokered access to it, so that adding
+       * it back again grants nothing until each person has consented afresh.
+       *
+       * REASON. `composio_connections` is the whole gate on a brokered call and it references
+       * nothing — not `mcp_servers`, not `users` — so nothing cascaded it and removing the app left
+       * every row standing. Two ordinary administrative acts, remove and add back, then restored
+       * everybody's access at a url the second act chose, with nobody asked again and no screen
+       * saying it had happened. Consent that reattaches by itself is not consent.
+       *
+       * KEYED ON THE APP THE URL NAMES, exactly as `connectionTokenFor` keys the gate. `row.id` is a
+       * display key and nothing holds it equal to the slug in the url, so a delete by id would clear
+       * some other app's connections, or none, for the very row shape that gate already refuses to
+       * trust. `accessFor` is asked rather than the url parsed here, so this cannot drift from it.
+       *
+       * ASKED WITH NO ENTRY, deliberately, and that is not the entry-wins order being dodged. An
+       * entry can only ever SUPPRESS this answer — `accessFor` returns a null toolkit for every row
+       * that has one — so passing the entry a colliding id looks up would hide the brokered state of
+       * the one row most in need of clearing, and would now refuse outright the very row this method
+       * exists to get rid of, leaving the collision unremovable. Nothing is dialled here, so there is
+       * no vendor for an entry to protect; the only question is which app's consent rows this row's
+       * own url stands for.
+       *
+       * Before the server row goes, for the reason the revokes above are: what a failure between
+       * two writes leaves has to be the recoverable half. A connection cleared with the app still
+       * present is fixed by removing it again; an app deleted with the connections standing is
+       * reachable by no operation at all, because the toolkit was only ever readable off its url.
+       *
+       * AND THE ACCOUNT IS ENDED AT THE VENDOR, not merely forgotten here. Deleting the row closes
+       * the gate this deployment owns and does nothing whatever to the account: the person's
+       * mailbox stays attached at Composio, the grant stays live, and an administrator who pressed
+       * "remove" was told the connector was gone. So every connected person is revoked through the
+       * broker first, exactly as {@link disconnectBrokered} revokes for one — the same
+       * shape at the scale of an app.
+       *
+       * REVOKE BEFORE DELETE, ALWAYS, and the argument is the one that method makes. The row is the
+       * only thing here that names which app this person connected, so a delete that ran first
+       * would leave a failed revoke with nothing to revoke under: a live grant on somebody's
+       * mailbox that no operation in this deployment can reach. The other order costs a repeat of
+       * an administrative act nobody minds repeating. Dead and reachable beats live and
+       * unreachable.
+       *
+       * WHICH MAKES THE FAILURE LOUD. Nothing is caught around the revokes: a broker that will not
+       * answer ends this method with the rows still standing and the app still present, rather than
+       * letting it report an ending that did not happen.
+       *
+       * THE AUTH CONFIG GOES LAST, after every account is dead and every row is gone, for the same
+       * reasoning one step out. An orphaned auth config grants nobody anything — it is a shape this
+       * deployment holds at Composio, not an account — while a live account whose config has
+       * already been deleted is access that nothing left here can end.
+       */
+      const toolkit = existing ? accessFor(existing, null).toolkit : null;
+
+      if (toolkit) {
+        /*
+         * Read before anything is deleted, because the revokes below need the people and the rows
+         * are where the people are. Sorted, so two removals of the same app revoke in the same
+         * order and write their trail rows in the same order.
+         */
+        const connected = await database
+          .select({ userId: composioConnections.userId })
+          .from(composioConnections)
+          .where(eq(composioConnections.toolkit, toolkit))
+          .orderBy(asc(composioConnections.userId));
+
+        /*
+         * What the broker was actually asked for each of them, kept so the trail below records the
+         * answer rather than the call. False where there is no broker at all: a deployment whose
+         * key has since been unset can still remove the app, and it could not have been calling it
+         * either way — but nothing was asked of Composio and the row must not claim otherwise.
+         */
+        const vendorRevocationRequested = new Map<string, boolean>();
+        for (const connection of connected) {
+          vendorRevocationRequested.set(
+            connection.userId,
+            broker
+              ? await broker.revoke({ userId: connection.userId, toolkit })
+              : false,
+          );
+        }
+
+        await database
+          .delete(composioConnections)
+          .where(eq(composioConnections.toolkit, toolkit));
+
+        for (const connection of connected) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.account_disconnected",
+            targetType: "mcp_server",
+            /*
+             * THE APP, not this row's id, and the same key `retireConnectionsFor` files under.
+             *
+             * CRITERION. Every `mcp.account_disconnected` row a brokered connection produces is
+             * keyed on the app at the broker, whichever act produced it, so one query answers
+             * what happened to one person's brokered access.
+             *
+             * REASON. The two acts that can end such a connection were keyed differently: this
+             * one on `mcp_servers.id`, offboarding on `composio_connections.toolkit` — which is
+             * all that row records and all that is left once the server row is gone. Nothing
+             * holds the two strings equal, so on any renamed row half the trail is filed under a
+             * name the other half never mentions, and the disagreement is invisible everywhere
+             * they happen to match.
+             *
+             * THE APP IS WHAT WAS CONSENTED TO. The gate is `(toolkit, user_id)`, the delete
+             * above is by toolkit, and the row outlives the server row entirely; the id is a
+             * display key that may not exist by the time somebody asks. Which server row was
+             * removed is not lost — the `configuration.changed` row written below names it.
+             */
+            targetId: toolkit,
+            payload: {
+              actor: by,
+              server: toolkit,
+              owner: connection.userId,
+              // The same three-way distinction the vault loop above draws, and the same answer: an
+              // administrator took the whole app away and the person did nothing.
+              reason: "mcp_server_removed",
+              /*
+               * What was asked of the vendor, not that a call was made — {@link
+               * ComposioBroker.revoke}'s own answer, passed through. True where an account was
+               * found and its withdrawal asked for, false where there was none to withdraw or
+               * where this deployment has no broker to have asked. The value of the field is
+               * exactly that a reader can tell an account this deployment acted on from one that
+               * outlives it somewhere else, so a constant here would be worse than none. It says
+               * "requested" because that is the strongest thing the vendor's answer supports:
+               * the upstream withdrawal runs as a background job nothing here can poll.
+               */
+              vendorRevocationRequested:
+                vendorRevocationRequested.get(connection.userId) ?? false,
+            },
+          });
+        }
+
+        // Last of all, for the reason above, and skipped entirely on a deployment with no
+        // broker to have made one.
+        if (broker) await broker.deleteAuthConfig(toolkit);
       }
 
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
@@ -1986,12 +3544,73 @@ export function createPluginStore(options: PluginStoreOptions) {
       serverId: string,
       actorId = "",
     ): Promise<{ tools: number }> {
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
+      /*
+       * Who the trail says asked for this listing, which is not the same value as who to list AS.
+       *
+       * CRITERION. The two audit rows below must never name an actor of `""`.
+       *
+       * REASON. `actorId` does double duty: it selects the person's credential where listing needs
+       * one, and it is copied into those rows. The add paths pass neither, deliberately — nobody can
+       * have connected an app in the second it is added, and the comment above this method says why
+       * requiring one there was wrong. So the absence is permanent and correct for the credential,
+       * and meaningless for the trail, which was left writing `actor: ""` on every row an add
+       * produced. The deployment refreshing on its own behalf is a real answer and `reachedAs`
+       * already spells it that way; see {@link DEPLOYMENT_ACTOR}. Held separately rather than
+       * defaulting the parameter, because defaulting it would hand `connectionTokenFor` a person
+       * called "deployment" to look a grant up by.
+       */
+      const auditActor = actorId || DEPLOYMENT_ACTOR;
+
+      // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
+      // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
+      const transport = transportFor(access.transport);
+
+      /*
+       * A brokered row with no app in its url has nobody to ask, and saying so is not the transport's
+       * job.
+       *
+       * CRITERION. A listing this deployment could not even attempt must not be committed as a
+       * refresh, and must not be written down as a vendor's answer.
+       *
+       * REASON. `accessFor` answers `brokered` for every row whose provenance column says so, and
+       * reads the app slug off the url — so `{ credential: "brokered", toolkit: null }` is a real
+       * state, which a hand edit or a restored backup produces and nothing in the product does.
+       * `connectionTokenFor` already refuses it, but only where listing needs a credential, and a
+       * brokered listing needs none: the broker publishes an action's schema to anybody. So the gate
+       * was skipped on exactly the path that reaches the vendor with no app named, and the transport
+       * answered `[]` — indistinguishable, one line later, from an app that advertises nothing.
+       *
+       * READ AS FIELDS, not as a transport. `credential` and `toolkit` are both resolved in
+       * `access.ts` and this asks nothing about which protocol is underneath: any broker reached
+       * without an app named is unroutable, which is the property `toolkit` is documented to carry.
+       * A `transport === "composio"` test here would put back the per-call-site derivation that
+       * module exists to have removed.
+       */
+      if (access.credential === "brokered" && !access.toolkit) {
+        throw new PluginInvariantError(
+          `${row.id} resolves to a brokered credential with no app in its url, so there is nothing to ask what it offers.`,
+        );
+      }
+
+      /*
+       * ASKING THE VENDOR, and the only part of this method whose failure is a vendor's.
+       *
+       * CRITERION. What lands in `lastError` must be something a vendor, a credential or a person
+       * could have caused. An invariant this deployment violated and a fault in its own database must
+       * not read as a vendor misbehaving.
+       *
+       * REASON. This used to be one `try` around everything below as well — the wholesale replace,
+       * the server-row update and both audit writes — with a `catch` that copied any message into
+       * `lastError` and answered `{ tools: 0 }`. So a statement timeout, a duplicate-key refusal or an
+       * `audit_events` insert that would not go in all reported a vendor that had in fact answered
+       * correctly, and reported it beside actions the refresh had already committed. Narrowing that
+       * by error class would be narrowing by prose; narrowing it by SHAPE is what this split does, so
+       * a line added below cannot quietly acquire a vendor's excuse.
+       */
+      let listed: ListedTool[];
       try {
-        // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
-        const transport = transportFor(entry);
-
         /*
          * A credential only when listing actually needs one.
          *
@@ -2008,124 +3627,65 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a function that discards it. The gate outlived the reason for it.
          */
         const token = transport.listNeedsCredential
-          ? (await connectionTokenFor(row, entry, actorId)).token
+          ? (await connectionTokenFor(row, entry, actorId, access)).token
           : undefined;
 
-        const tools = await transport.listTools({
+        listed = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
         });
-
-        /*
-         * ONE STEP, because the catch below promises that it is one.
-         *
-         * "The tools already held are left alone" is only true while nothing has been written yet.
-         * As two auto-committed statements the delete landed on its own whenever the insert did not:
-         * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
-         * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
-         * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
-         * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
-         * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
-         * connector kept every grant an administrator had made and offered none of them, and
-         * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
-         *
-         * Rolled back together, the vendor's bad answer is recorded in `lastError` and the Bots go
-         * on using what they were granted, which is what the comment said all along.
-         */
-        await database.transaction(async (transaction) => {
-          await transaction
-            .delete(mcpTools)
-            .where(eq(mcpTools.serverId, serverId));
-          if (tools.length > 0) {
-            await transaction.insert(mcpTools).values(
-              tools.map((tool) => ({
-                serverId,
-                name: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-              })),
-            );
-          }
-        });
-
-        await database
-          .update(mcpServers)
-          .set({
-            toolsRefreshedAt: new Date(),
-            lastError: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(mcpServers.id, serverId));
-
-        /*
-         * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
-         * nothing.
-         *
-         * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
-         * This answers "when did it stop being offered, and what was holding it" — the question asked
-         * after a transport is swapped back and a name starts resolving again. Without the row, the
-         * only record of the gap is its absence.
-         *
-         * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
-         * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
-         * what it names is what is actually left over.
-         */
-        const advertised = new Set(tools.map((tool) => tool.name));
-        const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
-          .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
-          .sort(([left], [right]) => left.localeCompare(right));
-
-        if (stranded.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "grants_not_advertised",
-              server: serverId,
-              // The refs, because that is what a grant is keyed on and what an administrator revokes.
-              refs: stranded.map(([ref]) => ref),
-              bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
-              note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
-            },
-          });
-        }
-
-        /*
-         * Tools the vendor advertises that this deployment's write list does not name.
-         *
-         * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
-         * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
-         * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
-         * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
-         *
-         * `configuration.changed` rather than a type of its own, the same as the stranded grants
-         * above and for the same reason: nothing was denied and the refresh succeeded. What changed
-         * is that the deployment now knows a name it had not classified.
-         */
-        const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
-        if (unlisted.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "unlisted_tools_advertised",
-              server: serverId,
-              tools: unlisted,
-              note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
-            },
-          });
-        }
-
-        return { tools: tools.length };
       } catch (error) {
-        const message =
-          error instanceof McpServerError || error instanceof Error
-            ? error.message
-            : String(error);
+        /*
+         * Ours rather than a vendor's, asked as one question about the whole shelf.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf is written into `lastError`, and
+         * nothing raised from here carries a statement or a bound value.
+         *
+         * WHAT THIS USED TO BE, and why the difference is not cosmetic. It read `error instanceof
+         * PluginInvariantError` — which was DEAD, and its own comment named two throws that cannot
+         * arrive here: `connectionTokenFor` is only called when `transport.listNeedsCredential`,
+         * which is false for `composio`, the only brokered transport, so the brokered narrowing
+         * cannot fire inside this `try`; and the `person-oauth` narrowing is unreachable because
+         * `accessFor` answers that credential only for a `user-oauth` entry. So the line could be
+         * deleted with every test still green while the arrival it should have been catching —
+         * a query of ours failing — went straight past it into the column below.
+         *
+         * A QUERY FAILURE IS THE REACHABLE ONE. `connectionTokenFor`'s vault read, its connection
+         * lookup and its locked credential swap all run inside this `try` for an MCP listing, and
+         * each throws a `DrizzleQueryError` whose message is the statement plus every value bound
+         * to it. Recorded, that put a SQL dump in the column the Plugins page draws, under a
+         * heading that says a vendor said it. Raised as an invariant of ours, with the driver's
+         * complaint and none of the query.
+         */
+        if (isDeploymentFault(error)) {
+          throw isQueryFailure(error)
+            ? new PluginInvariantError(
+                `${row.id}: asking this app what it offers failed on a query of this deployment's own, so nothing about the app was learned and nothing it holds was changed. ${databaseComplaint(error)}`,
+              )
+            : error;
+        }
+
+        /*
+         * ASKED THROUGH THE ONE DOOR, like the `storableTools` catch forty lines below that writes
+         * the same column.
+         *
+         * `McpServerError` in the old test was doing nothing — it extends `Error`, so the second arm
+         * answered for it — and what the whole expression amounted to was
+         * `error instanceof Error ? error.message : String(error)`, which is precisely the reflex
+         * {@link reasonWithoutStatement} exists to replace: it reads `.message` directly and so walks
+         * straight past {@link withoutStatement}.
+         *
+         * NOTHING REACHABLE CHANGES BEHAVIOUR HERE TODAY, and that is the reason to write it rather
+         * than an argument against. The guard above answers every query failure before this line, so
+         * the shape whose message must never travel cannot arrive by any path anybody can name. What
+         * CAN arrive is a wrapper — `composio.listTools` rethrows `new Error(listingSentence(...))`,
+         * and `listingSentence` falls through to the thrown message verbatim — and a wrapper carries
+         * no `query` and no `params` of its own, so it is on nobody's shelf and answers to nobody's
+         * check. "No thrower reachable today" was also true of the credential envelope before the
+         * rotation path started writing one; the door costs nothing and does not need to be
+         * rediscovered at the next site.
+         */
+        const message = reasonWithoutStatement(error);
         // The failure is recorded rather than thrown away, because a server with no tools and no
         // explanation reads as a server that offers nothing, and an operator would go looking in
         // the wrong place. The tools already held are left alone: a vendor being briefly
@@ -2146,6 +3706,255 @@ export function createPluginStore(options: PluginStoreOptions) {
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
       }
+
+      /*
+       * An empty listing never destroys what a real listing recorded.
+       *
+       * CRITERION ONE. An empty answer must not be committed as a healthy refresh where doing so
+       * would delete actions this deployment holds, and must not clear `lastError`.
+       *
+       * CRITERION TWO. "This app advertises nothing" stays recordable: an app with nothing held has
+       * nothing to lose, so the empty answer falls through to the replace below and commits — a
+       * refresh stamp, no error, no actions.
+       *
+       * REASON. The replace below is a delete and an insert, so an empty answer committed here
+       * deletes every `mcp_tools` row for the server, taking the recorded `effect`, `destructive`
+       * and `version` with it. `version` is the one that cannot be reconstructed: `callTool` refuses
+       * an action without it, so a refresh that reported success broke every subsequent call, and
+       * the grants survived pointing at rows that no longer existed — absent from `listServers`, and
+       * revived only by a later refresh that worked.
+       *
+       * WHAT USED TO REACH THIS LINE, and no longer does. `composio.listTools` once answered `[]`
+       * for a url naming no app and for a deployment with no Composio client installed, neither of
+       * which is a vendor's answer, and the second of those is the state of every real deployment.
+       * Both throw now, so that particular arrival is closed at the seam rather than here. The guard
+       * stays because its argument never depended on who sent the empty answer.
+       *
+       * KEPT RATHER THAN TRUSTED, and that asymmetry is the whole argument. Holding actions the vendor
+       * has withdrawn is visible and reversible: the next listing replaces them. Deleting actions the
+       * vendor never withdrew is neither — `mcp_tools` is shared, so it is every replica at once, and
+       * only a refresh from a deployment that can actually reach the vendor puts it back. That holds
+       * for any vendor that suddenly lists nothing, whatever made it do so, which is why removing
+       * this would reopen the same data loss for a different reason.
+       *
+       * THE SEAM REQUIREMENT this leans on, and it is satisfied: a transport that could not ask
+       * anybody must THROW rather than return `[]`. `composio.listTools` opens with two throws that
+       * say which of the two it is — no app in the url, no client installed — and no transport has
+       * an early `return []` left in it at all: `builtin-routines` answers a static list, and `mcp`
+       * and `google-drive-rest` hand back only what a request returned. So an empty listing reaching
+       * this line is a vendor's own answer, which is what the sentence below says. Nothing here asks
+       * which transport it is talking to, and nothing has to: the requirement is met at each seam
+       * rather than branched on here.
+       */
+      if (listed.length === 0) {
+        const held = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+
+        if (held.length > 0) {
+          await database
+            .update(mcpServers)
+            .set({
+              // Named as the state it is, because "listed nothing" and "would not answer" send an
+              // operator to different places, and reaching this line settles which one it was: a
+              // listing that could not be made throws and lands in the `catch` above instead. So
+              // this sentence must not send anybody to check their configuration — that is the
+              // other state's sentence, written by the transport that refused. No
+              // `toolsRefreshedAt`: that column says when this deployment last learned what the app
+              // offers, and it did not learn it here.
+              lastError: `This app was asked and answered with no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check whether it still publishes them, then refresh again.`,
+              updatedAt: new Date(),
+            })
+            .where(eq(mcpServers.id, serverId));
+          // What the app advertises, which is what it advertised before: the honest count, because
+          // nothing was replaced.
+          return { tools: held.length };
+        }
+      }
+
+      /*
+       * TURNING THE VENDOR'S ANSWER INTO ROWS, which is still the vendor's answer and so is still
+       * caught.
+       *
+       * CRITERION. Nothing a vendor can put in a listing leaves this method as an uncaught throw,
+       * and nothing a vendor can put in a listing half-applies the add that called it.
+       *
+       * REASON. Names are deduplicated and vendor text is made storable before a transaction is
+       * opened on any of it, because both of those failures used to abort the replace from inside
+       * one — see {@link storableTools}. Moving the work earlier moved the THROW earlier with it,
+       * to a line between the two `try` blocks and covered by neither. A schema that this could not
+       * make storable then left `refreshTools` raw: the refresh route has no mapping for it, so the
+       * admin page got a bodiless 500 and `lastError` kept whatever it held before; and `addServer`
+       * refreshes before it answers, so the add died AFTER its server row and its audit row had
+       * committed, leaving a configured app nobody had finished configuring.
+       *
+       * RECORDED RATHER THAN RAISED, which is the same answer the vendor `try` gives, because this
+       * is the same kind of event: the app was reached, it answered, and its answer is not something
+       * this deployment can write down. The actions it already holds are kept, no `toolsRefreshedAt`
+       * is stamped — nothing was learned — and the add completes with the failure on the row for an
+       * administrator to read.
+       *
+       * `withoutStatement` rather than `error.message`, so that the one shape whose message must
+       * never travel cannot reach the column even from a line that should never produce one.
+       */
+      let storable: ReturnType<typeof storableTools>;
+      try {
+        storable = storableTools(serverId, listed);
+      } catch (error) {
+        const reason =
+          error instanceof Error ? withoutStatement(error) : String(error);
+        await database
+          .update(mcpServers)
+          .set({
+            // Capped where every other quoted failure in this file is capped, and for the same
+            // reason: part of this sentence comes from elsewhere and none of it is a promise about
+            // length.
+            lastError:
+              `This app answered with an action whose schema could not be stored as it arrived, so the actions already recorded for it were kept rather than replaced. ${reason}`.slice(
+                0,
+                400,
+              ),
+            updatedAt: new Date(),
+          })
+          .where(eq(mcpServers.id, serverId));
+        return { tools: 0 };
+      }
+
+      /*
+       * COMMITTING WHAT THE VENDOR SAID. Nothing from here down is a vendor's doing, so nothing
+       * from here down is recorded as one — see the criterion on the vendor `try` further up, and
+       * the one on the `try` immediately above this, which is the last thing here that still is.
+       *
+       * ONE STEP, because the paragraph above promises the held actions are left alone.
+       *
+       * "The tools already held are left alone" is only true while nothing has been written yet.
+       * As two auto-committed statements the delete landed on its own whenever the insert did not:
+       * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
+       * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
+       * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
+       * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
+       * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
+       * connector kept every grant an administrator had made and offered none of them, and
+       * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
+       *
+       * Rolled back together, the Bots go on using what they were granted — and the fault raises
+       * rather than being copied into `lastError`, because a transaction this database would not take
+       * is not something the vendor did.
+       */
+      try {
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(mcpTools)
+            .where(eq(mcpTools.serverId, serverId));
+          if (storable.length > 0) {
+            await transaction.insert(mcpTools).values(storable);
+          }
+        });
+      } catch (error) {
+        /*
+         * A database failure, with the statement and its parameters left behind.
+         *
+         * CRITERION. Nothing raised from here carries the SQL or the values bound to it.
+         *
+         * REASON. drizzle wraps every failure as a `DrizzleQueryError`, whose message is
+         * `Failed query:` followed by the whole statement and then every parameter — here, the
+         * vendor's entire tool list. That message is what an unhandled throw puts in the logs and
+         * what any caller that prints an error puts on a screen. A SQL dump on an error path is
+         * the same disclosure shape as a credential leak one layer out, and it is gratuitous: the
+         * driver's own complaint says what went wrong without any of it.
+         *
+         * RAISED, NOT RECORDED, which is what the paragraph above this transaction argues for and
+         * is now true rather than merely intended: with duplicate names and unstorable text
+         * removed before the statement is built, what is left is this database refusing something
+         * this deployment's own schema says it will take, and `lastError` is where a VENDOR's
+         * answer goes.
+         */
+        throw new PluginInvariantError(
+          `${row.id}: the actions this app listed were not stored, so what it already had is unchanged. ${databaseComplaint(error)}`,
+        );
+      }
+
+      await database
+        .update(mcpServers)
+        .set({
+          toolsRefreshedAt: new Date(),
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(mcpServers.id, serverId));
+
+      /*
+       * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
+       * nothing.
+       *
+       * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
+       * This answers "when did it stop being offered, and what was holding it" — the question asked
+       * after a transport is swapped back and a name starts resolving again. Without the row, the
+       * only record of the gap is its absence.
+       *
+       * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
+       * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
+       * what it names is what is actually left over — and only ever after a listing that was
+       * committed, because the guard above returns before this on an empty answer that would have
+       * named every grant the app holds.
+       */
+      // The names as STORED, so a grant is compared against a row that exists: a duplicate the
+      // vendor listed twice is one row, and a name is spelled here the way the insert spelled it.
+      const advertised = new Set(storable.map((tool) => tool.name));
+      const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
+        .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
+        .sort(([left], [right]) => left.localeCompare(right));
+
+      if (stranded.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: auditActor,
+            change: "grants_not_advertised",
+            server: serverId,
+            // The refs, because that is what a grant is keyed on and what an administrator revokes.
+            refs: stranded.map(([ref]) => ref),
+            bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
+            note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
+          },
+        });
+      }
+
+      /*
+       * Tools the vendor advertises that this deployment's write list does not name.
+       *
+       * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
+       * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+       * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
+       * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
+       *
+       * `configuration.changed` rather than a type of its own, the same as the stranded grants
+       * above and for the same reason: nothing was denied and the refresh succeeded. What changed
+       * is that the deployment now knows a name it had not classified.
+       */
+      const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
+      if (unlisted.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: auditActor,
+            change: "unlisted_tools_advertised",
+            server: serverId,
+            tools: unlisted,
+            note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
+          },
+        });
+      }
+
+      // What was recorded, which is what "this app offers N actions" means on the page. Counting
+      // the listing instead reported a duplicate the vendor named twice as two actions the
+      // deployment holds, when `mcp_tools` holds one row for it.
+      return { tools: storable.length };
     },
 
     async listServers(): Promise<ServerRecord[]> {
@@ -2176,6 +3985,27 @@ export function createPluginStore(options: PluginStoreOptions) {
         tools.map((tool) => `${tool.serverId}/${tool.name}`),
       );
 
+      /*
+       * HOW EACH APP CONNECTS, WHICH IS A FACT ABOUT THE APP AND NOT ABOUT THE ROW BESIDE IT.
+       *
+       * CRITERION. Every row here whose url names a Composio app reports the scheme
+       * {@link brokeredAppScheme} answers for that app — so two rows at one url report one answer,
+       * and it is the answer {@link connectBrokeredWithFields} will act on.
+       *
+       * REASON. The browser forks on this field: `brokered-account-row.tsx` draws a consent button,
+       * a form or a "nothing to connect" sentence out of it, and the press then lands in a store
+       * method that resolves the app by its URL. Reported off each row's own column those were two
+       * readings of one fact — a form drawn from this row and a submission refused by the other
+       * row's scheme, telling somebody to connect the app the way it asks for over an app they were
+       * asked exactly that way. {@link serverAddress} answers the same field the same way, so the
+       * page that lists an app and the route that connects it cannot come apart either.
+       *
+       * ONE EXTRA READ FOR THE WHOLE LIST, and none where the deployment has enabled no apps.
+       */
+      const brokeredApps = await brokeredAppRowsAt(
+        rows.filter((row) => toolkitOf(row.url) !== null).map((row) => row.url),
+      );
+
       return rows.map((row) => {
         const entry = catalogueEntry(row.id);
         return {
@@ -2193,6 +4023,11 @@ export function createPluginStore(options: PluginStoreOptions) {
           dynamicClient:
             entry?.auth.kind === "user-oauth" &&
             entry.auth.clientRegistration === "dynamic",
+          // The app's, for a row whose url names one; this row's own column for everything else,
+          // which is a null on every server that is not brokered. See the read above.
+          authScheme: toolkitOf(row.url)
+            ? (brokeredApps.get(row.url)?.authScheme ?? null)
+            : row.authScheme,
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {
@@ -2203,7 +4038,8 @@ export function createPluginStore(options: PluginStoreOptions) {
                 description: tool.description,
                 inputSchema: tool.inputSchema as Record<string, unknown>,
                 ref,
-                effect: classifyTool(entry, tool.name, true),
+                effect: classifyTool(entry, tool.name, true, tool.effect),
+                destructive: tool.destructive,
                 grantedTo: grants.get(ref) ?? [],
               };
             }),
@@ -2224,6 +4060,84 @@ export function createPluginStore(options: PluginStoreOptions) {
             })),
         };
       });
+    },
+
+    /**
+     * Where one server is, by id, and nothing that hangs off it.
+     *
+     * WHY IT EXISTS BESIDE {@link listServers}. Three routes asked that one for a single row's url
+     * — the brokered branch of connect, and the confirm and disconnect pair behind
+     * `brokeredAppFor` — and it answers by running three queries and materialising every server,
+     * every tool and every grant in the deployment. Confirm is the sharp end: both brokered account
+     * screens call it from an effect on mount, so opening a large app's page read the whole tool and
+     * grant table to ask whether one row is brokered. None of the three looks at a tool or a grant.
+     *
+     * THE URL IS THE ROW'S OWN, read out of the column rather than composed from the id. The whole
+     * brokered feature rests on the two being allowed to differ: `addBrokeredApp` writes
+     * `composio://<slug>` and names the row for it, but nothing holds them equal afterwards, and a
+     * row called `gmail` at `composio://slack` is exactly the shape the connection gate was once
+     * keyed on the wrong half of. The catalogue reconciliation {@link effectiveUrl} applies for
+     * `listServers` is deliberately not applied here, and changes no answer: it only ever
+     * substitutes the pinned host of a first-party entry, and neither reading of such a row names a
+     * Composio app.
+     *
+     * `undefined` for an id naming no row, which is what the `.find` over the whole list answered
+     * before — so a route that refused an unknown id still refuses it, in the same words.
+     *
+     * AND THE SCHEME IS THE APP'S, NOT THIS ROW'S, WHICH IS THE ONE FIELD HERE THAT IS NOT ABOUT A
+     * ROW AT ALL.
+     *
+     * CRITERION. For a row whose url names a Composio app, `authScheme` is what
+     * {@link brokeredAppScheme} answers for that app.
+     *
+     * REASON. The connect route forks on this field — a form for a key app, a consent link for a
+     * consent one, a refusal for a no-auth one — and the store method that fork leads to,
+     * {@link connectBrokeredWithFields}, reads the scheme off the row that answers for the APP. Two
+     * rows may name one app, so those were two different reads of one fact: the page draws a form
+     * off this row and the submission is refused by the other row's scheme, in a sentence telling
+     * somebody to connect an app the way it asks for — over an app they were just asked exactly
+     * that way. The id and the title stay this row's own, because those name the row the page
+     * opened; the scheme is a fact about the app, and the app has one answer.
+     *
+     * ONE EXTRA READ, AND ONLY FOR A BROKERED URL. A row that names no app takes the read it always
+     * took.
+     */
+    async serverAddress(serverId: string): Promise<ServerAddress | undefined> {
+      const [row] = await database
+        .select({
+          id: mcpServers.id,
+          title: mcpServers.title,
+          url: mcpServers.url,
+          authScheme: mcpServers.authScheme,
+        })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!row) return undefined;
+      const toolkit = toolkitOf(row.url);
+      if (!toolkit) return row;
+      return { ...row, authScheme: await brokeredAppScheme(toolkit) };
+    },
+
+    /**
+     * Where every added server is, for the one caller whose question is about the whole set.
+     *
+     * A SECOND READ RATHER THAN {@link serverAddress} IN A LOOP, and rather than one method serving
+     * both. The app directory asks which of Composio's apps are already enabled here, which has no
+     * id to look up — answered a row at a time it would be one query per app in the directory. And
+     * it needs strictly less than the row read hands back: the app comes off the url, so an id and
+     * a title would be nothing but two fields a reader could take the app out of by mistake. The
+     * directory route's own comment says why that matters — the url is where the transport reads
+     * which app a call is against, and the id is a row name that happens to look similar.
+     *
+     * Ordered, so two readings of an unchanged deployment answer alike.
+     */
+    async serverUrls(): Promise<string[]> {
+      const rows = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .orderBy(asc(mcpServers.id));
+      return rows.map((row) => row.url);
     },
 
     /**
@@ -2752,6 +4666,1845 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * Which brokered apps this person has connected, for the same settings page.
+     *
+     * A SECOND METHOD RATHER THAN A WIDER {@link connectionsFor}, because the two answer out of
+     * different tables for a reason the schema is built on: a `user-oauth` connection is a pointer
+     * into the vault, and a brokered one holds no secret at all because Composio keeps the account
+     * (see {@link brokeredConnection}). Reading only the vault side is what left a brokered
+     * connection invisible to the browser, so the settings screen could not honestly say whether
+     * somebody was connected.
+     *
+     * THE SERVER ID IS JOINED, NOT SPELLED. `addBrokeredApp` writes the app into the url, and every
+     * later call resolves against that url — so matching on it asks the row what it is, where
+     * composing `composio-${toolkit}` by hand would re-derive the id from a convention nothing
+     * holds it to. It is the reasoning the directory route already uses when it reads a row's
+     * toolkit off its url rather than off its id. An app this deployment has since removed
+     * therefore drops out of the answer, which is the honest result: there is no server row left
+     * for a page to name.
+     *
+     * `scope` IS EMPTY for the reason {@link confirmBrokeredConnection} sets out: Composio grants
+     * none that it tells us about, and the field exists to record what the vendor said it granted
+     * rather than what we suppose. It is returned all the same, so the fields this shares with
+     * {@link connectionsFor} — `serverId`, `scope`, `connectedAt` — line up and one screen can draw
+     * both kinds of row. What comes back here is a SUPERSET of that shape rather than the same one:
+     * `verified` and `verifiedAt` ride along too, and only on a brokered row, because only a
+     * brokered row is a thing this deployment can re-check.
+     *
+     * `verified` AND `verifiedAt` COME ALONG BECAUSE "connected" IS NOT A PRESENT TENSE HERE.
+     * Composio never re-checks a key somebody typed in: it answers ACTIVE for as long as the row
+     * exists, whatever the vendor on the other side now thinks of that credential. So a page drawn
+     * off `connectedAt` alone would assert something this deployment has not known since the day it
+     * was written. These two fields are what lets it say when the claim was last earned instead —
+     * "connected with a key you provided, last checked 13 Sep". What the pair separates is a
+     * CHECKED key connection from an unchecked one, and nothing more: which KIND of connection a
+     * row is comes from the app's recorded {@link ServerRecord.authScheme}, which the page branches
+     * on first, and not from anything answered here.
+     *
+     * `probe` IS THE ACTION THE LAST CHECK SPENT, READ OUT OF THE ROW. The pair above says whether a
+     * key connection was ever checked; it cannot say WHY one was not, and three different
+     * situations share the one word `false`. Until this field, only the answer to a connect or a
+     * re-check could tell them apart — so a page reload lost the distinction, and the worst of the
+     * three degraded into the mildest: a row saying the key was accepted without being checked, over
+     * an account whose key the vendor had actually REFUSED.
+     *
+     * IT IS STORED BECAUSE IT IS A FACT ABOUT A MOMENT, NOT ABOUT TODAY'S METADATA. This field was
+     * once derived here, by asking {@link probeActionFor} which action this deployment WOULD check
+     * the app with; the argument for that was that the chooser holds every condition the probe
+     * itself runs on, so the two could not disagree. They cannot disagree AT AN INSTANT, and that is
+     * all it establishes. `verified` records a check made against the app's action listing as it
+     * stood THEN, and the chooser answers from the listing as it stands NOW — and `POST
+     * /servers/:id/refresh` is a generic administrator's route keyed on a server id, of which
+     * `composio-<slug>` is one, so an ordinary press of Refresh moves the second without touching
+     * the first. It is the very press the Composio transport tells an operator to make when an
+     * action appears or gains the version that makes it callable. So: somebody connects a key to an
+     * app that publishes nothing safe to try it on, and the row honestly says the key was accepted
+     * unchecked. An administrator presses Refresh. From that page load on, the derivation named an
+     * action, and the row drew the sentence written for a REFUSED key — your key was checked against
+     * this app and rejected, the account it was checked in still stands, so disconnect it. Every
+     * clause of that is false for somebody whose key was never tried, it tells them to take down a
+     * connection that works, and it persists: it is what every page load says until they press
+     * Re-check.
+     *
+     * SO THE WRITER RECORDS WHAT IT SPENT AND THIS READS IT BACK. {@link recordBrokeredConnection}
+     * is the single writer, every path into it knows the action it spent or that it spent none, and
+     * {@link composioConnections.probeAction} is where that goes. Read together with `verified`, the
+     * column tells four states apart, and no inference is made in any of them:
+     *
+     *   no probe, not verified   — nothing was tried: at the time of the check the app published
+     *                              nothing safe to spend a key on. A fact about the app, not the
+     *                              key. A key row written before the column existed reads this way
+     *                              too, for the reason that column gives.
+     *   no probe, verified       — a CONSENT connection. The vendor's own yes at its own screen is
+     *                              the evidence, no call was ever made against the account, and so
+     *                              there is no action to name.
+     *   a probe, verified        — it ran in this person's account and the vendor took the key.
+     *   a probe, NOT verified    — it ran and the vendor refused the key, and the account it ran in
+     *                              is still standing. A live account with a bad key behind it.
+     *
+     * AND THE LAST LINE IS A RECORD RATHER THAN AN INFERENCE, which is the whole of what changed.
+     * The caveat that stood here used to argue the state into existence: a key connection is ALWAYS
+     * probed at connect time, a probe that fails withdraws the account it just made, so an
+     * unverified row under an app that HAS a probe must be a refusal whose withdrawal failed — or
+     * else a re-check the vendor refused, which leaves the person's own older account alone. That
+     * reasoning was sound about the rows it described and said nothing about the row a refresh had
+     * quietly moved underneath it. What the row now warrants, it warrants by having been written:
+     * the check ran, it spent this action, and the vendor refused.
+     *
+     * WHICH PATH WROTE IT IS STILL NOT RECOVERABLE, and a reader must not invent one. The column
+     * records what was spent, not who spent it, and the two writers of that pair end differently: a
+     * connect withdraws the account it had just made and only leaves the row where Composio refused
+     * to take it back, while a re-check never withdraws anything, because the account predates the
+     * press and is the person's own. So a page may say the key was refused and the account stands;
+     * a page that goes on to blame a failed withdrawal is right on the connect path and FALSE on the
+     * re-check, where nothing ever tried to remove anything.
+     *
+     * `checkable` IS THE OTHER QUESTION, AND IT TRAVELS SEPARATELY BECAUSE COLLAPSING THE TWO IS
+     * WHAT DEADLOCKED THE SETTINGS SCREEN. "What did the check SPEND" is a fact about the past, and
+     * `probe` answers it. "Does this app have anything to check with TODAY" is a fact about the
+     * present, and this answers that — out of {@link probeActionFor}, asked of the APP rather than
+     * of the connection. The two agreed for as long as `probe` was derived: one field, one moment,
+     * two questions nobody ever had to tell apart. They part company the instant it became a
+     * record, which is the same instant it started being right about the past.
+     *
+     * THE DEADLOCK IN FULL, BECAUSE IT DOES NOT SELF-HEAL. The page gates its Re-check button on
+     * whether there is anything to check with, and it read `probe` for that. Somebody connects a
+     * key to an app that publishes nothing safe to spend it on: the check spends nothing, the row
+     * records null, and both of those are correct and permanent. An administrator presses Refresh,
+     * the app gains a safe versioned read, and the button is STILL withheld — because the record
+     * still says, truthfully, that nothing was spent. And pressing that button is the only thing in
+     * this product that can ever put an action into the record. The state is stable, wrong, and
+     * unreachable from inside itself: the single act that would end it is the act being withheld.
+     *
+     * SO A CALLER TAKES THE PAST FROM ONE AND THE PRESENT FROM THE OTHER, and must take neither out
+     * of the other one. A screen drawing its SENTENCE off `checkable` would accuse a key nobody
+     * tried, which is the defect the recorded column was made for; a screen gating its BUTTON on
+     * `probe` is the deadlock above. Neither field is a weaker spelling of the other, and the
+     * moment one is asked to answer both questions the two failures simply trade places.
+     *
+     * WHICH COSTS ONE QUERY PER CONNECTED APP, AND THAT IS THE RIGHT PRICE. Making `probe` a stored
+     * column took the per-row call out and left a listing that was one query; this puts it back —
+     * on top of the two the rows themselves now take, which the body below says why.
+     * The alternative is to fold the chooser's rule into the join — vendor-labelled read, not
+     * destructive, no required inputs, a recorded version — and that rule has no honest spelling in
+     * SQL: `required` is the vendor's own JSON Schema stored unchanged, and deciding whether it is
+     * a non-empty list of names is a thing JavaScript does and a `json` operator does badly. So
+     * folding it in means writing the rule a SECOND time, in a second language, over the same rows,
+     * and this file already records what a rule in two places costs: while the version condition
+     * sat in one of them, an app whose chosen action had no version connected honestly as "nothing
+     * was tried" and reloaded as "your key was checked and rejected". {@link probeActionFor} is the
+     * one authority on what can be checked, and a listing that asks it N times cannot disagree with
+     * the probe that asks it once. N is the apps ONE person has connected — a handful of indexed
+     * reads by server id, made in parallel — behind a settings page and not on any hot path.
+     *
+     * `verifiedAt` STAYS NULL WHERE IT IS NULL, unlike `connectedAt`, which collapses to `""`
+     * because a row cannot exist without one and the fallback is unreachable. Null here is
+     * reachable and it means something: never checked. Folding it into `""` would hand the page a
+     * row that was checked at a time nobody recorded, which is a different fact and not one this
+     * table ever holds. Note also what {@link composioConnections.verified} sets out about the rows
+     * migration 0037 backfilled: their `verifiedAt` is the moment of consent, not the moment of a
+     * probe, so a caller must not read every timestamp here as "this connection answered then".
+     */
+    async brokeredConnectionsFor(userId: string): Promise<
+      {
+        serverId: string;
+        scope: string;
+        connectedAt: string;
+        verified: boolean;
+        verifiedAt: string | null;
+        probe: string | null;
+        checkable: boolean;
+      }[]
+    > {
+      const connections = await database
+        .select({
+          toolkit: composioConnections.toolkit,
+          connectedAt: composioConnections.connectedAt,
+          verified: composioConnections.verified,
+          verifiedAt: composioConnections.verifiedAt,
+          probeAction: composioConnections.probeAction,
+        })
+        .from(composioConnections)
+        .where(eq(composioConnections.userId, userId));
+
+      /*
+       * THE APP IS RESOLVED PER CONNECTION, NOT JOINED TO IT, BECAUSE THE URL IS NOT A KEY.
+       *
+       * CRITERION. One connection is one row out of here, whatever `mcp_servers` holds.
+       *
+       * REASON. This read used to be an inner join on `mcp_servers.url = 'composio://' || toolkit`,
+       * and nothing in the schema makes that column unique — the one `uniqueIndex` in
+       * `db/schema/plugins.ts` is `skills_slug_key` on `skills.slug`. A join answers one row per
+       * PAIR, so a second row at an app's url listed the same account twice: two rows on the
+       * settings page saying the same app under two different server ids, each offering to
+       * disconnect the single connection standing behind both. And it is not an exotic state — it
+       * is what any database looks like the moment a row at `gmail` sits beside the
+       * `composio-gmail` an administrator really added, which is how a development database
+       * routinely looks.
+       *
+       * A UNIQUE INDEX WOULD BE THE OTHER FIX AND IS THE WRONG ONE. Two rows at one address is a
+       * state this product means to allow — a deployment holding two accounts at one vendor adds
+       * the same URL twice under two ids with two credentials, and `addCustomServer` refuses only a
+       * re-add that MOVES an existing id's address. Constraining the column would forbid that for
+       * everybody to tidy a display defect, and the migration that added it would fail outright on
+       * any deployment already holding a duplicate, taking the whole boot with it.
+       *
+       * SO THE LOWER ID ANSWERS FOR THE APP, and it is a rule rather than whatever the scan met
+       * first: a page that redrew under a different `serverId` each load would be offering buttons
+       * keyed on a value moving underneath it. The same rule decides the scheme reads — see
+       * {@link brokeredAppScheme} — so nothing in this file can name one row for an app while
+       * something else names another.
+       *
+       * AND "LOWER" IS THE DATABASE'S OWN WORD FOR IT, WHICH IS WHY THE ORDER IS IN THE QUERY. This
+       * read took its rows unordered and picked the smallest with a JavaScript `<`, which compares
+       * UTF-16 code units and nothing else, while {@link brokeredAppRow} asks for `order by id`
+       * under whatever collation the deployment's database runs. Those two agree for ASCII on a `C`
+       * database and are free to disagree everywhere else — a linguistic collation reorders case and
+       * punctuation, and byte order and code-unit order part company above the BMP. One rule spelled
+       * in two languages is two rules, and where they parted the page drew an app under one server
+       * id while the Re-check button beside it, the probe behind that button and the scheme that
+       * decides whether the button appears at all were about the other row: the same defect the
+       * single read was written to end, reached through the collation instead of through the query.
+       * So the resolution is {@link brokeredAppRowsAt} and not a rule spelled again here: it is the
+       * same function {@link brokeredAppRow} answers one app out of, which is what makes the row
+       * this page draws an app under the row every read behind its buttons is about.
+       *
+       * A CONNECTION WITH NO ROW AT ITS URL IS STILL LISTED BY NOTHING, which is what the inner
+       * join answered and what the missing `serverId` below drops. A person can hold an account at
+       * an app this deployment has since removed, and the settings page has no row to draw for it.
+       */
+      const named = await brokeredAppRowsAt(
+        connections.map((row) => `composio://${row.toolkit}`),
+      );
+
+      const rows = connections
+        .flatMap((row) => {
+          const serverId = named.get(`composio://${row.toolkit}`)?.id;
+          return serverId === undefined ? [] : [{ ...row, serverId }];
+        })
+        // By server id, as the join's own `order by` was, so this read and `connectionsFor` hand the
+        // route two lists ordered alike. Compared as plain strings rather than through a collation,
+        // for the reason the route gives where it merges them: the order only has to be the same
+        // one every time.
+        .sort((left, right) => {
+          if (left.serverId < right.serverId) return -1;
+          return left.serverId > right.serverId ? 1 : 0;
+        });
+
+      return await Promise.all(
+        rows.map(async (row) => ({
+          serverId: row.serverId,
+          scope: "",
+          connectedAt: iso(row.connectedAt) ?? "",
+          verified: row.verified,
+          verifiedAt: iso(row.verifiedAt),
+          // The name alone, because that is what the four states are told apart by; the version the
+          // check was made at is the caller-of-the-call's business, and this read makes none.
+          probe: row.probeAction,
+          /*
+           * WHETHER, NOT WHICH. The chooser names an action and this keeps only the yes or no,
+           * because the yes or no is the whole of the question being asked: is there anything to
+           * spend a key on. Carrying the name would put a second action name on a row that already
+           * has one, inches from the field that records what was actually spent — and the first
+           * reader to draw a sentence off the wrong one re-opens the defect that made `probe` a
+           * record. A boolean cannot be mistaken for a record of anything.
+           */
+          checkable: (await this.probeActionFor(row.serverId)) !== null,
+        })),
+      );
+    },
+
+    /**
+     * Whether this person has one brokered app connected, and since when.
+     *
+     * THE ROW IS A CACHE OF COMPOSIO'S ANSWER, not a record of a flow this deployment watched
+     * finish. Nothing here holds a secret for a brokered app: the vendor keeps the account, and
+     * what {@link composioConnections} holds is the sentence "Composio said yes when we asked",
+     * written down so that every later call can be gated without a round trip. That makes drift
+     * possible by construction — somebody can end the connection in Composio's own dashboard, and
+     * this row would go on saying yes — and it is why {@link confirmBrokeredConnection} asks the
+     * vendor again rather than trusting what is here. Calling confirm on any page load is
+     * therefore how a row that drifted heals.
+     *
+     * Read by the pair, because the pair is the primary key: an app has many people's connections
+     * and a person has many apps, and the only question anybody asks is about one of each.
+     */
+    async brokeredConnection(input: {
+      toolkit: string;
+      userId: string;
+    }): Promise<{ connectedAt: string } | null> {
+      const [row] = await database
+        .select({ connectedAt: composioConnections.connectedAt })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, input.toolkit),
+            eq(composioConnections.userId, input.userId),
+          ),
+        )
+        .limit(1);
+
+      if (!row) return null;
+      return { connectedAt: iso(row.connectedAt) ?? "" };
+    },
+
+    /**
+     * The action a key verification should call against this app, and the version to call it at.
+     *
+     * THIS CHOOSES THE ONE ACTION THAT WILL BE CALLED WITH SOMEBODY'S JUST-TYPED API KEY, which is
+     * what makes it the most dangerous line in the verification: whatever comes back from here runs
+     * against a stranger's account, once, purely to find out whether their key works. So the two
+     * safety conditions below are BOTH non-negotiable, and neither is a stricter spelling of the
+     * other.
+     *
+     * READ EFFECT, because a probe must not change anything. The label is the vendor's own and not
+     * a guess of ours: `effectOf` answers `read` only where Composio sent `readOnlyHint`, and
+     * everything unlabelled was already recorded as a write, so `read` here means Stripe or Linear
+     * or Notion said so. `destructive` is checked beside it rather than trusted to be implied — the
+     * two are separate columns precisely so a vendor can say both things, and a row that somehow
+     * says read AND destructive is a row this deployment has no business calling unasked.
+     *
+     * ZERO REQUIRED INPUTS, because there is nothing to invent an argument from. A probe happens
+     * before this deployment knows anything about the account beyond the key, so a required customer
+     * id or query has no honest value to carry, and a made-up one turns "is this key good" into
+     * "does this identifier exist" — which fails for a perfectly good key.
+     *
+     * BOTH, NEVER EITHER, and the live catalogue is why this sentence is here rather than a comment
+     * saying the checks are belt-and-braces. The first argument-less action on Stripe's own list is
+     * `STRIPE_CREATE_BILLING_METER_EVENT_SESSION`. A probe chosen on "takes no arguments" alone —
+     * the condition that looks sufficient, because it is the one that makes a call possible at all —
+     * would therefore write to somebody's account to find out whether their key works. The read
+     * effect is the whole of what stands between those two names.
+     *
+     * AND A RECORDED VERSION, WHICH IS PART OF "CAN THIS BE CALLED AT ALL" AND NOT A DETAIL OF THE
+     * CALLER. Composio refuses an execution without a specific version and rejects `latest`, so the
+     * transport refuses before dialling where none travels with the call — and Composio publishes
+     * some actions with no version at all. An action this deployment recorded without one is
+     * therefore an action nothing here can spend a key on, which is the same kind of fact as a
+     * required input: not unsafe, just not callable. The version is SELECTED AND RETURNED for the
+     * caller that has to send it, so the choice and the call cannot come apart.
+     *
+     * THE CONDITION LIVES IN THE FILTER RATHER THAN AFTER THE CHOICE, so there is ONE predicate for
+     * one question. While it sat downstream — read by the probe, unknown to everything else — there
+     * were two, and the weaker of them was what the connections listing derived its `probe` field
+     * from: an app whose chosen action had no version connected honestly as "nothing was tried",
+     * then reloaded as "your key was checked and rejected". That listing no longer derives that
+     * field from here — {@link brokeredConnectionsFor} reads what the check RECORDED, because no
+     * derivation from today's metadata can be right about yesterday's check. It still asks this
+     * function a question, but a present-tense one: whether the app has anything to check with now,
+     * kept as a yes or no beside the record. A split predicate would therefore no longer put a
+     * false sentence on a settings page; it would show up in two worse places — a probe that chose
+     * an action it then refused to send, and a button offered over an app nothing can be spent on.
+     * A filter also lets the search CONTINUE: a versionless
+     * candidate is passed over for the next safe read rather than short-circuiting the whole app to
+     * "nothing to try", so an app that can be checked is.
+     *
+     * NULL IS AN ANSWER AND NOT A FAILURE. Of fifteen key-based apps sampled, most publish some safe
+     * argument-less read and PostHog publishes none at all, so an app that cannot be probed is an
+     * ordinary app rather than a broken one. What a caller does about it — and running the probe at
+     * all — belongs to the verification path; this function only chooses.
+     */
+    async probeActionFor(
+      serverId: string,
+    ): Promise<{ name: string; version: string } | null> {
+      // Ordered, because the fallback below is "the first candidate" and Postgres promises no order
+      // without one: an unordered read would make which action gets called with somebody's key a
+      // property of whichever plan the server happened to pick.
+      const actions = await database
+        .select({
+          name: mcpTools.name,
+          inputSchema: mcpTools.inputSchema,
+          effect: mcpTools.effect,
+          destructive: mcpTools.destructive,
+          version: mcpTools.version,
+        })
+        .from(mcpTools)
+        .where(eq(mcpTools.serverId, serverId))
+        .orderBy(asc(mcpTools.name));
+
+      // One pass, and it yields the pair rather than the row: an action that survives every
+      // condition below has a version by definition, and building the answer here is what carries
+      // that fact into the type instead of leaving the caller to re-check it.
+      const safe = actions.flatMap((action) => {
+        if (action.effect !== "read" || action.destructive) return [];
+        // Null in the column and blank in the data are the same nothing, and neither is a version
+        // the transport can put on a call.
+        const version = action.version?.trim();
+        if (!version) return [];
+        /*
+         * THE WHOLE SCHEMA IS ASKED, NOT ITS TOP-LEVEL `required`. This read `schema?.required` and
+         * passed over the action only for a non-empty list there — so an action whose required
+         * arguments are published under `allOf`/`anyOf`/`$ref`, which is how a generated toolkit
+         * ordinarily writes them, was selected as argument-less, called with `{}`, and answered with
+         * the vendor's validation error. That arrives at `probeConnection` as `answered: true,
+         * isError: true`, which is the `refused` verdict — a valid key declared bad, and on connect
+         * the account created seconds earlier deleted behind it. See {@link asksForArguments} for
+         * which keywords bear on an empty object and why the unreadable shapes answer yes.
+         */
+        if (asksForArguments(action.inputSchema)) return [];
+        return [{ name: action.name, version }];
+      });
+
+      const identity = safe.find((action) => IDENTITY_ACTION.test(action.name));
+      return identity ?? safe[0] ?? null;
+    },
+
+    /**
+     * Write down that this person holds this brokered app, and how well that is known.
+     *
+     * ONE WRITER SO THE VERIFIED AND UNVERIFIED PATHS CANNOT DRIFT INTO TWO ROW SHAPES. What says
+     * how well a connection is known is a SET of fields and not a column: `verified` is meaningless
+     * without the moment it was earned, and `verified_at` without the flag is a date on a claim
+     * nobody made. Every path that records a connection therefore comes through here rather than
+     * spelling that set for itself — {@link confirmBrokeredConnection} with `true` today, and the
+     * verify path, which is the caller `false` exists for, when a probe against a key connection
+     * comes back unanswered. Two call sites each writing the set by hand is how one of them comes
+     * to set the flag and leave the timestamp null, or to move `connected_at` on a confirm that
+     * healed a row nothing changed; spelled once, a reader asking what shape a connection row takes
+     * has one answer and every path takes it.
+     *
+     * `verified` IS THE CALLER'S CLAIM AND `verifiedAt` FOLLOWS FROM IT, never the other way round.
+     * True means the caller has evidence as of now — the vendor's own yes at the end of a consent
+     * screen, or a call that went out and came back — so the timestamp is stamped here rather than
+     * passed in, and it is the moment of the write because that is the moment the evidence was in
+     * hand. False takes the timestamp back to null rather than leaving the old one standing: a row
+     * that has stopped being verified must not keep a date saying when it last was, because the one
+     * sentence the page builds out of the pair — "last checked 13 Sep" — would then be drawn for a
+     * connection this deployment is no longer claiming anything about.
+     *
+     * `connected_at` IS LEFT ALONE, which is the whole reason this is an upsert with an explicit
+     * `set` rather than a delete and an insert. The person connected when they connected; a write
+     * that moved it would make every page load look like a fresh connection on their own settings
+     * page, and would erase the one date the row holds that nothing else in this deployment knows.
+     *
+     * AND THE STAMP IT WROTE IS WHAT IT ANSWERS, for the same reason the caller does not pass one
+     * in. A caller that needs the moment — {@link recheckBrokeredConnection}, which hands it to the
+     * browser as the date the row's sentence is drawn from — would otherwise have to read the row
+     * back and hope it was reading its own write. The timestamp is still this writer's; what
+     * changed is that it is no longer thrown away.
+     *
+     * `only` IS WHETHER THIS WRITE MAY CREATE A CONNECTION, AND ONE CALLER MUST SAY NO.
+     *
+     * CRITERION. With `only: "a row that is still there"` this method never inserts. It updates a
+     * row that exists and answers `wrote: false` for one that does not, and the caller decides what
+     * to do about that.
+     *
+     * REASON. {@link recheckBrokeredConnection} reads the row first, deliberately, "because the
+     * writer below is an upsert, so a re-check that probed first would INSERT a connection for
+     * somebody who has none". That read and this write straddle a LIVE VENDOR CALL of several
+     * seconds, and nothing held the row still across it. A person pressing Re-check and then
+     * Disconnect in another tab — or a concurrent {@link confirmBrokeredConnection} getting `false`
+     * from Composio and deleting the row — had the revoke complete at Composio and the row deleted,
+     * and then this in-flight upsert PUT IT BACK. `composio_connections` is the whole of the
+     * permission a brokered call is decided on, so what the re-insert restores is access to an
+     * account the person has just disconnected, drawn on every screen as connected.
+     *
+     * THE GUARD IS ON THE WRITE RATHER THAN A LOCK ACROSS THE CALL, because the call is somebody
+     * else's and may take as long as it likes. A connection this write did not find is one nothing
+     * happened to: the probe's answer is about an account the person no longer has here.
+     *
+     * `probeAction` IS PASSED IN, UNLIKE THE TIMESTAMP, BECAUSE ONLY THE CALLER KNOWS IT. It is the
+     * action this check SPENT — the probe's name, or null where none was spent — and it is required
+     * rather than optional so that a new path cannot record a connection while staying silent about
+     * what it tried. Every existing caller knows the answer without looking anything up: a consent
+     * confirm spent nothing and passes null, and both probing paths pass the name the probe returned
+     * them, which is null there too when the app published nothing safe to call.
+     *
+     * IT IS PART OF THE SAME SET AS THE FLAG AND THE STAMP, which is the reason it is written here
+     * and nowhere else. `verified` alone says a check did not pass and cannot say what it was; this
+     * column is what separates "the app published nothing to try" from "it ran and the vendor said
+     * no", and a row carrying one of the three without the others is a shape no reader downstream
+     * has reasoned about. It used to be derived on read instead, from the app's action listing as
+     * that listing stood at the moment of the read — see {@link brokeredConnectionsFor}, where the
+     * refresh that broke the derivation is written out.
+     */
+    async recordBrokeredConnection(input: {
+      toolkit: string;
+      userId: string;
+      verified: boolean;
+      probeAction: string | null;
+      /** See the paragraph on `only` above. Absent is the ordinary upsert. */
+      only?: "a row that is still there";
+    }): Promise<{ verifiedAt: Date | null; wrote: boolean }> {
+      const verifiedAt = input.verified ? new Date() : null;
+      // The one set, spelled once, so the conditional write below and the upsert cannot drift into
+      // two row shapes. `probeAction` is overwritten rather than left standing, for `verifiedAt`'s
+      // reason: the pair describes ONE check, and a row keeping the action an earlier check spent
+      // beside the verdict of a later one would name a call this row's own state did not come from.
+      const set = {
+        verified: input.verified,
+        verifiedAt,
+        probeAction: input.probeAction,
+        updatedAt: new Date(),
+      };
+
+      if (input.only === "a row that is still there") {
+        /*
+         * AN UPDATE AND NEVER AN INSERT, and `returning` is how "there was a row" is ANSWERED rather
+         * than assumed. An update that matches nothing is not a failure — it is the row having been
+         * deleted while the vendor was being asked — and the caller has a sentence for that.
+         */
+        const written = await database
+          .update(composioConnections)
+          .set(set)
+          .where(
+            and(
+              eq(composioConnections.toolkit, input.toolkit),
+              eq(composioConnections.userId, input.userId),
+            ),
+          )
+          .returning({ userId: composioConnections.userId });
+        return { verifiedAt, wrote: written.length > 0 };
+      }
+
+      await database
+        .insert(composioConnections)
+        .values({
+          toolkit: input.toolkit,
+          userId: input.userId,
+          verified: input.verified,
+          verifiedAt,
+          probeAction: input.probeAction,
+        })
+        .onConflictDoUpdate({
+          target: [composioConnections.toolkit, composioConnections.userId],
+          set,
+        });
+      return { verifiedAt, wrote: true };
+    },
+
+    /**
+     * Spend one call on this person's key, and say what the vendor made of it.
+     *
+     * ONE PROBE, TWO CALLERS, AND THE ANSWER TO "WHAT DOES A FAILED PROBE MEAN" LIVES HERE ONCE.
+     * {@link connectBrokeredWithFields} probes a key somebody has just typed;
+     * {@link recheckBrokeredConnection} probes one this deployment has held for days. Both have to
+     * choose the action the same way, send it the same way, and read the vendor's answer the same
+     * way — and a second copy of that reading is how one of them comes to treat a rejected key as a
+     * connection that merely could not be checked. What the two callers do NEXT is all that differs,
+     * and it is all either of them keeps for itself: one withdraws the account it just made, the
+     * other leaves an account it did not make alone.
+     *
+     * FOUR ANSWERS AND NOT A BOOLEAN, because `verified: false` means several different things
+     * about somebody's key and the flag separates none of them. They are enumerated on
+     * {@link BrokeredProbe}, which is where a reader should go; the one worth repeating at the call
+     * this method makes is the fourth.
+     *
+     * A VENDOR THAT WAS NOT REACHED IS NOT A VENDOR THAT SAID NO, and this is the one place that
+     * can tell. `callTool` answers with a result rather than throwing, and `isError` is true for all
+     * three of the failures it documents — so read as a verdict here, a Composio outage, a socket
+     * that closed, a `@composio/core` that cannot parse what came back and a run attributed to
+     * nobody were every one of them "the vendor refused this key". What that cost is at the callers
+     * and it was the worst thing this feature did: on connect the account somebody had just made
+     * was deleted at the vendor and they were told what they entered did not work; on re-check a
+     * live, working connection was stripped of its verification and marked as holding a bad key.
+     * {@link ActionAnswer} is what the transport now answers beside the result, and this method
+     * asks for it by calling `askAction` rather than `callTool`.
+     *
+     * A FAILURE IS RETURNED RATHER THAN THROWN, which is the one thing this function does not
+     * decide. Its two callers end a bad key differently — one undoes an account and refuses, the
+     * other writes the row unverified and refuses — so a throw here would force the undo on both or
+     * neither. What it owes them is the vendor's sentence and the name of what was tried.
+     *
+     * NOTHING IS WRITTEN, NOTHING IS AUDITED, AND NO ACCOUNT IS TOUCHED. This is a question asked of
+     * the vendor; recording the answer belongs to whoever asked it.
+     */
+    async probeBrokeredConnection(input: {
+      toolkit: string;
+      userId: string;
+      /**
+       * THE ACCOUNT TO SPEND IT IN, where the caller has one in mind.
+       *
+       * {@link connectBrokeredWithFields} has just made an account and is asking about THAT key; a
+       * person and an app do not name it, because one person may hold several accounts for one app
+       * and the vendor picks which a call runs in. Unpinned, a bad key was verified by the person's
+       * other, working account — and the same defect the other way round condemned a good key, and
+       * deleted the account it made, on the strength of some other account of theirs being broken.
+       *
+       * ABSENT FOR A RE-CHECK, AND THAT IS A GAP RATHER THAN A CHOICE. `composio_connections`
+       * records no account id — the row is keyed on the person and the app — so a press of Re-check
+       * has nothing to pin to and asks the vendor the same app-level question it always did. It is
+       * the milder half: a re-check writes a verdict but takes nothing away, and its refusal tells
+       * the person their key is wrong rather than removing anything they hold.
+       */
+      accountId?: string;
+    }): Promise<BrokeredProbe> {
+      /*
+       * THE ONE ACTION THIS DEPLOYMENT WILL SPEND THE KEY ON, chosen from what the app published.
+       *
+       * Composio accepts a key without ever trying it, so "connected" at the vendor is not evidence
+       * that the credential works — and a row written on that acceptance is a gate every later
+       * brokered call passes for a key that cannot answer. {@link probeActionFor} is what keeps the
+       * call safe: the vendor must have labelled the action a read and it must take no arguments,
+       * and both matter because the first argument-less action on Stripe's own list creates a
+       * billing session. It answers the VERSION beside the name, because Composio refuses an
+       * execution without a specific one — so an action recorded without a version is one the
+       * chooser passes over rather than one this method discovers it cannot call. Null is an
+       * ordinary answer — see that method — and it is the FIRST of the three states above.
+       *
+       * NOTHING IS ASKED A SECOND TIME HERE, AND THAT IS THE POINT. Every condition on whether an
+       * action can be spent on a key lives in the chooser, so the action this method sends is the
+       * action the chooser said was sendable, whole. A version re-read here would be a second
+       * predicate for one question, and the weaker of two predicates is what once had a reloaded
+       * page tell somebody their untried key had been rejected — in the days when the connections
+       * listing answered by asking the chooser too. It no longer does: what a page says about a
+       * check is what the check recorded, and what it recorded is the name this method returns.
+       *
+       * AND THE APP IS RESOLVED BY ITS URL, THE WAY EVERY OTHER BROKERED LOOKUP HERE IS — through
+       * {@link brokeredAppRow}, which is the one read that decides it. The url is where a brokered
+       * row records which app it is; `mcp_servers.id` is a display name and nothing holds the two
+       * equal — which is exactly why {@link connectBrokeredWithFields}, {@link
+       * recheckBrokeredConnection} and {@link disconnectBrokered} all key on the url, and why {@link
+       * brokeredConnectionsFor} resolves on it rather than spelling `composio-${toolkit}` by hand.
+       * Composing it here made this method the one place that re-derived the id from a convention,
+       * and it put the two halves of the `checkable`/`probe` split back into disagreement on any
+       * row where they differ: the listing answered `checkable` off the app's real row while this
+       * answered off an id addressing nothing, so the button was offered and the press could never
+       * find anything to spend — the Re-check deadlock the split exists to prevent, reached from
+       * the other end. Worse where the composed id DID hit something: a row called `composio-gmail`
+       * at `composio://slack` would have this choose a stranger's probe off another app's listing
+       * and spend their key on it. A row this deployment has since removed drops out here as null,
+       * which is the same honest answer the listing gives for it: there is no app left to check.
+       *
+       * AND THE SHARED READ RATHER THAN A URL QUERY OF ITS OWN, because `mcp_servers.url` has no
+       * unique index and an unordered `limit(1)` over it is not an answer. A second row at the app's
+       * url — the ordinary state of any database where a fixture sits beside the `composio-` row an
+       * administrator really added — had this resolve to whichever row the scan met first while the
+       * listing named the app by the lower id, which is the SAME deadlock one step along: Re-check
+       * offered off the app's own row, and the press landing on a row that publishes no action and
+       * reporting there was nothing to try. One function decides which row answers for an app, so
+       * nothing here can name one row while something else names another.
+       */
+      const app = await brokeredAppRow(input.toolkit);
+
+      const candidate = app ? await this.probeActionFor(app.id) : null;
+      if (candidate === null) {
+        return { outcome: "nothing", probe: null };
+      }
+
+      /*
+       * THE TRANSPORT DIRECTLY, AND NOT `callTool` ABOVE. This deployment's own `callTool` checks a
+       * grant, evaluates the policy and writes an `mcp.call_*` row, and there is no Bot here to
+       * check a grant for, no policy context to evaluate and no Bot to attribute a row to. What
+       * holds this narrow is structural rather than disciplinary: no endpoint, no arguments, and an
+       * action chosen from recorded metadata rather than from anything a request said. See
+       * `mcp.connection_verified` in `./audit`, which records the same three properties as the
+       * reason this call may skip the checks the ordinary path cannot — and which names both of
+       * this function's callers as the whole of who may make it.
+       *
+       * THE VERSION IS NOT AN ARGUMENT. It travels under the transport's reserved key, which the
+       * Composio transport strips before anything reaches the vendor and asserts that it did, so
+       * what Composio is handed is the action and an empty argument object.
+       */
+      const { result, answered } = await composioAskAction(
+        {
+          url: `composio://${input.toolkit}`,
+          actorId: input.userId,
+          // Spread rather than passed as `undefined`, so "any account of theirs" reaches the wire
+          // as a body with no such key. See {@link ComposioActions.execute}.
+          ...(input.accountId === undefined
+            ? {}
+            : { accountId: input.accountId }),
+        },
+        candidate.name,
+        { [VERSION_ARG]: candidate.version },
+      );
+
+      /*
+       * THE READING, AND IT IS THE WHOLE OF WHAT THIS METHOD DECIDES. `answered` is the transport's
+       * own statement that Composio ran the action in the account and said how it went; `isError`
+       * then says what it said. Anything else is an outage or an answer this deployment could not
+       * read, and neither is evidence about a key — so the action's NAME is withheld from those,
+       * because the name beside `verified: false` is the accusation and only a call that can be
+       * shown to have run may make it.
+       */
+      if (!answered) {
+        return {
+          outcome: "unreachable",
+          probe: null,
+          attempted: candidate.name,
+          sentence: result.text,
+        };
+      }
+
+      /*
+       * AND `isError` SAYS THAT THE CALL WENT BADLY, NOT THAT THE KEY IS BAD. The envelope this is
+       * read out of is `{ data, error, successful }` and nothing more: a 429, a scope this one
+       * action needs and the key legitimately lacks, and a 404 for a resource the read action names
+       * all arrive here identically to a credential the vendor rejected. So the outcome is named
+       * for what was observed — the app complained — and the two readings that treated it as a
+       * verdict about the credential are gone from both callers. See {@link BrokeredProbe}.
+       */
+      return result.isError
+        ? {
+            outcome: "complained",
+            probe: candidate.name,
+            sentence: result.text,
+          }
+        : { outcome: "answered", probe: candidate.name };
+    },
+
+    /**
+     * Ask Composio whether this person's account is really attached, and write down the answer.
+     *
+     * THE VENDOR IS ASKED, NOT THE BROWSER. The return trip from a consent screen is an ordinary
+     * redirect carrying nothing signed, so a person arriving back on the page is not evidence that
+     * they finished the flow, nor that the account they finished it with is the one a row would
+     * claim. A confirm that wrote a row because somebody came back would hand every later brokered
+     * call a gate that passes for an account nobody has — and the first anyone would hear of it is
+     * the vendor's own error about a connection it cannot find, at the moment a Bot was asked to do
+     * something.
+     *
+     * SO THE ANSWER NO LEAVES NO ROW BEHIND. `false` from {@link ComposioBroker.isConnected} is a
+     * positive claim that there is no account, and the honest local state for that claim is an
+     * absence — so a row already sitting here is deleted rather than left standing. Leaving it
+     * would have the settings list go on drawing "Connected" for an account nobody has, and would
+     * go on passing the gate every later brokered call is decided on, while the app's own detail
+     * page asks the vendor and says the opposite.
+     *
+     * AND THAT DELETION FILES NO TRAIL ENTRY. Nobody disconnected anything here: the grant ended
+     * somewhere else, and this is our record catching up with a fact. {@link disconnectBrokered}
+     * owns `mcp.account_disconnected` and files it for the act it performed; a second filer here
+     * would have the trail claim an act that did not happen, credited to whichever page load
+     * happened to notice.
+     *
+     * UPSERT RATHER THAN INSERT, keyed on the pair the table itself is keyed on. This is safe to
+     * call repeatedly and is meant to be: because the row is only a cache of the vendor's answer
+     * (see {@link brokeredConnection}), a row that drifted out of step — an account ended in
+     * Composio's own dashboard, a connect this deployment missed the callback for — is healed by
+     * the next confirm on any page load, in whichever direction it drifted: by the upsert here
+     * where the vendor says yes, and by the delete above where it says no.
+     *
+     * AND THE YES WRITES A VERDICT ONLY WHERE CONSENT IS THE CHECK, which is the one thing a reader
+     * of this method has to carry away. `verified: true` beside a null `probeAction` is not a
+     * neutral heal: it is a NAMED one of the four states {@link composioConnections.probeAction}
+     * enumerates — the consent state — and this method runs from an effect on mount, so writing it
+     * unconditionally meant every page load restated it over whatever a real check had recorded.
+     * For a key connection that erased the record, worst of all over "a named probe beside
+     * `verified: false`", the live account with a bad key behind it that is the one state somebody
+     * must act on; and it re-dated `verified_at` to the page load, so the row claimed a check on a
+     * day nothing was checked. The yes itself does not bear on a key: {@link
+     * ComposioBroker.isConnected} says an account is attached, Composio takes a key when it is
+     * typed and never tests it again, so for a key app that answer is what the row's existence
+     * already said. The branch is on the scheme recorded on the app's row, classified through {@link
+     * brokeredAppKind} as {@link connectBrokeredWithFields} and {@link recheckBrokeredConnection}
+     * classify theirs, and a key row already here is left untouched — the evidence about a key is a
+     * call, and those two are the only writers of this row's verdict. A key app the vendor holds an
+     * account for with no row here still gets one, written UNCHECKED, because the row is the gate
+     * every later brokered call passes through and the only thing Disconnect works off.
+     *
+     * AND THE FLAG IS WRITTEN FOR A CONSENT APP RATHER THAN FOR ANYTHING THAT IS NOT A KEY APP. A
+     * scheme this deployment cannot read — a null, or a literal nothing here writes — is neither
+     * kind, and it takes the key app's treatment: nothing recorded is overwritten, and a person the
+     * vendor holds an account for still gets the row that is their permission. See {@link
+     * SchemeKind} for why that third answer has to travel rather than be flattened into the second.
+     *
+     * `scope` IS EMPTY BECAUSE COMPOSIO GRANTS NONE THAT IT TELLS US ABOUT. The field exists so a
+     * later refusal for want of a permission can be explained by what the vendor actually granted,
+     * and Composio's connection answer is a boolean with no scope in it. Writing a plausible claim
+     * there — the app's full access, say — would put words in the vendor's mouth in the one field
+     * whose whole job is to say what it said.
+     *
+     * `reconnected` IS FALSE FOR THE SAME REASON, and trivially so. The flag distinguishes somebody
+     * replacing a grant from somebody making one, and the only confirms that reach the trail are
+     * the ones that found no row at all — so there was nothing here to replace.
+     *
+     * AND THE EVENT IS WRITTEN ONLY WHERE THE ROW IS NEW. This method runs on every page load
+     * rather than only when a person acts, so an event per yes from the vendor would file ten
+     * "account connected" rows for somebody who opened the connector page ten times having
+     * connected once. A confirm that heals a row nothing changed is a read, and the trail records
+     * acts: where a row was already there the connection has been recorded once already, by the
+     * confirm that first found none.
+     */
+    async confirmBrokeredConnection(input: {
+      toolkit: string;
+      userId: string;
+    }): Promise<{ connected: boolean }> {
+      // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
+      // no key has no broker to have connected anybody at, so there is nothing here to ask.
+      if (!broker) throw new BrokerUnconfiguredError();
+
+      const connected = await broker.isConnected({
+        userId: input.userId,
+        toolkit: input.toolkit,
+      });
+      if (!connected) {
+        // Deleted rather than left alone, because the row is only the vendor's last answer: an
+        // account ended in Composio's own dashboard reaches this deployment as the no above and
+        // as nothing else, and a row that outlived it would go on saying yes about an account the
+        // vendor has just denied.
+        await database
+          .delete(composioConnections)
+          .where(
+            and(
+              eq(composioConnections.toolkit, input.toolkit),
+              eq(composioConnections.userId, input.userId),
+            ),
+          );
+        return { connected: false };
+      }
+
+      /*
+       * READ BEFORE THE WRITE, because the upsert leaves nothing behind that tells the two cases
+       * apart, and whether a row was already here is the whole of what decides if anybody acted.
+       *
+       * AND THE VERDICT IS READ BESIDE THE ROW'S EXISTENCE, which is the consent arm's business.
+       * `verified` here is the difference between "this deployment has already recorded the
+       * vendor's yes" and "it has not", and the write below is conditioned on it so that a mount
+       * cannot re-date a consent that was recorded days ago. The column is read directly rather
+       * than through {@link brokeredConnection}, which answers with the connection date alone.
+       */
+      const [held] = await database
+        .select({ verified: composioConnections.verified })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, input.toolkit),
+            eq(composioConnections.userId, input.userId),
+          ),
+        )
+        .limit(1);
+      const existing = held !== undefined;
+
+      /*
+       * THE SCHEME ON THE APP'S ROW, WHICH IS WHAT DECIDES WHETHER THE YES ABOVE IS A CHECK.
+       *
+       * Keyed on the url and on the one row that answers for it — see {@link brokeredAppRow} — which
+       * is the read {@link connectBrokeredWithFields} and {@link recheckBrokeredConnection} both
+       * make: `mcp_servers.id` is a display name and nothing holds the two equal, so a row called
+       * `gmail` at `composio://slack` would decide a Slack confirm on Gmail's scheme, and a second
+       * row at the app's own url would have this confirm branch on a scheme the re-check beside it
+       * disagrees with. Asked through {@link brokeredAppKind} rather than compared as a string, so
+       * the schemes this branches on cannot drift from the schemes that have a key behind them.
+       *
+       * AND THE QUESTION IS "IS THIS A CONSENT APP", NOT "IS THIS NOT A KEY APP", which are the same
+       * question only if the column can always be read.
+       *
+       * CRITERION. `verified: true` is written here for an app this deployment KNOWS connects by
+       * consent, and for no other.
+       *
+       * REASON. This branched on {@link isFieldScheme} alone, so every other answer — a consent
+       * scheme, a literal from a deployment that knew other names, a NULL — fell into the consent
+       * arm by elimination. A null is not a consent app: it is a column this deployment cannot read,
+       * which {@link mcpServers.authScheme} calls a row that is not brokered and which the row that
+       * ANSWERS for an app is perfectly free to carry — no unique index stands behind that url, so
+       * the row an enable wrote its scheme onto is not always the row found here. Confirm runs from
+       * an effect on mount, so the elimination wrote `verified: true` with a fresh `verified_at` and
+       * a null probe over that row on every page load: a verdict about evidence nobody has, dated to
+       * the day somebody opened a page, over whatever a real check had recorded. The other two
+       * readers of this column already fail closed on the null — {@link recheckBrokeredConnection}
+       * refuses the press, {@link disconnectBrokered} claims no revocation — so the one caller that
+       * could not survive being wrong was the only one failing open.
+       *
+       * SO AN UNREADABLE SCHEME IS TREATED AS A KEY APP IS, and that is the cautious half in both
+       * directions: nothing already recorded is overwritten, and the row that is the gate is still
+       * written where the vendor holds an account nothing here has a row for.
+       */
+      const kind = await brokeredAppKind(input.toolkit);
+
+      /**
+       * WHAT THIS CONFIRM ANSWERS FOR EACH KIND OF APP, WRITTEN DOWN BECAUSE THE CHAIN CANNOT BE.
+       *
+       * Type-only and erased; see {@link Decides}. The chain below tests ONE member and then tests
+       * something else — `kind === "none"`, `kind === "consent"`, then `!existing` — so there is no
+       * position where the compiler has this vocabulary narrowed away and nothing here would fail
+       * for a fifth member.
+       * This is the caller that WRITES, and it is the one that could not survive being wrong: it
+       * runs from an effect on mount, so whatever it decides for a member nobody named is decided
+       * again on every page load.
+       *
+       * EVERY CELL IS NOW ASSERTED RATHER THAN DECLARED. `consent` used to be written as what the
+       * code did rather than as what it should do — the re-stamp of `verified_at` on an
+       * already-consented row was a live finding — and `none` did not exist as a member at all, so
+       * a no-auth app was classified `consent` and got that same write on every mount. See the
+       * table in `tests/composio-connection-kinds.test.ts`, which drives each of these four against
+       * the running code.
+       */
+      type _ConfirmDecides = Decides<
+        SchemeKind,
+        {
+          key: "leaves an existing row exactly as it is; records a new one as unchecked";
+          consent: "records the vendor's yes as a verification the first time, and leaves an already-consented row alone";
+          none: "writes nothing and files nothing — there is no account here for a row to be about";
+          unreadable: "treated as a key app is — nothing already recorded is overwritten";
+        }
+      >;
+
+      /*
+       * AND THE CONSENT WRITE HAPPENS ONCE, WHICH IS THE OTHER HALF OF "A MOUNT DOES NOT RE-DECIDE".
+       *
+       * CRITERION. `verified: true` is written for a consent app only where this deployment has not
+       * already recorded it. A row already carrying that verdict is left exactly as it is, its
+       * `verified_at` included.
+       *
+       * REASON. The arm was unconditional, and this method runs from an effect on mount — so every
+       * page load re-stamped `verified_at` to the moment of the load. The flag never changed, so
+       * nothing looked wrong; what was destroyed was the DATE, which for a consent connection is
+       * the day somebody finished at the vendor's own screen and is a fact nothing else in this
+       * deployment records. The row's own sentence, "last checked 1 Sep", became "last checked
+       * today" on a day nothing was checked, and the real date could not be recovered from anywhere.
+       * {@link recheckBrokeredConnection} refuses to probe a consent app in order to protect exactly
+       * that date; a confirm that re-stamped it on every mount destroyed from the inside what that
+       * refusal protects from the outside. Two earlier fixes made this arm conditional for the key
+       * case and then for the unreadable case and left the consent case — the one the arm is
+       * actually FOR — writing on every load.
+       *
+       * AND A ROW NOT YET CARRYING THE VERDICT IS STILL HEALED, once. A consent app whose row was
+       * written by some other path — a key-era connect, an enable that changed the app's scheme
+       * afterwards — reads `false` with a null date, which is the pair "nobody has checked" and is
+       * not true of a consented account. The vendor's yes above is the check for this kind of app,
+       * so it is recorded, with the stamp of the moment it was first recorded here, and the next
+       * mount finds the verdict already present and writes nothing.
+       */
+      /*
+       * AN APP THERE IS NOTHING TO CONNECT TO GETS NO ROW, WHICH IS THE OTHER TABLE'S RULE APPLIED
+       * HERE FOR THE FIRST TIME.
+       *
+       * CRITERION. Nothing is written and nothing is filed for a `none` app, whatever the vendor
+       * answered about it.
+       *
+       * REASON. `NO_AUTH` used to be a member of the CONSENT list, so the classifier called it
+       * consent and the arm below wrote `verified: true` with a fresh `verified_at` for it — on
+       * every page load, because this runs from an effect on mount. That is precisely the row the
+       * connect route refuses to create for these apps and the row the per-person gate is written to
+       * do without: `composio_connections` is the whole of the permission for a brokered call, and
+       * every row in it means one thing, that this person granted this deployment access to their
+       * account at this app. There is no account — Composio refuses even to hold an authorization
+       * config for a no-auth toolkit — and there is no grant, so a year on, offboarding, the trail
+       * and the Disconnect button could not tell those rows from ones somebody really made.
+       *
+       * THE NEGATIVE HEAL ABOVE STILL RAN, and deliberately: a row left behind by the version that
+       * wrote them is removed by the first mount that finds the vendor holding no account, which is
+       * every mount for an app like this.
+       */
+      if (kind === "none") return { connected: true };
+
+      if (kind === "consent" && !held?.verified) {
+        // VERIFIED, BECAUSE A CONSENT SCREEN IS A VERIFICATION AND NOT A LESSER KIND OF ONE. The
+        // vendor has just answered that this person's account is attached, which is the same
+        // question a probe goes and asks; that the evidence arrived through a consent flow rather
+        // than through a call this deployment made does not make it weaker. Writing on the column
+        // defaults instead left every consent connection reading `false` with a null `verified_at` —
+        // the pair a key somebody typed in and nobody ever checked reads — so the settings page could
+        // not tell the two apart. Written through the single writer above rather than here, so this
+        // path and the verify path cannot come to write two different row shapes; see
+        // {@link composioConnections.verified}.
+        await this.recordBrokeredConnection({
+          toolkit: input.toolkit,
+          userId: input.userId,
+          verified: true,
+          // NOTHING WAS SPENT TO EARN THAT FLAG, and that is what the null records rather than an
+          // absence of information. A consent connection is verified by the vendor's own yes at its
+          // own screen; no action of the app's is ever called against it, here or later, so there is
+          // no name to write and there never will be. The derived field could not say so — it
+          // answered with whatever the app happened to publish — and a consent row was listed as
+          // having been checked with an action nothing had called.
+          probeAction: null,
+        });
+      } else if (kind !== "consent" && !existing) {
+        /*
+         * A KEY APP THE VENDOR HOLDS AN ACCOUNT FOR AND NOTHING HERE HAS A ROW FOR: recorded as
+         * UNCHECKED, which is the honest one of the four states for it. The account was made
+         * somewhere this deployment did not watch — in Composio's own dashboard, or by a connect
+         * whose row was lost — so no key of theirs has ever been tried from here, and null beside
+         * `false` is exactly "nothing was spent". The row still has to exist: it is the gate every
+         * later brokered call passes through, and the only thing Disconnect works off.
+         *
+         * AND AN APP WHOSE SCHEME CANNOT BE READ IS WRITTEN THE SAME WAY, for the same sentence
+         * one word weaker: nothing here has ever checked this account, and nothing here knows what
+         * checking it would even mean. `false` beside a null claims neither a check nor a refusal,
+         * which is the only pair that is true of it — and the row is still the permission, so a
+         * person whose account Composio holds does not lose their access to a column nobody wrote.
+         */
+        await this.recordBrokeredConnection({
+          toolkit: input.toolkit,
+          userId: input.userId,
+          verified: false,
+          probeAction: null,
+        });
+      }
+      /*
+       * AND AN EXISTING KEY ROW IS LEFT EXACTLY AS IT IS, which is the whole of what this branch
+       * does and the reason there is a branch at all.
+       *
+       * THIS RUNS FROM AN EFFECT ON MOUNT. Both brokered account screens confirm on every page
+       * load, so whatever is written here is written again every time somebody opens the page —
+       * and `verified: true` beside a null `probeAction` is not a neutral heal. It is one of the
+       * four states {@link composioConnections.probeAction} enumerates, and specifically the
+       * CONSENT one: "the vendor's own yes is the evidence and no call was ever made against the
+       * account". Written over a key row it erased the record of the last check and replaced it
+       * with that sentence, including over the worst state this feature has — a named probe beside
+       * `verified: false`, "it ran, the vendor refused the key, and the account is still standing"
+       * — which is the one state an operator has to act on. It also moved `verified_at` to the
+       * moment of the page load, so the row's own sentence, "last checked 13 Sep", named a day on
+       * which nothing was checked.
+       *
+       * BECAUSE THE YES IS NOT EVIDENCE ABOUT A KEY. {@link ComposioBroker.isConnected} answers
+       * that an account is attached, which for a key app is what the row's existence already said:
+       * Composio takes a key when it is typed and never tests it again — the whole reason the probe
+       * exists — so nothing in that answer bears on whether the key still works. Consent is the one
+       * scheme where the vendor's yes IS the check, and it earns the flag above for that reason
+       * alone. The evidence about a key is a call, and the two places that make one — {@link
+       * connectBrokeredWithFields} and {@link recheckBrokeredConnection} — are the only writers of
+       * this row's verdict. This one records what it learned by not writing.
+       *
+       * THE NEGATIVE HEAL IS UNTOUCHED, for all three kinds. A vendor answering NO still deletes the
+       * row above, which is what a confirm on a key app is still worth running for.
+       *
+       * AND AN EXISTING ROW UNDER AN UNREADABLE SCHEME IS LEFT ALONE FOR A STRICTLY WIDER REASON.
+       * For a key app the yes is not evidence; for an app whose scheme nothing here can read, it is
+       * not known WHAT the yes is evidence of. Both answers are the same act — write nothing — and
+       * it is the only act available that cannot claim more than was learned.
+       */
+
+      if (!existing) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_connected",
+          targetType: "mcp_server",
+          // The app, which is all a brokered connection is keyed on — the same id
+          // `retireConnectionsFor` files its rows under, so one query answers what happened to one
+          // person's access to one app however it ended.
+          targetId: input.toolkit,
+          payload: {
+            actor: input.userId,
+            server: input.toolkit,
+            scope: "",
+            reconnected: false,
+          },
+        });
+      }
+
+      return { connected: true };
+    },
+
+    /**
+     * Connect this person with the secret they typed, and write down everything except the secret.
+     *
+     * THE VALUES TRAVEL IN ONE DIRECTION AND THE WHOLE METHOD IS BUILT AROUND THAT. They arrive on
+     * the request, they are handed to {@link ComposioBroker.connectWithFields}, and they reach
+     * Composio. Nothing else here is given them: not the row, not the audit payload, not a log
+     * line, not a thrown error — the broker's own doc comment is where that promise is kept on the
+     * far side, and it is the one call in this tree that rethrows with no `cause` precisely because
+     * the vendor's error object holds the key. Every other participant in this method is a
+     * long-lived, widely-readable record, so a credential landing in one is not a leak somebody can
+     * clean up afterwards; it is a leak with a retention schedule.
+     *
+     * THE SCHEME IS THE ONE RECORDED ON THE APP'S ROW, never a fresh read of the catalogue and
+     * never a value a caller passed. It is what this deployment's authorization config was created
+     * AS, and a connection is attached to that config: a second derivation is a second answer — a
+     * key sent as `BASIC` against a config made for `API_KEY` — which is the reasoning {@link
+     * ComposioBroker.connectionFields} gives for taking the scheme rather than resolving it, one
+     * step earlier in the same flow.
+     *
+     * AND AN APP WHOSE SCHEME IS NOT A FIELD SCHEME IS REFUSED BEFORE THE KEY TRAVELS. A consent
+     * app, a `NO_AUTH` app and an app this deployment could not resolve at all have no form and
+     * nothing to attach typed values to, so sending them on would spend somebody's credential on a
+     * config that cannot hold it — and would do it having already taken the secret out of the
+     * request. {@link isFieldScheme} is asked rather than the string compared, for the reason it
+     * exists: one list, read by the guard and by the type, so the schemes this admits cannot come
+     * apart from the schemes the broker's signature takes.
+     *
+     * `connected` IS THE LITERAL `true` BECAUSE THERE IS NO OTHER WAY OUT OF HERE. Unlike {@link
+     * confirmBrokeredConnection}, which asks a question the vendor may answer no to, this performs
+     * an act: it either made the connection or it threw. A `boolean` would invite a caller to
+     * branch on a `false` this method cannot produce.
+     *
+     * `probe` IS RETURNED BESIDE `verified` BECAUSE THE FLAG ALONE NOW MEANS THREE DIFFERENT THINGS,
+     * AND THE BROWSER READS THIS FIELD TO CHOOSE ITS SENTENCE. While the row was written `false`
+     * unconditionally the flag had one meaning — nobody has checked — and a screen could say so from
+     * the flag alone. With a probe that can fail there are three states, and two of them share the
+     * flag:
+     *
+     *   null probe, `verified: false`   — nothing was tried, so nothing is known about the key.
+     *                                     Either this app publishes nothing safe to call, or the
+     *                                     check could not be made — Composio unreachable, or an
+     *                                     answer this deployment could not read. "It was accepted
+     *                                     without being checked" is true of both, which is why
+     *                                     they share the state; `checkable` on the listing is what
+     *                                     tells the person whether pressing Re-check can ever help,
+     *                                     and the trail carries the outage under `unreachable`.
+     *   named probe, `verified: true`   — the action ran in this person's account and answered.
+     *   named probe, `verified: false`  — it ran, the vendor said no, and the account could not be
+     *                                     withdrawn. The key is BAD and the row exists anyway.
+     *
+     * That last one is the worst state this feature has, and under the old wording a person in it
+     * would be told their key was never checked — when it was checked, the vendor rejected it, and
+     * this deployment failed to undo the account it made. INFERRING THE STATE CLIENT-SIDE FROM
+     * `verified` IS EXACTLY WHAT THIS FIELD EXISTS TO PREVENT: there is nothing in the flag that
+     * separates "nothing to try" from "tried and failed", so a browser deriving a sentence from it
+     * would tell one of those two people the opposite of what happened. The audit row carries the
+     * same distinction under `action`, for a reader of the trail rather than of the screen.
+     */
+    async connectBrokeredWithFields(input: {
+      toolkit: string;
+      userId: string;
+      values: Record<string, string>;
+    }): Promise<{ connected: true; verified: boolean; probe: string | null }> {
+      // First, and for `confirmBrokeredConnection`'s reason: a deployment with no key has nobody to
+      // connect anybody at, and the refusal must happen before the values are touched at all.
+      if (!broker) throw new BrokerUnconfiguredError();
+
+      // Keyed on the url and on the one row that answers for it — see `brokeredAppScheme`. It is
+      // the same reasoning the connection gate in `connectionTokenFor` is keyed on, and for the
+      // sharper version of the same stake: a row called `gmail` at `composio://slack` would have
+      // somebody's Slack key attached to a scheme read off Gmail's row.
+      /**
+       * WHAT THIS CONNECT ANSWERS FOR EACH KIND OF APP, AND FOR EACH OUTCOME OF ITS OWN CHECK.
+       *
+       * Type-only and erased; see {@link Decides}. Two vocabularies meet in this one method — the
+       * scheme decides whether it will run at all, and {@link BrokeredProbe} decides what the run
+       * leaves behind — and each is read here by an equality test that a new member would sail
+       * past. `isFieldScheme` is asked rather than {@link schemeKind}, so the two answers that are
+       * not `key` reach one refusal by elimination; the roster is what says so out loud.
+       */
+      type _ConnectWithFieldsDecides = Decides<
+        SchemeKind,
+        {
+          key: "connects, then checks the key it was just handed";
+          consent: "refuses — not an app this deployment connects with values somebody types";
+          none: "the same refusal — an app that needs no credential has nowhere to put one";
+          unreadable: "the same refusal, reached by elimination rather than by decision";
+        }
+      >;
+      type _ConnectWithFieldsRecords = Decides<
+        BrokeredProbe["outcome"],
+        {
+          nothing: "the account stands, recorded unchecked with a null probe";
+          answered: "the account stands, recorded verified under the probe's name";
+          complained: "the account stands, recorded unchecked under the probe's name, and the press reports what the app said";
+          unreachable: "the account stands, recorded unchecked, with the attempt on the trail";
+        }
+      >;
+      const authScheme = await brokeredAppScheme(input.toolkit);
+      if (!isFieldScheme(authScheme)) {
+        throw new BrokerRefusalError(
+          `${input.toolkit} is not an app this deployment connects with values somebody types, so nothing was sent. Open the app on the Plugins page and connect it the way it asks for; if it is not listed there at all, an administrator has to enable it first.`,
+        );
+      }
+
+      const { accountId } = await broker.connectWithFields({
+        userId: input.userId,
+        toolkit: input.toolkit,
+        authScheme,
+        values: input.values,
+      });
+
+      /*
+       * THE CHECK, WHICH IS THE SAME ONE A RE-CHECK MAKES AND IS SPELLED ONCE FOR THAT REASON.
+       *
+       * {@link probeBrokeredConnection} chooses the action out of what the app published — with the
+       * version the listing recorded for it, which is part of what makes it choosable — calls it
+       * with no arguments and reads what came back.
+       * What belongs to THIS path and to no other is what happens next: an account this call has
+       * just made, which a key the vendor rejects must not be allowed to leave standing. A re-check
+       * runs the identical probe against an account that already existed and leaves it alone, and
+       * those two undo behaviours are exactly why the shared part stops where it does.
+       *
+       * `probe: null` IS THE FIRST OF THE THREE STATES THIS METHOD REPORTS — the app published
+       * nothing safe to call, or nothing at a version this deployment recorded, so the key was
+       * never tried. It is an ordinary answer and not a failure; see that method.
+       */
+      const probed = await this.probeBrokeredConnection({
+        toolkit: input.toolkit,
+        userId: input.userId,
+        /*
+         * THE ACCOUNT THIS CALL JUST MADE, which is the only account this check is about. A person
+         * and an app do not name one: Composio takes an account per key, somebody may hold several
+         * for one app, and the vendor picks which a call runs in. So an unpinned probe verified a
+         * key that does not work against the person's OTHER account — writing `verified` on the
+         * strength of a call the new key never touched — and, the same defect pointing the other
+         * way, condemned a perfectly good key and deleted the account it had just made because
+         * some older account of theirs was broken. The undo below has always been keyed on this id;
+         * this is what makes the check about the same account as the withdrawal.
+         */
+        accountId,
+      });
+
+      if (probed.outcome === "complained") {
+        /*
+         * THE ACCOUNT THIS CALL MADE IS LEFT STANDING, AND THAT REVERSES WHAT THIS BRANCH USED TO DO.
+         *
+         * It read the outcome as "the vendor refused the key" and acted on it: `revokeAccount` on
+         * the id just created, then a refusal telling the person what they entered did not work.
+         * The premise was that nothing should be left behind on a key that does not work — which is
+         * a good rule for the fact it names and was being applied to a fact nobody had established.
+         * A complaint is Composio saying the CALL failed, out of an envelope with no status and no
+         * error code in it (see {@link BrokeredProbe}), so a 429 on the identity read, a scope this
+         * one action wants, or a 404 for a resource it names all arrived here as "your key is wrong"
+         * and destroyed a connection that had just been made correctly.
+         *
+         * THE TWO MISTAKES DO NOT COST THE SAME, WHICH IS WHAT SETTLES IT. Keeping the account of a
+         * genuinely bad key leaves a live row at Composio that can do nothing, that every screen
+         * here draws as unverified with the app's own words beside it, and that Disconnect ends in
+         * one press. Deleting the account of a good key costs the person the key itself: it is gone
+         * from Composio, it was never stored here, and getting back is fetching it from the vendor
+         * and typing it again. One is a press, the other is an errand — so the recoverable mistake
+         * is the one this branch is willing to make.
+         *
+         * SO THE STATE THIS WRITES IS THE ONE THE `probe` FIELD WAS ADDED FOR, reached now by the
+         * ordinary path rather than only by a failed undo: the row exists, it is unverified, it
+         * names the action the check was spent on, and the sentence carries what the app said. What
+         * it no longer carries is a verdict about the credential, here or on any screen that draws
+         * it.
+         */
+        await this.recordBrokeredConnection({
+          toolkit: input.toolkit,
+          userId: input.userId,
+          verified: false,
+          // THE ACTION THAT WAS TRIED, which is the half of this state the flag cannot hold. It is
+          // the whole of what separates this row on a later page load from a key nobody ever tried,
+          // and it is the same name the audit row below carries under `action`, for a reader of the
+          // trail rather than of a screen.
+          probeAction: probed.probe,
+        });
+
+        /*
+         * AND THE TRAIL SAYS SO TOO, WHICH IS THE HALF THE SENTENCE BELOW CANNOT REACH. The refusal
+         * is told to one person in one moment; what outlives it is an unverified row and a live
+         * account at the vendor, and the person who most needs to know both exist is an operator
+         * reading this trail a week later. Filed BEFORE the throw for the only reason that matters
+         * here: every way out of this branch is that throw, so a row written after it is a row
+         * never written.
+         *
+         * `action` IS THE PROBE THAT WAS TRIED, and it is what tells this row from the unchecked
+         * one. Both say `verified: false`; only the name separates "this app published nothing safe
+         * to call" from "it ran and the app answered with a failure".
+         */
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.connection_verified",
+          targetType: "mcp_server",
+          targetId: input.toolkit,
+          payload: {
+            actor: input.userId,
+            action: probed.probe,
+            verified: false,
+          },
+        });
+
+        /*
+         * AND THE SENTENCE REPORTS RATHER THAN ACCUSES. It said "what you entered did not work",
+         * which is the one thing this branch cannot know. What it can say is all true: a check was
+         * spent, here is what the app answered, the account is still there, and here are the two
+         * presses that end it either way.
+         */
+        throw new PluginRefusedError(
+          `${input.toolkit} was connected, and the check this deployment then ran against it did not come back clean: ${probed.sentence} That may be the key, and it may be the app — what came back does not say which — so the account is left standing and recorded as unchecked. Re-check it on the Plugins page once, and if it still will not answer, disconnect it and connect it again with a fresh key.`,
+          null,
+        );
+      }
+
+      /*
+       * ONE OUTCOME EARNS THE FLAG AND THE OTHER TWO REACHING HERE DO NOT, which is the whole of
+       * what is decided below. A probe that ran and answered is evidence the key works, exactly as
+       * the vendor's yes at the end of a consent screen is evidence for {@link
+       * confirmBrokeredConnection}. An app that published nothing safe to call is the honest
+       * unchecked state {@link composioConnections.verified} documents. And a vendor that could
+       * not be reached is the SAME unchecked state, arrived at a different way — which is the one
+       * thing a reader of this branch has to take away, so it is written out rather than left to
+       * the union.
+       *
+       * AN OUTAGE IS AN ABSENCE OF EVIDENCE AND THE ROW HAS A STATE FOR THAT. It is not a fourth
+       * thing to store: `probe_action` records the action a check SPENT, and a call that reached
+       * nobody spent none, so null beside `verified: false` says exactly what is true — this key
+       * has not been checked. What it must never become is the other `verified: false`, the one
+       * with a name beside it, because that pair is the accusation "it ran and the vendor refused
+       * your key" and the settings page draws it as such. {@link BrokeredProbe} withholds the name
+       * from this outcome so the writer below cannot record it even by accident.
+       *
+       * AND THE ACCOUNT STAYS, which is the half the person would not get back. The undo above is
+       * for a key the vendor REFUSED; a key nobody could ask about is very probably fine, and
+       * deleting somebody's account because Composio was down destroys the thing they just made to
+       * tell them something that was never established. The Re-check button is what settles it
+       * afterwards — the app publishes an action, so the settings page offers one — and this is why
+       * the connect answers rather than refusing: nothing went wrong with what they typed.
+       *
+       * Written through the single writer below rather than spelled here, so this path and the
+       * confirm path cannot drift into two row shapes — `verified_at` follows from the flag there
+       * and is not passed in.
+       */
+      const probe = probed.probe;
+      const verified = probed.outcome === "answered";
+
+      // Read before the write, for `confirmBrokeredConnection`'s reason: the record below is an
+      // upsert, so it leaves nothing behind that tells a first key from a replacement, and whether
+      // a row was already here is the whole of what `reconnected` says. The route that reaches
+      // this today refuses a second account for the same app, which makes a constant `false`
+      // accidentally true — but the guard lives in another file and this method is callable
+      // without it, so the trail would be claiming, on that guard's word, something it never
+      // checked.
+      const existing = await this.brokeredConnection({
+        toolkit: input.toolkit,
+        userId: input.userId,
+      });
+
+      await this.recordBrokeredConnection({
+        toolkit: input.toolkit,
+        userId: input.userId,
+        verified,
+        // What was spent, which is the name on a probe that ran and the null that IS the first of
+        // the three states: this app published nothing safe to try the key on. `verified` is
+        // derived from this same value a few lines above, so the row cannot claim a check with an
+        // action beside a flag that says nothing checked it, or the other way about.
+        probeAction: probe,
+      });
+
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.account_connected",
+        targetType: "mcp_server",
+        // The app, the same id `confirmBrokeredConnection` and `retireConnectionsFor` file under,
+        // so one query answers what happened to one person's access to one app however it began
+        // and however it ended.
+        targetId: input.toolkit,
+        payload: {
+          actor: input.userId,
+          server: input.toolkit,
+          /*
+           * EMPTY, AND PRESENT, which is the whole of what this field does on a brokered row.
+           *
+           * All three writers of `mcp.account_connected` now agree on the key. {@link
+           * recordConnection} carries what a vendor granted a `user-oauth` grant, and both brokered
+           * writers carry `""` — a brokered connection has no scopes at all, because Composio holds
+           * the grant and never tells this deployment what it covers.
+           *
+           * WRITING NOTHING IS NOT THE SAME AS WRITING THAT. This one wrote no key, so the same app
+           * connected by two people came back as `''` from {@link confirmBrokeredConnection} and as
+           * NULL from here, in a table whose entire purpose is being queried — and with nothing in
+           * either row saying which writer made it, a reader cannot tell an absent scope from an
+           * empty one, or either from a row written before the field existed.
+           */
+          scope: "",
+          reconnected: existing !== null,
+          /*
+           * THE NAMES AND NEVER THE VALUES. What a reader of the trail needs is which app somebody
+           * connected and what it asked them for; the values are the credential itself, and an
+           * audit row is exactly the kind of long-lived, widely-readable record they must never
+           * reach.
+           */
+          fields: Object.keys(input.values).sort(),
+        },
+      });
+
+      /*
+       * THE CHECK ITSELF, ON THE TRAIL, WHETHER OR NOT ONE HAPPENED.
+       *
+       * Filed on every connection rather than only where a probe ran, because "this app published
+       * nothing safe to call, so the key was never tried" is the fact a reader most needs and the
+       * one nothing else records. `action` is the null the response field is: it separates an
+       * unchecked connection from a checked one, which `verified: false` alone cannot.
+       *
+       * THE FAILED UNDO ABOVE FILES THE SAME ROW BEFORE IT THROWS, so the worst state this feature
+       * has — a live account, an unverified row, and a withdrawal the vendor refused — is no longer
+       * named only in a sentence one person read once. The clean undo files nothing, and the reason
+       * is written out at that branch: this trail records state that persists, and a row there
+       * would cost the failed-undo row the one meaning that makes it worth reading.
+       *
+       * UNDER THE APP SLUG, which is the id `mcp.account_connected` above, {@link
+       * confirmBrokeredConnection}, {@link disconnectBrokered} and {@link retireConnectionsFor} all
+       * file under — so the two rows this method can write about one person's access to one app
+       * come back in ONE query, however that access began and however it ended. This row was filed
+       * under the SERVER row's id instead, on the reasoning that it is about an ACTION of a server
+       * rather than about access; that is true and it cost the reader the only question anybody
+       * asks this trail, which was answered half by one id and half by the other. Nothing goes with
+       * the change: the server id is `composio-` and the slug, and the action is in the payload.
+       *
+       * AND THE OUTAGE IS NAMED HERE BECAUSE THE ROW CANNOT NAME IT. Two different things leave
+       * this method with a null `action` — an app that publishes nothing safe to call, and a check
+       * that could not be made — and on `composio_connections` they are one state, correctly: both
+       * mean the key is unchecked, and neither says anything about the key. A reader of the TRAIL
+       * is asking a different question, "was a check attempted and what became of it", and
+       * `unreachable` is the whole of the difference, in Composio's own words. Present only on the
+       * outage, so its absence is as informative as its value.
+       *
+       * AND CAPPED WHERE EVERY OTHER QUOTED FOREIGN STRING IN THIS FILE IS CAPPED, which this one
+       * alone was not. `passableSentence` decides whether a candidate is worth repeating and says
+       * nothing whatever about length; `askAction` then caps at `MAX_RESULT_CHARS`, which is 20_000
+       * and is a bound written for a model's context window rather than for a row. So the sentence
+       * arriving here can be fifty times what `refreshTools`' two `lastError` writes, the failed
+       * undo's own reason a hundred lines up, and `callTool`'s two `failure` fields each allow
+       * themselves — and `@composio/client` builds an `APIError` message out of an entire response
+       * body, so a multi-kilobyte one is the ordinary arrival and not a contrived one.
+       *
+       * WHY THIS ROW AND NOT ANOTHER. `audit_events` is append-only by trigger, it is exported, and
+       * it is kept for the deployment's whole retention window: a `lastError` written too long is
+       * overwritten by the next refresh, and this is not. Whatever lands here cannot be cleaned up
+       * afterwards, which makes the one uncapped write in the file the one that could least afford
+       * to be.
+       */
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.connection_verified",
+        targetType: "mcp_server",
+        targetId: input.toolkit,
+        payload: {
+          actor: input.userId,
+          action: probe,
+          verified,
+          ...(probed.outcome === "unreachable"
+            ? { unreachable: probed.sentence.slice(0, 400) }
+            : {}),
+        },
+      });
+
+      return { connected: true, verified, probe };
+    },
+
+    /**
+     * Try a key this deployment already holds, because somebody pressed the button that asks.
+     *
+     * A BUTTON, AND NEVER A PAGE-LOAD EFFECT. Composio never re-checks a key: it accepts one when it
+     * is typed and says nothing about it again, so a row that was verified in March goes on saying
+     * so after the key behind it was rotated, revoked or let expire. Nothing but this can correct
+     * that — which is exactly the argument somebody will use for calling it from an effect when the
+     * settings page mounts, and it is the wrong conclusion. The call this makes is spent against the
+     * PERSON'S OWN rate limit at the vendor, on their account, so verifying on every render would
+     * burn somebody's quota at Linear to redraw one word on a page they were only passing through.
+     * {@link confirmBrokeredConnection} is the one that runs on mount, and it asks Composio a
+     * question about its own records; this one goes out to the app.
+     *
+     * A RE-CHECK IS NOT A CONNECT, AND THE DIFFERENCE IS THE WHOLE METHOD. It runs against an
+     * account that already exists: it must not create one, it must not withdraw one when the probe
+     * fails — the person's account stays, it is their KEY that is wrong — and it must change
+     * nothing here but the verification and its timestamp. {@link connectBrokeredWithFields} does
+     * undo its account on a bad key, and it is right to: the account is a thing it had just made,
+     * seconds earlier, for a key that turned out not to work. Here the account predates the press by
+     * days, the person asked to have it CHECKED, and taking it away to tell them their key is wrong
+     * would destroy the thing they are trying to repair. The shared probe stops short of both
+     * behaviours for that reason.
+     *
+     * A PROBE THAT RAN AND FAILED RAISES, AND DOES NOT COME BACK AS `verified: false`. Those two
+     * answers are not different spellings of one outcome. `false` is also what an app that publishes
+     * nothing safe to call produces, and a row handed the flag alone cannot tell "the vendor
+     * rejected your key" from "there was nothing here to try" — so it would draw the unchecked
+     * sentence, and drop the Re-check button, for the one person who most needs it: somebody who has
+     * just fixed their key and pressed it. The refusal carries Composio's own sentence, which is the
+     * whole of what they can act on. The ONLY legitimate `verified: false` from here is the one that
+     * arrives with `probe: null` saying there was nothing to check with.
+     *
+     * NOTHING TO PROBE WRITES NOTHING AT ALL, and answers with the row as it stands. A check that
+     * could try nothing has learned nothing, and writing `false` on that would take the date off a
+     * connection verified at a consent screen — a fact nothing else in this deployment records,
+     * erased by a button that claims to check one. So the answer is what the row says after the
+     * press, and `probe` is what says whether the press was able to try anything.
+     *
+     * THE ROW IS READ BEFORE THE VENDOR IS CALLED, and its absence is a refusal. The writer below is
+     * an upsert, so a re-check that probed first and recorded the answer would INSERT a connection
+     * for somebody who has none — the row that is the whole of the gate every later brokered call
+     * passes through, created by a button that only asks a question. The probe itself would be spent
+     * on an account the vendor does not hold, and would come back "no connected account found": this
+     * deployment's own state, shown to somebody as though their key had been rejected.
+     *
+     * NO BROKER IS REFUSED BEFORE ANY OF IT, though nothing here calls the broker. The broker and the
+     * transport are built from the same key, so a deployment without one has neither — and the probe
+     * would come back as the transport's "Composio is not configured for this deployment", which
+     * this method would otherwise report as the vendor rejecting a perfectly good key, and would
+     * write the row unverified on the strength of it.
+     *
+     * AND A CONNECTION WITH NO KEY BEHIND IT IS REFUSED HERE RATHER THAN IN THE BROWSER. There is
+     * nothing to re-check on a consent connection: the person authenticated at the vendor's own
+     * screen, this deployment holds no credential of theirs, and the row's `verified_at` is the
+     * date that screen earned — a fact nothing else here records. A probe spent on it would be a
+     * call against their account that this method then reads as evidence about a key that does not
+     * exist, and the likely failure would write `verified: false` with a null timestamp: a button
+     * that claims to CHECK a connection, destroying the only record that one was ever checked. That
+     * is precisely what the nothing-to-probe branch above is written to protect, and an app that
+     * happens to publish a safe action walks straight past it. The screen does not offer the button
+     * for a consent app, but a route takes POSTs and not only button presses, so the refusal
+     * belongs where {@link connectBrokeredWithFields} puts its own: on the SCHEME RECORDED ON THE
+     * APP'S ROW, asked through {@link isFieldScheme} so the schemes this admits cannot drift from
+     * the schemes that have a key to admit.
+     */
+    async recheckBrokeredConnection(input: {
+      toolkit: string;
+      userId: string;
+    }): Promise<{
+      verified: boolean;
+      verifiedAt: string | null;
+      probe: string | null;
+    }> {
+      if (!broker) throw new BrokerUnconfiguredError();
+
+      // Keyed on the url and on the one row that answers for it — see `brokeredAppKind`. It is the
+      // read `connectBrokeredWithFields`, `confirmBrokeredConnection` and `disconnectBrokered` all
+      // make, for the same stake: a row called `gmail` at `composio://slack` would decide a Slack
+      // re-check on Gmail's scheme. Anything but a key refuses, a scheme nothing here can read
+      // included — there is no key recorded to re-check, and the sentence below is the same one
+      // either way.
+      /**
+       * WHAT THIS RE-CHECK ANSWERS FOR EACH KIND OF APP, AND FOR EACH OUTCOME OF THE CHECK.
+       *
+       * Type-only and erased; see {@link Decides}. `!== "key"` is a boolean read of a three-member
+       * vocabulary: it happens to fail closed for both of the other two today, which is why nothing
+       * has gone wrong here yet and also why a fourth member would inherit that answer without
+       * anybody choosing it. The probe roster below is the vocabulary this method reads FOUR ways,
+       * and it is the one that has already been added to once.
+       */
+      type _RecheckDecides = Decides<
+        SchemeKind,
+        {
+          key: "spends a call against the key this deployment holds";
+          consent: "refuses — there is no key here to re-check";
+          none: "the same refusal — there is no account, let alone a key, to check";
+          unreadable: "the same refusal, which is the closed direction";
+        }
+      >;
+      type _RecheckRecords = Decides<
+        BrokeredProbe["outcome"],
+        {
+          nothing: "writes nothing and files nothing; answers the held row beside a null probe";
+          answered: "records verified under the probe's name, and files the check";
+          complained: "records unchecked under the probe's name, files the check, then reports what the app said";
+          unreachable: "writes nothing and files nothing; refuses with Composio's own sentence";
+        }
+      >;
+      if ((await brokeredAppKind(input.toolkit)) !== "key") {
+        throw new PluginRefusedError(
+          `${input.toolkit} is not an app this deployment holds a key for, so there is nothing here to re-check. It was connected at ${input.toolkit}'s own sign-in screen, and if it has stopped working, disconnecting it on the Plugins page and connecting it again is what fixes it.`,
+          null,
+        );
+      }
+
+      const [held] = await database
+        .select({
+          verified: composioConnections.verified,
+          verifiedAt: composioConnections.verifiedAt,
+        })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, input.toolkit),
+            eq(composioConnections.userId, input.userId),
+          ),
+        )
+        .limit(1);
+
+      if (!held) {
+        throw new PluginRefusedError(
+          `You have no connection to ${input.toolkit} here, so there is nothing to re-check. Connect it on the Plugins page and it will be checked as it is made.`,
+          null,
+        );
+      }
+
+      const probed = await this.probeBrokeredConnection(input);
+
+      /*
+       * THE VENDOR WAS NOT REACHED, SO THE RECORD OF THE LAST CHECK IS LEFT EXACTLY WHERE IT IS.
+       *
+       * This is the branch the whole four-state reading exists for on this path. A failed probe
+       * used to mean one thing here — "the vendor rejected the key it is holding" — so an outage,
+       * a socket that closed, or a `@composio/core` that could not parse an answer cleared
+       * `verified`, dropped `verified_at` (the only record anywhere that this connection was ever
+       * checked, and the date the page prints) and wrote the named probe beside the `false`, which
+       * is the accusation. Every person who pressed the button while Composio was down was told
+       * their key had been refused, over a row that had been verified minutes earlier.
+       *
+       * NOTHING IS WRITTEN, WHICH IS STRONGER THAN WRITING SOMETHING HONEST. A press that learned
+       * nothing may not move a record: there is no state for "we could not ask" on the row, and
+       * there should not be — the row says what is known about the key, and an outage changes
+       * nothing about that. It is the same restraint as the nothing-to-probe branch below, and
+       * nothing is filed on the trail for the same reason it gives.
+       *
+       * AND IT RAISES RATHER THAN ANSWERING, which is where it parts from that branch. Somebody
+       * pressed a button and is owed the truth about what happened to their press: the check did
+       * not happen, and here is Composio's own sentence about why. Answering with the held row
+       * instead would report the state as though the press had confirmed it.
+       */
+      if (probed.outcome === "unreachable") {
+        throw new PluginRefusedError(
+          `${input.toolkit} could not be checked just now: ${probed.sentence} Nothing here changed — your connection is still recorded exactly as the last check left it — so pressing Re-check again when Composio is answering is the whole of the retry.`,
+          null,
+        );
+      }
+
+      /*
+       * NOTHING WAS TRIED, SO NOTHING IS WRITTEN AND NOTHING IS FILED. The row keeps whatever it
+       * held — a consent verification and its date, or the honest unchecked pair — and the answer
+       * reports that state beside the null probe that says why this press could not improve on it.
+       * `mcp.connection_verified` records an account exercised with a REAL CALL; a row filed here
+       * would make the one event that means "a key was tried" also mean "somebody pressed a button".
+       */
+      if (probed.outcome === "nothing") {
+        return {
+          verified: held.verified,
+          verifiedAt: iso(held.verifiedAt),
+          probe: null,
+        };
+      }
+
+      // What the press spent, which from here on is a name: both outcomes left are a call that ran
+      // and a vendor that answered about it.
+      const probe = probed.probe;
+
+      /*
+       * THE ANSWER IS WRITTEN FOR BOTH OUTCOMES, and through the single writer for its reason: the
+       * flag and its timestamp are one set, and a second hand spelling that set is how one of them
+       * comes to leave a date standing on a claim nobody is making any more. A key the vendor has
+       * just rejected stops being verified HERE — that is the state this button exists to correct,
+       * in the direction nothing else in the product can move it.
+       */
+      const verified = probed.outcome === "answered";
+      const { verifiedAt, wrote } = await this.recordBrokeredConnection({
+        toolkit: input.toolkit,
+        userId: input.userId,
+        verified,
+        // The action this press spent. Never null on this path: the nothing-to-probe branch above
+        // returns before reaching the writer, precisely so that a check which could try nothing
+        // writes nothing at all.
+        probeAction: probe,
+        /*
+         * AND IT MAY NOT CREATE THE CONNECTION IT IS RECORDING A CHECK OF. The read at the top of
+         * this method refuses a person with no row, deliberately, because this writer is an upsert —
+         * but that read and this write straddle the vendor call above, which is live and takes
+         * seconds. A Disconnect landing in that window revoked the grant at Composio and deleted the
+         * row, and this upsert then put the row back: `composio_connections` is the whole of the
+         * permission a brokered call is decided on, so the re-insert restored access to an account
+         * the person had just ended, and drew the app as connected again.
+         */
+        only: "a row that is still there",
+      });
+
+      /*
+       * THE ROW WENT WHILE COMPOSIO WAS BEING ASKED, SO NOTHING IS RECORDED AND NOTHING IS FILED.
+       *
+       * The two ways here are a Disconnect in another tab and a concurrent confirm that Composio
+       * answered `false` for and which deleted the row. Both are somebody or something ENDING this
+       * connection, and a verification row filed afterwards would be the trail recording a check of
+       * an account that no longer exists — beside `mcp.account_disconnected` for the same app, in
+       * whichever order the two happened to land.
+       *
+       * AND IT SAYS SO RATHER THAN ANSWERING QUIETLY, for the reason the outage branch above does:
+       * somebody pressed a button and is owed the truth about their press. The answer is not the
+       * probe's verdict, because the thing it was a verdict about is gone.
+       */
+      if (!wrote) {
+        throw new PluginRefusedError(
+          `Your connection to ${input.toolkit} was disconnected while this check was still running, so nothing was recorded about it: what the check found is about an account you no longer have here. Connect ${input.toolkit} again on the Plugins page if that was not what you meant.`,
+          null,
+        );
+      }
+
+      /*
+       * AND THE TRAIL CARRIES THE CHECK, whichever way it went, filed BEFORE the refusal below for
+       * the reason the connect path files its own row before its throw: every way out of a failure
+       * is that throw, so a row written after it is a row never written. `action` is the probe that
+       * ran, which is what separates this from a connection nothing was ever tried on.
+       *
+       * FILED UNDER THE APP'S BARE SLUG, as every row in this family is — the same id
+       * `confirmBrokeredConnection`, `connectBrokeredWithFields` and `retireConnectionsFor` file
+       * under — so one query still answers what happened to one person's access to one app.
+       *
+       * THE ROW NAMES A PERSON AND NO BOT, because none ran: this is somebody checking their own
+       * account. See `mcp.connection_verified` in `./audit`, whose safety argument names a person
+       * re-checking their own connection as one of the two callers this call may ever have.
+       */
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.connection_verified",
+        targetType: "mcp_server",
+        targetId: input.toolkit,
+        payload: {
+          actor: input.userId,
+          action: probe,
+          verified,
+        },
+      });
+
+      if (probed.outcome === "complained") {
+        /*
+         * THE APP'S OWN SENTENCE, AND THE TWO FACTS AROUND IT: the row here now says unchecked, and
+         * their account was left exactly as it was. The second half is what makes the retry one step
+         * rather than three — there is nothing to disconnect and nothing to reconnect, only this
+         * button to press again once whatever the sentence names has passed.
+         *
+         * AND IT REPORTS WHAT CAME BACK RATHER THAN RULING ON THE KEY. This said "would not answer
+         * with the key it is holding", which reads as the vendor having rejected the credential —
+         * and the envelope the outcome is decided from carries no status and no error code, so a
+         * rate limit and a bad key are the same answer here. See {@link BrokeredProbe}. Moving the
+         * row to unchecked is still right and is still the thing this button exists to do: whatever
+         * the failure was, the check did not come back clean, so a standing `verified: true` is no
+         * longer supported and must not keep standing.
+         */
+        throw new PluginRefusedError(
+          `The check this deployment ran against ${input.toolkit} did not come back clean: ${probed.sentence} That may be the key and it may be the app — what came back does not say which — so your connection here is recorded as unchecked until a check does come back clean. Nothing was disconnected: press Re-check again in a few minutes, and fix the key at ${input.toolkit} if it keeps answering the same way.`,
+          null,
+        );
+      }
+
+      return { verified: true, verifiedAt: iso(verifiedAt), probe };
+    },
+
+    /**
+     * End this person's brokered account at the vendor, and then forget where it was.
+     *
+     * REVOKE BEFORE DELETE, AND THAT ORDER IS THE WHOLE METHOD. The row is the only thing in this
+     * deployment that says which app this person connected: the app is read off
+     * `composio_connections`, and a revoke needs it. Delete first and a revoke that then fails
+     * leaves a live grant on somebody's mailbox that no operation here can reach, because the one
+     * value it would have to be revoked under is gone. The other order costs nothing by
+     * comparison — a revoke that throws leaves the row standing, the person presses disconnect
+     * again, and the second attempt has everything the first one had.
+     *
+     * WHICH ALSO MEANS THE FAILURE IS LOUD. Nothing is caught here: a broker that will not answer
+     * ends this call, and no row and no trail entry claims an account was disconnected when the
+     * account is still live.
+     *
+     * `vendorRevocationRequested` IS WHAT WAS ASKED FOR, NOT THAT A CALL WAS MADE — {@link
+     * ComposioBroker.revoke}'s own answer, passed through. True where an account was found and its
+     * withdrawal asked for, false where there was none to withdraw, and the value of the field is
+     * exactly that a reader can tell an account this deployment acted on from one that outlives it
+     * somewhere else.
+     *
+     * IT SAYS "REQUESTED" BECAUSE THE VENDOR'S ANSWER SUPPORTS NOTHING STRONGER, and the field was
+     * renamed from `vendorRevoked` when that turned out to be false in the plainest way: the
+     * adapter behind it was soft-deleting the account and asking for no upstream revocation at all,
+     * so every row saying a grant had been withdrawn described one still live at Google. The ask is
+     * now made; what a broker can promise synchronously is that the account is gone at Composio and
+     * that the provider has been asked, because the withdrawal itself runs as a background job with
+     * no supported way to poll it.
+     *
+     * EXCEPT WHERE THE APP IS ONE SOMEBODY TYPED A KEY INTO, AND THERE IT IS FALSE BY CONSTRUCTION
+     * RATHER THAN BY WHAT THE VENDOR FOUND. `revoke_on_delete` asks the PROVIDER to end a grant,
+     * which is a real request for a consent account — Google or Slack acts on it — and a
+     * meaningless one for an API key. There is no grant behind a key to withdraw: the value is
+     * still valid at the app and still works for anyone holding it, so the account ends at Composio
+     * and nothing was asked of anybody else. Saying otherwise would be the one row in this trail
+     * nobody could rely on, which is the failure the paragraph above describes arriving a second
+     * time by a different road — a withdrawal recorded for something that was never granted. So the
+     * scheme recorded on the app's row decides this field for a field connection, and the broker's
+     * own answer decides it for every other.
+     *
+     * THE SCHEME IS THE ONE ON THE APP'S ROW, for {@link connectBrokeredWithFields}' reason: it is
+     * what this deployment's authorization config was created AS and what the account was attached
+     * to, and a fresh read of the catalogue is a second answer — a key connection described as
+     * consent because the vendor has since started publishing managed OAuth for the app. The
+     * person's half of this fact is already written on the disconnect row they are shown: their key
+     * still works at the app, and rotating it there is what ends it. This is the trail's half of
+     * the same sentence.
+     *
+     * THE VENDOR IS ASKED WHETHER OR NOT A ROW IS HERE. The row is a cache of Composio's answer
+     * and never the account itself (see {@link brokeredConnection}), so its absence is not
+     * evidence that the grant is gone: the confirm above deletes it on any `false` from the
+     * vendor, and a person whose row was cleared that way can still be holding a live account at
+     * Composio with nothing left here pointing at it. Asking anyway is the only operation in this
+     * deployment that can end such a grant, and it costs nothing where there is genuinely nothing
+     * to withdraw — the broker answers `false` and says so. Skipping the revoke for want of a
+     * local row would make the safe half of disconnect unreachable for exactly the person who
+     * needs it, on the strength of a cache we already know drifts.
+     *
+     * BUT THE TRAIL RECORDS ONLY A DISCONNECT THAT HAPPENED. The event is filed where something
+     * actually ended — a row deleted here, or a grant withdrawn at the vendor — and not otherwise.
+     * A call that found no row and withdrew no grant disconnected nothing, and an
+     * `mcp.account_disconnected` row for it tells whoever reads the trail that somebody's account
+     * ended at a moment when nobody's did. It is the criterion
+     * {@link confirmBrokeredConnection} files its own event under, one act the other way round:
+     * the trail records acts, and a call that changed nothing performed none.
+     *
+     * WHICH IS NOT THE SAME QUESTION AS `vendorRevocationRequested`. A row here with no grant at
+     * the vendor is a disconnect — the gate this deployment decides every brokered call on was
+     * open, and this call closed it — so the event is filed, saying
+     * `vendorRevocationRequested: false`. A grant at the vendor
+     * with no row here is a disconnect too, and the weightier of the two, because somebody's live
+     * account was ended; the event is filed for that as well. Only where both are absent is there
+     * no act to record, and the two cases stay legible in the trail because the field still says
+     * which of them happened.
+     *
+     * SO THE FILING IS DECIDED ON THE BROKER'S OWN ANSWER AND NOT ON THE FIELD, because for a field
+     * connection the two part company on purpose. A key account the vendor found and ended with no
+     * row here is an act — somebody's live connection stopped existing — and gating the event on a
+     * value that is false by construction would leave exactly that act unrecorded. The field
+     * answers what was asked of the provider; `ended` answers whether anything was there.
+     */
+    async disconnectBrokered(input: {
+      toolkit: string;
+      userId: string;
+      by: string;
+      /**
+       * Why the account ended, which is the closed pair and not free text. A brokered account ends
+       * in exactly two ways — the person disconnecting their own, and the person being removed
+       * from the People screen, which is the word {@link retireConnectionsFor} already files its
+       * own rows under. A reader asking the trail which of the two happened can be answered only
+       * if it is the same word every time, so the type is the pair rather than whatever sentence a
+       * caller happened to spell.
+       */
+      reason: "self" | "person_removed";
+    }): Promise<{ vendorRevocationRequested: boolean }> {
+      if (!broker) throw new BrokerUnconfiguredError();
+
+      /*
+       * Keyed on the url and on the one row that answers for it — see {@link brokeredAppKind}.
+       * It is the read {@link connectBrokeredWithFields} makes, for the same stake: a row called
+       * `gmail` at `composio://slack` would have this disconnect reading Gmail's scheme to describe
+       * what happened to a Slack account.
+       *
+       * AN APP WITH NO ROW HERE IS NOT A FIELD APP, AND NEITHER IS ONE WHOSE SCHEME CANNOT BE READ.
+       * A person can hold an account at Composio for an app this deployment has since removed — the
+       * row is a cache and the removal takes no grant with it — and the revoke below is the one
+       * operation that can still end it. Nothing names the scheme it was connected under any more,
+       * so the honest reading is the broker's own answer, which is what both of those fall through
+       * to: the field below is a claim that this deployment asked the vendor to withdraw something,
+       * and an app it cannot say holds a key is one whose withdrawal it has to report as asked.
+       */
+      /**
+       * WHAT THIS DISCONNECT CLAIMS ON THE TRAIL FOR EACH KIND OF APP.
+       *
+       * Type-only and erased; see {@link Decides}. `=== "key"` collapses three answers into two,
+       * and the collapse is deliberate here rather than accidental: the field below is a claim that
+       * this deployment asked the VENDOR to withdraw something, and an app it cannot say holds a key
+       * is one whose withdrawal it has to report as asked. That is a decision about `unreadable`,
+       * and this roster is where it is written down as one.
+       */
+      type _DisconnectDecides = Decides<
+        SchemeKind,
+        {
+          key: "claims no vendor revocation — nothing at the vendor holds this key";
+          consent: "reports the vendor's own withdrawal as asked for";
+          none: "reports whatever the vendor says it ended, which for an app with no account is nothing";
+          unreadable: "reports it as asked for too, which is the claim that cannot be too weak";
+        }
+      >;
+      const fieldScheme = (await brokeredAppKind(input.toolkit)) === "key";
+
+      // Whether there was an account to end at all, which is what decides if anybody was
+      // disconnected. Named apart from the field below because for a key the two differ: something
+      // ended, and nothing was asked of the provider.
+      const ended = await broker.revoke({
+        userId: input.userId,
+        toolkit: input.toolkit,
+      });
+
+      const vendorRevocationRequested = fieldScheme ? false : ended;
+
+      // `returning` because whether a row was here is half of what decides if anybody was
+      // disconnected, and a delete that answered nothing would leave the two cases indistinguishable.
+      const [deleted] = await database
+        .delete(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, input.toolkit),
+            eq(composioConnections.userId, input.userId),
+          ),
+        )
+        .returning({ toolkit: composioConnections.toolkit });
+
+      if (deleted || ended) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          targetId: input.toolkit,
+          payload: {
+            actor: input.by,
+            server: input.toolkit,
+            // Whose account this was, which is not always who ended it: an administrator
+            // offboarding somebody and a person disconnecting themselves write the same shape of
+            // row, and only these two fields tell them apart.
+            owner: input.userId,
+            reason: input.reason,
+            vendorRevocationRequested,
+          },
+        });
+      }
+
+      return { vendorRevocationRequested };
+    },
+
+    /**
      * Retire every connector credential belonging to one person.
      *
      * WHAT THIS IS FOR. "We removed their access" has to be true of the thing that matters, which is
@@ -2772,10 +6525,31 @@ export function createPluginStore(options: PluginStoreOptions) {
      * The join rows go too, so the account pages stop claiming a connection this deployment can no
      * longer use.
      *
-     * NOT vendor-side revocation. That needs the OAuth client and the vendor's revoke endpoint, and
-     * it belongs with disconnect. This is the half that stops us holding the secret; the grant at
-     * Google outlives it until somebody revokes it there. Said plainly rather than implied, because
-     * the difference matters to whoever has to answer for it.
+     * AND THE BROKERED CONNECTIONS, which are neither a credential nor a join row. Composio holds
+     * the account, so there is no secret in the vault to find and the `composio_connections` row is
+     * itself the permission — the only thing deciding whether a call may go out as this person.
+     * Sweeping the vault alone therefore left that gate passing for somebody who had been removed.
+     *
+     * NOT VENDOR-SIDE REVOCATION FOR THE VAULT HALF. That needs the OAuth client and the vendor's
+     * revoke endpoint, and it belongs with disconnect. Those rows are the half that stops us
+     * holding the secret; the grant at Google outlives it until somebody revokes it there. Said
+     * plainly rather than implied, because the difference matters to whoever has to answer for it.
+     *
+     * THE BROKERED HALF DOES END IT AT THE VENDOR, because there is no secret of ours to stop
+     * holding: clearing the row alone would shut the gate this deployment owns and leave the
+     * mailbox attached at Composio, which is "we removed their access" being untrue of the only
+     * thing that matters, for the person it matters most about. So every app this person connected
+     * is revoked through the broker, exactly as {@link disconnectBrokered} revokes for one and
+     * {@link removeServer} for a whole app.
+     *
+     * REVOKE BEFORE DELETE, ALWAYS. The row is the only thing that names which apps this person
+     * had, and it outlives the `users` row precisely so offboarding can still find them — which
+     * was the table's whole justification and until now was theoretical. A delete that ran first
+     * would leave a failed revoke with nothing to revoke under: a live grant on a departed
+     * person's mailbox that no operation in this deployment can reach. The other order costs a
+     * repeat of an act nobody minds repeating. Nothing is caught around the revokes either, so a
+     * broker that will not answer ends this method with the rows still standing rather than
+     * letting it report an ending that did not happen.
      */
     async retireConnectionsFor(
       userId: string,
@@ -2819,7 +6593,7 @@ export function createPluginStore(options: PluginStoreOptions) {
              * which one this was.
              */
             reason: "person_removed",
-            vendorRevoked: false,
+            vendorRevocationRequested: false,
           },
         });
       }
@@ -2827,6 +6601,90 @@ export function createPluginStore(options: PluginStoreOptions) {
       await database
         .delete(mcpUserCredentials)
         .where(eq(mcpUserCredentials.userId, userId));
+
+      /*
+       * Every app this person connected at the broker, where there is no secret to scan the vault
+       * for.
+       *
+       * CRITERION. After this returns, no brokered call may go out on this person's behalf.
+       *
+       * REASON. A brokered connection is not a credential: Composio holds the account and this
+       * deployment sends a user id, so the vault sweep above finds nothing and `composio_connections`
+       * is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
+       * connector was brokered, reported that as a retirement, and left the `(toolkit, user_id)` gate
+       * passing for a person who no longer exists — their access outliving them, which is the first
+       * thing anybody asks about a per-person connector. The table's own docblock justifies its shape
+       * by this path, so the shape was carrying a promise nothing kept.
+       *
+       * FOUND HERE AND NOWHERE ELSE, which is what the missing foreign key buys. The row survives the
+       * `users` row precisely so this can still name what the person had after they are gone — the
+       * same argument the vault lookup above makes, from the side that has no vault row. It is also
+       * why the guard at the top of this method is load-bearing rather than defensive: `not null`
+       * admits the empty string, so a row at `(toolkit, "")` is legal, and retiring "nobody" must not
+       * be what deletes it.
+       *
+       * COUNTED, because the number is what "we removed their access" claims. Retiring twice stays
+       * quiet on its own: the rows are gone, so the second call finds none.
+       *
+       * READ BEFORE ANYTHING IS DELETED, because the revokes below need the apps and the rows are
+       * where the apps are — the reason the docblock gives for revoking first. Sorted, so two
+       * retirements of the same person revoke in the same order and write their rows in the same
+       * order.
+       */
+      const brokered = await database
+        .select({ toolkit: composioConnections.toolkit })
+        .from(composioConnections)
+        .where(eq(composioConnections.userId, userId))
+        .orderBy(asc(composioConnections.toolkit));
+
+      /*
+       * What the broker was actually asked for each app, kept so the trail below records the answer
+       * rather than the call. False where there is no broker at all: a deployment whose key has
+       * since been unset can still offboard somebody, and it could not have been calling Composio
+       * either way — but nothing was asked there and the row must not claim otherwise.
+       */
+      const vendorRevocationRequested = new Map<string, boolean>();
+      for (const connection of brokered) {
+        vendorRevocationRequested.set(
+          connection.toolkit,
+          broker
+            ? await broker.revoke({ userId, toolkit: connection.toolkit })
+            : false,
+        );
+      }
+
+      await database
+        .delete(composioConnections)
+        .where(eq(composioConnections.userId, userId));
+
+      for (const connection of brokered) {
+        retired += 1;
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          // The app, which for a brokered connection is all the row records. The `mcp_servers` row
+          // it belongs to may have been removed already, and the connection outlives that too.
+          targetId: connection.toolkit,
+          payload: {
+            actor: by,
+            server: connection.toolkit,
+            owner: userId,
+            reason: "person_removed",
+            /*
+             * What was asked of the vendor, not that a call was made — {@link
+             * ComposioBroker.revoke}'s own answer, passed through, and the one place this half
+             * differs from the vault loop above. There the grant at Google outlives our copy of
+             * the secret and nothing was asked of anybody, so the field can only say false; here
+             * there was no secret of ours and the account itself was deleted at Composio with its
+             * withdrawal asked for, or there was nothing to ask about, or there was no broker to
+             * ask. The value of the field is exactly that a reader can tell those apart, so a
+             * constant here would be worse than none.
+             */
+            vendorRevocationRequested:
+              vendorRevocationRequested.get(connection.toolkit) ?? false,
+          },
+        });
+      }
 
       return { retired };
     },
@@ -2887,6 +6745,17 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(`${input.ref} is not a tool.`, null);
       }
 
+      /*
+       * Who the trail says made this call, which is not what the call is made AS.
+       *
+       * `input.actorId` stays the value every gate is decided on, and the empty string must go on
+       * matching no grant and no connection anywhere. This is only what the row says: a run nobody
+       * could be attributed to is `unattributed` rather than blank, on the criterion at
+       * {@link DEPLOYMENT_ACTOR}, and never `deployment` — a run this deployment could not put a
+       * name to is not the deployment having acted.
+       */
+      const auditActor = input.actorId || UNATTRIBUTED_ACTOR;
+
       const decision = await this.decide("mcp", input.ref, input.botId);
       if (!decision.allowed) {
         await recordAuditEvent(auditStore, {
@@ -2895,7 +6764,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetId: input.ref,
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
-            actor: input.actorId,
+            actor: auditActor,
             bot: input.botId,
             server: serverId,
             tool: toolName,
@@ -2906,22 +6775,58 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(decision.reason, null);
       }
 
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
       const advertised = await database
-        .select({ name: mcpTools.name, inputSchema: mcpTools.inputSchema })
+        .select({
+          name: mcpTools.name,
+          inputSchema: mcpTools.inputSchema,
+          effect: mcpTools.effect,
+          destructive: mcpTools.destructive,
+          version: mcpTools.version,
+        })
         .from(mcpTools)
         .where(
           and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
         )
         .limit(1);
 
-      const effect = classifyTool(entry, toolName, advertised.length > 0);
+      const effect = classifyTool(
+        entry,
+        toolName,
+        advertised.length > 0,
+        advertised[0]?.effect,
+      );
 
       const args = withoutEmptyOptionals(
         input.args,
         advertised[0]?.inputSchema as Record<string, unknown> | undefined,
       );
+
+      /*
+       * The version this action was listed at, handed to the transport that needs one.
+       *
+       * Under a reserved key rather than as a parameter on the shared signature, because that
+       * signature is MCP's and three other transports implement it. The Composio transport strips
+       * the key before anything reaches the vendor, and asserts that it did.
+       *
+       * A `__version` in the model's own arguments is not an argument: it is this key, and no
+       * vendor publishes it. So it is stripped unconditionally, whatever its value, and that strip
+       * is the whole protection. The recorded version is then merged into arguments that provably
+       * cannot carry the key, which makes both spread orders identical: the merge order has no
+       * reachable failure mode. Do not read the strip as belt-and-braces on top of an ordering
+       * guarantee — the ordering is the redundant half, and removing the strip is what would let a
+       * model choose which revision of an action runs.
+       *
+       * Absent when the app has not been refreshed since the column existed, and because the key
+       * was stripped there is then no version at all for the transport to read, which is what makes
+       * its refusal hold rather than guessing — a guessed version is a call against an action's
+       * other behaviour.
+       */
+      const { [VERSION_ARG]: _dropped, ...modelArgs } = args;
+      const vendorArgs = advertised[0]?.version
+        ? { ...modelArgs, [VERSION_ARG]: advertised[0].version }
+        : modelArgs;
 
       /**
        * The same policy the computer actions are judged by, asked about a tool call.
@@ -2966,7 +6871,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * the row goes down once, after the outcome exists.
        */
       const decided = {
-        actor: input.actorId,
+        actor: auditActor,
         bot: input.botId,
         server: serverId,
         tool: toolName,
@@ -2978,7 +6883,7 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a per-person connector raises — two rows for the same tool and the same Bot can legitimately
          * have seen entirely different documents, and nothing else in the row says why.
          */
-        reachedAs: reachedAsFor(entry, input.actorId),
+        reachedAs: reachedAsFor(access, input.actorId),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,
@@ -3026,8 +6931,23 @@ export function createPluginStore(options: PluginStoreOptions) {
        * whether the arguments would carry a credential out of the deployment. It runs after policy
        * and before credentials are read or a vendor is contacted, and its result contains paths and
        * categories only: never the values it refused.
+       *
+       * IT IS ASKED ABOUT WHAT WOULD BE SENT, WHICH IS `vendorArgs` AND NOT `args`.
+       *
+       * CRITERION. The object this inspection judges is the object handed to the transport below,
+       * identically — not a version of it taken before the reserved key was stripped and the
+       * recorded one merged in.
+       *
+       * REASON. It was asked about `args`, so the gate and the call were about two different
+       * objects, and they came apart in both directions. Whatever is merged in below the strip left
+       * this deployment WITHOUT HAVING BEEN LOOKED AT, which is not a boundary at all — it is a
+       * boundary around a neighbouring value. And the reserved key, which is stripped
+       * unconditionally and provably reaches no vendor, was still judged: a model that put anything
+       * credential-shaped under `__version` had its granted call refused and its person told the
+       * arguments carry credential material, over material that was never going anywhere and a
+       * refusal no rule of this deployment's asked for.
        */
-      const contentDecision = inspectToolArguments(args);
+      const contentDecision = inspectToolArguments(vendorArgs);
       if (!contentDecision.safe) {
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_rejected",
@@ -3066,8 +6986,14 @@ export function createPluginStore(options: PluginStoreOptions) {
        * it did.
        */
       try {
-        const { token } = await connectionTokenFor(row, entry, input.actorId);
-        const vendor = injectedVendor ?? transportFor(entry).callTool;
+        const { token } = await connectionTokenFor(
+          row,
+          entry,
+          input.actorId,
+          access,
+        );
+        const vendor =
+          injectedVendor ?? transportFor(access.transport).callTool;
         const result = await vendor(
           {
             url: effectiveUrl(row, entry),
@@ -3076,7 +7002,7 @@ export function createPluginStore(options: PluginStoreOptions) {
             botId: input.botId,
           },
           toolName,
-          args,
+          vendorArgs,
         );
         await recordAuditEvent(auditStore, {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
@@ -3121,8 +7047,18 @@ export function createPluginStore(options: PluginStoreOptions) {
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
             ...decided,
+            /*
+             * Asked through {@link withoutStatement}, because not every throw in this block is a
+             * vendor's sentence.
+             *
+             * The vendor's own words are what this field is for and are kept. But every query on
+             * the way here throws a `DrizzleQueryError` whose message is our statement and its
+             * bound values — credential ids, user ids, server ids — and `audit_events` is read by
+             * an operator and exported. A dump in the row that records a failed call is the same
+             * disclosure the tool-list replace was fixed for, in the trail rather than on a page.
+             */
             failure: (error instanceof Error
-              ? error.message
+              ? withoutStatement(error)
               : String(error)
             ).slice(0, 400),
           },
