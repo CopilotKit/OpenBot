@@ -8,6 +8,7 @@ import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
+  policyInitiator,
 } from "../computer/policy";
 import {
   type CredentialExecutor,
@@ -6859,6 +6860,13 @@ export function createPluginStore(options: PluginStoreOptions) {
         command: "",
         intent: effect === "write" ? "write_tool" : "read_tool",
         mcp: { server: serverId, tool: toolName, effect },
+        /*
+         * The real one, and this is the path where it is not neutral. A routine's turn reaches its
+         * tools through here, carrying the initiator its run assertion was signed with, so this is
+         * where `initiator.kind == "routine"` becomes a rule a deployment can actually write. A
+         * chat turn arrives with none and reads as a person.
+         */
+        initiator: policyInitiator(input.initiator),
       };
 
       const verdict = evaluateActionPolicy(options.policy(), context);
@@ -6956,6 +6964,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
             ...decided,
+            decision: { ...decided.decision, carriedOut: false },
             refusal: "sensitive_tool_arguments",
             contentInspection: {
               reason: contentDecision.reason,

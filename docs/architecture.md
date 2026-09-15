@@ -58,6 +58,11 @@ Policy rules can inspect:
 - `command`
 - `file.path`, `file.name`, `file.extension`
 - `mcp.server`, `mcp.tool`, `mcp.effect`
+- `initiator.kind`, `initiator.id` — what started the run, as distinct from whose
+  authority it carries. `person`, `deployment`, `routine` or `handoff`, with the
+  routine or Bot id where there is one. `actor.id` is the routine's owner on a
+  scheduled run, so this is the only field that can tell an unattended run from
+  somebody typing.
 
 Rules use CEL expressions plus case-insensitive `contains()` and `matches()`.
 Deny rules are evaluated before allow rules. The policy engine fails closed: a

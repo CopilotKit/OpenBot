@@ -41,6 +41,7 @@ import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
+  policyInitiator,
   type PolicyDecision,
 } from "./policy";
 import type { ComputerProvider } from "./provider";
@@ -513,6 +514,13 @@ export function createComputerGateway(
         ? describeFile(filePath)
         : { path: "", name: "", extension: "" },
       command: subject.command ?? "",
+      /*
+       * A person, and truthfully so today: a Bot's computer is driven by frontend tools in the
+       * browser, so every action arriving here came from somebody's session rather than from a
+       * schedule. #298 is the change that would make that untrue, and it is the one that has to pass
+       * the run's own initiator through instead of inheriting this.
+       */
+      initiator: policyInitiator(),
       // Neutral, like the fields above: this is not an MCP call, but a `deny: mcp.effect == "write"`
       // names `mcp`, and cel-js throws on an unbound identifier — which fails closed and would refuse
       // every browser action the moment an operator wrote a rule about their tools. Empty server and

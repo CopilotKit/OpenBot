@@ -102,6 +102,7 @@ jobs:
             console.log(pkg.version);
           ' -- "$BUMP" > /tmp/version
           version=$(cat /tmp/version)
+          bun desktop/scripts/desktop-version.ts sync
 
           # The chart's default image tag is its appVersion, so a release that moves package.json
           # without moving this leaves a default `helm install` pulling the previous image, or an
@@ -144,7 +145,7 @@ jobs:
       - name: Preview
         if: inputs.dry_run
         run: |
-          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml
+          git --no-pager diff -- package.json CHANGELOG.md charts/openbot/Chart.yaml desktop/src-tauri/Cargo.toml desktop/src-tauri/Cargo.lock
           cat /tmp/pr-body.md
 
       # A pull request opened by a workflow does not trigger the pull_request workflows, so the

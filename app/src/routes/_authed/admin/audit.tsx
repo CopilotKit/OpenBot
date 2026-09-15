@@ -378,7 +378,9 @@ function Row({
             {decision.rule}
           </div>
         ) : null}
-        {decision.mode === "dry-run" && decision.carriedOut ? (
+        {decision.mode === "dry-run" &&
+        decision.allowed === false &&
+        decision.carriedOut ? (
           <div className="text-xs text-muted-foreground">
             dry-run: recorded, not enforced
           </div>

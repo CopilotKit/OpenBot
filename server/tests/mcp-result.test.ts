@@ -99,4 +99,27 @@ describe("a result too large to hand a model", () => {
     expect(truncated).toBe(false);
     expect(text).toBe(exact);
   });
+
+  test("a cut that would land inside a character stops one code unit short", () => {
+    // The limit counts UTF-16 code units, and an emoji is two of them. Cut between the two and the
+    // result ends on a lone high surrogate: `JSON.stringify` sends it as a bare `\ud83d` and UTF-8
+    // turns it into U+FFFD, so the model is handed a broken character for a reason that has nothing
+    // to do with what the tool said. `extractDocumentText` guards the same cut on attachments.
+    const emoji = "😀";
+    expect(emoji.length).toBe(2);
+    const input = `${"a".repeat(MAX_RESULT_CHARS - 1)}${emoji}tail`;
+    const { text, truncated } = resultText([{ type: "text", text: input }]);
+    expect(truncated).toBe(true);
+    expect(text).toBe(
+      `${"a".repeat(MAX_RESULT_CHARS - 1)}\n\n[truncated: the tool returned ${input.length} characters]`,
+    );
+  });
+
+  test("a cut that lands between characters still keeps the whole limit", () => {
+    const input = `${"a".repeat(MAX_RESULT_CHARS - 2)}😀tail`;
+    const { text } = resultText([{ type: "text", text: input }]);
+    expect(text).toBe(
+      `${"a".repeat(MAX_RESULT_CHARS - 2)}😀\n\n[truncated: the tool returned ${input.length} characters]`,
+    );
+  });
 });

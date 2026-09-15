@@ -38,9 +38,12 @@ import {
   channelMemberships,
   channels,
   routineRuns,
+  routineSweeps,
   routines,
 } from "../db/schema";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
+
+const SWEEP_ID = "routines";
 
 export class RoutineNotFoundError extends Error {
   constructor(message = "That routine does not exist.") {
@@ -223,6 +226,8 @@ export type RoutineStore = {
    * failure.
    */
   reapAbandonedRuns(olderThanMs: number, error: string): Promise<number>;
+  recordSweep(owner: string): Promise<void>;
+  lastSweptAt(): Promise<Date | null>;
   /**
    * Switch a routine off because its own schedule refuses to advance, and record why.
    *
@@ -787,6 +792,25 @@ export function createRoutineStore(database: Database): RoutineStore {
         // calls finishRun("failed") — matches no row here and is a silent no-op, rather than
         // relabeling what the first finish already recorded.
         .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
+    },
+
+    async recordSweep(owner) {
+      await database
+        .insert(routineSweeps)
+        .values({ id: SWEEP_ID, owner, sweptAt: sql`now()` })
+        .onConflictDoUpdate({
+          target: routineSweeps.id,
+          set: { owner, sweptAt: sql`now()` },
+        });
+    },
+
+    async lastSweptAt() {
+      const [row] = await database
+        .select({ sweptAt: routineSweeps.sweptAt })
+        .from(routineSweeps)
+        .where(eq(routineSweeps.id, SWEEP_ID))
+        .limit(1);
+      return row?.sweptAt ?? null;
     },
 
     async reapAbandonedRuns(olderThanMs, error) {

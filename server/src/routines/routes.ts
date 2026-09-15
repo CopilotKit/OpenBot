@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
+import { MINIMUM_INTERVAL_MS } from "./schedule";
 import {
   RoutineNotFoundError,
   RoutineRefusedError,
@@ -36,8 +37,14 @@ export function createRoutineRoutes(
   const routes = new Hono<{ Variables: AppVariables }>();
 
   routes.get("/", requireUser, async (context) => {
-    const routines = await routineStore.listFor(context.var.actor.id);
-    return context.json({ routines: routines.map(routineDto) });
+    const [routines, sweptAt] = await Promise.all([
+      routineStore.listFor(context.var.actor.id),
+      routineStore.lastSweptAt().catch(() => null),
+    ]);
+    return context.json({
+      routines: routines.map(routineDto),
+      sweep: sweepDto(sweptAt),
+    });
   });
 
   routes.put("/:id/enabled", requireUser, async (context) => {
@@ -93,6 +100,21 @@ type RoutineDto = {
   nextRunAt: string;
   lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
 };
+
+export const SWEEP_SILENCE_MS = MINIMUM_INTERVAL_MS;
+
+type SweepDto = {
+  lastSweptAt: string | null;
+  working: boolean;
+};
+
+function sweepDto(sweptAt: Date | null, now = new Date()): SweepDto {
+  return {
+    lastSweptAt: sweptAt?.toISOString() ?? null,
+    working:
+      sweptAt !== null && now.getTime() - sweptAt.getTime() <= SWEEP_SILENCE_MS,
+  };
+}
 
 function routineDto(routine: RoutineSummary): RoutineDto {
   return {

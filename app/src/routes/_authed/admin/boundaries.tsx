@@ -178,9 +178,13 @@ function BoundariesPage() {
             <code>key</code> being pressed, the file being touched, the{" "}
             <code>command</code> being run, and <code>mcp.server</code>,{" "}
             <code>mcp.tool</code> and <code>mcp.effect</code> for a call to
-            somebody else&rsquo;s tools. A rule that cannot be evaluated counts
-            as a match, so a mistyped deny refuses rather than quietly
-            permitting what it was meant to forbid.
+            somebody else&rsquo;s tools. <code>initiator.kind</code> says what
+            started the run &mdash; <code>person</code>, <code>routine</code> or{" "}
+            <code>handoff</code> &mdash; which <code>actor.id</code> cannot,
+            because a scheduled run carries its owner&rsquo;s authority while
+            nobody is watching. A rule that cannot be evaluated counts as a
+            match, so a mistyped deny refuses rather than quietly permitting
+            what it was meant to forbid.
           </>
         }
         title="It may never"

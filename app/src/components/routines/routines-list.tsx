@@ -33,6 +33,7 @@ import {
   setRoutineEnabledMutationOptions,
 } from "@/lib/routines/mutations";
 import {
+  nothingIsFiring,
   type RoutineRecord,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
@@ -143,9 +144,11 @@ export function RoutinesList({
   const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
   /** The routine a delete is being confirmed for, or null. Its own dialog rather than one per row. */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const rows = (routines.data ?? []).filter(
+  const rows = (routines.data?.routines ?? []).filter(
     (row) => agentId === undefined || row.agentId === agentId,
   );
+  const sweep = routines.data?.sweep;
+  const noWorker = nothingIsFiring(sweep, rows.length);
   const confirming = rows.find((row) => row.id === confirmingId) ?? null;
 
   return (
@@ -154,6 +157,25 @@ export function RoutinesList({
         <p className="text-destructive text-sm" role="alert">
           {setEnabled.error.message}
         </p>
+      ) : null}
+
+      {noWorker ? (
+        <Item
+          variant="muted"
+          className="mb-2 border-amber-500/40 bg-amber-500/5"
+          role="alert"
+        >
+          <ItemContent>
+            <ItemTitle className="text-amber-600 dark:text-amber-500">
+              Nothing is running these
+            </ItemTitle>
+            <ItemDescription>
+              {sweep?.lastSweptAt
+                ? `The routines worker last checked ${relativeTime(sweep.lastSweptAt)}. Until it is running again, none of these will fire.`
+                : "No routines worker has ever checked in, so none of these will fire. A deployment needs one running to carry them out."}
+            </ItemDescription>
+          </ItemContent>
+        </Item>
       ) : null}
 
       {/* Pending renders nothing: the empty-state sentence would otherwise flash for the fetch. */}

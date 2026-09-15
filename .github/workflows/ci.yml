@@ -35,6 +35,8 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      - name: Desktop version tracks the release version
+        run: bun desktop/scripts/desktop-version.ts check
       # The chart's default image tag is its appVersion, and a release must move both together. They
       # drifted once, appVersion left pointing at a tag that was never published, and a default
       # `helm install` sat in ImagePullBackOff. This refuses a tree where package.json (the last
@@ -271,6 +273,13 @@ jobs:
           . .venv-langgraph-agui/bin/activate
           python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
           python -m pytest agent-langgraph-agui/tests -q
+      - name: LlamaIndex model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-llamaindex
+          . .venv-llamaindex/bin/activate
+          python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
+          python -m pytest agent-llamaindex/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null

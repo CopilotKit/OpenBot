@@ -1,0 +1,7 @@
+{
+  "name": "openbot-windows-signing",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:CopilotKit@131273140/OpenBot@1336502227:environment:windows-signing",
+  "description": "OpenBot protected Windows signing workflow; existing DigiCert certificate",
+  "audiences": ["api://AzureADTokenExchange"]
+}

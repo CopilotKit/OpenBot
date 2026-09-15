@@ -1,6 +1,6 @@
 {
-  "id": "ac0f9895-5dfe-4179-b6f0-aa007780ae01",
-  "prevId": "62ecf575-8502-4dab-9978-abe46d0f01cb",
+  "id": "3ccdf12c-d313-45ae-9358-a68cd49c231b",
+  "prevId": "ac0f9895-5dfe-4179-b6f0-aa007780ae01",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1409,6 +1409,12 @@
         "verified_at": {
           "name": "verified_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "probe_action": {
+          "name": "probe_action",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

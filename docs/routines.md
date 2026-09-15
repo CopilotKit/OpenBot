@@ -67,10 +67,16 @@ Nothing above happens without a second process. The API server answers `/interna
 it is handed a run, but nothing hands it one on its own — that is a separate worker's whole job, and a
 deployment that never started one schedules nothing.
 
-This fails silently. A routine created in chat is stored, its schedule is computed, and the Routines
-page shows it sitting there with a next run time like any other — because as far as that page knows,
-it is correct. Nothing on the screen says a worker exists to act on it, so a deployment with no worker
-looks identical to one running normally, right up until nobody's standup notes ever arrive.
+This used to fail silently. A routine created in chat is stored, its schedule is computed, and the
+Routines page shows it sitting there with a next run time like any other — because as far as that
+page knows, it is correct. A deployment with no worker looked identical to one running normally,
+right up until nobody's standup notes ever arrive.
+
+Each sweep now records that it happened, in `routine_sweeps`, and the Routines page reads it. A
+person with standing routines and nothing sweeping is told so: that no worker has ever checked in,
+or when the last one did. The window is `MINIMUM_INTERVAL_MS` — fifteen minutes, the floor a
+routine's own schedule already has, so a gap longer than that is one no routine could have wanted.
+A CronJob scheduled less often than that will read as quiet between runs.
 
 Two settings carry this:
 

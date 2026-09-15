@@ -15,6 +15,7 @@ import {
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
+import { cutAtCodeUnits } from "../channels/text";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
 
@@ -508,7 +509,7 @@ const RELAY_ANSWER_LIMIT = 12_000;
 
 function clip(answer: string): string {
   if (answer.length <= RELAY_ANSWER_LIMIT) return answer;
-  return `${answer.slice(0, RELAY_ANSWER_LIMIT)}\n\n[…the answer was cut here for length]`;
+  return `${cutAtCodeUnits(answer, RELAY_ANSWER_LIMIT)}\n\n[…the answer was cut here for length]`;
 }
 
 /**

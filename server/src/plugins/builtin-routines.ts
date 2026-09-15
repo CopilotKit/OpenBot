@@ -1,3 +1,4 @@
+import { cutAtCodeUnits } from "../channels/text";
 import {
   MAX_RUN_ERROR,
   type Routine,
@@ -242,7 +243,7 @@ function asResult(text: string): McpCallResult {
     return { text, isError: false, truncated: false };
   }
   return {
-    text: `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${text.length} characters]`,
+    text: `${cutAtCodeUnits(text, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${text.length} characters]`,
     isError: false,
     truncated: true,
   };

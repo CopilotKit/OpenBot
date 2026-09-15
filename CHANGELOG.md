@@ -8,6 +8,95 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.11
+
+### The LlamaIndex Bot answers with the model the setup screen chose
+
+The LlamaIndex Bot built an OpenAI client from `BOT_MODEL` and ignored `BOT_PROVIDER`, so it only
+worked with an OpenAI model name sent to OpenAI. Picked with an Anthropic key, every run failed with
+`Unknown model 'claude-sonnet-4-5'`; picked with an OpenAI-compatible endpoint, every run failed
+with `Unknown model` for that endpoint's model, and an OpenAI model name went to api.openai.com
+instead of the address given, because the client read `OPENAI_API_BASE` and not the
+`OPENAI_BASE_URL` Compose passes. It now reaches the model through LiteLLM as `provider/model`, the
+way the Agno Bot does, so all three choices answer. A model LiteLLM does not know is treated as able
+to call tools, which the AG-UI workflow requires, and parameters a model does not accept, such as
+the temperature LlamaIndex sends to a reasoning model, are dropped rather than refused.
+
+### The Audit page says "not enforced" only under a dry-run refusal that went ahead
+
+On a deployment in `dry-run`, the Audit page printed "dry-run: recorded, not enforced" under every
+allowed action, because an allowed action is always carried out, and under a tool call content
+inspection had refused, because that row copied `carriedOut: true` from the policy step before the
+call was stopped. The line now appears only on a row the policy refused and dry-run let through,
+which is the one case it describes. A tool call refused for carrying credential material is now
+recorded with `carriedOut: false` in every mode. Rows already written keep their old value, and the
+page reads them correctly either way.
+### The Routines page says when nothing is there to run them
+
+A routine needs a second process to fire it, and a deployment that never started one looked exactly
+like a deployment that had: the routine was stored, its schedule was computed, and the page showed it
+waiting with a next run time, right up until nobody's standup notes arrived. Every sweep now records
+that it happened, and the page reads that record. Somebody with standing routines and nothing
+sweeping is told so — that no worker has ever checked in, or when the last one did — instead of
+being shown a page that looks correct. The window is the fifteen minutes a routine's own schedule
+already has as its floor, so a gap longer than that is one no routine could have wanted.
+
+### A long tool result or relayed answer is cut between characters, not through an emoji
+
+A tool result over 20,000 characters, and a Bot's answer over 12,000 relayed back through a handoff,
+were cut by UTF-16 code unit. When the cut landed inside an emoji or any other character outside the
+Basic Multilingual Plane, the text handed to the model ended on half of it: a lone surrogate that
+JSON carries as a bare `\ud83d` and UTF-8 turns into a replacement character. The cut now stops one
+unit short in that case, the way an attached text file's already did. Anything that fits is
+untouched, and the note saying the result was cut reads as before.
+### A boundary rule can ask what started a run, not only whose authority it carries
+
+A routine's turn goes through exactly the path a person's chat turn does, as the routine's owner:
+their grants, their connections, their thread. That is the right design, and it is also why
+`actor.id` cannot tell a scheduled run at three in the morning from the same person typing. The
+trail already drew that distinction — `AuditInitiator` is signed into the run assertion and written
+onto the row, so an investigator can see a routine caused something. A rule could not ask the same
+question.
+
+The policy context now carries `initiator`, with the kind and id the trail already records, so this
+is writable:
+
+```
+deny: initiator.kind == "routine" && intent == "run_command"
+```
+
+A deployment happy for a Bot to run a shell while somebody watches, and not happy for it to do so
+unattended, can now say so. The id is there too, so a single routine can be named rather than
+scheduled runs as a class. `handoff` is its own kind, for a Bot that hands work to another Bot.
+
+**Nothing is refused that was not refused before.** The field is neutral — `{kind: "person", id: ""}`
+— everywhere a person is driving, which is every path that does not carry an initiator today,
+including every action on a Bot's computer: those are driven by the browser, so they really are
+somebody's session. It is required rather than optional for the reason #115 exists: cel-js throws on
+an unbound identifier and a throw fails closed, so a field that were sometimes absent would turn one
+rule about routines into a deployment that refused every ordinary click.
+
+Replaying a rule against history reads the initiator off the row when it is there and treats a row
+that predates the field, or carries a shape this version does not recognise, as a person.
+### The Python LangGraph Bot tells its model why the deployment refused a tool call
+
+When the deployment would not run a tool call from the Python LangGraph Bot — a token it no longer
+accepts, one issued to another Bot, or a malformed call — it answered with the status and a reason
+under `error`, and the Bot told its model only "Refused. Tool callback returned HTTP 403." The model
+could say a call was refused but not why, and could not correct a call the deployment had named as
+malformed. The reason now follows the status, the way the TypeScript LangGraph Bot already passes it
+on. A refusal with no readable reason reads exactly as before.
+### A tool argument that starts with "Basic" or "Bearer" is no longer refused as a credential
+
+Content inspection read any MCP tool argument whose first word was "basic" or "bearer", in any case,
+as an authorization header. A Bot searching Drive for "Basic onboarding checklist", or posting
+"Bearer of bad news" to a channel, was refused because its arguments "contain credential material".
+Those words are now refused only when what follows them is shaped like a credential: base64 that
+decodes to `user:password` after `Basic`, and a token of at least 16 characters with a digit,
+punctuation or mixed case after `Bearer`. A shorter bearer token, or a Basic value that does not
+decode to `user:password`, is no longer caught by this pattern; the same value under an
+`authorization` field is still refused by name.
+
 ## 0.0.10
 
 ### The LangGraph Bot says a refused tool call was refused, not that it found nothing
