@@ -36,7 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && ln -s bun /usr/local/bin/bunx \
   && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
   && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/* \
-  && useradd --create-home --shell /bin/bash pwuser
+  && useradd --create-home --shell /bin/bash pwuser \
+  && useradd --create-home --shell /usr/sbin/nologin apiuser
 
 
 FROM base AS deps
@@ -192,9 +193,9 @@ ENV AGENT_COMPUTER_URL=http://127.0.0.1:4100
 # NOTHING THAT MATTERS RUNS AS ROOT.
 #
 # s6 stays root because that is the only way it can drop each service to a different user, and they
-# genuinely differ: the browser and API run as `pwuser`, the database as `postgres`. One shared
-# account would put the process that renders the open internet in the same skin as the one holding
-# the audit trail.
+# genuinely differ: the browser and the Bot's shell run as `pwuser`, the API and migrations as
+# `apiuser`, the database as `postgres`. One shared account would put the process that renders the
+# open internet in the same skin as the one holding the audit trail.
 #
 # This matters more than usual here. Chromium is launched with `--no-sandbox` unless the host can
 # support its sandbox, and with that flag the process user IS the boundary, so root would mean a

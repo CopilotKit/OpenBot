@@ -418,6 +418,21 @@ jobs:
             docker logs openbot-ci
             exit 1
           }
+      - name: A Bot's shell cannot reach the deployment secrets
+        run: |
+          set -uo pipefail
+          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c '
+                for e in /proc/[0-9]*/environ; do tr "\0" "\n" < "$e" 2>/dev/null; done
+              ' | grep -q "^KEY_ENCRYPTION_KEY="; then
+            echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from a sibling process /proc/<pid>/environ."
+            exit 1
+          fi
+          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c \
+                'cat /run/s6/container_environment/KEY_ENCRYPTION_KEY 2>/dev/null' | grep -q .; then
+            echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from /run/s6/container_environment."
+            exit 1
+          fi
+          echo "pwuser cannot reach KEY_ENCRYPTION_KEY"
       - if: always()
         run: docker rm -f openbot-ci >/dev/null 2>&1 || true
 
