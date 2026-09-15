@@ -16,6 +16,7 @@
     "@ag-ui/mastra": "1.1.2",
     "@better-auth/drizzle-adapter": "^1.7.1",
     "@better-auth/sso": "^1.7.1",
+    "@composio/core": "^0.18.1",
     "@copilotkit/runtime": "1.70.1",
     "@mastra/client-js": "^1.43.0",
     "@mastra/core": "^1.64.0",

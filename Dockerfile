@@ -63,7 +63,6 @@ RUN cd agent-computer && bun install --frozen-lockfile
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
 RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
-  && cp -r app/package.json /prod/app-package.json \
   && cd /prod && mkdir -p app server worker \
   && cp /src/app/package.json app/package.json \
   && cp /src/server/package.json server/package.json \
@@ -107,10 +106,21 @@ RUN case "${TARGETARCH}" in \
 
 WORKDIR /app
 
+# BOTH HALVES OF THE TREE COME FROM /prod. A workspace install is two directories, not one: the
+# packages it could hoist go to the root `node_modules`, and a per-workspace `node_modules` sits
+# beside each manifest holding the rest. The server's half used to be taken from /src, which is the
+# unpruned install, so the prune above bought nothing where the server actually resolves — and
+# `@copilotkit/aimock`, a development dependency, shipped as a symlink into a store the prune had
+# emptied, along with the two `.bin` shims pointing at it. Every dependency `server/package.json`
+# declares resolves from the /prod half; the ones it does not declare are absent now rather than
+# present and broken.
 COPY --from=deps /prod/node_modules node_modules
+COPY --from=deps /prod/server/node_modules server/node_modules
 COPY --from=deps /src/package.json package.json
 COPY --from=deps /src/bun.lock bun.lock
-COPY --from=deps /src/server/node_modules server/node_modules
+# The browser's tree is a separate install root with its own lockfile rather than a workspace of the
+# one above, so there is no /prod half of it to take and it ships as resolved, `typescript` included.
+# Pruning it would mean a second `--production` install in the stage above.
 COPY --from=deps /src/agent-computer/node_modules agent-computer/node_modules
 
 COPY server server
@@ -118,6 +128,19 @@ COPY shared shared
 COPY examples examples
 COPY agent-computer/src agent-computer/src
 COPY agent-computer/package.json agent-computer/package.json
+
+# `bun run composio:smoke`, because the manifest copied above carries that entry and the question it
+# answers belongs here rather than on a laptop: it asks what THIS deployment's Composio key can see,
+# and that key is the one in this container's environment. It reads `server/src/plugins/composio*`,
+# which is already in the image, so the file itself was the only thing missing and the entry was an
+# instruction that could not be followed where it shipped.
+#
+# ONE FILE, NOT `scripts/`. The others there are the laptop's. `diagram` and `mock:knowledge` reach
+# for `roughjs` and `@copilotkit/aimock`, which the prune above removes; `test:ci` runs a suite that
+# is not in the image; `generate:app-config` writes a file the build has already baked into
+# `app/dist`. Copying the directory ships four more entries with nothing to do here, to fix one that
+# has something to do.
+COPY scripts/composio-smoke.ts scripts/composio-smoke.ts
 
 # The built app, served by the API on the same origin. There is no CORS in this server, so this is
 # not a convenience: two origins would simply fail.

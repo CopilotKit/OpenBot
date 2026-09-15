@@ -13,6 +13,10 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import {
+  BrokeredAccountRow,
+  useBrokeredAccount,
+} from "@/components/plugins/brokered-account-row";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,7 +52,9 @@ import {
   removePluginServerMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
+  type CatalogueItem,
   connectionsQueryOptions,
+  type PluginServer,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
@@ -90,6 +96,76 @@ function grantSummary(held: number, total: number): string {
   return `${held} of ${total} Bots`;
 }
 
+/**
+ * How much of this vendor one Bot holds, in the same voice as {@link grantSummary}.
+ *
+ * The same decision counted the other way round, for the rows that open a Bot's own page against
+ * this app. Named ends rather than a fraction, for the reason recorded above: "0/167" reads as a
+ * score, and the two answers worth recognising without reading are none of it and all of it.
+ */
+function heldSummary(held: number, total: number): string {
+  if (held === 0) return "No tools";
+  if (held === total) return total === 1 ? "1 tool" : "Every tool";
+  return `${held} of ${total} tools`;
+}
+
+/**
+ * How this vendor is reached, from whichever record we have.
+ *
+ * The row's own provenance is asked first because it is a fact this deployment recorded when the
+ * app was enabled, not an inference: a brokered app is reached through Composio whatever the
+ * catalogue does or does not say about it.
+ *
+ * That order matters because the catalogue has nothing to say about a brokered app — it is not a
+ * curated entry — and what stood here was `entry?.auth ?? "deployment-bearer"`: a guess, and the
+ * one guess that is wrong for the one row shape that cannot hold a token. The page then offered
+ * "one credential, used for everybody" to the connector whose whole point is that each person
+ * connects their own account, and would have stored a token nothing ever reads.
+ *
+ * A server an administrator added by URL is still the fallback's case, and still correct there:
+ * nothing about it is reached as a person, so it gets the shared-token shape.
+ */
+export function connectionKindFor(
+  server: PluginServer | undefined,
+  auth: CatalogueItem["auth"] | undefined,
+): CatalogueItem["auth"] | "brokered" {
+  if (server?.provenance === "composio") return "brokered";
+  return auth ?? "deployment-bearer";
+}
+
+/**
+ * A row whose whole content is connection state, standing in for it when it could not be read.
+ *
+ * DRAWN BY BOTH ROWS THAT READ `/api/plugins/connections` — the brokered account and the
+ * `user-oauth` one — because the defaulting they suffer from is the same and so is the honest
+ * answer to it. Neither is drawn on a deployment-token server, which has no connection state to
+ * fail on.
+ *
+ * IN THE ROW'S OWN PLACE, so the card keeps its shape and the sentence sits where the thing it is
+ * about would have been. What it must not say is anything about whether an account exists: the
+ * whole defect is that a failed read defaulted to "not connected", and a second sentence guessing
+ * in the other direction would be the same mistake with better manners.
+ *
+ * `role="alert"` rather than plain text, because this appears in place of a row that carried
+ * buttons — somebody reading with a screen reader has to be told the controls are gone and why,
+ * not left to notice their absence.
+ */
+function ConnectionStateUnreadable() {
+  return (
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>Your account</ItemTitle>
+        <ItemDescription role="alert">
+          Whether you have connected an account here could not be loaded, so
+          nothing about it is shown rather than something that may be wrong.
+          Reload the page, and check this deployment&rsquo;s logs if it
+          persists.
+        </ItemDescription>
+      </ItemContent>
+    </Item>
+  );
+}
+
 function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
   const queryClient = useQueryClient();
@@ -104,9 +180,35 @@ function RouteComponent() {
    */
   const connections = useQuery(connectionsQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
-  const youConnected = (connections.data?.connections ?? []).some(
+  /*
+   * The row itself rather than whether there is one, because the brokered row below wants what the
+   * last re-check found and that is written on this same row. Asking a second time for it would be
+   * a second answer to a question this read already carried.
+   */
+  const connection = (connections.data?.connections ?? []).find(
     (row) => row.serverId === key,
   );
+  const youConnected = connection !== undefined;
+  /*
+   * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
+   *
+   * Nothing read `connections.error` at all, so a 500 from `/api/plugins/connections` degraded an
+   * account whose last check did not come back clean to "not connected" — dropping the sentence and
+   * withdrawing both Re-check and Disconnect — with no error text anywhere on the page.
+   *
+   * WITHHELD PER ROW RATHER THAN PER PAGE, which is the difference between this screen and the
+   * personal one. There, the page's entire content IS connection state, so drawing nothing is the
+   * honest whole answer. Here the page also carries the tools, the grants, Refresh and Remove, none
+   * of which touch this read — and a deployment-token server has no connection state on it at all.
+   * Collapsing the page on this error took an administrator's Remove button away at the exact
+   * moment something was failing, for every plugin in the deployment rather than only the two kinds
+   * that read this.
+   *
+   * BOTH KINDS THAT READ IT, not just the brokered one: the `user-oauth` "Your account" row derives
+   * its whole sentence and its Connect button from {@link youConnected}, which is the same defaulted
+   * `false` the brokered row was getting.
+   */
+  const connectionsUnreadable = connections.error !== null;
   const nameFor = useBotNames();
 
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +263,18 @@ function RouteComponent() {
      * complete it for them, and nothing about being an administrator changes that.
      */
     onSuccess: (authorizationUrl) => {
+      /*
+       * A 200 with no url on it is not a url to follow. This press is on a `user-oauth` catalogue
+       * entry, whose half of that route always mints one or refuses, so this is the server having
+       * answered something this page does not understand. Assigning it navigated to a page called
+       * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
+       */
+      if (authorizationUrl === null) {
+        setError(
+          "This deployment answered without a consent link, so there was nowhere to send you and nothing was connected. Try again, and check this connector's setup if it persists.",
+        );
+        return;
+      }
       window.location.href = authorizationUrl;
     },
   });
@@ -171,14 +285,54 @@ function RouteComponent() {
     name: nameFor(agent.id),
   }));
 
-  /**
-   * How this vendor is reached, from whichever record we have.
-   *
-   * A server added by URL has no catalogue entry, and nothing about it is reached as a person, so it
-   * falls back to the shared-token shape.
-   */
-  const auth = entry?.auth ?? "deployment-bearer";
+  const auth = connectionKindFor(server, entry?.auth);
   const title = entry?.title ?? server?.title ?? key;
+
+  /* Bound once because the brokered row below is told it twice — once inside the whole
+     disconnected sentence and once on its own — and two copies of it would drift. */
+  const reassurance =
+    "Setup is complete without it, and it reaches your documents only.";
+
+  /*
+   * Everything the brokered row below reads and does, shared with the personal connected-accounts
+   * screen that draws the same row. See `brokered-account-row.tsx`.
+   *
+   * `connectSelf` above stays: it is the `user-oauth` row's Connect, which is a different row with
+   * no Disconnect beside it and nothing brokered to confirm.
+   */
+  const brokeredAccount = useBrokeredAccount({
+    authScheme: server?.authScheme ?? null,
+    brokered: auth === "brokered",
+    configured: plugins.data?.composioConfigured ?? false,
+    recorded: youConnected,
+    report: setError,
+    // Back to this page afterwards, not to the personal settings screen.
+    returnTo: "admin",
+    serverId: key,
+    /*
+     * Absent where this person has never connected the app, and false rather than asserted: with no
+     * row there is nothing that could have been checked, which is exactly what the server's own
+     * columns default to. The three are optional on the type because that endpoint concatenates two
+     * reads and only a brokered row carries them.
+     */
+    verified: connection?.verified ?? false,
+    verifiedAt: connection?.verifiedAt ?? null,
+    /*
+     * AND THIS ONE IS NOT FLATTENED, for the reason the personal screen gives: the two above fall
+     * back on the server's own column defaults, while a null here is the server's record that the
+     * last check spent nothing — not the absence of a record. The row draws a different sentence
+     * for each, so the difference has to reach it.
+     */
+    probe: connection?.probe,
+    /*
+     * WHILE THIS ONE IS, for the reason that screen gives too: it is the Re-check button's gate and
+     * not a sentence. The record above says what was spent and this says whether the app has
+     * anything to spend today — asking the record the second question is what left a key nothing
+     * was tried on with no way to ever have anything tried on it. Absent and false are the same
+     * closed gate, so the fallback costs nothing here.
+     */
+    checkable: connection?.checkable ?? false,
+  });
 
   /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
   const add = async () => {
@@ -237,8 +391,14 @@ function RouteComponent() {
     }
   };
 
-  /* Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open. */
-  if (plugins.isPending) {
+  /*
+   * Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open —
+   * AND BOTH READS ARE WAITED FOR. `recorded`, `verified`, `verifiedAt`, `probe` and `checkable`
+   * all come off the connections read and this gated on `plugins` alone, so a connections read
+   * still in flight drew the brokered row with the whole of its state defaulted to "you have never
+   * connected this". The personal screen had the identical gap; see its own note.
+   */
+  if (plugins.isPending || connections.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
   }
   if (!(entry || server)) {
@@ -322,7 +482,10 @@ function RouteComponent() {
               ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account, so a Bot only ever sees what that person can see."
               : auth === "builtin"
                 ? "Built into this deployment. There is no vendor to reach and no credential to hold — a call runs as whoever asked."
-                : "What this deployment presents to the vendor. One credential, used for everybody."
+                : auth === "brokered"
+                  ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an administrator has to do here — which is nothing. */
+                    "Reached through Composio, which holds each person's own account."
+                  : "What this deployment presents to the vendor. One credential, used for everybody."
           }
           title="Connection"
         >
@@ -342,6 +505,12 @@ function RouteComponent() {
            * step rather than as the answer. The row states that plainly instead of leaving the
            * card empty — and being first, it also gives the docsUrl row below something other than
            * the card's own top border to sit its leading separator against.
+           *
+           * The third is the brokered row, for the same reason as the second and one more: an
+           * administrator looking at a Connection card with only somebody's personal account on it
+           * will reasonably look for the deployment's half of the arrangement. There is one, it is
+           * just not theirs to type, and saying so is the only way this card is not read as
+           * half-configured.
            */}
           <PageRows>
             {auth === "builtin" ? (
@@ -360,6 +529,31 @@ function RouteComponent() {
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
                     Built in
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "brokered" ? (
+              /*
+               * Nothing to click. The deployment's half of a brokered app is one key held once,
+               * for Composio rather than for this vendor, and it is set where every brokered app
+               * reads it from — not here, per app, by hand.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>How this is reached</ItemTitle>
+                  <ItemDescription>
+                    This app is reached through Composio, which holds the
+                    account. This deployment sends one key and the name of
+                    whoever is asking, so each person connects their own and a
+                    Bot sees only what that person can see. There is no token to
+                    paste.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Through Composio
                   </span>
                 </ItemActions>
               </Item>
@@ -448,50 +642,90 @@ function RouteComponent() {
              * that: a Connect button with no OAuth client behind it can only fail. A vendor with a
              * dynamic client is the exception — there is no client to register in advance, so
              * Connect is shown right away and is itself what creates one.
+             *
+             * A brokered app is shown right away too, and for the same reason: there is nothing
+             * for an administrator to configure first, so there is no state in which connecting
+             * could only fail. It is the one row on this card that is not optional in practice —
+             * a brokered app reaches nobody until somebody connects — but it is still personal,
+             * and still this person's account and nobody else's.
+             *
+             * The two are drawn by different things, which is the honest arrangement rather than
+             * one row branching on `auth` in five places. A brokered account is ended from here as
+             * well as begun, and says so; an OAuth one is withdrawn at the vendor and this page
+             * offers no button pretending otherwise.
              */}
+            {auth === "brokered" ? (
+              <>
+                <Separator />
+                {connectionsUnreadable ? (
+                  <ConnectionStateUnreadable />
+                ) : (
+                  <BrokeredAccountRow
+                    account={brokeredAccount}
+                    /* Said beside the button rather than after it: disconnecting ends the account
+                       at Composio, so what it undoes is not the row here but the grant on this
+                       person's mailbox, and connecting again is a fresh consent. */
+                    connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. Disconnecting ends the account at Composio, not just here.`}
+                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
+                    /* The half of the line above that is true whichever way this app connects.
+                       An app whose key somebody types gets a different first sentence from the
+                       row — pressing Connect opens a form rather than leaving for a consent
+                       screen — and an administrator still has to be told they are not the step
+                       that finishes the connector. */
+                    disconnectedReassurance={reassurance}
+                    title={title}
+                  />
+                )}
+              </>
+            ) : null}
+
             {auth === "user-oauth" &&
             (server?.hasCredential || server?.dynamicClient) ? (
               <>
                 <Separator />
-                <Item size="sm">
-                  <ItemContent>
-                    <ItemTitle>Your account</ItemTitle>
-                    <ItemDescription>
-                      {youConnected
-                        ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
-                        : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    {youConnected ? (
-                      <>
-                        {/* Decorative: the word beside it already says which. */}
-                        <span
-                          aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
-                        />
-                        <span className="text-muted-foreground text-xs">
-                          Connected
-                        </span>
-                      </>
-                    ) : (
-                      /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
-                      <Button
-                        disabled={connectSelf.isPending}
-                        onClick={() => {
-                          setError(null);
-                          connectSelf.mutate(key);
-                        }}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Connect
-                        <IconArrowUpRight />
-                      </Button>
-                    )}
-                  </ItemActions>
-                </Item>
+                {connectionsUnreadable ? (
+                  <ConnectionStateUnreadable />
+                ) : (
+                  <Item size="sm">
+                    <ItemContent>
+                      <ItemTitle>Your account</ItemTitle>
+                      <ItemDescription>
+                        {youConnected
+                          ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
+                          : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      {youConnected ? (
+                        <>
+                          {/* Decorative: the word beside it already says which. */}
+                          <span
+                            aria-hidden="true"
+                            className="size-1.5 rounded-full bg-emerald-500"
+                          />
+                          <span className="text-muted-foreground text-xs">
+                            Connected
+                          </span>
+                        </>
+                      ) : (
+                        /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
+                        <Button
+                          disabled={connectSelf.isPending}
+                          onClick={() => {
+                            setError(null);
+                            connectSelf.mutate(key);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Connect
+                          <IconArrowUpRight />
+                        </Button>
+                      )}
+                    </ItemActions>
+                  </Item>
+                )}
               </>
             ) : null}
 
@@ -683,6 +917,56 @@ function RouteComponent() {
               ))}
             </PageRows>
           )}
+
+          {/*
+           * The same grants, from the Bot's end.
+           *
+           * In this section rather than one of its own, because it is not a second subject: the
+           * list above is one action and every Bot, and these rows are one Bot and every action.
+           * Which way round somebody wants it depends on what they came here to do — write a rule
+           * about an action, or set a Bot up — and an app of a hundred and sixty-seven actions is
+           * only approachable from this end.
+           */}
+          {server.tools.length > 0 && bots.length > 0 ? (
+            <>
+              <p className="mt-8 font-medium text-sm">By Bot</p>
+              <PageRows>
+                {bots.map((bot, index) => (
+                  <React.Fragment key={bot.id}>
+                    {/* A real link with no children: children passed to `render` replace the row's own. */}
+                    <Item
+                      render={
+                        <Link
+                          params={{ agentId: bot.id, key }}
+                          to="/admin/plugins/$key/bots/$agentId"
+                        />
+                      }
+                      size="sm"
+                    >
+                      <ItemContent>
+                        <ItemTitle>{bot.name}</ItemTitle>
+                        <ItemDescription>
+                          Every action this app offers, switched one at a time.
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
+                        <span className="text-muted-foreground text-xs">
+                          {heldSummary(
+                            server.tools.filter((tool) =>
+                              tool.grantedTo.includes(bot.id),
+                            ).length,
+                            server.tools.length,
+                          )}
+                        </span>
+                        <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      </ItemActions>
+                    </Item>
+                    {index !== bots.length - 1 && <Separator />}
+                  </React.Fragment>
+                ))}
+              </PageRows>
+            </>
+          ) : null}
         </PageSection>
       ) : null}
 

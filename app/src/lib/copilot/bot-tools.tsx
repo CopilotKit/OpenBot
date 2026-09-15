@@ -173,8 +173,18 @@ export function BotTools() {
                   outcome.failed.push(slug);
                 }
               }
-              // Once at the end rather than between every pair, matching `grantPlugin`'s own note.
-              if (outcome.granted.length > 0) invalidatePlugins(queryClient);
+              /*
+               * Once at the end rather than between every pair, matching `grantPlugin`'s own note.
+               *
+               * AND UNCONDITIONALLY, BECAUSE A GRANT THAT THREW IS NOT A GRANT THAT DID NOT HAPPEN.
+               * `POST /api/plugins/grants` upserts the row and THEN files the trail entry, with no
+               * catch over either, so an audit insert that fails answers 500 for a grant that is
+               * recorded — see `invalidatePlugins`, which spells this out for the whole surface.
+               * Gating the refetch on `granted.length` meant the one run where every grant "failed"
+               * was the one run that refetched nothing, leaving the screens asserting a Bot has no
+               * skills while the deployment holds rows saying it has them.
+               */
+              invalidatePlugins(queryClient);
               return outcome;
             }}
             respond={props.respond}
