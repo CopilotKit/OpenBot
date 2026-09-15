@@ -167,6 +167,39 @@ describe("parseAriaSnapshot, against captured output", () => {
   });
 });
 
+/**
+ * A name or value longer than the 200 kept is cut, and the cut counts UTF-16 code units.
+ *
+ * An emoji is two of them. With its first half as the 200th unit, a plain `slice` leaves a lone high
+ * surrogate as the last character of what the Bot is handed: JSON carries it as a bare `\ud83d` and
+ * UTF-8 as U+FFFD, so the Bot reads back a broken character that is not on the page, in text it may
+ * well have typed itself.
+ */
+describe("a name or value too long to keep whole", () => {
+  const CUT_THROUGH = `${"a".repeat(199)}😀 and the rest`;
+  const ENDS_INSIDE = `${"a".repeat(198)}😀 and the rest`;
+
+  test("a name cut inside a character loses the whole character, not half of it", () => {
+    const { elements } = parseAriaSnapshot(`- link "${CUT_THROUGH}" [ref=e1]`);
+    expect(elements[0]?.name).toBe("a".repeat(199));
+  });
+
+  test("a value cut inside a character loses the whole character, not half of it", () => {
+    const { elements } = parseAriaSnapshot(
+      `- textbox "Message" [ref=e1]: ${CUT_THROUGH}`,
+    );
+    expect(elements[0]?.value).toBe("a".repeat(199));
+  });
+
+  test("a character that ends at the cut is kept", () => {
+    const { elements } = parseAriaSnapshot(
+      `- textbox "${ENDS_INSIDE}" [ref=e1]: ${ENDS_INSIDE}`,
+    );
+    expect(elements[0]?.name).toBe(`${"a".repeat(198)}😀`);
+    expect(elements[0]?.value).toBe(`${"a".repeat(198)}😀`);
+  });
+});
+
 describe("values a real parser handles and a pattern got wrong", () => {
   test("a quoted numeric value is not left with its quotes", () => {
     // Numeric-looking text remains a string, so one-time codes are not coerced.

@@ -31,11 +31,15 @@ export function matchesToken(expected: string, offered: string): boolean {
  * parameter.
  */
 export function offeredToken(headers: Headers, url: URL): string {
-  if (url.pathname === "/stream") return url.searchParams.get("token") ?? "";
+  // The header path trims; the query path must too, or `?token=%20SECRET` 401s while the same
+  // value in a header succeeds and the failure looks stream-specific.
+  if (url.pathname === "/stream")
+    return url.searchParams.get("token")?.trim() ?? "";
   const header = headers.get("x-openbot-computer-token")?.trim();
   if (header) return header;
   const authorization = headers.get("authorization")?.trim() ?? "";
-  return authorization.replace(/^Bearer /i, "");
+  // The remainder needs trimming too: `Bearer   SECRET  ` left leading spaces behind.
+  return authorization.replace(/^Bearer /i, "").trim();
 }
 
 /**

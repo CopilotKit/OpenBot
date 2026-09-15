@@ -18,6 +18,13 @@ and the audit trail recorded the saved state as deleted. A Bot's browser is no l
 it is being closed: the action waits for the reset to finish and starts signed out. Computers the
 supervisor makes per Bot were not affected.
 
+### A long control name or value in a page snapshot is cut between characters
+
+The computer's page snapshot keeps the first 200 UTF-16 code units of each control's accessible
+name and value. When that limit fell between the two halves of an emoji, the Bot was handed text
+ending on half a character, which reads as U+FFFD: a broken character that is not on the page, often
+at the end of a message the Bot had just typed into a text box. The cut now stops one code unit
+short in that case, the same rule tool results and relayed answers already follow.
 ### A Bot's shell can no longer read the deployment's keys from a neighbouring process
 
 In the all-in-one image the API and the browser ran under one account, and a Bot's shell — a child

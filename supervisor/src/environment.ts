@@ -12,9 +12,22 @@ export function environmentFor(
   const passthrough = Object.entries(env).filter(([key]) =>
     key.startsWith("EGRESS_PROXY"),
   );
-  const computerToken = env.COMPUTER_TOKEN;
+  const computerToken = env.COMPUTER_TOKEN?.trim() || undefined;
   const spireSocketVolume = env.SPIRE_AGENT_SOCKET_VOLUME;
-  const browserMode = env.COMPUTER_BROWSER_MODE;
+  // Fail fast here rather than forwarding an invalid mode that crashes the child at
+  // `browserModeFromEnv`: whitespace-only is falsy after trim, anything else must be headless
+  // or headed.
+  const rawBrowserMode = env.COMPUTER_BROWSER_MODE?.trim() || undefined;
+  if (
+    rawBrowserMode !== undefined &&
+    rawBrowserMode !== "headless" &&
+    rawBrowserMode !== "headed"
+  ) {
+    throw new Error(
+      `COMPUTER_BROWSER_MODE must be headless or headed, not ${JSON.stringify(env.COMPUTER_BROWSER_MODE)}.`,
+    );
+  }
+  const browserMode = rawBrowserMode;
   return [
     `COMPUTER_BOT_ID=${botId}`,
     ...(computerToken ? [`COMPUTER_TOKEN=${computerToken}`] : []),

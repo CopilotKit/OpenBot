@@ -59,16 +59,18 @@ if (!token) {
   );
   process.exit(1);
 }
-const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
-const network = process.env.COMPUTER_NETWORK;
-const runtime = process.env.COMPUTER_RUNTIME;
+const image =
+  process.env.COMPUTER_IMAGE?.trim() || "openbot-agent-computer:latest";
+const network = process.env.COMPUTER_NETWORK?.trim() || undefined;
+const runtime = process.env.COMPUTER_RUNTIME?.trim() || undefined;
 const resolvedMemory = computerMemoryBytes(process.env.COMPUTER_MEMORY_BYTES);
 if (!resolvedMemory.ok) {
   console.error(resolvedMemory.reason);
   process.exit(1);
 }
 const memoryBytes = resolvedMemory.bytes;
-const spireSocketVolume = process.env.SPIRE_AGENT_SOCKET_VOLUME;
+const spireSocketVolume =
+  process.env.SPIRE_AGENT_SOCKET_VOLUME?.trim() || undefined;
 
 const app = new Hono();
 

@@ -186,9 +186,11 @@ export function createControl(
         ...state,
         requested: true,
         requestedAt: now(),
+        // Polled ~1Hz by every viewer for HELP_REQUEST_TTL_MS: a model-generated megabyte reason
+        // would be retained and re-served the whole time. Capped like form fields are.
         reason:
           typeof reason === "string" && reason.trim()
-            ? reason.trim()
+            ? reason.trim().slice(0, 500)
             : "The assistant needs a person to continue.",
       };
       return this.get();
@@ -210,7 +212,7 @@ export function createControl(
         ...state,
         secretWanted:
           typeof input.label === "string" && input.label.trim()
-            ? input.label.trim()
+            ? input.label.trim().slice(0, 500)
             : "the value this page is asking for",
         secretRef: input.ref.trim(),
         secretSnapshotId:
