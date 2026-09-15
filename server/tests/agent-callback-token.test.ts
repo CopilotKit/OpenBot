@@ -557,4 +557,104 @@ describe("the tool-call route a callback token guards", () => {
       await toolResult(new Error("The caller does not have permission.")),
     ).toContain("The caller does not have permission.");
   });
+
+  /**
+   * A VENDOR THAT ANSWERED WITH AN ERROR, rather than one that threw, which is how an MCP server says
+   * no: `{ isError: true }` and a sentence, resolved and not thrown.
+   *
+   * The in-process door names that sentence as the vendor's (`plugins/tools.ts`), because handing it
+   * over as content already cost a diagnosis: Google's "The caller does not have permission" read as
+   * a result, and the model told the person it had no access to their Drive. Neither framework Bot
+   * words it on its way through — the LangGraph Bot passes an `isError` answer on untouched, and
+   * the Python one reads only `text` — so what this route writes is what the model reads.
+   */
+  function storeAnswering(result: { text: string; isError: boolean }) {
+    return {
+      callTool: async () => ({ ...result, truncated: false }),
+      listForAgent: async () => ({
+        tools: [
+          {
+            toolName: "mcp__linear__LINEAR_CREATE_ISSUE",
+            ref: "linear/LINEAR_CREATE_ISSUE",
+            description: "Create an issue.",
+            inputSchema: { type: "object" },
+          },
+        ],
+      }),
+    } as unknown as PluginStore;
+  }
+
+  /** Both doors' answers to one call against the same store: the callback route's, and the in-process one's. */
+  async function bothDoors(store: PluginStore) {
+    const response = await createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    ).request("http://openbot.local/api/agent-tools/call", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-openbot-agent-token": DEPLOYMENT_TOKEN,
+      },
+      body: JSON.stringify({
+        name: "mcp__linear__LINEAR_CREATE_ISSUE",
+        args: {},
+        run: mintRunAssertion(
+          { botId: "knowledge", actorId: "usr_7", runId: "run_1" },
+          config.keyEncryptionKey,
+        ),
+      }),
+    });
+    expect(response.status).toBe(200);
+    const callback = (await response.json()) as {
+      text: string;
+      isError: boolean;
+    };
+
+    const { grantedTools } = await import("../src/plugins/tools");
+    const [tool] = await grantedTools({
+      store,
+      botId: "knowledge",
+      actorId: "usr_7",
+    });
+    const inProcess = await tool?.execute({});
+    return { callback, inProcess };
+  }
+
+  test("a vendor's error answer is named as the vendor's, the way the in-process door names it", async () => {
+    const { callback, inProcess } = await bothDoors(
+      storeAnswering({
+        text: "The caller does not have permission.",
+        isError: true,
+      }),
+    );
+
+    expect(callback.isError).toBe(true);
+    // One store, one answer: which door a Bot comes through is topology, not what its model is told.
+    expect(callback.text).toBe(inProcess);
+    expect(callback.text).toBe(
+      "The vendor reported an error: The caller does not have permission.",
+    );
+  });
+
+  test("a vendor's result that is not an error reaches the model as the vendor wrote it", async () => {
+    const { callback, inProcess } = await bothDoors(
+      storeAnswering({ text: "Created LIN-42.", isError: false }),
+    );
+
+    expect(callback).toEqual({ text: "Created LIN-42.", isError: false });
+    expect(callback.text).toBe(inProcess);
+  });
 });

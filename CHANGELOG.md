@@ -15,6 +15,23 @@ whose vendor failed, or hit a fault in this deployment, the answer began "Refuse
 holding. The conversation drew it as blocked and the model read it as not allowed, while the audit
 trail recorded a failed call. Only a refusal is marked now. A vendor that broke reads "That tool could
 not be called: …", the way it already did for a Bot running here, and a refusal reads as before.
+### A Bot running its own loop is told a vendor's error is the vendor's
+
+A vendor that says no by answering with an error, the way an MCP server refuses a call, reached a Bot
+running here as "The vendor reported an error: …", and reached a Bot calling tools back from its own
+process, such as the LangGraph Bots, as the bare sentence. Those Bots pass the answer on as they
+receive it, so their model read something like Google's "The caller does not have permission" as an
+ordinary result, and could tell the person they had no access rather than that the vendor had refused.
+Both kinds of Bot are now told the same thing. A result that is not an error, and this deployment's
+own refusals, read as before.
+### A long Composio result or failure is cut between characters, not through an emoji
+
+A Composio action's answer over 20,000 characters, and a failure sentence as long, were cut by UTF-16
+code unit. When the cut landed inside an emoji or any other character outside the Basic Multilingual
+Plane, the text handed to the model ended on half of it: a lone surrogate that JSON carries as a bare
+`\ud83d` and UTF-8 turns into a replacement character. The cut now stops one unit short in that case,
+the way the MCP and built-in transports' cuts already do. Anything that fits is untouched, and the
+note saying the answer was cut reads as before.
 
 ## 0.0.12
 
