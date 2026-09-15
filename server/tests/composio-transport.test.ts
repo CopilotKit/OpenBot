@@ -2377,6 +2377,59 @@ describe("calling one action", () => {
     expect(result.text.length).toBe(CAPPED_LENGTH);
   });
 
+  test("a result or a failure over the cap is cut between characters, not through an emoji", async () => {
+    /*
+     * `slice` counts UTF-16 code units and an emoji is two of them. When the cap lands between the
+     * halves, the last unit a model reads is a lone high surrogate: JSON carries it as a bare
+     * `\ud83d` and UTF-8 as U+FFFD, a broken character that was never in what Composio sent. A
+     * result and a failure go through the same cap, so both are driven to the same boundary.
+     */
+    const straddling = (lead: number) =>
+      `${"x".repeat(lead)}😀${"x".repeat(100)}`;
+    // `JSON.stringify(data, null, 2)` writes `{\n  "body": "` before the string, so this puts the
+    // emoji's high surrogate on the cap's last unit.
+    const opening = '{\n  "body": "'.length;
+    const answers = [
+      {
+        name: "result",
+        execute: async () =>
+          answered({ body: straddling(RESULT_CAP - opening - 1) }),
+      },
+      {
+        name: "failure",
+        execute: async () => {
+          throw new Error(straddling(RESULT_CAP - 1));
+        },
+      },
+    ];
+
+    const seen: string[] = [];
+    for (const { name, execute } of answers) {
+      useComposioClient(recording({ execute }).client);
+
+      const result = await callTool(
+        { url: "composio://gmail", actorId: "user_asker" },
+        "GMAIL_FETCH_EMAILS",
+        { __version: "20260903_00" },
+      );
+
+      const kept = result.text.endsWith(TRUNCATION_MARKER)
+        ? result.text.slice(0, -TRUNCATION_MARKER.length)
+        : result.text;
+      const last = kept.charCodeAt(kept.length - 1);
+      const lone = last >= 0xd800 && last <= 0xdbff;
+      seen.push(
+        `${name}: truncated ${result.truncated}, marked ${kept !== result.text}, kept ${kept.length}, ends on a lone surrogate ${lone}`,
+      );
+    }
+
+    // The orphan is dropped rather than completed, so the cap is never exceeded.
+    expect(seen).toEqual([
+      `result: truncated true, marked true, kept ${RESULT_CAP - 1}, ends on a lone surrogate false`,
+      `failure: truncated true, marked true, kept ${RESULT_CAP - 1}, ends on a lone surrogate false`,
+    ]);
+  });
+
   test("an empty answer says so in words rather than being empty", async () => {
     useComposioClient(recording({ execute: async () => answered({}) }).client);
 

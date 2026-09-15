@@ -17,6 +17,14 @@ receive it, so their model read something like Google's "The caller does not hav
 ordinary result, and could tell the person they had no access rather than that the vendor had refused.
 Both kinds of Bot are now told the same thing. A result that is not an error, and this deployment's
 own refusals, read as before.
+### A long Composio result or failure is cut between characters, not through an emoji
+
+A Composio action's answer over 20,000 characters, and a failure sentence as long, were cut by UTF-16
+code unit. When the cut landed inside an emoji or any other character outside the Basic Multilingual
+Plane, the text handed to the model ended on half of it: a lone surrogate that JSON carries as a bare
+`\ud83d` and UTF-8 turns into a replacement character. The cut now stops one unit short in that case,
+the way the MCP and built-in transports' cuts already do. Anything that fits is untouched, and the
+note saying the answer was cut reads as before.
 
 ## 0.0.12
 
