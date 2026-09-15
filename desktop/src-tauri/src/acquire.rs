@@ -123,13 +123,24 @@ fn command_failure(binary: &str, args: &[&str], output: &std::process::Output) -
 }
 
 fn machine_exists_with(run: impl FnOnce() -> Result<String, String>) -> Result<bool, String> {
-    let names = run()?;
-    Ok(names.lines().any(|name| name.trim() == MACHINE))
+    #[derive(Deserialize)]
+    struct ListedMachine {
+        #[serde(rename = "Name")]
+        name: String,
+    }
+
+    let listing = run()?;
+    let machines: Vec<ListedMachine> = serde_json::from_str(&listing).map_err(|error| {
+        format!("could not read podman machine list JSON: {error}; stdout: {listing}")
+    })?;
+    Ok(machines.iter().any(|machine| machine.name == MACHINE))
 }
 
 /// Does this app's machine already exist?
 pub fn machine_exists() -> Result<bool, String> {
-    machine_exists_with(|| podman(&["machine", "list", "--quiet"]))
+    // --quiet still uses Podman's human format, which appends '*' to the default machine's name.
+    // JSON preserves the raw Name, independently of whether the machine is running or default.
+    machine_exists_with(|| podman(&["machine", "list", "--format", "json"]))
 }
 
 /// Create the machine.
@@ -537,9 +548,41 @@ mod tests {
     }
 
     #[test]
-    fn machine_existence_uses_the_quiet_machine_list_names() {
-        assert!(machine_exists_with(|| Ok("default\nopenbot\n".into())).unwrap());
-        assert!(!machine_exists_with(|| Ok("default\nopenbot-old\n".into())).unwrap());
+    fn machine_existence_uses_exact_json_names() {
+        for (listing, expected) in [
+            (r#"[{"Name":"default"},{"Name":"openbot"}]"#, true),
+            (r#"[{"Name":"default"},{"Name":"openbot-old"}]"#, false),
+            ("[]", false),
+        ] {
+            assert_eq!(
+                machine_exists_with(|| Ok(listing.into())).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn existing_stopped_default_machine_is_not_initialized_again() {
+        // Podman 6.1.1 reports this stopped default machine as `openbot*` in --quiet output.
+        // JSON keeps its raw name and reports default/running state as separate fields.
+        let listing = r#"[{"Name":"openbot","Default":true,"Running":false,"VMType":"wsl"}]"#;
+        let mut init_called = false;
+        let result = create_machine_with(
+            2,
+            4096,
+            20,
+            || machine_exists_with(|| Ok(listing.into())),
+            |_args| {
+                init_called = true;
+                Err("machine openbot already exists".into())
+            },
+        );
+        assert!(
+            !init_called,
+            "existing stopped default machine was initialized again"
+        );
+        assert!(result.ok, "{result:?}");
+        assert_eq!(result.said, "openbot already exists.");
     }
 
     #[test]
@@ -549,7 +592,11 @@ mod tests {
             2,
             4096,
             20,
-            || Err("podman machine list exited with status 125; stdout: denied".into()),
+            || {
+                machine_exists_with(|| {
+                    Err("podman machine list exited with status 125; stdout: denied".into())
+                })
+            },
             |_args| {
                 init_called = true;
                 Ok(String::new())
@@ -566,6 +613,35 @@ mod tests {
                 .is_some_and(|detail| detail.contains("stdout: denied")),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn malformed_machine_list_stops_create_and_keeps_the_response() {
+        for listing in [
+            "openbot*",
+            "",
+            "{}",
+            "null",
+            r#"[{"Name":null}]"#,
+            r#"[{"Running":false}]"#,
+        ] {
+            let result = create_machine_with(
+                2,
+                4096,
+                20,
+                || machine_exists_with(|| Ok(listing.into())),
+                |_args| panic!("machine init must not run after malformed list output"),
+            );
+            assert!(!result.ok, "{result:?}");
+            let detail = result
+                .detail
+                .expect("malformed listing needs diagnostic detail");
+            assert!(
+                detail.contains("could not read podman machine list JSON"),
+                "{detail}"
+            );
+            assert!(detail.ends_with(&format!("stdout: {listing}")), "{detail}");
+        }
     }
 
     #[test]
