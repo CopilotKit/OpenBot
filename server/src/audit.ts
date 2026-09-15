@@ -1,4 +1,5 @@
-import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
@@ -49,9 +50,6 @@ export const auditEventTypes = [
    */
   "credential.rotation_refused",
   "credential.revoked",
-  "connector.sync_succeeded",
-  "connector.sync_failed",
-  "knowledge.searched",
   /**
    * Which coworker an untagged message was routed to, and why.
    *
@@ -71,7 +69,6 @@ export const auditEventTypes = [
    * `payload.mechanism` names how, so a later hard delete is distinguishable from this one.
    */
   "channel.deleted",
-  "agent.invoked",
   /**
    * An address this deployment declined to dial for a Bot, and why.
    *
@@ -168,6 +165,36 @@ export const auditEventTypes = [
    */
   "mcp.oauth_client_registered",
   /*
+   * One person's brokered account was exercised with a real call, to see whether it is really there.
+   *
+   * THE ONE EXECUTION OF AN APP'S OWN ACTION THAT HAPPENS OUTSIDE `callTool`, which is why it is
+   * written down on its own instead of joining the `mcp.call_*` family. Everything that surrounds a
+   * vendor call on the ordinary path is absent from this one: no grant is consulted, no policy is
+   * evaluated, no arguments are inspected, and no `mcp.call_succeeded`, `mcp.call_rejected` or
+   * `mcp.call_failed` row is left behind it. An action ran at a vendor and the trail's tool-call
+   * family says nothing about it, so this row is the whole of what is recorded.
+   *
+   * WHAT MAKES THAT SAFE IS THE SHAPE OF THE CALL RATHER THAN ANYBODY'S CARE. The action is fixed:
+   * the adapter picks it out of the metadata this deployment already recorded for the app, not out
+   * of anything a caller sent; it is sent with no arguments at all, so there is nothing for content
+   * inspection to have missed; and the only two callers are the connect step and a person
+   * re-checking their own connection. Those three properties are the protection. A later change
+   * that let the action, the arguments or the callers vary would not be loosening a check that is
+   * merely skipped here — it would be removing the reason the check can be skipped at all, and the
+   * one call in this deployment that reaches a vendor unexamined would start taking instructions.
+   *
+   * THE ROW NAMES A PERSON AND HAS NO BOT IN IT, which is not new on this trail and must not be
+   * read as such. `mcp.callback_refused` deliberately names none, and `mcp.account_connected` and
+   * `mcp.account_disconnected` are both filed against the person whose account it was, so code that
+   * reads a Bot out of every `mcp.*` payload was already wrong before this row existed. What IS new
+   * is a vendor action with no `mcp.call_*` row beside it: anybody reconciling this trail against
+   * an app's own logs has a call here to account for that the tool-call rows will never mention.
+   * Borrowing a Bot to make the row look uniform with its neighbours would answer that by lying —
+   * a call somebody made about their own account, filed against a Bot that never ran, is the
+   * confidently wrong kind of entry that `mcp.call_failed` exists to keep off this trail.
+   */
+  "mcp.connection_verified",
+  /*
    * One person connected their own account to one server.
    *
    * Its own row rather than a credential event, because what happened is not "a secret was stored" —
@@ -182,10 +209,15 @@ export const auditEventTypes = [
    * their access". `reason` distinguishes somebody disconnecting their own account from an
    * administrator removing them, because those are the same effect and very different events.
    *
-   * `vendorRevoked` says whether the grant at the vendor was withdrawn as well, and is currently
-   * false: removing somebody stops this deployment holding a usable secret, and the grant at Google
-   * outlives it until it is revoked there. Recorded rather than glossed, because a row that implied
-   * otherwise would be worse than no row.
+   * `vendorRevocationRequested` says whether the grant at the vendor was asked to be withdrawn as
+   * well. It is false for every credential this deployment holds in its own vault: removing
+   * somebody stops us holding a usable secret, and the grant at Google outlives it until it is
+   * revoked there, which nothing on that path asks for. It is true for a brokered account whose
+   * withdrawal Composio accepted — accepted rather than completed, because the upstream revocation
+   * runs as a background job with no supported way to poll it, which is why the field is named for
+   * the ask. Recorded rather than glossed, because a row that implied otherwise would be worse
+   * than no row, and this field once did exactly that: it was called `vendorRevoked` and said true
+   * while the grant at Google stood untouched.
    */
   "mcp.account_disconnected",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
@@ -409,6 +441,13 @@ export const PERSON_INITIATOR: AuditInitiator = { kind: "person" };
 /** The deployment acting as itself: at start-up, or refusing a caller it could not identify. */
 export const DEPLOYMENT_INITIATOR: AuditInitiator = { kind: "deployment" };
 
+/*
+ * The vocabulary, kept as the declaration of what a row's `initiator_kind` can be.
+ *
+ * It no longer screens the `initiatorKind` filter. Screening there dropped an unrecognised kind
+ * from the requested set, and a requested set left empty widened back into no filter at all; see
+ * `matchesRequested`. An unrecognised kind is now simply a kind no row carries.
+ */
 export const auditInitiatorKinds = [
   "person",
   "deployment",
@@ -417,12 +456,6 @@ export const auditInitiatorKinds = [
 ] as const;
 
 export type AuditInitiatorKind = (typeof auditInitiatorKinds)[number];
-
-export function isAuditInitiatorKind(
-  value: string,
-): value is AuditInitiatorKind {
-  return (auditInitiatorKinds as readonly string[]).includes(value);
-}
 
 export type AuditEventInput = {
   eventType: AuditEventType;
@@ -553,47 +586,125 @@ export class AuditQueryError extends Error {
   }
 }
 
+/**
+ * The shape `audit_events.id` is, because that is what a cursor's id is compared against.
+ *
+ * Not a taste in ids: `lt(auditEvents.id, cursor.id)` is the DATABASE parsing this string, and
+ * anything it cannot parse is `invalid input syntax for type uuid` raised from inside the reader.
+ * Any version and any variant, because what the column accepts is what this must.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A caller's page marker, read as the two values the query builder will actually bind.
+ *
+ * WHAT ARRIVES HERE IS A STRING SOMEBODY TYPED. The cast below used to say `AuditCursor` outright,
+ * which was a promise nobody could keep: this is `JSON.parse` over base64 out of a query parameter,
+ * so the fields hold whatever the caller put in them — a stale bookmark from another deployment's
+ * trail, a hand-edited link, a cursor from a screen that has since changed shape. It says
+ * `Partial<AuditCursor>` now so that the checks below are the only thing narrowing it, and it
+ * admits `null` and `undefined` because `JSON.parse` answers both.
+ *
+ * THE ID IS CHECKED AS A UUID AND NOT MERELY AS PRESENT, which is the whole of this function's
+ * history. It asked `!parsed.id`, so every truthy value passed: `"event-1"`, a number, an object.
+ * All three reach `lt(auditEvents.id, cursor.id)` in {@link createAuditReader}, where PostgreSQL
+ * answers `invalid input syntax for type uuid` — or, for the number, `operator does not exist: uuid
+ * < integer`. That is a `DrizzleQueryError` rather than an {@link AuditQueryError}, so it goes
+ * straight past the admin route's catch and leaves as a 500 with the statement and every bound
+ * value in its message. The route's 400 exists for exactly this: a cursor the server cannot read is
+ * the caller's to fix, the way a bad `from` or `to` already is. The only id a cursor can honestly
+ * carry is one {@link encodeCursor} wrote off a row, and that is always a uuid.
+ *
+ * AND THE TIMESTAMP IS CHECKED AS A STRING BEFORE IT IS CHECKED AS A DATE, because `Date.parse`
+ * stringifies whatever it is handed and the reader does not. A `createdAt` of `2020` parses as the
+ * YEAR 2020 and passes; `new Date(2020)` in the query builder is 2020 MILLISECONDS after 1970. The
+ * two readings of one field differ by fifty years, the endpoint answers 200, and the page comes
+ * from the wrong end of the trail with nothing saying so. A silent wrong page on the record of
+ * whose credential was spent on what is worse than a refusal, so the shape is settled here.
+ *
+ * WHAT IS RETURNED IS THE TWO FIELDS, rebuilt, so nothing else the caller packed into the cursor
+ * travels on into the query.
+ */
 function decodeCursor(cursor: string): AuditCursor {
   try {
     const parsed = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
-    ) as AuditCursor;
+    ) as Partial<AuditCursor> | null | undefined;
 
-    if (!parsed.id || Number.isNaN(Date.parse(parsed.createdAt))) {
+    if (
+      typeof parsed?.id !== "string" ||
+      !UUID.test(parsed.id) ||
+      typeof parsed.createdAt !== "string" ||
+      Number.isNaN(Date.parse(parsed.createdAt))
+    ) {
       throw new AuditQueryError("cursor must be a valid audit page cursor");
     }
-    return parsed;
+    return { id: parsed.id, createdAt: parsed.createdAt };
   } catch (error) {
     if (error instanceof AuditQueryError) throw error;
     throw new AuditQueryError("cursor must be a valid audit page cursor");
   }
 }
 
+/**
+ * A comma-separated filter, read as the set of values it names.
+ *
+ * `undefined` means the caller did not ask, and the column goes unconstrained. `[]` means the caller
+ * did ask, and named nothing this trail could hold — a different answer, and the one the conditions
+ * below have to keep telling apart.
+ *
+ * A blank value counts as not asking, the way a blank `?limit=` still reads as the default page.
+ * Anything else the caller typed is an ask.
+ */
+function requestedValues(raw: string | undefined) {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The condition a requested set puts on a column, including the condition that nothing satisfies.
+ *
+ * An asked-for set that came out empty must narrow to nothing. It used to widen instead: both
+ * comma-separated filters collapsed an empty set into `undefined`, which `and(...)` drops, so
+ * `?initiatorKind=nonsense` — where the unrecognised kind was screened out of the set — answered
+ * the question "what did this initiator do" with every row in the trail, indistinguishable from a
+ * real result. On the record of whose credential was spent on what, handing back everything is the
+ * wrong direction to fail.
+ *
+ * A value that matches nothing answers empty rather than 400, matching how every other value
+ * parameter on this endpoint already behaves: `eventType`, `actorUserId`, `targetType` and
+ * `targetId` all take a free-form string and answer with whatever it matches, and `eventType` names
+ * a closed vocabulary just as `initiatorKind` does. What earns a 400 here is a value that cannot be
+ * read at all — `from`, `to`, `cursor` — not one that reads fine and names no row. Rejecting an
+ * unknown kind outright would also break `?initiatorKind=routine,nonsense`, which a caller unioning
+ * kinds can still expect to answer for the kind it did name.
+ */
+function matchesRequested(column: PgColumn, values: string[] | undefined) {
+  if (!values) return undefined;
+  const [first, ...rest] = values;
+  if (first === undefined) return sql`false`;
+  if (rest.length === 0) return eq(column, first);
+  return inArray(column, [first, ...rest]);
+}
+
 export function createAuditReader(database: Database): AuditReader {
   return {
     list: async (query) => {
-      const requestedTypes = (query.eventType ?? "")
-        .split(",")
-        .map((type) => type.trim())
-        .filter(Boolean);
-      const requestedInitiators = (query.initiatorKind ?? "")
-        .split(",")
-        .map((kind) => kind.trim())
-        .filter((kind) => isAuditInitiatorKind(kind));
       const conditions = [
-        requestedTypes.length === 1
-          ? eq(auditEvents.eventType, requestedTypes[0] as string)
-          : requestedTypes.length > 1
-            ? inArray(auditEvents.eventType, requestedTypes)
-            : undefined,
+        matchesRequested(
+          auditEvents.eventType,
+          requestedValues(query.eventType),
+        ),
         query.actorUserId
           ? eq(auditEvents.actorUserId, query.actorUserId)
           : undefined,
-        requestedInitiators.length === 1
-          ? eq(auditEvents.initiatorKind, requestedInitiators[0] as string)
-          : requestedInitiators.length > 1
-            ? inArray(auditEvents.initiatorKind, requestedInitiators)
-            : undefined,
+        matchesRequested(
+          auditEvents.initiatorKind,
+          requestedValues(query.initiatorKind),
+        ),
         query.targetType
           ? eq(auditEvents.targetType, query.targetType)
           : undefined,

@@ -17,6 +17,33 @@ the person waiting, and no audit row recorded that the question had reached nobo
 told, in a sentence it can say, that nobody could be asked and that it must not claim otherwise, and
 an `agent.escalation_failed` row goes down carrying what the route actually threw. Deployments using
 the shipped in-conversation route are unaffected: it cannot fail.
+### Resetting a Bot's computer while the Bot is acting signs it out
+
+On a deployment with one shared computer, which is what the published image and the Helm chart run by
+default, a reset takes about two seconds to close the browser before it deletes the profile. A Bot
+action that arrived in that window started a new browser from the profile about to be deleted, so the
+Bot stayed signed in to everything until that browser next closed, while the reset reported success
+and the audit trail recorded the saved state as deleted. A Bot's browser is no longer reopened while
+it is being closed: the action waits for the reset to finish and starts signed out. Computers the
+supervisor makes per Bot were not affected.
+
+### A long control name or value in a page snapshot is cut between characters
+
+The computer's page snapshot keeps the first 200 UTF-16 code units of each control's accessible
+name and value. When that limit fell between the two halves of an emoji, the Bot was handed text
+ending on half a character, which reads as U+FFFD: a broken character that is not on the page, often
+at the end of a message the Bot had just typed into a text box. The cut now stops one code unit
+short in that case, the same rule tool results and relayed answers already follow.
+### A Bot's shell can no longer read the deployment's keys from a neighbouring process
+
+In the all-in-one image the API and the browser ran under one account, and a Bot's shell — a child
+of the browser — could read a same-account process's environment through `/proc`, whatever its own
+environment had been scrubbed to. One allowed `computer_run_command` returned `KEY_ENCRYPTION_KEY`,
+the session-signing secret and the database password, none of it on the audit trail. The API and its
+migrations now run as their own account, so the kernel refuses that read; the browser is handed only
+the variables it needs, so its own environment carries none of those keys; and the files under
+`/run/s6/container_environment` are closed to the shell. A deployment that runs each Bot in its own
+sandboxed computer, as the documentation asks for, was never exposed to this.
 
 ## 0.0.11
 
