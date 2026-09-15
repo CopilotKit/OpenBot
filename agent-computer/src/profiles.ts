@@ -248,6 +248,25 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
   const live = new Map<string, LiveBrowser>();
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
+  /** Closes and resets in flight, so a Bot's browser is never reopened from a profile being closed or deleted. */
+  const closing = new Map<string, Promise<void>>();
+
+  const whileClosing = async (
+    botId: string,
+    work: () => Promise<void>,
+  ): Promise<void> => {
+    const { promise: done, resolve } = Promise.withResolvers<void>();
+    const held = Promise.all([closing.get(botId), done]).then(() => undefined);
+    closing.set(botId, held);
+    try {
+      await work();
+    } finally {
+      resolve();
+      void held.then(() => {
+        if (closing.get(botId) === held) closing.delete(botId);
+      });
+    }
+  };
 
   // Checked, not joined. `join(root, botId)` normalizes `..` away, so a Bot id of `../workspace`
   // used to resolve outside the root and `reset` would delete whatever was there.
@@ -273,8 +292,10 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     // Bounded, because this now sits on the launch path: `enforceCap` evicts from inside another
     // Bot's launch, so a teardown that never answers would pin that launch and every caller waiting
     // on it. The close is the thing that must happen; being told about it is best effort.
-    await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
-    await closeAndWait(running.context).catch(() => undefined);
+    await whileClosing(botId, async () => {
+      await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
+      await closeAndWait(running.context).catch(() => undefined);
+    });
     return true;
   };
 
@@ -352,6 +373,9 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      * container restarts. This turns that into one slow request instead of an outage.
      */
     async page(botId: string): Promise<Page> {
+      // Only when something is closing: an unconditional await would let a stop slip in ahead of the launch.
+      const closingNow = closing.get(botId);
+      if (closingNow) await closingNow;
       /*
        * One launch at a time per Bot. Calls that arrive during a launch wait for that launch instead
        * of starting another browser against the same profile directory.
@@ -476,8 +500,10 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      */
     async reset(botId: string): Promise<void> {
       // Its own reason rather than borrowing stop's, so the trail says which of the two happened.
-      await closeOnRequest(botId, "it was reset");
-      await rm(directoryFor(botId), { recursive: true, force: true });
+      await whileClosing(botId, async () => {
+        await closeOnRequest(botId, "it was reset");
+        await rm(directoryFor(botId), { recursive: true, force: true });
+      });
     },
 
     /**

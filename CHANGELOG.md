@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Resetting a Bot's computer while the Bot is acting signs it out
+
+On a deployment with one shared computer, which is what the published image and the Helm chart run by
+default, a reset takes about two seconds to close the browser before it deletes the profile. A Bot
+action that arrived in that window started a new browser from the profile about to be deleted, so the
+Bot stayed signed in to everything until that browser next closed, while the reset reported success
+and the audit trail recorded the saved state as deleted. A Bot's browser is no longer reopened while
+it is being closed: the action waits for the reset to finish and starts signed out. Computers the
+supervisor makes per Bot were not affected.
+
 ### A Bot's shell can no longer read the deployment's keys from a neighbouring process
 
 In the all-in-one image the API and the browser ran under one account, and a Bot's shell — a child
