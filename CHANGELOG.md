@@ -18,6 +18,14 @@ and wrote `vendorRevocationRequested: false` about a withdrawal this deployment 
 got. Each app is now asked, recorded with the answer it actually gave and its row removed, and only
 the apps that were refused are left standing for the retry. The act still fails and still answers
 500, so a refusal is as loud as it was.
+### Paging the audit trail no longer skips rows written in the same millisecond
+
+`GET /api/admin/audit-events` hands out a `nextCursor` built from the last row's timestamp, which the
+server read at millisecond precision while PostgreSQL keeps microseconds. The cursor therefore named a
+moment just before that row, and the rows the next page should have started with, written earlier in
+the same millisecond, were on no page at all. Anything that walked the trail page by page could miss
+them without any sign of it. The cursor now carries the row's full timestamp. A cursor issued before
+this change still reads.
 
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
