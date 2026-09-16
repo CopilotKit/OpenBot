@@ -261,7 +261,12 @@ function GeneralSection({
         title: profile.title,
         roleDescription: profile.roleDescription,
         visibility: profile.visibility,
-        endpoint: profile.endpoint ?? "",
+        /*
+         * Not a built-in coworker's endpoint. That is the managed Bot's own address, which nobody
+         * typed, and the route checks any endpoint it is sent as one somebody did: on a deployment
+         * whose Bot is on localhost it refused every edit. Empty leaves the stored one where it is.
+         */
+        endpoint: profile.builtIn ? "" : (profile.endpoint ?? ""),
         authValue: "",
         ...patch,
       }),

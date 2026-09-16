@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A built-in coworker can be edited where the deployment's own Bot is on localhost
+
+A coworker created as Built in is stored pointing at the managed Bot's address. Editing its name,
+title, role or visibility sent that address back as though somebody had typed it, and the server
+checks an endpoint it is sent the way it checks a person's. `scripts/start.sh` puts the managed Bot on
+`http://localhost:4201/ag-ui`, which that check refuses unless private hosts are opened, so every edit
+failed with "That address is inside this deployment's own network, so an agent may not live there."
+The dialog now leaves a built-in coworker's address where it is stored. A coworker somebody hosts
+still sends its own endpoint, as before.
+
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
