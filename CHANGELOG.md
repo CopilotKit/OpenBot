@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Google Drive connector reaches files in shared drives
+
+Drive leaves shared drive items out of any `files.get` or `files.list` request that does not say it
+supports shared drives, and none of the connector's requests said so. A document the person could
+open in a shared drive was "File not found" to `get_file_metadata` and `read_file_content`, and never
+appeared in `search_files` or `list_recent_files`. Those requests now say they support shared drives,
+and the listings ask for shared drive items. Listings keep Drive's default `user` scope rather than
+searching every shared drive.
+
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
 Settings lists New chat as Shift+N, and the app matched the character the keystroke wrote. A layout

@@ -46,6 +46,21 @@ const FILE_FIELDS =
   "id,name,mimeType,modifiedTime,webViewLink,size,owners(emailAddress)";
 
 /**
+ * Shared drives as well as My Drive.
+ *
+ * Drive leaves shared drive items out of every `files.get` and `files.list` that does not say it
+ * supports them. A company's documents often live in shared drives, so a file the person could open
+ * came back from `get_file_metadata` and `read_file_content` as a 404 "File not found", and never
+ * came back from a search at all. The listing also has to ask for those items. It keeps Drive's
+ * default `user` corpus, which Google recommends over `allDrives`.
+ */
+const SHARED_DRIVES = { supportsAllDrives: "true" } as const;
+const SHARED_DRIVE_ITEMS = {
+  ...SHARED_DRIVES,
+  includeItemsFromAllDrives: "true",
+} as const;
+
+/**
  * Google's editor formats, and the plain-text export each one has.
  *
  * A Doc has no bytes to download — `alt=media` refuses it — so it has to be exported. Anything not
@@ -331,6 +346,7 @@ export async function callTool(
     }
 
     const result = await request(connection, "/files", {
+      ...SHARED_DRIVE_ITEMS,
       pageSize: String(PAGE_SIZE),
       fields: `files(${FILE_FIELDS})`,
       // Drive's own ordering for "recent". Search leaves it to relevance.
@@ -350,7 +366,7 @@ export async function callTool(
     const result = await request(
       connection,
       `/files/${encodeURIComponent(fileId)}`,
-      { fields: FILE_FIELDS },
+      { ...SHARED_DRIVES, fields: FILE_FIELDS },
     );
     if (!result.ok) return failure(result.message);
 
@@ -379,7 +395,7 @@ export async function callTool(
     const metadata = await request(
       connection,
       `/files/${encodeURIComponent(fileId)}`,
-      { fields: "id,name,mimeType" },
+      { ...SHARED_DRIVES, fields: "id,name,mimeType" },
     );
     if (!metadata.ok) return failure(metadata.message);
     const file = (await metadata.response.json()) as DriveFile;
@@ -412,6 +428,7 @@ export async function callTool(
           { mimeType: exportAs },
         )
       : await request(connection, `/files/${encodeURIComponent(fileId)}`, {
+          ...SHARED_DRIVES,
           alt: "media",
         });
     if (!content.ok) return failure(content.message);

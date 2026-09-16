@@ -394,3 +394,49 @@ describe("reading a file asks Drive what it is first", () => {
     expect(result.text.split("\n\n[truncated")[0]).toBe(`${heading}${filler}`);
   });
 });
+
+/*
+ * Drive leaves shared drive items out of any `files.get` or `files.list` that does not say it supports
+ * them. Without these parameters a document the person could open in a shared drive was a 404 by id
+ * and missing from every search, and shared drives are where many companies keep their documents.
+ */
+describe("a file in a shared drive is reached like one in My Drive", () => {
+  test("both listings ask Drive for shared drive items", async () => {
+    const calls = stubFetch({ files: [] });
+    await callTool(connection, "search_files", { query: "roadmap" });
+    await callTool(connection, "list_recent_files", {});
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const params = new URL(call.url).searchParams;
+      expect(params.get("supportsAllDrives")).toBe("true");
+      expect(params.get("includeItemsFromAllDrives")).toBe("true");
+    }
+  });
+
+  test("looking a file up says the caller supports shared drives", async () => {
+    const calls = stubFetch({ id: "shared1", name: "Plan" });
+    await callTool(connection, "get_file_metadata", { fileId: "shared1" });
+
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).searchParams.get("supportsAllDrives")).toBe(
+      "true",
+    );
+  });
+
+  test("reading a file says so on the lookup and on the download", async () => {
+    const calls = stubFetch({
+      id: "shared2",
+      name: "notes.txt",
+      mimeType: "text/plain",
+    });
+    await callTool(connection, "read_file_content", { fileId: "shared2" });
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(new URL(call.url).searchParams.get("supportsAllDrives")).toBe(
+        "true",
+      );
+    }
+  });
+});
