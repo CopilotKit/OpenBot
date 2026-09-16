@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A long message reaches the coworker it is for, and is recorded
+
+A message over 10,000 characters, such as a pasted email thread or log, was refused by the router
+since it started capping the text it reads. The home composer carries on past a routing that fails,
+so the message went to the default coworker rather than the one it is for, and a coworker chosen with
+`@` or from the To: field started with no `channel.routed` row. The app now asks the router about the
+message's opening, and the whole message still goes to the coworker. Shorter messages route as
+before.
+
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
