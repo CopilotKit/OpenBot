@@ -802,8 +802,15 @@ mod tests {
                     signing.child.try_wait().unwrap().is_none(),
                     "the login child must survive until the code can be supplied"
                 );
+                let draining = std::sync::Arc::downgrade(&signing.output);
                 signing.stop();
                 drop(signing);
+                // Modern ClosePseudoConsole returns before its clients disconnect. The
+                // reader's EOF, not the master's drop, marks completed console cleanup.
+                // Keep this inside the deadline before deleting the fixture executable.
+                while draining.strong_count() != 0 {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 Ok::<_, String>(())
             })();
             let _ = sent.send(result);
