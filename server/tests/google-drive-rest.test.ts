@@ -204,7 +204,7 @@ describe("a search becomes the right Drive request", () => {
       "https://www.googleapis.com/drive/v3/files",
     );
     expect(url.searchParams.get("q")).toBe(
-      "name contains 'roadmap' or fullText contains 'roadmap'",
+      "(name contains 'roadmap' or fullText contains 'roadmap') and trashed = false",
     );
     expect(calls[0].authorization).toBe("Bearer test-token");
   });
@@ -220,17 +220,22 @@ describe("a search becomes the right Drive request", () => {
 
     const q = new URL(calls[0].url).searchParams.get("q");
     expect(q).toBe(
-      "name contains 'don\\'t ship' or fullText contains 'don\\'t ship'",
+      "(name contains 'don\\'t ship' or fullText contains 'don\\'t ship') and trashed = false",
     );
   });
 
-  test("recent files are ordered by Drive rather than filtered", async () => {
+  /*
+   * `files.list` returns trashed files unless the query excludes them, so a document somebody had
+   * thrown away came back as a recent file, or as a match above, with nothing in its line to say it
+   * was in the trash. Both listings ask Drive to leave the trash out.
+   */
+  test("recent files are ordered by Drive, and filtered only by the trash", async () => {
     const calls = stubFetch({ files: [] });
     await callTool(connection, "list_recent_files", {});
 
     const url = new URL(calls[0].url);
     expect(url.searchParams.get("orderBy")).toBe("modifiedTime desc");
-    expect(url.searchParams.has("q")).toBe(false);
+    expect(url.searchParams.get("q")).toBe("trashed = false");
   });
 
   test("a search with nothing to search for is refused before the network", async () => {

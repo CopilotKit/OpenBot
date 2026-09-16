@@ -276,16 +276,28 @@ function fileLine(file: DriveFile): string {
 }
 
 /**
+ * Only files that are not in the trash.
+ *
+ * `files.list` returns trashed files unless the query says otherwise, so a document somebody had
+ * thrown away came back as a match, or as a recent file, with nothing in its line to say it was in
+ * the trash, and a model answers from what it is handed. A file read by its id is still read, trashed
+ * or not: that is a request for that file.
+ */
+const NOT_TRASHED = "trashed = false";
+
+/**
  * A Drive query string built from what somebody typed.
  *
  * The quote is escaped, not stripped. Drive's `q` syntax delimits with single quotes, so an
  * apostrophe in a search term would otherwise end the clause and change the query's meaning —
  * searching for `don't` would become a syntax error at best, and at worst a different search than
  * the one asked for. Escaped, a term is only ever a term.
+ *
+ * Bracketed, so the {@link NOT_TRASHED} joined to it applies to both halves of the `or`.
  */
 const driveQuery = (query: string) => {
   const escaped = query.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `name contains '${escaped}' or fullText contains '${escaped}'`;
+  return `(name contains '${escaped}' or fullText contains '${escaped}') and ${NOT_TRASHED}`;
 };
 
 /**
@@ -350,7 +362,9 @@ export async function callTool(
       pageSize: String(PAGE_SIZE),
       fields: `files(${FILE_FIELDS})`,
       // Drive's own ordering for "recent". Search leaves it to relevance.
-      ...(query ? { q: driveQuery(query) } : { orderBy: "modifiedTime desc" }),
+      ...(query
+        ? { q: driveQuery(query) }
+        : { q: NOT_TRASHED, orderBy: "modifiedTime desc" }),
     });
     if (!result.ok) return failure(result.message);
 
