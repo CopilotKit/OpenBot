@@ -7,13 +7,14 @@
  * Offer then claim, like `work/culler.ts`. The offer is derived from the table rather than from an
  * event, so a missed sweep costs two seconds where a missed event would cost the name entirely.
  */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, notExists, sql } from "drizzle-orm";
 import { readFiring } from "../../../shared/routine-firing";
 import type { Database } from "../db/client";
 import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
+  workItems,
 } from "../db/schema";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { CHANNEL_ACTIVITY_TOPIC, type ChannelActivityEvent } from "./events";
@@ -73,6 +74,25 @@ export async function offerChannelsAwaitingSummary(
         isNull(channels.summary),
         isNull(channels.deletedAt),
         sql`${channels.lastMessageAt} is not null`,
+        /*
+         * Not one the queue already holds a row for, pending or settled.
+         *
+         * Offering it again changes nothing, but it takes one of the `limit` places. A conversation
+         * this cannot name keeps no summary and so never leaves the set above, and enough of them
+         * ahead of a new conversation left the new one unoffered on every pass. Once its settled row
+         * is forgotten it is offered again, as before.
+         */
+        notExists(
+          options.database
+            .select({ key: workItems.key })
+            .from(workItems)
+            .where(
+              and(
+                eq(workItems.kind, CHANNEL_SUMMARY_KIND),
+                eq(workItems.key, channels.id),
+              ),
+            ),
+        ),
       ),
     )
     .limit(options.limit ?? 20);

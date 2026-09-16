@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### New conversations are still named once some older ones could not be
+
+Every pass of the job that names conversations offered at most twenty of those still without a name.
+A conversation it had tried and could not name, for example because the model answered with no text
+or the conversation opened with only an attachment, keeps no name, so it stayed among those twenty
+and took a place on every pass, although offering it again did nothing. Once enough of them had built
+up, a new conversation could miss out on every pass and keep showing its plain name in the sidebar.
+A pass now skips any conversation that the job already holds work for, so new ones get a place. One
+it could not name is still tried again later, as before.
+
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
 Settings lists New chat as Shift+N, and the app matched the character the keystroke wrote. A layout
