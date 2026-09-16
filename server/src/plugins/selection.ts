@@ -128,9 +128,20 @@ export function readChosenSkills(
   answer: string,
   skills: readonly SelectableSkill[],
 ): string[] | null {
+  /*
+   * The object in the answer, not the answer as a whole.
+   *
+   * `response_format` asks for bare JSON and does not guarantee it: Anthropic's OpenAI-compatible
+   * endpoint ignores the field, and a model left to itself often fences its object or leads with a
+   * sentence. Parsed whole, every such answer read as a selector that could not say, and a Bot on
+   * that model was offered its entire catalogue on every run. The router reads its answer from the
+   * same completer this way already (`classify.ts`); an answer with no object in it is still null.
+   */
+  const object = answer.match(/\{[\s\S]*\}/);
+  if (!object) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(answer);
+    parsed = JSON.parse(object[0]);
   } catch {
     return null;
   }

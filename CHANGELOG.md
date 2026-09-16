@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Tool selection reads a skill choice the model wrapped in a code fence
+
+Before a run, the deployment's model picks which of a Bot's skills the message needs, so a Bot holding
+many tools is offered only the relevant ones. The request asks for bare JSON, but an endpoint that
+ignores `response_format`, as Anthropic's OpenAI-compatible one does, lets the model fence the object
+or lead with a sentence. Every such answer read as no answer, so the Bot was offered every tool it
+holds and the audit row said `unavailable`. The object is now read out of the answer, the way the
+router already reads its own. A bare JSON answer is read as before.
+
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
