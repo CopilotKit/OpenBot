@@ -451,6 +451,27 @@ const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";
 const CHATGPT_LOOPBACK: u16 = 1455;
 const CHATGPT_RELAY: u16 = 1456;
 
+fn publish_chatgpt_callback(
+    command: &mut std::process::Command,
+    engine: crate::engine::Engine,
+    windows: bool,
+) {
+    // Windows Podman's IPv6 forward accepts TCP but closes the callback without an HTTP
+    // response. That prevents localhost clients from trying the working IPv4 address:
+    // Happy Eyeballs stops at the first successful TCP handshake (RFC 8305, sections 5/9.2).
+    // Publish only IPv4 there so localhost falls back after IPv6 connection refusal.
+    // Keep the registered localhost redirect URI and the other runtimes' bindings unchanged.
+    let hosts: &[&str] = if windows && engine == crate::engine::Engine::Podman {
+        &["127.0.0.1"]
+    } else {
+        &["127.0.0.1", "[::1]"]
+    };
+    for host in hosts {
+        command.arg("-p");
+        command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
+    }
+}
+
 /**
 The ChatGPT sign-in, as a program handed to the harness image.
 
@@ -567,14 +588,10 @@ impl SigningInToChatGpt {
          * Published on loopback only, and on the number the vendor's login advertises.
          *
          * The container's relay listens on `CHATGPT_RELAY` and forwards to the login's own
-         * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine. Both families
-         * are published because a browser resolving the registered `localhost` may pick either, and
-         * which one it picks is not ours to decide.
+         * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine.
+         * publish_chatgpt_callback handles the Windows Podman IPv6 forwarding limitation.
          */
-        for host in ["127.0.0.1", "[::1]"] {
-            command.arg("-p");
-            command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
-        }
+        publish_chatgpt_callback(&mut command, engine.engine, cfg!(windows));
         command.arg(image);
         command.arg("python");
         command.arg("-u");
@@ -721,6 +738,29 @@ pub fn openai_url_in(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::Engine;
+
+    #[test]
+    fn chatgpt_callback_uses_ipv4_only_for_windows_podman() {
+        for (engine, windows, hosts) in [
+            (Engine::Podman, true, vec!["127.0.0.1"]),
+            (Engine::Podman, false, vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, true, vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, false, vec!["127.0.0.1", "[::1]"]),
+        ] {
+            let mut command = crate::quiet::command(engine.binary());
+            publish_chatgpt_callback(&mut command, engine, windows);
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_str().unwrap())
+                .collect();
+            let expected: Vec<String> = hosts
+                .into_iter()
+                .flat_map(|host| ["-p".into(), format!("{host}:1455:1456")])
+                .collect();
+            assert_eq!(args, expected, "{engine:?}, Windows={windows}");
+        }
+    }
 
     /// Fixtures are composed from the prefix rather than written out, so no credential-shaped
     /// literal sits in this repository for a scanner to find or a person to copy.
