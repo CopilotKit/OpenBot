@@ -91,10 +91,90 @@ const serving = {
   },
 };
 
+type RouteSplitGroupings = Array<
+  Array<
+    "component" | "pendingComponent" | "errorComponent" | "notFoundComponent"
+  >
+>;
+
+const componentRouteSplit: RouteSplitGroupings = [["component"]];
+
+export function selectedRouteSplitBehavior({
+  routeId,
+}: {
+  routeId: string;
+}): RouteSplitGroupings | undefined {
+  if (routeId === "/" || routeId.startsWith("/__root")) {
+    return undefined;
+  }
+  return componentRouteSplit;
+}
+
+export const routeCodeSplittingOptions = {
+  defaultBehavior: [],
+  splitBehavior: selectedRouteSplitBehavior,
+};
+
+function normalizedModuleId(id: string): string {
+  return id.replaceAll("\\", "/");
+}
+
+function routeComponentSplitPath(id: string): string | undefined {
+  const normalized = normalizedModuleId(id);
+  const [filePath, query = ""] = normalized.split("?");
+  if (new URLSearchParams(query).get("tsr-split") !== "component") {
+    return undefined;
+  }
+  const routesMarker = "/src/routes/";
+  const routesIndex = filePath.lastIndexOf(routesMarker);
+  if (routesIndex === -1) {
+    return undefined;
+  }
+  return filePath.slice(routesIndex + routesMarker.length);
+}
+
+export function selectOpenBotManualChunk(id: string): string | undefined {
+  const routePath = routeComponentSplitPath(id);
+  if (!routePath) {
+    return undefined;
+  }
+  if (routePath === "sign.tsx") {
+    return "route-sign";
+  }
+  if (
+    routePath === "_authed.tsx" ||
+    routePath === "_authed/_app.tsx" ||
+    routePath.startsWith("_authed/_app/channel/")
+  ) {
+    return "route-chat-core";
+  }
+  if (routePath.startsWith("_authed/admin/")) {
+    return "route-admin";
+  }
+  if (routePath.startsWith("_authed/settings/")) {
+    return "route-settings";
+  }
+  if (
+    routePath.startsWith("_authed/_app/") ||
+    routePath === "_authed/onboarding.tsx"
+  ) {
+    return "route-app-secondary";
+  }
+  return undefined;
+}
+
+export const routeBuildRollupOutputOptions = {
+  onlyExplicitManualChunks: true,
+  manualChunks: selectOpenBotManualChunk,
+};
+
 export default defineConfig({
   plugins: [
     announceServerPort(apiPort.port),
-    tanstackRouter(),
+    tanstackRouter({
+      autoCodeSplitting: true,
+      codeSplittingOptions: routeCodeSplittingOptions,
+    }),
     react(),
     tailwindcss(),
   ],
@@ -105,4 +185,9 @@ export default defineConfig({
   },
   server: serving,
   preview: serving,
+  build: {
+    rollupOptions: {
+      output: routeBuildRollupOutputOptions,
+    },
+  },
 });
