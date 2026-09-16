@@ -6691,22 +6691,65 @@ export function createPluginStore(options: PluginStoreOptions) {
        * rather than the call. False where there is no broker at all: a deployment whose key has
        * since been unset can still offboard somebody, and it could not have been calling Composio
        * either way — but nothing was asked there and the row must not claim otherwise.
+       *
+       * ONE APP'S REFUSAL IS ONE APP'S REFUSAL, and until now it was everybody's. A throw out of
+       * `revoke` left this loop before the delete and before the trail, so three accounts already
+       * withdrawn at Composio kept their rows and got no row on the trail. That was survivable while
+       * repeating the act did nothing — and #574 made repeating it the documented recovery, so the
+       * second pass asks again for those three, Composio answers `false` because the accounts are
+       * gone, and each writes `vendorRevocationRequested: false` about a withdrawal this deployment
+       * asked for and got. That field exists to tell an account we acted on from one that outlives
+       * us somewhere else; those three rows say the wrong one.
+       *
+       * So the answer is kept per app and the refusal is held rather than thrown. Every app is still
+       * asked — a later one is not punished for an earlier one — and the first refusal is rethrown
+       * below, so the act still fails loudly and the administrator still gets a 500.
        */
-      const vendorRevocationRequested = new Map<string, boolean>();
+      const withdrawn: { toolkit: string; requested: boolean }[] = [];
+      const refusals: unknown[] = [];
       for (const connection of brokered) {
-        vendorRevocationRequested.set(
-          connection.toolkit,
-          broker
-            ? await broker.revoke({ userId, toolkit: connection.toolkit })
-            : false,
+        try {
+          withdrawn.push({
+            toolkit: connection.toolkit,
+            requested: broker
+              ? await broker.revoke({ userId, toolkit: connection.toolkit })
+              : false,
+          });
+        } catch (error) {
+          /*
+           * Held, and the row deliberately left standing.
+           *
+           * "An offboarding the vendor refuses leaves the connection standing" is the existing
+           * criterion and it is unchanged: the row is the only thing naming which app this person
+           * connected, repeating the act is the recovery, and repeating it is only possible while
+           * the row is there. What changes is that the rule now applies to the app it is about
+           * rather than to every app in the same act.
+           */
+          refusals.push(error);
+        }
+      }
+
+      /*
+       * Only the apps that answered, which is the other half of the same correction.
+       *
+       * Deleting by user id would take the rows of apps that were refused or never reached, and
+       * those are exactly the rows the recovery needs. Deleting none — what a throw used to do —
+       * leaves a row and an open `(toolkit, user_id)` gate for an account that is already gone at
+       * Composio, so the table claims a connection this person does not have.
+       */
+      if (withdrawn.length > 0) {
+        await database.delete(composioConnections).where(
+          and(
+            eq(composioConnections.userId, userId),
+            inArray(
+              composioConnections.toolkit,
+              withdrawn.map((entry) => entry.toolkit),
+            ),
+          ),
         );
       }
 
-      await database
-        .delete(composioConnections)
-        .where(eq(composioConnections.userId, userId));
-
-      for (const connection of brokered) {
+      for (const connection of withdrawn) {
         retired += 1;
         await recordAuditEvent(auditStore, {
           eventType: "mcp.account_disconnected",
@@ -6729,11 +6772,20 @@ export function createPluginStore(options: PluginStoreOptions) {
              * ask. The value of the field is exactly that a reader can tell those apart, so a
              * constant here would be worse than none.
              */
-            vendorRevocationRequested:
-              vendorRevocationRequested.get(connection.toolkit) ?? false,
+            vendorRevocationRequested: connection.requested,
           },
         });
       }
+
+      /*
+       * Loud, after every app has been asked and every answer recorded.
+       *
+       * The first, because the route turns this into a 500 and one sentence is what reaches the
+       * administrator; the rest are the same act failing more than once, and the trail above already
+       * says which apps did not end. Thrown last rather than first so a refusal on one app cannot
+       * cost the record of another — which is the whole of this change.
+       */
+      if (refusals.length > 0) throw refusals[0];
 
       return { retired };
     },

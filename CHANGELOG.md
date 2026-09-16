@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### An offboarding one app refuses still records the apps that answered
+
+Removing somebody withdraws each brokered account they connected. When the broker refused one of
+those apps, the whole act stopped before anything was recorded: apps already withdrawn at Composio
+kept their `composio_connections` row and left nothing on the trail saying the account had ended,
+and the retry that #574 made the recovery then asked again, was told there was nothing to withdraw,
+and wrote `vendorRevocationRequested: false` about a withdrawal this deployment had asked for and
+got. Each app is now asked, recorded with the answer it actually gave and its row removed, and only
+the apps that were refused are left standing for the retry. The act still fails and still answers
+500, so a refusal is as loud as it was.
+
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
 Settings lists New chat as Shift+N, and the app matched the character the keystroke wrote. A layout

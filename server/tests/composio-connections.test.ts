@@ -1305,6 +1305,95 @@ test("an offboarding carries the vendor's answer per app, in a fixed order", asy
 });
 
 /**
+ * ONE APP'S REFUSAL IS ONE APP'S REFUSAL, AND THE APPS THAT ANSWERED ARE RECORDED.
+ *
+ * CRITERION. Two apps, the vendor refusing the second: the act still fails, the refused app keeps
+ * its row and gets no trail row, and the app that WAS withdrawn loses its row and is recorded with
+ * `vendorRevocationRequested: true`.
+ *
+ * REASON. A throw out of `revoke` used to leave the loop before the delete and before the trail, so
+ * an account already gone at Composio kept its row and its `(toolkit, user_id)` gate and left
+ * nothing on the trail saying it had ended. That was survivable while repeating the act did
+ * nothing — and #574 made repeating it the documented recovery, so the second pass asks again for
+ * that app, the vendor answers `false` because the account is already gone, and the row that
+ * finally lands says `vendorRevocationRequested: false` about a withdrawal this deployment asked
+ * for and got. `vendorRevocationRequested` exists to tell an account we acted on from one that
+ * outlives us somewhere else; that row says the wrong one, permanently, and no later act corrects it.
+ *
+ * THE REFUSED APP IS UNCHANGED, which is the criterion the single-app test above already states:
+ * the row is the only thing naming which app this person connected, and repeating the act is only
+ * possible while it is there. What is new is that the rule now applies to the app it is about
+ * rather than to every app in the same act.
+ */
+test("an offboarding one app refuses still records the app that answered", async () => {
+  await seedApp({ connect: false });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit, userId: askerId });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit: secondToolkit, userId: askerId });
+  vendorRefuses = ({ toolkit: asked }) => asked === secondToolkit;
+
+  await expect(store.retireConnectionsFor(askerId, admin)).rejects.toThrow(
+    /would not withdraw/i,
+  );
+
+  // Both were asked. A later app is not punished for an earlier one, and on the previous shape the
+  // throw left the loop, so an app after the refused one was never reached at all.
+  expect(asksMade()).toEqual([
+    `revoke:${toolkit}/${askerId}`,
+    `revoke:${secondToolkit}/${askerId}`,
+  ]);
+
+  // The withdrawn app's row is gone; the refused app's stands, so the recovery still has it.
+  expect(await connectedToolkitsFor(askerId)).toEqual([secondToolkit]);
+
+  const disconnected = recordedOfType("mcp.account_disconnected");
+  expect(disconnected).toHaveLength(1);
+  expect(disconnected[0]?.payload).toMatchObject({
+    server: toolkit,
+    owner: askerId,
+    reason: "person_removed",
+    // The answer this app actually got, written while it was still known.
+    vendorRevocationRequested: true,
+  });
+});
+
+/**
+ * AND THE REFUSAL IS STILL THROWN, WHATEVER ORDER IT CAME IN.
+ *
+ * CRITERION. The vendor refusing the FIRST app: the second is still asked and still recorded, and
+ * the act still fails with the refusal rather than reporting a success.
+ *
+ * REASON. Holding a refusal instead of throwing it is only correct if it is still thrown. The risk
+ * this pins is the opposite of the one above — that collecting refusals turns a failed offboarding
+ * into a reported one, which is the state `an offboarding the vendor refuses leaves the connection
+ * standing` exists to forbid.
+ */
+test("a refusal on the first app still fails the act and still asks the second", async () => {
+  await seedApp({ connect: false });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit, userId: askerId });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit: secondToolkit, userId: askerId });
+  vendorRefuses = ({ toolkit: asked }) => asked === toolkit;
+
+  await expect(store.retireConnectionsFor(askerId, admin)).rejects.toThrow(
+    /would not withdraw/i,
+  );
+
+  expect(asksMade()).toEqual([
+    `revoke:${toolkit}/${askerId}`,
+    `revoke:${secondToolkit}/${askerId}`,
+  ]);
+  expect(await connectedToolkitsFor(askerId)).toEqual([toolkit]);
+  expect(recordedOfType("mcp.account_disconnected")).toHaveLength(1);
+});
+
+/**
  * THE ANONYMOUS ACTOR OWNS NOTHING, and `notNull` does not exclude the empty string, so a row at
  * `(toolkit, "")` is legal. Retiring "nobody" must not be what deletes it — that would be an
  * unattributed offboarding reaching a row it cannot possibly own.
