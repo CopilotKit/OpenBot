@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseAriaSnapshot, parseDescriptor } from "../src/aria-snapshot";
+import {
+  cutAtCodeUnits,
+  parseAriaSnapshot,
+  parseDescriptor,
+} from "../src/aria-snapshot";
 
 /**
  * The parser, tested against captured Playwright output.
@@ -197,6 +201,46 @@ describe("a name or value too long to keep whole", () => {
     );
     expect(elements[0]?.name).toBe(`${"a".repeat(198)}😀`);
     expect(elements[0]?.value).toBe(`${"a".repeat(198)}😀`);
+  });
+});
+
+/**
+ * The cut itself, at any limit.
+ *
+ * Tested directly as well as through the parser because `index.ts` cuts the readable page text with
+ * it at 6000 rather than 200, and that caller imports Playwright at load, so there is no test that
+ * can reach it. The rule is the thing worth pinning, so it is pinned where it is declared.
+ */
+describe("cutting at code units", () => {
+  const EMOJI = "\u{1F600}";
+
+  test("a limit landing between the halves of a character drops the character", () => {
+    const text = `${"a".repeat(5999)}${EMOJI}tail`;
+    const cut = cutAtCodeUnits(text, 6000);
+    expect(cut).toBe("a".repeat(5999));
+    // Not a lone high surrogate, which is what a bare `slice` leaves and what reads as U+FFFD.
+    expect(cut.charCodeAt(cut.length - 1)).toBeLessThan(0xd800);
+  });
+
+  test("a character that ends exactly at the limit is kept whole", () => {
+    const text = `${"a".repeat(5998)}${EMOJI}tail`;
+    expect(cutAtCodeUnits(text, 6000)).toBe(`${"a".repeat(5998)}${EMOJI}`);
+  });
+
+  test("text that fits is returned unchanged, emoji and all", () => {
+    const text = `hello ${EMOJI} world`;
+    expect(cutAtCodeUnits(text, 6000)).toBe(text);
+  });
+
+  test("empty text is empty rather than a thrown index", () => {
+    // `charCodeAt(-1)` is NaN and every comparison against it is false, so this returns "".
+    expect(cutAtCodeUnits("", 6000)).toBe("");
+  });
+
+  test("a low surrogate last is a whole character and is kept", () => {
+    // The guard must look only for an UNPAIRED high surrogate. A complete pair ends on its low half,
+    // and dropping that would cost a character the limit had room for.
+    expect(cutAtCodeUnits(EMOJI, 2)).toBe(EMOJI);
   });
 });
 

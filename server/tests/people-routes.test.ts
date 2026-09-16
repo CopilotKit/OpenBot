@@ -51,6 +51,9 @@ function appWith(
     revoke: async (userId, by) => {
       calls.push(`revoke:${userId}:${by}`);
     },
+    retireOwned: async (userId, by) => {
+      calls.push(`retireOwned:${userId}:${by}`);
+    },
     restore: async (userId) => {
       calls.push(`restore:${userId}`);
     },
@@ -188,7 +191,10 @@ describe("people routes", () => {
 
     await request("/api/admin/people/u1/access", json({ revoked: true }));
 
-    expect(calls).toEqual([`revoke:u1:${ADMIN.id}`]);
+    expect(calls).toEqual([
+      `revoke:u1:${ADMIN.id}`,
+      `retireOwned:u1:${ADMIN.id}`,
+    ]);
   });
 
   test("restores access for somebody already removed", async () => {

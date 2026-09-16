@@ -18,6 +18,51 @@ failed with "That address is inside this deployment's own network, so an agent m
 The dialog now leaves a built-in coworker's address where it is stored. A coworker somebody hosts
 still sends its own endpoint, as before.
 
+### A long page's text is cut between characters, not through one
+
+A navigation hands the Bot the first 6000 UTF-16 code units of the page's readable text. When that
+limit fell between the two halves of an emoji, the Bot was handed text ending on half a character,
+which reads as U+FFFD: a broken character that is not on the page. It now stops one code unit short
+in that case, which is what a control's name and value in a page snapshot already did.
+
+### Tool selection reads a skill choice the model wrapped in a code fence
+
+Before a run, the deployment's model picks which of a Bot's skills the message needs, so a Bot holding
+many tools is offered only the relevant ones. The request asks for bare JSON, but an endpoint that
+ignores `response_format`, as Anthropic's OpenAI-compatible one does, lets the model fence the object
+or lead with a sentence. Every such answer read as no answer, so the Bot was offered every tool it
+holds and the audit row said `unavailable`. The object is now read out of the answer, the way the
+router already reads its own. A bare JSON answer is read as before.
+
+### A long message reaches the coworker it is for, and is recorded
+
+A message over 10,000 characters, such as a pasted email thread or log, was refused by the router
+since it started capping the text it reads. The home composer carries on past a routing that fails,
+so the message went to the default coworker rather than the one it is for, and a coworker chosen with
+`@` or from the To: field started with no `channel.routed` row. The app now asks the router about the
+message's opening, and the whole message still goes to the coworker. Shorter messages route as
+before.
+
+### Removing somebody is recorded even when retiring what they owned fails
+
+Removing somebody denies their access and ends their sessions, then retires the credentials and
+brokered connections they had granted this deployment. When that second half failed — a vault or
+Composio not answering — the removal was already committed but nothing was written to the audit trail,
+and removing them a second time reported success without retrying it, leaving those connections
+standing. The removal is now recorded as soon as it takes effect, and removing somebody already
+removed finishes the retirement that failed.
+
+### Removing a connector takes its grants with it
+
+A grant naming a connector's tool outlived the connector. Removing an app revoked every credential
+and every brokered account and deleted the app itself, and left the grant rows behind, naming a
+server that no longer existed. Nothing showed them: the page that reports grants a connector no
+longer advertises reads them off the connector's own row, and there was none. Adding the same app
+back — which mints the same id, and so the same tool names — put every action it had back on every
+Bot that used to hold it, with nobody granting anything and no row in the trail saying a grant had
+been made. An app's grants are now removed in the same step as the app, the removal records which
+grants it released and from which Bots, and a migration drops the grants earlier removals left
+behind. Grants for other connectors, and skill grants, are untouched.
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
