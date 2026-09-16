@@ -38,6 +38,7 @@ import {
   type ConnectionVerdict,
   testAgentConnection,
 } from "@/lib/agents/queries";
+import { isComposing } from "@/lib/composing";
 import { queryClient } from "@/query-client";
 
 /**
@@ -254,12 +255,15 @@ function CreateAgentWizard({
            * questionnaire's own submit path refuses any item it does not consider answered, and it
            * cannot see these fields: the identity inputs are this dialog's own, not registered
            * answers. Running first and preventing default also keeps the primitive's Enter
-           * handling out of the way; a textarea keeps Enter for its line breaks.
+           * handling out of the way; a textarea keeps Enter for its line breaks. The Enter that
+           * confirms a composed character is left alone, as the primitive leaves it: it finishes a
+           * character, not the step.
            */
           onKeyDown={(event) => {
             if (
               event.key === "Enter" &&
               !event.shiftKey &&
+              !isComposing(event) &&
               event.target instanceof HTMLInputElement
             ) {
               event.preventDefault();

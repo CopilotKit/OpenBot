@@ -70,6 +70,7 @@ import {
   updateAgentMutationOptions,
 } from "@/lib/agents/mutations";
 import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
+import { isComposing } from "@/lib/composing";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { readToolName } from "@/lib/plugins/tool-name";
 
@@ -433,7 +434,9 @@ function EditableTextItem({
             autoFocus
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              // Not the Enter that confirms a composed character: that one would save the value
+              // before the person has finished typing it.
+              if (event.key === "Enter" && !isComposing(event)) {
                 event.preventDefault();
                 void submit();
               }
