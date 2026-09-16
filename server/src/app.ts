@@ -782,6 +782,10 @@ export function createApp(
       );
     }
 
+    if (revoked) {
+      await peopleStore.retireOwned(userId, context.var.actor.id);
+    }
+
     return context.json({ person: await peopleStore.find(userId) });
   });
 

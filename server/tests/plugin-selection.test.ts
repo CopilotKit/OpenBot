@@ -114,6 +114,23 @@ describe("what gets offered", () => {
     expect(offered).toContain("drive/tool_0");
     expect(offered).toContain("slack/tool_0");
   });
+
+  test("a choice wrapped in a code fence still narrows, rather than reading as no answer", async () => {
+    const selection = await selectTools({
+      tools: manyTools,
+      skills,
+      text: "read my drive",
+      choose: async () =>
+        ["```json", JSON.stringify({ skills: ["drive-audit"] }), "```"].join(
+          "\n",
+        ),
+    });
+    expect(selection.reason).toBe("selected");
+    expect(selection.skills).toEqual(["drive-audit"]);
+    expect(selection.offered.map((entry) => entry.ref)).not.toContain(
+      "slack/tool_0",
+    );
+  });
 });
 
 describe("a declaration is not a grant", () => {
@@ -274,6 +291,20 @@ describe("reading pass one's answer", () => {
     expect(readChosenSkills("null", skills)).toBeNull();
     expect(readChosenSkills("{}", skills)).toBeNull();
     expect(readChosenSkills("not json", skills)).toBeNull();
+    expect(readChosenSkills("{skills: drive-audit}", skills)).toBeNull();
+  });
+
+  test("a fenced or padded answer is read, the way the router reads its own", () => {
+    // `response_format` is a request, not a guarantee: an endpoint that ignores it, as Anthropic's
+    // OpenAI-compatible one does, lets the model wrap the object in a fence or a sentence.
+    const fenced = [
+      "```json",
+      JSON.stringify({ skills: ["drive-audit"] }),
+      "```",
+    ].join("\n");
+    expect(readChosenSkills(fenced, skills)).toEqual(["drive-audit"]);
+    const padded = `Here is the selection:\n${JSON.stringify({ skills: ["slack-digest"] })}`;
+    expect(readChosenSkills(padded, skills)).toEqual(["slack-digest"]);
   });
 
   test("an answer naming only unknown slugs is an empty choice, not a failure", () => {

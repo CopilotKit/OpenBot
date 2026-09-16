@@ -380,11 +380,13 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
     let places: Vec<PathBuf> = match engine {
         #[cfg(target_os = "windows")]
         Engine::Podman => {
-            // The per-user MSI first: it is the one OpenBot runs. A machine-wide install left by
-            // somebody else is still found by the second.
+            // The MSI uses Programs\Podman per user and Program Files\Podman per machine.
+            // Keep the legacy RedHat location for installations from the older EXE installer.
             [
                 std::env::var_os("LOCALAPPDATA")
                     .map(|local| PathBuf::from(local).join("Programs\\Podman\\podman.exe")),
+                std::env::var_os("ProgramFiles")
+                    .map(|files| PathBuf::from(files).join("Podman\\podman.exe")),
                 std::env::var_os("ProgramFiles")
                     .map(|files| PathBuf::from(files).join("RedHat\\Podman\\podman.exe")),
             ]
@@ -611,6 +613,48 @@ mod tests {
     #[test]
     fn a_binary_that_is_nowhere_is_absent_rather_than_guessed_at() {
         assert_eq!(on_path("openbot-not-a-real-binary"), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_installed_podman_runs_without_an_inherited_path_entry() {
+        if crate::test_support::isolated_process(
+            "engine::tests::windows_installed_podman_runs_without_an_inherited_path_entry",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("podman install locations");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("engine.rs");
+        let binary = root.join("fixture.exe");
+        std::fs::write(&source, "fn main() { println!(\"1.44\"); }").unwrap();
+        crate::test_support::compile_fixture(&source, &binary);
+        let local = root.join("Local");
+        let program_files = root.join("Program Files");
+        std::env::set_var("LOCALAPPDATA", &local);
+        std::env::set_var("ProgramFiles", &program_files);
+        std::env::set_var("PATH", root.join("empty-path"));
+
+        for installation in [
+            local.join("Programs/Podman/podman.exe"),
+            program_files.join("Podman/podman.exe"),
+            program_files.join("RedHat/Podman/podman.exe"),
+        ] {
+            std::fs::create_dir_all(installation.parent().unwrap()).unwrap();
+            std::fs::copy(&binary, &installation).unwrap();
+            assert_eq!(program(Engine::Podman).as_ref(), Some(&installation));
+            let address = Address::new(Engine::Podman, Some("openbot".into()));
+            assert_eq!(address.parts().0, installation);
+            assert!(address.responds(), "resolved engine should actually run");
+            assert!(tool(Engine::Podman)
+                .arg("--version")
+                .output()
+                .unwrap()
+                .status
+                .success());
+            std::fs::remove_file(installation).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The provider directory has to be in *front* of PATH: a broken `docker-compose` earlier on

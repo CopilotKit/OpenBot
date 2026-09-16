@@ -364,12 +364,24 @@ pub fn install_engine(cache: &Path) -> Result<String, Problem> {
 /// Observe an actual Podman installer invocation, excluding existing engines and Compose repair.
 pub fn install_engine_observed(
     cache: &Path,
+    installed: impl FnMut(bool),
+) -> Result<String, Problem> {
+    install_engine_with(cache, installed, install_podman, place_compose)
+}
+
+fn install_engine_with(
+    cache: &Path,
     mut installed: impl FnMut(bool),
+    install_podman: impl FnOnce(&Path) -> Result<(), Problem>,
+    place_compose: impl FnOnce(&Path) -> Result<String, Problem>,
 ) -> Result<String, Problem> {
     let into = crate::acquire::download_dir(cache);
 
-    // An engine somebody already has is theirs. This only ever adds what is missing.
-    if engine::program(Engine::Docker).is_some() || engine::program(Engine::Podman).is_some() {
+    // engine_ready can start an installed Podman machine, but cannot start Docker. A stopped
+    // Docker CLI must not skip installing the Podman that preparation will then try to run.
+    if engine::program(Engine::Podman).is_some()
+        || engine::Address::new(Engine::Docker, None).responds()
+    {
         return place_compose(&into);
     }
 
@@ -641,6 +653,67 @@ fn linux_package_manager() -> Option<(&'static str, &'static [&'static str])> {
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+
+    #[test]
+    #[cfg(windows)]
+    fn a_stopped_docker_does_not_skip_the_podman_needed_for_setup() {
+        if crate::test_support::isolated_process(
+            "install::tests::a_stopped_docker_does_not_skip_the_podman_needed_for_setup",
+        ) {
+            return;
+        }
+        let root = temp_root("stopped-docker-install");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let source = root.join("engine.rs");
+        std::fs::write(
+            &source,
+            r#"fn main() {
+                if std::env::var_os("OPENBOT_TEST_DOCKER_RUNNING").is_none() {
+                    std::process::exit(1);
+                }
+                println!("1.44");
+            }"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &bin.join("docker.exe"));
+        std::env::set_var("PATH", &bin);
+        std::env::set_var("LOCALAPPDATA", root.join("Local"));
+        std::env::set_var("ProgramFiles", root.join("Program Files"));
+        std::env::remove_var("OPENBOT_TEST_DOCKER_RUNNING");
+
+        let found = engine::detect();
+        assert_eq!(found.engine, Some(Engine::Docker));
+        assert!(!found.responding);
+        assert!(engine::program(Engine::Podman).is_none());
+        let mut observed = Vec::new();
+        let result = install_engine_with(
+            &root,
+            |success| observed.push(success),
+            |_| {
+                // Installation supplies the engine that engine_ready will create/start.
+                std::fs::copy(bin.join("docker.exe"), bin.join("podman.exe")).unwrap();
+                Ok(())
+            },
+            |_| Ok("Compose placed".into()),
+        );
+        result.expect("setup should install its missing Podman");
+        assert_eq!(observed, [true], "the Podman installer must run");
+        assert!(engine::program(Engine::Podman).is_some());
+
+        // A responding Docker still supplies the engine; never install a replacement.
+        std::fs::remove_file(bin.join("podman.exe")).unwrap();
+        std::env::set_var("OPENBOT_TEST_DOCKER_RUNNING", "1");
+        assert!(engine::detect().responding);
+        let result = install_engine_with(
+            &root,
+            |_| panic!("no Podman installation should be observed"),
+            |_| panic!("responding Docker must be reused"),
+            |_| Ok("Compose placed".into()),
+        );
+        assert_eq!(result.unwrap(), "Compose placed");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// Every platform this app runs on has a Compose build, or the stack cannot be raised there.
     #[test]
