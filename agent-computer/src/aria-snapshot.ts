@@ -163,8 +163,12 @@ export function parseDescriptor(text: string): Descriptor | null {
  * high surrogate last: JSON carries it as a bare `\ud83d` and UTF-8 as U+FFFD, and the Bot reads a
  * broken character that is not on the page. The server's `cutAtCodeUnits` is the same rule; this
  * process shares no code with the server, so it is repeated here rather than imported.
+ *
+ * Exported for `index.ts`, which cuts the readable page text the same way, and so that the rule has
+ * its own tests. It lives here rather than beside that caller because this module imports no
+ * Playwright: `index.ts` does, at load, so a helper declared there could not be tested at all.
  */
-function cutAtCodeUnits(text: string, limit: number): string {
+export function cutAtCodeUnits(text: string, limit: number): string {
   const sliced = text.slice(0, limit);
   const last = sliced.charCodeAt(sliced.length - 1);
   return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;

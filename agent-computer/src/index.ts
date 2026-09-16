@@ -1,7 +1,10 @@
 import { serve } from "bun";
 import type { Page } from "playwright";
-import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
-import { browserModeFromEnv } from "./browser-mode";
+import {
+  cutAtCodeUnits,
+  parseAriaSnapshot,
+  type SnapshotElement,
+} from "./aria-snapshot";
 import {
   actsOnTheComputer,
   isOpenPath,
@@ -9,6 +12,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
+import { browserModeFromEnv } from "./browser-mode";
 import {
   type Control,
   ControlError,
@@ -289,7 +293,18 @@ async function readablePageText(
 
   const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
   return {
-    text: collapsed.slice(0, TEXT_EXTRACT_LIMIT),
+    /*
+     * Cut between characters, not through one. #539 fixed this for a control's name and value in the
+     * snapshot and left the page text, which is the same bug at thirty times the length: `slice`
+     * counts UTF-16 code units, an emoji is two, and a limit landing between the halves hands the Bot
+     * a lone high surrogate that reads as U+FFFD — a character that is not on the page.
+     *
+     * More likely to bite here than there, for the reason the limit is bigger. A 200-unit control
+     * name rarely reaches an emoji; 6000 units of somebody's page usually passes through several, and
+     * whether the cut lands mid-character is decided by whatever was above it.
+     */
+    text: cutAtCodeUnits(collapsed, TEXT_EXTRACT_LIMIT),
+    // Unaffected by the line above: dropping one more unit cannot make an over-limit string fit.
     truncated: collapsed.length > TEXT_EXTRACT_LIMIT,
   };
 }
