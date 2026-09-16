@@ -3512,12 +3512,35 @@ export function createPluginStore(options: PluginStoreOptions) {
         if (broker) await broker.deleteAuthConfig(toolkit);
       }
 
-      await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
+      const released = await database.transaction(async (transaction) => {
+        const removed = await transaction
+          .delete(pluginGrants)
+          .where(
+            and(
+              eq(pluginGrants.kind, "mcp"),
+              eq(sql`split_part(${pluginGrants.ref}, '/', 1)`, serverId),
+            ),
+          )
+          .returning({ ref: pluginGrants.ref, agentId: pluginGrants.agentId });
+        await transaction.delete(mcpServers).where(eq(mcpServers.id, serverId));
+        return removed.sort((left, right) => left.ref.localeCompare(right.ref));
+      });
+
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "mcp_server",
         targetId: serverId,
-        payload: { actor: by, change: "mcp_server_removed", server: serverId },
+        payload: {
+          actor: by,
+          change: "mcp_server_removed",
+          server: serverId,
+          ...(released.length > 0
+            ? {
+                releasedGrants: released.map((grant) => grant.ref),
+                bots: [...new Set(released.map((grant) => grant.agentId))],
+              }
+            : {}),
+        },
       });
     },
 
