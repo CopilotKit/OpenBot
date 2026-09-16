@@ -202,6 +202,12 @@ pub struct SigningIn {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     writer: Box<dyn std::io::Write + Send>,
     output: std::sync::Arc<std::sync::Mutex<String>>,
+    // ConPTY's pipe clones do not own its console. Dropping the last master closes the
+    // console and its child, so retain it through the code/token exchange on Windows.
+    #[cfg(windows)]
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+    #[cfg(windows)]
+    cursor_reported: bool,
 }
 
 /// How long to wait for the CLI to show the URL. Machine time: a container start and an HTTP call.
@@ -298,6 +304,10 @@ impl SigningIn {
             child,
             writer,
             output,
+            #[cfg(windows)]
+            _master: pty.master,
+            #[cfg(windows)]
+            cursor_reported: false,
         };
         let url = signing
             .wait_for(authorize_url_in, PATIENCE_FOR_THE_LINK)
@@ -387,6 +397,16 @@ impl SigningIn {
         let began = Instant::now();
         while began.elapsed() < patience {
             if let Ok(seen) = self.output.lock() {
+                // portable-pty enables ConPTY's INHERIT_CURSOR flag. It waits for this
+                // reply before emitting the child's output, and can hang on close without it.
+                // This hidden terminal starts at 1;1. Accumulating output also handles a
+                // query split across reads; reply once to the initial inheritance request.
+                #[cfg(windows)]
+                if !self.cursor_reported && seen.contains("\x1b[6n") {
+                    self.writer.write_all(b"\x1b[1;1R").ok()?;
+                    self.writer.flush().ok()?;
+                    self.cursor_reported = true;
+                }
                 if let Some(value) = found(&seen) {
                     return Some(value);
                 }
@@ -739,6 +759,62 @@ pub fn openai_url_in(output: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::engine::Engine;
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_claude_sign_in_keeps_its_terminal_until_the_flow_finishes() {
+        if crate::test_support::isolated_process(
+            "plan::tests::windows_claude_sign_in_keeps_its_terminal_until_the_flow_finishes",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("claude-terminal-lifetime");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("podman.rs");
+        std::fs::write(
+            &source,
+            r#"use std::io::{Read, Write};
+            fn main() {
+                print!("\x1b]8;;https://claude.ai/oauth/authorize?synthetic=terminal-lifetime\x1b\\Sign in\x1b]8;;\x1b\\\r\n");
+                std::io::stdout().flush().unwrap();
+                let mut input = Vec::new();
+                std::io::stdin().read_to_end(&mut input).unwrap();
+            }"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &root.join("podman.exe"));
+        std::env::set_var("PATH", &root);
+
+        // Bound begin and cleanup, including any destructor run before either returns.
+        // The fixture prints a synthetic URL and waits; no provider or container is contacted.
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = (|| {
+                let (mut signing, url) = SigningIn::begin(
+                    &crate::engine::Address::new(Engine::Podman, None),
+                    "synthetic-sign-in-image",
+                )?;
+                assert_eq!(
+                    url,
+                    "https://claude.ai/oauth/authorize?synthetic=terminal-lifetime"
+                );
+                assert!(
+                    signing.child.try_wait().unwrap().is_none(),
+                    "the login child must survive until the code can be supplied"
+                );
+                signing.stop();
+                drop(signing);
+                Ok::<_, String>(())
+            })();
+            let _ = sent.send(result);
+        });
+        received
+            .recv_timeout(Duration::from_secs(10))
+            .expect("begin and cleanup must finish without a terminal teardown deadlock")
+            .expect("the synthetic login should provide a URL");
+        worker.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn chatgpt_callback_uses_ipv4_only_for_windows_podman() {
