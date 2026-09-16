@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { socketUrl } from "@/lib/socket-url";
+import { currentPageVisible } from "./preview-visibility";
 import { pageCoordinates } from "./take-the-wheel";
 
 /**
@@ -48,6 +49,12 @@ type Props = {
   onProblem?: (problem: string | null) => void;
 };
 
+type FrameMessage = {
+  data: string;
+  width: number;
+  height: number;
+};
+
 export function LiveScreen({ computerId, driving, onProblem }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -55,6 +62,10 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
   const localKeyUps = useRef(new Set<string>());
   /** The size of the frames Chrome is sending, which is what input coordinates are relative to. */
   const frameSize = useRef<{ width: number; height: number } | null>(null);
+  /** Latest validated encoded frame. Hidden tabs keep only this, never decoded bitmaps. */
+  const latestFrame = useRef<FrameMessage | null>(null);
+  /** Monotonic guard so a slow older decode cannot replace a newer frame. */
+  const latestFrameId = useRef(0);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -65,6 +76,50 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     );
     socketRef.current = socket;
     let closed = false;
+
+    const drawFrame = async (frame: FrameMessage, frameId: number) => {
+      /**
+       * Decoded off the main thread and drawn as a bitmap.
+       *
+       * `createImageBitmap` rather than assigning a data URI to an `<img>`: the image path decodes
+       * synchronously on the main thread for every frame, which at screencast rates is the difference
+       * between a smooth page and one that stutters while you are trying to click something on it.
+       */
+      try {
+        const binary = Uint8Array.from(atob(frame.data), (c) =>
+          c.charCodeAt(0),
+        );
+        const bitmap = await createImageBitmap(
+          new Blob([binary], { type: "image/jpeg" }),
+        );
+        if (
+          closed ||
+          frameId !== latestFrameId.current ||
+          !currentPageVisible()
+        ) {
+          bitmap.close();
+          return;
+        }
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          bitmap.close();
+          return;
+        }
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+        bitmap.close();
+      } catch {
+        // Ignore a single corrupt frame; the next frame replaces it.
+      }
+    };
+
+    const drawLatestFrame = () => {
+      if (!currentPageVisible()) return;
+      const frame = latestFrame.current;
+      if (!frame) return;
+      void drawFrame(frame, latestFrameId.current);
+    };
 
     socket.onopen = () => {
       setConnected(true);
@@ -132,39 +187,21 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
         width: message.width ?? 1280,
         height: message.height ?? 800,
       };
+      const frame = { data: message.data, width, height };
+      latestFrame.current = frame;
+      const frameId = ++latestFrameId.current;
 
-      /**
-       * Decoded off the main thread and drawn as a bitmap.
-       *
-       * `createImageBitmap` rather than assigning a data URI to an `<img>`: the image path decodes
-       * synchronously on the main thread for every frame, which at screencast rates is the difference
-       * between a smooth page and one that stutters while you are trying to click something on it.
-       */
-      try {
-        const binary = Uint8Array.from(atob(message.data), (c) =>
-          c.charCodeAt(0),
-        );
-        const bitmap = await createImageBitmap(
-          new Blob([binary], { type: "image/jpeg" }),
-        );
-        if (closed) {
-          bitmap.close();
-          return;
-        }
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
-        bitmap.close();
-      } catch {
-        // Ignore a single corrupt frame; the next frame replaces it.
-      }
+      if (!currentPageVisible()) return;
+      void drawFrame(frame, frameId);
     };
 
+    document.addEventListener("visibilitychange", drawLatestFrame);
     socket.onerror = () => onProblem?.("The live screen could not be reached.");
     socket.onclose = () => setConnected(false);
 
     return () => {
       closed = true;
+      document.removeEventListener("visibilitychange", drawLatestFrame);
       socket.close();
       socketRef.current = null;
     };
