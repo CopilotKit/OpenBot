@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Google Drive search and recent files leave out what is in the trash
+
+Drive's `files.list` returns trashed files unless the query excludes them, and neither `search_files`
+nor `list_recent_files` did. A document somebody had thrown away came back to the Bot as a match or
+as a recently changed file, with nothing in its line to say it was in the trash, so the Bot could
+answer from it as though it were current. Both now ask Drive to leave the trash out. Reading a file by its
+id is unchanged.
+
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
 Settings lists New chat as Shift+N, and the app matched the character the keystroke wrote. A layout
