@@ -72,6 +72,7 @@ export type PeopleStore = {
   list: (query?: PeopleQuery) => Promise<PeoplePage>;
   setRole: (userId: string, role: OpenBotRole) => Promise<void>;
   revoke: (userId: string, revokedBy: string) => Promise<void>;
+  retireOwned: (userId: string, revokedBy: string) => Promise<void>;
   restore: (userId: string) => Promise<void>;
   find: (userId: string) => Promise<Person | undefined>;
   isRevoked: (email: string) => Promise<boolean>;
@@ -309,20 +310,22 @@ export function createPeopleStore(
           .onConflictDoNothing();
         await tx.delete(sessions).where(eq(sessions.userId, userId));
       });
+    },
 
-      /*
-       * After the transaction, and deliberately not inside it.
-       *
-       * Retiring a credential is a write to the vault plus an audit row, and the vault is reached
-       * through its own interface rather than this transaction's handle. Holding the person's removal
-       * open until that finishes would make an unrelated failure able to undo the deny-list row and
-       * the session deletion, which are the two things that must not fail to stick.
-       *
-       * So the order is: stop them getting in, then stop us holding their secret. If the second half
-       * throws, the first is already done and the audit trail shows a removal with no retirement
-       * beside it — which is the honest record of what happened, and is recoverable by removing them
-       * again.
-       */
+    /*
+     * After `revoke`, and deliberately not inside it.
+     *
+     * Retiring a credential is a write to the vault plus an audit row, and the vault is reached
+     * through its own interface rather than that transaction's handle. Holding the person's removal
+     * open until that finishes would make an unrelated failure able to undo the deny-list row and
+     * the session deletion, which are the two things that must not fail to stick.
+     *
+     * So the order is: stop them getting in, then stop us holding their secret. If the second half
+     * throws, the first is already done and the audit trail shows a removal with no retirement
+     * beside it — which is the honest record of what happened, and is recoverable by removing them
+     * again.
+     */
+    async retireOwned(userId, revokedBy) {
       await retireOwnedCredentials?.(userId, revokedBy);
     },
 

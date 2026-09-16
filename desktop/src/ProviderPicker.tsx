@@ -485,23 +485,25 @@ export function ProviderPicker({
                   Opens {row.name} in your browser. Nothing is typed here and no
                   key is stored.
                 </p>
-                <button type="button" disabled={busy} onClick={beginSignIn}>
-                  {busy ? "Starting…" : `Sign in with ${row.name}`}
-                </button>
-                {!busy &&
-                  (row.id === "openai" || row.id === "anthropic") &&
-                  held.saved?.modelSessions?.[row.id] !== false && (
-                    <button
-                      type="button"
-                      className="quiet"
-                      onClick={() =>
-                        setReuse({ provider: row.id, login: "plan" })
-                      }
-                    >
-                      Use a saved{" "}
-                      {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
-                    </button>
-                  )}
+                <div className="provider-sign-in-actions">
+                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                    {busy ? "Starting…" : `Sign in with ${row.name}`}
+                  </button>
+                  {!busy &&
+                    (row.id === "openai" || row.id === "anthropic") &&
+                    held.saved?.modelSessions?.[row.id] !== false && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        onClick={() =>
+                          setReuse({ provider: row.id, login: "plan" })
+                        }
+                      >
+                        Use a saved{" "}
+                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                      </button>
+                    )}
+                </div>
                 {busy && progress && (
                   <p className="footnote" style={{ marginBottom: 0 }}>
                     {progress}
