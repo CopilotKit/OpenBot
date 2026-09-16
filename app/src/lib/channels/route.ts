@@ -21,13 +21,37 @@ export type RoutingDecision = {
   viaMention: boolean;
 };
 
+/**
+ * The most of a message `POST /api/route` reads, and a message's opening cut to it.
+ *
+ * The route refuses anything longer with a 400, so the prompt it builds stays bounded. The composer
+ * has no such limit, and both callers here carry on past a routing that failed: the home composer
+ * sends the message to the default coworker instead, and a chosen coworker's conversation starts
+ * without its `channel.routed` row. So a pasted email thread or log went to the wrong coworker, or
+ * unrecorded, and nothing on screen said so. Who a message is for is plain from its opening, so the
+ * opening is what is asked about; the whole message still goes to the coworker.
+ *
+ * Trimmed first, as the route trims, and cut one unit short when the cut would split a character, so
+ * the router is not handed half of an emoji.
+ */
+const ROUTING_TEXT_LIMIT = 10_000;
+
+function routingText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= ROUTING_TEXT_LIMIT) return trimmed;
+  const opening = trimmed.slice(0, ROUTING_TEXT_LIMIT);
+  const last = opening.charCodeAt(opening.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? opening.slice(0, -1) : opening;
+}
+
 export async function routeMessage(
   text: string,
   agentId?: string,
 ): Promise<RoutingDecision> {
+  const asked = routingText(text);
   const response = await client("/api/route", {
     method: "POST",
-    body: agentId ? { text, agentId } : { text },
+    body: agentId ? { text: asked, agentId } : { text: asked },
     fallback: "Could not choose a coworker.",
   });
   return (await response.json()) as RoutingDecision;

@@ -400,6 +400,12 @@ details > summary:hover {
   margin-top: 0.9rem;
 }
 
+.provider-sign-in-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 .segmented {
   display: inline-flex;
   background: var(--sunk);
