@@ -187,10 +187,22 @@ breaks the first time a hint or a colour is added, and breaking here means telli
 approved in their browser that it failed.
 */
 pub fn token_in(output: &str) -> Option<String> {
-    plain(output)
-        .split(|c: char| c.is_whitespace() || c == '"' || c == '\'')
-        .map(|word| word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_'))
-        .find(|word| word.starts_with(PLAN_TOKEN_PREFIX) && word.len() > 30)
+    fn token_character(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '-' || c == '_'
+    }
+
+    let text = plain(output);
+    // Cursor positioning can separate a label from its token visually without a space
+    // in the stream. Accept the prefix after punctuation, but not inside another word.
+    text.match_indices(PLAN_TOKEN_PREFIX)
+        .filter(|(at, _)| !matches!(text[..*at].chars().next_back(), Some(c) if token_character(c)))
+        .map(|(at, _)| {
+            text[at..]
+                .split(|c| !token_character(c))
+                .next()
+                .unwrap_or("")
+        })
+        .find(|token| token.len() > 30)
         .map(str::to_string)
 }
 
@@ -773,12 +785,18 @@ mod tests {
         let source = root.join("podman.rs");
         std::fs::write(
             &source,
-            r#"use std::io::{Read, Write};
+            r#"use std::io::Write;
             fn main() {
                 print!("\x1b]8;;https://claude.ai/oauth/authorize?synthetic=terminal-lifetime\x1b\\Sign in\x1b]8;;\x1b\\\r\n");
+                println!("Paste code here if prompted");
                 std::io::stdout().flush().unwrap();
-                let mut input = Vec::new();
-                std::io::stdin().read_to_end(&mut input).unwrap();
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).unwrap();
+                assert_eq!(input.trim(), format!("{}#{}", "c".repeat(43), "s".repeat(48)));
+                print!("Your OAuth token (valid for 1 year):");
+                std::io::stdout().flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                println!("\x1b[40G\x1b[32msk-ant-oat01-{}\x1b[0m", "s".repeat(95));
             }"#,
         )
         .unwrap();
@@ -803,8 +821,11 @@ mod tests {
                     "the login child must survive until the code can be supplied"
                 );
                 let draining = std::sync::Arc::downgrade(&signing.output);
-                signing.stop();
-                drop(signing);
+                let code = format!("{}#{}", "c".repeat(43), "s".repeat(48));
+                assert_eq!(
+                    signing.finish(&code)?,
+                    format!("sk-ant-oat01-{}", "s".repeat(95))
+                );
                 // Modern ClosePseudoConsole returns before its clients disconnect. The
                 // reader's EOF, not the master's drop, marks completed console cleanup.
                 // Keep this inside the deadline before deleting the fixture executable.
@@ -1032,6 +1053,16 @@ mod tests {
     fn nothing_in_nothing() {
         assert_eq!(token_in(""), None);
         assert_eq!(authorize_url_in(""), None);
+    }
+
+    #[test]
+    fn token_after_a_cursor_positioned_label_is_found_in_full() {
+        let token = format!("{PLAN_TOKEN_PREFIX}01-{}", "s".repeat(95));
+        let output = format!(
+            "Your OAuth token (valid for 1 year):\x1b[1G\x1b[32m{token}\x1b[0m\nStore this token safely."
+        );
+        assert_eq!(token_in(&output), Some(token.clone()));
+        assert_eq!(token_in(&format!("other-{token}")), None);
     }
 
     /// The stripper has to survive what a TUI actually emits, including a bare ESC pair.
