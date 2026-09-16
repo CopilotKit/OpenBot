@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Removing somebody is recorded even when retiring what they owned fails
+
+Removing somebody denies their access and ends their sessions, then retires the credentials and
+brokered connections they had granted this deployment. When that second half failed — a vault or
+Composio not answering — the removal was already committed but nothing was written to the audit trail,
+and removing them a second time reported success without retrying it, leaving those connections
+standing. The removal is now recorded as soon as it takes effect, and removing somebody already
+removed finishes the retirement that failed.
+
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
