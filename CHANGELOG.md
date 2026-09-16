@@ -17,6 +17,17 @@ and removing them a second time reported success without retrying it, leaving th
 standing. The removal is now recorded as soon as it takes effect, and removing somebody already
 removed finishes the retirement that failed.
 
+### Removing a connector takes its grants with it
+
+A grant naming a connector's tool outlived the connector. Removing an app revoked every credential
+and every brokered account and deleted the app itself, and left the grant rows behind, naming a
+server that no longer existed. Nothing showed them: the page that reports grants a connector no
+longer advertises reads them off the connector's own row, and there was none. Adding the same app
+back — which mints the same id, and so the same tool names — put every action it had back on every
+Bot that used to hold it, with nobody granting anything and no row in the trail saying a grant had
+been made. An app's grants are now removed in the same step as the app, the removal records which
+grants it released and from which Bots, and a migration drops the grants earlier removals left
+behind. Grants for other connectors, and skill grants, are untouched.
 ### A vendor that broke no longer reads as a refusal to a Bot running its own loop
 
 When a Bot that calls tools back from its own process, such as the LangGraph Bots, called a tool
