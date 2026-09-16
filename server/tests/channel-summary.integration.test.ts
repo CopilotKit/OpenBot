@@ -195,6 +195,46 @@ describe("offering conversations to be named", () => {
       .where(eq(workItems.key, channel.id));
     expect(rows).toHaveLength(1);
   });
+
+  /*
+   * A pass offers at most `limit` conversations, twenty by default, and a conversation it could not
+   * name keeps no summary, so it stays in the set the pass reads. Offering it again while its settled
+   * work row stands does nothing, but it still used one of those places. Twenty such conversations
+   * ahead of a new one left nothing for it, pass after pass.
+   */
+  test("does not spend a place on a conversation whose settled work still stands", async () => {
+    const owner = await createUser();
+    const channel = await createUsedChannel(owner);
+    await offer(channel.id);
+    // Settled without a name, the way a model that answers with nothing leaves it.
+    await summariseClaimedChannels(options({ title: titler(null) }));
+    expect((await summaryOf(channel.id))?.summary).toBeNull();
+
+    const { offered } = await offerChannelsAwaitingSummary({
+      database,
+      queue,
+      limit: 200,
+    });
+
+    expect(offered).not.toContain(channel.id);
+  });
+
+  test("offers it again once its settled work has been forgotten", async () => {
+    const owner = await createUser();
+    const channel = await createUsedChannel(owner);
+    await offer(channel.id);
+    await summariseClaimedChannels(options({ title: titler(null) }));
+    // What `forgetSettledSummaries` does once the finished row is an hour old.
+    await database.delete(workItems).where(eq(workItems.key, channel.id));
+
+    const { offered } = await offerChannelsAwaitingSummary({
+      database,
+      queue,
+      limit: 200,
+    });
+
+    expect(offered).toContain(channel.id);
+  });
 });
 
 /**

@@ -14,6 +14,7 @@ import {
 } from "@/lib/computers/screen";
 import { ChannelAvatar } from "../channels/avatar";
 import { LiveScreen } from "./live-screen";
+import { useElementVisible, usePageVisible } from "./preview-visibility";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
 function isBlankBrowser(shot: Screenshot): boolean {
@@ -228,6 +229,8 @@ export function ComputerView({
   const [secret, setSecret] = useState("");
   const [secretProblem, setSecretProblem] = useState<string | null>(null);
   const [sendingSecret, setSendingSecret] = useState(false);
+  const pageVisible = usePageVisible();
+  const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
   const driving = control?.holder === "human";
   /** Read by the polling loop without restarting it on control changes. */
   const drivingRef = useRef(false);
@@ -277,6 +280,7 @@ export function ComputerView({
   const [, setFrameArrived] = useState(0);
 
   const settled = !active && (finished || Boolean(knownPage));
+  const visualVisible = pageVisible && (expanded || previewIntersecting);
 
   /*
    * The frame this turn's page was showing, fetched once and then kept.
@@ -317,6 +321,7 @@ export function ComputerView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
     if (settled) return;
+    if (!visualVisible) return;
     const mine = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
     // Consecutive identical frames observed during post-action settling.
@@ -364,7 +369,7 @@ export function ComputerView({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [computerId, active, intervalMs, secretPending, settled]);
+  }, [computerId, active, intervalMs, secretPending, settled, visualVisible]);
 
   /** Poll control state independently from screenshot polling so help/secret prompts surface. */
   useEffect(() => {
@@ -452,7 +457,7 @@ export function ComputerView({
 
   return (
     <>
-      <figure className="overflow-hidden rounded-2xl border">
+      <figure ref={previewRef} className="overflow-hidden rounded-2xl border">
         {/* Inline preview remains in transcript; click opens a readable full-size view. */}
         <button
           type="button"

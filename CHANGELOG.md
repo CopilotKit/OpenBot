@@ -15,6 +15,33 @@ nor `list_recent_files` did. A document somebody had thrown away came back to th
 as a recently changed file, with nothing in its line to say it was in the trash, so the Bot could
 answer from it as though it were current. Both now ask Drive to leave the trash out. Reading a file by its
 id is unchanged.
+### New conversations are still named once some older ones could not be
+
+Every pass of the job that names conversations offered at most twenty of those still without a name.
+A conversation it had tried and could not name, for example because the model answered with no text
+or the conversation opened with only an attachment, keeps no name, so it stayed among those twenty
+and took a place on every pass, although offering it again did nothing. Once enough of them had built
+up, a new conversation could miss out on every pass and keep showing its plain name in the sidebar.
+A pass now skips any conversation that the job already holds work for, so new ones get a place. One
+it could not name is still tried again later, as before.
+### An offboarding one app refuses still records the apps that answered
+
+Removing somebody withdraws each brokered account they connected. When the broker refused one of
+those apps, the whole act stopped before anything was recorded: apps already withdrawn at Composio
+kept their `composio_connections` row and left nothing on the trail saying the account had ended,
+and the retry that #574 made the recovery then asked again, was told there was nothing to withdraw,
+and wrote `vendorRevocationRequested: false` about a withdrawal this deployment had asked for and
+got. Each app is now asked, recorded with the answer it actually gave and its row removed, and only
+the apps that were refused are left standing for the retry. The act still fails and still answers
+500, so a refusal is as loud as it was.
+### Paging the audit trail no longer skips rows written in the same millisecond
+
+`GET /api/admin/audit-events` hands out a `nextCursor` built from the last row's timestamp, which the
+server read at millisecond precision while PostgreSQL keeps microseconds. The cursor therefore named a
+moment just before that row, and the rows the next page should have started with, written earlier in
+the same millisecond, were on no page at all. Anything that walked the trail page by page could miss
+them without any sign of it. The cursor now carries the row's full timestamp. A cursor issued before
+this change still reads.
 
 ### The New chat shortcut works on a Russian or Greek keyboard layout
 
