@@ -291,6 +291,7 @@ describe("reading pass one's answer", () => {
     expect(readChosenSkills("null", skills)).toBeNull();
     expect(readChosenSkills("{}", skills)).toBeNull();
     expect(readChosenSkills("not json", skills)).toBeNull();
+    expect(readChosenSkills("{skills: drive-audit}", skills)).toBeNull();
   });
 
   test("a fenced or padded answer is read, the way the router reads its own", () => {
