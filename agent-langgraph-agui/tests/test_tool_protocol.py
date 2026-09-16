@@ -603,3 +603,12 @@ async def test_chatgpt_plan_sdk_emits_both_surface_calls_and_consumes_results(
     assert all("public marker 43" in part["output"] for part in results)
     assert "Both client results: public marker 43" in json.dumps(snapshot(second))
     assert "synthetic-access" not in json.dumps(first + second)
+    # Streamed owners and final history must describe the same messages. A
+    # Responses API metadata-only chunk has the provider ID before text/tools.
+    for events in (first, second):
+        final_ids = {message["id"] for message in snapshot(events)}
+        for event in events:
+            if event["type"] == "TEXT_MESSAGE_START":
+                assert event["messageId"] in final_ids
+            elif event["type"] == "TOOL_CALL_START":
+                assert event["parentMessageId"] in final_ids

@@ -45,6 +45,7 @@ class ParallelToolAgent(LangGraphAgent):
         # for explicit reuse and when an HTTP consumer cancels/closes its run.
         streams = {}
         self._tool_streams = streams
+        self._response_message_ids = {}
         self._upstream_stream = None
         self._graph_stream = None
         try:
@@ -66,6 +67,7 @@ class ParallelToolAgent(LangGraphAgent):
                         await self._graph_stream.aclose()
                 finally:
                     streams.clear()
+                    self._response_message_ids.clear()
 
     def _handle_stream_events(self, input):
         # Upstream run uses a bare async-for. Keep its generator so closing
@@ -82,7 +84,25 @@ class ParallelToolAgent(LangGraphAgent):
         active_run = self.active_run
         kind = event.get("event")
         model_key = (self._current_lane(), event.get("run_id"))
+        if kind == "on_chat_model_stream":
+            chunk = event.get("data", {}).get("chunk")
+            # Responses API announces its durable ID in a metadata-only chunk.
+            # Later chunks get lc_run IDs from LangChain; emitting those creates
+            # a second copy when the final snapshot restores the provider ID.
+            metadata = _get(chunk, "response_metadata", {}) or {}
+            response_id = metadata.get("id")
+            if response_id and _get(chunk, "id") == response_id:
+                self._response_message_ids.setdefault(model_key, response_id)
+            stable_id = self._response_message_ids.get(model_key)
+            if stable_id and _get(chunk, "id") != stable_id:
+                clean = (
+                    {**chunk, "id": stable_id}
+                    if isinstance(chunk, dict)
+                    else chunk.model_copy(update={"id": stable_id})
+                )
+                event = {**event, "data": {**event["data"], "chunk": clean}}
         if kind == "on_chat_model_end":
+            self._response_message_ids.pop(model_key, None)
             saved = self.get_message_in_progress(self.active_run["id"])
             try:
                 for slot in self._tool_streams.pop(model_key, {}).values():
