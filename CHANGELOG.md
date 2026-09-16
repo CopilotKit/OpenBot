@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The proof-of-concept Bot reads a model name set with whitespace around it
+
+A `BOT_MODEL` carrying a leading space reached this Bot as it was written. Its startup check refuses
+`gpt-5.6-*`, which rejects function tools on the API this Bot speaks, and that check matches from the
+start of the name, so a padded one walked past it: the Bot started, reported healthy, and answered
+nothing at all on the first turn that used a tool. An empty value was read the same way and asked the
+provider for a model with no name. Both now fall back to the default, and the name is used trimmed.
+`.env` was never a route to this — Compose, Bun and the desktop shell each strip the value first — so
+it reached only deployments that set the variable directly, such as a Kubernetes manifest or
+`docker run -e`.
+
 ### The Google Drive connector reaches files in shared drives
 
 Drive leaves shared drive items out of any `files.get` or `files.list` request that does not say it

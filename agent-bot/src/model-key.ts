@@ -24,3 +24,11 @@ export function keyIsRequired(baseUrl: string | undefined): boolean {
 export function apiKeyOrPlaceholder(apiKey: string | undefined): string {
   return apiKey?.trim() || "no-key-needed";
 }
+
+export function modelName(configured: string | undefined): string {
+  return configured?.trim() || "gpt-5.5";
+}
+
+export function modelIsUnusable(model: string): boolean {
+  return /^gpt-5\.[6-9]|^gpt-[6-9]/.test(model);
+}

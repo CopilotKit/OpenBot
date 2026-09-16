@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { apiKeyOrPlaceholder, keyIsRequired } from "../src/model-key";
+import {
+  apiKeyOrPlaceholder,
+  keyIsRequired,
+  modelIsUnusable,
+  modelName,
+} from "../src/model-key";
 
 /**
  * A named endpoint is a model, and its key belongs to it.
@@ -24,5 +29,28 @@ describe("whether a model key is required", () => {
     expect(apiKeyOrPlaceholder(undefined)).toBe("no-key-needed");
     expect(apiKeyOrPlaceholder("  ")).toBe("no-key-needed");
     expect(apiKeyOrPlaceholder("sk-real")).toBe("sk-real");
+  });
+});
+
+describe("which model this Bot was told to use", () => {
+  test("an unset or empty choice falls back", () => {
+    expect(modelName(undefined)).toBe("gpt-5.5");
+    expect(modelName("")).toBe("gpt-5.5");
+    expect(modelName("   ")).toBe("gpt-5.5");
+  });
+
+  test("a padded name is the name", () => {
+    expect(modelName(" gpt-5.5 ")).toBe("gpt-5.5");
+  });
+
+  test("the models this Bot cannot drive are refused", () => {
+    expect(modelIsUnusable("gpt-5.6-terra")).toBe(true);
+    expect(modelIsUnusable("gpt-6")).toBe(true);
+    expect(modelIsUnusable("gpt-5.5")).toBe(false);
+  });
+
+  test("padding does not get one past the guard", () => {
+    expect(modelIsUnusable(modelName(" gpt-5.6-terra"))).toBe(true);
+    expect(modelIsUnusable(modelName("\tgpt-6 "))).toBe(true);
   });
 });
