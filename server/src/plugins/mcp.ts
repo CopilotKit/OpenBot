@@ -52,9 +52,19 @@ export function resultText(content: unknown): {
   const joined = parts
     .map((part) => {
       if (!part || typeof part !== "object") return "[unknown]";
-      const item = part as { type?: string; text?: string };
+      const item = part as {
+        type?: string;
+        text?: string;
+        resource?: { text?: unknown } | null;
+      };
       if (item.type === "text" && typeof item.text === "string") {
         return item.text;
+      }
+      // An embedded resource with text in it is text, and often the answer itself: GitHub's MCP
+      // server returns a file it read as one, beside a line saying the download worked. A resource
+      // carrying bytes (`blob`) has no text to read and is named below like any other part.
+      if (item.type === "resource" && typeof item.resource?.text === "string") {
+        return item.resource.text;
       }
       // A non-text part is named rather than dropped. A model told "[image]" can say the tool
       // returned an image; a model handed nothing concludes the tool returned nothing.

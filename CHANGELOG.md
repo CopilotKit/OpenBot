@@ -16,6 +16,14 @@ more than 600 MB for one call, on the process that serves everybody else. The co
 reading once it has more than it can show and cancels the rest of the download. What the Bot is shown
 is unchanged, except that the note on a cut file no longer gives the file's full length, which is no
 longer known.
+### A Bot reads the text an MCP server returns as an embedded resource
+
+A tool result can carry an embedded resource, and a text resource holds content, such as a file the
+server read. The MCP connector passed text parts to the Bot and named every other part, so a text
+resource reached the model as `[resource]` and its contents were dropped. GitHub's MCP server answers
+`get_file_contents` for a text file this way: the Bot was told the download worked and never saw the
+file. The text of an embedded resource is now passed on like a text part. A resource that carries
+bytes is still named.
 
 ### The Google Drive connector reaches files in shared drives
 
