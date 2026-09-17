@@ -25,6 +25,7 @@ async function withProject(
     await mkdir(join(appDir, "src/lib/generated"), { recursive: true });
     await mkdir(join(appDir, "dist"), { recursive: true });
     await mkdir(join(rootDir, "examples/brand"), { recursive: true });
+    await mkdir(join(rootDir, "shared"), { recursive: true });
     await writeFile(join(rootDir, "package.json"), '{"version":"1.2.3"}\n');
     await writeFile(join(rootDir, "bun.lock"), "lock-a\n");
     await writeFile(join(appDir, "package.json"), '{"version":"0.0.0"}\n');
@@ -36,6 +37,10 @@ async function withProject(
       "export const appConfig = { brand: { tenantId: 'a' } };\n",
     );
     await writeFile(join(rootDir, "examples/brand/brand.yaml"), "name: A\n");
+    await writeFile(
+      join(rootDir, "shared/attachments.ts"),
+      "export const MAX_ATTACHMENTS_PER_MESSAGE = 8;\n",
+    );
     await writeFile(join(appDir, "dist/index.html"), "<html></html>\n");
     await callback({ rootDir, appDir });
   } finally {
@@ -76,6 +81,11 @@ describe("production build cache", () => {
     ["root package version", "package.json", '{"version":"1.2.4"}\n'],
     ["app package manifest", "app/package.json", '{"version":"0.0.1"}\n'],
     ["tenant branding", "examples/brand/brand.yaml", "name: B\n"],
+    [
+      "a shared module the app imports",
+      "shared/attachments.ts",
+      "export const MAX_ATTACHMENTS_PER_MESSAGE = 10;\n",
+    ],
   ] as const)(
     "rejects a build when %s changes",
     async (_name, path, contents) => {
