@@ -307,8 +307,11 @@ const driveQuery = (query: string) => {
  * transports. The empty case is the one that matters: a search that matched nothing has to SAY so,
  * because an empty string reads to a model as "the tool had nothing to say" and gets filled in from
  * memory — which for a knowledge connector is the exact failure the lane exists to prevent.
+ *
+ * `cut` is true when reading stopped before the file ended (see {@link readOpening}), so the file's
+ * full length is not known and is not claimed.
  */
-function asResult(text: string): McpCallResult {
+function asResult(text: string, cut = false): McpCallResult {
   const joined = text.trim();
   if (joined === "") {
     return {
@@ -317,14 +320,44 @@ function asResult(text: string): McpCallResult {
       truncated: false,
     };
   }
-  if (joined.length <= MAX_RESULT_CHARS) {
+  if (joined.length <= MAX_RESULT_CHARS && !cut) {
     return { text: joined, isError: false, truncated: false };
   }
   return {
-    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: ${cut ? "the file is longer than this" : `the tool returned ${joined.length} characters`}]`,
     isError: false,
     truncated: true,
   };
+}
+
+/**
+ * As much of a file's text as a result can show, and whether there was more.
+ *
+ * `response.text()` held the whole download as one string before all but its opening was dropped,
+ * so a 200 MB log raised the process's memory by more than 600 MB to return 20,000 characters, on
+ * the same process that serves everybody else. Reading stops once there is more than a result can
+ * carry, and the rest of the body is cancelled rather than downloaded.
+ *
+ * Decoded the way `response.text()` decodes: UTF-8, with a byte order mark dropped and anything
+ * malformed replaced.
+ */
+async function readOpening(
+  response: Response,
+): Promise<{ text: string; cut: boolean }> {
+  if (!response.body) return { text: "", cut: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return { text: text + decoder.decode(), cut: false };
+      text += decoder.decode(value, { stream: true });
+      if (text.length > MAX_RESULT_CHARS) return { text, cut: true };
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
 }
 
 const failure = (message: string): McpCallResult => ({
@@ -447,9 +480,9 @@ export async function callTool(
         });
     if (!content.ok) return failure(content.message);
 
-    const text = await content.response.text();
+    const { text, cut } = await readOpening(content.response);
     // Named, because a model handed only the body cannot cite what it read.
-    return asResult(`${file.name ?? fileId}\n\n${text}`);
+    return asResult(`${file.name ?? fileId}\n\n${text}`, cut);
   }
 
   return failure(

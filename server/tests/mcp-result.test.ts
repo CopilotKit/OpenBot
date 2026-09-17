@@ -63,6 +63,45 @@ describe("a result with something in it", () => {
     expect(resultText([{}]).text).toBe("[unknown]");
   });
 
+  test("reads the text of an embedded resource, as a server returns a file it read", () => {
+    // The shape GitHub's MCP server answers `get_file_contents` with for a text file: a line saying
+    // the download worked, then the file itself as an embedded resource. Named as "[resource]", the
+    // model was told the file arrived and never shown what was in it.
+    expect(
+      resultText([
+        { type: "text", text: "successfully downloaded text file (SHA: abc)" },
+        {
+          type: "resource",
+          resource: {
+            uri: "repo://octo/docs/contents/README.md",
+            mimeType: "text/markdown",
+            text: "# Expense policy\n\nMeals under $75 need no receipt.",
+          },
+        },
+      ]).text,
+    ).toBe(
+      "successfully downloaded text file (SHA: abc)\n# Expense policy\n\nMeals under $75 need no receipt.",
+    );
+  });
+
+  test("still names an embedded resource that carries bytes rather than text", () => {
+    expect(
+      resultText([
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///logo.png",
+            mimeType: "image/png",
+            blob: "iVBORw0KGgo=",
+          },
+        },
+      ]).text,
+    ).toBe("[resource]");
+    expect(resultText([{ type: "resource", resource: null }]).text).toBe(
+      "[resource]",
+    );
+  });
+
   test("names a null or non-object part rather than throwing", () => {
     // Content arrives from a vendor's server; a null entry must not throw.
     expect(resultText([null]).text).toBe("[unknown]");
