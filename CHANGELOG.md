@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot reads the text an MCP server returns as an embedded resource
+
+A tool result can carry an embedded resource, and a text resource holds content, such as a file the
+server read. The MCP connector passed text parts to the Bot and named every other part, so a text
+resource reached the model as `[resource]` and its contents were dropped. GitHub's MCP server answers
+`get_file_contents` for a text file this way: the Bot was told the download worked and never saw the
+file. The text of an embedded resource is now passed on like a text part. A resource that carries
+bytes is still named.
+
 ### The Google Drive connector reaches files in shared drives
 
 Drive leaves shared drive items out of any `files.get` or `files.list` request that does not say it
