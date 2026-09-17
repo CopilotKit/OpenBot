@@ -487,18 +487,20 @@ const CHATGPT_RELAY: u16 = 1456;
 fn publish_chatgpt_callback(
     command: &mut std::process::Command,
     engine: crate::engine::Engine,
-    windows: bool,
+    os: &str,
 ) {
-    // Windows Podman's IPv6 forward accepts TCP but closes the callback without an HTTP
-    // response. That prevents localhost clients from trying the working IPv4 address:
-    // Happy Eyeballs stops at the first successful TCP handshake (RFC 8305, sections 5/9.2).
-    // Publish only IPv4 there so localhost falls back after IPv6 connection refusal.
-    // Keep the registered localhost redirect URI and the other runtimes' bindings unchanged.
-    let hosts: &[&str] = if windows && engine == crate::engine::Engine::Podman {
-        &["127.0.0.1"]
-    } else {
-        &["127.0.0.1", "[::1]"]
-    };
+    // macOS Podman clears HostIP inside its VM, so dual loopback publishes become duplicate
+    // mappings and rootlessport rejects them with "conflict with ID 1". See Podman's
+    // libpod/networking_common.go::convertPortMappings. Windows Podman's IPv6 forward instead
+    // accepts TCP but drops HTTP, preventing localhost from trying IPv4 (RFC 8305, sections 5/9.2).
+    // Publish IPv4 only on these hosts: IPv6 refuses, allowing the registered localhost callback
+    // to reach IPv4. Docker and native Linux Podman retain both loopback bindings.
+    let hosts: &[&str] =
+        if matches!(os, "windows" | "macos") && engine == crate::engine::Engine::Podman {
+            &["127.0.0.1"]
+        } else {
+            &["127.0.0.1", "[::1]"]
+        };
     for host in hosts {
         command.arg("-p");
         command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
@@ -623,9 +625,9 @@ impl SigningInToChatGpt {
          *
          * The container's relay listens on `CHATGPT_RELAY` and forwards to the login's own
          * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine.
-         * publish_chatgpt_callback handles the Windows Podman IPv6 forwarding limitation.
+         * publish_chatgpt_callback handles the macOS and Windows Podman forwarding limitations.
          */
-        publish_chatgpt_callback(&mut command, engine.engine, cfg!(windows));
+        publish_chatgpt_callback(&mut command, engine.engine, std::env::consts::OS);
         command.arg(image);
         command.arg("python");
         command.arg("-u");
@@ -884,15 +886,17 @@ fn main() {
     }
 
     #[test]
-    fn chatgpt_callback_uses_ipv4_only_for_windows_podman() {
-        for (engine, windows, hosts) in [
-            (Engine::Podman, true, vec!["127.0.0.1"]),
-            (Engine::Podman, false, vec!["127.0.0.1", "[::1]"]),
-            (Engine::Docker, true, vec!["127.0.0.1", "[::1]"]),
-            (Engine::Docker, false, vec!["127.0.0.1", "[::1]"]),
+    fn chatgpt_callback_uses_one_loopback_mapping_for_macos_and_windows_podman() {
+        for (engine, os, hosts) in [
+            (Engine::Podman, "windows", vec!["127.0.0.1"]),
+            (Engine::Podman, "macos", vec!["127.0.0.1"]),
+            (Engine::Podman, "linux", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "windows", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "macos", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "linux", vec!["127.0.0.1", "[::1]"]),
         ] {
             let mut command = crate::quiet::command(engine.binary());
-            publish_chatgpt_callback(&mut command, engine, windows);
+            publish_chatgpt_callback(&mut command, engine, os);
             let args: Vec<_> = command
                 .get_args()
                 .map(|arg| arg.to_str().unwrap())
@@ -901,7 +905,7 @@ fn main() {
                 .into_iter()
                 .flat_map(|host| ["-p".into(), format!("{host}:1455:1456")])
                 .collect();
-            assert_eq!(args, expected, "{engine:?}, Windows={windows}");
+            assert_eq!(args, expected, "{engine:?}, OS={os}");
         }
     }
 

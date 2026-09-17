@@ -204,7 +204,7 @@ fn digest_of(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// A fresh Windows account has no developer tools. Acquire the host runtime as that user,
+/// A fresh Mac or Windows account has no developer tools. Acquire the host runtime as that user,
 /// without changing PATH or requiring an administrator. Existing installations remain usable.
 pub fn ensure_bun(cache: &Path, existing: Option<PathBuf>) -> Result<PathBuf, Problem> {
     ensure_bun_with(existing, || install_bun(cache))
@@ -220,22 +220,30 @@ fn ensure_bun_with(
     }
 }
 
-#[cfg(any(windows, test))]
-fn bun_download(arch: &str) -> Result<Download, Problem> {
+#[cfg(any(windows, target_os = "macos", test))]
+fn bun_download(os: &str, arch: &str) -> Result<Download, Problem> {
     // Official bun-v1.3.14/SHASUMS256.txt. The baseline x64 build also supports older CPUs.
-    let (file, sha256) = match arch {
-        "x86_64" => (
+    let (file, sha256) = match (os, arch) {
+        ("windows", "x86_64") => (
             "bun-windows-x64-baseline.zip",
             "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f",
         ),
-        "aarch64" => (
+        ("windows", "aarch64") => (
             "bun-windows-aarch64.zip",
             "89841f5a57f2348b67ec0839b718f4bf4ea7d07c371c9ba4b77b6c790f918953",
+        ),
+        ("macos", "x86_64") => (
+            "bun-darwin-x64-baseline.zip",
+            "3e35ad6f53971a9834bf9e6786e2adf72b5f1921cc9a9c5fde073d2972944076",
+        ),
+        ("macos", "aarch64") => (
+            "bun-darwin-aarch64.zip",
+            "d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620",
         ),
         _ => {
             return Err(Problem::with(
                 "OpenBot cannot install its app runtime on this kind of computer.",
-                format!("no Bun {BUN} Windows build for {arch}"),
+                format!("no Bun {BUN} build for {os} on {arch}"),
             ))
         }
     };
@@ -246,10 +254,14 @@ fn bun_download(arch: &str) -> Result<Download, Problem> {
     })
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn install_bun(cache: &Path) -> Result<PathBuf, Problem> {
-    let download = bun_download(std::env::consts::ARCH)?;
-    let entry = format!("{}/bun.exe", download.file.trim_end_matches(".zip"));
+    let download = bun_download(std::env::consts::OS, std::env::consts::ARCH)?;
+    let entry = format!(
+        "{}/bun{}",
+        download.file.trim_end_matches(".zip"),
+        std::env::consts::EXE_SUFFIX,
+    );
     let into = crate::acquire::download_dir(cache).join(format!("bun-{BUN}"));
     install_bun_with(
         &into,
@@ -259,27 +271,27 @@ fn install_bun(cache: &Path) -> Result<PathBuf, Problem> {
     )
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn install_bun(_cache: &Path) -> Result<PathBuf, Problem> {
     Err(Problem::plain(
         "bun was not found, so the API server cannot be started",
     ))
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 fn install_bun_with(
     into: &Path,
     download: &Download,
     extract: impl FnOnce(&Path, &Path) -> Result<(), Problem>,
     verify: impl Fn(&Path) -> Result<(), Problem>,
 ) -> Result<PathBuf, Problem> {
-    let binary = into.join("bun.exe");
+    let binary = into.join(format!("bun{}", std::env::consts::EXE_SUFFIX));
     if binary.is_file() {
         verify(&binary)?;
         return Ok(binary);
     }
     let archive = fetch_verified(download, into)?;
-    let staged = into.join("bun.download.exe");
+    let staged = into.join(format!("bun.download{}", std::env::consts::EXE_SUFFIX));
     extract(&archive, &staged)?;
     verify(&staged)?;
     std::fs::rename(&staged, &binary).map_err(|error| unwritable(&binary, &error.to_string()))?;
@@ -326,7 +338,42 @@ try {
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "macos")]
+fn extract_bun(archive: &Path, target: &Path, entry: &str) -> Result<(), Problem> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // unzip ships with macOS itself. Use its absolute path and extract only the expected file;
+    // neither Xcode's command-line tools, Homebrew, nor a configured shell PATH is needed.
+    let file =
+        std::fs::File::create(target).map_err(|error| unwritable(target, &error.to_string()))?;
+    let output = crate::quiet::command("/usr/bin/unzip")
+        .arg("-p")
+        .arg(archive)
+        .arg(entry)
+        .stdout(file)
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not unpack its app runtime. Try again.",
+                error.to_string(),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not unpack its app runtime. Try again.",
+            format!(
+                "unzip {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755))
+        .map_err(|error| unwritable(target, &error.to_string()))?;
+    Ok(())
+}
+
+#[cfg(any(windows, target_os = "macos"))]
 fn verify_bun(binary: &Path) -> Result<(), Problem> {
     let output = crate::quiet::command(binary)
         .arg("--version")
@@ -729,8 +776,10 @@ mod tests {
         for download in [
             compose_download(),
             podman_download(),
-            bun_download("x86_64"),
-            bun_download("aarch64"),
+            bun_download("windows", "x86_64"),
+            bun_download("windows", "aarch64"),
+            bun_download("macos", "x86_64"),
+            bun_download("macos", "aarch64"),
         ]
         .into_iter()
         .flatten()
@@ -806,6 +855,83 @@ mod tests {
         (dir, download)
     }
 
+    #[cfg(target_os = "macos")]
+    fn macos_bun_zip_fixture(name: &str) -> (PathBuf, Download) {
+        use base64::Engine as _;
+
+        // A real ZIP containing only bun-fixture/bun: a /bin/sh script printing 1.3.14.
+        // Fixed bytes keep both digest verification and extraction in this offline regression.
+        let bytes = base64::engine::general_purpose::STANDARD.decode(
+            "UEsDBBQAAAAAAAAAIVwlsF+1HAAAABwAAAAPAAAAYnVuLWZpeHR1cmUvYnVuIyEvYmluL3NoCnByaW50ZiAnMS4zLjE0XG4nClBLAQIUAxQAAAAAAAAAIVwlsF+1HAAAABwAAAAPAAAAAAAAAAAAAACAAQAAAABidW4tZml4dHVyZS9idW5QSwUGAAAAAAEAAQA9AAAASQAAAAAA",
+        ).unwrap();
+        let root = temp_root(name);
+        std::fs::create_dir_all(&root).unwrap();
+        let download = Download {
+            url: "http://127.0.0.1:1/never-reached".into(),
+            sha256: "15be25bd806770f73afe7d2bab41ae26b2a380645e3100c60f391dc97ac0126e",
+            file: "bun-fixture.zip",
+        };
+        std::fs::write(root.join(download.file), bytes).unwrap();
+        (root, download)
+    }
+
+    #[test]
+    fn macos_runtime_downloads_are_pinned_for_both_supported_architectures() {
+        for (arch, file) in [
+            ("aarch64", "bun-darwin-aarch64.zip"),
+            ("x86_64", "bun-darwin-x64-baseline.zip"),
+        ] {
+            let download = bun_download("macos", arch).unwrap();
+            assert_eq!(download.file, file);
+            assert_eq!(
+                download.url,
+                format!("https://github.com/oven-sh/bun/releases/download/bun-v{BUN}/{file}")
+            );
+        }
+        assert!(bun_download("macos", "unsupported").is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_bun_installation_works_without_developer_tools() {
+        if crate::test_support::isolated_process(
+            "install::tests::macos_bun_installation_works_without_developer_tools",
+        ) {
+            return;
+        }
+        std::env::set_var("PATH", "/openbot-no-developer-tools");
+        let (root, download) = macos_bun_zip_fixture("bun Mac's fresh account");
+        let binary = ensure_bun_with(None, || {
+            install_bun_with(
+                &root,
+                &download,
+                |archive, target| extract_bun(archive, target, "bun-fixture/bun"),
+                verify_bun,
+            )
+        })
+        .unwrap();
+        assert_eq!(binary, root.join("bun"));
+        verify_bun(&binary).unwrap();
+        assert!(!root.join("bun.download").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_missing_bun_archive_entry_is_not_published_or_run() {
+        let (root, download) = macos_bun_zip_fixture("bun Mac missing entry");
+        let failure = install_bun_with(
+            &root,
+            &download,
+            |archive, target| extract_bun(archive, target, "missing/bun"),
+            |_| panic!("a missing archive entry must not be run"),
+        )
+        .unwrap_err();
+        assert!(failure.detail.unwrap().contains("unzip"));
+        assert!(!root.join("bun").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_fresh_account_acquires_bun_before_returning_its_executable() {
         let (dir, download) = cached_bun_archive("bun-fresh-account");
@@ -815,21 +941,32 @@ mod tests {
                 &download,
                 |archive, target| {
                     assert_eq!(std::fs::read(archive).unwrap(), b"abc");
-                    assert!(!dir.join("bun.exe").exists());
+                    assert!(!dir
+                        .join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+                        .exists());
                     std::fs::write(target, b"executable").unwrap();
                     Ok(())
                 },
                 |target| {
                     assert_eq!(std::fs::read(target).unwrap(), b"executable");
-                    assert!(!dir.join("bun.exe").exists(), "verify before publishing");
+                    assert!(
+                        !dir.join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+                            .exists(),
+                        "verify before publishing"
+                    );
                     Ok(())
                 },
             )
         })
         .unwrap();
-        assert_eq!(binary, dir.join("bun.exe"));
+        assert_eq!(
+            binary,
+            dir.join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+        );
         assert_eq!(std::fs::read(binary).unwrap(), b"executable");
-        assert!(!dir.join("bun.download.exe").exists());
+        assert!(!dir
+            .join(format!("bun.download{}", std::env::consts::EXE_SUFFIX))
+            .exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -845,7 +982,7 @@ mod tests {
     #[test]
     fn an_acquired_bun_is_checked_and_reused_without_extracting_again() {
         let (dir, download) = cached_bun_archive("bun-reuse");
-        let binary = dir.join("bun.exe");
+        let binary = dir.join(format!("bun{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&binary, b"installed").unwrap();
         std::fs::remove_file(dir.join(download.file)).unwrap();
         let result = install_bun_with(
@@ -872,7 +1009,9 @@ mod tests {
             |_| panic!("failed extraction must not be executed"),
         );
         assert_eq!(result, Err(failure));
-        assert!(!dir.join("bun.exe").exists());
+        assert!(!dir
+            .join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+            .exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -892,7 +1031,9 @@ mod tests {
             )
         });
         assert_eq!(result, Err(failure));
-        assert!(!dir.join("bun.exe").exists());
+        assert!(!dir
+            .join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+            .exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -907,7 +1048,9 @@ mod tests {
             |_| panic!("an unverified runtime must not be run"),
         );
         assert!(result.unwrap_err().detail.is_some());
-        assert!(!dir.join("bun.exe").exists());
+        assert!(!dir
+            .join(format!("bun{}", std::env::consts::EXE_SUFFIX))
+            .exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 
