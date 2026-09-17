@@ -225,6 +225,9 @@ function BoundariesPage() {
         <div className="mt-3 flex gap-2">
           <Input
             aria-label="A rule, written in CEL"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             className="min-w-0 flex-1 font-mono text-xs"
             onChange={(event) => {
               setDraft(event.target.value);

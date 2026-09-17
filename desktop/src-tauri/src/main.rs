@@ -12,8 +12,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, problem::Problem, provider, pull_metrics, quiet, stack, supervise, telemetry, tray,
-    windows as win,
+    install, preparation, problem::Problem, provider, pull_metrics, quiet, stack, supervise,
+    telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -41,6 +41,8 @@ struct Shell {
     startup: Mutex<()>,
     /// A cancelled attempt must finish returning its unpublished children before another starts.
     starting: std::sync::atomic::AtomicBool,
+    /// An explicit Stop must survive setup navigation; a new app session may resume again.
+    stopped_in_session: std::sync::atomic::AtomicBool,
     /// Quit keeps the event loop alive until one background cleanup attempt finishes.
     quit: std::sync::Arc<QuitState>,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
@@ -214,6 +216,8 @@ struct SavedConfiguration {
 struct AlreadyConfigured {
     values: std::collections::BTreeMap<String, String>,
     saved: SavedConfiguration,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    launch: Option<preparation::Launch>,
 }
 
 struct ReadyRespondingEngine {
@@ -367,12 +371,114 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
     Ok(engine::detect())
 }
 
+/// Complete all local software acquisition before either authentication screen is available.
+#[tauri::command]
+async fn prepare_installation(
+    app: tauri::AppHandle,
+    root: String,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<(), Problem> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let shell = app.state::<Shell>();
+        let attempt = StartAttempt::begin(&shell)?;
+        {
+            let shell = app.state::<Shell>();
+            let _startup = attempt.lock_current()?;
+            if shell.containers.lock().unwrap().is_some() || shell.root.lock().unwrap().is_some() {
+                return Err(Problem::plain(
+                    "Stop OpenBot before changing its local installation.",
+                ));
+            }
+            remember_selected_root(&shell, &root);
+        }
+        let address = tauri::async_runtime::block_on(engine_ready(&app))?.pin()?;
+        attempt.require_current()?;
+        tauri::async_runtime::block_on(deployment_ready(&app, &root))?;
+        let picked = harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
+        let handle = app.clone();
+        let _startup = attempt.lock_current()?;
+        if preparation::require(&root, Some(&harness), &address).is_ok() {
+            report(
+                &handle,
+                "installation",
+                true,
+                "Local software is already installed.",
+            );
+            return Ok(());
+        }
+        preparation::invalidate(&root)?;
+        if let Some(problem) = stack::deployment_problem(&root) {
+            return Err(Problem::from(problem));
+        }
+        report(
+            &handle,
+            "dependencies",
+            true,
+            "Preparing the app's dependencies.",
+        );
+        preparation::install_dependencies_if_needed(&root, || {
+            install::ensure_bun(&root, which_bun())
+        })?;
+        report(
+            &handle,
+            "dependencies",
+            true,
+            "The app's dependencies are installed.",
+        );
+        let settings = preparation::image_settings(&root, picked.as_ref())?;
+        let installed = picked
+            .as_ref()
+            .and_then(|picked| picked.installed_port())
+            .is_some();
+        let mut images = stack::installation_images(&address, &root, installed, &settings)?;
+        for published in [
+            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
+            openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
+        ] {
+            images.push(deployment::reference(&root, published)?);
+        }
+        images.sort();
+        images.dedup();
+        for (index, image) in images.iter().enumerate() {
+            attempt.require_current()?;
+            report(
+                &handle,
+                "images",
+                true,
+                format!(
+                    "Downloading local software ({}/{}).",
+                    index + 1,
+                    images.len()
+                ),
+            );
+            pull_metrics::pull_image(&address, image, |metrics| {
+                desktop_telemetry::pull_completed(&handle, metrics)
+            })?;
+        }
+        attempt.require_current()?;
+        preparation::complete(&root, harness.as_ref(), images, &address)?;
+        report(
+            &handle,
+            "installation",
+            true,
+            "Local software is installed. Continue to sign in.",
+        );
+        Ok::<(), Problem>(())
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "The local installation did not finish. Try again.",
+            error.to_string(),
+        )
+    })?
+}
+
 /// An engine that can run a container: installed, its machine up, and answering.
 ///
-/// ONE function, because three screens need it and they used to disagree. Start installed and
-/// created; both plan sign-ins only looked, and answered "No container engine is answering, so the
-/// sign-in cannot run" on a machine whose whole setup exists to put one there. That sentence named
-/// an obstacle and no way past it, on a screen where the way past it is ours to take.
+/// Called only by local installation. Authentication and launch check the prepared assets and
+/// never invoke acquisition or repair from inside a sign-in operation.
 ///
 /// Reported step by step rather than as one result, because these take minutes and a window with
 /// nothing moving in it reads as a hang.
@@ -492,9 +598,8 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
 
 /// Install the latest published deployment on first use, then keep its recorded version.
 ///
-/// Extracted from `start_stack` because Start is no longer the only thing that needs it: a plan
-/// sign-in runs a published image, and the reference for that image is read from the manifest this
-/// lays down. An installed deployment keeps its exact tag without consulting GitHub again.
+/// Local preparation fetches the manifest needed by both launch and plan sign-in images.
+/// An installed deployment keeps its exact tag without consulting GitHub again.
 async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
@@ -533,36 +638,18 @@ async fn deployment_ready<R: tauri::Runtime>(
 
 /// The reference for an image the shell runs directly, rather than through Compose.
 ///
-/// The deployment first, because the manifest that names the image is part of it. A sign-in on a
-/// machine that has never started the stack has no manifest yet, and building a name instead is
-/// what sent Podman to Docker Hub.
-async fn sign_in_image(
-    app: &tauri::AppHandle,
-    root: &Path,
-    published: &str,
-) -> Result<String, Problem> {
-    sign_in_image_with(
-        root,
-        published,
-        |ready_root| async move { deployment_ready(app, &ready_root).await },
-        deployment::reference,
-    )
-    .await
-}
-
-async fn sign_in_image_with<Ready, ReadyFuture, Reference>(
-    root: &Path,
-    published: &str,
-    deployment_ready: Ready,
-    reference: Reference,
-) -> Result<String, Problem>
-where
-    Ready: FnOnce(PathBuf) -> ReadyFuture,
-    ReadyFuture: std::future::Future<Output = Result<(), Problem>>,
-    Reference: FnOnce(&Path, &str) -> Result<String, String>,
-{
-    deployment_ready(root.to_path_buf()).await?;
-    sign_in_reference(root, published, reference)
+/// Require completed local installation before starting an authentication container.
+fn prepared_sign_in(root: &Path, published: &str) -> Result<(engine::Address, String), Problem> {
+    let status = engine::detect();
+    let address = status
+        .address
+        .filter(|_| status.responding)
+        .ok_or_else(|| preparation::required(status.detail))?
+        .pin()?;
+    preparation::require(root, None, &address)?;
+    let image = sign_in_reference(root, published, deployment::reference)?;
+    preparation::require_images(&address, std::slice::from_ref(&image))?;
+    Ok((address, image))
 }
 
 fn sign_in_reference(
@@ -851,6 +938,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
      * Nobody is asked to know this, which is the audience rule. The plan re-points the Bot, and
      * the window says which Bot it will be while there is still a screen to say it on.
      */
+    let requested_harness = harness.clone();
     let harness =
         match &credential {
             openbot_env::ModelCredential::ClaudePlan { .. } => harness::speaking_for("anthropic")
@@ -865,24 +953,19 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 }),
             _ => harness,
         };
-    let picked = harness::picked_after_deployment_ready(&root, harness.as_ref(), || async {
-        deployment_ready(&app, &root).await
-    })
-    .await
-    .map_err(|error| match error {
-        harness::PickedAfterDeploymentError::Deployment(problem) => problem,
+    let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
         // evidence, not the sentence: it names a published image, which is not a thing the
         // person chose or can change.
-        harness::PickedAfterDeploymentError::Harness(error) => Problem::with(
+        Problem::with(
             "This version of OpenBot does not include the Bot you picked. Go back and choose \
                  another, or update OpenBot.",
             error,
-        ),
+        )
     })?;
 
-    let (logs, existing_bun, mut secrets) = {
+    let (logs, bun, mut secrets) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -907,6 +990,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         };
         let found = found.pin()?;
         acquire::prepare_for_compose(&found)?;
+        let bun = preparation::require(&root, Some(&requested_harness), &found)?;
 
         // Checked here as well as in the health gate, because the gate only runs when an engine had to
         // be installed. A machine that already had Podman skips all of that and arrives at Compose,
@@ -977,15 +1061,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // Set before Bun imports the runtime, and retained for supervised restarts.
         secrets.extend(desktop_telemetry::runtime_env(&app));
 
-        // Said before rather than after. On a machine that has never run OpenBot this pulls five
-        // images, and a person watching a button that says "Working" has no way to tell a download
-        // from a hang.
-        report(
-            &app,
-            "services",
-            true,
-            "pulling images and starting containers",
-        );
+        // Installation already verified these images. Start only raises the local containers;
+        // its no-pull policy sends missing assets back to the installation step.
+        report(&app, "services", true, "starting installed containers");
         /*
          * The harness's port, before the containers rather than after.
          *
@@ -1026,17 +1104,6 @@ async fn start_stack_inner<R: tauri::Runtime>(
          * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
          */
         let bundled_bots = stack::BundledBots::for_credential(&credential);
-        attempt.require_current()?;
-        stack::pull(
-            &found,
-            &root,
-            installed_harness,
-            bundled_bots,
-            &secrets,
-            |metrics| {
-                desktop_telemetry::pull_completed(&app, metrics);
-            },
-        )?;
         attempt.require_current()?;
         // Even a failed up can have started some services. Keep their root until down succeeds.
         *shell.containers.lock().unwrap() = Some(ContainerDeployment {
@@ -1087,26 +1154,8 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let logs = root.join(".logs");
-        let bun = which_bun();
-
         (logs, bun, secrets)
     };
-
-    // The source alone will not run: without this the server stops at a package it cannot resolve
-    // and the app at a missing `vite`, neither of which mentions dependencies.
-    report(&app, "dependencies", true, "installing");
-    let bun = {
-        let target = root.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let bun = install::ensure_bun(&target, existing_bun)?;
-            stack::install_dependencies(&target, &bun).map_err(Problem::plain)?;
-            Ok::<_, Problem>(bun)
-        })
-        .await
-        .map_err(|error| format!("the install did not run: {error}"))?
-        .inspect_err(|error| report(&app, "dependencies", false, problem_detail(error.clone())))?
-    };
-    report(&app, "dependencies", true, "installed");
 
     // Never persisted or passed to Compose. Only the server process receives this credential;
     // model workers and frontend processes cannot impersonate the native approval transport.
@@ -1160,6 +1209,14 @@ async fn start_stack_inner<R: tauri::Runtime>(
     )
     .map_err(|error| Problem::with("Local folder access could not start.", error.to_string()))?;
     *shell.host_access.lock().unwrap() = Some(broker);
+    preparation::record_launch(&root, requested_harness.as_ref())?;
+    let config = app.path().app_config_dir().map_err(|error| {
+        Problem::with(
+            "OpenBot could not remember this installation for next time.",
+            error.to_string(),
+        )
+    })?;
+    preparation::save_selected_root(&config, &root)?;
     supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
 
     report(&app, "answering", true, "the API and the app are answering");
@@ -1227,6 +1284,9 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    shell
+        .stopped_in_session
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     shell
         .start_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2291,7 +2351,22 @@ same person: reading their own file back to them is not a disclosure. The key is
 anywhere, and only the settings the wizard asks about are read.
 */
 #[tauri::command]
-fn already_configured(root: String) -> AlreadyConfigured {
+fn already_configured<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+) -> AlreadyConfigured {
+    let mut configured = already_configured_for_root(root);
+    if app
+        .state::<Shell>()
+        .stopped_in_session
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        configured.launch = None;
+    }
+    configured
+}
+
+fn already_configured_for_root(root: String) -> AlreadyConfigured {
     let root = stack::root_from(&root);
     let env_file = root.join(".env");
     let mut values = openbot_desktop_lib::vault::already_given_file_only(
@@ -2324,6 +2399,7 @@ fn already_configured(root: String) -> AlreadyConfigured {
     };
     let claude_plan = values.remove("CLAUDE_CODE_OAUTH_TOKEN").is_some();
     AlreadyConfigured {
+        launch: preparation::launch(&root),
         saved: SavedConfiguration {
             intelligence_api_key: hint(
                 Category::Intelligence,
@@ -2376,16 +2452,8 @@ async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<Str
      * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
      * would make the sign-in depend on a choice that has nothing to do with it.
      */
-    // Set up rather than refused. The sign-in runs in a container, so it needs the same engine
-    // Start needs and the same deployment Start needs, and on a first run nothing has fetched or
-    // installed either yet.
-    let address = engine_ready(&app).await?;
-    let image = sign_in_image(&app, &root, openbot_desktop_lib::plan::SIGN_IN_IMAGE).await?;
-    let telemetry_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        pull_metrics::pull_image(&address, &image, |metrics| {
-            desktop_telemetry::pull_completed(&telemetry_app, metrics);
-        })?;
+        let (address, image) = prepared_sign_in(&root, openbot_desktop_lib::plan::SIGN_IN_IMAGE)?;
         openbot_desktop_lib::plan::SigningIn::begin(&address, &image).map_err(Problem::from)
     })
     .await
@@ -2438,19 +2506,9 @@ async fn begin_chatgpt_sign_in(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    // Set up rather than refused: see `engine_ready`.
-    let address = engine_ready(&app).await?;
-    let image = sign_in_image(
-        &app,
-        &root,
-        openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-    )
-    .await?;
-    let telemetry_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        pull_metrics::pull_image(&address, &image, |metrics| {
-            desktop_telemetry::pull_completed(&telemetry_app, metrics);
-        })?;
+        let (address, image) =
+            prepared_sign_in(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)?;
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
     .await
@@ -2567,7 +2625,13 @@ fn which_bun() -> Option<PathBuf> {
         .map(|o| o.status.success())
         .unwrap_or(false)
     {
-        return Some(PathBuf::from("bun"));
+        if let Some(path) = std::env::var_os("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|directory| directory.join(if cfg!(windows) { "bun.exe" } else { "bun" }))
+                .find(|path| path.is_file())
+        }) {
+            return Some(path);
+        }
     }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -2900,6 +2964,7 @@ fn main() {
             windows_blocker,
             windows_blocker_instruction,
             prepare_engine,
+            prepare_installation,
             start_stack,
             stop_stack,
             show_openbot,
@@ -2942,6 +3007,14 @@ fn main() {
         })
         .setup(|app| {
             desktop_telemetry::initialize(app.handle());
+            if let Some(root) = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .and_then(|config| preparation::selected_root(&config))
+            {
+                remember_selected_root(&app.state::<Shell>(), &root);
+            }
             // Where the Compose provider OpenBot installs itself lives, told once so every engine
             // command can put it on the child's PATH. Before anything asks for an engine.
             engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
@@ -3463,12 +3536,29 @@ mod tests {
             }
             for legacy in ["", "INTELLIGENCE_API_KEY=synthetic-cpk\nOPENAI_API_KEY=synthetic-openai\nANTHROPIC_API_KEY=synthetic-anthropic\nCLAUDE_CODE_OAUTH_TOKEN=synthetic-claude\n"] {
                 std::fs::write(root.join(".env"), format!("INTELLIGENCE_API_URL=https://synthetic.example\n{legacy}")).unwrap();
-                let configured = already_configured(root.to_string_lossy().into_owned());
+                let configured = already_configured_for_root(root.to_string_lossy().into_owned());
                 assert_eq!(configured.values["INTELLIGENCE_API_URL"], "https://synthetic.example");
                 assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
             }
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn launch_never_downloads_missing_images() {
+        if test_support::isolated_process("tests::launch_never_downloads_missing_images") {
+            return;
+        }
+        let _path = SerializedPath::set_only_with("docker", "installation-boundary");
+        let root = temp_root("launch-without-installation");
+        std::fs::create_dir_all(&root).unwrap();
+        let address = engine::Address::new(engine::Engine::Docker, None);
+        let secrets = stack::Secrets::new();
+        let up = stack::up(&address, &root, false, stack::BundledBots::none(), &secrets);
+        let migrate = stack::migrate(&address, &root, &secrets);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(up.is_ok(), "{up:?}");
+        assert!(migrate.is_ok(), "{migrate:?}");
     }
 
     #[test]
@@ -3492,30 +3582,24 @@ mod tests {
     }
 
     #[test]
-    fn plan_sign_in_boundary_uses_selected_root_for_deploy_and_reference() {
+    fn plan_sign_in_boundary_uses_selected_root_for_reference_without_acquisition() {
         let default = temp_root("signin-default-root");
         let selected = temp_root("signin-selected-root");
         std::fs::create_dir_all(&default).unwrap();
         std::fs::create_dir_all(&selected).unwrap();
         std::fs::write(default.join("manifest.json"), "poisoned-default").unwrap();
-        let ready_root = std::cell::RefCell::new(None);
         let reference_root = std::cell::RefCell::new(None);
 
-        let image = tauri::async_runtime::block_on(sign_in_image_with(
+        let image = sign_in_reference(
             &selected,
             openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE,
-            |root| {
-                *ready_root.borrow_mut() = Some(root);
-                async { Ok(()) }
-            },
             |root, published| {
                 *reference_root.borrow_mut() = Some((root.to_path_buf(), published.to_string()));
                 Ok(format!("{}@{}", published, root.display()))
             },
-        ))
+        )
         .unwrap();
 
-        assert_eq!(ready_root.into_inner(), Some(selected.clone()));
         assert_eq!(
             reference_root.into_inner(),
             Some((
@@ -3582,8 +3666,8 @@ mod tests {
         )
         .unwrap();
         let typed = format!(" \n{}\t ", root.display());
-        let configured = already_configured(typed);
-        let normal = already_configured(root.to_string_lossy().into_owned());
+        let configured = already_configured_for_root(typed);
+        let normal = already_configured_for_root(root.to_string_lossy().into_owned());
         assert_eq!(configured.values, normal.values);
         assert_eq!(
             configured.values.get("INTELLIGENCE_API_URL"),
@@ -3608,7 +3692,7 @@ mod tests {
         )
         .unwrap();
 
-        let configured = already_configured(root.to_string_lossy().into_owned());
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
 
         assert_eq!(
             configured.values.get("INTELLIGENCE_API_KEY"),
@@ -3635,7 +3719,7 @@ mod tests {
             "CLAUDE_CODE_OAUTH_TOKEN=synthetic-legacy-plan\n",
         )
         .unwrap();
-        let configured = already_configured(root.to_string_lossy().into_owned());
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
 
         assert_eq!(configured.saved.model_sessions.anthropic, Some(true));
         assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
@@ -3688,7 +3772,7 @@ mod tests {
             if let Some(input) = input {
                 std::fs::write(root.join(openbot_desktop_lib::saved_intent::FILE), input).unwrap();
             }
-            let unknown = already_configured(root.to_string_lossy().into_owned());
+            let unknown = already_configured_for_root(root.to_string_lossy().into_owned());
             assert_eq!(unknown.saved.intelligence_api_key, None);
             assert_eq!(unknown.saved.model_sessions.anthropic, None);
         }
@@ -3697,13 +3781,13 @@ mod tests {
             r#"{"version":1,"categories":["intelligence","claude-plan"],"model":"claude-plan"}"#,
         )
         .unwrap();
-        let recorded = already_configured(root.to_string_lossy().into_owned());
+        let recorded = already_configured_for_root(root.to_string_lossy().into_owned());
         assert_eq!(recorded.saved.intelligence_api_key, Some(true));
         assert_eq!(recorded.saved.model_sessions.anthropic, Some(true));
         assert_eq!(recorded.saved.model_api_keys.anthropic, None);
         assert_eq!(recorded.saved.model_sessions.openai, None);
         assert!(recorded.values.is_empty());
-        let fresh = already_configured(
+        let fresh = already_configured_for_root(
             temp_root("different-public-root")
                 .to_string_lossy()
                 .into_owned(),
@@ -3714,7 +3798,7 @@ mod tests {
             "ANTHROPIC_API_KEY=synthetic-legacy-anthropic\n",
         )
         .unwrap();
-        let legacy = already_configured(root.to_string_lossy().into_owned());
+        let legacy = already_configured_for_root(root.to_string_lossy().into_owned());
         assert_eq!(legacy.saved.model_api_keys.anthropic, Some(true));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -4117,7 +4201,7 @@ mod tests {
         chosen.api_key = Some("synthetic-endpoint-key".into());
         let credential = chosen.into_credential(&root).unwrap();
         persist_endpoint_fixture(&root, &credential);
-        let configured = already_configured(root.to_string_lossy().into_owned());
+        let configured = already_configured_for_root(root.to_string_lossy().into_owned());
         assert_eq!(
             configured.values.get("BOT_MODEL").map(String::as_str),
             Some("local-model")
@@ -4730,6 +4814,7 @@ fn main() {
     if words.first()==Some(&"machine") { println!("[]"); return; }
     if !base.join(format!("{engine}-ready")).exists() { eprintln!("synthetic original runtime unavailable"); std::process::exit(74); }
     match words.as_slice() {
+        ["image", "inspect", _] => (),
         ["version","--format",_] => println!("1.44"),
         ["info","--format","{{.Host.ServiceIsRemote}}"] => println!("false"),
         ["compose","version"] => println!("Synthetic Compose"),
@@ -4738,7 +4823,7 @@ fn main() {
             fs::write(cwd.join("fixture-containers-running"),&identity).unwrap();
             if cwd.join("fail-up").exists() { eprintln!("synthetic partial up failure");std::process::exit(71); }
         }
-        ["compose","run","--rm","migrate"] => { eprintln!("synthetic migration barrier");std::process::exit(72); }
+        ["compose","run","--rm","--pull","never","migrate"] => { eprintln!("synthetic migration barrier");std::process::exit(72); }
         ["compose","-f","docker-compose.yml","config","--format","json"] => println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"fixture\"}}}}}}}}"),
         ["compose","-f","docker-compose.yml","stop","supervisor"] => (),
         ["ps","--quiet","--filter",_,"--filter",_] => (),
@@ -5611,33 +5696,33 @@ fn main() {
         let mut choice = serde_json::json!({"id":"byo-url", "agentUrl":remote});
         let (expected_up, expected_image) = match case {
             "remote" | "remote-stale-image" => (
-                "compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph",
+                "compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph",
                 None,
             ),
             "anthropic-api" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"api-key", "apiKey":"synthetic-anthropic-key"});
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-langgraph agent-harness", Some("agent-langgraph-agui"))
             }
             "compatible" => {
                 model = serde_json::json!({"provider":"openai-compatible", "login":"endpoint", "baseUrl":"http://127.0.0.1:11434/v1", "model":"synthetic-model", "apiKey":""});
-                ("compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph", None)
+                ("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph", None)
             }
             "installed" => {
                 choice = serde_json::json!({"id":"langgraph"});
-                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph agent-harness", Some("agent-langgraph-agui"))
             }
             "none" => {
                 choice = serde_json::Value::Null;
-                ("compose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph", None)
+                ("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph", None)
             }
             "chatgpt-plan" => {
                 model = serde_json::json!({"provider":"openai", "login":"plan", "token":"{\"refresh_token\":\"synthetic-plan\"}"});
-                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-harness", Some("agent-langgraph-agui"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-harness", Some("agent-langgraph-agui"))
             }
             "claude-plan" => {
                 model = serde_json::json!({"provider":"anthropic", "login":"plan", "token":"synthetic-claude-plan"});
-                ("compose --profile harness up -d --no-build postgres supervisor agent-computer agent-harness", Some("agent-claude-sdk"))
+                ("compose --profile harness up -d --no-build --pull never postgres supervisor agent-computer agent-harness", Some("agent-claude-sdk"))
             }
             _ => panic!("unknown test case"),
         };
@@ -5684,6 +5769,14 @@ fn main() {
             )
             .map(|body| body.deserialize::<serde_json::Value>().unwrap())
         };
+        let prepared_choice: Option<harness::HarnessChoice> =
+            serde_json::from_value(choice.clone()).unwrap();
+        preparation::record(
+            &root,
+            prepared_choice.as_ref(),
+            vec!["fixture-image".into()],
+        )
+        .unwrap();
         let problem = invoke("start_stack", serde_json::json!({
             "root":root, "apiUrl":"https://intelligence.example.test", "gatewayWsUrl":"wss://gateway.example.test",
             "apiKey":"synthetic-intelligence-key", "model":model, "harness":choice,
@@ -5708,7 +5801,7 @@ fn main() {
             vec![expected_up],
             "case={case}, actual Start IPC commands:\n{commands}"
         );
-        assert!(commands.contains("\tcompose run --rm migrate\n"));
+        assert!(commands.contains("\tcompose run --rm --pull never migrate\n"));
         assert!(!root.join(".logs").exists(), "no host runtime was launched");
         let settings = openbot_env::read_already_set(
             &root.join(".env"),
@@ -5916,9 +6009,9 @@ fn main() {
             "{commands}"
         );
         assert!(commands.contains("\tcompose version\n"), "{commands}");
-        assert!(commands.contains("\tcompose up -d --no-build postgres supervisor agent-computer agent-bot agent-langgraph\n"), "{commands}");
+        assert!(commands.contains("\tcompose up -d --no-build --pull never postgres supervisor agent-computer agent-bot agent-langgraph\n"), "{commands}");
         assert!(
-            commands.contains("\tcompose run --rm migrate\n"),
+            commands.contains("\tcompose run --rm --pull never migrate\n"),
             "{commands}"
         );
         assert!(
@@ -5982,13 +6075,13 @@ fn main() {
         let commands = std::fs::read_to_string(&record).expect("command record");
         assert!(
             commands.contains(
-                "\tcompose up -d --no-build postgres supervisor agent-computer agent-langgraph\n"
+                "\tcompose up -d --no-build --pull never postgres supervisor agent-computer agent-langgraph\n"
             ),
             "{commands}"
         );
         assert!(
             !commands
-                .contains("compose up -d --no-build postgres supervisor agent-computer agent-bot"),
+                .contains("compose up -d --no-build --pull never postgres supervisor agent-computer agent-bot"),
             "Anthropic Start must not target the OpenAI-only agent-bot: {commands}"
         );
         assert_eq!(problem.said, "Part of OpenBot stopped during startup.");
@@ -6531,6 +6624,12 @@ fn main() {
         )
         .unwrap();
         deployment::record(root, DEPLOYMENT_VERSION).unwrap();
+        for package in ["", "server", "worker"] {
+            std::fs::write(root.join(package).join("package.json"), "{}").unwrap();
+        }
+        std::fs::write(root.join("bun.lock"), "synthetic-lock").unwrap();
+        preparation::record_dependencies(root, Path::new("bun")).unwrap();
+        preparation::record(root, None, vec!["fixture-image".into()]).unwrap();
     }
 
     struct TestRequest {
@@ -8041,6 +8140,7 @@ fn main() {
             let bin = temp_root("openbot-fake-engine-bin");
             std::fs::create_dir_all(&bin).unwrap();
             Self::write_binary_under(&bin, binary, scenario);
+            Self::write_binary_under(&bin, "bun", "runtime");
             let mut path = std::ffi::OsString::from(bin.clone());
             if inherit_path {
                 if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {

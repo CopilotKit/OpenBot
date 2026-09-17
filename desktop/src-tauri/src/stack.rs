@@ -179,10 +179,53 @@ fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command 
     command
 }
 
+/// Resolve only image references, using public installation overrides before credentials exist.
+pub fn installation_images(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    settings: &Secrets,
+) -> Result<Vec<String>, Problem> {
+    let mut requested = selected_services(harness, BundledBots::openai_compatible());
+    requested.push("migrate");
+    let mut command = compose_command(engine, root, settings);
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    let output = command
+        .args(["config", "--images"])
+        .args(requested)
+        .output()
+        .map_err(|e| {
+            Problem::with(
+                "OpenBot could not check which software to install.",
+                e.to_string(),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not check which software to install.",
+            command_said(&output.stderr),
+        ));
+    }
+    let images: std::collections::BTreeSet<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    if images.is_empty() {
+        return Err(Problem::plain(
+            "This deployment does not identify the software OpenBot needs to install.",
+        ));
+    }
+    Ok(images.into_iter().collect())
+}
+
 /// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
 /// Keep this separate from `up`: image transfer must not include container startup or migrations.
-/// Older providers without a missing-only pull policy retain the existing implicit pull in `up`;
-/// no pull metric is reported for that unmeasurable path.
+/// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
+/// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
 pub fn pull(
     engine: &Address,
     root: &Path,
@@ -236,7 +279,7 @@ pub fn up(
         command.args(["--profile", "harness"]);
     }
     let output = command
-        .args(["up", "-d", "--no-build"])
+        .args(["up", "-d", "--no-build", "--pull", "never"])
         .args(&requested)
         .output()
         .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
@@ -263,11 +306,10 @@ pub fn migrate(
     root: &Path,
     secrets: &Secrets,
 ) -> Result<(), crate::problem::Problem> {
-    // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
-    // than on anything to do with migrations. Building is prevented the other way, by
-    // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
+    // The installation step supplies this image. `run` does not accept `--no-build`, and its
+    // explicit no-pull policy must report a missing image without starting another download.
     let output = compose_command(engine, root, secrets)
-        .args(["run", "--rm", "migrate"])
+        .args(["run", "--rm", "--pull", "never", "migrate"])
         .output()
         .map_err(|error| format!("could not run migrations: {error}"))?;
 

@@ -268,6 +268,7 @@ impl SigningIn {
             command.arg(argument);
         }
         command.arg("run");
+        command.arg("--pull=never");
         command.arg("--rm");
         command.arg("-i");
         command.arg("-t");
@@ -615,6 +616,7 @@ impl SigningInToChatGpt {
         let mut command = crate::quiet::command(binary);
         command.args(arguments);
         command.arg("run");
+        command.arg("--pull=never");
         command.arg("--rm");
         /*
          * Published on loopback only, and on the number the vendor's login advertises.
@@ -771,6 +773,43 @@ pub fn openai_url_in(output: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::engine::Engine;
+
+    #[test]
+    fn subscription_containers_never_download_software() {
+        if crate::test_support::isolated_process(
+            "plan::tests::subscription_containers_never_download_software",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("subscription-without-downloads");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("docker.rs");
+        std::fs::write(&source, r#"
+use std::io::Write;
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    assert_eq!(args.first().map(String::as_str), Some("run"));
+    assert!(args.iter().any(|arg| arg == "--pull=never"), "subscription login must refuse missing images");
+    print!("\x1b]8;;https://claude.ai/oauth/authorize?synthetic=prepared\x1b\\Sign in\x1b]8;;\x1b\\\r\n");
+    println!("https://auth.openai.com/oauth/authorize?synthetic=prepared");
+    std::io::stdout().flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(30));
+}
+"#).unwrap();
+        crate::test_support::compile_fixture(
+            &source,
+            &root.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+        );
+        std::env::set_var("PATH", &root);
+        let address = crate::engine::Address::new(Engine::Docker, None);
+        let (mut claude, url) = SigningIn::begin(&address, "synthetic-claude").unwrap();
+        assert!(url.contains("synthetic=prepared"));
+        claude.stop();
+        let (mut chatgpt, url) = SigningInToChatGpt::begin(&address, "synthetic-chatgpt").unwrap();
+        assert!(url.contains("synthetic=prepared"));
+        chatgpt.stop();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     #[cfg(windows)]

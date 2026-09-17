@@ -192,6 +192,9 @@ test("a boundary rule is not saved by the Enter that confirms a composed charact
   );
 
   const field = await view.findByLabelText("A rule, written in CEL");
+  expect(field.getAttribute("spellcheck")).toBe("false");
+  expect(field.getAttribute("autocorrect")).toBe("off");
+  expect(field.getAttribute("autocapitalize")).toBe("off");
   const rule = 'contains(element.name, "送信")';
   await type(field, rule);
 

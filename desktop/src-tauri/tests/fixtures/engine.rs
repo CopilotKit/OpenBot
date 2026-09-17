@@ -12,6 +12,25 @@ fn main() {
         args.remove(0);
     }
     let joined = args.join(" ");
+    if SCENARIO == "runtime" {
+        assert_eq!(joined, "--version", "launch must not install dependencies");
+        println!("1.3.14");
+        return;
+    }
+    if joined.starts_with("image inspect ") {
+        return;
+    }
+    if SCENARIO == "installation-boundary" {
+        if joined.contains(" up ") || joined.contains(" run ") {
+            if !args.windows(2).any(|pair| pair == ["--pull", "never"]) {
+                eprintln!("launch may implicitly pull an uninstalled image: {joined}");
+                std::process::exit(61);
+            }
+            return;
+        }
+        eprintln!("unexpected installation boundary command: {joined}");
+        std::process::exit(62);
+    }
     if joined == "context show" {
         println!("fixture");
         return;
@@ -104,9 +123,10 @@ fn main() {
             }
         }
         value
-            if value.starts_with("compose up -d --no-build ")
-                || value.starts_with("compose --profile harness up -d --no-build ") => {}
-        "compose run --rm migrate" => {
+            if value.starts_with("compose up -d --no-build --pull never ")
+                || value
+                    .starts_with("compose --profile harness up -d --no-build --pull never ") => {}
+        "compose run --rm --pull never migrate" => {
             if SCENARIO == "harness" {
                 eprintln!("synthetic migration barrier");
                 std::process::exit(71);

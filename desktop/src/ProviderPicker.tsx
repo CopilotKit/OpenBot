@@ -57,7 +57,7 @@ export type HeldConfiguration = {
   saved?: SavedConfiguration;
 };
 
-function recordedModel(held: HeldConfiguration): ModelChoice | null {
+export function recordedModel(held: HeldConfiguration): ModelChoice | null {
   switch (held.saved?.model) {
     case "open-ai-api-key":
       return { provider: "openai", login: "api-key", saved: true };
@@ -153,9 +153,8 @@ export function ProviderPicker({
   /*
    * What the sign-in is doing, while it is doing it.
    *
-   * A plan sign-in runs in a container, so on a first run it installs the engine and boots its
-   * machine first, which is minutes. "Starting…" for that long is a hang as far as anybody
-   * watching is concerned, so the same steps the setup screen lists are shown here as one line.
+   * Local software is already installed before this screen. A plan sign-in starts its prepared
+   * container, and progress explains what is happening while its browser session opens.
    */
   const [progress, setProgress] = useState<string | null>(null);
   // A problem, not a string: a sign-in failure carries the container's own output, and
@@ -326,7 +325,7 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      <p className="steps-of">Step 2 of 2</p>
+      <p className="steps-of">Step 3 of 4</p>
       <h1>Connect your AI</h1>
       <p className="lede">
         Sign in to the plan you already pay for. No key needed.

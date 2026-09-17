@@ -112,14 +112,19 @@ fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
 
 /// Pull a provider sign-in image without starting its CLI or creating a container.
 /// A tiny stdin Compose project gives the same missing-only policy and JSON progress as setup.
-/// Providers without `pull --policy missing` retain their implicit pull and emit no metric.
+/// Older Compose providers use an explicit native pull after a local presence check.
 pub fn pull_image(
     engine: &Address,
     image: &str,
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
-    let Some(json_progress) = compose_pull_progress(engine) else {
+    if crate::preparation::image_present(engine, image)? {
         return Ok(());
+    }
+    let Some(json_progress) = compose_pull_progress(engine) else {
+        let mut command = engine.command();
+        command.args(["pull", image]);
+        return run(command, None, false, on_complete);
     };
     let mut command = engine.command();
     command.arg("compose");
@@ -213,6 +218,48 @@ pub(crate) fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_compose_explicitly_downloads_missing_images_and_reuses_cached_images() {
+        if crate::test_support::isolated_process("pull_metrics::tests::older_compose_explicitly_downloads_missing_images_and_reuses_cached_images") { return; }
+        let root = crate::test_support::temp_root("explicit-image-install");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("docker.rs");
+        std::fs::write(&source, r#"
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let executable = std::env::current_exe().unwrap();
+    let root = executable.parent().unwrap();
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["image", "inspect", image] => std::process::exit(if root.join(image).is_file() {0} else {1}),
+        ["compose", "pull", "--help"] => println!("--include-deps"),
+        ["pull", "synthetic-image"] => { std::fs::write(root.join("synthetic-image"), "installed").unwrap(); },
+        ["pull", "missing-image"] => { eprintln!("synthetic download failure"); std::process::exit(71); },
+        _ => panic!("no services or authentication may start while installing: {args:?}"),
+    }
+}
+"#).unwrap();
+        crate::test_support::compile_fixture(
+            &source,
+            &root.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+        );
+        std::env::set_var("PATH", &root);
+        let address = Address::new(crate::engine::Engine::Docker, None);
+        let mut outcomes = Vec::new();
+        pull_image(&address, "synthetic-image", |metric| {
+            outcomes.push(metric.outcome)
+        })
+        .unwrap();
+        pull_image(&address, "synthetic-image", |_| {
+            panic!("cached image must not be downloaded again")
+        })
+        .unwrap();
+        assert!(pull_image(&address, "missing-image", |metric| outcomes
+            .push(metric.outcome))
+        .is_err());
+        assert_eq!(outcomes, [Outcome::Success, Outcome::Failure]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn counts_each_shared_layer_once_and_ignores_extraction() {

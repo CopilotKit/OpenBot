@@ -10,6 +10,7 @@ pub mod host_access;
 pub mod install;
 pub mod intelligence;
 pub mod plan;
+pub mod preparation;
 pub mod problem;
 pub mod provider;
 pub mod pull_metrics;

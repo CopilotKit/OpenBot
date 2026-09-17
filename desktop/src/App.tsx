@@ -7,20 +7,21 @@ import {
   type HarnessChoice,
   HarnessPicker,
 } from "./HarnessPicker";
+import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { asProblem, Failure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
   ProviderPicker,
+  recordedModel,
 } from "./ProviderPicker";
-import { Welcome } from "./Welcome";
-import { isHttpEndpointUrl } from "./http-endpoint-url";
 import {
   harnessChoiceEvent,
   modelChoiceEvent,
   recordSetupEvent,
   type SetupStep,
 } from "./telemetry";
+import { Welcome } from "./Welcome";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -41,7 +42,16 @@ type Progress = { step: string; ok: boolean; detail: string };
 type AlreadyConfigured = {
   values: Record<string, string>;
   saved: NonNullable<HeldConfiguration["saved"]>;
+  launch?: { harness: HarnessChoice | null } | null;
 };
+
+function installationKeyFor(root: string, harness: HarnessChoice | null) {
+  return JSON.stringify([
+    root.trim(),
+    harness?.id ?? DEFAULT_HARNESS,
+    harness?.agentUrl?.trim() ?? "",
+  ]);
+}
 
 const MANAGED_INTELLIGENCE_API_URL = "https://api.intelligence.copilotkit.ai";
 const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
@@ -56,10 +66,6 @@ const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
  */
 const SUGGESTED_QUESTION = "What is 17 times 23?";
 
-/**
- * One screen, four states: something is in the way, nothing is set up yet, it is working, it is
- * running. A wizard with more screens than states is a wizard that asks twice.
- */
 export function App() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [blocker, setBlocker] = useState<Blocker | null>(null);
@@ -140,9 +146,24 @@ export function App() {
   const [wsUrl, setWsUrl] = useState(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [checkingResume, setCheckingResume] = useState(true);
+  const [preparation, setPreparation] = useState<{
+    key: string;
+    status: "preparing" | "complete" | "failed";
+  } | null>(null);
+  const installationKey = installationKeyFor(root, harness);
+  const installationReady =
+    preparation?.key === installationKey && preparation.status === "complete";
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
-    blockerFailure || blocker || (running && step !== "ask") ? null : step;
+    checkingResume ||
+    resuming ||
+    blockerFailure ||
+    blocker ||
+    (running && step !== "ask")
+      ? null
+      : step;
   const lastViewedStep = useRef<SetupStep | null>(null);
   useEffect(() => {
     if (visibleSetupStep === lastViewedStep.current) return;
@@ -209,16 +230,18 @@ export function App() {
       clearRootScopedSavedState();
       if (!trimmedRoot) return;
       try {
-        const { values, saved } = await invoke<AlreadyConfigured>(
+        const configured = await invoke<AlreadyConfigured>(
           "already_configured",
           { root: trimmedRoot },
         );
         if (configuredRunRef.current !== run) return;
+        const { values, saved } = configured;
         if (values.INTELLIGENCE_API_KEY) setApiKey(values.INTELLIGENCE_API_KEY);
         if (values.INTELLIGENCE_API_URL) setApiUrl(values.INTELLIGENCE_API_URL);
         if (values.INTELLIGENCE_GATEWAY_WS_URL)
           setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
         setAlreadyHeld({ ...values, saved });
+        return configured;
       } catch {
         if (configuredRunRef.current === run) {
           setAlreadyHeld({});
@@ -229,15 +252,43 @@ export function App() {
   );
 
   useEffect(() => {
+    let active = true;
     invoke<EngineStatus>("detect_engine")
       .then(setEngine)
       .catch(() => undefined);
+    const windowsReady = invoke<Blocker | null>("windows_blocker")
+      .then(async (found) => {
+        setBlocker(found);
+        if (found) {
+          setInstruction(
+            await invoke<string>("windows_blocker_instruction", {
+              blocker: found,
+            }),
+          );
+        }
+        return found === null;
+      })
+      .catch((error) => {
+        setBlockerFailure(asProblem(error));
+        return false;
+      });
+    // A supervisor that stopped retrying must stay stopped when it returns to this window.
+    const interruptedRun = invoke<Problem | null>("last_failure")
+      .then((found) => {
+        if (found) setRecoveryFailure(found);
+        return found;
+      })
+      .catch(() => null);
     Promise.all([
       invoke<string | null>("selected_root").catch(() => null),
       invoke<string>("default_root"),
+      windowsReady,
+      interruptedRun,
     ])
-      .then(async ([selected, fallback]) => {
+      .then(async ([selected, fallback, canResume, interrupted]) => {
+        if (!active) return;
         const found = selected || fallback;
+        if (!selected) setCheckingResume(false);
         setRoot(found);
         /*
          * Arrive filled in when a previous run already wrote these.
@@ -246,7 +297,8 @@ export function App() {
          * a dotfile in a text editor — the exact thing this product exists not to require. Their own
          * file, read back to them on their own machine.
          */
-        loadConfiguredRoot(found);
+        const configured = await loadConfiguredRoot(found);
+        if (!active) return;
         // A stack this app started may still be up from a previous window. Ask, rather than
         // offering to set up something that is already running.
         if (
@@ -257,29 +309,56 @@ export function App() {
           // Already up from a previous window: show it, rather than a screen about it.
           await invoke("show_openbot");
           setRunning(true);
+          return;
+        }
+        if (!active || !canResume || interrupted || !configured?.launch) return;
+        const resumedModel = recordedModel({
+          ...configured.values,
+          saved: configured.saved,
+        });
+        if (!resumedModel) return;
+        const resumedHarness = configured.launch.harness;
+        setHarness(resumedHarness);
+        setModel(resumedModel);
+        setPreparation({
+          key: installationKeyFor(found, resumedHarness),
+          status: "complete",
+        });
+        setStep("connect");
+        setBusy(true);
+        setResuming(true);
+        try {
+          // Only a successful previous setup supplies launch intent. Reopening uses its saved
+          // connections and already installed assets; the native start still validates both.
+          await invoke("start_stack", {
+            root: found,
+            apiKey: "",
+            apiUrl:
+              configured.values.INTELLIGENCE_API_URL ||
+              MANAGED_INTELLIGENCE_API_URL,
+            gatewayWsUrl:
+              configured.values.INTELLIGENCE_GATEWAY_WS_URL ||
+              MANAGED_INTELLIGENCE_GATEWAY_WS_URL,
+            model: resumedModel,
+            harness: resumedHarness,
+          });
+          if (!active) return;
+          setRunning(true);
+          setRecoveryFailure(null);
+          await invoke("show_openbot");
+        } catch (error) {
+          if (active) setRecoveryFailure(asProblem(error));
+        } finally {
+          if (active) {
+            setBusy(false);
+            setResuming(false);
+          }
         }
       })
-      .catch(() => undefined);
-    invoke<Blocker | null>("windows_blocker")
-      .then(async (found) => {
-        setBlocker(found);
-        if (found) {
-          setInstruction(
-            await invoke<string>("windows_blocker_instruction", {
-              blocker: found,
-            }),
-          );
-        }
-      })
-      .catch((error) => setBlockerFailure(asProblem(error)));
-    // Why the stack stopped, if it did while this screen was not loaded. The supervisor gives up
-    // and sends the window back here, and without this the person arrives at a setup screen with
-    // no indication that anything happened.
-    invoke<Problem | null>("last_failure")
-      .then((found) => {
-        if (found) setRecoveryFailure(found);
-      })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setCheckingResume(false);
+      });
     const stop = listen<Progress>("setup:progress", (event) => {
       // One row per step, updated in place. A step that reports twice is the same step saying
       // more, and a list that grows a line each time reads as a log rather than as progress.
@@ -294,18 +373,39 @@ export function App() {
       });
     });
     return () => {
+      active = false;
       stop.then((unlisten) => unlisten());
     };
   }, [loadConfiguredRoot]);
 
+  async function install() {
+    if (busy || !root.trim()) return;
+    setBusy(true);
+    setFailure(null);
+    setSteps([]);
+    setPreparation({ key: installationKey, status: "preparing" });
+    try {
+      await invoke("prepare_installation", { root: root.trim(), harness });
+      setPreparation({ key: installationKey, status: "complete" });
+    } catch (error) {
+      setPreparation({ key: installationKey, status: "failed" });
+      setFailure(asProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function start() {
+    if (!installationReady) {
+      setStep("install");
+      return;
+    }
     setBusy(true);
     setFailure(null);
     setSteps([]);
     try {
-      await invoke("prepare_engine");
       await invoke("start_stack", {
-        root,
+        root: root.trim(),
         apiUrl,
         gatewayWsUrl: wsUrl,
         apiKey,
@@ -405,9 +505,23 @@ export function App() {
     );
   }
 
+  if (resuming || checkingResume) {
+    return (
+      <main>
+        <h1>{resuming ? "Starting OpenBot" : "Opening OpenBot"}</h1>
+        <p role="status">
+          {resuming
+            ? "Opening your saved setup…"
+            : "Checking your saved setup…"}
+        </p>
+        <SetupProgress steps={steps} />
+      </main>
+    );
+  }
+
   /*
-   * Which Bot, then which model, then install. Before this the screen asked for an OpenAI key in a
-   * password field, which is the developer-shaped main path the audience rule exists to prevent.
+   * Install local software before showing either sign-in. A completed installation is retained
+   * while somebody changes or retries their connection; changing its folder or Bot invalidates it.
    *
    * Skipped entirely when a stack is already up: somebody returning to a running OpenBot is not
    * setting one up, and asking them to pick a Bot again would be the wizard asking twice.
@@ -426,7 +540,16 @@ export function App() {
       <main>
         <HarnessPicker
           chosen={harness}
-          onChoose={setHarness}
+          onChoose={(choice) => {
+            if (
+              choice.id !== harness?.id ||
+              choice.agentUrl !== harness?.agentUrl
+            ) {
+              setPreparation(null);
+              setSteps([]);
+            }
+            setHarness(choice);
+          }}
           onContinue={() => {
             recordSetupEvent(
               harnessChoiceEvent(harness?.id ?? DEFAULT_HARNESS),
@@ -436,10 +559,93 @@ export function App() {
                 ? { ...choice, agentUrl: choice.agentUrl?.trim() }
                 : choice,
             );
-            setStep("model");
+            setStep("install");
           }}
           onBack={() => setStep("welcome")}
         />
+      </main>
+    );
+  }
+
+  if (!running && step === "install") {
+    return (
+      <main>
+        <div className="sheet">
+          <p className="steps-of">Step 2 of 4</p>
+          <h1>
+            {installationReady ? "Installation complete" : "Install OpenBot"}
+          </h1>
+          <p className="lede">
+            {installationReady
+              ? "OpenBot’s local software is ready. Next, connect your AI and CopilotKit accounts."
+              : "Install the software OpenBot needs on this computer. This can take a few minutes. You’ll sign in after installation finishes."}
+          </p>
+          {!installationReady && engine?.responding && (
+            <p className="footnote">
+              Using {engine.engine === "docker" ? "Docker" : "Podman"} for local
+              services.
+            </p>
+          )}
+          <div className="field">
+            <label htmlFor="root">Where OpenBot lives</label>
+            <input
+              id="root"
+              disabled={busy}
+              value={root}
+              onChange={(event) => {
+                configuredRunRef.current += 1;
+                setRoot(event.target.value);
+                setModel(null);
+                setPreparation(null);
+                setSteps([]);
+                clearRootScopedSavedState();
+              }}
+              onBlur={(event) => loadConfiguredRoot(event.target.value)}
+              spellCheck={false}
+            />
+          </div>
+          <SetupProgress steps={steps} />
+          {displayedFailure && <Failure problem={displayedFailure} />}
+          {busy && <p role="status">Installing local software…</p>}
+          {installationReady && (
+            <button type="button" className="quiet" onClick={install}>
+              Repair installation
+            </button>
+          )}
+          <div className="row">
+            <button
+              type="button"
+              className="quiet"
+              disabled={busy}
+              onClick={() => setStep("harness")}
+            >
+              Back
+            </button>
+            {installationReady ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSteps([]);
+                  setStep("model");
+                }}
+              >
+                Continue to sign in
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy || !root.trim()}
+                onClick={install}
+              >
+                {busy
+                  ? "Installing…"
+                  : preparation?.status === "failed"
+                    ? "Retry installation"
+                    : "Install OpenBot"}
+              </button>
+            )}
+          </div>
+        </div>
       </main>
     );
   }
@@ -479,9 +685,12 @@ export function App() {
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
             setModel(choice);
+            setStep("connect");
+          }}
+          onBack={() => {
+            setSteps([]);
             setStep("install");
           }}
-          onBack={() => setStep("harness")}
         />
       </main>
     );
@@ -492,26 +701,16 @@ export function App() {
       {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
+      {!running && <p className="steps-of">Step 4 of 4</p>}
       <h1>
-        {running && !displayedFailure ? "OpenBot is running" : "Set up OpenBot"}
+        {running && !displayedFailure
+          ? "OpenBot is running"
+          : "Connect to CopilotKit"}
       </h1>
       <p className="lede">
         {running && !displayedFailure
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
-          : engine?.responding
-            ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
-            : /* Two states, and only one of them is somebody's to act on.
-
-                 An engine that is there but not running is theirs: the backend says "podman is
-                 installed but not answering", and that is the sentence to show. Repeating a fixed
-                 one here threw that away and told somebody with Podman 6.1.1 on their PATH to go
-                 and install Podman, which was the one thing they had already done.
-
-                 No engine at all is ours. Start installs one, so this says so rather than sending
-                 somebody to a download page they were never going to read. */
-              engine?.engine
-              ? engine.detail
-              : "OpenBot needs one more piece of software to run, and installs it for you. Press Start."}
+          : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
       </p>
 
       {!running && (
@@ -622,23 +821,6 @@ export function App() {
                 Use a saved connection
               </button>
             )}
-          <div className="field">
-            <label htmlFor="root">Where OpenBot lives</label>
-            <input
-              id="root"
-              disabled={busy}
-              value={root}
-              onChange={(event) => {
-                // Invalidate pending loads before blur starts one for this edit.
-                configuredRunRef.current += 1;
-                setRoot(event.target.value);
-                setModel(null);
-                clearRootScopedSavedState();
-              }}
-              onBlur={(event) => loadConfiguredRoot(event.target.value)}
-              spellCheck={false}
-            />
-          </div>
           {/*
             This used to be headed "Self-hosted Intelligence" over two fields pre-filled with the
             MANAGED service's addresses, which says the opposite of what it does: somebody opening
@@ -685,19 +867,7 @@ export function App() {
         </fieldset>
       )}
 
-      {steps.length > 0 && (
-        <div className="steps">
-          {steps.map((step) => (
-            <div className="step" key={step.step}>
-              <span className={`mark ${step.ok ? "good" : "bad"}`}>
-                {step.ok ? "✓" : "✗"}
-              </span>
-              <span>{label(step.step)}</span>
-              <span className="detail">{step.detail}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <SetupProgress steps={steps} />
 
       {displayedFailure && <Failure problem={displayedFailure} />}
 
@@ -705,7 +875,21 @@ export function App() {
         <button
           type="button"
           className="quiet"
-          disabled={busy}
+          disabled={busy || signingIn}
+          onClick={() => {
+            setPreparation(null);
+            setSteps([]);
+            setStep("install");
+          }}
+        >
+          Change installation
+        </button>
+      )}
+      {!running && (
+        <button
+          type="button"
+          className="quiet"
+          disabled={busy || signingIn}
           onClick={() => setStep("model")}
         >
           Change AI connection
@@ -750,6 +934,7 @@ export function App() {
             // answered at all, not that some field on this screen is non-empty.
             disabled={
               busy ||
+              !installationReady ||
               (apiKey.trim() === "" &&
                 !alreadyHeld.saved?.intelligenceApiKey &&
                 !reuseIntelligence) ||
@@ -762,6 +947,23 @@ export function App() {
         )}
       </div>
     </main>
+  );
+}
+
+function SetupProgress({ steps }: { steps: Progress[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="steps" aria-live="polite">
+      {steps.map((step) => (
+        <div className="step" key={step.step}>
+          <span className={`mark ${step.ok ? "good" : "bad"}`}>
+            {step.ok ? "✓" : "✗"}
+          </span>
+          <span>{label(step.step)}</span>
+          <span className="detail">{step.detail}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -798,6 +1000,10 @@ function label(step: string): string {
       return "Ports";
     case "dependencies":
       return "Dependencies";
+    case "images":
+      return "Local software";
+    case "installation":
+      return "Installation";
     case "answering":
       return "Answering";
     case "services":

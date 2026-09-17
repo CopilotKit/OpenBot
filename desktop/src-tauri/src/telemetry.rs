@@ -686,8 +686,9 @@ impl Architecture {
 pub enum Step {
     Welcome,
     Harness,
-    Model,
     Install,
+    Model,
+    Connect,
     Ask,
 }
 
@@ -798,16 +799,16 @@ pub fn schema_json() -> serde_json::Value {
             "runtime_env": ["development", "production", "test"]
         },
         "events": {
-            "step_viewed": { "step": ["welcome", "harness", "model", "install", "ask"] },
+            "step_viewed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] },
             "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
             "model_chosen": { "provider": ["openai", "anthropic", "compatible", "none"], "credential_path": ["subscription", "api_key", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "not_administrator", "check_failed"] },
             "image_pull": { "outcome": ["success", "failure"], "duration_ms": "u64", "bytes": "option_u64" },
-            "setup_failed": { "step": ["welcome", "harness", "model", "install", "ask"], "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "unknown"] },
+            "setup_failed": { "step": ["welcome", "harness", "install", "model", "connect", "ask"], "error_class": ["engine_unavailable", "engine_install_failed", "image_pull_failed", "invalid_configuration", "network_unavailable", "permission_denied", "unknown"] },
             "activated": {},
-            "setup_abandoned": { "step": ["welcome", "harness", "model", "install", "ask"] }
+            "setup_abandoned": { "step": ["welcome", "harness", "install", "model", "connect", "ask"] }
         }
     })
 }
