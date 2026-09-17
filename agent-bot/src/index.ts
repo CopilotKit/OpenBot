@@ -38,8 +38,15 @@ if (!MANAGED_AGENT_TOKEN) {
  *
  * `gpt-5.6-*` models require the Responses API for tool use and cannot be used by this
  * chat-completions streaming loop.
+ *
+ * The name is trimmed before anything reads it, and an empty one is the same as an unset one. A
+ * variable set directly on the container arrives exactly as written, and a padded name does not
+ * start with `gpt`, so the guard below would let it past and the run would die on its first tool
+ * call instead. `??` keeps an empty string as a value, and the provider is then asked for a model
+ * named "". Every other Bot in the repository already cleans this, and `OPENAI_BASE_URL` below
+ * cleans it in this file.
  */
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+const MODEL = process.env.BOT_MODEL?.trim() || "gpt-5.5";
 /*
  * Refuse a model this file cannot use, rather than discover it one tool call at a time.
  *

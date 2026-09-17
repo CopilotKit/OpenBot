@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A padded model name no longer slips past the proof-of-concept Bot's startup check
+
+The Bot in `agent-bot` refuses to start on a model it cannot drive, because `gpt-5.6-*` rejects
+function tools on the `/v1/chat/completions` API it speaks, and a Bot pointed at one answers nothing
+and says nothing on its first tool call. That check read the name exactly as it arrived, and a name
+carrying a leading space does not start with `gpt`, so the check passed and the silence it exists to
+prevent came back. Compose, `bun --env-file` and the desktop app all clean the value on the way
+through; a variable set straight on the container — `docker run -e`, a systemd unit, a hand-written
+Deployment — did not. The name is now trimmed before the check reads it, and an empty name falls back
+to the default model rather than being sent to the provider as a model named "".
+
 ### The Google Drive connector reaches files in shared drives
 
 Drive leaves shared drive items out of any `files.get` or `files.list` request that does not say it
