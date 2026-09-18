@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Typing into a Bot's browser no longer triggers the app's own shortcuts
+
+While somebody drives a Bot's browser, every keystroke is sent to it. The app's shortcuts listen for
+keystrokes too, and they heard each one first, so typing a capital N into the Bot's browser, as in
+"New York", started a new chat and took the person away from the Bot mid-word, and Ctrl+B there
+also showed or hid the sidebar. A keystroke sent to the Bot's browser now reaches only the Bot's
+browser. Escape still closes the view, and the paste shortcut still pastes.
+
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
 A `BOT_MODEL` carrying a leading space reached this Bot as it was written. Its startup check refuses
