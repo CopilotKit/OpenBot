@@ -8,6 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Pasting into a Bot's browser works on a layout that does not write Latin letters
+
+While somebody drives a Bot's browser, Ctrl+V or Cmd+V is left to the local page so its paste event
+can send the clipboard text across. The shortcut was recognised by the character the key writes,
+and on a Russian or Greek layout the V key writes "м" or "ω", so the keystroke went to the Bot's
+browser instead and nothing was pasted. The V is now read the way the app's own shortcuts read it
+since Shift+N was fixed for the same layouts: from the physical key when the layout writes a
+character outside ASCII there.
+### Reading a large file from Google Drive no longer downloads all of it
+
+`read_file_content` shows a Bot at most the first 20,000 characters of a file, but it downloaded the
+whole file and held it in memory before cutting it. A 200 MB text file raised the server's memory by
+more than 600 MB for one call, on the process that serves everybody else. The connector now stops
+reading once it has more than it can show and cancels the rest of the download. What the Bot is shown
+is unchanged, except that the note on a cut file no longer gives the file's full length, which is no
+longer known.
+### A Bot reads the text an MCP server returns as an embedded resource
+
+A tool result can carry an embedded resource, and a text resource holds content, such as a file the
+server read. The MCP connector passed text parts to the Bot and named every other part, so a text
+resource reached the model as `[resource]` and its contents were dropped. GitHub's MCP server answers
+`get_file_contents` for a text file this way: the Bot was told the download worked and never saw the
+file. The text of an embedded resource is now passed on like a text part. A resource that carries
+bytes is still named.
+
 ### The Google Drive connector reaches files in shared drives
 
 Drive leaves shared drive items out of any `files.get` or `files.list` request that does not say it

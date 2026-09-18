@@ -398,6 +398,86 @@ describe("reading a file asks Drive what it is first", () => {
     expect(result.truncated).toBe(true);
     expect(result.text.split("\n\n[truncated")[0]).toBe(`${heading}${filler}`);
   });
+
+  /*
+   * Only the opening of a long file is shown, so only the opening is read.
+   *
+   * The whole download used to be held as one string before all but the first MAX_RESULT_CHARS
+   * characters were dropped: a 200 MB log took the process up by more than 600 MB to return 20,000
+   * characters. The body here counts what is pulled from it, so reading it to the end fails.
+   */
+  test("a file far longer than one result is not downloaded whole", async () => {
+    const line = new TextEncoder().encode(`${"x".repeat(1023)}\n`);
+    const size = 16 * 1024 * 1024;
+    let pulled = 0;
+    let served = 0;
+    globalThis.fetch = (async () => {
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "log1",
+            name: "big.log",
+            mimeType: "text/plain",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= size) {
+            controller.close();
+            return;
+          }
+          pulled += line.length;
+          controller.enqueue(line);
+        },
+      });
+      return new Response(body, { headers: { "content-type": "text/plain" } });
+    }) as unknown as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "log1",
+    });
+
+    expect(pulled).toBeLessThan(size / 16);
+    expect(result.isError).toBe(false);
+    expect(result.truncated).toBe(true);
+    expect(result.text.startsWith(`big.log\n\n${"x".repeat(1023)}\n`)).toBe(
+      true,
+    );
+    // The file's length is not known, so none is claimed.
+    expect(
+      result.text.endsWith("\n\n[truncated: the file is longer than this]"),
+    ).toBe(true);
+  });
+
+  test("a download with no body at all reads as an empty file", async () => {
+    let served = 0;
+    globalThis.fetch = (async () => {
+      served += 1;
+      return served === 1
+        ? new Response(
+            JSON.stringify({
+              id: "empty1",
+              name: "empty.txt",
+              mimeType: "text/plain",
+            }),
+            { headers: { "content-type": "application/json" } },
+          )
+        : new Response(null);
+    }) as unknown as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "empty1",
+    });
+
+    expect(result).toEqual({
+      text: "empty.txt",
+      isError: false,
+      truncated: false,
+    });
+  });
 });
 
 /*

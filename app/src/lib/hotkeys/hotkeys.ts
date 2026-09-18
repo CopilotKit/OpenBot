@@ -61,7 +61,7 @@ const isMac =
  * Latin N) on Greek, so a shortcut read from `key` alone never fired there. When `key` is a single
  * character outside ASCII, the physical key in `code` is the only N there is.
  */
-function keyOf(event: KeyboardEvent): string {
+export function keyOf(event: KeyboardEvent): string {
   const written = event.key.toLowerCase();
   if (written.length !== 1 || written.charCodeAt(0) < 0x80) return written;
   const physical = /^(?:Key|Digit)([A-Z0-9])$/.exec(event.code);

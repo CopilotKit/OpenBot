@@ -75,6 +75,81 @@ for (const [name, modifier] of [
   });
 }
 
+/*
+ * A layout that writes another script has no key that writes a V. Ctrl and the V key report "м" on
+ * Russian and "ω" on Greek, with `code` still `KeyV`, so reading `key` alone sent the shortcut to the
+ * remote browser and stopped the local paste event that carries the clipboard text.
+ */
+for (const [layout, written] of [
+  ["Russian", "м"],
+  ["Greek", "ω"],
+] as const) {
+  test(`Ctrl+V on a ${layout} layout stays in the local page too`, async () => {
+    const socket = await liveSocket();
+    const shortcut = new KeyboardEvent("keydown", {
+      key: written,
+      code: "KeyV",
+      keyCode: 86,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    window.dispatchEvent(shortcut);
+    window.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        key: written,
+        code: "KeyV",
+        keyCode: 86,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(socket.sent).toEqual([]);
+    expect(shortcut.defaultPrevented).toBe(false);
+  });
+}
+
+test("Ctrl on a key that writes V on Dvorak is still paste, and Ctrl on the QWERTY V key is not", async () => {
+  const socket = await liveSocket();
+  // On Dvorak the key that writes V is the one QWERTY calls Period.
+  const paste = new KeyboardEvent("keydown", {
+    key: "v",
+    code: "Period",
+    keyCode: 86,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  // And the key QWERTY calls V writes K.
+  const other = new KeyboardEvent("keydown", {
+    key: "k",
+    code: "KeyV",
+    keyCode: 75,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+
+  window.dispatchEvent(paste);
+  window.dispatchEvent(other);
+
+  expect(paste.defaultPrevented).toBe(false);
+  expect(other.defaultPrevented).toBe(true);
+  expect(socket.sent).toEqual([
+    {
+      type: "key",
+      event: "down",
+      key: "k",
+      code: "KeyV",
+      text: "k",
+      windowsVirtualKeyCode: 75,
+      modifiers: 2,
+    },
+  ]);
+});
+
 test("a paste keyup stays local when the modifier was released first", async () => {
   const socket = await liveSocket();
   window.dispatchEvent(

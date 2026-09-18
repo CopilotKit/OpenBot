@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { keyOf } from "@/lib/hotkeys/hotkeys";
 import { socketUrl } from "@/lib/socket-url";
 import { currentPageVisible } from "./preview-visibility";
 import { pageCoordinates } from "./take-the-wheel";
@@ -33,9 +34,14 @@ function modifierBits(event: {
   );
 }
 
-/** Let the local browser create a paste event, whose clipboard text is forwarded separately. */
+/**
+ * Let the local browser create a paste event, whose clipboard text is forwarded separately.
+ *
+ * The V is read the way a shortcut is (`keyOf`), so a layout that writes another script still has
+ * one: Ctrl and the V key report "м" on Russian and "ω" on Greek.
+ */
 function isPasteShortcut(event: KeyboardEvent): boolean {
-  return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v";
+  return (event.ctrlKey || event.metaKey) && keyOf(event) === "v";
 }
 
 type Props = {
