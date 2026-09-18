@@ -325,6 +325,13 @@ jobs:
           . .venv-ag2/bin/activate
           python -m pip install --requirement agent-ag2/requirements.txt --requirement agent-ag2/requirements-test.txt
           python -m pytest agent-ag2/tests -q
+      - name: Microsoft Agent Framework model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-microsoft
+          . .venv-microsoft/bin/activate
+          python -m pip install --requirement agent-microsoft/requirements.txt --requirement agent-microsoft/requirements-test.txt
+          python -m pytest agent-microsoft/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null

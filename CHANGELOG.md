@@ -40,6 +40,14 @@ Compose writes that one empty when the choice was Anthropic. It now reaches Anth
 own Anthropic client when that is the provider chosen, and OpenAI or an OpenAI-compatible endpoint
 as before otherwise.
 
+### The Microsoft Agent Framework Bot starts on an Anthropic key
+
+The Microsoft Agent Framework Bot built an OpenAI client whatever the setup screen chose, and read
+`BOT_MODEL` but never `BOT_PROVIDER`. Picked with an Anthropic key, it exited on startup asking for
+an OpenAI key, because Compose writes that one empty when the choice was Anthropic. It now reaches
+Anthropic through Agent Framework's own Anthropic client when that is the provider chosen, and
+OpenAI or an OpenAI-compatible endpoint as before otherwise.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in
