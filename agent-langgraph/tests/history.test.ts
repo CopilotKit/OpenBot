@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { RunAgentInput } from "@ag-ui/core";
+import { ChatAnthropic } from "@langchain/anthropic";
 import {
   AIMessage,
   SystemMessage,
   ToolMessage,
 } from "@langchain/core/messages";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 import { NO_ANSWER_CAME, toLangChainMessages } from "../src/history";
 
 /**
@@ -196,5 +199,148 @@ describe("a message with a file attached", () => {
   test("sends a message that is only text exactly as it was typed", () => {
     // Nearly every message. Unchanged by this, and pinned so it stays that way.
     expect(userContent("What is 17 times 3?")).toBe("What is 17 times 3?");
+  });
+});
+
+/**
+ * A run as the server sends it to a remote Bot: the coworker's standing role at the head of the
+ * messages, the caller's context beside them, and a skill somebody picked as a system turn just ahead
+ * of the message it was picked for.
+ *
+ * Anthropic and Gemini take one system prompt, at the top, and their LangChain integrations refuse a
+ * second before any request is made. With the computer guidance this module puts first, every run
+ * the server sends holds at least two.
+ */
+describe("a provider that takes one system prompt", () => {
+  const run = () => {
+    const shaped = input([
+      {
+        id: "standing-role:bot_1",
+        role: "system",
+        content: "You are Ada, Analyst.",
+      },
+      { id: "u1", role: "user", content: "Summarise the Q3 filing." },
+      { id: "a1", role: "assistant", content: "Revenue rose 4%." },
+      { id: "s1", role: "system", content: "Answer in bullet points." },
+      { id: "u2", role: "user", content: "Again, shorter." },
+    ]);
+    shaped.context = [{ description: "A2UI Component Schema", value: "{}" }];
+    return shaped;
+  };
+  // In the order the model is given them: the context beside the run, then the turns.
+  const instructions = [
+    "A2UI Component Schema\n{}",
+    "You are Ada, Analyst.",
+    "Answer in bullet points.",
+  ];
+
+  test("folds every system message into one at the top, in order", () => {
+    for (const provider of ["anthropic", "google"]) {
+      const messages = toLangChainMessages(run(), provider);
+
+      const system = messages.filter((m) => m instanceof SystemMessage);
+      expect(system).toHaveLength(1);
+      expect(messages[0]).toBe(system[0] as SystemMessage);
+      const prompt = String(system[0]?.content);
+      expect(prompt.startsWith(COMPUTER_GUIDANCE)).toBe(true);
+      const at = instructions.map((text) => prompt.indexOf(text));
+      expect(at.every((index) => index > 0)).toBe(true);
+      expect(at).toEqual([...at].sort((a, b) => a - b));
+      expect(messages.slice(1).map((m) => String(m.content))).toEqual([
+        "Summarise the Q3 filing.",
+        "Revenue rose 4%.",
+        "Again, shorter.",
+      ]);
+    }
+  });
+
+  test("is accepted by Anthropic", async () => {
+    let sent: { system?: unknown; messages?: { role: string }[] } = {};
+    const model = new ChatAnthropic({
+      model: "claude-sonnet-4-5",
+      apiKey: "sk-ant-test",
+      clientOptions: {
+        fetch: (async (_url: unknown, init?: RequestInit) => {
+          sent = JSON.parse(String(init?.body));
+          return Response.json({
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "- Revenue rose 4%." }],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          });
+        }) as typeof fetch,
+      },
+    });
+
+    const answer = await model.invoke(toLangChainMessages(run(), "anthropic"));
+
+    expect(answer.content).toBe("- Revenue rose 4%.");
+    for (const text of instructions) {
+      expect(JSON.stringify(sent.system)).toContain(
+        JSON.stringify(text).slice(1, -1),
+      );
+    }
+    expect(sent.messages?.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+  });
+
+  test("is accepted by Gemini", async () => {
+    let sent: {
+      systemInstruction?: unknown;
+      contents?: { role: string }[];
+    } = {};
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return Response.json({
+        candidates: [
+          {
+            content: { role: "model", parts: [{ text: "- Revenue rose 4%." }] },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      });
+    }) as typeof fetch;
+    try {
+      const model = new ChatGoogleGenerativeAI({
+        model: "gemini-2.5-flash",
+        apiKey: "test",
+      });
+
+      const answer = await model.invoke(toLangChainMessages(run(), "google"));
+
+      expect(answer.content).toBe("- Revenue rose 4%.");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    for (const text of instructions) {
+      expect(JSON.stringify(sent.systemInstruction)).toContain(
+        JSON.stringify(text).slice(1, -1),
+      );
+    }
+    expect(sent.contents?.map((c) => c.role)).toEqual([
+      "user",
+      "model",
+      "user",
+    ]);
+  });
+
+  test("leaves an OpenAI conversation's system turns where they were", () => {
+    // OpenAI takes a system turn anywhere, so a skill stays beside the message it was picked for.
+    const messages = toLangChainMessages(run(), "openai");
+    expect(
+      messages
+        .map((m) => (m instanceof SystemMessage ? "system" : String(m.content)))
+        .slice(-3),
+    ).toEqual(["Revenue rose 4%.", "system", "Again, shorter."]);
+    expect(messages.filter((m) => m instanceof SystemMessage)).toHaveLength(4);
   });
 });

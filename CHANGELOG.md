@@ -16,6 +16,14 @@ a system message that comes after a turn of the conversation, so with `BOT_PROVI
 every run in that conversation failed from then on, before the model was asked. On Anthropic the
 Python LangGraph Bot now puts every system message ahead of the conversation, in the order given,
 where the integration joins them into its one prompt. Runs on OpenAI and Gemini are unchanged.
+### The LangGraph Bot answers on Anthropic and Gemini
+
+With `BOT_PROVIDER=anthropic` or `BOT_PROVIDER=google`, the LangGraph Bot answered nothing: every run
+ended in an error before the model was asked. Those two providers take one system prompt, at the top,
+and the Bot handed its model several: its own guidance, the context the app sends, and the
+coworker's standing role, which the server puts at the head of every run. The provider's LangChain
+integration refused the second one. On those two providers the Bot now folds them into one system
+prompt, in the same order, and a skill picked for a message joins it. Runs on OpenAI are unchanged.
 
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
