@@ -32,6 +32,14 @@ builds an OpenAI client for such a model all the same, from the `OPENAI_API_KEY`
 empty when the choice was not OpenAI. The image now installs Langroid's litellm extra and an empty
 OpenAI key is treated as none, so the Bot starts and answers with the Anthropic model chosen.
 
+### The AG2 Bot answers on an Anthropic key
+
+The AG2 Bot built an OpenAI client whatever the setup screen chose, and read `BOT_MODEL` but never
+`BOT_PROVIDER`. Picked with an Anthropic key, every run failed asking for an OpenAI key, because
+Compose writes that one empty when the choice was Anthropic. It now reaches Anthropic through AG2's
+own Anthropic client when that is the provider chosen, and OpenAI or an OpenAI-compatible endpoint
+as before otherwise.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in
