@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Python LangGraph Bot on Anthropic answers after a skill was picked
+
+A skill somebody picks reaches the Bot as a system message just ahead of their message, and it
+stays in the conversation. Anthropic takes one system prompt, and its LangChain integration refuses
+a system message that comes after a turn of the conversation, so with `BOT_PROVIDER=anthropic`
+every run in that conversation failed from then on, before the model was asked. On Anthropic the
+Python LangGraph Bot now puts every system message ahead of the conversation, in the order given,
+where the integration joins them into its one prompt. Runs on OpenAI and Gemini are unchanged.
+
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
 A `BOT_MODEL` carrying a leading space reached this Bot as it was written. Its startup check refuses

@@ -173,7 +173,7 @@ def provider_environment(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-async def _run_answer_with_httpx2_capture(monkeypatch, response_json):
+async def _run_answer_with_httpx2_capture(monkeypatch, response_json, messages=None):
     captured = []
 
     async def send(self, request, **kwargs):
@@ -188,7 +188,7 @@ async def _run_answer_with_httpx2_capture(monkeypatch, response_json):
 
     monkeypatch.setattr(httpx2.AsyncClient, "send", send)
     result = await main.answer(
-        {"messages": [{"role": "user", "content": "Say hello."}]}
+        {"messages": messages or [{"role": "user", "content": "Say hello."}]}
     )
     return result, captured
 
@@ -341,6 +341,76 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
+    ]
+
+
+# A conversation as the server sends it after somebody picked a skill: the coworker's standing role
+# at the head, and the skill's instruction as a system turn just ahead of the message it was picked
+# for. The turn stays in the thread's history, so every later run carries it too.
+_HISTORY_WITH_A_SKILL = [
+    {"role": "system", "content": "You are Ada, Analyst."},
+    {"role": "user", "content": "Summarise the Q3 filing."},
+    {"role": "assistant", "content": "Revenue rose 4%."},
+    {"role": "system", "content": "Answer in bullet points."},
+    {"role": "user", "content": "Again, shorter."},
+]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_answers_a_conversation_in_which_a_skill_was_picked(
+    monkeypatch,
+):
+    # Anthropic takes one system prompt, and langchain-anthropic refuses a system message that
+    # does not follow the others: "Received multiple non-consecutive system messages."
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-openbot-ci")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:4311")
+    monkeypatch.setenv("BOT_PROVIDER", "anthropic")
+
+    result, captured = await _run_answer_with_httpx2_capture(
+        monkeypatch,
+        {
+            "id": "msg-openbot-ci",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-4-5",
+            "content": [{"type": "text", "text": "anthropic proof"}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+        _HISTORY_WITH_A_SKILL,
+    )
+
+    assert result["messages"][0].content == "anthropic proof"
+    assert [block["text"] for block in captured[0]["body"]["system"]] == [
+        "You are Ada, Analyst.",
+        "Answer in bullet points.",
+    ]
+    assert captured[0]["body"]["messages"] == [
+        {"role": "user", "content": "Summarise the Q3 filing."},
+        {"role": "assistant", "content": "Revenue rose 4%."},
+        {"role": "user", "content": "Again, shorter."},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openai_keeps_a_skill_turn_beside_the_message_it_was_picked_for(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openbot-ci")
+
+    result, captured = await _run_answer_with_httpx2_capture(
+        monkeypatch,
+        _openai_response("gpt-4o-mini", "openai proof"),
+        _HISTORY_WITH_A_SKILL,
+    )
+
+    assert result["messages"][0].content == "openai proof"
+    assert [
+        (message["role"], message["content"])
+        for message in captured[0]["body"]["messages"]
+    ] == [
+        (message["role"], message["content"]) for message in _HISTORY_WITH_A_SKILL
     ]
 
 

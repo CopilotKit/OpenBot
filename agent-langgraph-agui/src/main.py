@@ -12,6 +12,8 @@ from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain.chat_models import init_chat_model
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage, convert_to_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
@@ -157,9 +159,33 @@ def _model():
     )
 
 
+def _system_turns_first(messages):
+    """Every system message ahead of the conversation, in the order it was given.
+
+    ANTHROPIC TAKES ONE SYSTEM PROMPT, AT THE TOP. `langchain-anthropic` joins system messages that
+    follow one another into it, and refuses one that comes after a conversation turn: "Received
+    multiple non-consecutive system messages." A skill somebody picks arrives as a system turn just
+    ahead of their message and stays in the thread, so from then on every run in that conversation
+    failed on Anthropic before the model was asked.
+
+    Moved rather than merged, because the integration already joins the ones that are adjacent.
+    Only for Anthropic: OpenAI takes a system turn anywhere, so a skill stays beside the message it
+    was picked for, and `langchain-google-genai` already gathers every system message into Gemini's
+    one system instruction by itself.
+    """
+    messages = convert_to_messages(messages)
+    return [
+        *(message for message in messages if isinstance(message, SystemMessage)),
+        *(message for message in messages if not isinstance(message, SystemMessage)),
+    ]
+
+
 async def answer(state: MessagesState):
+    model = _model()
     messages = model_messages(state["messages"])
-    return {"messages": [await bind_tools(_model()).ainvoke(messages)]}
+    if isinstance(model, ChatAnthropic):
+        messages = _system_turns_first(messages)
+    return {"messages": [await bind_tools(model).ainvoke(messages)]}
 
 
 builder = StateGraph(MessagesState)
