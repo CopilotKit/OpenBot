@@ -778,22 +778,6 @@ pub mod local_api {
                 command
                     .args(["system", "service", "--time=0"])
                     .arg(format!("unix://{}", socket.display()));
-                // A crash must not leave a service owned by a dead desktop process.
-                let parent = unsafe { libc::getpid() };
-                unsafe {
-                    command.pre_exec(move || {
-                        if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        if libc::getppid() != parent {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::Interrupted,
-                                "desktop exited before service startup",
-                            ));
-                        }
-                        Ok(())
-                    });
-                }
                 command
             })
         }
