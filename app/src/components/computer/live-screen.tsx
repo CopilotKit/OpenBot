@@ -227,7 +227,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
    * Convert from displayed canvas coordinates to page coordinates with the shared, tested helper.
    * A screencast frame is the viewport, so its frame size stands in for natural image size.
    */
-  const at = useCallback((event: React.MouseEvent) => {
+  const at = useCallback((event: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     const size = frameSize.current;
     if (!canvas || !size) return null;
@@ -279,6 +279,13 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
    *
    * Listen on window because canvas cannot hold focus. `preventDefault` keeps Tab and typing directed
    * at the remote page while takeover is active.
+   *
+   * The keydown in the capture phase, and stopped as well as prevented, because a keystroke sent to
+   * the Bot's browser is not also this page's. The app's own shortcuts listen on this window too,
+   * and they were bound first, when the signed-in app mounted, so they saw every keystroke before
+   * this did: a capital N typed into the remote page started a new chat, and Ctrl+B there toggled
+   * the sidebar here. Escape and the paste shortcut are not stopped, because both are meant for this
+   * page.
    */
   useEffect(() => {
     if (!driving) return;
@@ -289,6 +296,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       send({
         type: "key",
         event: "down",
@@ -324,16 +332,43 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       send({ type: "text", text });
     };
 
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("paste", onPaste);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("paste", onPaste);
       localKeyUps.current.clear();
     };
   }, [driving, send]);
+
+  /**
+   * The wheel, forwarded while driving, from a listener that is allowed to stop it here.
+   *
+   * Not React's `onWheel`: React attaches that to its root as a passive listener, so the
+   * `preventDefault` in it was ignored ("Unable to preventDefault inside passive event listener
+   * invocation."). The wheel reached the Bot's page and also scrolled whatever on this page was
+   * under it, the frame that holds this screen included, and Ctrl and the wheel zoomed this page.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!driving || !canvas) return;
+    const onWheel = (event: WheelEvent) => {
+      const point = at(event);
+      if (!point) return;
+      event.preventDefault();
+      send({
+        type: "wheel",
+        ...point,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        modifiers: modifierBits(event),
+      });
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [driving, at, send]);
 
   return (
     <canvas
@@ -346,18 +381,6 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
             onMouseUp: onMouse("released"),
             onMouseMove: onMouse("moved"),
             onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
-            onWheel: (event: React.WheelEvent<HTMLCanvasElement>) => {
-              const point = at(event);
-              if (!point) return;
-              event.preventDefault();
-              send({
-                type: "wheel",
-                ...point,
-                deltaX: event.deltaX,
-                deltaY: event.deltaY,
-                modifiers: modifierBits(event),
-              });
-            },
           }
         : {})}
       aria-label={
