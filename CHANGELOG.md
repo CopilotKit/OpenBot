@@ -16,6 +16,14 @@ Compose passes when the setup screen names none, so the run ended in `Unsupporte
 parameter the model does not take is now dropped instead, the way the LlamaIndex Bot already does
 it. The Anthropic key and an OpenAI-compatible endpoint behave as before.
 
+### The Pydantic AI Bot starts on an Ollama model named with its tag
+
+Ollama names every model with a tag after a colon, as in `llama3.1:8b`, and that is the name the
+setup screen passes on for an OpenAI-compatible endpoint. The Pydantic AI Bot took any colon in the
+model's name to mean the name already carried a provider, so Pydantic AI read `llama3.1` as one,
+refused it as unknown, and the Bot never started. A model's name now carries a provider only when it
+begins with the chosen provider's own, as in `anthropic:claude-sonnet-4-5`.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in
