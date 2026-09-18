@@ -8,6 +8,43 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Ctrl+B shows and hides the sidebar on a layout that does not write Latin letters
+
+The sidebar toggle's tooltip names Ctrl+B, or ⌘B on a Mac, and the shortcut was recognised by the
+character the key writes. On a Russian or Greek layout the B key writes "и" or "β", so the shortcut
+did nothing there. It is now read the way the app's own shortcuts read it since Shift+N was fixed
+for the same layouts: from the physical key when the layout writes a character outside ASCII there.
+### Scrolling a Bot's browser no longer scrolls or zooms the page around it
+
+While somebody drives a Bot's browser, a turn of the mouse wheel over its screen is sent to it, and
+the screen was meant to keep the wheel from also acting on the app. React attaches its wheel handler
+as a passive listener, which a browser does not allow to do that, so the wheel scrolled the frame
+holding the Bot's screen along with the Bot's page, and Ctrl with the wheel zoomed the app. The
+wheel is now handled by a listener that can hold it, so it reaches only the Bot's browser.
+### Typing into a Bot's browser no longer triggers the app's own shortcuts
+
+While somebody drives a Bot's browser, every keystroke is sent to it. The app's shortcuts listen for
+keystrokes too, and they heard each one first, so typing a capital N into the Bot's browser, as in
+"New York", started a new chat and took the person away from the Bot mid-word, and Ctrl+B there
+also showed or hid the sidebar. A keystroke sent to the Bot's browser now reaches only the Bot's
+browser. Escape still closes the view, and the paste shortcut still pastes.
+### The Python LangGraph Bot on Anthropic answers after a skill was picked
+
+A skill somebody picks reaches the Bot as a system message just ahead of their message, and it
+stays in the conversation. Anthropic takes one system prompt, and its LangChain integration refuses
+a system message that comes after a turn of the conversation, so with `BOT_PROVIDER=anthropic`
+every run in that conversation failed from then on, before the model was asked. On Anthropic the
+Python LangGraph Bot now puts every system message ahead of the conversation, in the order given,
+where the integration joins them into its one prompt. Runs on OpenAI and Gemini are unchanged.
+### The LangGraph Bot answers on Anthropic and Gemini
+
+With `BOT_PROVIDER=anthropic` or `BOT_PROVIDER=google`, the LangGraph Bot answered nothing: every run
+ended in an error before the model was asked. Those two providers take one system prompt, at the top,
+and the Bot handed its model several: its own guidance, the context the app sends, and the
+coworker's standing role, which the server puts at the head of every run. The provider's LangChain
+integration refused the second one. On those two providers the Bot now folds them into one system
+prompt, in the same order, and a skill picked for a message joins it. Runs on OpenAI are unchanged.
+
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
 A `BOT_MODEL` carrying a leading space reached this Bot as it was written. Its startup check refuses
