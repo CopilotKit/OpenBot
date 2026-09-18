@@ -179,6 +179,100 @@ fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command 
     command
 }
 
+const MACOS_PODMAN_PORTS_FILE: &str = ".openbot-macos-podman.yml";
+const MACOS_PODMAN_PORTS: &str = include_str!("macos-podman-ports.yml");
+
+/// Only service creation needs the Mac Podman port overlay. In particular, `run migrate` can
+/// create its Postgres dependency, so it must use the same configuration as `up`.
+fn compose_start_command(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    os: &str,
+) -> Result<Command, Problem> {
+    let mut command = compose_command(engine, root, secrets);
+    if os != "macos" || engine.engine != crate::engine::Engine::Podman {
+        return Ok(command);
+    }
+
+    // Let Compose read/interpolate .env and COMPOSE_ENV_FILES itself. Adding -f directly would
+    // otherwise discard both implicit override files and COMPOSE_FILE from that environment.
+    // This output can contain credentials: retain only file-selection settings, never log it.
+    let environment = compose_command(engine, root, secrets)
+        .args(["config", "--environment"])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not read the deployment's Compose settings.",
+                error.to_string(),
+            )
+        })?;
+    if !environment.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not read the deployment's Compose settings.",
+            command_said(&environment.stderr),
+        ));
+    }
+    let environment = String::from_utf8(environment.stdout)
+        .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
+    let files = compose_files(root, &environment)?;
+    let overlay = root.join(MACOS_PODMAN_PORTS_FILE);
+    if std::fs::read(&overlay).ok().as_deref() != Some(MACOS_PODMAN_PORTS.as_bytes()) {
+        std::fs::write(&overlay, MACOS_PODMAN_PORTS).map_err(|error| {
+            Problem::with(
+                "OpenBot could not prepare the Mac Podman port settings.",
+                error.to_string(),
+            )
+        })?;
+    }
+    for file in files {
+        command.arg("-f").arg(file);
+    }
+    command.arg("-f").arg(MACOS_PODMAN_PORTS_FILE);
+    Ok(command)
+}
+
+fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
+    let setting = |key: &str| {
+        environment.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name == key).then_some(value)
+        })
+    };
+    if let Some(files) = setting("COMPOSE_FILE") {
+        let separator = setting("COMPOSE_PATH_SEPARATOR")
+            .filter(|value| !value.is_empty())
+            .unwrap_or(":"); // Only used on macOS.
+        return Ok(files.split(separator).map(str::to_owned).collect());
+    }
+
+    // Compose-go's default discovery order. A valid installed deployment contains its base
+    // file in this directory, so there is no need to search outside the selected installation.
+    let first = |names: &[&str]| {
+        names
+            .iter()
+            .find(|name| root.join(name).exists())
+            .map(|name| (*name).to_owned())
+    };
+    let base = first(&[
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    ])
+    .ok_or_else(|| Problem::plain("The selected installation has no Compose file."))?;
+    let mut files = vec![base];
+    if let Some(existing) = first(&[
+        "compose.override.yml",
+        "compose.override.yaml",
+        "docker-compose.override.yml",
+        "docker-compose.override.yaml",
+    ]) {
+        files.push(existing);
+    }
+    Ok(files)
+}
+
 /// Resolve only image references, using public installation overrides before credentials exist.
 pub fn installation_images(
     engine: &Address,
@@ -274,7 +368,7 @@ pub fn up(
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
     let requested = selected_services(harness, bots);
-    let mut command = compose_command(engine, root, secrets);
+    let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
     }
@@ -308,7 +402,7 @@ pub fn migrate(
 ) -> Result<(), crate::problem::Problem> {
     // The installation step supplies this image. `run` does not accept `--no-build`, and its
     // explicit no-pull policy must report a missing image without starting another download.
-    let output = compose_command(engine, root, secrets)
+    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)?
         .args(["run", "--rm", "--pull", "never", "migrate"])
         .output()
         .map_err(|error| format!("could not run migrations: {error}"))?;
@@ -3931,6 +4025,27 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    if scenario == "macos-podman-start" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual == ["compose", "config", "--environment"] {
+            if std::path::Path::new(".fixture-config-failure").exists() {
+                eprintln!("synthetic invalid deployment override");
+                std::process::exit(17);
+            }
+            print!("{}", std::fs::read_to_string(".fixture-compose-environment").unwrap_or_default());
+            return;
+        }
+        if actual.iter().any(|arg| arg == "up" || arg == "run") {
+            let files: Vec<_> = actual.windows(2).filter(|pair| pair[0] == "-f").map(|pair| &pair[1]).collect();
+            if !files.iter().any(|file| file.ends_with(".openbot-macos-podman.yml")) {
+                eprintln!("Error response from daemon: rootlessport conflict with ID 1");
+                std::process::exit(126);
+            }
+            for file in files { assert!(std::path::Path::new(file).is_file(), "missing compose file {file}"); }
+            return;
+        }
+        panic!("unexpected startup command: {actual:?}");
+    }
     if scenario == "computer-stop" {
         let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
         let race = root.join(".fixture-race").exists();
@@ -6014,6 +6129,193 @@ fn main() {
         let patience = std::time::Duration::from_secs(3);
         wait_for_ports_to_clear(&[port], patience);
         assert!(started.elapsed() < patience, "a released port kept waiting");
+    }
+
+    #[test]
+    fn compose_port_overlay_is_limited_to_macos_podman() {
+        let root = temp_root("compose-platform-policy");
+        let secrets = Secrets::from([("SYNTHETIC_SETTING".into(), "preserved".into())]);
+        for (engine, os) in [
+            (crate::engine::Engine::Docker, "macos"),
+            (crate::engine::Engine::Docker, "linux"),
+            (crate::engine::Engine::Docker, "windows"),
+            (crate::engine::Engine::Podman, "linux"),
+            (crate::engine::Engine::Podman, "windows"),
+        ] {
+            let command =
+                compose_start_command(&Address::new(engine, None), &root, &secrets, os).unwrap();
+            assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+            assert_eq!(command.get_current_dir(), Some(root.as_path()));
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == "SYNTHETIC_SETTING"
+                    && value == Some(std::ffi::OsStr::new("preserved"))));
+            assert!(
+                !root.exists(),
+                "{engine:?} on {os} must not write a Mac Podman overlay"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_port_overlay_preserves_discovery_and_explicit_file_selection() {
+        let root = temp_root("compose-file-selection");
+        std::fs::create_dir_all(&root).unwrap();
+        for file in ["docker-compose.yml", "docker-compose.override.yml"] {
+            std::fs::write(root.join(file), "services: {}\n").unwrap();
+        }
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["docker-compose.yml", "docker-compose.override.yml"]
+        );
+        std::fs::write(root.join("compose.yaml"), "services: {}\n").unwrap();
+        std::fs::write(root.join("compose.override.yml"), "services: {}\n").unwrap();
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["compose.yaml", "compose.override.yml"]
+        );
+        assert_eq!(
+            compose_files(&root, "COMPOSE_FILE=first.yml:folder/custom file.yml\n").unwrap(),
+            ["first.yml", "folder/custom file.yml"]
+        );
+        assert_eq!(
+            compose_files(
+                &root,
+                "COMPOSE_FILE=first.yml|custom.yml\nCOMPOSE_PATH_SEPARATOR=|\n"
+            )
+            .unwrap(),
+            ["first.yml", "custom.yml"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
+    /// This only reads configuration; it never contacts a container engine or registry.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn macos_podman_port_overlay_replaces_all_six_ports_and_preserves_other_settings() {
+        let root = temp_root("compose-ports-merge");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), source).unwrap();
+        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: bool| {
+            let mut command = Command::new(&docker);
+            command
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"));
+            command.arg("compose");
+            if overlay {
+                command.args([
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    "docker-compose.override.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ]);
+            }
+            let output = command
+                .args(["--profile", "*", "config", "--format", "json"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        for settings in [
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\n".to_string(),
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\nPOSTGRES_PORT=15432\nSUPERVISOR_PORT=14500\nCOMPUTER_PORT=14100\nBOT_PORT=14200\nLANGGRAPH_PORT=14201\nPICKED_HARNESS_PORT=14206\n".to_string(),
+        ] {
+            std::fs::write(root.join(".env"), &settings).unwrap();
+            let mut before = config(false);
+            let after = config(true);
+            let mut published = 0;
+            for (_, service) in before["services"].as_object_mut().unwrap() {
+                if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
+                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    ports.retain(|port| port["host_ip"] == "127.0.0.1");
+                    assert_eq!(ports.len(), 1);
+                    published += 1;
+                }
+            }
+            assert_eq!(published, 6, "all published services must be covered");
+            assert_eq!(after, before, "only the duplicate IPv6 loopback mappings may change");
+            assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), settings);
+            assert_eq!(std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(), source);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports() {
+        if crate::test_support::isolated_process("stack::tests::macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports") { return; }
+        let path = PathFixture::with_fake_engine("macos-podman-start");
+        let [_, podman] = computer_stop_addresses(&path);
+        let (root, record) = computer_stop_root(&path, "podman-start", "{}");
+        let original = "services: {}\n";
+        let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
+        std::fs::write(root.join(".env"), settings).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
+        let services = up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
+        assert_eq!(
+            services,
+            ["postgres", "supervisor", "agent-computer", "agent-harness"]
+        );
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        for action in [
+            "--profile harness up -d --no-build --pull never",
+            "run --rm --pull never migrate",
+        ] {
+            let line = log.lines().find(|line| line.contains(action)).unwrap();
+            let base = line.find("-f docker-compose.yml").unwrap();
+            let existing = line.find("-f docker-compose.override.yml").unwrap();
+            let desktop = line.find(".openbot-macos-podman.yml").unwrap();
+            assert!(base < existing && existing < desktop, "{line}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            original
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".env")).unwrap(),
+            settings
+        );
+
+        std::fs::write(root.join("custom override.yml"), "services: {}\n").unwrap();
+        std::fs::write(
+            root.join(".fixture-compose-environment"),
+            "COMPOSE_FILE=docker-compose.yml;custom override.yml\nCOMPOSE_PATH_SEPARATOR=;\n",
+        )
+        .unwrap();
+        std::fs::remove_file(&record).unwrap();
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        assert!(
+            log.contains("-f docker-compose.yml -f custom override.yml"),
+            "{log}"
+        );
+        assert!(!log.contains("docker-compose.override.yml"), "{log}");
+
+        std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
+        std::fs::remove_file(&record).unwrap();
+        assert!(
+            up(&podman, &root, true, BundledBots::none(), &Secrets::new())
+                .unwrap_err()
+                .detail
+                .unwrap()
+                .contains("synthetic invalid deployment override")
+        );
+        assert!(!std::fs::read_to_string(record).unwrap().contains(" up "));
     }
 
     #[test]

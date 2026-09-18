@@ -4807,6 +4807,14 @@ fn main() {
     writeln!(trace,"{}\t{}",identity,original.join(" ")).unwrap();
     let mut log=fs::OpenOptions::new().create(true).append(true).open(&record).unwrap();
     writeln!(log,"{}\t{}",cwd.display(),args.join(" ")).unwrap();
+    // Mac Podman adds its port overlay only to service-creating commands. Keep the original
+    // arguments in the ownership trace, then dispatch the same fixture behavior for up/run.
+    if engine=="podman" && args.iter().any(|arg| arg=="up" || arg=="run") {
+        while args.get(1).is_some_and(|arg| arg=="-f") {
+            assert!(std::path::Path::new(&args[2]).is_file());
+            args.drain(1..3);
+        }
+    }
     let words:Vec<&str>=args.iter().map(String::as_str).collect();
     if words==["context","show"] { println!("{target}"); return; }
     if words.starts_with(&["context","inspect"]) { println!("unix:///owned-default.sock"); return; }
@@ -4818,6 +4826,7 @@ fn main() {
         ["version","--format",_] => println!("1.44"),
         ["info","--format","{{.Host.ServiceIsRemote}}"] => println!("false"),
         ["compose","version"] => println!("Synthetic Compose"),
+        ["compose","config","--environment"] => (),
         ["compose","ps","--format",_] => (),
         ["compose","up",..] => {
             fs::write(cwd.join("fixture-containers-running"),&identity).unwrap();
