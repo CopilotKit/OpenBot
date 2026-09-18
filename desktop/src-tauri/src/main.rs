@@ -29,6 +29,9 @@ struct Shell {
     host_access: Mutex<Option<host_access::HostAccess>>,
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
+    /// Native Linux engine API owned by this desktop session, kept through Stop/Start.
+    #[cfg(target_os = "linux")]
+    podman_api: Mutex<engine::local_api::Service>,
     /// Which run is the current one.
     ///
     /// Stopping and starting again inside two seconds would otherwise leave the previous watcher
@@ -229,26 +232,32 @@ struct ReadyRespondingEngine {
 /// Return a responding engine only after Compose is present too.
 fn ready_responding_engine_after_compose_repair(
     found: engine::EngineStatus,
+    install_missing_native: bool,
     mut install_engine: impl FnMut() -> Result<String, Problem>,
     mut detect: impl FnMut() -> engine::EngineStatus,
     mut composes: impl FnMut(&engine::Address) -> bool,
 ) -> Result<Option<ReadyRespondingEngine>, Problem> {
-    let Some(address) = found.address.clone().filter(|_| found.responding) else {
+    if let Some(address) = found.address.clone().filter(|_| found.responding) {
+        if composes(&address) {
+            return Ok(Some(ReadyRespondingEngine {
+                address,
+                detail: found.detail,
+                installed: None,
+            }));
+        }
+    } else if !install_missing_native {
         return Ok(None);
-    };
-    if composes(&address) {
-        return Ok(Some(ReadyRespondingEngine {
-            address,
-            detail: found.detail,
-            installed: None,
-        }));
     }
 
     let installed = install_engine()?;
     let ready = detect();
     let Some(address) = ready.address.clone().filter(|_| ready.responding) else {
         return Err(Problem::with(
-            "OpenBot installed Compose, but the container engine is not answering. Try again.",
+            if install_missing_native {
+                "OpenBot installed the container software, but the engine is not answering. Try again."
+            } else {
+                "OpenBot installed Compose, but the container engine is not answering. Try again."
+            },
             ready.detail,
         ));
     };
@@ -489,6 +498,7 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
     let existing = tauri::async_runtime::spawn_blocking(move || {
         ready_responding_engine_after_compose_repair(
             found,
+            cfg!(target_os = "linux"),
             || install::install_engine(&root),
             engine::detect,
             engine::Address::composes,
@@ -505,6 +515,23 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
         Ok(Some(ready)) => {
             if let Some(installed) = ready.installed {
                 report(app, "install-engine", true, installed);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let handle = app.clone();
+                let address = ready.address.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let shell = handle.state::<Shell>();
+                    let _startup = shell.startup.lock().unwrap();
+                    ensure_linux_podman_api(&shell, &address)
+                })
+                .await
+                .map_err(|error| {
+                    Problem::with(
+                        "OpenBot could not start its container service.",
+                        error.to_string(),
+                    )
+                })??;
             }
             report(app, "engine", true, ready.detail);
             return Ok(ready.address);
@@ -594,6 +621,21 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
                 ready.detail,
             )
         })
+}
+
+/// Called while holding startup so Quit cannot retire the service during its acquisition.
+#[cfg(target_os = "linux")]
+fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(), Problem> {
+    if !matches!(*shell.quit.phase.lock().unwrap(), QuitPhase::Idle) {
+        return Err(Problem::plain(
+            "OpenBot is quitting. Start it again to continue.",
+        ));
+    }
+    shell
+        .podman_api
+        .lock()
+        .unwrap()
+        .ensure(&address.pin()?, &stack::default_root())
 }
 
 /// Install the latest published deployment on first use, then keep its recorded version.
@@ -989,6 +1031,10 @@ async fn start_stack_inner<R: tauri::Runtime>(
             return Err(status.detail.into());
         };
         let found = found.pin()?;
+        #[cfg(target_os = "linux")]
+        ensure_linux_podman_api(&shell, &found)?;
+        #[cfg(target_os = "linux")]
+        let status = found.status();
         acquire::prepare_for_compose(&found)?;
         let bun = preparation::require(&root, Some(&requested_harness), &found)?;
 
@@ -1857,6 +1903,13 @@ where
     if let Err(problem) = down_containers_with(shell, &root, down) {
         failures.push(format!("Compose down failed: {problem}"));
     }
+    #[cfg(target_os = "linux")]
+    if let Err(problem) = shell.podman_api.lock().unwrap().stop() {
+        failures.push(format!(
+            "Container API cleanup failed: {}",
+            problem_detail(problem)
+        ));
+    }
     if failures.is_empty() {
         clear_recovery_required(shell, &root);
     }
@@ -2452,8 +2505,16 @@ async fn begin_claude_sign_in(app: tauri::AppHandle, root: String) -> Result<Str
      * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
      * would make the sign-in depend on a choice that has nothing to do with it.
      */
+    #[cfg(target_os = "linux")]
+    let service_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         let (address, image) = prepared_sign_in(&root, openbot_desktop_lib::plan::SIGN_IN_IMAGE)?;
+        #[cfg(target_os = "linux")]
+        {
+            let shell = service_app.state::<Shell>();
+            let _startup = shell.startup.lock().unwrap();
+            ensure_linux_podman_api(&shell, &address)?;
+        }
         openbot_desktop_lib::plan::SigningIn::begin(&address, &image).map_err(Problem::from)
     })
     .await
@@ -2506,9 +2567,17 @@ async fn begin_chatgpt_sign_in(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
+    #[cfg(target_os = "linux")]
+    let service_app = app.clone();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         let (address, image) =
             prepared_sign_in(&root, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE)?;
+        #[cfg(target_os = "linux")]
+        {
+            let shell = service_app.state::<Shell>();
+            let _startup = shell.startup.lock().unwrap();
+            ensure_linux_podman_api(&shell, &address)?;
+        }
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
     .await
@@ -4378,6 +4447,71 @@ mod tests {
     }
 
     #[test]
+    fn linux_first_install_redetects_native_podman_without_a_virtual_machine() {
+        let missing = engine::EngineStatus {
+            engine: None,
+            address: None,
+            responding: false,
+            engine_socket: None,
+            detail: "No container engine yet.".into(),
+        };
+        let trace = std::cell::RefCell::new(Vec::new());
+        let ready = ready_responding_engine_after_compose_repair(
+            missing,
+            true,
+            || {
+                trace.borrow_mut().push("install");
+                Ok("Podman and Compose installed".into())
+            },
+            || {
+                trace.borrow_mut().push("detect");
+                engine::EngineStatus {
+                    engine: Some(engine::Engine::Podman),
+                    address: Some(engine::Address::new(engine::Engine::Podman, None)),
+                    responding: true,
+                    engine_socket: None,
+                    detail: "native Podman answers".into(),
+                }
+            },
+            |_| {
+                trace.borrow_mut().push("compose");
+                true
+            },
+        )
+        .unwrap()
+        .expect("Linux must return its newly installed native engine, not request a VM");
+        assert_eq!(ready.address.engine, engine::Engine::Podman);
+        assert!(ready.address.connection.is_none());
+        assert_eq!(*trace.borrow(), ["install", "detect", "compose"]);
+    }
+
+    #[test]
+    fn linux_failed_native_engine_is_an_error_instead_of_a_request_for_qemu() {
+        let stopped = engine::EngineStatus {
+            engine: Some(engine::Engine::Podman),
+            address: None,
+            responding: false,
+            engine_socket: None,
+            detail: "podman native operation failed".into(),
+        };
+        let result = ready_responding_engine_after_compose_repair(
+            stopped.clone(),
+            true,
+            || Ok("installed".into()),
+            || stopped.clone(),
+            |_| panic!("a failed engine cannot run Compose"),
+        );
+        assert!(
+            result.is_err(),
+            "Ok(None) would enter the virtual-machine path"
+        );
+        assert_eq!(
+            result.err().unwrap().detail.as_deref(),
+            Some("podman native operation failed")
+        );
+    }
+
+    #[test]
     fn responding_engine_without_compose_installs_then_redetects_before_returning() {
         let before = engine::EngineStatus {
             engine: Some(engine::Engine::Podman),
@@ -4401,6 +4535,7 @@ mod tests {
 
         let ready = ready_responding_engine_after_compose_repair(
             before,
+            false,
             || {
                 trace.borrow_mut().push("install-engine".to_string());
                 Ok("Compose installed.".into())
@@ -4447,6 +4582,7 @@ mod tests {
                 engine_socket: None,
                 detail: "podman is answering.".into(),
             },
+            false,
             || {
                 path.write_binary(install::compose_provider_name(), "compose-provider");
                 installed = true;
