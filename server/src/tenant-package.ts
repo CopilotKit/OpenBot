@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { parse } from "yaml";
@@ -116,7 +116,22 @@ type PackageFiles = {
    * package had until now.
    */
   skills?: string;
+  /**
+   * A coworker per file, from `agents/` beside `agents.yaml`, in the order they should be read.
+   *
+   * `agents.yaml` holds every coworker in one file, so adding one means editing a file somebody
+   * else is also editing, and sending one means sending a fragment of it. A directory makes a
+   * coworker a thing you can copy in, delete, or hand to somebody. Both are read, and a package
+   * with only `agents.yaml` is unchanged.
+   */
+  agentFiles?: PackageAgentFile[];
   themeCss: string;
+};
+
+/** One file from `agents/`, kept with its name so a refusal can say which file it came from. */
+export type PackageAgentFile = {
+  filename: string;
+  contents: string;
 };
 
 /**
@@ -330,6 +345,152 @@ export function expandEnvironment(
   );
 }
 
+/**
+ * The coworkers one YAML document declares, in the order it declares them.
+ *
+ * `source` names the file in any refusal, because a package can now declare coworkers in more than
+ * one place and "agent.id is required" is no use when there are eleven files it could be in.
+ *
+ * A remote coworker whose endpoint interpolates to nothing is dropped rather than refused, and its
+ * id is collected so a channel naming it is dropped too. That is what lets a package carry a row
+ * for a Bot somebody has not picked yet.
+ */
+function parseAgents(
+  values: unknown[],
+  source: string,
+  omittedAgentIds: Set<string>,
+): TenantAgent[] {
+  return values.flatMap((value) => {
+    const agent = asRecord(value, "agent");
+    const type: TenantAgent["type"] | undefined =
+      agent.type === "built-in"
+        ? "built_in"
+        : agent.type === "remote-ag-ui"
+          ? "remote_ag_ui"
+          : // A Mastra server, dialled through `@ag-ui/mastra` rather than an AG-UI route of its
+            // own. Seedable like the others: it is an address, and the same one this deployment
+            // would have been given by hand.
+            agent.type === "remote-mastra"
+            ? "remote_mastra"
+            : undefined;
+    if (!type) {
+      throw new Error(
+        `${source}: agent.type must be built-in, remote-ag-ui or remote-mastra`,
+      );
+    }
+    const id = requiredString(agent.id, "agent.id");
+    /*
+     * A Bot may not be named after a deployment route.
+     *
+     * The computer router's bot-access guard steps aside for those names, and a request cannot
+     * tell a Bot called `policy` from `/policy` itself, so such a Bot would be served to anybody
+     * who can sign in without the guard ever being asked. A package id is the only way a Bot gets
+     * a chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
+     * closes it rather than moving it.
+     */
+    if (DEPLOYMENT_ROUTES.has(id)) {
+      throw new Error(
+        `${source}: agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
+      );
+    }
+    if (type === "remote_ag_ui" || type === "remote_mastra") {
+      const endpoint =
+        typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
+      if (!endpoint) {
+        omittedAgentIds.add(id);
+        return [];
+      }
+    }
+    return [
+      {
+        id,
+        name: requiredString(agent.name, "agent.name"),
+        title: requiredString(agent.title, "agent.title"),
+        roleDescription: requiredString(
+          agent.role_description,
+          "agent.role_description",
+        ),
+        avatarSeed:
+          agent.avatar_seed === undefined
+            ? undefined
+            : requiredString(agent.avatar_seed, "agent.avatar_seed"),
+        type,
+        configuration:
+          type === "built_in"
+            ? {
+                systemPrompt: requiredString(
+                  agent.system_prompt,
+                  "agent.system_prompt",
+                ),
+              }
+            : {
+                endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                /*
+                 * Which agent on that server, when the server is a roster.
+                 *
+                 * Optional, and only meaningful for Mastra: a package naming one gets that one,
+                 * and a package naming none gets the only agent there or a refusal. Carried here
+                 * so a seeded Mastra Bot is as specific as one added by hand. See
+                 * `pickFromRoster`.
+                 */
+                ...(type === "remote_mastra" &&
+                typeof agent.remote_agent_id === "string" &&
+                agent.remote_agent_id.trim().length > 0
+                  ? { remoteAgentId: agent.remote_agent_id.trim() }
+                  : {}),
+              },
+        skills:
+          agent.skills === undefined || agent.skills === null
+            ? []
+            : stringArray(agent.skills, "agent.skills"),
+      },
+    ];
+  });
+}
+
+/**
+ * Every coworker the package declares: `agents.yaml` first, then one file at a time from `agents/`.
+ *
+ * A file under `agents/` may hold a list under `agents:`, the way `agents.yaml` does, or the one
+ * coworker on its own. The second is the point of the directory — a coworker somebody sends you is
+ * a file you drop in, not a fragment to paste into the middle of a file you already have.
+ *
+ * Two declarations of the same id are refused, and the refusal names both files. Preferring one
+ * would make which coworker a deployment runs depend on the order a directory happened to be read
+ * in, and a clone that copied a file in twice under different names would never find out.
+ */
+function collectAgents(
+  agentsYaml: Record<string, unknown>,
+  agentFiles: PackageAgentFile[],
+  omittedAgentIds: Set<string>,
+): TenantAgent[] {
+  const agents = parseAgents(
+    asList(agentsYaml.agents, "agents.yaml agents"),
+    "agents.yaml",
+    omittedAgentIds,
+  );
+  const declaredIn = new Map(agents.map((agent) => [agent.id, "agents.yaml"]));
+  for (const file of agentFiles) {
+    const source = `agents/${file.filename}`;
+    const document = yaml(file.contents, source);
+    const values =
+      document.agents === undefined
+        ? [document]
+        : asList(document.agents, `${source} agents`);
+    for (const agent of parseAgents(values, source, omittedAgentIds)) {
+      const existing = declaredIn.get(agent.id);
+      if (existing) {
+        throw new Error(
+          `agent "${agent.id}" is declared in both ${existing} and ${source}`,
+        );
+      }
+      declaredIn.set(agent.id, source);
+      agents.push(agent);
+    }
+  }
+  return agents;
+}
+
 export function validateTenantPackage(files: PackageFiles): TenantPackage {
   if (files.themeCss.trim()) {
     validateThemeCss(files.themeCss);
@@ -348,93 +509,10 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
   const omittedAgentIds = new Set<string>();
-  const agents = asList(agentsYaml.agents, "agents.yaml agents").flatMap(
-    (value) => {
-      const agent = asRecord(value, "agent");
-      const type: TenantAgent["type"] | undefined =
-        agent.type === "built-in"
-          ? "built_in"
-          : agent.type === "remote-ag-ui"
-            ? "remote_ag_ui"
-            : // A Mastra server, dialled through `@ag-ui/mastra` rather than an AG-UI route of its
-              // own. Seedable like the others: it is an address, and the same one this deployment
-              // would have been given by hand.
-              agent.type === "remote-mastra"
-              ? "remote_mastra"
-              : undefined;
-      if (!type) {
-        throw new Error(
-          "agent.type must be built-in, remote-ag-ui or remote-mastra",
-        );
-      }
-      const id = requiredString(agent.id, "agent.id");
-      /*
-       * A Bot may not be named after a deployment route.
-       *
-       * The computer router's bot-access guard steps aside for those names, and a request cannot
-       * tell a Bot called `policy` from `/policy` itself, so such a Bot would be served to anybody
-       * who can sign in without the guard ever being asked. A package id is the only way a Bot gets
-       * a chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
-       * closes it rather than moving it.
-       */
-      if (DEPLOYMENT_ROUTES.has(id)) {
-        throw new Error(
-          `agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
-        );
-      }
-      if (type === "remote_ag_ui" || type === "remote_mastra") {
-        const endpoint =
-          typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
-        if (!endpoint) {
-          omittedAgentIds.add(id);
-          return [];
-        }
-      }
-      return [
-        {
-          id,
-          name: requiredString(agent.name, "agent.name"),
-          title: requiredString(agent.title, "agent.title"),
-          roleDescription: requiredString(
-            agent.role_description,
-            "agent.role_description",
-          ),
-          avatarSeed:
-            agent.avatar_seed === undefined
-              ? undefined
-              : requiredString(agent.avatar_seed, "agent.avatar_seed"),
-          type,
-          configuration:
-            type === "built_in"
-              ? {
-                  systemPrompt: requiredString(
-                    agent.system_prompt,
-                    "agent.system_prompt",
-                  ),
-                }
-              : {
-                  endpoint: requiredString(agent.endpoint, "agent.endpoint"),
-                  /*
-                   * Which agent on that server, when the server is a roster.
-                   *
-                   * Optional, and only meaningful for Mastra: a package naming one gets that one,
-                   * and a package naming none gets the only agent there or a refusal. Carried here
-                   * so a seeded Mastra Bot is as specific as one added by hand. See
-                   * `pickFromRoster`.
-                   */
-                  ...(type === "remote_mastra" &&
-                  typeof agent.remote_agent_id === "string" &&
-                  agent.remote_agent_id.trim().length > 0
-                    ? { remoteAgentId: agent.remote_agent_id.trim() }
-                    : {}),
-                },
-          skills:
-            agent.skills === undefined || agent.skills === null
-              ? []
-              : stringArray(agent.skills, "agent.skills"),
-        },
-      ];
-    },
+  const agents = collectAgents(
+    agentsYaml,
+    files.agentFiles ?? [],
+    omittedAgentIds,
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
   const packageSkills = parseTenantSkills(skillsYaml.skills);
@@ -566,6 +644,42 @@ function parseTenantSkills(value: unknown): TenantSkill[] {
   });
 }
 
+/**
+ * The coworker files beside `agents.yaml`, read in a fixed order.
+ *
+ * No directory is a package that keeps every coworker in one file, which is every package written
+ * before this and stays supported. `.yaml` and `.yml` only, so a README or an editor's leftovers
+ * sitting in there is not something the deployment tries to parse.
+ *
+ * Sorted by filename rather than taken in the order the filesystem answers, because the order
+ * decides which file a duplicate id is blamed on, and a refusal that names a different file on
+ * another machine is not one anybody can act on.
+ *
+ * `${NAME}` is expanded here exactly as it is in `agents.yaml`: these are the clone's own files,
+ * written by whoever wrote the rest of the package.
+ */
+async function readAgentFiles(sourcePath: string): Promise<PackageAgentFile[]> {
+  const directory = join(sourcePath, "agents");
+  const entries = await readdir(directory).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return [];
+      throw error;
+    },
+  );
+  const filenames = entries
+    .filter((entry) => entry.endsWith(".yaml") || entry.endsWith(".yml"))
+    .sort();
+  return await Promise.all(
+    filenames.map(async (filename) => ({
+      filename,
+      contents: expandEnvironment(
+        await readFile(join(directory, filename), "utf8"),
+        `agents/${filename}`,
+      ),
+    })),
+  );
+}
+
 export async function loadTenantPackage(
   sourcePath: string,
 ): Promise<LoadedTenantPackage> {
@@ -604,6 +718,7 @@ export async function loadTenantPackage(
       if (error.code === "ENOENT") return "";
       throw error;
     });
+  const agentFiles = await readAgentFiles(sourcePath);
   const tenantPackage = validateTenantPackage({
     brand,
     agents,
@@ -611,6 +726,7 @@ export async function loadTenantPackage(
     model,
     knowledge,
     skills,
+    agentFiles,
     themeCss,
   });
 
@@ -619,8 +735,17 @@ export async function loadTenantPackage(
     sourcePath,
     // `skills` is in the checksum, so editing it is a package change like any other and the
     // deployment notices on the next boot rather than reporting itself unchanged.
+    // `agents/` is in the checksum for the reason `skills` is: a coworker added, edited or removed
+    // there is a package change, and a deployment that did not notice would go on running the
+    // roster it booted with while the repository said otherwise.
     checksum: createHash("sha256")
-      .update([...contents, skills].join("\n"))
+      .update(
+        [
+          ...contents,
+          skills,
+          ...agentFiles.map((file) => `${file.filename}\n${file.contents}`),
+        ].join("\n"),
+      )
       .digest("hex"),
   };
 }
