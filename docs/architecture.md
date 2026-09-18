@@ -325,6 +325,9 @@ Required package files:
 - `model.yaml`
 - `knowledge.yaml`
 
+Optional: `skills.yaml`, `theme.css`, and an `agents/` directory holding a coworker per file, read
+alongside `agents.yaml`. See [configuration.md](configuration.md#agents).
+
 The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
 
 Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.

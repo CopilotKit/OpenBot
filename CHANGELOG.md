@@ -8,6 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A coworker can be a file of its own
+
+The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file
+somebody else was editing too, and handing somebody a coworker meant handing them a fragment to
+paste into the middle of theirs. A package may now also keep a coworker per file in an `agents/`
+directory beside `agents.yaml`, and both are read. A package that keeps everything in `agents.yaml`
+loads exactly as before. A file holds the coworker on its own or a list under `agents:`, only
+`.yaml` and `.yml` are read, and files are read in filename order. Two declarations of the same id
+stop the server and both files are named, rather than one quietly winning on the order a directory
+was listed in. The directory is in the package checksum, so a coworker added or edited there is a
+package change a running deployment notices.
+
+### Ten more example coworkers, each doing one job
+
+The example package shipped three coworkers, which is enough to prove the format and not enough to
+give anybody ideas, and writing a `role_description` cold is the part that decides whether a
+coworker answers usefully or vaguely. Ten more ship in `examples/fintech/agents/`, one file each:
+reading an expense claim against the policy as written, turning a meeting note into the follow-ups
+actually in it, drafting release notes from what shipped, triaging a support ticket, answering a new
+starter from the handbook, writing a brief that names what it could not find, writing up an
+interview with question, answer and observation kept apart, handing an on-call shift over from the
+record, assembling what is known before a renewal decision, and grouping customer feedback into
+themes it can cite. Each says what the job is, what the coworker must not do, and what to say when
+it cannot find something. They grant nothing: a coworker names skills, a skill names tools, and what
+it may call is what an administrator has granted. Delete the ones you do not want.
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in

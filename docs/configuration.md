@@ -404,7 +404,7 @@ Set `OPENBOT_ONE_COMPUTER_EACH=false` when using `start.sh` to run all Bots agai
 
 ## Tenant package
 
-The tenant package contains five required YAML files, and one optional:
+The tenant package contains five required YAML files, and two optional:
 
 ```text
 examples/fintech/
@@ -413,7 +413,9 @@ examples/fintech/
 ├── channels.yaml
 ├── model.yaml
 ├── knowledge.yaml
-└── skills.yaml      (optional)
+├── skills.yaml      (optional)
+└── agents/          (optional)
+    └── expense-review.yaml
 ```
 
 ### `brand.yaml`
@@ -479,6 +481,36 @@ against a local stack, a staging one and production. `${NAME:-fallback}` uses th
 name is unset or empty, which is how the example package points at the Bot in the box without
 requiring any configuration. A name with neither a value nor a fallback stops the server with a
 message saying which file wanted it, rather than leaving a Bot pointed at an address nobody meant.
+
+### `agents/`
+
+A coworker may also be one file of its own, in an `agents/` directory beside `agents.yaml`. Both are
+read, and a package that keeps every coworker in `agents.yaml` is unchanged.
+
+```yaml
+# examples/fintech/agents/expense-review.yaml
+id: expense-review
+name: Expense Review
+title: Finance Operations
+role_description: Check one expense claim at a time against the policy as it is written.
+avatar_seed: expense-review
+type: built-in
+system_prompt: Quote the clause you relied on, and leave the decision to a person.
+skills:
+  - find-a-document
+```
+
+The file holds the coworker on its own, as above, or a list under `agents:` the way `agents.yaml`
+does. Only `.yaml` and `.yml` are read, so a README beside them is left alone. Files are read in
+filename order, and every check that applies to a row in `agents.yaml` applies here too: a refusal
+names the file it came from.
+
+Two files declaring the same `id`, or a file repeating an id `agents.yaml` already uses, stop the
+server and both files are named. Nothing wins by being read later — which coworker a deployment runs
+should not depend on what a directory listing happened to return.
+
+The directory is in the package checksum, so adding, editing or deleting a coworker there is a
+package change like any other and a running deployment notices it on the next boot.
 
 ### `channels.yaml`
 
