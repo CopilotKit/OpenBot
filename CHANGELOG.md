@@ -24,6 +24,14 @@ model's name to mean the name already carried a provider, so Pydantic AI read `l
 refused it as unknown, and the Bot never started. A model's name now carries a provider only when it
 begins with the chosen provider's own, as in `anthropic:claude-sonnet-4-5`.
 
+### The Langroid Bot starts on an Anthropic key
+
+Picked with an Anthropic key, the Langroid Bot exited on startup asking for an OpenAI key. It names
+a model from any provider but OpenAI through litellm, which its image did not install, and Langroid
+builds an OpenAI client for such a model all the same, from the `OPENAI_API_KEY` Compose writes
+empty when the choice was not OpenAI. The image now installs Langroid's litellm extra and an empty
+OpenAI key is treated as none, so the Bot starts and answers with the Anthropic model chosen.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in

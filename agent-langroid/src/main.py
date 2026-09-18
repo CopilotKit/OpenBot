@@ -24,6 +24,13 @@ def _model_id() -> str:
     return f"litellm/{provider}/{model}"
 
 
+# An empty `OPENAI_API_KEY` is no key. Compose writes the keys a model choice does not use as empty
+# rather than leaving them out, and Langroid reads `OPENAI_API_KEY` as its own setting: given an empty
+# one it builds an OpenAI client with it, even for a model it hands to litellm, and the client refuses
+# to be built. Unset, Langroid uses its placeholder and litellm reads the chosen provider's own key.
+if not os.environ.get("OPENAI_API_KEY"):
+    os.environ.pop("OPENAI_API_KEY", None)
+
 agent = ChatAgent(
     ChatAgentConfig(
         llm=OpenAIGPTConfig(chat_model=_model_id()),

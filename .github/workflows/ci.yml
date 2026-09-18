@@ -311,6 +311,13 @@ jobs:
           . .venv-pydantic-ai/bin/activate
           python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
           python -m pytest agent-pydantic-ai/tests -q
+      - name: Langroid model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-langroid
+          . .venv-langroid/bin/activate
+          python -m pip install --requirement agent-langroid/requirements.txt --requirement agent-langroid/requirements-test.txt
+          python -m pytest agent-langroid/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
