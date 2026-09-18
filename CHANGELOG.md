@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.13
+
 ### Ctrl+B shows and hides the sidebar on a layout that does not write Latin letters
 
 The sidebar toggle's tooltip names Ctrl+B, or ⌘B on a Mac, and the shortcut was recognised by the

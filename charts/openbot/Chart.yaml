@@ -6,7 +6,7 @@ type: application
 version: 0.1.1
 # The OpenBot release this chart's default image tag points at. Kept equal to package.json's version
 # (the last version published) by the release workflow, and CI refuses a tree where they have drifted.
-appVersion: "0.0.12"
+appVersion: "0.0.13"
 home: https://github.com/CopilotKit/OpenBot
 sources:
   - https://github.com/CopilotKit/OpenBot
