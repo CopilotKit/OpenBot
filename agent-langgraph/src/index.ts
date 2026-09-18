@@ -407,7 +407,7 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
       await streamRun(
         async () =>
           buildGraph(input).streamEvents(
-            { messages: toLangChainMessages(input) },
+            { messages: toLangChainMessages(input, PROVIDER) },
             { version: "v2" },
           ),
         input,

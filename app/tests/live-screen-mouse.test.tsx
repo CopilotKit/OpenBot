@@ -165,3 +165,43 @@ test("moving the mouse is not a click", async () => {
     },
   ]);
 });
+
+test("a turn of the wheel is stopped here as well as sent there", async () => {
+  // In a browser React attaches `onWheel` to its root as a passive listener, so a `preventDefault`
+  // there is ignored and the wheel scrolled this page as well as the Bot's. Under happy-dom React
+  // does not detect passive support and binds it actively, which hides exactly that, so this pins
+  // the listener the canvas holds itself, and that it is not passive.
+  const wheelListeners: unknown[] = [];
+  const addEventListener = HTMLCanvasElement.prototype.addEventListener;
+  HTMLCanvasElement.prototype.addEventListener = function (
+    this: HTMLCanvasElement,
+    ...args: Parameters<typeof addEventListener>
+  ) {
+    if (args[0] === "wheel") wheelListeners.push(args[2]);
+    return addEventListener.apply(this, args);
+  };
+  try {
+    const { canvas, socket } = await liveCanvas();
+    expect(wheelListeners).toEqual([{ passive: false }]);
+
+    // happy-dom's WheelEvent carries no coordinates, so a mouse event of that type stands in.
+    const wheel = new MouseEvent("wheel", {
+      clientX: 40,
+      clientY: 30,
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperties(wheel, {
+      deltaX: { value: 0 },
+      deltaY: { value: 120 },
+    });
+    canvas.dispatchEvent(wheel);
+
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(socket.sent).toEqual([
+      { type: "wheel", x: 40, y: 30, deltaX: 0, deltaY: 120, modifiers: 0 },
+    ]);
+  } finally {
+    HTMLCanvasElement.prototype.addEventListener = addEventListener;
+  }
+});

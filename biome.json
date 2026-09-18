@@ -5,7 +5,6 @@
       "**",
       "!**/dist",
       "!.",
-      "!app/src/components/ui",
       "!app/src/lib/generated/application-config.ts",
       "!app/src/routeTree.gen.ts",
       "!desktop/src-tauri/gen",
@@ -32,6 +31,18 @@
         "rules": {
           "style": {
             "noNonNullAssertion": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["app/src/components/ui/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off",
+            "noLabelWithoutControl": "off",
+            "useKeyWithClickEvents": "off"
           }
         }
       }
