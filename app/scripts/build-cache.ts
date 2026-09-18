@@ -171,15 +171,25 @@ async function collectBuildInputs(
     include: (path) => hasSourceExtension(path),
     skipDirectory: (path) => basename(path) === "node_modules",
   });
+  // The app bundles modules from `shared/` too (attachment limits, handoff markers), so a change
+  // there has to rebuild it just as a change under `app/src` does.
+  const sharedFiles = await collectFiles(join(resolvedRoot, "shared"), {
+    prefix: "shared",
+    include: (path) => hasSourceExtension(path),
+    skipDirectory: (path) => basename(path) === "node_modules",
+  });
   const tenantFiles = await collectFiles(tenantDir, {
     prefix: `tenant/${slashPath(relative(resolvedRoot, tenantDir))}`,
     include: (path) => hasSourceExtension(path),
     skipDirectory: (path) => basename(path) === "node_modules",
   });
 
-  return [...explicitFiles, ...sourceFiles, ...tenantFiles].sort(
-    (left, right) => left.path.localeCompare(right.path),
-  );
+  return [
+    ...explicitFiles,
+    ...sourceFiles,
+    ...sharedFiles,
+    ...tenantFiles,
+  ].sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export async function buildCacheKey(
