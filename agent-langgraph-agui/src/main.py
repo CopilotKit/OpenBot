@@ -12,8 +12,6 @@ from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain.chat_models import init_chat_model
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, convert_to_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
@@ -173,6 +171,8 @@ def _system_turns_first(messages):
     was picked for, and `langchain-google-genai` already gathers every system message into Gemini's
     one system instruction by itself.
     """
+    from langchain_core.messages import SystemMessage, convert_to_messages
+
     messages = convert_to_messages(messages)
     return [
         *(message for message in messages if isinstance(message, SystemMessage)),
@@ -180,10 +180,26 @@ def _system_turns_first(messages):
     ]
 
 
+def _wants_system_turns_first(model) -> bool:
+    """
+    Anthropic is the provider that refuses non-consecutive system turns, and it is asked for by
+    class rather than by `BOT_PROVIDER` because `BOT_MODEL` can name a provider on its own.
+
+    The import is here rather than at the top of the file because this module is imported to read
+    a deployment's provider configuration in places that install no provider package at all, and a
+    missing import there would answer that question with a crash.
+    """
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError:
+        return False
+    return isinstance(model, ChatAnthropic)
+
+
 async def answer(state: MessagesState):
     model = _model()
     messages = model_messages(state["messages"])
-    if isinstance(model, ChatAnthropic):
+    if _wants_system_turns_first(model):
         messages = _system_turns_first(messages)
     return {"messages": [await bind_tools(model).ainvoke(messages)]}
 
