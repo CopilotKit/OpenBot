@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The LangGraph Bot answers on Anthropic and Gemini
+
+With `BOT_PROVIDER=anthropic` or `BOT_PROVIDER=google`, the LangGraph Bot answered nothing: every run
+ended in an error before the model was asked. Those two providers take one system prompt, at the top,
+and the Bot handed its model several: its own guidance, the context the app sends, and the
+coworker's standing role, which the server puts at the head of every run. The provider's LangChain
+integration refused the second one. On those two providers the Bot now folds them into one system
+prompt, in the same order, and a skill picked for a message joins it. Runs on OpenAI are unchanged.
+
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
 A `BOT_MODEL` carrying a leading space reached this Bot as it was written. Its startup check refuses
