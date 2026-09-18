@@ -22,8 +22,22 @@ import { userContent } from "../../shared/user-content";
  */
 export { NO_ANSWER_CAME };
 
+/**
+ * The providers that take one system prompt, and take it first.
+ *
+ * Anthropic's Messages API has the system prompt as a field of the request rather than as a turn,
+ * and Gemini has it as `systemInstruction`, so neither integration has anywhere to put a second one:
+ * `@langchain/anthropic` throws "System messages are only permitted as the first passed message."
+ * and `@langchain/google-genai` throws "System message should be the first one", both before any
+ * request is made. OpenAI takes a system turn anywhere in a conversation.
+ */
+const ONE_SYSTEM_PROMPT = new Set(["anthropic", "google"]);
+
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
-export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
+export function toLangChainMessages(
+  input: RunAgentInput,
+  provider = "openai",
+): BaseMessage[] {
   const messages: BaseMessage[] = [
     new SystemMessage(COMPUTER_GUIDANCE),
     // AG-UI carries application context separately from conversation history. CopilotKit puts
@@ -134,11 +148,36 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
     messages.push(new HumanMessage(CONTINUE_TURN));
   }
 
-  return messages;
+  /*
+   * Every run holds more than one system message, so on those providers every run failed.
+   *
+   * The computer guidance opens this list and the caller's context follows it, and the server puts a
+   * coworker's standing role at the head of `input.messages` on every run it sends a remote Bot. A
+   * skill somebody picks arrives as a system turn ahead of their message, too. So a Bot set to
+   * `BOT_PROVIDER=anthropic` or `google` answered nothing at all: each run ended in the integration's
+   * refusal, before the model was asked.
+   *
+   * Folded into one, in the order given, and only for those providers. On OpenAI a skill's
+   * instruction stays beside the message it was picked for.
+   */
+  return ONE_SYSTEM_PROMPT.has(provider)
+    ? withOneSystemPrompt(messages)
+    : messages;
 }
 
 /** The continuation a strict provider needs when a run carries only deltas. See toLangChainMessages. */
 const CONTINUE_TURN = "Continue from where the conversation above left off.";
+
+/** Every system message's text as one system message at the top, and the rest as they were. */
+function withOneSystemPrompt(messages: BaseMessage[]): BaseMessage[] {
+  const system = messages.filter((message) => message instanceof SystemMessage);
+  return [
+    new SystemMessage(
+      system.map((message) => String(message.content)).join("\n\n"),
+    ),
+    ...messages.filter((message) => !(message instanceof SystemMessage)),
+  ];
+}
 
 function parseArguments(raw: string): Record<string, unknown> {
   try {

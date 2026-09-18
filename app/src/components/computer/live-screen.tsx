@@ -279,6 +279,13 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
    *
    * Listen on window because canvas cannot hold focus. `preventDefault` keeps Tab and typing directed
    * at the remote page while takeover is active.
+   *
+   * The keydown in the capture phase, and stopped as well as prevented, because a keystroke sent to
+   * the Bot's browser is not also this page's. The app's own shortcuts listen on this window too,
+   * and they were bound first, when the signed-in app mounted, so they saw every keystroke before
+   * this did: a capital N typed into the remote page started a new chat, and Ctrl+B there toggled
+   * the sidebar here. Escape and the paste shortcut are not stopped, because both are meant for this
+   * page.
    */
   useEffect(() => {
     if (!driving) return;
@@ -289,6 +296,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       send({
         type: "key",
         event: "down",
@@ -324,11 +332,11 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       send({ type: "text", text });
     };
 
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("paste", onPaste);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("paste", onPaste);
       localKeyUps.current.clear();
