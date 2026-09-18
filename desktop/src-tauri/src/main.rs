@@ -4903,13 +4903,20 @@ mod tests {
             path: SerializedPath,
             app: tauri::App<tauri::test::MockRuntime>,
             window: tauri::WebviewWindow<tauri::test::MockRuntime>,
+            previous_runtime: Option<std::ffi::OsString>,
         }
 
         impl Fixture {
             fn new() -> Self {
-                let base = temp_root("container-root-workflow");
+                // Unix socket paths must remain below sockaddr_un's length limit on macOS too.
+                let base = PathBuf::from("/tmp")
+                    .join(temp_root("container-root-workflow").file_name().unwrap());
                 std::fs::create_dir_all(&base).unwrap();
                 let base = base.canonicalize().unwrap();
+                let runtime = base.join("runtime");
+                std::fs::create_dir_all(&runtime).unwrap();
+                let previous_runtime = std::env::var_os("XDG_RUNTIME_DIR");
+                std::env::set_var("XDG_RUNTIME_DIR", &runtime);
                 let a = base.join("a");
                 let b = base.join("b");
                 write_installed_deployment(&a);
@@ -4954,6 +4961,34 @@ fn main() {
     let words:Vec<&str>=args.iter().map(String::as_str).collect();
     if words==["context","show"] { println!("{target}"); return; }
     if words.starts_with(&["context","inspect"]) { println!("unix:///owned-default.sock"); return; }
+    if words.starts_with(&["system", "service"]) {
+        use std::{io::Read, os::unix::net::UnixListener, time::{Duration, Instant}};
+        assert_eq!(engine, "podman");
+        assert_eq!(target, "local");
+        let socket=PathBuf::from(words.last().unwrap().strip_prefix("unix://").unwrap());
+        assert_eq!(socket, PathBuf::from(env::var_os("XDG_RUNTIME_DIR").unwrap()).join("podman/podman.sock"));
+        let listener=UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(60);
+        while Instant::now()<deadline {
+            match listener.accept() {
+                Ok((mut stream,_)) => {
+                    stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                    stream.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+                    let mut request=Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        let mut byte=[0;1]; stream.read_exact(&mut byte).unwrap(); request.push(byte[0]);
+                        assert!(request.len()<4096);
+                    }
+                    assert!(request.starts_with(b"GET /_ping HTTP/1.1\r\n"));
+                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK").unwrap();
+                }
+                Err(error) if error.kind()==std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) => panic!("fixture API accept failed: {error}"),
+            }
+        }
+        return;
+    }
     if words.first()==Some(&"system") { println!("{target}"); return; }
     if words.first()==Some(&"machine") { println!("[]"); return; }
     if !base.join(format!("{engine}-ready")).exists() { eprintln!("synthetic original runtime unavailable"); std::process::exit(74); }
@@ -5015,6 +5050,7 @@ fn main() {
                     path,
                     app,
                     window,
+                    previous_runtime,
                 }
             }
 
@@ -5125,6 +5161,18 @@ fn main() {
 
         impl Drop for Fixture {
             fn drop(&mut self) {
+                #[cfg(target_os = "linux")]
+                self.app
+                    .state::<Shell>()
+                    .podman_api
+                    .lock()
+                    .unwrap()
+                    .stop()
+                    .expect("stop owned fixture API before deleting its runtime directory");
+                match &self.previous_runtime {
+                    Some(runtime) => std::env::set_var("XDG_RUNTIME_DIR", runtime),
+                    None => std::env::remove_var("XDG_RUNTIME_DIR"),
+                }
                 println!(
                     "CONTAINER_CLEANUP={}",
                     serde_json::json!({"base":self.base,"bin":self.path.bin(),"commands":self.commands(),"affinity":std::fs::read_to_string(self.base.join("affinity.log")).unwrap_or_default(),"engineBinarySha256":format!("{:x}",Sha256::digest(std::fs::read(self.path.bin().join("docker")).unwrap())),"persistentFixtureProcesses":0})
@@ -5333,6 +5381,44 @@ fn main() {
                 .lock()
                 .unwrap()
                 .is_none());
+        }
+
+        #[test]
+        fn local_podman_fixture_serves_api_on_its_private_runtime_socket() {
+            if crate::test_support::isolated_process("tests::container_root::local_podman_fixture_serves_api_on_its_private_runtime_socket") { return; }
+            use std::io::{Read, Write};
+            let fixture = Fixture::new();
+            let socket = fixture.base.join("runtime/podman/podman.sock");
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            let mut service = engine::Address::new(engine::Engine::Podman, None)
+                .command()
+                .args(["--remote=false", "system", "service", "--time=0"])
+                .arg(format!("unix://{}", socket.display()))
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let response = loop {
+                match std::os::unix::net::UnixStream::connect(&socket) {
+                    Ok(mut stream) => {
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                            .unwrap();
+                        stream.write_all(b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+                        let mut response = String::new();
+                        let read = stream.read_to_string(&mut response);
+                        break read.map(|_| response);
+                    }
+                    Err(error) if std::time::Instant::now() >= deadline => break Err(error),
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                }
+            };
+            service.kill().unwrap();
+            service.wait().unwrap();
+            assert!(response.unwrap().starts_with("HTTP/1.1 200 OK\r\n"));
+            assert_eq!(
+                std::env::var_os("XDG_RUNTIME_DIR").unwrap(),
+                fixture.base.join("runtime")
+            );
         }
 
         #[test]
