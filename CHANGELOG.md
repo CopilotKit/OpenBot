@@ -15,6 +15,22 @@ keystrokes too, and they heard each one first, so typing a capital N into the Bo
 "New York", started a new chat and took the person away from the Bot mid-word, and Ctrl+B there
 also showed or hid the sidebar. A keystroke sent to the Bot's browser now reaches only the Bot's
 browser. Escape still closes the view, and the paste shortcut still pastes.
+### The Python LangGraph Bot on Anthropic answers after a skill was picked
+
+A skill somebody picks reaches the Bot as a system message just ahead of their message, and it
+stays in the conversation. Anthropic takes one system prompt, and its LangChain integration refuses
+a system message that comes after a turn of the conversation, so with `BOT_PROVIDER=anthropic`
+every run in that conversation failed from then on, before the model was asked. On Anthropic the
+Python LangGraph Bot now puts every system message ahead of the conversation, in the order given,
+where the integration joins them into its one prompt. Runs on OpenAI and Gemini are unchanged.
+### The LangGraph Bot answers on Anthropic and Gemini
+
+With `BOT_PROVIDER=anthropic` or `BOT_PROVIDER=google`, the LangGraph Bot answered nothing: every run
+ended in an error before the model was asked. Those two providers take one system prompt, at the top,
+and the Bot handed its model several: its own guidance, the context the app sends, and the
+coworker's standing role, which the server puts at the head of every run. The provider's LangChain
+integration refused the second one. On those two providers the Bot now folds them into one system
+prompt, in the same order, and a skill picked for a message joins it. Runs on OpenAI are unchanged.
 
 ### The proof-of-concept Bot reads a model name set with whitespace around it
 
