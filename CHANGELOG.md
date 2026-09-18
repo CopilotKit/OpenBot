@@ -10,6 +10,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## 0.0.13
 
+### Fresh desktop setup installs its runtime before sign-in
+
+Desktop setup installs local software before asking for an AI connection. Fresh Mac Podman
+installations no longer duplicate stack port bindings. The shared installer downloads verified
+prebuilt Bun binaries without developer tools; Linux setup also installs its native Podman runtime
+and certificate bundle. (#599, #604)
+
 ### Ctrl+B shows and hides the sidebar on a layout that does not write Latin letters
 
 The sidebar toggle's tooltip names Ctrl+B, or ⌘B on a Mac, and the shortcut was recognised by the
