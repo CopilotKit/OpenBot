@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Agno Bot answers on an OpenAI key
+
+Picked with an OpenAI key, the Agno Bot failed every run before reaching OpenAI. Agno sends a
+temperature and a `top_p` with each request, and LiteLLM refuses both for `gpt-5.5`, the model
+Compose passes when the setup screen names none, so the run ended in `UnsupportedParamsError`. A
+parameter the model does not take is now dropped instead, the way the LlamaIndex Bot already does
+it. The Anthropic key and an OpenAI-compatible endpoint behave as before.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in

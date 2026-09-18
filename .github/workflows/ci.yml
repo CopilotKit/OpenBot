@@ -297,6 +297,13 @@ jobs:
           . .venv-llamaindex/bin/activate
           python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
           python -m pytest agent-llamaindex/tests -q
+      - name: Agno model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-agno
+          . .venv-agno/bin/activate
+          python -m pip install --requirement agent-agno/requirements.txt --requirement agent-agno/requirements-test.txt
+          python -m pytest agent-agno/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
