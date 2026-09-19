@@ -15,12 +15,14 @@ def _config() -> AnthropicConfig | OpenAIConfig:
     """The provider the model screen chose, which AG2 reaches through a config of its own.
 
     `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
-    endpoint included. Each SDK reads its own key and base URL from the environment.
+    endpoint included. Each SDK reads its own key from the environment.
     """
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
     if provider == "anthropic":
-        return AnthropicConfig(model=model)
+        # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
+        base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+        return AnthropicConfig(model=model, base_url=base_url)
     return OpenAIConfig(model=model)
 
 
