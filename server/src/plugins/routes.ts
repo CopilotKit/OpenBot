@@ -2271,9 +2271,37 @@ export function createPluginRoutes(
     const actor = skillActor(context);
 
     if (kind === "mcp") {
-      return actor.isAdmin
-        ? null
-        : "An administrator decides which Bots may reach a tool.";
+      if (!actor.isAdmin) {
+        return "An administrator decides which Bots may reach a tool.";
+      }
+      // Taking something away is always allowed: see the note on `intent`. It matters more here
+      // than anywhere else, because the rows this check exists to prevent are the same shape as the
+      // rows #572's migration had to delete, and an administrator has to be able to remove one by
+      // hand rather than wait for a migration.
+      if (intent === "revoke") return null;
+
+      /*
+       * A grant that could never do anything is refused rather than stored, which is the rule the
+       * `bot` branch below already states and this one did not follow.
+       *
+       * Nothing checked that the app existed. `store.grant` is a bare upsert, so a ref naming an
+       * app this deployment has not added was stored and then invisible: the surface that reports a
+       * grant nothing advertises is built per server row, and there was no row. #572 fixed the way
+       * these rows were MADE — a removal used to leave its grants behind — and added the migration
+       * that deleted the ones already there. This is the other door into the same room. Add the app
+       * afterwards and the id is the same, the action names are the same, and every one of those
+       * grants resolves, with nobody having granted anything and no row in the trail saying so.
+       *
+       * THE SERVER HALF ONLY. A grant naming a tool the server has stopped advertising is a
+       * supported state, held and not offered, because what a vendor lists today is not what
+       * somebody decided yesterday — checking the tool here would refuse a re-grant of exactly the
+       * tool an administrator is trying to restore. A grant naming no app at all is not that state.
+       */
+      const [serverId] = ref.split("/");
+      if (!(await store.serverExists(serverId ?? ""))) {
+        return `${serverId} is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.`;
+      }
+      return null;
     }
 
     if (kind === "bot") {
