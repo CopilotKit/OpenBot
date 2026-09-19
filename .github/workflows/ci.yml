@@ -311,7 +311,14 @@ jobs:
           . .venv-pydantic-ai/bin/activate
           python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
           python -m pytest agent-pydantic-ai/tests -q
-      - name: Langroid model-choice regression
+      - name: Google ADK tool-call regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-adk
+          . .venv-adk/bin/activate
+          python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
+          python -m pytest agent-adk/tests -q
+      - name: Langroid model-choice and tool-call regressions
         run: |
           set -euo pipefail
           python -m venv .venv-langroid

@@ -6,7 +6,7 @@ reads LiteLLM model strings, and OpenBot writes the one it was told.
 
 import os
 
-from ag_ui_adk import ADKAgent, add_adk_fastapi_endpoint
+from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from google.adk.agents import Agent
@@ -44,6 +44,7 @@ add_adk_fastapi_endpoint(
     ADKAgent(
         adk_agent=Agent(
             name="openbot",
+            tools=[AGUIToolset()],
             model=LiteLlm(model=_model_id()),
             instruction="Answer the question you are asked, briefly and correctly.",
         ),
