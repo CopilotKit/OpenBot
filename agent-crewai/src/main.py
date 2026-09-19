@@ -37,10 +37,18 @@ def _model() -> str:
     `BOT_PROVIDER` and `BOT_MODEL` are set by the shell from the model screen. litellm addresses a
     model as `provider/model`, and it reads that provider's key from the environment itself, which
     is why nothing here touches a key.
+
+    The model half is whatever the endpoint publishes, slashes included. litellm takes the first
+    path component as the provider and sends the rest as the model name, so a name that already
+    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
+    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
+    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
+    and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
+    or sent only the second half to the endpoint.
     """
     provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
     model = (os.environ.get("BOT_MODEL") or "").strip() or "gpt-5.5"
-    return model if "/" in model else f"{provider}/{model}"
+    return f"{provider}/{model}"
 
 
 _PROVIDER_MESSAGE_FIELDS = {

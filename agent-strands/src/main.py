@@ -10,9 +10,19 @@ from strands.models.litellm import LiteLLMModel
 
 
 def _model_id() -> str:
+    """`provider/model`, which is how litellm addresses one.
+
+    The model half is whatever the endpoint publishes, slashes included. litellm takes the first
+    path component as the provider and sends the rest as the model name, so a name that already
+    contains a slash still needs the chosen provider in front: `qwen/qwen3-8b` on an
+    OpenAI-compatible endpoint is `openai/qwen/qwen3-8b`, and `openai/gpt-5.6-terra` is
+    `openai/openai/gpt-5.6-terra`. Treating a slash as "already a provider" dropped the prefix,
+    and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
+    or sent only the second half to the endpoint.
+    """
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
-    return model if "/" in model else f"{provider}/{model}"
+    return f"{provider}/{model}"
 
 
 app = FastAPI()

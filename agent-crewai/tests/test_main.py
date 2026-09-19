@@ -56,8 +56,10 @@ def run_input(messages):
         ("openai", "   ", "openai/gpt-5.5"),
         ("anthropic", "claude-3-5-sonnet-latest", "anthropic/claude-3-5-sonnet-latest"),
         ("custom-provider", "custom-model", "custom-provider/custom-model"),
-        ("   ", "azure/gpt-4o", "azure/gpt-4o"),
-        ("anthropic", "openai/gpt-4o", "openai/gpt-4o"),
+        ("   ", "azure/gpt-4o", "openai/azure/gpt-4o"),
+        ("anthropic", "openai/gpt-4o", "anthropic/openai/gpt-4o"),
+        ("openai", "qwen/qwen3-8b", "openai/qwen/qwen3-8b"),
+        ("", "openai/gpt-5.6-terra", "openai/openai/gpt-5.6-terra"),
     ],
 )
 def test_model_normalizes_blank_provider_and_model_before_defaults(
@@ -462,6 +464,18 @@ def run_litellm_loopback_proof(proof_case, output):
         "blank-model": ("openai", "   ", "openai/gpt-5.5", "gpt-5.5"),
         "strict-projection": ("openai", "gpt-4o", "openai/gpt-4o", "gpt-4o"),
         "caller-tool": ("openai", "gpt-4o", "openai/gpt-4o", "gpt-4o"),
+        "namespaced-model": (
+            "openai",
+            "qwen/qwen3-8b",
+            "openai/qwen/qwen3-8b",
+            "qwen/qwen3-8b",
+        ),
+        "gateway-model": (
+            "openai",
+            "openai/gpt-5.6-terra",
+            "openai/openai/gpt-5.6-terra",
+            "openai/gpt-5.6-terra",
+        ),
     }[proof_case]
     os.environ["BOT_PROVIDER"] = provider
     os.environ["BOT_MODEL"] = model
@@ -715,7 +729,10 @@ def assert_provider_messages_are_projected(messages):
             assert tool_call["id"] == "call-1"
 
 
-@pytest.mark.parametrize("proof_case", ["blank-provider", "blank-model", "strict-projection"])
+@pytest.mark.parametrize(
+    "proof_case",
+    ["blank-provider", "blank-model", "strict-projection", "namespaced-model", "gateway-model"],
+)
 def test_crewai_endpoint_uses_normalized_model_with_real_litellm_loopback(
     tmp_path, proof_case
 ):
@@ -762,7 +779,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--proof-case",
-        choices=["blank-provider", "blank-model", "strict-projection", "caller-tool"],
+        choices=[
+            "blank-provider",
+            "blank-model",
+            "strict-projection",
+            "caller-tool",
+            "namespaced-model",
+            "gateway-model",
+        ],
         required=True,
     )
     parser.add_argument("--output", type=Path, required=True)

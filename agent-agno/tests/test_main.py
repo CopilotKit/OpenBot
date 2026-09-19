@@ -149,6 +149,28 @@ CHOICES = {
         },
         ("openai", "local-model"),
     ),
+    # An endpoint that namespaces its catalogue. The whole name has to reach it; a slash is not a
+    # provider already being named.
+    "an OpenAI-compatible endpoint that namespaces its catalogue": (
+        lambda base: {
+            "BOT_PROVIDER": "",
+            "BOT_MODEL": "openai/gpt-5.6-terra",
+            "OPENAI_API_KEY": "no-key-needed",
+            "OPENAI_BASE_URL": f"{base}/v1",
+            "ANTHROPIC_API_KEY": "",
+        },
+        ("openai", "openai/gpt-5.6-terra"),
+    ),
+    "an OpenAI-compatible endpoint whose model name contains a slash": (
+        lambda base: {
+            "BOT_PROVIDER": "",
+            "BOT_MODEL": "qwen/qwen3-8b",
+            "OPENAI_API_KEY": "no-key-needed",
+            "OPENAI_BASE_URL": f"{base}/v1",
+            "ANTHROPIC_API_KEY": "",
+        },
+        ("openai", "qwen/qwen3-8b"),
+    ),
     # The default: Compose passes `gpt-5.5` when the model screen names no model, and Agno sends a
     # temperature and a `top_p` on every request, which LiteLLM refuses for that reasoning model.
     "an OpenAI key": (

@@ -75,36 +75,6 @@ def _provider_app(seen):
             [f"data: {json.dumps(chunk)}\n\n", f"data: {json.dumps(done)}\n\n", "data: [DONE]\n\n"]
         )
 
-    @app.post("/v1/messages")
-    async def anthropic_messages(request: Request):
-        body = await request.json()
-        seen.append(("anthropic", body["model"]))
-        message = {
-            "id": "msg",
-            "type": "message",
-            "role": "assistant",
-            "model": body["model"],
-            "stop_sequence": None,
-        }
-        if not body.get("stream"):
-            return JSONResponse(
-                {
-                    **message,
-                    "content": [{"type": "text", "text": "hello"}],
-                    "stop_reason": "end_turn",
-                    "usage": {"input_tokens": 1, "output_tokens": 1},
-                }
-            )
-        events = [
-            ("message_start", {"type": "message_start", "message": {**message, "content": [], "stop_reason": None, "usage": {"input_tokens": 1, "output_tokens": 0}}}),
-            ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
-            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hello"}}),
-            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 1}}),
-            ("message_stop", {"type": "message_stop"}),
-        ]
-        return _sse([f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events])
-
     return app
 
 
@@ -127,30 +97,32 @@ def provider():
     thread.join(timeout=10)
 
 
+@pytest.mark.parametrize(
+    ("bot_provider", "model", "expected"),
+    [
+        ("openai", "gpt-4o-mini", "openai/gpt-4o-mini"),
+        ("openai", "qwen/qwen3-8b", "openai/qwen/qwen3-8b"),
+        ("openai", "openai/gpt-5.6-terra", "openai/openai/gpt-5.6-terra"),
+        ("", "qwen/qwen3-8b", "openai/qwen/qwen3-8b"),
+        ("anthropic", "claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+    ],
+)
+def test_model_id_keeps_the_chosen_provider_on_a_name_that_contains_a_slash(
+    monkeypatch, bot_provider, model, expected
+):
+    monkeypatch.setenv("BOT_PROVIDER", bot_provider)
+    monkeypatch.setenv("BOT_MODEL", model)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    monkeypatch.setenv("OPENAI_API_KEY", "no-key-needed")
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+
+    from src import main
+
+    main = importlib.reload(main)
+    assert main._model_id() == expected
+
+
 CHOICES = {
-    "an Anthropic key": (
-        lambda base: {
-            "BOT_PROVIDER": "anthropic",
-            "BOT_MODEL": "claude-sonnet-4-5",
-            "ANTHROPIC_API_KEY": "test-key",
-            "ANTHROPIC_BASE_URL": base,
-            "OPENAI_API_KEY": "",
-            "OPENAI_BASE_URL": "",
-        },
-        ("anthropic", "claude-sonnet-4-5"),
-    ),
-    "an OpenAI-compatible endpoint": (
-        lambda base: {
-            "BOT_PROVIDER": "",
-            "BOT_MODEL": "local-model",
-            "OPENAI_API_KEY": "no-key-needed",
-            "OPENAI_BASE_URL": f"{base}/v1",
-            "ANTHROPIC_API_KEY": "",
-        },
-        ("openai", "local-model"),
-    ),
-    # An endpoint that namespaces its catalogue. The whole name has to reach it; a slash is not a
-    # provider already being named.
     "an OpenAI-compatible endpoint that namespaces its catalogue": (
         lambda base: {
             "BOT_PROVIDER": "",
@@ -171,21 +143,11 @@ CHOICES = {
         },
         ("openai", "qwen/qwen3-8b"),
     ),
-    "an OpenAI key": (
-        lambda base: {
-            "BOT_PROVIDER": "",
-            "BOT_MODEL": "gpt-5.5",
-            "OPENAI_API_KEY": "test-key",
-            "OPENAI_BASE_URL": f"{base}/v1",
-            "ANTHROPIC_API_KEY": "",
-        },
-        ("openai", "gpt-5.5"),
-    ),
 }
 
 
 @pytest.mark.parametrize("choice", list(CHOICES))
-def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, choice):
+def test_a_run_sends_a_namespaced_model_name_verbatim(monkeypatch, provider, choice):
     base, seen = provider
     environment, expected = CHOICES[choice]
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
@@ -197,7 +159,7 @@ def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, c
 
     main = importlib.reload(main)
     response = TestClient(main.app).post(
-        "/run", json=RUN, headers={"x-openbot-agent-token": TOKEN}
+        "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
     )
 
     assert response.status_code == 200

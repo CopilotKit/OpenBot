@@ -17,6 +17,14 @@ later put every such grant straight onto its Bots, with nobody having granted an
 the trail saying so. The grant is now refused, naming the app. Taking a grant away is unaffected, so
 a dead row an administrator can see is still one they can remove, and a tool a connector has stopped
 advertising can still be granted: what a vendor lists today is not what somebody decided yesterday.
+### The LiteLLM Bots keep the chosen provider on a model name that contains a slash
+
+A model name the endpoint publishes with a slash in it — `qwen/qwen3-8b`, or the docs example
+`openai/gpt-5.6-terra` — was treated as already carrying a provider. LiteLLM then took the first
+half as the provider and sent only the rest, so a compatibility endpoint either failed with
+`LLM Provider NOT provided` or received `gpt-5.6-terra` instead of the namespaced name. The ADK,
+Strands, Agno, LlamaIndex and CrewAI Bots now keep the chosen provider in front, and the whole
+model name reaches the endpoint.
 
 ### A Google Drive shortcut is read as the file it points at
 

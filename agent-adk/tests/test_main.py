@@ -160,6 +160,46 @@ def test_client_tool_executes_and_its_result_reaches_the_followup_model(harness)
     assert answer == TOOL_VALUE
 
 
+@pytest.mark.parametrize("model", ["qwen/qwen3-8b", "openai/gpt-5.6-terra"])
+def test_a_namespaced_model_name_is_sent_to_the_endpoint(monkeypatch, provider, model):
+    """The whole name the endpoint publishes, including a slash, has to reach it."""
+    base_url, seen = provider
+    for name, value in {
+        "OPENAI_API_KEY": "synthetic-test-key",
+        "OPENAI_BASE_URL": base_url,
+        "BOT_PROVIDER": "openai",
+        "BOT_MODEL": model,
+        "MANAGED_AGENT_TOKEN": TOKEN,
+        "OTEL_SDK_DISABLED": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    from src import main
+
+    app = importlib.reload(main).app
+
+    async def roundtrip():
+        body = {
+            "threadId": "namespaced-model",
+            "runId": "first-run",
+            "state": {},
+            "context": [],
+            "forwardedProps": {},
+            "messages": [{"id": "user", "role": "user", "content": "Say hello."}],
+            "tools": [],
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://harness"
+        ) as client:
+            return decode(
+                await client.post("/", headers={"x-openbot-agent-token": TOKEN}, json=body)
+            )
+
+    asyncio.run(asyncio.wait_for(roundtrip(), timeout=30))
+    assert seen, "the endpoint was never asked"
+    assert seen[0][2]["model"] == model
+
+
 @pytest.mark.parametrize("headers", [{}, {"x-openbot-agent-token": "wrong-token"}])
 def test_client_tools_still_require_the_server_token(harness, headers):
     app, seen = harness
