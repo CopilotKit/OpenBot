@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A tool cannot be granted for an app this deployment has not added
+
+Granting a Bot a connector's tool checked only that the person asking was an administrator, so a
+grant naming an app that was never added was stored and then invisible — the page that reports a
+grant nothing advertises is built from the connector's own row, and there was none. Adding that app
+later put every such grant straight onto its Bots, with nobody having granted anything and nothing in
+the trail saying so. The grant is now refused, naming the app. Taking a grant away is unaffected, so
+a dead row an administrator can see is still one they can remove, and a tool a connector has stopped
+advertising can still be granted: what a vendor lists today is not what somebody decided yesterday.
+
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file

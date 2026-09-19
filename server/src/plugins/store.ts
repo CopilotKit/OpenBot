@@ -4253,6 +4253,28 @@ export function createPluginStore(options: PluginStoreOptions) {
       return row !== undefined;
     },
 
+    /**
+     * Whether this deployment has an app by this id.
+     *
+     * The narrowest question a caller can ask about a server, and deliberately not `listServers`,
+     * which materialises every tool and every grant in the deployment to answer. One row, one
+     * column, one limit — this runs on the grant path, which is a person waiting on a switch.
+     *
+     * Existence only. Whether the app currently ADVERTISES a given tool is a different question and
+     * is not asked here: a grant naming a tool a server has stopped offering is a supported state
+     * ({@link GrantOnWithdrawnTool}), held and not offered, because what a vendor advertises today
+     * is not what somebody decided yesterday. A grant naming no app at all is not that state.
+     */
+    async serverExists(serverId: string): Promise<boolean> {
+      if (!serverId) return false;
+      const [row] = await database
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      return row !== undefined;
+    },
+
     async agentOwner(agentId: string): Promise<string | null | undefined> {
       const [row] = await database
         .select({ ownerUserId: agentProfiles.ownerUserId })

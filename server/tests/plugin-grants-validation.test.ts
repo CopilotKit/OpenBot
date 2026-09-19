@@ -5,12 +5,21 @@ import type { BotAccessCheck } from "../src/plugins/routes";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { PluginStore } from "../src/plugins/store";
 
-function appWith(calls: {
-  grants: unknown[];
-  toolCalls: unknown[];
-  revokes?: unknown[];
-}) {
+function appWith(
+  calls: {
+    grants: unknown[];
+    toolCalls: unknown[];
+    revokes?: unknown[];
+    serverLookups?: unknown[];
+  },
+  /** The apps this deployment has added, for the grant path's existence check. */
+  servers: string[] = ["tool"],
+) {
   const store = {
+    serverExists: async (serverId: string) => {
+      calls.serverLookups?.push(serverId);
+      return servers.includes(serverId);
+    },
     grant: async (kind: unknown, ref: unknown, agentId: unknown) => {
       calls.grants.push({ kind, ref, agentId });
       return { ok: true };
@@ -69,6 +78,131 @@ describe("POST /api/plugins/grants", () => {
       error: "A kind, a ref and a Bot are required.",
     });
     expect(calls.grants).toEqual([]);
+  });
+});
+
+/**
+ * A GRANT NAMING NO APP IS A GRANT THAT COULD NEVER DO ANYTHING.
+ *
+ * `store.grant` is a bare upsert and the mcp branch of `enablementRefusal` checked only the role, so
+ * a ref naming an app this deployment had not added was stored and then invisible — the surface that
+ * reports a grant nothing advertises is built per server row, and there was no row. #572 closed the
+ * way these rows were MADE, by taking an app's grants when the app is removed, and its migration
+ * deleted the ones already there. This is the other door into the same room: add the app afterwards
+ * and the id is the same, the action names are the same, and every such grant resolves, with nobody
+ * having granted anything and no row in the trail saying so.
+ */
+describe("POST /api/plugins/grants, for an app this deployment does not have", () => {
+  test("refuses the grant and never reaches the store", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      serverLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, ["added-app"]).request(
+      "http://openbot.test/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "mcp",
+          ref: "missing-app/SEND_MESSAGE",
+          agentId: "bot-1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "missing-app is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.",
+    });
+    expect(calls.grants).toEqual([]);
+    // The server half, not the whole ref: the tool is not what is being looked up.
+    expect(calls.serverLookups).toEqual(["missing-app"]);
+  });
+
+  test("an app that is here is granted as before", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      serverLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, ["added-app"]).request(
+      "http://openbot.test/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "mcp",
+          ref: "added-app/SEND_MESSAGE",
+          agentId: "bot-1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.grants).toEqual([
+      { kind: "mcp", ref: "added-app/SEND_MESSAGE", agentId: "bot-1" },
+    ]);
+  });
+
+  /*
+   * THE SERVER HALF ONLY, and this is the test that says so.
+   *
+   * A grant naming a tool the server has stopped advertising is a supported state — held and not
+   * offered, because what a vendor lists today is not what somebody decided yesterday. Checking the
+   * tool here would refuse a re-grant of exactly the tool an administrator is trying to restore.
+   */
+  test("a tool the app no longer advertises is still grantable", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      serverLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, ["added-app"]).request(
+      "http://openbot.test/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "mcp",
+          ref: "added-app/A_TOOL_IT_WITHDREW",
+          agentId: "bot-1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.grants).toHaveLength(1);
+  });
+
+  /*
+   * TAKING SOMETHING AWAY IS STILL ALWAYS ALLOWED, which matters more here than anywhere else.
+   *
+   * The rows this check exists to prevent are the same shape as the rows #572's migration had to
+   * delete. Applying the check to a revoke would mean the reason a dead row is wrong is the reason
+   * it can never be removed, and an administrator looking at one in the UI would have to wait for
+   * somebody to write another migration.
+   */
+  test("a grant naming no app can still be revoked by hand", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      revokes: [] as unknown[],
+      serverLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, ["added-app"]).request(
+      "http://openbot.test/grants?kind=mcp&ref=missing-app%2FSEND_MESSAGE&agentId=bot-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.revokes).toEqual([
+      { kind: "mcp", ref: "missing-app/SEND_MESSAGE", agentId: "bot-1" },
+    ]);
+    // Not even asked: a revoke has nothing to check.
+    expect(calls.serverLookups).toEqual([]);
   });
 });
 
