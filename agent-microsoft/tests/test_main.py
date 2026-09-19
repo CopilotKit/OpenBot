@@ -6,6 +6,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
@@ -178,3 +179,41 @@ def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, c
     assert '"RUN_ERROR"' not in response.text
     assert "hello" in response.text
     assert seen == [expected]
+
+
+def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_url(monkeypatch):
+    seen = []
+    provider_seen = []
+    provider_app = _provider_app(provider_seen)
+
+    async def respond(transport, request):
+        seen.append(
+            (request.url.scheme, request.url.host, request.url.path, request.headers.get("x-api-key"))
+        )
+        async with httpx.ASGITransport(app=provider_app) as local_provider:
+            return await local_provider.handle_async_request(request)
+
+    # Keep the real framework and Anthropic clients; replace only the network transport.
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", respond)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    monkeypatch.setenv("BOT_PROVIDER", "anthropic")
+    monkeypatch.setenv("BOT_MODEL", "claude-sonnet-4-5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+
+    from src import main
+
+    main = importlib.reload(main)
+    response = TestClient(main.app).post(
+        "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
+    )
+
+    assert seen == [("https", "api.anthropic.com", "/v1/messages", "test-key")]
+    assert provider_seen == [("anthropic", "claude-sonnet-4-5")]
+    assert response.status_code == 200
+    assert '"RUN_FINISHED"' in response.text
+    assert '"RUN_ERROR"' not in response.text
+    assert "hello" in response.text

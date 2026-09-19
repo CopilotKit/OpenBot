@@ -15,12 +15,14 @@ def _client() -> AnthropicClient | OpenAIChatClient:
     """The provider the model screen chose, through Agent Framework's own client for it.
 
     `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
-    endpoint included. Each client reads its own key and base URL from the environment.
+    endpoint included. Each client reads its own key from the environment.
     """
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
     if provider == "anthropic":
-        return AnthropicClient(model=model)
+        # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
+        base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+        return AnthropicClient(model=model, base_url=base_url)
     return OpenAIChatClient(model)
 
 
