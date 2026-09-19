@@ -44,12 +44,15 @@ export const MAX_RESULT_CHARS = 20_000;
  * from memory. For a knowledge connector that is precisely the failure the whole slice exists to
  * prevent — an answer with nothing behind it. So nothing is stated, in words.
  */
-export function resultText(content: unknown): {
+export function resultText(
+  content: unknown,
+  structuredContent?: unknown,
+): {
   text: string;
   truncated: boolean;
 } {
   const parts = Array.isArray(content) ? content : [];
-  const joined = parts
+  let joined = parts
     .map((part) => {
       if (!part || typeof part !== "object") return "[unknown]";
       const item = part as {
@@ -76,10 +79,25 @@ export function resultText(content: unknown): {
   // that sent one newline has said nothing, and which shape of nothing arrived should not change
   // what the model is told.
   if (joined.trim() === "") {
-    return {
-      text: "The tool returned no content. Nothing was found, so there is nothing here to answer from.",
-      truncated: false,
-    };
+    /*
+     * MCP tools with an output schema often put the answer in `structuredContent` and leave
+     * `content` empty. Treating that as "nothing was found" is the same lie an empty string was:
+     * the tool answered, and the model fills the gap from memory. Read only when `content` had
+     * nothing; a text part already present is the representation the server chose to show.
+     */
+    const structured =
+      structuredContent !== null &&
+      structuredContent !== undefined &&
+      typeof structuredContent === "object"
+        ? JSON.stringify(structuredContent)
+        : "";
+    if (structured === "") {
+      return {
+        text: "The tool returned no content. Nothing was found, so there is nothing here to answer from.",
+        truncated: false,
+      };
+    }
+    joined = structured;
   }
 
   if (joined.length <= MAX_RESULT_CHARS) {
@@ -372,7 +390,10 @@ export async function callTool(
       { timeout: CALL_TIMEOUT_MS },
     );
 
-    const { text, truncated } = resultText(result.content);
+    const { text, truncated } = resultText(
+      result.content,
+      "structuredContent" in result ? result.structuredContent : undefined,
+    );
     return { text, isError: result.isError === true, truncated };
   });
 }

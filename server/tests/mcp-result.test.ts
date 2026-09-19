@@ -33,6 +33,34 @@ describe("a result with nothing in it", () => {
   test("is not reported as truncated", () => {
     expect(resultText([]).truncated).toBe(false);
   });
+
+  test("reads structuredContent when the content list was empty", () => {
+    // Tools that declare an output schema often put the answer only in structuredContent.
+    // An empty content list used to be reported as nothing found, so the model filled the
+    // gap from memory while the vendor had answered.
+    const { text, truncated } = resultText([], {
+      title: "Expense policy",
+      meals: "under $75 need no receipt",
+    });
+    expect(truncated).toBe(false);
+    expect(text).toContain("Expense policy");
+    expect(text).toContain("under $75 need no receipt");
+    expect(text.toLowerCase()).not.toContain("no content");
+  });
+
+  test("does not replace a text part with structuredContent", () => {
+    const { text } = resultText(
+      [{ type: "text", text: "the prose the server chose" }],
+      { title: "ignored" },
+    );
+    expect(text).toBe("the prose the server chose");
+    expect(text).not.toContain("ignored");
+  });
+
+  test("empty content and empty structuredContent still say nothing was found", () => {
+    expect(resultText([], null).text).toBe(resultText([]).text);
+    expect(resultText([], undefined).text).toBe(resultText([]).text);
+  });
 });
 
 describe("a result with something in it", () => {
