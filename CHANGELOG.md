@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Built-in and Mastra Bots can run on Anthropic API keys
+
+The example built-in Bots and the Mastra Bot now use the selected model provider instead of
+assuming OpenAI. A deployment with `BOT_PROVIDER=anthropic`, `BOT_MODEL=claude-sonnet-4-5` and an
+Anthropic key routes built-in model calls, tool selection and Mastra runs through Anthropic's native
+API. Source startup no longer waits for the unused OpenAI-only sample when Anthropic is selected.
+
 ### The Agno Bot answers on an OpenAI key
 
 Picked with an OpenAI key, the Agno Bot failed every run before reaching OpenAI. Agno sends a

@@ -130,7 +130,7 @@ export type CredentialStatusReader = {
 
 export type ModelCredentialSecretReader = {
   readModelSecret: (input: {
-    provider: "openai";
+    provider: "openai" | "anthropic";
     keyId: string;
   }) => Promise<{ encryptedValue: string } | null>;
 };
@@ -241,7 +241,7 @@ export async function decryptCredentialForUse(
 export async function resolveModelApiKey(input: {
   encryptionKey: string;
   reader: ModelCredentialSecretReader;
-  provider: "openai";
+  provider: "openai" | "anthropic";
   keyId: string;
   environment: Record<string, string | undefined>;
 }) {
@@ -253,7 +253,10 @@ export async function resolveModelApiKey(input: {
     return decryptSecret(input.encryptionKey, stored.encryptedValue);
   }
 
-  const environmentKey = input.environment.OPENAI_API_KEY?.trim();
+  const environmentKey =
+    input.environment[
+      input.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"
+    ]?.trim();
   return environmentKey || null;
 }
 

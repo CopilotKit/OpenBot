@@ -22,11 +22,20 @@ async function writeExecutable(path: string, contents: string) {
 type Run = {
   shell?: "bash" | "sh";
   omitFromEnv?: readonly string[];
+  settings?: Record<string, string>;
+  processEnvironment?: Record<string, string>;
+  unavailableHealthPorts?: readonly number[];
 };
 
 async function runStartWithStaleServerProbe(
   status: 401 | 404,
-  { shell = "bash", omitFromEnv = [] }: Run = {},
+  {
+    shell = "bash",
+    omitFromEnv = [],
+    settings = {},
+    processEnvironment = {},
+    unavailableHealthPorts = [],
+  }: Run = {},
 ) {
   const root =
     await Bun.$`mktemp -d ${tmpdir()}/openbot-start-guard-XXXXXX`.text();
@@ -34,6 +43,8 @@ async function runStartWithStaleServerProbe(
   const fakeBin = join(directory, "bin");
   const scripts = join(directory, "scripts");
   const logPath = join(directory, "pkill.log");
+  const dockerLogPath = join(directory, "docker.log");
+  const curlLogPath = join(directory, "curl.log");
   await mkdir(fakeBin, { recursive: true });
   await mkdir(scripts, { recursive: true });
   const environment = [
@@ -51,7 +62,15 @@ async function runStartWithStaleServerProbe(
     "MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui",
     "OPENBOT_ONE_COMPUTER_EACH=true",
     "DATABASE_URL=postgres://openbot:openbot@localhost:5432/openbot",
-  ].filter((line) => !omitFromEnv.some((key) => line.startsWith(`${key}=`)));
+  ].filter(
+    (line) =>
+      ![...omitFromEnv, ...Object.keys(settings)].some((key) =>
+        line.startsWith(`${key}=`),
+      ),
+  );
+  environment.push(
+    ...Object.entries(settings).map(([key, value]) => `${key}=${value}`),
+  );
   await writeFile(join(directory, ".env"), `${environment.join("\n")}\n`);
   await writeFile(
     join(scripts, "start.sh"),
@@ -73,6 +92,10 @@ async function runStartWithStaleServerProbe(
     join(fakeBin, "curl"),
     `#!/usr/bin/env bash
 args="$*"
+printf '%s\\n' "$args" >> "$CURL_LOG"
+for port in ${unavailableHealthPorts.join(" ")}; do
+  if [[ "$args" == *"http://localhost:$port/health"* ]]; then exit 7; fi
+done
 if [[ "$args" == *"/internal/routines/run"* ]]; then
   printf '${status}'
   exit 0
@@ -92,6 +115,7 @@ exit 0
     join(fakeBin, "docker"),
     `#!/usr/bin/env bash
 args="$*"
+printf '%s\\n' "$args" >> "$DOCKER_LOG"
 if [[ "$args" == *"to_regclass('public.agent_profiles')"* ]]; then echo agent_profiles; fi
 if [[ "$args" == *"to_regclass('public.agent_preferences')"* ]]; then echo agent_preferences; fi
 exit 0
@@ -118,6 +142,9 @@ exit 0
       env: {
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
         PKILL_LOG: logPath,
+        DOCKER_LOG: dockerLogPath,
+        CURL_LOG: curlLogPath,
+        ...processEnvironment,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -130,7 +157,13 @@ exit 0
     const pkillLog = await Bun.file(logPath)
       .text()
       .catch(() => "");
-    return { exitCode, stdout, stderr, pkillLog };
+    const dockerLog = await Bun.file(dockerLogPath)
+      .text()
+      .catch(() => "");
+    const curlLog = await Bun.file(curlLogPath)
+      .text()
+      .catch(() => "");
+    return { exitCode, stdout, stderr, pkillLog, dockerLog, curlLog };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -223,5 +256,67 @@ describe("start.sh settings with no line in .env", () => {
       stderr: "",
     });
     expect(result.stdout).toContain("http://localhost:3010");
+  });
+});
+
+describe("start.sh selected provider services", () => {
+  test.each([".env", "process environment"])(
+    "an Anthropic-only %s selection starts the managed Bot without the OpenAI-only sample",
+    async (source) => {
+      const selected = {
+        BOT_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
+      };
+      const result = await runStartWithStaleServerProbe(401, {
+        settings: source === ".env" ? selected : { BOT_PROVIDER: "openai" },
+        processEnvironment: source === "process environment" ? selected : {},
+        unavailableHealthPorts: [4200],
+      });
+      expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+        exitCode: 0,
+        stderr: "",
+      });
+      expect(result.dockerLog).toContain(
+        "compose up -d --build postgres supervisor agent-computer agent-langgraph",
+      );
+      expect(result.dockerLog).not.toContain("agent-bot");
+      expect(result.dockerLog).toContain("compose run --rm --build migrate");
+      expect(result.curlLog).toContain("http://localhost:4100/health");
+      expect(result.curlLog).toContain("http://localhost:4201/health");
+      expect(result.curlLog).not.toContain("http://localhost:4200/health");
+      expect(result.stdout).toContain("agent-bot: skipped for Anthropic");
+      expect(result.stdout).not.toContain("agent-bot ready");
+      expect(result.stdout).toContain("agent-langgraph ready");
+      expect(result.stdout).toContain(
+        "managed coworker endpoint: http://localhost:4201/ag-ui",
+      );
+      expect(result.stdout).toContain("Ready. http://localhost:3010");
+    },
+  );
+
+  test("the default OpenAI startup still starts and checks the legacy sample", async () => {
+    const result = await runStartWithStaleServerProbe(401);
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).toContain(
+      "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+    );
+    expect(result.curlLog).toContain("http://localhost:4200/health");
+    expect(result.stdout).toContain("agent-bot ready");
+    expect(result.stdout).not.toContain("agent-bot: skipped");
+  });
+
+  test("Anthropic startup still fails if its managed LangGraph Bot is unavailable", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      settings: {
+        BOT_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "synthetic-anthropic-key",
+      },
+      unavailableHealthPorts: [4200, 4201],
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.curlLog).not.toContain("http://localhost:4200/health");
+    expect(result.curlLog).toContain("http://localhost:4201/health");
+    expect(result.stdout).toContain("agent-langgraph never became ready");
+    expect(result.stdout).not.toContain("Ready. http://localhost:3010");
   });
 });

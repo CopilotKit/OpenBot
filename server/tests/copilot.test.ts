@@ -159,7 +159,6 @@ describe("deployment model selection", () => {
     {},
     { OPENAI_BASE_URL: "http://127.0.0.1:11434/v1", BOT_MODEL: "   " },
     { BOT_MODEL: "selected-local-model" },
-    { BOT_PROVIDER: "anthropic", BOT_MODEL: "claude-sonnet-4-5" },
   ])(
     "package default remains the model without a compatible endpoint selection: %j",
     async (environment) => {

@@ -70,6 +70,7 @@ import {
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
+  normalizeModelBaseUrls,
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
   type ToolSelection,
@@ -506,6 +507,7 @@ const stallGuard = createStallGuard({
   auditStore: bootAuditStore,
 });
 
+normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
 
 const intentRouter = createIntentRouter({
@@ -515,7 +517,7 @@ const intentRouter = createIntentRouter({
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
-        provider: tenantPackage.model.provider,
+        provider: runtimeModel.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
       }),
@@ -534,7 +536,7 @@ const chooseSkills = createModelCompleter({
     resolveModelApiKey({
       encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
-      provider: tenantPackage.model.provider,
+      provider: runtimeModel.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
     }),
@@ -556,7 +558,7 @@ const resolveRuntimeModelApiKey = () =>
   resolveModelApiKey({
     encryptionKey: config.keyEncryptionKey,
     reader: credentialStore,
-    provider: tenantPackage.model.provider,
+    provider: runtimeModel.provider,
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
   });
