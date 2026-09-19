@@ -360,7 +360,165 @@ describe("reading a file asks Drive what it is first", () => {
     // One call: the metadata lookup. No download followed it.
     expect(calls).toHaveLength(1);
   });
+});
 
+/*
+ * Drive's search and recent lists return shortcuts as ordinary hits. Reading one by that id used
+ * to be refused as a binary `application/vnd.google-apps.shortcut`, so a document the person could
+ * open — and that search had just named — could not be read.
+ */
+describe("a shortcut is read as the file it points at", () => {
+  test("a shortcut to a Google Doc is exported from the target", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "shortcut1",
+            name: "Notes",
+            mimeType: "application/vnd.google-apps.shortcut",
+            shortcutDetails: {
+              targetId: "doc1",
+              targetMimeType: "application/vnd.google-apps.document",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (served === 2) {
+        return new Response(
+          JSON.stringify({
+            id: "doc1",
+            name: "Notes",
+            mimeType: "application/vnd.google-apps.document",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("the document body", {
+        headers: { "content-type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut1",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("the document body");
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toContain("/files/doc1?");
+    expect(calls[2]).toContain("/files/doc1/export");
+    expect(calls[2]).not.toContain("/files/shortcut1/");
+  });
+
+  test("a shortcut to a text file is downloaded from the target", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "shortcut2",
+            name: "notes.txt",
+            mimeType: "application/vnd.google-apps.shortcut",
+            shortcutDetails: {
+              targetId: "txt1",
+              targetMimeType: "text/plain",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (served === 2) {
+        return new Response(
+          JSON.stringify({
+            id: "txt1",
+            name: "notes.txt",
+            mimeType: "text/plain",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("plain notes", {
+        headers: { "content-type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut2",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("plain notes");
+    expect(new URL(calls[2]).searchParams.get("alt")).toBe("media");
+    expect(calls[2]).toContain("/files/txt1?");
+    expect(calls[2]).not.toContain("/export");
+  });
+
+  test("a shortcut that names no file is refused without a second request", async () => {
+    const calls = stubFetch({
+      id: "shortcut3",
+      name: "Broken",
+      mimeType: "application/vnd.google-apps.shortcut",
+      shortcutDetails: {},
+    });
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut3",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text.toLowerCase()).toContain("shortcut");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a shortcut to a PDF is declined as a PDF, and the PDF is not downloaded", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      calls.push(String(input));
+      served += 1;
+      return new Response(
+        JSON.stringify(
+          served === 1
+            ? {
+                id: "shortcut4",
+                name: "Contract",
+                mimeType: "application/vnd.google-apps.shortcut",
+                shortcutDetails: {
+                  targetId: "pdf1",
+                  targetMimeType: "application/pdf",
+                },
+              }
+            : {
+                id: "pdf1",
+                name: "Contract.pdf",
+                mimeType: "application/pdf",
+              },
+        ),
+        { headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut4",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("application/pdf");
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("reading a file asks Drive what it is first", () => {
   test("a file id is required, and no request is made without one", async () => {
     const calls = stubFetch({});
     const result = await callTool(connection, "read_file_content", {});

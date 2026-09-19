@@ -241,7 +241,10 @@ type DriveFile = {
   webViewLink?: string;
   size?: string;
   owners?: { emailAddress?: string }[];
+  shortcutDetails?: { targetId?: string; targetMimeType?: string };
 };
+
+const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 
 /**
  * One file as a line a model can quote.
@@ -442,10 +445,38 @@ export async function callTool(
     const metadata = await request(
       connection,
       `/files/${encodeURIComponent(fileId)}`,
-      { ...SHARED_DRIVES, fields: "id,name,mimeType" },
+      {
+        ...SHARED_DRIVES,
+        fields: "id,name,mimeType,shortcutDetails(targetId,targetMimeType)",
+      },
     );
     if (!metadata.ok) return failure(metadata.message);
-    const file = (await metadata.response.json()) as DriveFile;
+    let file = (await metadata.response.json()) as DriveFile;
+    let readId = fileId;
+
+    /*
+     * A shortcut is a pointer, not a document. Drive's search and recent lists return them as
+     * ordinary hits, and reading one by that id used to be refused as a binary
+     * `application/vnd.google-apps.shortcut` — so a file the person could open, that search had
+     * just named, could not be read. Follow the target once. A shortcut that names another
+     * shortcut is declined as that type, rather than walked; loops are not a document.
+     */
+    if (file.mimeType === SHORTCUT_MIME) {
+      const targetId = file.shortcutDetails?.targetId?.trim();
+      if (!targetId) {
+        return failure(
+          `${file.name ?? fileId} is a shortcut that does not name a file.`,
+        );
+      }
+      const target = await request(
+        connection,
+        `/files/${encodeURIComponent(targetId)}`,
+        { ...SHARED_DRIVES, fields: "id,name,mimeType" },
+      );
+      if (!target.ok) return failure(target.message);
+      file = (await target.response.json()) as DriveFile;
+      readId = targetId;
+    }
 
     const exportAs = file.mimeType ? EXPORTABLE[file.mimeType] : undefined;
 
@@ -471,10 +502,10 @@ export async function callTool(
     const content = exportAs
       ? await request(
           connection,
-          `/files/${encodeURIComponent(fileId)}/export`,
+          `/files/${encodeURIComponent(readId)}/export`,
           { mimeType: exportAs },
         )
-      : await request(connection, `/files/${encodeURIComponent(fileId)}`, {
+      : await request(connection, `/files/${encodeURIComponent(readId)}`, {
           ...SHARED_DRIVES,
           alt: "media",
         });
