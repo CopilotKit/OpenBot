@@ -150,9 +150,27 @@ export function standingRoleMessage(
 }
 
 export type RuntimeModel = {
-  provider: "openai";
+  provider: "openai" | "anthropic";
   defaultModel: string;
 };
+
+/** Optional desktop environment values may be present but blank; SDKs treat them as URLs. */
+export function normalizeModelBaseUrls(
+  environment: Record<string, string | undefined> = process.env,
+): void {
+  for (const key of ["OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"]) {
+    const value = environment[key]?.trim();
+    if (!value) {
+      delete environment[key];
+    } else if (key === "ANTHROPIC_BASE_URL") {
+      // The SDK appends only /messages; match the selector's versioned-base contract.
+      const base = value.replace(/\/+$/, "");
+      environment[key] = /\/v\d+$/.test(base) ? base : `${base}/v1`;
+    } else {
+      environment[key] = value;
+    }
+  }
+}
 
 export function runtimeModelForEnvironment(
   packageModel: RuntimeModel,
@@ -160,15 +178,28 @@ export function runtimeModelForEnvironment(
 ): RuntimeModel {
   const selectedModel = environment.BOT_MODEL?.trim();
   const selectedProvider = environment.BOT_PROVIDER?.trim().toLowerCase();
-  const compatibleEndpoint =
-    (!selectedProvider || selectedProvider === "openai") &&
-    !!environment.OPENAI_BASE_URL?.trim();
+  // The desktop writes an empty provider when switching back to OpenAI. An absent
+  // choice leaves the tenant package authoritative.
+  const provider =
+    selectedProvider === "anthropic"
+      ? "anthropic"
+      : selectedProvider === "openai" || selectedProvider === ""
+        ? "openai"
+        : packageModel.provider;
+  const defaultModel =
+    provider === packageModel.provider
+      ? packageModel.defaultModel
+      : provider === "anthropic"
+        ? "claude-sonnet-4-5"
+        : "gpt-5.6-terra";
+  const selectedModelApplies =
+    provider === "anthropic" ||
+    ((!selectedProvider || selectedProvider === "openai") &&
+      !!environment.OPENAI_BASE_URL?.trim());
   return {
-    provider: packageModel.provider,
+    provider,
     defaultModel:
-      compatibleEndpoint && selectedModel
-        ? selectedModel
-        : packageModel.defaultModel,
+      selectedModelApplies && selectedModel ? selectedModel : defaultModel,
   };
 }
 
@@ -318,7 +349,7 @@ export function builtInAgentConfiguration(
       // biome-ignore lint/correctness/useYield: this agent must fail when iteration starts.
       factory: async function* () {
         throw new Error(
-          `Model credential is not configured for ${agent.name}. Add the package credential or set OPENAI_API_KEY.`,
+          `Model credential is not configured for ${agent.name}. Add the package credential or set ${model.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}.`,
         );
       },
     };

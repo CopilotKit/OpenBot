@@ -33,6 +33,53 @@ record, assembling what is known before a renewal decision, and grouping custome
 themes it can cite. Each says what the job is, what the coworker must not do, and what to say when
 it cannot find something. They grant nothing: a coworker names skills, a skill names tools, and what
 it may call is what an administrator has granted. Delete the ones you do not want.
+### Built-in and Mastra Bots can run on Anthropic API keys
+
+The example built-in Bots and the Mastra Bot now use the selected model provider instead of
+assuming OpenAI. A deployment with `BOT_PROVIDER=anthropic`, `BOT_MODEL=claude-sonnet-4-5` and an
+Anthropic key routes built-in model calls, tool selection and Mastra runs through Anthropic's native
+API. Source startup no longer waits for the unused OpenAI-only sample when Anthropic is selected.
+
+### The Agno Bot answers on an OpenAI key
+
+Picked with an OpenAI key, the Agno Bot failed every run before reaching OpenAI. Agno sends a
+temperature and a `top_p` with each request, and LiteLLM refuses both for `gpt-5.5`, the model
+Compose passes when the setup screen names none, so the run ended in `UnsupportedParamsError`. A
+parameter the model does not take is now dropped instead, the way the LlamaIndex Bot already does
+it. The Anthropic key and an OpenAI-compatible endpoint behave as before.
+
+### The Pydantic AI Bot starts on an Ollama model named with its tag
+
+Ollama names every model with a tag after a colon, as in `llama3.1:8b`, and that is the name the
+setup screen passes on for an OpenAI-compatible endpoint. The Pydantic AI Bot took any colon in the
+model's name to mean the name already carried a provider, so Pydantic AI read `llama3.1` as one,
+refused it as unknown, and the Bot never started. A model's name now carries a provider only when it
+begins with the chosen provider's own, as in `anthropic:claude-sonnet-4-5`.
+
+### The Langroid Bot starts on an Anthropic key
+
+Picked with an Anthropic key, the Langroid Bot exited on startup asking for an OpenAI key. It names
+a model from any provider but OpenAI through litellm, which its image did not install, and Langroid
+builds an OpenAI client for such a model all the same, from the `OPENAI_API_KEY` Compose writes
+empty when the choice was not OpenAI. The image now installs Langroid's litellm extra and an empty
+OpenAI key is treated as none, so the Bot starts and answers with the Anthropic model chosen.
+
+### The AG2 Bot answers on an Anthropic key
+
+The AG2 Bot built an OpenAI client whatever the setup screen chose, and read `BOT_MODEL` but never
+`BOT_PROVIDER`. Picked with an Anthropic key, every run failed asking for an OpenAI key, because
+Compose writes that one empty when the choice was Anthropic. It now reaches Anthropic through AG2's
+own Anthropic client when that is the provider chosen, and OpenAI or an OpenAI-compatible endpoint
+as before otherwise.
+
+### The Microsoft Agent Framework Bot starts on an Anthropic key
+
+The Microsoft Agent Framework Bot built an OpenAI client whatever the setup screen chose, and read
+`BOT_MODEL` but never `BOT_PROVIDER`. Picked with an Anthropic key, it exited on startup asking for
+an OpenAI key, because Compose writes that one empty when the choice was Anthropic. It now reaches
+Anthropic through Agent Framework's own Anthropic client when that is the provider chosen, and
+OpenAI or an OpenAI-compatible endpoint as before otherwise.
+
 ## 0.0.13
 
 ### Fresh desktop setup installs its runtime before sign-in

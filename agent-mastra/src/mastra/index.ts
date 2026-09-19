@@ -12,13 +12,43 @@
  * translation belongs on OpenBot's side, in one place, where every remote Bot is governed the same
  * way — not in each harness.
  */
-import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
 import { listenPort } from "../../../shared/listen-port";
 
-const model = process.env.BOT_MODEL?.trim() || "gpt-4o-mini";
+async function configuredModel() {
+  const provider = process.env.BOT_PROVIDER?.trim() || "openai";
+  const model =
+    process.env.BOT_MODEL?.trim() ||
+    (provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4o-mini");
+  const baseVariable =
+    provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
+  const baseURL = process.env[baseVariable]?.trim();
+  // Provider modules create default clients at import, which reject Compose's empty overrides.
+  if (!baseURL) delete process.env[baseVariable];
+
+  if (provider === "anthropic") {
+    const { createAnthropic } = await import("@ai-sdk/anthropic");
+    // Other harnesses accept an Anthropic origin; AI SDK expects the /v1 API prefix.
+    const origin = (baseURL || "https://api.anthropic.com").replace(/\/+$/, "");
+    return createAnthropic({
+      baseURL: origin.endsWith("/v1") ? origin : `${origin}/v1`,
+    })(model);
+  }
+  const { createOpenAI } = await import("@ai-sdk/openai");
+  const compatible =
+    Boolean(baseURL) &&
+    baseURL?.replace(/\/+$/, "") !== "https://api.openai.com/v1";
+  const openai = createOpenAI({
+    baseURL: baseURL || "https://api.openai.com/v1",
+    apiKey: compatible
+      ? process.env.OPENAI_API_KEY?.trim() || "no-key-needed"
+      : undefined,
+  });
+  // Compatible endpoints commonly expose Chat Completions; OpenAI keeps its Responses default.
+  return compatible ? openai.chat(model) : openai(model);
+}
 const port = listenPort(process.env.PORT, 4213);
 if (!port.ok) throw new Error(port.reason);
 
@@ -79,7 +109,7 @@ const openbot = new Agent({
   id: "openbot",
   name: "openbot",
   instructions: buildOpenBotInstructions,
-  model: openai(model),
+  model: await configuredModel(),
 });
 
 /** The one header OpenBot's server sends, compared without leaking length through timing. */

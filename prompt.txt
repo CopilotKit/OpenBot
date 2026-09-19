@@ -5,141 +5,189 @@ this repository; if something here disagrees with what you see, trust the reposi
 
 ASK THIS BEFORE YOU DO ANYTHING ELSE
 
-There are two ways to have OpenBot and they are different jobs. Ask which one they want:
+There are three supported paths, and they are different jobs:
 
-  A. They want to run it. One container, one command, nothing cloned and nothing built. The image
-     carries the app, the API, Chromium, and its own PostgreSQL if asked.
-  B. They want to make it theirs. The clone, run from source, with the Bots, channels and skills as
-     configuration they edit. That is the rest of this file.
+  A. They have the OpenBot desktop app, or they want to try/run OpenBot locally without developer
+     tools. Use the desktop setup flow. It installs what it needs and asks for account sign-ins in
+     the window.
+  B. They want a server/container deployment. Use the published Docker image and an env file.
+  C. They want to change OpenBot itself or edit a tenant package from source. Use the clone.
 
-"I want to try OpenBot" is A. Go to B only if they mean to change something: their own Bots, their
-own channels, their own skills, or the code. Somebody who wanted A and was walked through B has
-installed a toolchain and a container engine to see a screen that one command would have shown them.
+Most people asking to "try OpenBot" want A. Do not send them to Bun, Docker, Node, `npx`, or a
+clone unless they specifically mean B or C.
 
-A. A LOCAL COPY, FROM THE PUBLISHED IMAGE
+OpenBot is a template to make your own and white-label, not a hosted product somebody signs up for.
+The desktop app and container run it locally; the clone is for changing the product, tenant package,
+Bots, channels, skills, or branding.
+
+A. DESKTOP APP: LOCAL SETUP WITHOUT DEVELOPER TOOLS
+
+Tell them to open the OpenBot desktop app and follow the screens:
+
+  1. Set up OpenBot.
+  2. Keep the default Bot unless they know they want a specific framework.
+  3. Choose where OpenBot lives. This is the local deployment folder the app prepares.
+  4. Click Install OpenBot.
+  5. Connect an AI provider.
+  6. Sign in to CopilotKit when the app asks.
+  7. Start OpenBot.
+
+Do not tell desktop users to install Bun or run `bun install`. The desktop installer acquires the
+pinned Bun runtime itself when it is missing. Do not tell them to install Node or run
+`npx copilotkit`: the desktop flow signs in to CopilotKit and provisions the project key itself.
+Do not tell them to clone the repository: the desktop app fetches the released deployment tree and
+uses the release's digest-pinned container images.
+
+The desktop app uses an existing Docker/Podman runtime when one is already usable. If it needs to
+install Podman, the platform decides what that looks like: Windows uses a per-user installer, macOS
+asks for the normal administrator approval, and Linux uses the distribution package manager through
+the desktop authorization prompt. It also places a Compose provider when needed. If setup reports a
+Windows WSL or virtualization blocker, follow the exact sentence in the app; that blocker is the
+source of truth.
+
+The AI provider screen offers OpenAI, Anthropic, and one OpenAI-compatible endpoint row. A compatible
+endpoint means an endpoint or gateway that speaks the OpenAI API shape, such as Ollama, vLLM, Azure
+OpenAI, or a company gateway. Do not describe raw Bedrock as OpenAI-compatible unless there is a
+gateway in front of it that provides that API.
+
+Plan sign-in and API keys are not interchangeable. OpenAI plan sign-in is routed through the
+LangGraph/Codex path. Claude plan sign-in is routed through the Claude Agent SDK path. API keys are
+the broad framework path. Do not claim every framework can use both plan sign-ins.
+
+The desktop wizard's last built-in question proves that the selected Bot can answer. After it opens
+OpenBot, validate the main path with a real browser action and a visible chart, not just a text
+reply. If they are running an already-installed release, check its version first; source-tree fixes
+land in a desktop/container install only after that release is published. Ask a Bot to open a
+simple public site, report something visible on the page, and show the result as a bar or line
+chart. Passing means you saw the browser activity and the chart rendered in the transcript.
+
+B. SERVER OR ONE-CONTAINER DEPLOYMENT
+
+Use this when they are deploying a container, not when they are just trying the desktop app.
 
   docker run -p 3001:3001 --env-file .env \
     -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
     ghcr.io/copilotkit/openbot:latest
 
 One port. The app is on 3001 as well, so open http://localhost:3001, not 3010. `latest` is the most
-recent release; a version tag such as `:v0.0.9` pins one.
+recent release; a version tag such as `:v0.0.13` pins one.
 
-The `.env` still carries the same values as B: INTELLIGENCE_API_KEY, a model key, a real
-KEY_ENCRYPTION_KEY, and either an identity provider or OPENBOT_SINGLE_USER=true. Start from
-`.env.example` in this repository, or write the handful by hand. `EMBEDDED_POSTGRES=on` runs
-PostgreSQL inside the container, creates the database and the `vector` extension the first time, and
-applies the migrations on every start, so there is nothing to provision and no password to manage.
-Point DATABASE_URL at a database you already run instead, and leave EMBEDDED_POSTGRES off, if you
-would rather. That database needs the `vector` extension enabled; the managed ones support it and
-none of them enable it for you.
+The env file still needs INTELLIGENCE_API_KEY, a model credential, a real KEY_ENCRYPTION_KEY, and
+either an identity provider or OPENBOT_SINGLE_USER=true. Start from `.env.example` in this
+repository, or write the handful by hand. `EMBEDDED_POSTGRES=on` runs PostgreSQL inside the
+container, creates the database and the `vector` extension the first time, and applies migrations on
+every start. With your own DATABASE_URL, leave EMBEDDED_POSTGRES off and enable the `vector`
+extension in that database.
 
 Mount the volume at `/var/lib/postgresql`, the parent, not `/var/lib/postgresql/data`. `initdb` will
-not initialise into a directory that holds anything, and an ext4 volume arrives holding
-`lost+found`, so mounting the data directory itself leaves the cluster uncreated and the container
-serving nothing.
+not initialise into a directory that already contains `lost+found`.
 
-WHAT THIS IMAGE DOES NOT CARRY: `agent-langgraph` and `agent-bot`, the two framework Bots, are
-separate images that `docker-compose.yml` starts. Leave MANAGED_AGENT_AG_UI_URL unset and the
-shipped Risk Analyst coworker is omitted rather than registered against a host that is not there. If
-their `.env` still has the laptop default `http://localhost:4201/ag-ui`, unset it. Somebody who
-wants those Bots wants B.
+The one-container image does not carry the separate framework Bot images that `docker-compose.yml`
+starts. Leave MANAGED_AGENT_AG_UI_URL unset unless a Bot endpoint is actually reachable from this
+container. If their `.env` still has the laptop default `http://localhost:4201/ag-ui`, unset it for
+this path. See docs/deployment.md for platform notes, sizing and migrations.
 
-docs/deployment.md is the whole of this path, including the managed-database version, the sizing and
-the platform notes.
+C. CLONE: CHANGE OPENBOT OR A TENANT PACKAGE
 
-B. MAKE IT THEIRS, FROM THE CLONE
+Use this only when they want to edit code or configuration in the repository.
 
-OpenBot is a template to clone and make your own, not a product with a hosted version. It runs on
-the person's machine: their PostgreSQL, their model credential, their Bots.
-
-WHAT THEY NEED BEFORE STARTING
-- Bun 1.3.14. The repository pins it (`packageManager` in package.json).
-- Docker, running. `scripts/start.sh` brings up PostgreSQL with `docker compose`.
-- Node, for `npx`, to fetch the CopilotKit credentials below.
+Requirements for the clone path:
+- Bun 1.3.14. The repository pins it in package.json.
+- Docker CLI plus Docker Compose, or a compatible `docker` command/socket. `scripts/start.sh`
+  calls `docker compose` for PostgreSQL and shipped Bots; Podman works only when it is exposed
+  through that Docker-compatible command path.
+- Node/npx, only to fetch the CopilotKit key from the CLI.
 - A CopilotKit account. Free is enough.
-- A model credential. `OPENAI_API_KEY` is the default; any OpenAI-compatible base URL works via
-  `OPENAI_BASE_URL`.
+- A model credential. The current source tree supports OpenAI or Anthropic for the example built-in
+  Bots and the LangGraph framework Bot. Use the provider-specific key and model variables below.
+  Google is supported by the LangGraph framework Bot, not by the example built-in package model.
 
-THE ONLY TWO VALUES A PERSON HAS TO SUPPLY
-`.env.example` ships ten empty keys, which makes this look bigger than it is. `scripts/start.sh`
-fills most of them itself: it defaults COMPUTER_TOKEN and WORKER_SHARED_SECRET, and generates
-AGENT_TOOL_TOKEN and writes it back into `.env`. What it cannot invent is:
+The default OpenAI clone setup needs only two values from the person:
 
   1. INTELLIGENCE_API_KEY        the `cpk-...` runtime key
   2. OPENAI_API_KEY              the model credential
 
-Everything else in `.env.example` is either already correct or generated. Do not talk the person
-through the other eight.
+`scripts/start.sh` fills the local secrets it owns: COMPUTER_TOKEN and WORKER_SHARED_SECRET have dev
+defaults, and MANAGED_AGENT_TOKEN plus AGENT_TOOL_TOKEN are generated and written back into `.env`.
+Everything else in `.env.example` is either already correct, optional, or generated. Do not walk the
+person through every blank line.
 
-THE STEPS
+The clone commands are:
 
   cp .env.example .env
 
   npx --yes copilotkit@latest login           # opens a browser
   npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
 
-There is no licence step. `copilotkit license` still exists for a self-hosted Intelligence, and
+There is no licence step. `copilotkit license` still exists for self-hosted Intelligence, and
 COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
-Put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. Put their model key in OPENAI_API_KEY.
+Put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. For the default OpenAI path, put the
+OpenAI model key in OPENAI_API_KEY. For Anthropic, set all three lines together:
+
+  ANTHROPIC_API_KEY=...
+  BOT_PROVIDER=anthropic
+  BOT_MODEL=claude-sonnet-4-5
+
+That BOT_MODEL line is not optional in the clone path: docker-compose defaults BOT_MODEL to an
+OpenAI model. For a compatible endpoint, set OPENAI_BASE_URL, OPENAI_API_KEY if that endpoint needs
+one, and BOT_MODEL to the model name the endpoint publishes. Do not paste ChatGPT or Claude
+browser-session tokens into `.env`.
+
 Then:
 
   bun install
   bash scripts/start.sh
 
-It starts Docker services, applies migrations, starts the API on 3001 and the app on 3010, and
-waits for each to answer its own health route before printing next steps. Open http://localhost:3010.
+It starts Docker services, applies migrations, starts the API on 3001, starts the app on 3010,
+starts the local routine worker, and waits for each service to answer its own health route. Open
+http://localhost:3010.
 
-`bash scripts/stop.sh` takes down everything it started, the Bots' computers included. The database,
-the files and the browser profiles are volumes, so nothing is deleted either way.
+`bash scripts/stop.sh` takes down the app, worker, API server, Docker services, and each Bot's
+computer. Pass `--keep-computers` only when they deliberately want browser sessions left signed in.
+Nothing is deleted either way: the database, files and browser profiles are volumes.
 
 WHAT YOU MUST NOT DO FOR THEM
-- Do not run `copilotkit login`. It opens a browser and signs in as them. Tell them to run it.
-- Do not put their API keys into any file you did not just tell them about, and do not echo the
+- Do not run `copilotkit login`; it signs in as them. Tell them to run it.
+- Do not put their API keys into any file you did not just tell them about, and do not echo
   values back.
-- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL. The defaults in `.env.example`
-  point at the managed service and are correct. Self-hosting Intelligence is an enterprise feature
-  deployed by Helm chart and is not self-serve.
+- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL unless they run Intelligence themselves.
 
-FAILURES YOU WILL ACTUALLY SEE, AND WHAT THEY MEAN
+FAILURES YOU WILL ACTUALLY SEE
 The server refuses to start rather than running half-configured. The message names the variable.
 
 - "CopilotKit Intelligence is required and is not configured. Missing: ..."
-  One of the three Intelligence values is blank. Almost always INTELLIGENCE_API_KEY, from
-  skipping `project select`.
+  Almost always INTELLIGENCE_API_KEY was skipped.
 
 - "No identity provider is configured. Set GOOGLE_OAUTH_* ... or set OPENBOT_SINGLE_USER=true"
-  `.env.example` already sets OPENBOT_SINGLE_USER=true, so this means it was removed or edited.
-  On a laptop, put it back. It admits every request as one administrator, which is why it must be
-  off anywhere other people can reach.
+  `.env.example` already sets OPENBOT_SINGLE_USER=true. On a laptop, put it back. On a shared URL,
+  configure real sign-in instead.
 
 - "KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key"
-  Generate one with `openssl rand -base64 32`. The value in `.env.example` is public and fine
-  locally; the deployment refuses it in production on purpose.
+  Generate one with `openssl rand -base64 32`. The example value is local-only.
 
 - "Model credential is not configured for <Bot>. Add the package credential or set OPENAI_API_KEY."
-  This one appears in a conversation rather than at start-up, because the model is only needed
-  when a Bot answers.
+  or the same sentence naming ANTHROPIC_API_KEY. Set the key for the provider the deployment is
+  actually using.
 
-- A port is taken: start.sh names the port and the process. Re-run with `APP_PORT=<free port>` or
-  `SERVER_PORT=<free port>`, or stop the other process.
+- A port is taken: start.sh names the port and process. Re-run with APP_PORT=<free port> or
+  SERVER_PORT=<free port>, or stop the other process.
 
 - `.env is missing`: they skipped `cp .env.example .env`.
 
 HOW TO KNOW IT WORKED
-  curl -s localhost:3001/api/capabilities
-Expect JSON with "mode":"intelligence". Then open the app and send a message to General Assistant.
-A reply means the model credential and Intelligence are both good. The app is on 3010 from the
-clone and on 3001 from the image.
+
+For a clone, `curl -s localhost:3001/api/capabilities` should return JSON with
+`"mode":"intelligence"`. Then use the app, not just curl: ask a Bot to open a public site in its
+browser, report something visible on the page, and show a small chart. A plain text/math answer is
+not enough for the main path because it does not prove browser tools or component rendering.
 
 WHEN THEY WANT TO MAKE IT THEIRS
-The Bots, channels and skills are configuration, not code: `examples/fintech` is a worked example,
-pointed at by TENANT_PACKAGE_DIR. Copy it, edit `agents.yaml`, and point TENANT_PACKAGE_DIR at the
-copy. That is the fork, and it is the point of the repository.
 
-Watch the path: the server runs from `server/`, so TENANT_PACKAGE_DIR is relative to that, which is
-why the default reads `../examples/fintech` rather than `examples/fintech`.
+The Bots, channels and skills are configuration: `examples/fintech` is a worked example pointed at
+by TENANT_PACKAGE_DIR. Copy it, edit `agents.yaml`, and point TENANT_PACKAGE_DIR at the copy.
+The server runs from `server/`, so TENANT_PACKAGE_DIR is relative to that; the default is
+`../examples/fintech`, not `examples/fintech`.
 
 Further reading: README.md, docs/development.md, docs/deployment.md, and docs/configuration.md for
 every variable.

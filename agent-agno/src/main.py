@@ -29,7 +29,11 @@ agent = Agent(
     # In memory, because a Bot's history lives in OpenBot's database and not in the harness. Two
     # places remembering the same conversation is how they come to disagree.
     db=InMemoryDb(),
-    model=LiteLLM(id=_model_id()),
+    # `drop_params`, because Agno sends a temperature and a `top_p` on every request and LiteLLM
+    # refuses both for a reasoning model, the default `gpt-5.5` among them: every run on an OpenAI
+    # key failed before it reached OpenAI. A parameter a model does not take is dropped instead,
+    # for this one client, as the LlamaIndex Bot does.
+    model=LiteLLM(id=_model_id(), request_params={"drop_params": True}),
     # No role, goal or backstory invented on somebody's behalf. A Bot answers the question it is
     # asked, and anybody who wants a persona sets one in OpenBot where the rest of them live.
     instructions="Answer the question you are asked, briefly and correctly.",

@@ -15,10 +15,15 @@ TOKEN_HEADER = "x-openbot-agent-token"
 
 
 def _model_id() -> str:
-    """`provider:model`, which is the form Pydantic AI names a model in."""
+    """`provider:model`, which is the form Pydantic AI names a model in.
+
+    A colon in `BOT_MODEL` names the provider only when it follows the provider's own name. Any
+    other colon is part of the model's name: Ollama tags every model with one, as in `llama3.1:8b`,
+    and Pydantic AI read the part before it as a provider, refused an unknown one and started no Bot.
+    """
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
-    return model if ":" in model else f"{provider}:{model}"
+    return model if model.startswith(f"{provider}:") else f"{provider}:{model}"
 
 
 agent = Agent(_model_id())

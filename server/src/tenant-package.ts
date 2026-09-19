@@ -212,7 +212,7 @@ export type TenantPackage = {
   omittedAgentIds: string[];
   channels: TenantChannel[];
   model: {
-    provider: "openai";
+    provider: "openai" | "anthropic";
     credentialSecretRef: string;
     defaultModel: string;
   };
@@ -560,8 +560,8 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     },
   );
   const model = asRecord(modelYaml.model, "model");
-  if (model.provider !== "openai") {
-    throw new Error("model.provider must be openai");
+  if (model.provider !== "openai" && model.provider !== "anthropic") {
+    throw new Error("model.provider must be openai or anthropic");
   }
   const sources = asList(knowledgeYaml.sources, "knowledge.yaml sources").map(
     (value) => {
@@ -589,7 +589,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     omittedAgentIds: [...omittedAgentIds],
     channels,
     model: {
-      provider: "openai",
+      provider: model.provider,
       credentialSecretRef: requiredString(
         model.credential_secret_ref,
         "model.credential_secret_ref",

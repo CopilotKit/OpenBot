@@ -205,3 +205,229 @@ describe("OpenBot Mastra listen port configuration", () => {
     });
   }
 });
+
+describe("OpenBot Mastra provider requests", () => {
+  const choices: {
+    provider: string;
+    base: string;
+    model: string;
+    url: string;
+    apiKey?: string;
+    error?: string;
+  }[] = [
+    {
+      provider: "anthropic",
+      base: "",
+      model: "claude-sonnet-4-5",
+      url: "https://api.anthropic.com/v1/messages",
+      apiKey: "test-anthropic",
+    },
+    {
+      provider: "anthropic",
+      base: "http://anthropic.test/v1",
+      model: "claude-sonnet-4-5",
+      url: "http://anthropic.test/v1/messages",
+      apiKey: "test-anthropic",
+    },
+    {
+      provider: "",
+      base: "",
+      model: "gpt-5.5",
+      url: "https://api.openai.com/v1/responses",
+      apiKey: "test-openai",
+    },
+    {
+      provider: "openai",
+      base: " https://api.openai.com/v1/ ",
+      model: "gpt-5.5",
+      url: "https://api.openai.com/v1/responses",
+      apiKey: "test-openai",
+    },
+    {
+      provider: "",
+      base: "http://compatible.test/v1",
+      model: "llama3.1:8b",
+      url: "http://compatible.test/v1/chat/completions",
+      apiKey: "test-openai",
+    },
+    ...[
+      "http://anthropic.test",
+      " http://anthropic.test/proxy/ ",
+      "http://anthropic.test/proxy/v1/",
+    ].map((base) => ({
+      provider: "anthropic",
+      base,
+      model: "claude-sonnet-4-5",
+      apiKey: "test-anthropic",
+      url: base.includes("proxy")
+        ? "http://anthropic.test/proxy/v1/messages"
+        : "http://anthropic.test/v1/messages",
+    })),
+    ...[undefined, ""].map((apiKey) => ({
+      provider: "openai",
+      base: "http://compatible.test/v1",
+      model: "llama3.1:8b",
+      apiKey,
+      url: "http://compatible.test/v1/chat/completions",
+    })),
+    {
+      provider: "openai",
+      base: "",
+      model: "gpt-5.5",
+      url: "https://api.openai.com/v1/responses",
+      error: "OpenAI API key is missing",
+    },
+  ];
+
+  for (const choice of choices) {
+    test(`uses ${choice.base || "the default endpoint"} with ${choice.apiKey === undefined ? "no" : choice.apiKey || "an empty"} API key`, async () => {
+      const seen: { url: string | null; key: string | null; model: string }[] =
+        [];
+      const provider = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          const body = await request.json();
+          seen.push({
+            url: request.headers.get("x-test-original-url"),
+            key: request.headers.get(
+              choice.provider === "anthropic" ? "x-api-key" : "authorization",
+            ),
+            model: body.model,
+          });
+          const path = new URL(request.url).pathname;
+          if (path.endsWith("/v1/messages")) {
+            return Response.json({
+              id: "msg",
+              type: "message",
+              role: "assistant",
+              model: body.model,
+              content: [{ type: "text", text: "hello" }],
+              stop_reason: "end_turn",
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            });
+          }
+          if (path === "/v1/chat/completions") {
+            return Response.json({
+              id: "chat",
+              object: "chat.completion",
+              created: 0,
+              model: body.model,
+              choices: [
+                {
+                  index: 0,
+                  finish_reason: "stop",
+                  message: { role: "assistant", content: "hello" },
+                },
+              ],
+              usage: {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                total_tokens: 2,
+              },
+            });
+          }
+          if (path === "/v1/responses") {
+            return Response.json({
+              id: "resp",
+              object: "response",
+              created_at: 0,
+              model: body.model,
+              status: "completed",
+              output: [
+                {
+                  id: "msg",
+                  type: "message",
+                  role: "assistant",
+                  status: "completed",
+                  content: [
+                    { type: "output_text", text: "hello", annotations: [] },
+                  ],
+                },
+              ],
+              usage: {
+                input_tokens: 1,
+                output_tokens: 1,
+                input_tokens_details: { cached_tokens: 0 },
+                output_tokens_details: { reasoning_tokens: 0 },
+              },
+            });
+          }
+          return new Response("unexpected provider route", { status: 404 });
+        },
+      });
+      const child = Bun.spawn(
+        [
+          Bun.argv[0],
+          "-e",
+          [
+            // Only HTTP is replaced: the real Mastra Agent and provider SDK build the request.
+            "const networkFetch = globalThis.fetch;",
+            "globalThis.fetch = (input, init) => {",
+            "  const request = new Request(input, init);",
+            "  const url = new URL(request.url);",
+            '  request.headers.set("x-test-original-url", request.url);',
+            `  return networkFetch(new Request(${JSON.stringify(provider.url.toString())} + url.pathname.slice(1) + url.search, request));`,
+            "};",
+            'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+            'const result = await mastra.getAgent("openbot").generate("Say hello");',
+            "console.log(JSON.stringify({ text: result.text }));",
+          ].join("\n"),
+        ],
+        {
+          env: {
+            PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+            MASTRA_TELEMETRY_DISABLED: "true",
+            DO_NOT_TRACK: "1",
+            NODE_ENV: "test",
+            BOT_PROVIDER: choice.provider,
+            BOT_MODEL: choice.model,
+            ANTHROPIC_API_KEY:
+              choice.provider === "anthropic" ? choice.apiKey : "",
+            OPENAI_API_KEY:
+              choice.provider === "anthropic" ? "" : choice.apiKey,
+            ANTHROPIC_BASE_URL:
+              choice.provider === "anthropic" ? choice.base : "",
+            OPENAI_BASE_URL: choice.provider === "anthropic" ? "" : choice.base,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const timeout = setTimeout(() => child.kill(), 10_000);
+      try {
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        if (choice.error) {
+          expect(exitCode).not.toBe(0);
+          expect(stderr).toContain(choice.error);
+          expect(seen).toEqual([]);
+          return;
+        }
+        if (exitCode !== 0)
+          throw new Error(
+            `provider probe exited ${exitCode}\n${stdout}\n${stderr}`,
+          );
+        expect(stdout).toContain('"text":"hello"');
+        expect(seen).toEqual([
+          {
+            url: choice.url,
+            key:
+              choice.provider === "anthropic"
+                ? (choice.apiKey ?? null)
+                : `Bearer ${choice.apiKey?.trim() || "no-key-needed"}`,
+            model: choice.model,
+          },
+        ]);
+      } finally {
+        clearTimeout(timeout);
+        child.kill();
+        await provider.stop(true);
+      }
+    }, 15_000);
+  }
+});

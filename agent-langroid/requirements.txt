@@ -1,5 +1,5 @@
 ag-ui-langroid
-langroid
+langroid[litellm]
 fastapi
 python-multipart
 uvicorn[standard]
