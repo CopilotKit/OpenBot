@@ -98,6 +98,8 @@ export function ProviderPicker({
   root,
   onChoose,
   onBack,
+  returning = false,
+  busy: starting = false,
 }: {
   chosen: ModelChoice | null;
   /**
@@ -110,6 +112,8 @@ export function ProviderPicker({
   root: string;
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
+  returning?: boolean;
+  busy?: boolean;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
@@ -325,8 +329,8 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      <p className="steps-of">Step 3 of 4</p>
-      <h1>Connect your AI</h1>
+      {!returning && <p className="steps-of">Step 3 of 4</p>}
+      <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
         Sign in to the plan you already pay for. No key needed.
       </p>
@@ -640,12 +644,17 @@ export function ProviderPicker({
       )}
 
       <div className="row">
-        <button type="button" className="quiet" onClick={onBack}>
+        <button
+          type="button"
+          className="quiet"
+          onClick={onBack}
+          disabled={starting}
+        >
           Back
         </button>
         <button
           type="button"
-          disabled={!row || !login || !ready}
+          disabled={starting || !row || !login || !ready}
           onClick={continueWithChoice}
         >
           Continue

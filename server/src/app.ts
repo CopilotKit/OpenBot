@@ -30,6 +30,7 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import { desktopAuthPage } from "./auth/native-browser";
 import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
@@ -51,6 +52,7 @@ import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { withoutStatement } from "./db/query-failure";
+import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -315,6 +317,7 @@ export function createApp(
   composio?: { broker: ComposioBroker },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
+  mountDesktopConnectionFailure(app, desktopHostToken);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
@@ -375,6 +378,16 @@ export function createApp(
   };
 
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
+    if (
+      context.req.method === "GET" &&
+      new URL(context.req.url).pathname === "/api/auth/desktop" &&
+      !config.organizationAuthUrl
+    ) {
+      return desktopAuthPage(
+        context.req.raw,
+        configuredAuthProviders(config.auth),
+      );
+    }
     if (!auth) {
       return context.json(
         { error: "No identity provider is configured." },

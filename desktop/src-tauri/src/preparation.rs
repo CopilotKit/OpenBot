@@ -65,6 +65,15 @@ pub fn launch(root: &Path) -> Option<Launch> {
     (prepared_digest(root).as_deref() == Some(&record.preparation)).then_some(record.launch)
 }
 
+/// Completed installation is independent of sign-in and runtime state. This passive checkpoint
+/// only selects the recovery screen; Start still verifies the assets and selected engine.
+pub fn installation(root: &Path) -> Option<Launch> {
+    let record: Prepared = serde_json::from_slice(&std::fs::read(root.join(FILE)).ok()?).ok()?;
+    Some(Launch {
+        harness: record.harness,
+    })
+}
+
 pub fn save_selected_root(config: &Path, root: &Path) -> Result<(), Problem> {
     let root = std::fs::canonicalize(root).map_err(|e| {
         Problem::with(
@@ -452,8 +461,14 @@ fn main() {
         });
         assert!(result.is_err());
         assert!(!f.root.join(FILE).exists());
+        assert!(installation(&f.root).is_none());
         complete_with(&f.root, None, vec!["now-present".into()], |_| Ok(())).unwrap();
         assert!(f.root.join(FILE).is_file());
+        assert!(installation(&f.root).is_some());
+        assert!(
+            launch(&f.root).is_none(),
+            "installation does not authorize automatic Start"
+        );
     }
 
     #[test]

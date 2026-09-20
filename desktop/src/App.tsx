@@ -8,6 +8,7 @@ import {
   HarnessPicker,
 } from "./HarnessPicker";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
+import { OrganizationSignIn } from "./OrganizationSignIn";
 import { asProblem, Failure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
@@ -43,6 +44,8 @@ type AlreadyConfigured = {
   values: Record<string, string>;
   saved: NonNullable<HeldConfiguration["saved"]>;
   launch?: { harness: HarnessChoice | null } | null;
+  installation?: { harness: HarnessChoice | null } | null;
+  autoStart?: boolean;
 };
 
 function installationKeyFor(root: string, harness: HarnessChoice | null) {
@@ -74,6 +77,10 @@ export function App() {
   const [root, setRoot] = useState("");
   const [reuseIntelligence, setReuseIntelligence] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [organizationAuthorityUrl, setOrganizationAuthorityUrl] = useState<
+    string | null
+  >(null);
+  const [refreshOrganization, setRefreshOrganization] = useState(false);
   /*
    * Which Bot and which model, as two separate answers.
    *
@@ -148,13 +155,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [checkingResume, setCheckingResume] = useState(true);
-  const savedLaunch = useRef<{
-    installationKey: string;
-    model: ModelChoice;
-    apiKey: string;
-    apiUrl: string;
-    wsUrl: string;
-  } | null>(null);
+  const savedLaunch = useRef<string | null>(null);
+  const [refreshIntelligence, setRefreshIntelligence] = useState(false);
   const [preparation, setPreparation] = useState<{
     key: string;
     status: "preparing" | "complete" | "failed";
@@ -162,6 +164,7 @@ export function App() {
   const installationKey = installationKeyFor(root, harness);
   const installationReady =
     preparation?.key === installationKey && preparation.status === "complete";
+  const returningToInstallation = savedLaunch.current === installationKey;
   const [running, setRunning] = useState(false);
   const visibleSetupStep =
     checkingResume ||
@@ -191,6 +194,16 @@ export function App() {
   const [failure, setFailure] = useState<Problem | null>(null);
   // A supervisor notice belongs to the interrupted run, not to the form being hydrated.
   const [recoveryFailure, setRecoveryFailure] = useState<Problem | null>(null);
+  const recoverFromStart = useCallback((error: unknown) => {
+    const problem = asProblem(error);
+    setRecoveryFailure(problem);
+    if (problem.connection === "model") setStep("model");
+    if (problem.connection === "intelligence") {
+      setRefreshIntelligence(true);
+      setStep("connect");
+    }
+    if (problem.connection === "organization") setRefreshOrganization(true);
+  }, []);
   const displayedFailure = failure ?? recoveryFailure;
   const credentialContext = useRef([
     root,
@@ -223,6 +236,9 @@ export function App() {
 
   const clearRootScopedSavedState = useCallback(() => {
     savedLaunch.current = null;
+    setRefreshIntelligence(false);
+    setRefreshOrganization(false);
+    setOrganizationAuthorityUrl(null);
     setApiKey("");
     setReuseIntelligence(false);
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
@@ -249,6 +265,9 @@ export function App() {
         if (values.INTELLIGENCE_GATEWAY_WS_URL)
           setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
         setAlreadyHeld({ ...values, saved });
+        setOrganizationAuthorityUrl(
+          values.OPENBOT_ORGANIZATION_AUTH_URL ?? null,
+        );
         return configured;
       } catch {
         if (configuredRunRef.current === run) {
@@ -296,7 +315,6 @@ export function App() {
       .then(async ([selected, fallback, canResume, interrupted]) => {
         if (!active) return;
         const found = selected || fallback;
-        if (!selected) setCheckingResume(false);
         setRoot(found);
         /*
          * Arrive filled in when a previous run already wrote these.
@@ -307,6 +325,25 @@ export function App() {
          */
         const configured = await loadConfiguredRoot(found);
         if (!active) return;
+        const installed = configured?.launch ?? configured?.installation;
+        const resumedModel = configured
+          ? recordedModel({
+              ...configured.values,
+              saved: configured.saved,
+            })
+          : null;
+        if (installed) {
+          const key = installationKeyFor(found, installed.harness);
+          setHarness(installed.harness);
+          setModel(resumedModel);
+          setPreparation({ key, status: "complete" });
+          if (configured?.launch) savedLaunch.current = key;
+          setStep(resumedModel ? "connect" : "model");
+        }
+        if (interrupted?.connection) {
+          recoverFromStart(interrupted);
+          return;
+        }
         // A stack this app started may still be up from a previous window. Ask, rather than
         // offering to set up something that is already running.
         if (
@@ -319,33 +356,11 @@ export function App() {
           setRunning(true);
           return;
         }
-        if (!active || !canResume || !configured?.launch) return;
-        const resumedModel = recordedModel({
-          ...configured.values,
-          saved: configured.saved,
-        });
-        if (!resumedModel) return;
+        if (!active || !canResume || !configured?.launch || !resumedModel)
+          return;
         const resumedHarness = configured.launch.harness;
-        setHarness(resumedHarness);
-        setModel(resumedModel);
-        setPreparation({
-          key: installationKeyFor(found, resumedHarness),
-          status: "complete",
-        });
-        setStep("connect");
-        savedLaunch.current = {
-          installationKey: installationKeyFor(found, resumedHarness),
-          model: resumedModel,
-          apiKey: configured.values.INTELLIGENCE_API_KEY || "",
-          apiUrl:
-            configured.values.INTELLIGENCE_API_URL ||
-            MANAGED_INTELLIGENCE_API_URL,
-          wsUrl:
-            configured.values.INTELLIGENCE_GATEWAY_WS_URL ||
-            MANAGED_INTELLIGENCE_GATEWAY_WS_URL,
-        };
         // An interrupted run needs an explicit Start, with its saved setup still available.
-        if (interrupted) return;
+        if (interrupted || configured.autoStart === false) return;
         setBusy(true);
         setResuming(true);
         try {
@@ -362,13 +377,19 @@ export function App() {
               MANAGED_INTELLIGENCE_GATEWAY_WS_URL,
             model: resumedModel,
             harness: resumedHarness,
+            ...(configured.values.OPENBOT_ORGANIZATION_AUTH_URL
+              ? {
+                  organizationAuthUrl:
+                    configured.values.OPENBOT_ORGANIZATION_AUTH_URL,
+                }
+              : {}),
           });
           if (!active) return;
           setRunning(true);
           setRecoveryFailure(null);
           await invoke("show_openbot");
         } catch (error) {
-          if (active) setRecoveryFailure(asProblem(error));
+          if (active) recoverFromStart(error);
         } finally {
           if (active) {
             setBusy(false);
@@ -376,7 +397,9 @@ export function App() {
           }
         }
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        if (active) recoverFromStart(error);
+      })
       .finally(() => {
         if (active) setCheckingResume(false);
       });
@@ -397,7 +420,7 @@ export function App() {
       active = false;
       stop.then((unlisten) => unlisten());
     };
-  }, [loadConfiguredRoot]);
+  }, [loadConfiguredRoot, recoverFromStart]);
 
   async function install() {
     if (busy || !root.trim()) return;
@@ -416,7 +439,7 @@ export function App() {
     }
   }
 
-  async function start() {
+  async function start(nextModel = model) {
     if (!installationReady) {
       setStep("install");
       return;
@@ -433,22 +456,24 @@ export function App() {
         // The whole answer from the model screen, so the Rust side decides which keys that
         // implies. Sending a bare key here is what made `ANTHROPIC_API_KEY` and a plan token
         // expressible at the same time.
-        model,
+        model: nextModel,
         // By id only. The image, the port and how it is dialled are facts about the harness, and
         // the window carrying them would be a second list to keep in step with the catalogue.
         harness,
+        ...(organizationAuthorityUrl !== null
+          ? { organizationAuthUrl: organizationAuthorityUrl }
+          : {}),
       });
       setRunning(true);
       setRecoveryFailure(null);
-      // An unchanged, previously launched setup has already completed the first-run handover.
-      const previous = savedLaunch.current;
+      // Refreshing credentials does not turn an existing installation into a first run.
       if (
-        previous?.installationKey === installationKey &&
-        previous.model === model &&
-        previous.apiKey === apiKey &&
-        previous.apiUrl === apiUrl &&
-        previous.wsUrl === wsUrl
+        savedLaunch.current === installationKey ||
+        organizationAuthorityUrl?.trim()
       ) {
+        savedLaunch.current = installationKey;
+        setStep("connect");
+        setRefreshIntelligence(false);
         await invoke("show_openbot");
         return;
       }
@@ -463,7 +488,7 @@ export function App() {
        */
       setStep("ask");
     } catch (error) {
-      setFailure(asProblem(error));
+      recoverFromStart(error);
     } finally {
       setBusy(false);
       invoke<EngineStatus>("detect_engine")
@@ -494,6 +519,8 @@ export function App() {
       await invoke("stop_stack", { root });
       setRunning(false);
       setRecoveryFailure(null);
+      setStep("connect");
+      setRefreshIntelligence(false);
     } catch (error) {
       setFailure(asProblem(error));
     } finally {
@@ -548,6 +575,33 @@ export function App() {
             : "Checking your saved setup…"}
         </p>
         <SetupProgress steps={steps} />
+      </main>
+    );
+  }
+
+  if (refreshOrganization) {
+    return (
+      <main>
+        <OrganizationSignIn
+          root={root}
+          authorityUrl={organizationAuthorityUrl ?? ""}
+          onBack={() => {
+            setRefreshOrganization(false);
+            setRefreshIntelligence(true);
+            setRunning(false);
+          }}
+          onSignedIn={async () => {
+            try {
+              await invoke("show_openbot");
+              setRefreshOrganization(false);
+              setRecoveryFailure(null);
+              setRunning(true);
+            } catch (error) {
+              recoverFromStart(error);
+            }
+          }}
+        />
+        {displayedFailure && <Failure problem={displayedFailure} />}
       </main>
     );
   }
@@ -697,9 +751,8 @@ export function App() {
             invoke<string>("ask_the_bot", { root, question })
           }
           onOpen={() => {
-            invoke("show_openbot").catch((error) =>
-              setFailure(asProblem(error)),
-            );
+            savedLaunch.current = installationKey;
+            invoke("show_openbot").catch((error) => recoverFromStart(error));
           }}
           onBack={changeModelAfterAskFailure}
         />
@@ -715,16 +768,81 @@ export function App() {
           held={alreadyHeld}
           root={root}
           chosen={model}
+          returning={returningToInstallation}
+          busy={busy}
           onChoose={(choice) => {
             recordSetupEvent(modelChoiceEvent(choice));
             setModel(choice);
-            setStep("connect");
+            if (returningToInstallation) void start(choice);
+            else setStep("connect");
           }}
           onBack={() => {
             setSteps([]);
-            setStep("install");
+            setStep(returningToInstallation ? "connect" : "install");
           }}
         />
+        {displayedFailure && <Failure problem={displayedFailure} />}
+      </main>
+    );
+  }
+
+  if (!running && returningToInstallation && !refreshIntelligence) {
+    return (
+      <main>
+        <h1>OpenBot is stopped</h1>
+        <p className="lede">
+          Your installation and saved connections are ready to reopen.
+        </p>
+        <SetupProgress steps={steps} />
+        {displayedFailure && <Failure problem={displayedFailure} />}
+        <button
+          type="button"
+          disabled={busy || !installationReady || !modelCanStart()}
+          onClick={() => start()}
+        >
+          {busy ? "Starting…" : "Start OpenBot"}
+        </button>
+        <button
+          type="button"
+          className="quiet"
+          disabled={busy}
+          onClick={() => setStep("model")}
+        >
+          Change AI connection
+        </button>
+        <button
+          type="button"
+          className="quiet"
+          disabled={busy}
+          onClick={() => setRefreshIntelligence(true)}
+        >
+          Change CopilotKit connection
+        </button>
+        {displayedFailure && (
+          <button
+            type="button"
+            className="quiet"
+            disabled={busy}
+            onClick={install}
+          >
+            Repair installation
+          </button>
+        )}
+        <details>
+          <summary>Installation options</summary>
+          <button
+            type="button"
+            className="quiet"
+            disabled={busy}
+            onClick={() => {
+              setPreparation(null);
+              setSteps([]);
+              setStep("install");
+            }}
+          >
+            Change installation
+          </button>
+        </details>
       </main>
     );
   }
@@ -734,16 +852,22 @@ export function App() {
       {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
           back here, and a heading that still says everything is running while the box underneath
           names the process that stopped is a screen arguing with itself. */}
-      {!running && <p className="steps-of">Step 4 of 4</p>}
+      {!running && !returningToInstallation && (
+        <p className="steps-of">Step 4 of 4</p>
+      )}
       <h1>
         {running && !displayedFailure
           ? "OpenBot is running"
-          : "Connect to CopilotKit"}
+          : returningToInstallation
+            ? "Refresh your CopilotKit connection"
+            : "Connect to CopilotKit"}
       </h1>
       <p className="lede">
         {running && !displayedFailure
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
-          : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
+          : returningToInstallation
+            ? "Update this connection to reopen your existing OpenBot."
+            : "Local installation is complete. Connect CopilotKit, then start OpenBot."}
       </p>
 
       {!running && (
@@ -760,8 +884,19 @@ export function App() {
             Intelligence has a key this sign-in knows nothing about, so the field moves down there
             with the addresses it belongs with.
           */}
-          {apiKey ? (
-            <p className="lede">Connected to CopilotKit.</p>
+          {apiKey && !signingIn && !projects ? (
+            <>
+              <p className="lede">Connected to CopilotKit.</p>
+              {returningToInstallation && (
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={signInToCopilotKit}
+                >
+                  Sign in to CopilotKit again
+                </button>
+              )}
+            </>
           ) : (alreadyHeld.saved?.intelligenceApiKey || reuseIntelligence) &&
             !signingIn &&
             !projects ? (
@@ -897,6 +1032,27 @@ export function App() {
               />
             </div>
           </details>
+          <details>
+            <summary>Sign in through your organization</summary>
+            <p className="footnote">
+              Enter your organization’s OpenBot address to use its sign-in and
+              access rules.
+            </p>
+            <div className="field">
+              <label htmlFor="organization-authority">
+                Organization OpenBot URL
+              </label>
+              <input
+                id="organization-authority"
+                value={organizationAuthorityUrl ?? ""}
+                onChange={(event) =>
+                  setOrganizationAuthorityUrl(event.target.value)
+                }
+                placeholder="https://openbot.your-company.com"
+                spellCheck={false}
+              />
+            </div>
+          </details>
         </fieldset>
       )}
 
@@ -904,7 +1060,7 @@ export function App() {
 
       {displayedFailure && <Failure problem={displayedFailure} />}
 
-      {!running && (
+      {!running && !returningToInstallation && (
         <button
           type="button"
           className="quiet"
@@ -923,9 +1079,13 @@ export function App() {
           type="button"
           className="quiet"
           disabled={busy || signingIn}
-          onClick={() => setStep("model")}
+          onClick={() =>
+            returningToInstallation
+              ? setRefreshIntelligence(false)
+              : setStep("model")
+          }
         >
-          Change AI connection
+          {returningToInstallation ? "Back" : "Change AI connection"}
         </button>
       )}
       <div className="row">
@@ -943,9 +1103,7 @@ export function App() {
                * window threw it away. The Ask screen's copy of this call always showed it.
                */
               onClick={() =>
-                invoke("show_openbot").catch((error) =>
-                  setFailure(asProblem(error)),
-                )
+                invoke("show_openbot").catch((error) => recoverFromStart(error))
               }
             >
               Show OpenBot
@@ -962,7 +1120,7 @@ export function App() {
         ) : (
           <button
             type="button"
-            onClick={start}
+            onClick={() => start()}
             // The model is answered by its own screen now, so what is checked here is that it was
             // answered at all, not that some field on this screen is non-empty.
             disabled={

@@ -1,4 +1,5 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { electron } from "@better-auth/electron";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
@@ -150,6 +151,7 @@ export function createAuth(
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
   const plugins = [
+    electron({ clientID: "openbot-desktop", codeExpiresIn: 120 }),
     ...(authConfig.okta
       ? [
           genericOAuth({

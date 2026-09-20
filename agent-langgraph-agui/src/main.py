@@ -90,9 +90,7 @@ def _resolve_provider(provider: str):
 def _chatgpt_auth_file(store: str) -> Path:
     path = Path(store)
     if not path.exists():
-        raise FileNotFoundError(
-            f"CHATGPT_AUTH_FILE points to a missing file: {path}"
-        )
+        raise FileNotFoundError(f"CHATGPT_AUTH_FILE points to a missing file: {path}")
     if path.is_dir():
         raise IsADirectoryError(
             f"CHATGPT_AUTH_FILE must point to a file, not a directory: {path}"
@@ -197,11 +195,20 @@ def _wants_system_turns_first(model) -> bool:
 
 
 async def answer(state: MessagesState):
-    model = _model()
-    messages = model_messages(state["messages"])
-    if _wants_system_turns_first(model):
-        messages = _system_turns_first(messages)
-    return {"messages": [await bind_tools(model).ainvoke(messages)]}
+    from openai import AuthenticationError, PermissionDeniedError
+    from langchain_openai.chatgpt_oauth import _ChatGPTOAuthRefreshError
+    from .tool_runtime import current_tools
+
+    try:
+        model = _model()
+        messages = model_messages(state["messages"])
+        if _wants_system_turns_first(model):
+            messages = _system_turns_first(messages)
+        return {"messages": [await bind_tools(model).ainvoke(messages)]}
+    except (AuthenticationError, PermissionDeniedError, _ChatGPTOAuthRefreshError):
+        # Typed provider boundary only. A callback or harness 401 is a different credential.
+        current_tools().connection["authentication_failed"] = True
+        raise
 
 
 builder = StateGraph(MessagesState)
@@ -235,8 +242,6 @@ async def health():
 
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=ToolAwareAgent(
-        name="openbot", graph=graph, config={"recursion_limit": 25}
-    ),
+    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": 25}),
     path="/",
 )

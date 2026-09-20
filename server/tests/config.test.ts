@@ -51,6 +51,17 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
+  test("organization authority disables the standalone actor without requiring local provider secrets", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      OPENBOT_SINGLE_USER: "true",
+      OPENBOT_ORGANIZATION_AUTH_URL: "https://openbot.company.example",
+    });
+    expect(config.singleUser).toBe(false);
+    expect(config.auth).toBeUndefined();
+    expect(config.organizationAuthUrl).toBe("https://openbot.company.example");
+    expect(config.runtime.intelligence.apiKey).toBe("tenant-api-key");
+  });
   test("resolves the Intelligence runtime, which is the only runtime", () => {
     const config = loadConfig(baseEnvironment);
 

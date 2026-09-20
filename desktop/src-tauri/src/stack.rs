@@ -179,6 +179,81 @@ fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command 
     command
 }
 
+/// Check the actual selected deployment before minting an encryption key. Compose resolves
+/// project names, explicit volume names, and override files; the pinned engine owns the volume.
+/// Never include config output in diagnostics: interpolation may have put credentials in it.
+pub fn postgres_volume_exists(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<bool, Problem> {
+    let configuration = compose_command(engine, root, secrets)
+        .args(["config", "--format", "json"])
+        .output()
+        .map_err(|error| {
+            postgres_volume_problem(format!("Could not run Compose config: {error}"))
+        })?;
+    if !configuration.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Compose config exited with {}. Output omitted because it can contain credentials.",
+            configuration.status
+        )));
+    }
+    let volume = postgres_volume_name(&configuration.stdout)?;
+    let inventory = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "ls", "--format", "{{.Name}}"])
+        .output()
+        .map_err(|error| postgres_volume_problem(format!("Could not list volumes: {error}")))?;
+    if !inventory.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Volume inventory exited with {}.",
+            inventory.status
+        )));
+    }
+    let names = std::str::from_utf8(&inventory.stdout)
+        .map_err(|_| postgres_volume_problem("Volume inventory was not valid UTF-8."))?;
+    Ok(names.lines().any(|name| name.trim() == volume))
+}
+
+fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify whether this installation has saved database data. No encryption key was created. Check the selected container engine and Compose configuration, then try again.",
+        detail,
+    )
+}
+
+fn postgres_volume_name(configuration: &[u8]) -> Result<String, Problem> {
+    let config: serde_json::Value = serde_json::from_slice(configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
+    let postgres = &config["services"]["postgres"];
+    let data = postgres["environment"]["PGDATA"]
+        .as_str()
+        .unwrap_or("/var/lib/postgresql/data");
+    // A PGDATA subdirectory still belongs to its containing mount. Prefer the closest mount
+    // so a nested override cannot make us inspect an unrelated volume.
+    let mount = postgres["volumes"].as_array().and_then(|mounts| {
+        mounts
+            .iter()
+            .filter(|mount| {
+                mount["target"].as_str().is_some_and(|target| {
+                    data == target
+                        || data.starts_with(&format!("{}/", target.trim_end_matches('/')))
+                })
+            })
+            .max_by_key(|mount| mount["target"].as_str().unwrap().len())
+    });
+    let volume = mount
+        .filter(|mount| mount["type"].as_str() == Some("volume"))
+        .and_then(|mount| mount["source"].as_str())
+        .and_then(|source| config["volumes"][source]["name"].as_str())
+        .filter(|name| !name.trim().is_empty());
+    volume.map(str::to_owned).ok_or_else(|| {
+        postgres_volume_problem("Compose did not resolve a named volume for Postgres data.")
+    })
+}
+
 const MACOS_PODMAN_PORTS_FILE: &str = ".openbot-macos-podman.yml";
 const MACOS_PODMAN_PORTS: &str = include_str!("macos-podman-ports.yml");
 
@@ -2695,6 +2770,114 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
+    fn postgres_config_fixture(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "services": {"postgres": {"volumes": [{
+                "type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"
+            }]}},
+            "volumes": {"postgres-data": {"name": name}}
+        })
+    }
+
+    #[test]
+    fn postgres_volume_uses_resolved_names_and_the_mount_containing_pgdata() {
+        for name in ["openbot_postgres-data", "explicit-external-database"] {
+            let mut config = postgres_config_fixture(name);
+            config["services"]["postgres"]["environment"] =
+                serde_json::json!({"PGDATA": "/var/lib/postgresql/data/pgdata"});
+            assert_eq!(
+                postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+                name
+            );
+        }
+        let mut config = postgres_config_fixture("outer-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"PGDATA": "/var/lib/postgresql/data/nested"});
+        config["services"]["postgres"]["volumes"].as_array_mut().unwrap().push(
+            serde_json::json!({"type":"volume", "source":"inner", "target":"/var/lib/postgresql/data/nested"})
+        );
+        config["volumes"]["inner"] = serde_json::json!({"name":"actual-data-volume"});
+        assert_eq!(
+            postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+            "actual-data-volume"
+        );
+    }
+
+    #[test]
+    fn postgres_volume_refuses_unresolved_or_non_volume_storage_without_disclosing_config() {
+        let mut config = postgres_config_fixture("selected-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"SECRET": "synthetic-secret-must-not-appear-in-diagnostics"});
+        config["services"]["postgres"]["volumes"][0]["type"] = "bind".into();
+        let mut missing_name = postgres_config_fixture("selected-volume");
+        missing_name["volumes"] = serde_json::json!({});
+        for content in [
+            config.to_string(),
+            missing_name.to_string(),
+            "{}".into(),
+            "invalid-json-secret".into(),
+        ] {
+            let error = postgres_volume_name(content.as_bytes()).unwrap_err();
+            assert!(error.said.contains("No encryption key was created"));
+            assert!(!format!("{error:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed() {
+        if crate::test_support::isolated_process(
+            "stack::tests::postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed",
+        ) { return; }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-deployment", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            std::fs::write(
+                root.join(".fixture-config"),
+                postgres_config_fixture("selected-db").to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                root.join(".fixture-volumes"),
+                "other-db\nselected-db-backup\n",
+            )
+            .unwrap();
+            assert!(!postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            std::fs::write(root.join(".fixture-volumes"), "other-db\nselected-db\n").unwrap();
+            assert!(postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            for failure in [".fixture-volume-failure", ".fixture-config-failure"] {
+                std::fs::write(root.join(failure), "").unwrap();
+                let error = postgres_volume_exists(&address, &root, &Secrets::new()).unwrap_err();
+                assert!(error.said.contains("No encryption key was created"));
+                assert!(!format!("{error:?}").contains("synthetic-secret"));
+                std::fs::remove_file(root.join(failure)).unwrap();
+            }
+            let log = std::fs::read_to_string(record).unwrap();
+            for line in log.lines() {
+                let (cwd, command) = line.split_once('\t').unwrap();
+                assert_eq!(
+                    Path::new(cwd).canonicalize().unwrap(),
+                    root.canonicalize().unwrap()
+                );
+                let command = if address.engine == crate::engine::Engine::Podman {
+                    command
+                        .strip_prefix("--connection fixture-machine ")
+                        .expect("retain selected Podman connection")
+                } else {
+                    command
+                };
+                assert!(matches!(
+                    command,
+                    "compose config --format json" | "volume ls --format {{.Name}}"
+                ));
+            }
+        }
+    }
+
     #[test]
     fn desktop_approval_transport_credential_reaches_only_the_server() {
         let secrets = Secrets::from([
@@ -4025,6 +4208,20 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    if scenario == "postgres-volume" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let (file, failure) = if actual == ["compose", "config", "--format", "json"] {
+            (".fixture-config", ".fixture-config-failure")
+        } else if actual == ["volume", "ls", "--format", "{{.Name}}"] {
+            (".fixture-volumes", ".fixture-volume-failure")
+        } else { panic!("unexpected volume probe command: {actual:?}"); };
+        if std::path::Path::new(failure).exists() {
+            eprintln!("synthetic-secret-must-not-appear-in-diagnostics");
+            std::process::exit(17);
+        }
+        print!("{}", std::fs::read_to_string(file).unwrap());
+        return;
+    }
     if scenario == "macos-podman-start" {
         let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
         if actual == ["compose", "config", "--environment"] {

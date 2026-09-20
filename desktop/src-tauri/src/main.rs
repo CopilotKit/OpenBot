@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_connection;
 mod desktop_host_access;
 mod desktop_telemetry;
 
@@ -95,6 +96,7 @@ struct ContainerDeployment {
 struct RecoveryRequired {
     root: PathBuf,
     generation: u64,
+    connection: Option<openbot_desktop_lib::problem::Connection>,
 }
 
 /// Callers serialize eligibility and any navigation with `startup`. A failed Start may advance
@@ -116,6 +118,7 @@ fn mark_recovery_required(shell: &Shell, root: &Path, generation: u64) {
     *shell.recovery_required.lock().unwrap() = Some(RecoveryRequired {
         root: root.to_path_buf(),
         generation,
+        connection: None,
     });
 }
 
@@ -221,6 +224,9 @@ struct AlreadyConfigured {
     saved: SavedConfiguration,
     #[serde(skip_serializing_if = "Option::is_none")]
     launch: Option<preparation::Launch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    installation: Option<preparation::Launch>,
+    auto_start: bool,
 }
 
 struct ReadyRespondingEngine {
@@ -408,6 +414,12 @@ async fn prepare_installation(
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
         if preparation::require(&root, Some(&harness), &address).is_ok() {
+            preparation::save_selected_root(
+                &app.path()
+                    .app_config_dir()
+                    .map_err(|e| Problem::from(e.to_string()))?,
+                &root,
+            )?;
             report(
                 &handle,
                 "installation",
@@ -467,6 +479,12 @@ async fn prepare_installation(
         }
         attempt.require_current()?;
         preparation::complete(&root, harness.as_ref(), images, &address)?;
+        preparation::save_selected_root(
+            &app.path()
+                .app_config_dir()
+                .map_err(|e| Problem::from(e.to_string()))?,
+            &root,
+        )?;
         report(
             &handle,
             "installation",
@@ -853,7 +871,9 @@ fn start_stack_credential(
     root: &Path,
     model: ChosenModel,
 ) -> Result<openbot_env::ModelCredential, Problem> {
-    model.into_credential(root)
+    model
+        .into_credential(root)
+        .map_err(|problem| problem.connection(openbot_desktop_lib::problem::Connection::Model))
 }
 
 #[cfg(test)]
@@ -862,7 +882,9 @@ fn start_stack_credential_with(
     model: ChosenModel,
     saved_secret: impl FnMut(&Path, &str) -> Result<String, Problem>,
 ) -> Result<openbot_env::ModelCredential, Problem> {
-    model.into_credential_with(root, saved_secret)
+    model
+        .into_credential_with(root, saved_secret)
+        .map_err(|problem| problem.connection(openbot_desktop_lib::problem::Connection::Model))
 }
 
 fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
@@ -876,12 +898,15 @@ fn intelligence_key_for_start(
     mut resolve: impl FnMut(&Path, &str) -> Result<String, Problem>,
 ) -> Result<String, Problem> {
     let key = if given.trim().is_empty() {
-        resolve(root, "INTELLIGENCE_API_KEY")?
+        resolve(root, "INTELLIGENCE_API_KEY").map_err(|problem| {
+            problem.connection(openbot_desktop_lib::problem::Connection::Intelligence)
+        })?
     } else {
         given
     };
     if key.trim().is_empty() {
-        return Err("That saved CopilotKit connection is no longer available. Sign in again or enter a project key.".into());
+        return Err(Problem::plain("That saved CopilotKit connection is no longer available. Sign in again or enter a project key.")
+            .connection(openbot_desktop_lib::problem::Connection::Intelligence));
     }
     Ok(key)
 }
@@ -889,17 +914,22 @@ fn intelligence_key_for_start(
 fn require_existing_encryption_key(
     root: &Path,
     secrets: &std::collections::BTreeMap<String, String>,
+    existing_postgres_volume: impl FnOnce() -> Result<bool, Problem>,
 ) -> Result<(), Problem> {
+    if secrets
+        .get("KEY_ENCRYPTION_KEY")
+        .is_some_and(|value| openbot_env::usable_encryption_key(value))
+    {
+        return Ok(());
+    }
     let configured = openbot_desktop_lib::saved_intent::SavedIntent::read(root)
         .model
         .is_some()
         || openbot_env::already_set(&root.join(".env"), &["DATABASE_URL"])
             .contains_key("DATABASE_URL");
-    if configured
-        && !secrets
-            .get("KEY_ENCRYPTION_KEY")
-            .is_some_and(|value| openbot_env::usable_encryption_key(value))
-    {
+    // A reinstall can remove every root-local marker and secret while Compose keeps its volume.
+    // Only a verified fresh database may receive a newly minted encryption key.
+    if configured || existing_postgres_volume()? {
         return Err(Problem::plain(
             "This installation's saved encryption key is missing, invalid, or public. Restore its original private key from backup, or get help preserving its saved data. OpenBot will not replace the key automatically.",
         ));
@@ -918,11 +948,22 @@ async fn start_stack<R: tauri::Runtime>(
     model: ChosenModel,
     // The row the person picked, with the address only for the bring-your-own row.
     harness: Option<harness::HarnessChoice>,
+    organization_auth_url: Option<String>,
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let root = stack::root_from(&root);
-    start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await
+    start_stack_inner(
+        app,
+        root,
+        api_url,
+        gateway_ws_url,
+        api_key,
+        model,
+        harness,
+        organization_auth_url,
+    )
+    .await
 }
 
 async fn start_stack_inner<R: tauri::Runtime>(
@@ -933,7 +974,22 @@ async fn start_stack_inner<R: tauri::Runtime>(
     api_key: String,
     model: ChosenModel,
     harness: Option<harness::HarnessChoice>,
+    organization_auth_url: Option<String>,
 ) -> Result<(), Problem> {
+    let organization_auth_url = organization_auth_url.map(|url| url.trim().to_string());
+    if let Some(url) = organization_auth_url.as_ref().filter(|url| !url.is_empty()) {
+        if !reqwest::Url::parse(url).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.has_host()
+                && url.username().is_empty()
+                && url.password().is_none()
+        }) {
+            return Err(Problem::plain(
+                "Enter a valid http:// or https:// organization OpenBot URL.",
+            )
+            .connection(openbot_desktop_lib::problem::Connection::Organization));
+        }
+    }
     let shell = app.state::<Shell>();
     let attempt = StartAttempt::begin(&shell)?;
     {
@@ -1053,9 +1109,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
             &root.join(".env"),
             &openbot_env::MINTED[..],
         )?;
-        require_existing_encryption_key(&root, &existing_secrets)?;
+        require_existing_encryption_key(&root, &existing_secrets, || {
+            stack::postgres_volume_exists(&found, &root, &existing_secrets)
+        })?;
 
-        let settings = openbot_env::compose(
+        let mut settings = openbot_env::compose(
             &openbot_env::Intelligence {
                 api_url,
                 gateway_ws_url,
@@ -1072,6 +1130,9 @@ async fn start_stack_inner<R: tauri::Runtime>(
             // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
             &existing_secrets,
         );
+        if let Some(authority) = organization_auth_url {
+            settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
+        }
         /*
          * The credentials come out here and never reach the file.
          *
@@ -2012,22 +2073,25 @@ where
 /// double-clicked OpenBot to get OpenBot.
 ///
 /// So the window navigates to the running app, and the tray keeps the controls that would otherwise
-/// have nowhere to live. Setup comes back if the stack is stopped, because then there is something
-/// to set up again.
+/// have nowhere to live. The connection screen comes back if the stack is stopped.
 ///
 /// The address is asked for rather than named. `stack::app_url` tries `127.0.0.1` and `[::1]` and
 /// returns whichever answered, because a dev server binds whichever loopback its runtime resolved
 /// and naming one guesses wrong half the time. Never the word `localhost`: it does not resolve the
 /// same way on every operating system, which is the whole reason both are asked.
 #[tauri::command]
-fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
-    show_openbot_on(app, &openbot_env::Ports::default())
+async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
+    tauri::async_runtime::spawn_blocking(move || {
+        show_openbot_on(app, &openbot_env::Ports::default())
+    })
+    .await
+    .map_err(|error| Problem::with("OpenBot could not open its window.", error.to_string()))?
 }
 
 fn show_openbot_on<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     ports: &openbot_env::Ports,
-) -> Result<(), String> {
+) -> Result<(), Problem> {
     let port = ports.app;
     // Where it answered, not where it was asked to listen. A dev server binds whichever loopback
     // its runtime resolved `localhost` to, and navigating to the other one shows a blank window
@@ -2035,22 +2099,53 @@ fn show_openbot_on<R: tauri::Runtime>(
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     let root = cleanup_root(&shell, &stack::default_root());
-    if recovery_required_or_pending_quit_notice(&shell, &root) {
+    let organization_recovery = !quit_cleanup_notice_path(&root).exists()
+        && shell
+            .recovery_required
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|recovery| {
+                recovery.root == root
+                    && recovery.connection
+                        == Some(openbot_desktop_lib::problem::Connection::Organization)
+            });
+    if recovery_required_or_pending_quit_notice(&shell, &root) && !organization_recovery {
         return Err("Part of OpenBot needs recovery. Try starting OpenBot once more.".into());
     }
     let url = owned_app_url(&root, ports).ok_or_else(|| {
         format!("OpenBot could not verify its app on port {port} belongs to this installation. Try starting OpenBot again.")
     })?;
-    eprintln!("[show] navigating the window to {url}");
+    let authority =
+        openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
+            .remove("OPENBOT_ORGANIZATION_AUTH_URL")
+            .unwrap_or_default();
+    let destination = if authority.is_empty() {
+        if organization_recovery {
+            return Err(Problem::plain(
+                "Restore this installation's organization OpenBot URL before signing in.",
+            )
+            .connection(openbot_desktop_lib::problem::Connection::Organization));
+        }
+        url
+    } else {
+        openbot_desktop_lib::organization_auth::session_destination(&root, &authority, &url)?
+    };
+    if organization_recovery {
+        clear_recovery_required(&shell, &root);
+    }
+    // Organization destinations can contain a one-use session ticket; never log them.
+    eprintln!("[show] navigating to the owned OpenBot app");
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
     let outcome = window
         .navigate(
-            url.parse()
-                .map_err(|error| format!("{url} is not a URL: {error}"))?,
+            destination
+                .parse()
+                .map_err(|_| "OpenBot returned an invalid app destination.".to_string())?,
         )
-        .map_err(|error| format!("could not show OpenBot: {error}"));
+        .map_err(|_| Problem::plain("OpenBot could not navigate to its app."));
     eprintln!("[show] navigate returned {outcome:?}");
     outcome
 }
@@ -2409,13 +2504,10 @@ fn already_configured<R: tauri::Runtime>(
     root: String,
 ) -> AlreadyConfigured {
     let mut configured = already_configured_for_root(root);
-    if app
+    configured.auto_start = !app
         .state::<Shell>()
         .stopped_in_session
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
-        configured.launch = None;
-    }
+        .load(std::sync::atomic::Ordering::SeqCst);
     configured
 }
 
@@ -2428,6 +2520,7 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
             "INTELLIGENCE_API_KEY",
             "INTELLIGENCE_API_URL",
             "INTELLIGENCE_GATEWAY_WS_URL",
+            "OPENBOT_ORGANIZATION_AUTH_URL",
             /*
              * The model credentials too, so the wizard never asks twice for one of these either.
              *
@@ -2453,6 +2546,8 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
     let claude_plan = values.remove("CLAUDE_CODE_OAUTH_TOKEN").is_some();
     AlreadyConfigured {
         launch: preparation::launch(&root),
+        installation: preparation::installation(&root),
+        auto_start: true,
         saved: SavedConfiguration {
             intelligence_api_key: hint(
                 Category::Intelligence,
@@ -2679,6 +2774,76 @@ async fn intelligence_key_for(
     })?
 }
 
+#[tauri::command]
+async fn begin_organization_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+    authority_url: String,
+    provider: String,
+) -> Result<String, Problem> {
+    let root = stack::root_from(&root);
+    let handle = app.clone();
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        let shell = handle.state::<Shell>();
+        let _startup = shell.startup.lock().unwrap();
+        if shell.root.lock().unwrap().as_deref() != Some(root.as_path()) {
+            return Err(Problem::plain(
+                "Start this OpenBot installation before signing in to its organization.",
+            ));
+        }
+        let configured =
+            openbot_env::already_set(&root.join(".env"), &["OPENBOT_ORGANIZATION_AUTH_URL"])
+                .remove("OPENBOT_ORGANIZATION_AUTH_URL")
+                .unwrap_or_default();
+        if configured.trim() != authority_url.trim() {
+            return Err(Problem::plain(
+                "Save this organization's OpenBot URL before signing in.",
+            ));
+        }
+        openbot_desktop_lib::organization_auth::begin(&root, &authority_url, &provider)
+    })
+    .await
+    .map_err(|_| Problem::plain("Organization sign-in could not start."))??;
+    if tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(&url, None::<&str>)
+        .is_err()
+    {
+        eprintln!(
+            "[organization] browser could not open; use the sign-in address shown in the window"
+        );
+    }
+    Ok(url)
+}
+
+#[tauri::command]
+async fn finish_organization_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<openbot_desktop_lib::organization_auth::OrganizationUser, Problem> {
+    let root = stack::root_from(&root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let shell = app.state::<Shell>();
+        let generation = shell.generation.load(std::sync::atomic::Ordering::SeqCst);
+        let user = openbot_desktop_lib::organization_auth::finish(&root)?;
+        let _startup = shell.startup.lock().unwrap();
+        if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+            || shell.root.lock().unwrap().as_deref() != Some(root.as_path())
+        {
+            return Err(Problem::plain(
+                "That sign-in belongs to a previous OpenBot run. Open this installation again.",
+            ));
+        }
+        Ok(user)
+    })
+    .await
+    .map_err(|_| Problem::plain("Organization sign-in did not finish."))?
+}
+
+#[tauri::command]
+fn cancel_organization_sign_in(root: String) {
+    openbot_desktop_lib::organization_auth::cancel(&stack::root_from(&root));
+}
+
 /// The model screen's rows. Independent of the picker above, and required to stay that way: no
 /// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
 #[tauri::command]
@@ -2716,6 +2881,36 @@ fn which_bun() -> Option<PathBuf> {
 ///
 /// The policy is in `supervise.rs`; this is the loop that applies it. It ends when the stack is
 /// stopped, which is what clearing the root means, so stopping does not race a restart.
+fn publish_connection_failure<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    generation: u64,
+    connection: openbot_desktop_lib::problem::Connection,
+) -> Result<bool, String> {
+    let shell = app.state::<Shell>();
+    let _startup = shell.startup.lock().unwrap();
+    if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+        || shell.root.lock().unwrap().as_deref() != Some(root)
+    {
+        return Ok(false);
+    }
+    if recovery_required(&shell, root) {
+        return Ok(true);
+    }
+    let said = match connection {
+        openbot_desktop_lib::problem::Connection::Model => "Your AI connection was refused. Refresh it to continue using your existing OpenBot.",
+        openbot_desktop_lib::problem::Connection::Intelligence => "Your CopilotKit connection was refused. Refresh it to continue using your existing OpenBot.",
+        openbot_desktop_lib::problem::Connection::Organization => "Your organization sign-in needs to be refreshed to continue using your existing OpenBot.",
+    };
+    mark_recovery_required(&shell, root, generation);
+    if let Some(recovery) = shell.recovery_required.lock().unwrap().as_mut() {
+        recovery.connection = Some(connection.clone());
+    }
+    *shell.last_failure.lock().unwrap() = Some(Problem::plain(said).connection(connection));
+    show_setup_and_focus(app.clone())?;
+    Ok(true)
+}
+
 fn supervise_host_processes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: PathBuf,
@@ -2735,6 +2930,13 @@ fn supervise_host_processes<R: tauri::Runtime>(
             .iter()
             .map(|process| supervise::Watch::new(process.name))
             .collect();
+        let connection_client = desktop_connection::client()
+            .map_err(|error| {
+                eprintln!("[watch] {error}");
+            })
+            .ok();
+        let mut connection_notice_sent = false;
+        let mut connection_poll_failed = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -2744,6 +2946,38 @@ fn supervise_host_processes<R: tauri::Runtime>(
                 || shell.root.lock().unwrap().is_none()
             {
                 return;
+            }
+
+            if connection_notice_sent && !recovery_required(&shell, &root) {
+                connection_notice_sent = false;
+            }
+            if !connection_notice_sent {
+                if let (Some(client), Some(token)) = (
+                    &connection_client,
+                    secrets.get("OPENBOT_DESKTOP_HOST_TOKEN"),
+                ) {
+                    match desktop_connection::poll(
+                        client,
+                        openbot_env::Ports::default().server,
+                        token,
+                    ) {
+                        Ok(Some(connection)) => {
+                            match publish_connection_failure(&app, &root, generation, connection) {
+                                Ok(published) => connection_notice_sent = published,
+                                Err(error) => {
+                                    eprintln!("[watch] could not show connection refresh: {error}")
+                                }
+                            }
+                        }
+                        Ok(None) => connection_poll_failed = false,
+                        Err(error) => {
+                            if !connection_poll_failed {
+                                eprintln!("[watch] {error}");
+                            }
+                            connection_poll_failed = true;
+                        }
+                    }
+                }
             }
 
             // Which ones have died. Collected rather than acted on under the lock, because a
@@ -3052,6 +3286,9 @@ fn main() {
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,
+            begin_organization_sign_in,
+            finish_organization_sign_in,
+            cancel_organization_sign_in,
             ask_the_bot,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
@@ -3583,6 +3820,92 @@ mod tests {
     }
 
     #[test]
+    fn runtime_connection_recovery_retains_installation_and_rejects_stale_run_notifications() {
+        let root = temp_root("runtime-connection-recovery");
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        remember_selected_root(&shell, &root);
+        *shell.setup_url.lock().unwrap() = Some("http://tauri.localhost/recovery".into());
+        shell
+            .generation
+            .store(7, std::sync::atomic::Ordering::SeqCst);
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        window
+            .navigate("http://127.0.0.1:3010/channel/existing".parse().unwrap())
+            .unwrap();
+        let connection = openbot_desktop_lib::problem::Connection::Model;
+        assert!(!publish_connection_failure(app.handle(), &root, 6, connection.clone()).unwrap());
+        assert!(!publish_connection_failure(
+            app.handle(),
+            &root.join("another"),
+            7,
+            connection.clone()
+        )
+        .unwrap());
+        assert_eq!(window.url().unwrap().path(), "/channel/existing");
+        assert!(publish_connection_failure(app.handle(), &root, 7, connection).unwrap());
+        let shell = app.state::<Shell>();
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&root));
+        assert_eq!(shell.selected_root.lock().unwrap().as_ref(), Some(&root));
+        assert!(recovery_required(&shell, &root));
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            "http://tauri.localhost/recovery"
+        );
+        assert_eq!(
+            last_failure(app.handle().clone()).unwrap().connection,
+            Some(openbot_desktop_lib::problem::Connection::Model)
+        );
+        assert!(publish_connection_failure(
+            app.handle(),
+            &root,
+            7,
+            openbot_desktop_lib::problem::Connection::Intelligence
+        )
+        .unwrap());
+        assert!(
+            last_failure(app.handle().clone()).is_none(),
+            "one refresh per run; a second signal cannot replace the pending screen"
+        );
+    }
+
+    #[test]
+    fn stop_retains_completed_installation_and_disables_only_automatic_start() {
+        let root = temp_root("stopped-completed-installation");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(preparation::FILE), "{}").unwrap();
+        preparation::record_launch(
+            &root,
+            Some(&harness::HarnessChoice {
+                id: "mastra".into(),
+                agent_url: None,
+            }),
+        )
+        .unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        app.state::<Shell>()
+            .stopped_in_session
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let configured = serde_json::to_value(already_configured(
+            app.handle().clone(),
+            root.to_string_lossy().into_owned(),
+        ))
+        .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(configured["launch"]["harness"]["id"], "mastra");
+        assert_eq!(configured["autoStart"], false);
+    }
+
+    #[test]
     fn public_already_configured_reads_only_passive_files() {
         let root = temp_root("public-passive-boundary");
         std::fs::create_dir_all(&root).unwrap();
@@ -3902,6 +4225,10 @@ mod tests {
                 });
                 let problem = result.expect_err("selected credential is unavailable");
                 assert!(!problem.said.is_empty());
+                assert_eq!(
+                    problem.connection,
+                    Some(openbot_desktop_lib::problem::Connection::Model)
+                );
                 if denied {
                     assert_eq!(problem.said, "synthetic access denied");
                 }
@@ -3917,7 +4244,10 @@ mod tests {
                     Ok(String::new())
                 }
             });
-            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err().connection,
+                Some(openbot_desktop_lib::problem::Connection::Intelligence)
+            );
         }
         // A missing or unreadable ChatGPT file is an action error; no API-key resolver is called.
         std::fs::create_dir_all(&root).unwrap();
@@ -4095,7 +4425,10 @@ mod tests {
                     })
                     .unwrap_or_default();
                 assert!(
-                    require_existing_encryption_key(&root, &secrets).is_err(),
+                    require_existing_encryption_key(&root, &secrets, || {
+                        panic!("configured roots already require their original key")
+                    })
+                    .is_err(),
                     "{marker}: {original:?}"
                 );
             }
@@ -4107,7 +4440,23 @@ mod tests {
     fn configured_root_without_original_key_is_rejected_but_fresh_root_is_allowed() {
         let root = temp_root("valid-existing-encryption-key");
         std::fs::create_dir_all(&root).unwrap();
-        assert!(require_existing_encryption_key(&root, &std::collections::BTreeMap::new()).is_ok());
+        assert!(
+            require_existing_encryption_key(&root, &std::collections::BTreeMap::new(), || Ok(
+                false
+            ))
+            .is_ok()
+        );
+        assert!(
+            require_existing_encryption_key(&root, &std::collections::BTreeMap::new(), || Ok(true))
+                .is_err()
+        );
+        let unavailable = Problem::plain("selected engine unavailable");
+        assert_eq!(
+            require_existing_encryption_key(&root, &std::collections::BTreeMap::new(), || Err(
+                unavailable.clone()
+            )),
+            Err(unavailable)
+        );
         std::fs::write(
             root.join(".env"),
             "DATABASE_URL=postgres://synthetic-local\n",
@@ -4116,9 +4465,93 @@ mod tests {
         let original = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
         let secrets =
             std::collections::BTreeMap::from([("KEY_ENCRYPTION_KEY".into(), original.into())]);
-        assert!(require_existing_encryption_key(&root, &secrets).is_ok());
+        assert!(require_existing_encryption_key(&root, &secrets, || {
+            panic!("normal resume with the original key needs no volume probe")
+        })
+        .is_ok());
         assert_eq!(secrets["KEY_ENCRYPTION_KEY"], original);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Real engine boundary: all root metadata can disappear while a named volume survives.
+    /// Creates only one uniquely named, empty test volume; never starts a container or database.
+    #[test]
+    #[ignore = "creates and removes one isolated Docker volume"]
+    fn surviving_postgres_volume_blocks_fresh_root_without_key() {
+        let root = temp_root("encryption-key-volume-reinstall");
+        std::fs::create_dir_all(&root).unwrap();
+        let volume = format!(
+            "openbot-key-reinstall-fixture-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        std::fs::write(
+            root.join("docker-compose.yml"),
+            format!(
+                "services:\n  postgres:\n    image: pgvector/pgvector:pg17\n    volumes:\n      - database:/var/lib/postgresql/data\nvolumes:\n  database:\n    name: {volume}\n"
+            ),
+        )
+        .unwrap();
+        let address = engine::Address::new(engine::Engine::Docker, None)
+            .pin()
+            .expect("explicit selected Docker runtime");
+        let created = address
+            .command()
+            .args([
+                "volume",
+                "create",
+                "--label",
+                "ai.copilotkit.openbot.fixture=key-reinstall",
+                &volume,
+            ])
+            .output()
+            .expect("create isolated volume");
+        assert!(created.status.success(), "fixture volume creation failed");
+
+        let secrets = std::collections::BTreeMap::new();
+        let guarded = require_existing_encryption_key(&root, &secrets, || {
+            stack::postgres_volume_exists(&address, &root, &secrets)
+        });
+        let survived = address
+            .command()
+            .args(["volume", "inspect", &volume])
+            .output()
+            .unwrap();
+        let removed = address
+            .command()
+            .args(["volume", "rm", &volume])
+            .output()
+            .unwrap();
+        let fresh = require_existing_encryption_key(&root, &secrets, || {
+            stack::postgres_volume_exists(&address, &root, &secrets)
+        });
+        let key_was_not_written = !root.join(".secrets/KEY_ENCRYPTION_KEY.secret").exists();
+        let settings_were_not_written = !root.join(".env").exists();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            removed.status.success(),
+            "remove only the fixture-owned volume"
+        );
+        assert!(
+            survived.status.success(),
+            "the guard must preserve the existing volume"
+        );
+        assert!(key_was_not_written && settings_were_not_written);
+        assert!(
+            guarded.is_err(),
+            "a fresh root with a surviving Postgres volume must not mint a replacement key"
+        );
+        assert!(guarded
+            .unwrap_err()
+            .said
+            .contains("Restore its original private key"));
+        assert!(
+            fresh.is_ok(),
+            "the same root is fresh once its test-owned volume is absent"
+        );
     }
 
     #[test]
@@ -6222,6 +6655,7 @@ fn main() {
                 saved: Some(false),
             },
             None,
+            None,
         ))
         .expect_err("a dead required Compose service must fail Start");
 
@@ -6299,6 +6733,7 @@ fn main() {
                 token: None,
                 saved: Some(false),
             },
+            None,
             None,
         ))
         .expect_err("dead selected LangGraph service must fail Start");
@@ -7444,7 +7879,10 @@ fn main() {
             .is_null());
         assert!(recovery_required(&shell, &fixture.host.root));
         let show_error = invoke("show_openbot", serde_json::json!({})).unwrap_err();
-        assert!(show_error.as_str().unwrap().contains("needs recovery"));
+        assert!(show_error["said"]
+            .as_str()
+            .unwrap()
+            .contains("needs recovery"));
         restore_window_on(fixture.app.handle(), &openbot_env::Ports::default());
         assert_eq!(window.url().unwrap().as_str(), setup);
         println!(
@@ -8862,6 +9300,34 @@ fn main() {
                 "tray/reopen must not adopt an unrelated successful app-port responder"
             );
         }
+    }
+
+    #[test]
+    fn showing_owned_organization_app_requires_its_session_without_forgetting_installation() {
+        let f = RestoreFixture::new();
+        std::fs::write(
+            f.owned.join(".env"),
+            "OPENBOT_ORGANIZATION_AUTH_URL=https://company.example\n",
+        )
+        .unwrap();
+        let app = f.app(&f.owned, "tauri://localhost/");
+        let window = app.get_webview_window("main").unwrap();
+        let before = window.url().unwrap();
+        let failure = show_openbot_on(app.handle().clone(), &f.ports).unwrap_err();
+        assert_eq!(
+            failure.connection,
+            Some(openbot_desktop_lib::problem::Connection::Organization)
+        );
+        assert_eq!(
+            window.url().unwrap(),
+            before,
+            "no unauthenticated navigation"
+        );
+        assert_eq!(
+            app.state::<Shell>().selected_root.lock().unwrap().as_ref(),
+            Some(&f.owned)
+        );
+        assert!(stack::recorded_server_owns_port(&f.owned, f.ports.server).unwrap());
     }
 
     #[test]

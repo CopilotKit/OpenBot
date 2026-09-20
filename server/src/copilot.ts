@@ -15,6 +15,12 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
+import {
+  PLAN_RUN_COMPLETED,
+  PlanModel,
+  type PlanModelConfig,
+  planModelForEnvironment,
+} from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
 import type { AuditInitiator } from "./audit";
 import {
@@ -25,7 +31,9 @@ import {
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
+import { observeIntelligenceAuthentication } from "./intelligence-client";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -152,6 +160,7 @@ export function standingRoleMessage(
 export type RuntimeModel = {
   provider: "openai" | "anthropic";
   defaultModel: string;
+  plan?: PlanModelConfig;
 };
 
 /** Optional desktop environment values may be present but blank; SDKs treat them as URLs. */
@@ -198,6 +207,7 @@ export function runtimeModelForEnvironment(
       !!environment.OPENAI_BASE_URL?.trim());
   return {
     provider,
+    plan: planModelForEnvironment(environment),
     defaultModel:
       selectedModelApplies && selectedModel ? selectedModel : defaultModel,
   };
@@ -342,8 +352,9 @@ export function builtInAgentConfiguration(
    * none, which is most people on most days and costs the prompt nothing.
    */
   standingInstructions?: string | null,
+  planModel?: PlanModel,
 ): BuiltInAgentConfiguration {
-  if (!apiKey) {
+  if (!apiKey && !planModel) {
     return {
       type: "custom",
       // biome-ignore lint/correctness/useYield: this agent must fail when iteration starts.
@@ -358,7 +369,7 @@ export function builtInAgentConfiguration(
   const standing = standingInstructionsGuidance(standingInstructions);
 
   return {
-    model: `${model.provider}/${model.defaultModel}`,
+    model: planModel ?? `${model.provider}/${model.defaultModel}`,
     /*
      * The package's role, then the person's own standing instructions, then what this Bot actually
      * holds, then the computer.
@@ -387,7 +398,7 @@ export function builtInAgentConfiguration(
         : []),
       ...(computerGuidance ? [computerGuidance] : []),
     ].join("\n\n"),
-    apiKey,
+    ...(planModel ? {} : { apiKey: apiKey ?? undefined }),
     /*
      * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
      * one and never speaks: the tool executes, the result arrives, and the run ends before the model
@@ -893,7 +904,11 @@ async function buildAgent(
    * the message is known. The guidance it is given is generated from the tools passed here, which is
    * what keeps a narrowed run from being told it holds something it was not offered.
    */
-  const withTools = (tools: GrantedTool[]) =>
+  const withTools = (
+    tools: GrantedTool[],
+    input?: RunAgentInput,
+    signal?: AbortSignal,
+  ) =>
     new BuiltInAgentWithSaneHistory(
       builtInAgentConfiguration(
         agent,
@@ -903,13 +918,22 @@ async function buildAgent(
         computerGuidance,
         connectedVendors,
         standingInstructions,
+        model.plan && input
+          ? new PlanModel(
+              model.plan,
+              agent.id,
+              input,
+              new Set(input.tools.map((tool) => tool.name)),
+              signal,
+            )
+          : undefined,
       ),
       loadAttachment,
       markAttachmentsSent,
     );
 
   const whole = withTools(granted);
-  if (!narrowing && !handoff) return whole;
+  if (!narrowing && !handoff && !model.plan) return whole;
 
   return new RunBuiltAgent(
     { agentId: agent.id, description: agent.name },
@@ -930,9 +954,11 @@ async function buildAgent(
       const tools = passing.length > 0 ? [...offered, ...passing] : offered;
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
-      return tools.length === granted.length && passing.length === 0
+      return !model.plan &&
+        tools.length === granted.length &&
+        passing.length === 0
         ? whole
-        : withTools(tools);
+        : withTools(tools, input, signal);
     },
   );
 }
@@ -1314,13 +1340,25 @@ function remoteAgentWithStandingRole(
    * begins, so nothing happens until somebody is listening and a retried run chooses again.
    */
   return new CloningRemoteAgent(remote, (target) => {
-    target.use((input, next) =>
-      defer(() =>
+    target.use((input, next) => {
+      const stream = defer(() =>
         from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
           switchMap((offered) => runWith(offered, input, next)),
         ),
-      ),
-    );
+      );
+      const owned =
+        !!process.env.MANAGED_AGENT_TOKEN &&
+        agent.headers?.["x-openbot-agent-token"] ===
+          process.env.MANAGED_AGENT_TOKEN &&
+        [
+          process.env.PICKED_HARNESS_URL,
+          process.env.MANAGED_AGENT_AG_UI_URL,
+        ].some(
+          (url) =>
+            url?.replace(/\/$/, "") === agent.endpoint.replace(/\/$/, ""),
+        );
+      return owned ? observeModelConnection(stream) : stream;
+    });
   });
 }
 
@@ -1501,7 +1539,8 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
      * Nothing to load means nothing to inline, and the run goes up exactly as it did before any of
      * this existed.
      */
-    if (!load) return super.run({ ...input, messages: history });
+    if (!load)
+      return observeModelConnection(super.run({ ...input, messages: history }));
     /*
      * Deferred, because `run` has to answer with a stream straight away and reading the bytes is a
      * database round trip. `defer` puts that read on the subscription, which is where the run
@@ -1516,7 +1555,11 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
           input.threadId,
           this.markAttachmentsSent,
         ),
-      ).pipe(switchMap((messages) => super.run({ ...input, messages }))),
+      ).pipe(
+        switchMap((messages) =>
+          observeModelConnection(super.run({ ...input, messages })),
+        ),
+      ),
     );
   }
 
@@ -1602,7 +1645,7 @@ class RunBuiltAgent extends AbstractAgent {
         takeUntil(fromEvent(signal, "abort")),
         finalize(() => {
           if (this.active === active) this.active = undefined;
-          active.controller.abort();
+          active.controller.abort(PLAN_RUN_COMPLETED);
         }),
       );
     });
@@ -1932,9 +1975,9 @@ export async function historyOrEmpty<T>(
  * The platform client, with one answer corrected.
  *
  * A subclass rather than a wrapper. The runtime is handed this object and calls many methods on it,
- * and the base class keeps its state in `#private` fields — which a `Proxy` cannot forward, because a
- * method invoked with the proxy as `this` cannot reach them. Extending keeps every other method
- * exactly as it was, on the instance that owns those fields.
+ * and the base class keeps its state in `#private` fields. Extending keeps every other method on
+ * the instance that owns those fields. The authentication observer separately binds methods to
+ * that original instance, so it preserves this override and its private-field receiver.
  *
  * `getThreadMessages` is the only override. `handleGetThreadMessages` in the runtime calls it and
  * returns `Response.json` of whatever comes back, so an empty history here is the `{ messages: [] }`
@@ -2076,11 +2119,13 @@ export function mountCopilotRuntime(
    * One client, used by the runtime and by anything reading a thread beside it, so a hop reads the
    * history a person's run would read rather than a second view of it that could disagree.
    */
-  const intelligenceClient = new IntelligenceKnowingANewThread({
-    apiUrl: intelligence.apiUrl,
-    wsUrl: intelligence.gatewayWsUrl,
-    apiKey: intelligence.apiKey,
-  });
+  const intelligenceClient = observeIntelligenceAuthentication(
+    new IntelligenceKnowingANewThread({
+      apiUrl: intelligence.apiUrl,
+      wsUrl: intelligence.gatewayWsUrl,
+      apiKey: intelligence.apiKey,
+    }),
+  );
 
   const runtime = new CopilotRuntime({
     // `mode` is inferred from the presence of `intelligence`; passing it is a type error.

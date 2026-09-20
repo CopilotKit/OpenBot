@@ -4,6 +4,7 @@
  * boot boundary.
  */
 import { singleUserEnabled } from "./auth/dev-actor";
+import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 
@@ -243,6 +244,8 @@ export type DeploymentConfig = {
     google?: { clientId: string; clientSecret: string };
   };
   auth?: AuthConfig;
+  /** Customer OpenBot authority for employee desktop sessions, separate from Intelligence. */
+  organizationAuthUrl?: string;
   /**
    * Admit everybody as one fixed administrator instead of requiring sign-in.
    *
@@ -1010,6 +1013,13 @@ export function loadConfig(
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
+  const organizationAuthValue = optional(
+    environment,
+    "OPENBOT_ORGANIZATION_AUTH_URL",
+  );
+  const organizationAuthUrl = organizationAuthValue
+    ? organizationAuthority(organizationAuthValue)
+    : undefined;
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
@@ -1037,10 +1047,10 @@ export function loadConfig(
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
     auth,
-    singleUser: singleUserEnabled(
-      environment,
-      configuredAuthProviders(auth).length > 0,
-    ),
+    ...(organizationAuthUrl ? { organizationAuthUrl } : {}),
+    singleUser:
+      !organizationAuthUrl &&
+      singleUserEnabled(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")

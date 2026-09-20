@@ -331,6 +331,26 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 - **Put TLS in front of any deployment.** A page served over plain `http://` on anything but
   localhost is not a secure context, and sign-in cookies want `Secure`.
 
+### Organization sign-in for desktop installations
+
+For an employee desktop, provision an OpenBot authority using the Google, Microsoft or Okta
+settings above (your Kubernetes OpenBot can serve this role). Set **Organization OpenBot URL**
+in the desktop connection screen, or `OPENBOT_ORGANIZATION_AUTH_URL=https://openbot.company.example`
+in its public configuration. Use an HTTPS origin; HTTP is accepted only on loopback for local tests.
+Provider client secrets stay on that authority. Template and white-label deployments can supply
+the same setting without changing their Intelligence endpoint.
+
+This optional URL is separate from `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
+`INTELLIGENCE_API_KEY`. Local, managed and customer-hosted Intelligence all retain their project
+credential. A Google ID token is not an Intelligence project key. Leave the organization URL empty
+for a standalone desktop.
+
+Desktop sign-in uses the system browser and Better Auth's single-use PKCE exchange. The authority
+verifies the employee and current role; organization mode never substitutes `dev@openbot.local`.
+Employees do not need project-key administration privileges. Installation happens once: reopening
+or refreshing an expired organization, Intelligence or model connection preserves the installed
+runtime and data and opens the relevant connection screen.
+
 ## Keeping it to your machine
 
 - `agent-computer` drives a browser holding real logins. `docker-compose.yml` binds it to loopback; leave it there.
