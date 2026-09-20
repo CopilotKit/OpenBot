@@ -4,6 +4,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_EXTRACTED_CHARACTERS,
   MAX_FILE_BYTES,
+  mayBeTruncatedForModel,
   mediaTypeOf,
   namesNoFormat,
   shouldClaimPaste,
@@ -135,13 +136,10 @@ describe("what is uploaded and what the model reads are different limits", () =>
     // characters. A file at or under the character ceiling therefore CANNOT be
     // truncated, which is what makes `file.size > MAX_EXTRACTED_CHARACTERS` a
     // warning that never fires on a file that arrives whole.
-    const mayBeTruncated = (byteLength: number) =>
-      byteLength > MAX_EXTRACTED_CHARACTERS;
-
-    expect(mayBeTruncated(MAX_EXTRACTED_CHARACTERS)).toBe(false);
-    expect(mayBeTruncated(MAX_EXTRACTED_CHARACTERS + 1)).toBe(true);
+    expect(mayBeTruncatedForModel(MAX_EXTRACTED_CHARACTERS)).toBe(false);
+    expect(mayBeTruncatedForModel(MAX_EXTRACTED_CHARACTERS + 1)).toBe(true);
     // The case the gap is about: an accepted upload that will still be cut.
-    expect(mayBeTruncated(MAX_FILE_BYTES)).toBe(true);
+    expect(mayBeTruncatedForModel(MAX_FILE_BYTES)).toBe(true);
   });
 });
 

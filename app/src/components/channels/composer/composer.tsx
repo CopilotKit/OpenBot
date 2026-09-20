@@ -30,6 +30,7 @@ import {
   attachmentUrl,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  mayBeTruncatedForModel,
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
@@ -1004,6 +1005,20 @@ export function Composer({
           name: attachment.filename ?? "Attachment",
           size: attachment.size,
           loading: attachment.status === "uploading",
+          /*
+           * Warned, never refused. The server accepts the whole file and the
+           * model reads its first MAX_EXTRACTED_CHARACTERS; mayBeTruncatedForModel
+           * is exact in the safe direction (N bytes decode to at most N chars),
+           * so a file at or under the ceiling cannot be cut. Only text reaches
+           * the extraction path: images are excluded by the filter above, and an
+           * unnamed pick whose type is still unknown gets no warning until the
+           * server has sniffed it (then the strip re-renders off the url source).
+           */
+          mayTruncate:
+            attachment.status !== "uploading" &&
+            attachment.type !== "image" &&
+            attachment.size !== undefined &&
+            mayBeTruncatedForModel(attachment.size),
         })),
     [staged],
   );

@@ -44,6 +44,12 @@ export type StagedFile = {
   name: string;
   size?: number;
   loading: boolean;
+  /**
+   * The model reads at most MAX_EXTRACTED_CHARACTERS of a text file, while
+   * the pick ceiling is MAX_FILE_BYTES. A file over the first may be read
+   * truncated — warned on the tile, never refused.
+   */
+  mayTruncate?: boolean;
 };
 
 export function AttachmentStrip({
@@ -132,6 +138,14 @@ export function AttachmentStrip({
                   {formatBytes(file.size)}
                 </p>
               )}
+              {file.mayTruncate === true ? (
+                <p
+                  className="text-muted-foreground text-xs"
+                  title="The model reads the first 120,000 characters of this file."
+                >
+                  May be read truncated
+                </p>
+              ) : null}
             </div>
             <RemoveButton name={file.name} onRemove={() => onRemove(file.id)} />
           </Staged>

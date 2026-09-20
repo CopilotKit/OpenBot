@@ -121,3 +121,29 @@ test("an unnamed image going up falls back to the same word the finished one use
 
   expect(getByRole("img", { name: "Attachment, uploading" })).toBeTruthy();
 });
+
+test("a text file that fits shows no truncation warning", () => {
+  // mayTruncate is what composer.tsx sets from mayBeTruncatedForModel: a file
+  // at or under MAX_EXTRACTED_CHARACTERS cannot be cut (N bytes decode to at
+  // most N chars), so the tile must not warn about it.
+  const { queryByText } = render(
+    <AttachmentStrip files={[notes]} images={[]} onRemove={() => {}} />,
+  );
+
+  expect(queryByText("May be read truncated")).toBeNull();
+});
+
+test("a text file over the extraction ceiling warns it may be read truncated", () => {
+  // The gap this closes: the server accepts up to MAX_FILE_BYTES and the
+  // model reads the first MAX_EXTRACTED_CHARACTERS, so a file between the two
+  // arrives truncated with nothing on screen saying so. Warned, never refused.
+  const { getByText } = render(
+    <AttachmentStrip
+      files={[{ ...notes, id: "5", mayTruncate: true }]}
+      images={[]}
+      onRemove={() => {}}
+    />,
+  );
+
+  expect(getByText("May be read truncated")).toBeTruthy();
+});
