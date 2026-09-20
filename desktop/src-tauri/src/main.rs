@@ -939,6 +939,10 @@ fn require_existing_encryption_key(
 
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "These named fields preserve the existing Tauri IPC contract."
+)]
 async fn start_stack<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: String,
@@ -966,6 +970,10 @@ async fn start_stack<R: tauri::Runtime>(
     .await
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Mirror the command fields while testing startup with a resolved root."
+)]
 async fn start_stack_inner<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: PathBuf,
@@ -5431,6 +5439,8 @@ fn main() {
         ["info","--format","{{.Host.ServiceIsRemote}}"] => println!("false"),
         ["compose","version"] => println!("Synthetic Compose"),
         ["compose","config","--environment"] => (),
+        ["compose","config","--format","json"] => println!("{{\"services\":{{\"postgres\":{{\"volumes\":[{{\"type\":\"volume\",\"source\":\"postgres-data\",\"target\":\"/var/lib/postgresql/data\"}}]}}}},\"volumes\":{{\"postgres-data\":{{\"name\":\"fixture_postgres-data\"}}}}}}"),
+        ["volume","ls","--format","{{.Name}}"] => (),
         ["compose","ps","--format",_] => (),
         ["compose","up",..] => {
             fs::write(cwd.join("fixture-containers-running"),&identity).unwrap();

@@ -403,6 +403,7 @@ pub fn session_destination(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
     #[test]
     fn cancellation_retires_a_finish_already_waiting_for_the_browser() {
         let root = PathBuf::from("organization-cancellation-fixture");
@@ -433,8 +434,17 @@ mod tests {
             let address = listener.local_addr().unwrap();
             let worker = std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0; 4096];
-                stream.read(&mut request).unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                assert_eq!(line, "GET /api/me HTTP/1.1\r\n");
+                loop {
+                    line.clear();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
                 write!(
                     stream,
                     "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"

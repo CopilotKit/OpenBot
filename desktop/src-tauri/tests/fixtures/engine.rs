@@ -48,6 +48,18 @@ fn main() {
         println!("Docker Compose version disposable-provider");
         return;
     }
+    // Fresh startup checks the selected Compose database volume before generating a key.
+    // These scenarios model an empty database; cleanup's explicit -f config stays separate.
+    if joined == "compose config --format json" {
+        println!(
+            "{}",
+            r#"{"services":{"postgres":{"volumes":[{"type":"volume","source":"postgres-data","target":"/var/lib/postgresql/data"}]}},"volumes":{"postgres-data":{"name":"fixture_postgres-data"}}}"#
+        );
+        return;
+    }
+    if joined == "volume ls --format {{.Name}}" {
+        return;
+    }
     if SCENARIO == "podman" {
         match joined.as_str() {
             "version --format {{.Server.APIVersion}}" => println!("1.44"),

@@ -364,21 +364,20 @@ mod stop_ipc {
         let shell = fixture.app.state::<Shell>();
         assert!(last_failure(fixture.app.handle().clone()).is_none());
         assert!(!recovery_required(&shell, &fixture.root));
-        assert!(
-            configured().launch.is_none(),
-            "Stop must survive setup reloading"
-        );
+        let stopped = configured();
+        assert!(stopped.launch.is_some(), "Stop retains the installed setup");
+        assert!(!stopped.auto_start, "Stop must survive setup reloading");
         let reopened = tauri::test::mock_builder()
             .manage(Shell::default())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
+        let resumed = already_configured(
+            reopened.handle().clone(),
+            fixture.root.to_string_lossy().into_owned(),
+        );
+        assert!(resumed.launch.is_some());
         assert!(
-            already_configured(
-                reopened.handle().clone(),
-                fixture.root.to_string_lossy().into_owned(),
-            )
-            .launch
-            .is_some(),
+            resumed.auto_start,
             "a fresh app session may resume the saved installation"
         );
     }
