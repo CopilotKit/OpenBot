@@ -133,11 +133,13 @@ def sdk(monkeypatch):
             yield AssistantMessage(content=calls, model="controlled-sdk")
 
             async def finish_tool(call):
-                result = {
-                    "content": [
-                        {"type": "text", "text": "Tool call forwarded to client"}
-                    ]
-                }
+                # This is the CLI's PostToolUse stage, after the MCP response
+                # envelope was removed. SDK 0.2.152's bundled MCP output schema
+                # accepts string | content-block[] | null; its result-size
+                # mapper calls .reduce() on nonstrings. Hooks replace that
+                # output directly, NOT the earlier MCP {content: ...} envelope.
+                # https://code.claude.com/docs/en/hooks#posttooluse-decision-control
+                result = [{"type": "text", "text": "Tool call forwarded to client"}]
                 for matcher in (self.options.hooks or {}).get("PostToolUse", []):
                     for hook in matcher.hooks:
                         update = await hook(
@@ -154,12 +156,15 @@ def sdk(monkeypatch):
                             "updatedMCPToolOutput", result
                         )
                 self.results[call.id] = result
+                assert result is None or isinstance(result, (str, list)), (
+                    "CLI MCP hook output must be content blocks, not a {content: ...} response envelope"
+                )
 
             self.hooks_entered.set()
             await asyncio.gather(*(finish_tool(call) for call in calls))
             yield UserMessage(
                 content=[
-                    ToolResultBlock(tool_use_id=id, content=result["content"])
+                    ToolResultBlock(tool_use_id=id, content=result)
                     for id, result in self.results.items()
                 ]
             )
@@ -220,14 +225,12 @@ def test_client_result_resumes_original_sdk_query(sdk, streaming):
             assert sdk[0].queries == [("1", "thread-a")], (
                 "a tool result must not become another SDK user prompt"
             )
-            assert sdk[0].results["thread-a-tool-0"] == {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": '{"url":"https://example.com","title":"Example Domain"}',
-                    }
-                ]
-            }
+            assert sdk[0].results["thread-a-tool-0"] == [
+                {
+                    "type": "text",
+                    "text": '{"url":"https://example.com","title":"Example Domain"}',
+                }
+            ]
             assert resumed[0].type == "RUN_STARTED"
             assert resumed[-1].type == "RUN_FINISHED"
             assert any(
@@ -282,12 +285,8 @@ def test_parallel_calls_with_identical_arguments_keep_distinct_results(
                 )
             assert sdk[0].queries == [("2", "thread-a")]
             assert sdk[0].results == {
-                "thread-a-tool-0": {
-                    "content": [{"type": "text", "text": "first result"}]
-                },
-                "thread-a-tool-1": {
-                    "content": [{"type": "text", "text": "second result"}]
-                },
+                "thread-a-tool-0": [{"type": "text", "text": "first result"}],
+                "thread-a-tool-1": [{"type": "text", "text": "second result"}],
             }
         finally:
             await adapter.shutdown()
@@ -322,8 +321,8 @@ def test_unknown_id_cannot_resolve_another_threads_tool(sdk):
                     results=[("thread-b-tool-0", "b result")],
                 ),
             )
-            assert sdk[0].results["thread-a-tool-0"]["content"][0]["text"] == "a result"
-            assert sdk[1].results["thread-b-tool-0"]["content"][0]["text"] == "b result"
+            assert sdk[0].results["thread-a-tool-0"][0]["text"] == "a result"
+            assert sdk[1].results["thread-b-tool-0"][0]["text"] == "b result"
         finally:
             await adapter.shutdown()
 

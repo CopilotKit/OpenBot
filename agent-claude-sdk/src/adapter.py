@@ -64,9 +64,9 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
-                    "updatedMCPToolOutput": {
-                        "content": [{"type": "text", "text": content}]
-                    },
+                    # At PostToolUse the CLI has removed the MCP response
+                    # envelope. Replacement is tool_result.content itself.
+                    "updatedMCPToolOutput": [{"type": "text", "text": content}],
                 }
             }
 
