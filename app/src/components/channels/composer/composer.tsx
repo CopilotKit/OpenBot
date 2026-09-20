@@ -1013,10 +1013,16 @@ export function Composer({
            * the extraction path: images are excluded by the filter above, and an
            * unnamed pick whose type is still unknown gets no warning until the
            * server has sniffed it (then the strip re-renders off the url source).
+           *
+           * THE FILTER IS THE ONLY IMAGE TEST, DELIBERATELY. `attachment.type` is
+           * the browser's claim, fixed at pick time and never revised; the filter
+           * runs `stagedModality`, which prefers what the server sniffed. Testing
+           * both would not narrow this to text, it would only subtract: a file the
+           * browser called a PNG and the server read as text lands in this strip,
+           * goes down the extraction path, and is exactly the one that gets cut.
            */
           mayTruncate:
             attachment.status !== "uploading" &&
-            attachment.type !== "image" &&
             attachment.size !== undefined &&
             mayBeTruncatedForModel(attachment.size),
         })),

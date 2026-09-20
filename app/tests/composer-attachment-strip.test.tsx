@@ -130,7 +130,7 @@ test("a text file that fits shows no truncation warning", () => {
     <AttachmentStrip files={[notes]} images={[]} onRemove={() => {}} />,
   );
 
-  expect(queryByText("May be read truncated")).toBeNull();
+  expect(queryByText(/may be cut/)).toBeNull();
 });
 
 test("a text file over the extraction ceiling warns it may be read truncated", () => {
@@ -145,5 +145,5 @@ test("a text file over the extraction ceiling warns it may be read truncated", (
     />,
   );
 
-  expect(getByText("May be read truncated")).toBeTruthy();
+  expect(getByText(/· may be cut/)).toBeTruthy();
 });

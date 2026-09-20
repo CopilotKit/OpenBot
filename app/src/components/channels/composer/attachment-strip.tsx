@@ -126,7 +126,13 @@ export function AttachmentStrip({
             className="flex h-20 w-40 flex-col justify-between rounded-xl border border-border bg-muted/40 p-2"
             key={file.id}
           >
-            <IconFile className="size-5 text-muted-foreground" />
+            {/*
+             * `shrink-0` because the tile's height is fixed and the text below it is not. A third
+             * line, which is exactly what the truncation warning adds, takes the extra out of the
+             * only child that can give: this icon. It renders visibly smaller on precisely the
+             * tiles that carry the warning, which is the wrong moment to look broken.
+             */}
+            <IconFile className="size-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
               <p className="truncate font-medium text-xs" title={file.name}>
                 {file.name}
@@ -134,18 +140,31 @@ export function AttachmentStrip({
               {file.loading ? (
                 <p className="text-muted-foreground text-xs">Uploading…</p>
               ) : file.size === undefined ? null : (
-                <p className="text-muted-foreground text-xs">
+                /*
+                 * ON THE SIZE LINE, NOT UNDER IT, AND THAT IS A LAYOUT CONSTRAINT RATHER THAN A
+                 * PREFERENCE. The tile's height is fixed so that a file and a thumbnail read as
+                 * one row. A third line does not fit: measured in Chromium at this repository's
+                 * 15px root, the two in-flow children need 63.75px inside a 58px box. Something
+                 * has to give, and the only choices are the icon shrinking to 13px or the text
+                 * spilling past the border. Folding the warning onto this line keeps two.
+                 *
+                 * `truncate` is the guarantee, not the wording: `formatBytes` is unbounded, so a
+                 * large enough file would wrap this line and put the third one back. The short
+                 * phrasing is what keeps it from ellipsizing at any realistic size; `title`
+                 * carries the sentence that actually explains it.
+                 */
+                <p
+                  className="truncate text-muted-foreground text-xs"
+                  title={
+                    file.mayTruncate === true
+                      ? "The model reads the first 120,000 characters of this file."
+                      : undefined
+                  }
+                >
                   {formatBytes(file.size)}
+                  {file.mayTruncate === true ? " · may be cut" : null}
                 </p>
               )}
-              {file.mayTruncate === true ? (
-                <p
-                  className="text-muted-foreground text-xs"
-                  title="The model reads the first 120,000 characters of this file."
-                >
-                  May be read truncated
-                </p>
-              ) : null}
             </div>
             <RemoveButton name={file.name} onRemove={() => onRemove(file.id)} />
           </Staged>
