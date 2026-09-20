@@ -10,9 +10,11 @@ deployment that sets both silently bills the key and the plan goes unused. OpenB
 
 import os
 
-from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
+from ag_ui_claude_sdk import add_claude_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+from .adapter import OpenBotClaudeAgentAdapter
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -59,6 +61,6 @@ async def health():
 
 add_claude_fastapi_endpoint(
     app=app,
-    adapter=ClaudeAgentAdapter(name="openbot"),
+    adapter=OpenBotClaudeAgentAdapter(name="openbot"),
     path="/",
 )
