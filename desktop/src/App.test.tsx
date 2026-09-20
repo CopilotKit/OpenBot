@@ -448,6 +448,110 @@ test("reopening a retained root waits for its saved setup without flashing the w
   );
 });
 
+function useInterruptedShutdownSetup() {
+  const root = "/tmp/interrupted-shutdown-root";
+  const notice = "OpenBot had trouble shutting down last time.";
+  useRootConfigurationSetup("/tmp/default-root", async () => ({
+    values: {
+      INTELLIGENCE_API_URL: "https://own.example/api",
+      INTELLIGENCE_GATEWAY_WS_URL: "wss://own.example/ws",
+    },
+    saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
+    launch: { harness: { id: "mastra" } },
+  }));
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "selected_root") return root;
+    if (command === "last_failure") return { said: notice };
+    if (command === "show_openbot") return null;
+    return previous(command, args);
+  };
+  return { root, notice };
+}
+
+test("an interrupted shutdown restores saved setup for explicit recovery", async () => {
+  const { root, notice } = useInterruptedShutdownSetup();
+  const view = await renderApp();
+  expect(view.getByRole("alert").textContent).toContain(notice);
+  expect(view.queryByRole("button", { name: "Set up OpenBot" }) !== null).toBe(
+    false,
+  );
+  expect(
+    view.getByRole("heading", { name: "Connect to CopilotKit" }),
+  ).toBeTruthy();
+  const start = view.getByRole("button", { name: "Start OpenBot" });
+  expect(start).toHaveProperty("disabled", false);
+  expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+    false,
+  );
+
+  await userEvent.click(start);
+
+  expect(getStartStackPayload()).toEqual({
+    root,
+    apiKey: "",
+    apiUrl: "https://own.example/api",
+    gatewayWsUrl: "wss://own.example/ws",
+    harness: { id: "mastra" },
+    model: { provider: "openai", login: "api-key", saved: true },
+  });
+  expect(
+    invokeCalls.filter((call) => call.command === "start_stack"),
+  ).toHaveLength(1);
+  expect(
+    invokeCalls.some((call) =>
+      /prepare_|sign_in|^providers$|^harnesses$/.test(call.command),
+    ),
+  ).toBe(false);
+  expect(view.queryByText(notice)).toBeNull();
+  expect(invokeCalls).toContainEqual({ command: "show_openbot" });
+  expect(view.queryByRole("button", { name: "Ask" }) !== null).toBe(false);
+});
+
+test.each(["model", "root", "Intelligence"])(
+  "changing the saved %s during recovery keeps the first-run Ask handover",
+  async (changed) => {
+    useInterruptedShutdownSetup();
+    const view = await renderApp();
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    if (changed === "model") {
+      await user.click(
+        view.getByRole("button", { name: "Change AI connection" }),
+      );
+      await user.type(view.getByLabelText("OpenAI API key"), "new-model-key");
+      await user.click(view.getByRole("button", { name: "Continue" }));
+    } else if (changed === "root") {
+      await user.click(
+        view.getByRole("button", { name: "Change installation" }),
+      );
+      const input = view.getByLabelText("Where OpenBot lives");
+      await user.clear(input);
+      await user.type(input, "/tmp/changed-recovery-root");
+      await completeInstallation(view);
+      await user.click(view.getByRole("button", { name: "Continue" }));
+    } else {
+      await user.click(view.getByText("Point at your own Intelligence server"));
+      const input = view.getByLabelText("API URL");
+      await user.clear(input);
+      await user.type(input, "https://different.example/api");
+    }
+
+    await user.click(view.getByRole("button", { name: "Start OpenBot" }));
+
+    expect(getStartStackPayload()).toMatchObject(
+      changed === "root"
+        ? { root: "/tmp/changed-recovery-root" }
+        : changed === "model"
+          ? { model: { apiKey: "new-model-key" } }
+          : { apiUrl: "https://different.example/api" },
+    );
+    expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+      false,
+    );
+    expect(view.getByRole("button", { name: "Ask" })).toBeTruthy();
+  },
+);
+
 test.each(["supervisor", "windows"])(
   "automatic reopen respects the existing %s blocker",
   async (blocker) => {

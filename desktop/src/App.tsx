@@ -148,6 +148,13 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [checkingResume, setCheckingResume] = useState(true);
+  const savedLaunch = useRef<{
+    installationKey: string;
+    model: ModelChoice;
+    apiKey: string;
+    apiUrl: string;
+    wsUrl: string;
+  } | null>(null);
   const [preparation, setPreparation] = useState<{
     key: string;
     status: "preparing" | "complete" | "failed";
@@ -215,6 +222,7 @@ export function App() {
   }, [root, model, apiKey, apiUrl, wsUrl, harness, step, reuseIntelligence]);
 
   const clearRootScopedSavedState = useCallback(() => {
+    savedLaunch.current = null;
     setApiKey("");
     setReuseIntelligence(false);
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
@@ -311,7 +319,7 @@ export function App() {
           setRunning(true);
           return;
         }
-        if (!active || !canResume || interrupted || !configured?.launch) return;
+        if (!active || !canResume || !configured?.launch) return;
         const resumedModel = recordedModel({
           ...configured.values,
           saved: configured.saved,
@@ -325,6 +333,19 @@ export function App() {
           status: "complete",
         });
         setStep("connect");
+        savedLaunch.current = {
+          installationKey: installationKeyFor(found, resumedHarness),
+          model: resumedModel,
+          apiKey: configured.values.INTELLIGENCE_API_KEY || "",
+          apiUrl:
+            configured.values.INTELLIGENCE_API_URL ||
+            MANAGED_INTELLIGENCE_API_URL,
+          wsUrl:
+            configured.values.INTELLIGENCE_GATEWAY_WS_URL ||
+            MANAGED_INTELLIGENCE_GATEWAY_WS_URL,
+        };
+        // An interrupted run needs an explicit Start, with its saved setup still available.
+        if (interrupted) return;
         setBusy(true);
         setResuming(true);
         try {
@@ -419,6 +440,18 @@ export function App() {
       });
       setRunning(true);
       setRecoveryFailure(null);
+      // An unchanged, previously launched setup has already completed the first-run handover.
+      const previous = savedLaunch.current;
+      if (
+        previous?.installationKey === installationKey &&
+        previous.model === model &&
+        previous.apiKey === apiKey &&
+        previous.apiUrl === apiUrl &&
+        previous.wsUrl === wsUrl
+      ) {
+        await invoke("show_openbot");
+        return;
+      }
       /*
        * One screen short of the handover, on purpose.
        *
