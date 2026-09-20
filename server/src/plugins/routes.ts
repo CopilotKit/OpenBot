@@ -2395,16 +2395,23 @@ export function createPluginRoutes(
         400,
       );
     }
+    /*
+     * Trimmed before it is checked and before it is stored, the way the DELETE twin below already
+     * does. Without this a padded ref refuses with the padding quoted back (`" app" is not an app`),
+     * and a grant that did pass would be stored under a ref no revoke could match.
+     */
+    const grantRef = body.ref.trim();
+    const grantAgentId = body.agentId.trim();
     const refusal = await enablementRefusal(
       context,
       kind,
-      body.ref,
-      body.agentId,
+      grantRef,
+      grantAgentId,
       "grant",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.grant(kind, body.ref, body.agentId, actorEmail(context));
+    await store.grant(kind, grantRef, grantAgentId, actorEmail(context));
     return context.json({ ok: true });
   });
 
