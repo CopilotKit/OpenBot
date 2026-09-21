@@ -18,6 +18,8 @@ RUN bun install --frozen-lockfile
 
 COPY --from=spire /opt/spire/bin/spire-server /usr/local/bin/spire-server
 
+# Same helper every other Bot/process uses; local duplicate deleted in favor of shared.
+COPY shared/listen-port.ts /shared/listen-port.ts
 COPY supervisor/src ./src
 
 EXPOSE 4300

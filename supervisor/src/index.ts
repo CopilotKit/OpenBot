@@ -14,7 +14,7 @@ import {
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
 import { computerMemoryBytes } from "./computer-memory-bytes";
-import { listenPort } from "./listen-port";
+import { listenPort } from "../../shared/listen-port";
 
 /**
  * The container supervisor: the only thing here that holds the Docker socket.

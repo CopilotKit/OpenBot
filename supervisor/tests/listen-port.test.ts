@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { listenPort } from "../src/listen-port";
+import { listenPort } from "../../shared/listen-port";
 
 /**
  * Empty PORT must not become NaN / an ephemeral bind. Same empty-string trap as the API server.
