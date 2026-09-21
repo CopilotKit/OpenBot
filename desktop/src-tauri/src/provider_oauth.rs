@@ -506,14 +506,17 @@ fn write(
         let output = std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .env("OPENBOT_OAUTH_DIRECTORY", directory)
+            // A PowerShell 7 parent passes its incompatible modules through Cargo/OpenBot.
+            // Let Windows PowerShell rebuild its own default module search path.
+            .env_remove("PSModulePath")
             .creation_flags(0x08000000)
             .output()
             .map_err(|e| e.to_string())?;
         if !output.status.success() {
-            return Err(
-                "OpenBot could not make the provider sign-in private to your Windows account."
-                    .into(),
-            );
+            return Err(format!(
+                "OpenBot could not make the provider sign-in private to your Windows account. {}",
+                crate::quiet::said(&output.stderr)
+            ));
         }
     }
     let lock = PathBuf::from(format!("{}.lock", path.display()));
@@ -587,6 +590,35 @@ mod tests {
         assert_eq!(active().lock().unwrap().as_ref().unwrap().id, newer.id);
         assert!(check(&newer).is_ok());
         cancel(&newer.id);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_oauth_persistence_ignores_incompatible_parent_powershell_modules() {
+        let root = crate::test_support::temp_root("oauth-parent-modules");
+        let module = root.join("Microsoft.PowerShell.Security");
+        std::fs::create_dir_all(&module).unwrap();
+        // A module with a newer engine requirement models the PS7 path inherited through Cargo.
+        std::fs::write(
+            module.join("Microsoft.PowerShell.Security.psd1"),
+            "@{ModuleVersion='99.0';PowerShellVersion='99.0';CmdletsToExport=@('Set-Acl')}",
+        )
+        .unwrap();
+        let output = crate::quiet::command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "provider_oauth::tests::persisted_credentials_remain_provider_bound",
+                "--nocapture",
+            ])
+            .env("PSModulePath", &root)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            crate::quiet::said(&output.stdout),
+            crate::quiet::said(&output.stderr)
+        );
     }
     #[test]
     fn persisted_credentials_remain_provider_bound() {

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
+import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
 import {
   createProviderOAuthProxy,
   type ModelOAuthRecord,
@@ -11,7 +12,11 @@ import {
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
-  for (const dispose of cleanup.splice(0).reverse()) await dispose();
+  try {
+    for (const dispose of cleanup.splice(0).reverse()) await dispose();
+  } finally {
+    clearDesktopConnectionFailure("model");
+  }
 });
 
 function record(overrides: Partial<ModelOAuthRecord> = {}): ModelOAuthRecord {
