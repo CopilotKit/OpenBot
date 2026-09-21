@@ -180,6 +180,47 @@ driver's metadata source. Take these two lines out if you need that.
 Nothing in OpenBot wants pod-level IMDS: the chart reaches AWS through IRSA. Documentation only; no
 chart template changed, and an existing cluster is unaffected until its node group is recreated.
 
+### A large text file says so on the composer before it is sent
+
+The model reads the first 120,000 characters of an attached text file and the rest is dropped. The
+part said so to the model and nothing said so to the person attaching it, so a 1MB CSV was answered
+from roughly a tenth of itself with nothing on screen to explain the answer. A staged file over that
+ceiling now carries "may be cut" beside its size, with the exact number on hover. Warned, never
+refused: the whole file is still uploaded and still stored.
+
+Whether a file is text is decided by what the server read in its bytes, not by what the browser
+called it, so a file the browser labelled an image and the server read as text is warned about too.
+That is the file the old reading would have missed.
+
+### ADK and Langroid Bots can call the tools OpenBot supplies
+
+Both answered text prompts on an OpenAI key and neither could reliably use the tools the deployment
+supplies them, so a Bot on either harness could talk but could not act. ADK now registers the
+documented `AGUIToolset`. Langroid now sends each run's tool schemas and its complete message
+history, tool results included, so a tool's answer reaches the model that asked for it. Each run
+keeps its own tool and history state.
+
+### Built-in Bots carry a model provider's sign-in failure through as itself
+
+A built-in or LangGraph Bot whose model credential had expired ended the run as a generic failure,
+which reads as the Bot being broken. The run now ends with `OPENBOT_MODEL_AUTH_REQUIRED` and says to
+sign in to the model provider again.
+
+The built-in Bot's tool loop also moved to the server, which owns the grants that decide what a tool
+may do. The harness is given model input alone, and a tool result is resolved against the call that
+produced it, so a Bot can carry a multi-step task across several tool calls rather than losing the
+thread after the first.
+
+### A deployment can name an organization authority that decides who it admits
+
+`OPENBOT_ORGANIZATION_AUTH_URL` points at an OpenBot deployment configured with Google, Microsoft or
+Okta, which verifies who somebody is and what roles they currently hold. It is separate from any
+Intelligence connection, and the authority keeps its own secrets.
+
+Naming one settles the sign-in question by itself: it wins over `OPENBOT_SINGLE_USER`, so a
+deployment carrying a leftover single-user flag admits verified people rather than admitting
+everybody as one administrator.
+
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file
