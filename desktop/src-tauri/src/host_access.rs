@@ -1653,6 +1653,15 @@ mod tests {
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            // Winsock accept inherits the listener's nonblocking mode.
+                            // Only accept polls; each fixture request uses bounded blocking I/O.
+                            stream.set_nonblocking(false).unwrap();
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(2)))
+                                .unwrap();
+                            stream
+                                .set_write_timeout(Some(Duration::from_secs(2)))
+                                .unwrap();
                             let mut reader = BufReader::new(stream.try_clone().unwrap());
                             let mut content_length = 0_usize;
                             loop {
@@ -1718,6 +1727,30 @@ mod tests {
                 let _ = thread.join();
             }
         }
+    }
+
+    #[test]
+    fn result_collector_accepts_delayed_fragmented_requests() {
+        let collector = ResultCollector::start();
+        let address = collector.base_url.strip_prefix("http://").unwrap();
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream.write_all(b"POST /res").unwrap();
+        thread::sleep(Duration::from_millis(50));
+        stream
+            .write_all(b"ults HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n{\"ok\":")
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        stream.write_all(b"true}").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert_eq!(collector.bodies(), vec!["{\"ok\":true}".to_owned()]);
     }
 
     fn temp_root(name: &str) -> PathBuf {
