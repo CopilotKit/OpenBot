@@ -13,8 +13,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 Downloads show transferred bytes and elapsed time, Back preserves saved connections, and repair
 stays under Installation options after setup. OpenBot selects and remembers usable local ports,
 including when Windows reserves a default port. Setup can create a CopilotKit project and offers
-Google Gemini and xAI API-key choices. Unsupported Bun installations are replaced with the pinned
-runtime; startup errors retain useful details and provide a configurable setup-help link.
+Google Gemini and xAI API-key choices, plus OAuth sign-in with automatic token refresh. Google
+OAuth requires the distributor's desktop client and quota-project configuration. Unsupported Bun
+installations are replaced with the pinned runtime; startup errors retain useful details and provide a configurable setup-help link.
 
 ## 0.0.14
 

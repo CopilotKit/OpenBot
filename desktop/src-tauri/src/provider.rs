@@ -22,6 +22,8 @@ pub enum Login {
     ApiKey,
     /// A base URL, a key and a model name. The developer row and the everything-else row at once.
     Endpoint,
+    /// Browser authorization for the provider's model API, with renewable credentials.
+    Oauth,
 }
 
 /// One row on the model screen.
@@ -89,16 +91,16 @@ pub fn catalogue() -> Vec<Provider> {
         Provider {
             id: "google".into(),
             name: "Google Gemini".into(),
-            summary: "Use Gemini with a Google AI Studio API key.".into(),
-            logins: vec![Login::Endpoint],
+            summary: "Use a Google AI Studio key or sign in for Gemini API access.".into(),
+            logins: vec![Login::Endpoint, Login::Oauth],
             mark: None,
             caution: None,
         },
         Provider {
             id: "xai".into(),
             name: "xAI".into(),
-            summary: "Use Grok with an xAI API key.".into(),
-            logins: vec![Login::Endpoint],
+            summary: "Use an xAI API key or sign in to your xAI account.".into(),
+            logins: vec![Login::Endpoint, Login::Oauth],
             mark: None,
             caution: None,
         },
@@ -132,7 +134,7 @@ mod tests {
             .into_iter()
             .filter(|provider| provider.logins.contains(&Login::Endpoint))
         {
-            assert_eq!(provider.logins, vec![Login::Endpoint]);
+            assert!(!provider.logins.contains(&Login::Plan));
         }
     }
 

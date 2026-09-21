@@ -67,6 +67,10 @@ import {
   type PluginStore,
 } from "./plugins/store";
 import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
+import {
+  type ModelProviderProxy,
+  mountProviderOAuthProxy,
+} from "./provider-oauth";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
@@ -315,9 +319,12 @@ export function createApp(
    * no app directory to offer, rather than one that lists apps nobody can connect.
    */
   composio?: { broker: ComposioBroker },
+  /** Native model OAuth stays server-side; callers hold only a separate local bearer. */
+  modelProviderProxy?: ModelProviderProxy,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
+  mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including

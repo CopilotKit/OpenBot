@@ -6,7 +6,7 @@ import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 
-export type Login = "plan" | "api-key" | "endpoint";
+export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
 export type Provider = {
   id: string;
@@ -38,12 +38,16 @@ export type SavedConfiguration = {
     | "claude-plan"
     | "chat-gpt-plan"
     | "compatible-endpoint"
+    | "google-oauth"
+    | "xai-oauth"
     | null;
   intelligenceApiKey?: boolean | null;
   modelApiKeys?: Partial<
     Record<"openai" | "anthropic" | "compatible", boolean | null>
   >;
-  modelSessions?: Partial<Record<"openai" | "anthropic", boolean | null>>;
+  modelSessions?: Partial<
+    Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
+  >;
 };
 
 export type HeldConfiguration = {
@@ -104,6 +108,14 @@ export function recordedModel(held: HeldConfiguration): ModelChoice | null {
       return { provider: "anthropic", login: "plan", saved: true };
     case "chat-gpt-plan":
       return { provider: "openai", login: "plan", saved: true };
+    case "google-oauth":
+    case "xai-oauth":
+      return {
+        provider: held.saved.model === "google-oauth" ? "google" : "xai",
+        login: "oauth",
+        saved: true,
+        model: held.BOT_MODEL,
+      };
     case "compatible-endpoint":
       return {
         provider: "openai-compatible",
@@ -200,6 +212,96 @@ export function ProviderPicker({
   const [failure, setFailure] = useState<Problem | null>(null);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
+  const oauthAttempt = useRef<string | null>(null);
+  const [oauthCode, setOauthCode] = useState<string | null>(null);
+  const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
+    initialChoice?.login === "oauth" && initialChoice.saved
+      ? initialChoice.provider
+      : null,
+  );
+
+  async function cancelOAuth() {
+    signInRunRef.current += 1;
+    const attemptId = oauthAttempt.current;
+    oauthAttempt.current = null;
+    setBusy(false);
+    setSignInUrl(null);
+    setOauthCode(null);
+    if (attemptId) {
+      try {
+        await invoke("cancel_model_oauth", { attemptId });
+      } catch (error) {
+        setFailure(asProblem(error));
+      }
+    }
+  }
+
+  async function beginOAuth() {
+    if (!row) return;
+    const providerId = row.id;
+    const run = ++signInRunRef.current;
+    const current = () =>
+      signInRunRef.current === run && openRef.current === providerId;
+    setBusy(true);
+    setFailure(null);
+    setOauthSignedIn(null);
+    try {
+      const authorization = await invoke<{
+        attemptId: string;
+        url: string;
+        userCode: string | null;
+      }>("begin_model_oauth", { root: root.trim(), provider: providerId });
+      if (!current()) {
+        await invoke("cancel_model_oauth", {
+          attemptId: authorization.attemptId,
+        });
+        return;
+      }
+      oauthAttempt.current = authorization.attemptId;
+      setSignInUrl(authorization.url);
+      setOauthCode(authorization.userCode);
+      try {
+        await invoke("plugin:opener|open_url", { url: authorization.url });
+      } catch (error) {
+        if (current()) setFailure(asProblem(error));
+      }
+      await invoke("finish_model_oauth", {
+        attemptId: authorization.attemptId,
+      });
+      if (current()) {
+        setOauthSignedIn(providerId);
+        setSignInUrl(null);
+        setOauthCode(null);
+        setFailure(null);
+      }
+    } catch (error) {
+      if (current()) {
+        setFailure(asProblem(error));
+        setSignInUrl(null);
+        setOauthCode(null);
+      }
+    } finally {
+      if (current()) {
+        oauthAttempt.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  useEffect(
+    () => () => {
+      signInRunRef.current += 1;
+      const attemptId = oauthAttempt.current;
+      if (attemptId) {
+        invoke("cancel_model_oauth", { attemptId }).catch(() => {
+          console.error(
+            "OpenBot could not cancel the pending provider sign-in.",
+          );
+        });
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     openRef.current = open;
@@ -322,6 +424,9 @@ export function ProviderPicker({
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
   const ready =
+    (login === "oauth" &&
+      oauthSignedIn === row?.id &&
+      model.trim().length > 0) ||
     (login === "plan" && (token.trim().length > 0 || savedPlan)) ||
     (login === "api-key" && (apiKey.trim().length > 0 || savedApiKey)) ||
     /*
@@ -350,13 +455,16 @@ export function ProviderPicker({
         ? { apiKey: trimmedApiKey }
         : {}),
       ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
+      ...(login === "oauth" ? { saved: true } : {}),
       ...((login === "plan" && !trimmedToken && savedPlan) ||
       (login === "api-key" && !trimmedApiKey && savedApiKey) ||
       (login === "endpoint" && !trimmedApiKey && savedEndpointKey)
         ? { saved: true }
         : {}),
-      ...(trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
-      ...(trimmedContainerBaseUrl
+      ...(login !== "oauth" && trimmedBaseUrl
+        ? { baseUrl: trimmedBaseUrl }
+        : {}),
+      ...(login !== "oauth" && trimmedContainerBaseUrl
         ? { containerBaseUrl: trimmedContainerBaseUrl }
         : {}),
       ...(trimmedModel ? { model: trimmedModel } : {}),
@@ -385,6 +493,7 @@ export function ProviderPicker({
               value={r.id}
               checked={open === r.id}
               onChange={() => {
+                if (oauthAttempt.current) void cancelOAuth();
                 signInRunRef.current += 1;
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI
@@ -443,14 +552,66 @@ export function ProviderPicker({
                   role="tab"
                   aria-selected={login === option}
                   className={login === option ? "on" : ""}
-                  onClick={() => setLogin(option)}
+                  onClick={() => {
+                    if (login === "oauth" && option !== login)
+                      void cancelOAuth();
+                    setLogin(option);
+                  }}
                 >
                   {option === "plan"
                     ? "Sign in with my plan"
-                    : "Use an API key"}
+                    : option === "oauth"
+                      ? "Sign in"
+                      : "Use an API key"}
                 </button>
               ))}
             </div>
+          )}
+
+          {login === "oauth" && (
+            <>
+              <p className="footnote">
+                {row.id === "google"
+                  ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
+                  : "Authorize OpenBot to use models available to your xAI account."}
+              </p>
+              {oauthSignedIn === row.id ? (
+                <p className="lede">Signed in to {row.name}.</p>
+              ) : signInUrl ? (
+                <>
+                  <p role="status">
+                    Waiting for you to approve sign-in in your browser.
+                  </p>
+                  {oauthCode && (
+                    <p>
+                      Verification code: <strong>{oauthCode}</strong>
+                    </p>
+                  )}
+                  <ExternalLink href={signInUrl}>
+                    Open sign-in page
+                  </ExternalLink>
+                  <button type="button" className="quiet" onClick={cancelOAuth}>
+                    Cancel sign-in
+                  </button>
+                </>
+              ) : null}
+              {!busy && (
+                <button type="button" onClick={beginOAuth}>
+                  Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
+                  {row.name}
+                </button>
+              )}
+              {busy && !signInUrl && <p role="status">Preparing sign-in…</p>}
+              <div className="field">
+                <label htmlFor="oauth-model">Model name</label>
+                <input
+                  id="oauth-model"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+            </>
           )}
 
           {login === "plan" &&

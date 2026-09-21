@@ -209,6 +209,10 @@ struct SavedModelApiKeys {
 struct SavedModelSessions {
     openai: Option<bool>,
     anthropic: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    google: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    xai: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -828,6 +832,18 @@ impl ChosenModel {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
         match (self.provider.as_str(), self.login.as_str()) {
+            ("google" | "xai", "oauth") => {
+                let saved = openbot_desktop_lib::provider_oauth::read(root, &self.provider)
+                    .map_err(Problem::plain)?;
+                let model = given(self.model);
+                if model.is_empty() { return Err("Choose a model for this provider.".into()); }
+                Ok(openbot_env::ModelCredential::ProviderOAuth {
+                    provider: self.provider,
+                    path: root.join(openbot_desktop_lib::provider_oauth::FILE).to_string_lossy().into_owned(),
+                    proxy_token: saved.proxy_token,
+                    model,
+                })
+            }
             ("openai", "api-key") => {
                 let api_key = if saved {
                     saved_secret(root, "OPENAI_API_KEY")?
@@ -2654,6 +2670,8 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
                     openbot_env::saved_chatgpt_plan_store(&root),
                 ),
                 anthropic: hint(Category::ClaudePlan, claude_plan),
+                google: hint(Category::GoogleOauth, false),
+                xai: hint(Category::XaiOauth, false),
             },
             model: intent.model,
         },
@@ -2950,6 +2968,32 @@ fn cancel_organization_sign_in(root: String) {
 #[tauri::command]
 fn providers() -> Vec<provider::Provider> {
     provider::catalogue()
+}
+
+#[tauri::command]
+async fn begin_model_oauth(
+    root: String,
+    provider: String,
+) -> Result<openbot_desktop_lib::provider_oauth::Authorization, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::provider_oauth::begin(&stack::root_from(&root), &provider)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn finish_model_oauth(attempt_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::provider_oauth::finish(&attempt_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cancel_model_oauth(attempt_id: String) {
+    openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
 }
 
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
@@ -3392,6 +3436,9 @@ fn main() {
             begin_claude_sign_in,
             finish_claude_sign_in,
             begin_chatgpt_sign_in,
+            begin_model_oauth,
+            finish_model_oauth,
+            cancel_model_oauth,
             finish_chatgpt_sign_in,
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
@@ -4380,6 +4427,41 @@ mod tests {
                 "plan must not fall back to an API key"
             ))
             .is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn oauth_start_reads_private_session_without_contacting_unstarted_proxy() {
+        let root = temp_root("oauth-start");
+        std::fs::create_dir_all(root.join(".openbot")).unwrap();
+        for provider in ["google", "xai"] {
+            let path = root.join(openbot_desktop_lib::provider_oauth::FILE);
+            let record = serde_json::json!({"version":1,"sessionId":"synthetic-session","provider":provider,"clientId":"synthetic-client","accessToken":"synthetic-access","refreshToken":"synthetic-refresh","expiresAt":1,"scope":"synthetic","proxyToken":"synthetic-proxy"});
+            std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+            let choice = ChosenModel {
+                provider: provider.into(),
+                login: "oauth".into(),
+                api_key: None,
+                base_url: None,
+                container_base_url: None,
+                model: Some("chosen-model".into()),
+                token: None,
+                saved: Some(true),
+            };
+            let credential = start_stack_credential_with(&root, choice, |_, _| {
+                panic!("OAuth must not resolve an API key")
+            })
+            .unwrap();
+            assert_eq!(
+                credential,
+                openbot_env::ModelCredential::ProviderOAuth {
+                    provider: provider.into(),
+                    path: path.to_string_lossy().into_owned(),
+                    proxy_token: "synthetic-proxy".into(),
+                    model: "chosen-model".into()
+                }
+            );
         }
         std::fs::remove_dir_all(root).unwrap();
     }

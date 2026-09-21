@@ -391,6 +391,7 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            "OPENBOT_MODEL_OAUTH_FILE",
             "BOT_PROVIDER",
             /*
              * Retired, and cleared for exactly that reason. An earlier version put the ChatGPT
@@ -414,7 +415,10 @@ pub fn compose(
          * Removed rather than emptied, so `docker-compose.yml`'s own default applies. Blank would
          * be passed through as a model named "", which is a worse question to ask a provider.
          */
-        if !matches!(model.credential, ModelCredential::Compatible { .. }) {
+        if !matches!(
+            model.credential,
+            ModelCredential::Compatible { .. } | ModelCredential::ProviderOAuth { .. }
+        ) {
             for key in ["BOT_MODEL", "AGENT_BOT_MODEL"] {
                 env.remove(key);
             }
@@ -453,6 +457,29 @@ pub fn compose(
             if !store.trim().is_empty() {
                 env.insert("CHATGPT_AUTH_FILE".into(), CHATGPT_STORE_INSIDE.into());
             }
+        }
+        ModelCredential::ProviderOAuth {
+            path,
+            proxy_token,
+            model,
+            ..
+        } => {
+            env.insert("OPENBOT_MODEL_OAUTH_FILE".into(), path.clone());
+            env.insert("OPENAI_API_KEY".into(), proxy_token.clone());
+            env.insert(
+                "OPENAI_BASE_URL".into(),
+                format!("http://127.0.0.1:{}/api/model-provider/v1", ports.server),
+            );
+            env.insert(
+                "OPENAI_CONTAINER_BASE_URL".into(),
+                format!(
+                    "http://host.docker.internal:{}/api/model-provider/v1",
+                    ports.server
+                ),
+            );
+            env.insert("BOT_PROVIDER".into(), "openai".into());
+            env.insert("BOT_MODEL".into(), model.clone());
+            env.insert("AGENT_BOT_MODEL".into(), model.clone());
         }
         ModelCredential::Compatible {
             base_url,
@@ -822,6 +849,13 @@ pub enum ModelCredential {
     build doc.
     */
     ChatGptPlan { store: String },
+    /// A native-held OAuth session; the local proxy owns access-token refresh.
+    ProviderOAuth {
+        provider: String,
+        path: String,
+        proxy_token: String,
+        model: String,
+    },
     /// Anything that speaks the OpenAI wire format, at an address the person gave.
     ///
     /// Also where a signed-in ChatGPT plan lands, because that login yields a token and the address

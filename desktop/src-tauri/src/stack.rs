@@ -49,9 +49,9 @@ impl BundledBots {
     pub fn for_credential(credential: &crate::env::ModelCredential) -> Self {
         use crate::env::ModelCredential;
         match credential {
-            ModelCredential::OpenAi { .. } | ModelCredential::Compatible { .. } => {
-                Self::openai_compatible()
-            }
+            ModelCredential::OpenAi { .. }
+            | ModelCredential::Compatible { .. }
+            | ModelCredential::ProviderOAuth { .. } => Self::openai_compatible(),
             ModelCredential::Anthropic { .. } => Self::anthropic(),
             ModelCredential::None
             | ModelCredential::ClaudePlan { .. }

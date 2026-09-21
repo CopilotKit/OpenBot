@@ -90,6 +90,7 @@ import { hostAccessTools } from "./host-access/tools";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
+import { createProviderOAuthProxy } from "./provider-oauth";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
@@ -1309,6 +1310,9 @@ const app = createApp(
   // Absent without a key, which leaves the routes reporting no broker rather than listing apps
   // nobody could connect.
   composio ? { broker: composio.broker } : undefined,
+  process.env.OPENBOT_MODEL_OAUTH_FILE?.trim()
+    ? createProviderOAuthProxy(process.env.OPENBOT_MODEL_OAUTH_FILE.trim())
+    : undefined,
 );
 
 /**

@@ -14,6 +14,7 @@ pub mod plan;
 pub mod preparation;
 pub mod problem;
 pub mod provider;
+pub mod provider_oauth;
 pub mod pull_metrics;
 pub mod quiet;
 pub mod saved_intent;

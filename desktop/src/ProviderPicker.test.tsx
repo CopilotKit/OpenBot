@@ -808,7 +808,98 @@ test("a saved keyless endpoint never requests a saved first-party key", async ()
   ]);
 });
 
+test("OAuth tab switch cancels a late authorization before opening the browser", async () => {
+  let resolveBegin!: (value: unknown) => void;
+  invokeHandler = async (command) => {
+    if (command === "providers")
+      return allProviders.map((row) =>
+        row.id === "xai" ? { ...row, logins: ["endpoint", "oauth"] } : row,
+      );
+    if (command === "begin_model_oauth")
+      return new Promise((resolve) => {
+        resolveBegin = resolve;
+      });
+    if (command === "cancel_model_oauth") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /xAI/ }));
+  await user.click(view.getByRole("tab", { name: "Sign in" }));
+  await user.click(view.getByRole("button", { name: "Sign in with xAI" }));
+  await user.click(view.getByRole("tab", { name: "Use an API key" }));
+  await act(async () => {
+    resolveBegin({
+      attemptId: "late-attempt",
+      url: "https://authorization.example.test",
+      userCode: null,
+    });
+  });
+  expect(invokeCalls).toContainEqual({
+    command: "cancel_model_oauth",
+    args: { attemptId: "late-attempt" },
+  });
+  expect(
+    invokeCalls.some((call) => call.command === "plugin:opener|open_url"),
+  ).toBe(false);
+  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+});
+
 for (const provider of cloudProviders) {
+  test(`${provider.name} OAuth completes through native storage without exposing tokens`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers")
+        return allProviders.map((row) =>
+          row.id === provider.id
+            ? { ...row, logins: ["endpoint", "oauth"] }
+            : row,
+        );
+      if (command === "begin_model_oauth")
+        return {
+          attemptId: "synthetic-attempt",
+          url: "https://authorization.example.test/approve",
+          userCode: "SYNTHETIC",
+        };
+      if (
+        command === "plugin:opener|open_url" ||
+        command === "finish_model_oauth"
+      )
+        return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+    await user.click(view.getByRole("tab", { name: "Sign in" }));
+    await user.click(
+      view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+    );
+    await view.findByText(`Signed in to ${provider.name}.`);
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices).toEqual([
+      {
+        provider: provider.id,
+        login: "oauth",
+        model: provider.model,
+        saved: true,
+      },
+    ]);
+    expect(invokeCalls).toContainEqual({
+      command: "begin_model_oauth",
+      args: { root: "/tmp/openbot-provider-root", provider: provider.id },
+    });
+    expect(invokeCalls).toContainEqual({
+      command: "finish_model_oauth",
+      args: { attemptId: "synthetic-attempt" },
+    });
+  });
+
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;

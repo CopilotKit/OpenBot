@@ -543,6 +543,9 @@ export function App() {
   function modelCanStart() {
     if (!model) return false;
     if (!model.saved) return true;
+    if (model.provider === "google" || model.provider === "xai") {
+      return model.login === "oauth" && Boolean(model.model?.trim());
+    }
     if (model.provider === "openai-compatible") {
       return (
         model.login === "endpoint" &&
