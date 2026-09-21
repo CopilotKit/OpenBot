@@ -207,23 +207,90 @@ test("unsupported content and unsafe model names fail before sending provider cr
   ).toThrow();
 });
 
+const terminalFrame = 'data: {"candidates":[{"finishReason":"STOP"}]}\n\n';
+const partialFrame =
+  'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n';
+const providerErrorFrame =
+  'data: {"error":{"code":429,"message":"private provider detail"}}\n\n';
+const sanitizedError = `data: ${JSON.stringify({
+  error: {
+    message: "The Google model stream failed or ended early. Try again.",
+    type: "provider_error",
+    code: "incomplete_model_stream",
+  },
+})}`;
+
+async function expectFailedStream(chunks: string[]) {
+  const encoder = new TextEncoder();
+  const upstream = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+  const response = await googleResponse(upstream, "gemini-3.6-flash", true);
+  const text = await response.text();
+  const events = text.split("\n\n").filter(Boolean);
+  expect(events.filter((event) => event.startsWith('data: {"error":'))).toEqual(
+    [sanitizedError],
+  );
+  expect(events.at(-1)).toBe(sanitizedError);
+  expect(text).not.toContain("private provider detail");
+  expect(text).not.toContain("content after failure");
+  expect(text).not.toMatch(/"finish_reason"\s*:\s*"/);
+  expect(text).not.toContain("[DONE]");
+  return text;
+}
+
+// A terminal reason is already present, so the missing-terminal guard cannot
+// mask a missing parser, framing, or trailing-data guard in these cases.
 test.each([
-  'data: {"error":{"code":429,"message":"private provider detail"}}\n\n',
-  '{"error":{"code":429,"message":"private provider detail"}}',
-  'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n',
-  'data: {"candidates":',
+  ["provider error", providerErrorFrame],
+  ["malformed JSON", 'data: {"private provider detail":\n\n'],
+  ["invalid schema", 'data: {"candidates":"private provider detail"}\n\n'],
+  ["invalid SSE line", "private provider detail\n\n"],
+  ["trailing fragment", "private provider detail"],
+  [
+    "undelimited data",
+    'data: {"candidates":[{"content":{"parts":[{"text":"private provider detail"}]}}]}\n',
+  ],
 ])(
-  "failed or truncated native streams cannot become successful completions: %s",
-  async (wire) => {
-    const response = await googleResponse(
-      new Response(wire),
-      "gemini-3.6-flash",
-      true,
-    );
-    const text = await response.text();
-    expect(text).toContain('"error"');
-    expect(text).not.toContain("private provider detail");
-    expect(text).not.toContain('"finish_reason":"stop"');
-    expect(text).not.toContain("[DONE]");
+  "native stream rejects %s after a terminal frame",
+  async (_name, invalid) => {
+    await expectFailedStream([terminalFrame + invalid]);
+  },
+);
+
+test("native stream rejects a partial response without a terminal reason", async () => {
+  const text = await expectFailedStream([partialFrame]);
+  expect(text).toContain('"content":"partial"');
+});
+
+const laterDataLine =
+  'data: {"candidates":[{"content":{"parts":[{"text":"content after failure"}]},"finishReason":"STOP"}]}\n';
+test.each([
+  [
+    "the same chunk",
+    [`${partialFrame}${providerErrorFrame}${laterDataLine}\n`],
+  ],
+  [
+    "separate chunks",
+    [partialFrame + providerErrorFrame, `${laterDataLine}\n`],
+  ],
+  [
+    "a later chunk completing an interrupted event",
+    [
+      `${partialFrame}${laterDataLine}private provider detail\n`,
+      `\n${terminalFrame}`,
+    ],
+  ],
+] satisfies [string, string[]][])(
+  "native stream cannot resume after failure in %s",
+  async (_name, chunks) => {
+    const text = await expectFailedStream(chunks);
+    expect(text).toContain('"content":"partial"');
   },
 );

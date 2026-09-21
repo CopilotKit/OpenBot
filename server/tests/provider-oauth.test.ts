@@ -1,9 +1,24 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fsPromises from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { clearDesktopConnectionFailure } from "../src/desktop-connection-failure";
+import { fileURLToPath } from "node:url";
+import { lockProviderCredentials } from "../src/provider-oauth-lock";
+import {
+  clearDesktopConnectionFailure,
+  mountDesktopConnectionFailure,
+} from "../src/desktop-connection-failure";
 import {
   createProviderOAuthProxy,
   type ModelOAuthRecord,
@@ -58,6 +73,7 @@ async function fixture(
       },
     }),
   );
+  mountDesktopConnectionFailure(app, "test-host-token");
   const ask = (token: string | null = current.proxyToken) =>
     app.request("/api/model-provider/v1/chat/completions", {
       method: "POST",
@@ -72,7 +88,7 @@ async function fixture(
         stream: true,
       }),
     });
-  return { app, file, ask, destinations };
+  return { app, file, ask, destinations, providerUrl: server.url };
 }
 
 test("the model proxy requires its bearer even with a browser cookie", async () => {
@@ -311,4 +327,298 @@ test("missing or malformed credential files fail closed without exposing their c
   response = await f.ask();
   expect(response.status).toBe(503);
   expect(f.destinations).toEqual([]);
+});
+
+async function authenticationFailure(app: Hono) {
+  const response = await app.request("/api/desktop/connection-failure", {
+    headers: { "x-openbot-desktop-host-token": "test-host-token" },
+  });
+  return response.json();
+}
+
+test("an abandoned legacy lock directory does not consume and lose a rotated token", async () => {
+  let exchanges = 0;
+  const f = await fixture(record({ provider: "xai", expiresAt: 1 }), () => {
+    exchanges++;
+    return Response.json({
+      access_token: "next",
+      refresh_token: "next-refresh",
+      expires_in: 3600,
+    });
+  });
+  const child = await lockOwner(f.file, "legacy");
+  // The former Rust create_dir used the process umask (commonly 0755).
+  if (process.platform !== "win32") await chmod(`${f.file}.lock`, 0o755);
+  child.kill("SIGKILL");
+  await child.exited;
+  const response = await f.ask();
+  expect(response.status).toBe(200);
+  expect(exchanges).toBe(2); // One refresh and one model request.
+  expect(JSON.parse(await readFile(f.file, "utf8")).refreshToken).toBe(
+    "next-refresh",
+  );
+}, 10000);
+
+test("independent proxy instances serialize real rotating-token exchanges", async () => {
+  let exchanges = 0;
+  const initial = record({ provider: "xai", expiresAt: 1 });
+  const f = await fixture(initial, async (request) => {
+    if (new URL(request.url).pathname === "/oauth2/token") {
+      const exchange = ++exchanges;
+      await Bun.sleep(50);
+      return exchange === 1
+        ? Response.json({
+            access_token: "next",
+            refresh_token: "next-refresh",
+            expires_in: 3600,
+          })
+        : Response.json({ error: "already spent" }, { status: 400 });
+    }
+    return Response.json({ choices: [] });
+  });
+  // Each separate Hono/proxy instance has its own in-memory refresh deduplication map.
+  const other = createProviderOAuthProxy(f.file, {
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      return fetch(new URL(url.pathname, f.providerUrl), init);
+    },
+  });
+  const responses = await Promise.all([
+    f.ask(),
+    other(
+      new Request("http://localhost/model", {
+        method: "POST",
+        headers: { authorization: `Bearer ${initial.proxyToken}` },
+        body: JSON.stringify({ model: "model", messages: [] }),
+      }),
+    ),
+  ]);
+  expect(responses.map((response) => response.status)).toEqual([200, 200]);
+  expect(exchanges).toBe(1);
+});
+
+test("an unreadable request body does not invalidate provider sign-in", async () => {
+  const f = await fixture(record(), () => new Response("must not be called"));
+  const response = await f.app.request(
+    "/api/model-provider/v1/chat/completions",
+    {
+      method: "POST",
+      headers: { authorization: "Bearer local-proxy-token" },
+      body: new ReadableStream({
+        start(controller) {
+          controller.error(new Error("client disconnected"));
+        },
+      }),
+    },
+  );
+  expect(response.status).toBe(400);
+  expect(f.destinations).toEqual([]);
+  expect(await authenticationFailure(f.app)).toBeNull();
+});
+
+test("a quota-project permission denial stays 403 without invalidating sign-in", async () => {
+  const f = await fixture(record(), () =>
+    Response.json({ error: "private quota project detail" }, { status: 403 }),
+  );
+  const response = await f.ask();
+  expect(response.status).toBe(403);
+  expect(await response.text()).not.toContain("private quota project detail");
+  expect(await authenticationFailure(f.app)).toBeNull();
+  expect(f.destinations).toHaveLength(1);
+});
+
+test("credential file paths must be absolute", () => {
+  expect(() => createProviderOAuthProxy("relative.json")).toThrow("absolute");
+});
+
+test.each(["world-readable", "symlink", "oversized", "missing-quota"] as const)(
+  "%s credential files are refused before provider I/O",
+  async (kind) => {
+    if (kind === "world-readable" && process.platform === "win32") return;
+    const f = await fixture(record(), () => new Response("must not be called"));
+    if (kind === "world-readable") await chmod(f.file, 0o644);
+    if (kind === "symlink") {
+      const target = `${f.file}.target`;
+      await writeFile(target, JSON.stringify(record()), { mode: 0o600 });
+      await rm(f.file);
+      await symlink(target, f.file);
+    }
+    if (kind === "oversized")
+      await writeFile(
+        f.file,
+        JSON.stringify(record({ scope: "x".repeat(64 * 1024) })),
+      );
+    if (kind === "missing-quota")
+      await writeFile(
+        f.file,
+        JSON.stringify(record({ quotaProject: undefined })),
+      );
+    const response = await f.ask();
+    expect(response.status).toBe(503);
+    expect(f.destinations).toEqual([]);
+    expect(await response.text()).not.toContain("provider-refresh-token");
+  },
+);
+
+async function lockOwner(file: string, mode?: "legacy") {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      fileURLToPath(
+        new URL("./fixtures/provider-oauth-lock-owner.ts", import.meta.url),
+      ),
+      file,
+      ...(mode ? [mode] : []),
+    ],
+    {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  cleanup.push(async () => {
+    child.kill();
+    await child.exited;
+  });
+  const reader = child.stdout.getReader();
+  const timeout = setTimeout(() => child.kill(), 15000);
+  try {
+    let message = "";
+    while (!message.includes("\n")) {
+      const { value, done } = await reader.read();
+      if (done)
+        throw new Error(
+          `Lock owner exited: ${await new Response(child.stderr).text()}`,
+        );
+      message += new TextDecoder().decode(value);
+    }
+    expect(message.trim()).toBe("locked");
+  } finally {
+    clearTimeout(timeout);
+    reader.releaseLock();
+  }
+  return child;
+}
+
+test("killing a real lock owner permits a subsequent durable rotating-token exchange", async () => {
+  let refreshes = 0;
+  const f = await fixture(
+    record({ provider: "xai", expiresAt: 1 }),
+    (request) => {
+      if (new URL(request.url).pathname === "/oauth2/token") {
+        refreshes++;
+        return Response.json({
+          access_token: "recovered",
+          refresh_token: "recovered-refresh",
+          expires_in: 3600,
+        });
+      }
+      return Response.json({ choices: [] });
+    },
+  );
+  const child = await lockOwner(f.file);
+  child.kill("SIGKILL");
+  await child.exited;
+  expect((await f.ask()).status).toBe(200);
+  expect(refreshes).toBe(1);
+  expect(JSON.parse(await readFile(f.file, "utf8")).refreshToken).toBe(
+    "recovered-refresh",
+  );
+}, 20000);
+
+test("a live lock owner prevents any provider exchange until ownership is obtained", async () => {
+  let refreshes = 0;
+  const f = await fixture(
+    record({ provider: "xai", expiresAt: 1 }),
+    (request) => {
+      if (new URL(request.url).pathname === "/oauth2/token") {
+        refreshes++;
+        return Response.json({
+          access_token: "next",
+          refresh_token: "next-refresh",
+          expires_in: 3600,
+        });
+      }
+      return Response.json({ choices: [] });
+    },
+  );
+  const child = await lockOwner(f.file);
+  const pending = f.ask();
+  await Bun.sleep(100);
+  expect(refreshes).toBe(0);
+  child.stdin.end();
+  expect(await child.exited).toBe(0);
+  expect((await pending).status).toBe(200);
+  expect(refreshes).toBe(1);
+}, 20000);
+
+test("a lock timeout returns a retryable failure without consuming a refresh token or recording an auth failure", async () => {
+  const f = await fixture(
+    record({ expiresAt: 1 }),
+    () => new Response("must not be called"),
+  );
+  const unlock = await lockProviderCredentials(f.file);
+  try {
+    expect((await f.ask()).status).toBe(503);
+    expect(f.destinations).toEqual([]);
+    expect(await authenticationFailure(f.app)).toBeNull();
+    expect(JSON.parse(await readFile(f.file, "utf8")).refreshToken).toBe(
+      "provider-refresh-token",
+    );
+  } finally {
+    await unlock();
+  }
+}, 20000);
+
+test("a redirected lock inode is rejected before a provider exchange", async () => {
+  const f = await fixture(
+    record({ expiresAt: 1 }),
+    () => new Response("must not be called"),
+  );
+  await mkdir(`${f.file}.lock`, { mode: 0o700 });
+  const target = `${f.file}.untouched`;
+  await writeFile(target, "untouched", { mode: 0o600 });
+  await symlink(target, join(`${f.file}.lock`, "owner.lock"));
+  expect((await f.ask()).status).toBe(503);
+  expect(f.destinations).toEqual([]);
+  expect(await readFile(target, "utf8")).toBe("untouched");
+});
+
+test("Windows validates the opened credential identity before reading a replaced path", async () => {
+  const f = await fixture(record({ provider: "xai" }), () =>
+    Response.json({ choices: [] }),
+  );
+  const originalPlatform = Object.getOwnPropertyDescriptor(
+    process,
+    "platform",
+  )!;
+  const before = await fsPromises.lstat(f.file, { bigint: true });
+  const replacement = `${f.file}.replacement`;
+  await writeFile(
+    replacement,
+    JSON.stringify(
+      record({ provider: "xai", accessToken: "must-not-be-forwarded" }),
+    ),
+    { mode: 0o600 },
+  );
+  // Return the real metadata sampled before another writer atomically replaced
+  // the path: a deterministic race between Windows lstat and open.
+  Object.defineProperty(process, "platform", {
+    value: "win32",
+    configurable: true,
+  });
+  try {
+    expect((await f.ask()).status).toBe(200); // Valid file identities still work.
+    f.destinations.length = 0;
+    await fsPromises.rename(replacement, f.file);
+    const inspect = spyOn(fsPromises, "lstat").mockResolvedValue(before);
+    try {
+      expect((await f.ask()).status).toBe(503);
+      expect(f.destinations).toEqual([]);
+    } finally {
+      inspect.mockRestore();
+    }
+  } finally {
+    Object.defineProperty(process, "platform", originalPlatform);
+  }
 });

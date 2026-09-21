@@ -7,8 +7,8 @@ use reqwest::blocking::Client;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::io::Write;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
@@ -177,6 +177,23 @@ fn callback_code(request: &str, expected_state: &str) -> Result<String, Problem>
     Ok(codes[0].1.to_string())
 }
 
+fn receive_callback(stream: &mut TcpStream, expected_state: &str) -> Result<String, Problem> {
+    let result = crate::provider_oauth::read_callback_request(stream, Duration::from_secs(3))
+        .map_err(|_| problem("OpenBot could not read the organization callback."))
+        .and_then(|request| callback_code(&request, expected_state));
+    let (status, message) = if result.is_ok() {
+        ("200 OK", "Sign-in received. You can return to OpenBot.")
+    } else {
+        (
+            "400 Bad Request",
+            "Sign-in did not match. Return to OpenBot and try again.",
+        )
+    };
+    let reply = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{message}", message.len());
+    let _ = stream.write_all(reply.as_bytes());
+    result
+}
+
 pub fn begin(root: &Path, authority_url: &str, provider: &str) -> Result<String, Problem> {
     let authority = authority(authority_url)?;
     if !matches!(provider, "google" | "microsoft" | "okta") {
@@ -227,27 +244,7 @@ pub fn begin(root: &Path, authority_url: &str, provider: &str) -> Result<String,
         while started.elapsed() < PATIENCE && !cancel_listener.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-                    let mut bytes = [0u8; 8192];
-                    let result = stream
-                        .read(&mut bytes)
-                        .map_err(|_| problem("OpenBot could not read the organization callback."))
-                        .and_then(|length| {
-                            callback_code(
-                                &String::from_utf8_lossy(&bytes[..length]),
-                                &expected_state,
-                            )
-                        });
-                    let (status, message) = if result.is_ok() {
-                        ("200 OK", "Sign-in received. You can return to OpenBot.")
-                    } else {
-                        (
-                            "400 Bad Request",
-                            "Sign-in did not match. Return to OpenBot and try again.",
-                        )
-                    };
-                    let reply = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{message}", message.len());
-                    let _ = stream.write_all(reply.as_bytes());
+                    let result = receive_callback(&mut stream, &expected_state);
                     let _ = sender.send(result);
                     return;
                 }
@@ -403,7 +400,74 @@ pub fn session_destination(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
+    fn callback_over_tcp(nonblocking: bool, fragmented: bool) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut browser = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        browser
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(accepted) => break accepted,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "browser connection was not accepted"
+                    );
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("browser connection failed: {error}"),
+            }
+        };
+        // Unix does not consistently inherit this flag; model the Windows accept behavior.
+        if nonblocking {
+            stream.set_nonblocking(true).unwrap();
+        } else {
+            stream.set_nonblocking(false).unwrap();
+        }
+        let request = b"GET /organization-auth/callback?state=expected&code=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let split = if fragmented { 18 } else { 0 };
+        if fragmented {
+            browser.write_all(&request[..split]).unwrap();
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(receive_callback(&mut stream, "expected"))
+                .unwrap();
+        });
+        let early = receiver.recv_timeout(Duration::from_millis(100));
+        if !matches!(early, Err(std::sync::mpsc::RecvTimeoutError::Timeout)) {
+            worker.join().unwrap();
+            panic!("callback completed before its request line arrived: {early:?}");
+        }
+        browser.write_all(&request[split..]).unwrap();
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap()
+                .unwrap(),
+            "a".repeat(32)
+        );
+        let mut response = String::new();
+        browser.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn callback_waits_for_delayed_get_on_nonblocking_stream() {
+        callback_over_tcp(true, false);
+    }
+
+    #[test]
+    fn callback_waits_for_fragmented_request_line() {
+        callback_over_tcp(false, true);
+    }
+
     #[test]
     fn cancellation_retires_a_finish_already_waiting_for_the_browser() {
         let root = PathBuf::from("organization-cancellation-fixture");

@@ -43,14 +43,16 @@ export function mountDesktopConnectionFailure<T extends Env>(
   });
 }
 
-/** Only provider SDK errors qualify; a harness HTTP 401 is a different credential. */
+/** Only provider SDK errors qualify; a harness HTTP 401 is a different credential.
+ * A provider 403 can mean missing project/resource permission, not expired credentials.
+ */
 export function isModelAuthenticationError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   if (error.name === "OpenBotModelAuthenticationError") return true;
   if (
     error.name === "AI_APICallError" &&
     "statusCode" in error &&
-    (error.statusCode === 401 || error.statusCode === 403)
+    error.statusCode === 401
   )
     return true;
   return (

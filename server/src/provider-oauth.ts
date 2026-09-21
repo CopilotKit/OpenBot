@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, rename, rmdir, unlink } from "node:fs/promises";
+import { lstat, open, rename, unlink } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import type { Env, Hono } from "hono";
 import { z } from "zod";
@@ -10,6 +10,10 @@ import {
   recordDesktopConnectionFailure,
 } from "./desktop-connection-failure";
 import { googleRequest, googleResponse } from "./google-oauth-transport";
+import {
+  CredentialLockUnavailable,
+  lockProviderCredentials,
+} from "./provider-oauth-lock";
 
 export type ModelOAuthRecord = {
   version: 1;
@@ -58,13 +62,25 @@ const providers = {
 class SignInRequired extends Error {}
 
 async function readRecord(file: string): Promise<ModelOAuthRecord> {
+  // Windows ignores O_NOFOLLOW. Bind its no-follow path metadata to the opened
+  // handle before reading bytes, so a replacement between lstat/open is refused.
+  const before =
+    process.platform === "win32"
+      ? await lstat(file, { bigint: true })
+      : undefined;
+  if (before && (!before.isFile() || before.ino === 0n))
+    throw new Error("The private model credential path is not valid.");
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
+    if (before && (before.dev !== info.dev || before.ino !== info.ino))
+      throw new Error(
+        "The private model credential path changed while opening.",
+      );
     if (
       !info.isFile() ||
-      info.size > 64 * 1024 ||
-      (process.platform !== "win32" && (info.mode & 0o077) !== 0)
+      info.size > 64n * 1024n ||
+      (process.platform !== "win32" && (info.mode & 0o077n) !== 0n)
     )
       throw new Error("The private model credential file is not valid.");
     const record = schema.parse(JSON.parse(await handle.readFile("utf8")));
@@ -86,17 +102,6 @@ async function persistRotation(
   previous: ModelOAuthRecord,
   next: ModelOAuthRecord,
 ): Promise<void> {
-  const lock = `${file}.lock`;
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    try {
-      await mkdir(lock, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (!hasCode(error, "EEXIST") || Date.now() >= deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     const current = await readRecord(file);
@@ -114,13 +119,9 @@ async function persistRotation(
     }
     await rename(temporary, file);
   } finally {
-    try {
-      await unlink(temporary).catch((error: unknown) => {
-        if (!hasCode(error, "ENOENT")) throw error;
-      });
-    } finally {
-      await rmdir(lock);
-    }
+    await unlink(temporary).catch((error: unknown) => {
+      if (!hasCode(error, "ENOENT")) throw error;
+    });
   }
 }
 
@@ -147,55 +148,61 @@ export function createProviderOAuthProxy(
     const pending = refreshes.get(previous.sessionId);
     if (pending) return pending;
     const work = (async () => {
-      const current = await readRecord(file);
-      if (current.sessionId !== previous.sessionId)
-        throw new SignInRequired("The model sign-in changed.");
-      // A concurrent request may have already rotated the token that received a 401.
-      if (current.accessToken !== previous.accessToken) return current;
-      const body = new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: current.clientId,
-        refresh_token: current.refreshToken,
-      });
-      if (current.clientSecret) body.set("client_secret", current.clientSecret);
-      const response = await requestProvider(
-        providers[current.provider].token,
-        {
-          method: "POST",
-          redirect: "error",
-          signal: AbortSignal.timeout(15_000),
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            accept: "application/json",
+      const unlock = await lockProviderCredentials(file);
+      try {
+        const current = await readRecord(file);
+        if (current.sessionId !== previous.sessionId)
+          throw new SignInRequired("The model sign-in changed.");
+        // A concurrent request may have already rotated the token that received a 401.
+        if (current.accessToken !== previous.accessToken) return current;
+        const body = new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: current.clientId,
+          refresh_token: current.refreshToken,
+        });
+        if (current.clientSecret)
+          body.set("client_secret", current.clientSecret);
+        const response = await requestProvider(
+          providers[current.provider].token,
+          {
+            method: "POST",
+            redirect: "error",
+            signal: AbortSignal.timeout(15_000),
+            headers: {
+              "content-type": "application/x-www-form-urlencoded",
+              accept: "application/json",
+            },
+            body,
           },
-          body,
-        },
-      );
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new SignInRequired("The model provider refused token refresh.");
-      }
-      const tokens = z
-        .object({
-          access_token: z.string().min(1),
-          refresh_token: z.string().min(1).optional(),
-          expires_in: z.number().finite().positive().optional(),
-          token_type: z.string().optional(),
-        })
-        .parse(await response.json());
-      if (tokens.token_type && tokens.token_type.toLowerCase() !== "bearer")
-        throw new SignInRequired(
-          "The model provider returned an unsupported token.",
         );
-      const next = {
-        ...current,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? current.refreshToken,
-        expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-      };
-      // Do not use a rotated pair until it is durable; a failed save requires sign-in again.
-      await persistRotation(file, current, next);
-      return next;
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw new SignInRequired("The model provider refused token refresh.");
+        }
+        const tokens = z
+          .object({
+            access_token: z.string().min(1),
+            refresh_token: z.string().min(1).optional(),
+            expires_in: z.number().finite().positive().optional(),
+            token_type: z.string().optional(),
+          })
+          .parse(await response.json());
+        if (tokens.token_type && tokens.token_type.toLowerCase() !== "bearer")
+          throw new SignInRequired(
+            "The model provider returned an unsupported token.",
+          );
+        const next = {
+          ...current,
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token ?? current.refreshToken,
+          expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+        };
+        // Do not use a rotated pair until it is durable; a failed save requires sign-in again.
+        await persistRotation(file, current, next);
+        return next;
+      } finally {
+        await unlock();
+      }
     })();
     refreshes.set(previous.sessionId, work);
     try {
@@ -222,9 +229,18 @@ export function createProviderOAuthProxy(
     let body: ArrayBuffer;
     try {
       body = await request.arrayBuffer();
+    } catch {
+      return refused(400, "The model request body could not be read.");
+    }
+    try {
       if (current.expiresAt <= Date.now() + 120_000)
         current = await refresh(current);
-    } catch {
+    } catch (error) {
+      if (error instanceof CredentialLockUnavailable)
+        return refused(
+          503,
+          "The model credential store is busy or unavailable. Try again.",
+        );
       recordDesktopConnectionFailure({
         connection: "model",
         code: "provider_authentication_failed",
@@ -268,14 +284,15 @@ export function createProviderOAuthProxy(
         await response.body?.cancel();
         try {
           current = await refresh(current);
-        } catch {
+        } catch (error) {
+          if (error instanceof CredentialLockUnavailable) throw error;
           throw new SignInRequired("The model sign-in could not be refreshed.");
         }
         response = await send(current);
       }
       if (!response.ok) {
         await response.body?.cancel();
-        if (response.status === 401 || response.status === 403)
+        if (response.status === 401)
           throw new SignInRequired("The model provider refused this sign-in.");
         return refused(
           response.status >= 400 ? response.status : 502,
@@ -299,6 +316,11 @@ export function createProviderOAuthProxy(
         },
       });
     } catch (error) {
+      if (error instanceof CredentialLockUnavailable)
+        return refused(
+          503,
+          "The model credential store is busy or unavailable. Try again.",
+        );
       if (error instanceof SignInRequired) {
         recordDesktopConnectionFailure({
           connection: "model",

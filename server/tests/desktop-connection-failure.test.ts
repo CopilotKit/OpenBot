@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { EventType } from "@ag-ui/client";
 import { Hono } from "hono";
-import { firstValueFrom, of } from "rxjs";
+import { firstValueFrom, of, throwError } from "rxjs";
 import {
   clearDesktopConnectionFailure,
   isModelAuthenticationError,
@@ -74,30 +74,78 @@ test("typed provider failures trigger refresh and successful model output clears
   });
 });
 
+function providerError(statusCode: number, cause?: Error) {
+  return Object.assign(
+    new Error("provider detail must not enter native status", { cause }),
+    {
+      name: "AI_APICallError",
+      statusCode,
+    },
+  );
+}
+
+function explicitAuthenticationError() {
+  return Object.assign(new Error("provider authentication failed"), {
+    name: "OpenBotModelAuthenticationError",
+  });
+}
+
 test("HTTP status and error prose from unrelated services are not model authentication", () => {
   expect(
     isModelAuthenticationError(
       Object.assign(new Error("401 model unauthorized"), { statusCode: 401 }),
     ),
   ).toBe(false);
-  for (const statusCode of [400, 404, 429, 500]) {
+  for (const statusCode of [400, 403, 404, 429, 500]) {
+    const error = providerError(statusCode);
+    expect(isModelAuthenticationError(error)).toBe(false);
     expect(
       isModelAuthenticationError(
-        Object.assign(new Error("provider issue"), {
-          name: "AI_APICallError",
-          statusCode,
-        }),
+        new Error("wrapped provider issue", { cause: error }),
       ),
     ).toBe(false);
   }
-  for (const statusCode of [401, 403]) {
+});
+
+test("provider 401 and explicit authentication markers survive SDK wrapping", () => {
+  for (const error of [providerError(401), explicitAuthenticationError()]) {
+    expect(isModelAuthenticationError(error)).toBe(true);
     expect(
       isModelAuthenticationError(
-        Object.assign(new Error("provider issue"), {
-          name: "AI_APICallError",
-          statusCode,
-        }),
+        new Error("wrapped provider issue", { cause: error }),
       ),
     ).toBe(true);
   }
+  expect(
+    isModelAuthenticationError(
+      providerError(403, explicitAuthenticationError()),
+    ),
+  ).toBe(true);
 });
+
+test.each([
+  ["provider 403 permission denial", providerError(403), false],
+  [
+    "wrapped provider 403 permission denial",
+    new Error("wrapped provider issue", { cause: providerError(403) }),
+    false,
+  ],
+  ["provider 401 invalid credentials", providerError(401), true],
+  ["explicit authentication failure", explicitAuthenticationError(), true],
+] as const)(
+  "model observation preserves %s without guessing authentication",
+  async (_label, error, requiresAuthentication) => {
+    const { read } = endpoint();
+    await expect(
+      firstValueFrom(observeModelConnection(throwError(() => error))),
+    ).rejects.toBe(error);
+    expect(await (await read()).json()).toEqual(
+      requiresAuthentication
+        ? {
+            connection: "model",
+            code: "provider_authentication_failed",
+          }
+        : null,
+    );
+  },
+);
