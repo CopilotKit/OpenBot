@@ -1747,9 +1747,11 @@ mod tests {
             .unwrap();
         thread::sleep(Duration::from_millis(50));
         stream.write_all(b"true}").unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        // Content-Length frames the response; a subsequent socket close is not part of it.
+        let expected = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}";
+        let mut response = vec![0_u8; expected.len()];
+        stream.read_exact(&mut response).unwrap();
+        assert_eq!(response, expected);
         assert_eq!(collector.bodies(), vec!["{\"ok\":true}".to_owned()]);
     }
 
