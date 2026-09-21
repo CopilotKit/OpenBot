@@ -6,7 +6,10 @@ OpenBot or CopilotKit. API keys remain available for both providers.
 ## Google Gemini
 
 Google OAuth uses the Gemini Developer API and the selected Google Cloud
-project's API quota. It does not use a personal Gemini subscription.
+project's API quota. It does not use a personal Gemini subscription. OAuth
+requests use Google's native generation API; the local server translates the
+existing agents' Chat Completions requests, streamed replies, tool calls and
+screenshots. API-key connections continue to use Google's compatibility API.
 
 Before distributing a configured desktop build, register a **Desktop app** OAuth
 client in a Google Cloud project with the Generative Language API enabled. Set
