@@ -9,6 +9,7 @@ import {
   clearDesktopConnectionFailure,
   recordDesktopConnectionFailure,
 } from "./desktop-connection-failure";
+import { googleRequest, googleResponse } from "./google-oauth-transport";
 
 export type ModelOAuthRecord = {
   version: 1;
@@ -47,7 +48,6 @@ const schema = z.object({
 const providers = {
   google: {
     token: "https://oauth2.googleapis.com/token",
-    chat: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   },
   xai: {
     token: "https://auth.x.ai/oauth2/token",
@@ -235,6 +235,18 @@ export function createProviderOAuthProxy(
       );
     }
 
+    let google: ReturnType<typeof googleRequest> | undefined;
+    if (current.provider === "google") {
+      try {
+        google = googleRequest(JSON.parse(new TextDecoder().decode(body)));
+      } catch {
+        return refused(
+          400,
+          "The Google model request has unsupported or invalid content.",
+        );
+      }
+    }
+
     const send = (credential: ModelOAuthRecord) => {
       const headers = new Headers({
         "content-type": "application/json",
@@ -242,10 +254,10 @@ export function createProviderOAuthProxy(
       });
       if (credential.provider === "google" && credential.quotaProject)
         headers.set("x-goog-user-project", credential.quotaProject);
-      return requestProvider(providers[credential.provider].chat, {
+      return requestProvider(google?.url ?? providers.xai.chat, {
         method: "POST",
         headers,
-        body,
+        body: google ? JSON.stringify(google.body) : body,
         redirect: "error",
         signal: request.signal,
       });
@@ -271,6 +283,13 @@ export function createProviderOAuthProxy(
         );
       }
       clearDesktopConnectionFailure("model");
+      if (google)
+        return await googleResponse(
+          response,
+          google.model,
+          google.stream,
+          google.includeUsage,
+        );
       return new Response(response.body, {
         status: response.status,
         headers: {

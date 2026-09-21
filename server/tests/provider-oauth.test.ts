@@ -95,15 +95,17 @@ test("Google uses provider bearer and quota project while preserving streamed mo
     );
     expect(request.headers.get("cookie")).toBeNull();
     expect(await request.json()).toMatchObject({
-      model: "chosen-model",
-      stream: true,
+      contents: [],
     });
-    return new Response('data: {"choices":[]}\n\ndata: [DONE]\n\n', {
-      headers: {
-        "content-type": "text/event-stream",
-        "set-cookie": "must-not-leave-provider",
+    return new Response(
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}\n\n',
+      {
+        headers: {
+          "content-type": "text/event-stream",
+          "set-cookie": "must-not-leave-provider",
+        },
       },
-    });
+    );
   });
   const response = await f.ask();
   expect(response.status).toBe(200);
@@ -112,7 +114,7 @@ test("Google uses provider bearer and quota project while preserving streamed mo
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.text()).toContain("data: [DONE]");
   expect(f.destinations).toEqual([
-    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "https://generativelanguage.googleapis.com/v1beta/models/chosen-model:streamGenerateContent?alt=sse",
   ]);
 });
 
@@ -151,12 +153,17 @@ test("concurrent requests refresh once and persist the rotated pair before forwa
     expect(request.headers.get("authorization")).toBe("Bearer rotated-access");
     const saved = JSON.parse(await readFile(f.file, "utf8"));
     expect(saved.refreshToken).toBe("rotated-refresh");
-    return Response.json({ choices: [] });
+    return new Response(
+      'data: {"candidates":[{"content":{"parts":[{"text":"Refreshed"}]},"finishReason":"STOP"}]}\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    );
   });
   const responses = await Promise.all(Array.from({ length: 8 }, () => f.ask()));
   expect(responses.map((response) => response.status)).toEqual(
     Array(8).fill(200),
   );
+  for (const response of responses)
+    expect(await response.text()).toContain("data: [DONE]");
   expect(refreshes).toBe(1);
   const saved = JSON.parse(await readFile(f.file, "utf8"));
   expect(saved).toMatchObject({
@@ -169,6 +176,23 @@ test("concurrent requests refresh once and persist the rotated pair before forwa
     expect((await stat(f.file)).mode & 0o777).toBe(0o600);
   expect((await f.ask()).status).toBe(200);
   expect(refreshes).toBe(1);
+});
+
+test("invalid Google requests are rejected before forwarding the provider bearer", async () => {
+  const f = await fixture(record(), () => new Response("must not be called"));
+  const response = await f.app.request(
+    "/api/model-provider/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer local-proxy-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model: "../outside", messages: [] }),
+    },
+  );
+  expect(response.status).toBe(400);
+  expect(f.destinations).toEqual([]);
 });
 
 test("an unexpired rejected xAI token is refreshed once and the request is replayed", async () => {
