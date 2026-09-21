@@ -14,8 +14,8 @@ import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import { toLangChainMessages } from "./history";
-import { readReasoningEffort } from "./model-options";
 import { apiKeyOrPlaceholder, KEY_VARIABLE, keyIsRequired } from "./model-key";
+import { readReasoningEffort } from "./model-options";
 import { streamRun } from "./stream";
 import { toolAnswer } from "./tool-answer";
 
@@ -426,6 +426,40 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
     },
   });
 }
+
+/**
+ * One failed model call must not take this Bot down.
+ *
+ * {@link streamRun} wraps the whole run in a try/catch and reports a failure as RUN_ERROR, which is
+ * the contract the surface expects. That catch only covers what the awaited iterator throws, and the
+ * graph does not run entirely inside it: a node's rejection also surfaces as a pregel task's own
+ * promise, which nothing awaits. Bun treats an unhandled rejection as fatal, so a provider answering
+ * one request with a 503 exited the process.
+ *
+ * What that cost is out of all proportion to a retryable error. Nothing brought the process back, so
+ * every later run got a connection refused from the API server instead of the provider's actual
+ * message: the deployment reported "Unable to connect", the model was overloaded, and nothing
+ * anywhere said so. `docker-compose.yml` now also restarts this service a bounded number of times,
+ * but that is the net under a genuine crash; this is the fix for the failure that was never a crash.
+ *
+ * Logged in full rather than swallowed, and the same shape the API server uses for the same reason
+ * (`server/src/index.ts`): a process that hides unhandled rejections is worse than one that dies.
+ * A run whose stream is still open has already had its RUN_ERROR from `streamRun`; this is the
+ * safety net under the cases that escape it.
+ */
+process.on("unhandledRejection", (reason) => {
+  console.error(
+    JSON.stringify({
+      type: "unhandled-rejection",
+      message: reason instanceof Error ? reason.message : String(reason),
+      code:
+        reason && typeof reason === "object" && "code" in reason
+          ? String((reason as { code: unknown }).code)
+          : undefined,
+      note: "The Bot kept running. A provider failing one request must not end every later one.",
+    }),
+  );
+});
 
 serve({
   port: PORT,

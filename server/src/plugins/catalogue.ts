@@ -299,6 +299,104 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
+  {
+    key: "gmail",
+    title: "Gmail",
+    vendor: "Google",
+    summary:
+      "Read mail threads and save replies as drafts. Cannot send: sending is SMTP, and this connector speaks only IMAP.",
+    /*
+     * IMAP rather than Google's Gmail MCP server, which is gated behind the Workspace Developer
+     * Preview a personal account cannot join, and rather than the Gmail REST API, whose
+     * `gmail.readonly` and `gmail.compose` are restricted scopes: an unverified app using them stays
+     * in Testing, where refresh tokens expire weekly. A dispute outlives that. See gmail-imap.ts.
+     *
+     * The host is informational here. The transport dials imap.gmail.com:993 itself rather than
+     * composing a URL, because IMAP is not HTTP and there is no path to append.
+     */
+    host: "imaps://imap.gmail.com",
+    path: "/",
+    transport: "gmail-imap",
+    /*
+     * One credential for the deployment, stored at /admin/credentials as `you@gmail.com:app-password`.
+     * Not `user-oauth`: an app password belongs to one mailbox, and the mailbox holding a dispute is
+     * not necessarily the mailbox of whoever opens the channel.
+     */
+    auth: Object.freeze({ kind: "deployment-bearer" }),
+    /*
+     * Writes, in the only sense available here: they add a draft to the drafts folder. Named so the
+     * audit row reads correctly and so a deny rule on `mcp.effect == "write"` catches them. There is
+     * deliberately no send tool to classify -- see the module header.
+     */
+    writeTools: Object.freeze(["create_draft", "update_draft"]),
+    docsUrl: "https://support.google.com/mail/answer/185833",
+  },
+  {
+    key: "beacon",
+    title: "Beacon",
+    vendor: "www.heybeacon.co",
+    summary:
+      "Work items, plans and the agent event stream, as whoever is asking.",
+    /*
+     * WHY THIS ENTRY EXISTS AT ALL. Beacon was reachable before this, added by hand as a custom
+     * server with one deployment-wide API key. It worked, and every write it made was anonymous:
+     * Beacon attributes an event to the member whose credential sent it, a shared key belongs to
+     * no member, and so an agent's `send_event` landed on the dashboard with no author while every
+     * event from a person's own laptop carried their name.
+     *
+     * `send_event` has an `engineer` field that overrides the attribution, and naming the person
+     * there is the workaround this entry replaces. It is a name typed into a prompt: right for one
+     * person on one deployment, wrong the moment a second person uses it, and silently wrong rather
+     * than broken. Identity belongs to the connection.
+     */
+    host: "https://www.heybeacon.co",
+    path: "/api/mcp",
+    auth: {
+      kind: "user-oauth",
+      // From https://www.heybeacon.co/.well-known/oauth-authorization-server, verified live.
+      authorizationUrl: "https://www.heybeacon.co/oauth/authorize",
+      tokenUrl: "https://www.heybeacon.co/api/oauth/token",
+      revokeUrl: "https://www.heybeacon.co/api/oauth/revoke",
+      /*
+       * Beacon publishes no `scopes_supported`, and its consent screen is the scoping, as Notion's
+       * is. An invented scope string would assert a control that does not exist, so `writeTools`
+       * below plus the action policy are the entire write barrier.
+       */
+      scopes: Object.freeze([]),
+      /*
+       * Beacon advertises a `registration_endpoint`, so the deployment registers itself and an
+       * administrator has nothing to paste in. `token_endpoint_auth_methods_supported` is
+       * `["none"]`: a public client, with PKCE (S256) carrying the proof.
+       */
+      clientRegistration: "dynamic",
+      registrationUrl: "https://www.heybeacon.co/api/oauth/register",
+    },
+    /*
+     * Over-inclusive on purpose, per the rule {@link classifyTool} imposes: an advertised tool
+     * missing from this list reads as a read, so under-inclusion is the failure that matters.
+     *
+     * The plan tools are listed although this deployment's last tool refresh did not return them.
+     * They exist on the live server, and a list that only covers what one refresh happened to see
+     * turns every later-advertised write into a silent read.
+     */
+    writeTools: Object.freeze([
+      "add_comment",
+      "add_doc_task",
+      "add_plan_tasks",
+      "add_relation",
+      "carry_forward_plan",
+      "complete_plan",
+      "create_doc",
+      "create_work_item",
+      "move_doc",
+      "send_event",
+      "toggle_doc_task",
+      "update_doc",
+      "update_plan_task",
+      "update_work_item",
+    ]),
+    docsUrl: "https://www.heybeacon.co",
+  },
 ]);
 
 const BY_KEY = new Map(CATALOGUE.map((entry) => [entry.key, entry]));

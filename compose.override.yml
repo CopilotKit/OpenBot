@@ -1,0 +1,49 @@
+services:
+  agent-computer:
+    build:
+      context: ./agent-computer
+      dockerfile: Dockerfile.opencode
+    image: openbot-agent-computer:opencode
+
+    environment:
+      # opencode's own model credential. Vercel AI Gateway is a built-in opencode
+      # provider (`@ai-sdk/gateway`) and this is the variable it reads.
+      #
+      # This is the SECOND brain: the Dev Agent decides what to do (BOT_MODEL, in
+      # .env), opencode is what actually reads the code.
+      #
+      # Falls back to OPENAI_API_KEY, which already holds a gateway key, so this
+      # works with nothing further set. Set AI_GATEWAY_API_KEY in .env to give
+      # opencode a SEPARATE, spend-capped key: the one named here is readable by any
+      # Bot with a shell on this computer, and the fallback makes that the same key
+      # the API server and the Dev Agent use.
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-${OPENAI_API_KEY:-}}
+
+      # Setting the variable above is not enough on its own.
+      #
+      # agent-computer/src/shell.ts builds every shell command's environment from an
+      # allow list (PATH, locale, terminal, proxy) and drops everything else, so that
+      # a Bot running `env` cannot print the deployment's secrets. COMPUTER_SHELL_ENV
+      # is the operator's opt-in: naming a variable here says this Bot may read it.
+      #
+      # Comma separated. Every name added here is readable by ANY Bot with a shell on
+      # this computer, so keep the list as short as it can be.
+      COMPUTER_SHELL_ENV: AI_GATEWAY_API_KEY
+
+    volumes:
+      # Bind-mount ~/Documents so ALL projects under it are accessible
+      - ~/Documents:/workspace/projects:rw
+
+      # Git credentials from host (for push/pull).
+      #
+      # These live under /workspace, NOT /home/opencode. Shell commands run with
+      # HOME=/workspace (shell.ts sets it), so that is the only home directory ssh,
+      # git and gh will ever look in. Mounted at /home/opencode they were read by
+      # nothing at all.
+      - ~/.ssh:/workspace/.ssh:ro
+      - ~/.gitconfig:/workspace/.gitconfig:ro
+      - ~/.config/gh:/workspace/.config/gh:ro
+
+      # opencode's config, at the path it resolves to when HOME=/workspace.
+      # Read-only: opencode writes its state to ~/.local/share/opencode, not here.
+      - ./agent-computer/opencode.json:/workspace/.config/opencode/opencode.json:ro

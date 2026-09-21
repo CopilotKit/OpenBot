@@ -1,0 +1,27 @@
+# Custom agent-computer image with OpenCode installed
+# Based on the LOCAL agent-computer Dockerfile (since published image is private)
+FROM openbot-agent-computer:latest
+
+USER root
+
+# Install OpenCode
+# Check https://opencode.ai/docs/ for latest install method
+RUN curl -fsSL https://opencode.ai/install | bash
+
+# Add OpenCode to PATH for all shells (not just interactive)
+ENV PATH="/root/.opencode/bin:${PATH}"
+
+# Install GitHub CLI (gh)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && apt-get update \
+  && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
+
+# Optional: Install pnpm if your projects use it (adjust as needed)
+RUN npm install -g pnpm
+
+# Optional: Install other global tools your projects need
+# RUN npm install -g typescript tsx
+
+# Stay as root (base image runs as root)

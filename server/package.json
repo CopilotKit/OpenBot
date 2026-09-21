@@ -28,6 +28,8 @@
     "drizzle-orm": "^0.45.2",
     "eventsource": "3.0.7",
     "hono": "^4.10.0",
+    "imapflow": "^2.0.2",
+    "mailparser": "^3.9.26",
     "postgres": "^3.4.9",
     "rxjs": "7.8.1",
     "yaml": "^2.9.0",

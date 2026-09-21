@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.agents/skills/beacon-insights/session-start-hook.mjs\"",
+            "timeout": 8
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.agents/skills/beacon-insights/beacon-hook.mjs\" tool",
+            "timeout": 8
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.agents/skills/beacon-insights/beacon-hook.mjs\" stop",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.agents/skills/beacon-insights/beacon-hook.mjs\" session-end",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

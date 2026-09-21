@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "model": "vercel/openai/gpt-5.6-sol",
+  "small_model": "vercel/openai/gpt-5.6-sol-fast",
+  "enabled_providers": ["vercel"],
+
+  "autoupdate": false,
+  "share": "disabled",
+
+  "permission": {
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "webfetch": "allow",
+
+    "edit": "deny",
+    "bash": "deny",
+    "external_directory": "deny"
+  }
+}

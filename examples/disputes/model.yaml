@@ -1,0 +1,4 @@
+model:
+  provider: openai
+  credential_secret_ref: openai-api-key
+  default_model: gpt-5.6-terra

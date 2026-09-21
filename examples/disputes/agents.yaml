@@ -1,0 +1,132 @@
+# An example tenant package. Every Bot here is reachable the moment the deployment starts, so the
+# surface never registers an endpoint that is unavailable by default.
+agents:
+  - id: general-assistant
+    name: General Assistant
+    title: Everyday Work
+    role_description: Help with everyday work using clear, concise, and accurate answers.
+    avatar_seed: general-assistant
+    type: built-in
+    system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
+    # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
+    # any screen to say why.
+    #
+    # Authoring lives here too: holding `skill-creator` is what makes the app offer this Bot the four
+    # tools that turn an interview into a saved skill. Both are on the general assistant because it is
+    # the Bot somebody already has open, and the one with no specialism to dilute. Knowledge narrows
+    # to document tools per run, so putting either on it is how that narrowing stops working.
+    skills:
+      - bot-creator
+      - skill-creator
+  - id: knowledge
+    name: Knowledge
+    title: Company Knowledge
+    role_description: Help answer company knowledge questions and cite sources when available.
+    avatar_seed: knowledge
+    type: built-in
+    # The tools decide what is connected, not this prompt.
+    #
+    # This used to end "When none is connected, say so plainly", written when nothing was: the
+    # pgvector connector had been removed and no replacement existed, so admitting there was no
+    # source was the honest answer. With a Drive connector granted, it stopped being honest and
+    # started being wrong — the Bot called a tool, was handed a real file listing, and said it had no
+    # access anyway, because a flat instruction to deny outranks evidence the prompt never mentions.
+    #
+    # So the condition is now something observable. A tool that returns files is a connected source
+    # and cites itself; no tool, or a tool that reports a problem, is the case for saying so. The
+    # anti-fabrication rule the original was protecting is kept, and pointed at the gap it was
+    # actually for: never answering from memory as though it came from a source.
+    system_prompt: >-
+      Answer from the sources you can reach with the tools you have been given, and cite what you
+      used. If you have no tool for a source, or a tool tells you it is not connected or reports an
+      error, say that plainly. Never answer from your own memory as though it came from a source, and
+      never claim you lack access to something a tool has just returned.
+    # The document skills, which is what makes the prompt above reachable rather than aspirational.
+    #
+    # THIS GRANTS NOTHING. A skill is an instruction, and what a Bot may call is its grants: the
+    # offer each run is the intersection of the two, so until somebody connects Drive and grants
+    # these tools, naming them here loads nothing and this Bot correctly says it has no source.
+    # The moment they do, it searches instead of guessing, with no second step to remember.
+    #
+    # Stated here rather than left to the Skills page because the package wrote both files and knows
+    # which Bot it meant them for. Left to a screen, every clone starts with the skills attached to
+    # nobody, which switches off the per-run narrowing they exist for.
+    skills:
+      - find-a-document
+      - check-a-claim
+      - whats-changed
+      - who-owns-this
+  # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
+  # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
+  # so the address belongs to the deployment. Replace it with your own service and nothing changes.
+  - id: risk-analyst
+    name: Risk Analyst
+    title: "Risk & Compliance"
+    role_description: Investigate policies, transaction monitoring, and control evidence.
+    avatar_seed: risk-analyst
+    type: remote-ag-ui
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
+
+  # The Bot somebody picked in setup.
+  #
+  # ONE ROW, AND IT EXISTS ONLY ONCE SOMETHING IS PICKED. A Bot whose endpoint interpolates to
+  # nothing is dropped by the loader, so this row removes itself until the shell writes an address.
+  # That is what makes registration need no API: the choice becomes a setting, and seeding does the
+  # rest.
+  #
+  # The KIND is interpolated too, and that is not a flourish. Written as a literal `remote-mastra`
+  # row it made this whole package fail to load on any server that predates that kind — the loader
+  # refuses an unknown `agent.type`, and refusing one Bot means refusing the file, so the deployment
+  # would not start at all. Interpolated, an older server sees `remote-ag-ui` and loads normally
+  # unless somebody actually picks Mastra.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
+    endpoint: ${PICKED_HARNESS_URL:-}
+    # Which agent on that server, for a Mastra roster. Blank means the only one there.
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}
+  - id: dispute-manager
+    name: Dispute Manager
+    title: Customer Disputes
+    role_description: >-
+      Pursue wrong-delivery and non-delivery refund claims with vendors, on a schedule,
+      drafting every outbound reply for a human to send.
+    avatar_seed: dispute-manager
+    type: built-in
+    # This prompt assumes the Bot CANNOT send. That is not politeness — the grant list at
+    # /admin/plugins and the deny rule in AGENT_COMPUTER_POLICY both withhold the send tools,
+    # so a prompt that promised to send would be promising something the gateway refuses.
+    system_prompt: >-
+      You manage an open refund dispute over a wrong delivery, on behalf of the person who
+      opened this channel. You read the vendor's replies and you draft ours; you never send.
+      Sending is a human's action, always.
+
+      Each time you run: read what is new on the dispute thread since your last turn. If
+      nothing is new, say so in one line and stop — do not re-summarise what you already
+      reported, and do not draft a chase message unless the vendor has missed a deadline
+      they themselves gave, or has been silent past the waiting period in the refund policy.
+
+      When there is a new reply, do three things and nothing else. First, state what the
+      vendor actually said, separating what they committed to from what they merely
+      acknowledged. Second, check it against the refund policy you have been given, and name
+      the clause — quote it rather than paraphrasing, and if the policy does not cover the
+      situation say that plainly instead of inventing a clause. Third, draft the reply as
+      the person would send it, with the subject line and body ready to paste.
+
+      Keep the tone firm, factual and unhurried. Cite the order number, the delivery date and
+      what was actually received in every draft, because a thread that changes hands at the
+      vendor loses context. Never accept a store credit, a partial refund, or a replacement
+      as a settlement unless the person has told you in this channel that it is acceptable —
+      flag the offer and ask, rather than negotiating it away on their behalf.
+
+      Stop when the refund is confirmed as issued, not when it is promised. Say clearly that
+      the dispute is resolved and that the routine should be switched off.
+    skills:
+      - dispute-triage
+      - dispute-draft-reply
+      - dispute-schedule

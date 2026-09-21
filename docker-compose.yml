@@ -374,6 +374,13 @@ services:
       AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Bounded, and not `unless-stopped`, because the two ways this service exits are different
+    # things. A crash mid-run is worth retrying: the Bot was working and something transient took
+    # it out. A refusal to start is not — this process exits 1 on a missing MANAGED_AGENT_TOKEN, an
+    # unknown provider, a reasoning effort its API cannot carry — and those are deliberate, designed
+    # to fail in front of whoever is deploying. `unless-stopped` would turn each of them into a
+    # restart loop that looks like a flapping service rather than the configuration error it is.
+    restart: on-failure:3
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4201/health')\""]
       interval: 10s

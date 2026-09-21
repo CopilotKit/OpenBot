@@ -1,5 +1,6 @@
 import * as builtinRoutines from "./builtin-routines";
 import * as composio from "./composio";
+import * as gmailImap from "./gmail-imap";
 import * as driveRest from "./google-drive-rest";
 import type { ListedTool, McpCallResult } from "./mcp";
 import * as mcp from "./mcp";
@@ -118,6 +119,7 @@ export type VendorTransport = {
 export type TransportKind =
   | "mcp"
   | "google-drive-rest"
+  | "gmail-imap"
   | "builtin-routines"
   | "composio";
 
@@ -143,6 +145,14 @@ export type CuratedTransportKind = Exclude<TransportKind, "composio">;
 const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
+  /*
+   * Not HTTP at all. Gmail's own MCP server is gated behind a Workspace developer preview a
+   * personal account cannot join, and the REST API's `gmail.readonly` and `gmail.compose` are
+   * restricted scopes that keep an unverified app in Testing, where refresh tokens expire weekly.
+   * IMAP over TLS has neither problem, so this adapter dials imap.gmail.com itself and composes no
+   * URL at all — which is why its catalogue entry's `host` is informational. See gmail-imap.ts.
+   */
+  "gmail-imap": gmailImap,
   "builtin-routines": builtinRoutines,
   composio,
 };

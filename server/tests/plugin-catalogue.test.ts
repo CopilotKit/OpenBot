@@ -106,6 +106,13 @@ describe("which servers this deployment will talk to", () => {
         // https requirement below does not apply. Asserted positively instead, so this branch
         // cannot quietly become a loophole for a future entry that DOES dial a real host.
         expect(entry.host).toBe("builtin://routines");
+      } else if (entry.transport === "gmail-imap") {
+        // Not HTTP at all: IMAP over TLS, dialled by the transport rather than composed into a
+        // URL. The https requirement below encodes "we only speak to pinned, encrypted hosts",
+        // which this satisfies by a different scheme -- so the invariant is kept and the spelling
+        // widened. Asserted as an exact string for the same reason as the builtin branch above:
+        // one named host, not a scheme any future entry could claim.
+        expect(entry.host).toBe("imaps://imap.gmail.com");
       } else {
         expect(entry.host.startsWith("https://")).toBe(true);
       }
@@ -595,4 +602,71 @@ test("a recorded read cannot take an action off a curated entry's write list", (
   // And the empty string is a recorded value rather than a silence, so it does not fall through to
   // the write list and read as a read for an action the list omits.
   expect(classifyTool(notion, "notion-fetch", true, "")).toBe("write");
+});
+
+/**
+ * Beacon's entry exists for one reason, and it is not reachability: it was already reachable as a
+ * custom server with a deployment-wide API key. It exists so that a write carries a person.
+ *
+ * Beacon attributes an event to the member whose credential sent it. A shared key belongs to no
+ * member, so every agent write landed anonymous while the same event sent from somebody's laptop
+ * carried their name. Nothing errored; the dashboard just quietly under-reported. These tests pin
+ * the properties that make that impossible to reintroduce by editing the entry.
+ */
+describe("Beacon", () => {
+  const entry = catalogueEntry("beacon");
+
+  test("is in the catalogue with the MCP transport", () => {
+    expect(entry).not.toBeNull();
+    expect(entry?.transport).toBeUndefined();
+    expect(entry?.host).toBe("https://www.heybeacon.co");
+    expect(entry?.path).toBe("/api/mcp");
+  });
+
+  /**
+   * The whole point. `deployment-bearer` here would compile, work, and silently restore the bug.
+   */
+  test("is reached as the person asking, not as the deployment", () => {
+    expect(entry?.auth.kind).toBe("user-oauth");
+    expect(serverCredentialKind(entry as CatalogueEntry)).not.toBe("mcp");
+  });
+
+  test("registers its client dynamically, with every endpoint pinned to https", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth.clientRegistration).toBe("dynamic");
+    expect(entry.auth.registrationUrl).toBe(
+      "https://www.heybeacon.co/api/oauth/register",
+    );
+    expect(entry.auth.authorizationUrl).toBe(
+      "https://www.heybeacon.co/oauth/authorize",
+    );
+    expect(entry.auth.tokenUrl).toBe(
+      "https://www.heybeacon.co/api/oauth/token",
+    );
+    expect(entry.auth.revokeUrl).toBe(
+      "https://www.heybeacon.co/api/oauth/revoke",
+    );
+    // Beacon publishes no scopes_supported; its consent screen is the scoping.
+    expect(entry.auth.scopes).toEqual([]);
+  });
+
+  /**
+   * `send_event` is the one that matters most and is the easiest to read as a read: it reports,
+   * it does not change a work item. It appends to a stream people are measured by, so it is a
+   * write, and an unlisted tool is classified as a read.
+   */
+  test("classifies reporting and record-changing tools as writes", () => {
+    expect(classifyTool(entry, "send_event", true)).toBe("write");
+    expect(classifyTool(entry, "create_work_item", true)).toBe("write");
+    expect(classifyTool(entry, "update_work_item", true)).toBe("write");
+    expect(classifyTool(entry, "add_comment", true)).toBe("write");
+    expect(classifyTool(entry, "add_plan_tasks", true)).toBe("write");
+  });
+
+  test("leaves the query tools as reads", () => {
+    expect(classifyTool(entry, "query_events", true)).toBe("read");
+    expect(classifyTool(entry, "search_knowledge", true)).toBe("read");
+    expect(classifyTool(entry, "list_work_items", true)).toBe("read");
+    expect(classifyTool(entry, "get_work_item", true)).toBe("read");
+  });
 });
