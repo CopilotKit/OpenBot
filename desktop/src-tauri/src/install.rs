@@ -215,8 +215,8 @@ fn ensure_bun_with(
     install: impl FnOnce() -> Result<PathBuf, Problem>,
 ) -> Result<PathBuf, Problem> {
     match existing {
-        Some(path) => Ok(path),
-        None => install(),
+        Some(path) if verify_bun(&path).is_ok() => Ok(path),
+        _ => install(),
     }
 }
 
@@ -338,7 +338,7 @@ fn extract_bun(archive: &Path, target: &Path, entry: &str) -> Result<(), Problem
     Ok(())
 }
 
-fn verify_bun(binary: &Path) -> Result<(), Problem> {
+pub(crate) fn verify_bun(binary: &Path) -> Result<(), Problem> {
     let output = crate::quiet::command(binary)
         .arg("--version")
         .output()
@@ -992,11 +992,41 @@ mod tests {
 
     #[test]
     fn an_existing_bun_does_not_trigger_installation() {
-        let existing = PathBuf::from("existing user runtime/bun.exe");
+        let root = temp_root("existing-pinned-bun");
+        let existing = runtime_version_fixture(&root, BUN);
         assert_eq!(
             ensure_bun_with(Some(existing.clone()), || panic!("already installed")).unwrap(),
             existing
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn runtime_version_fixture(root: &Path, version: &str) -> PathBuf {
+        std::fs::create_dir_all(root).unwrap();
+        let source = root.join("runtime.rs");
+        std::fs::write(&source, format!("fn main() {{ assert_eq!(std::env::args().nth(1).as_deref(), Some(\"--version\")); println!({version:?}); }}")).unwrap();
+        let binary = root.join(format!("bun{}", std::env::consts::EXE_SUFFIX));
+        crate::test_support::compile_fixture(&source, &binary);
+        binary
+    }
+
+    #[test]
+    fn unsupported_existing_bun_acquires_pinned_runtime_without_changing_user_binary() {
+        let root = temp_root("unsupported-existing-bun");
+        let existing = runtime_version_fixture(&root.join("user"), "1.2.15");
+        let pinned = runtime_version_fixture(&root.join("openbot"), BUN);
+        let before = std::fs::read(&existing).unwrap();
+        let chosen = ensure_bun_with(Some(existing.clone()), || Ok(pinned.clone())).unwrap();
+        assert_eq!(
+            chosen, pinned,
+            "an incompatible user runtime must not be selected"
+        );
+        assert_eq!(
+            std::fs::read(existing).unwrap(),
+            before,
+            "the user's runtime is untouched"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -6,11 +6,19 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
+type ProgressEvent = {
+  step: string;
+  ok: boolean;
+  detail: string;
+  running?: boolean;
+  downloadBytes?: number;
+};
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -22,7 +30,7 @@ let invokeHandler: Invoke = async () => {
   throw new Error("invoke handler was not installed");
 };
 const progressListeners = new Set<
-  (event: { payload: { step: string; ok: boolean; detail: string } }) => void
+  (event: { payload: ProgressEvent }) => void
 >();
 
 mock.module("@tauri-apps/api/core", () => ({
@@ -35,9 +43,7 @@ mock.module("@tauri-apps/api/core", () => ({
 mock.module("@tauri-apps/api/event", () => ({
   listen: async (
     name: string,
-    listener: (event: {
-      payload: { step: string; ok: boolean; detail: string };
-    }) => void,
+    listener: (event: { payload: ProgressEvent }) => void,
   ) => {
     if (name === "setup:progress") progressListeners.add(listener);
     return () => progressListeners.delete(listener);
@@ -102,8 +108,196 @@ function installationCalls() {
   );
 }
 
+async function beginPendingInstallation() {
+  setupRootConfiguration("/tmp/install-progress", async () =>
+    emptyConfiguration(),
+  );
+  let preparation = deferred<void>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "prepare_installation"
+      ? preparation.promise
+      : previous(command, args);
+  const view = await renderApp();
+  await enterInstallation(view);
+  await userEvent.click(view.getByRole("button", { name: "Install OpenBot" }));
+  return {
+    view,
+    preparation,
+    retry: async () => {
+      preparation = deferred<void>();
+      await userEvent.click(
+        view.getByRole("button", { name: "Retry installation" }),
+      );
+      return preparation;
+    },
+  };
+}
+
+async function emitProgress(payload: ProgressEvent) {
+  await act(async () => {
+    for (const listener of progressListeners) listener({ payload });
+  });
+}
+
+test("installation shows its active stage immediately and advances elapsed time", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  const engine = within(
+    view.getByRole("listitem", { name: "Container engine" }),
+  );
+  expect(engine.getByText("Checking the software OpenBot needs.")).toBeTruthy();
+  expect(engine.getByText("In progress")).toBeTruthy();
+  expect(engine.queryByText("✓")).toBeNull();
+  await waitFor(() => expect(engine.getByText(/1s elapsed/)).toBeTruthy(), {
+    timeout: 1800,
+  });
+  await act(async () => preparation.resolve());
+  expect(engine.getByText("Complete")).toBeTruthy();
+  expect(engine.getByText("✓")).toBeTruthy();
+  expect(view.queryByText("In progress") === null).toBe(true);
+  expect(view.queryByText(/elapsed/)).toBeNull();
+});
+
+test("running updates show real download bytes without completing a stage early", async () => {
+  const { view, preparation } = await beginPendingInstallation();
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    detail: "Docker is answering.",
+  });
+  await emitProgress({
+    step: "dependencies",
+    ok: true,
+    running: true,
+    detail: "Downloading the local runtime.",
+    downloadBytes: 2_400_000,
+  });
+  const dependencies = within(
+    view.getByRole("listitem", { name: "Dependencies" }),
+  );
+  expect(dependencies.getByText("In progress")).toBeTruthy();
+  expect(dependencies.getByText(/2.4 MB downloaded/)).toBeTruthy();
+  expect(dependencies.queryByText("✓")).toBeNull();
+  await emitProgress({
+    step: "dependencies",
+    ok: true,
+    running: true,
+    detail: "Downloading the local runtime.",
+    downloadBytes: 5_700_000,
+  });
+  expect(view.getAllByRole("listitem", { name: "Dependencies" })).toHaveLength(
+    1,
+  );
+  expect(dependencies.getByText(/5.7 MB downloaded/)).toBeTruthy();
+  expect(dependencies.queryByText(/2.4 MB downloaded/)).toBeNull();
+  expect(dependencies.queryByText("Complete")).toBeNull();
+  await emitProgress({
+    step: "dependencies",
+    ok: true,
+    running: false,
+    detail: "Local runtime installed.",
+  });
+  expect(dependencies.getByText("Complete")).toBeTruthy();
+  expect(dependencies.getByText("✓")).toBeTruthy();
+  expect(dependencies.queryByText("In progress")).toBeNull();
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software (2/4).",
+  });
+  expect(view.getByText("Downloading local software (2/4).")).toBeTruthy();
+  await act(async () => preparation.resolve());
+  expect(view.queryByText("In progress") === null).toBe(true);
+});
+
+test("installation failure stops active indicators and retry begins fresh", async () => {
+  const { view, preparation, retry } = await beginPendingInstallation();
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    running: false,
+    detail: "Docker is answering.",
+  });
+  await emitProgress({
+    step: "dependencies",
+    ok: true,
+    running: true,
+    detail: "Installing the local runtime.",
+  });
+  await act(async () =>
+    preparation.reject({ said: "The download was interrupted." }),
+  );
+  const dependencies = within(
+    view.getByRole("listitem", { name: "Dependencies" }),
+  );
+  expect(dependencies.getByText("Failed")).toBeTruthy();
+  expect(dependencies.getByText("✗")).toBeTruthy();
+  expect(dependencies.getByText("The download was interrupted.")).toBeTruthy();
+  expect(view.queryByText("In progress") === null).toBe(true);
+  expect(view.queryByText(/elapsed/)).toBeNull();
+  expect(
+    within(view.getByRole("listitem", { name: "Container engine" })).getByText(
+      "Complete",
+    ),
+  ).toBeTruthy();
+  const secondAttempt = await retry();
+  expect(view.queryByRole("listitem", { name: "Dependencies" })).toBeNull();
+  expect(view.queryByText("Failed")).toBeNull();
+  expect(view.getByText("In progress")).toBeTruthy();
+  expect(view.queryByRole("alert")).toBeNull();
+  await act(async () => secondAttempt.resolve());
+  expect(view.queryByText("In progress") === null).toBe(true);
+  expect(
+    view.getByRole("heading", { name: "Installation complete" }),
+  ).toBeTruthy();
+});
+
+test.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])(
+  "startup settles active progress (automatic=%s, succeeds=%s)",
+  async (automatic, succeeds) => {
+    useInterruptedShutdownSetup();
+    const launch = deferred<void>();
+    const previous = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "last_failure" && automatic) return null;
+      if (command === "start_stack") return launch.promise;
+      return previous(command, args);
+    };
+    const view = await renderApp();
+    if (!automatic)
+      await userEvent.click(
+        view.getByRole("button", { name: "Start OpenBot" }),
+      );
+    await emitProgress({
+      step: "services",
+      ok: true,
+      running: true,
+      detail: "Starting local services.",
+    });
+    expect(view.getByText("In progress")).toBeTruthy();
+    await act(async () => {
+      if (succeeds) launch.resolve();
+      else launch.reject({ said: "Local services could not start." });
+    });
+    expect(view.queryByText("In progress") === null).toBe(true);
+    const services = within(view.getByRole("listitem", { name: "Containers" }));
+    expect(services.getByText(succeeds ? "Complete" : "Failed")).toBeTruthy();
+    expect(services.getByText(succeeds ? "✓" : "✗")).toBeTruthy();
+    if (!succeeds)
+      expect(
+        view.getByRole("button", { name: "Start OpenBot" }),
+      ).toHaveProperty("disabled", false);
+  },
+);
+
 test("installation completes before either sign-in is available", async () => {
-  useRootConfigurationSetup("/tmp/install-before-signin", async () =>
+  setupRootConfiguration("/tmp/install-before-signin", async () =>
     emptyConfiguration(),
   );
   const preparation = deferred<void>();
@@ -164,6 +358,11 @@ test("installation completes before either sign-in is available", async () => {
   expect(
     view.getByRole("heading", { name: "Installation complete" }),
   ).toBeTruthy();
+  expect(
+    view
+      .getByRole("button", { name: "Repair installation" })
+      .closest("details"),
+  ).toHaveProperty("open", false);
   expect(view.queryByRole("heading", { name: "Connect your AI" })).toBeNull();
   await userEvent.click(
     view.getByRole("button", { name: "Continue to sign in" }),
@@ -171,8 +370,73 @@ test("installation completes before either sign-in is available", async () => {
   expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
 });
 
+test("CopilotKit Back preserves the selected AI and connection settings", async () => {
+  setupRootConfiguration("/tmp/back-preserves-setup", async () =>
+    emptyConfiguration(),
+  );
+  const view = await renderApp();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    view.getByText("Point at your own Intelligence server"),
+  );
+  await userEvent.type(view.getByLabelText("Project key"), "project-test-key");
+  const api = view.getByLabelText("API URL");
+  await user.clear(api);
+  await user.type(api, "https://intelligence.example/api");
+  const gateway = view.getByLabelText("Gateway WebSocket URL");
+  await user.clear(gateway);
+  await user.type(gateway, "wss://intelligence.example/ws");
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
+  expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
+  expect(view.getByRole("radio", { name: /OpenAI/ })).toHaveProperty(
+    "checked",
+    true,
+  );
+  expect(view.getByLabelText("OpenAI API key")).toHaveProperty(
+    "value",
+    "model-test-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(
+    view.getByRole("heading", { name: "Connect to CopilotKit" }),
+  ).toBeTruthy();
+  await userEvent.click(
+    view.getByText("Point at your own Intelligence server"),
+  );
+  expect(view.getByLabelText("Project key")).toHaveProperty(
+    "value",
+    "project-test-key",
+  );
+  expect(view.getByLabelText("API URL")).toHaveProperty(
+    "value",
+    "https://intelligence.example/api",
+  );
+  expect(view.getByLabelText("Gateway WebSocket URL")).toHaveProperty(
+    "value",
+    "wss://intelligence.example/ws",
+  );
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  expect(
+    view.queryByRole("button", { name: "Change AI connection" }) === null,
+  ).toBe(true);
+  expect(
+    view
+      .getByRole("button", { name: "Change installation" })
+      .closest("details"),
+  ).toHaveProperty("open", false);
+  expect(installationCalls()).toHaveLength(1);
+});
+
 test("failed installation blocks sign-in and retries before reporting completion", async () => {
-  useRootConfigurationSetup("/tmp/install-retry", async () =>
+  setupRootConfiguration("/tmp/install-retry", async () =>
     emptyConfiguration(),
   );
   const previous = invokeHandler;
@@ -211,7 +475,7 @@ test("failed installation blocks sign-in and retries before reporting completion
 });
 
 test("provider sign-in retries and Back reuse the completed local installation", async () => {
-  useRootConfigurationSetup("/tmp/provider-retry", async () =>
+  setupRootConfiguration("/tmp/provider-retry", async () =>
     emptyConfiguration(),
   );
   const previous = invokeHandler;
@@ -260,7 +524,7 @@ test("provider sign-in retries and Back reuse the completed local installation",
 });
 
 test("a completed installation can be repaired after a provider reports missing assets", async () => {
-  useRootConfigurationSetup("/tmp/repair-installation", async () =>
+  setupRootConfiguration("/tmp/repair-installation", async () =>
     emptyConfiguration(),
   );
   const previous = invokeHandler;
@@ -293,6 +557,7 @@ test("a completed installation can be repaired after a provider reports missing 
   );
   await view.findByText("Return to Install and try again.");
   await userEvent.click(view.getByRole("button", { name: "Back" }));
+  await userEvent.click(view.getByText("Installation options"));
   await userEvent.click(
     view.getByRole("button", { name: "Repair installation" }),
   );
@@ -345,7 +610,7 @@ test.each([false, true])(
   "reopening a successful setup starts its saved root and connections without the wizard or Ask (Strict Mode=%s)",
   async (strictMode) => {
     const root = "/tmp/successful-setup-root";
-    useRootConfigurationSetup("/tmp/default-root", async () => ({
+    setupRootConfiguration("/tmp/default-root", async () => ({
       values: {
         INTELLIGENCE_API_URL: "https://own.example/api",
         INTELLIGENCE_GATEWAY_WS_URL: "wss://own.example/ws",
@@ -397,7 +662,7 @@ test.each([false, true])(
 );
 
 test("a failed automatic reopen offers recovery without retrying or installing", async () => {
-  useRootConfigurationSetup("/tmp/reopen-failure", async () => ({
+  setupRootConfiguration("/tmp/reopen-failure", async () => ({
     ...savedOpenAiConfiguration(),
     saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
     launch: { harness: { id: "langgraph" } },
@@ -428,7 +693,7 @@ test("a failed automatic reopen offers recovery without retrying or installing",
 
 test("menu Stop retains the installed root for explicit Start without the wizard", async () => {
   const root = "/tmp/menu-stopped-installation";
-  useRootConfigurationSetup(root, async () => ({
+  setupRootConfiguration(root, async () => ({
     ...savedOpenAiConfiguration(),
     saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
     launch: { harness: { id: "mastra" } },
@@ -457,7 +722,7 @@ test("menu Stop retains the installed root for explicit Start without the wizard
 });
 
 test("completed local installation resumes at sign-in when it has never launched", async () => {
-  useRootConfigurationSetup("/tmp/installed-before-signin", async () => ({
+  setupRootConfiguration("/tmp/installed-before-signin", async () => ({
     ...emptyConfiguration(),
     installation: { harness: { id: "mastra" } },
   }));
@@ -507,7 +772,7 @@ test.each(["reopen", "runtime"])(
   async (source) => {
     const root = "/tmp/organization-installation";
     const authorityUrl = "https://company.example";
-    useRootConfigurationSetup(root, async () => ({
+    setupRootConfiguration(root, async () => ({
       ...savedOpenAiConfiguration(),
       values: { OPENBOT_ORGANIZATION_AUTH_URL: authorityUrl },
       saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
@@ -578,7 +843,7 @@ test.each(["model", "intelligence"])(
   "an unavailable saved %s connection opens only its refresh screen and returns to the existing app",
   async (connection) => {
     const root = "/tmp/installed-refresh";
-    useRootConfigurationSetup(root, async () => ({
+    setupRootConfiguration(root, async () => ({
       ...savedOpenAiConfiguration(),
       saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
       launch: { harness: { id: "mastra" } },
@@ -654,7 +919,7 @@ test.each(["model", "intelligence"])(
 test("reopening a retained root waits for its saved setup without flashing the wizard", async () => {
   const root = "/tmp/reopen-pending-configuration";
   const configuration = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
-  useRootConfigurationSetup(root, async () => configuration.promise);
+  setupRootConfiguration(root, async () => configuration.promise);
   const previous = invokeHandler;
   invokeHandler = async (command, args) => {
     if (command === "selected_root") return root;
@@ -676,7 +941,7 @@ test("reopening a retained root waits for its saved setup without flashing the w
 function useInterruptedShutdownSetup() {
   const root = "/tmp/interrupted-shutdown-root";
   const notice = "OpenBot had trouble shutting down last time.";
-  useRootConfigurationSetup("/tmp/default-root", async () => ({
+  setupRootConfiguration("/tmp/default-root", async () => ({
     values: {
       INTELLIGENCE_API_URL: "https://own.example/api",
       INTELLIGENCE_GATEWAY_WS_URL: "wss://own.example/ws",
@@ -786,7 +1051,7 @@ test.each(["model", "root", "Intelligence"])(
 test.each(["supervisor", "windows"])(
   "automatic reopen respects the existing %s blocker",
   async (blocker) => {
-    useRootConfigurationSetup("/tmp/reopen-blocked", async () => ({
+    setupRootConfiguration("/tmp/reopen-blocked", async () => ({
       ...savedOpenAiConfiguration(),
       saved: { ...savedOpenAiConfiguration().saved, model: "open-ai-api-key" },
       launch: { harness: { id: "langgraph" } },
@@ -822,7 +1087,7 @@ test.each(["supervisor", "windows"])(
 );
 
 test("setup records telemetry without a consent gate and deduplicates viewed steps", async () => {
-  useRootConfigurationSetup("/tmp/private-setup-root", async () =>
+  setupRootConfiguration("/tmp/private-setup-root", async () =>
     emptyConfiguration(),
   );
   const previous = invokeHandler;
@@ -962,7 +1227,7 @@ function emptyConfiguration() {
   };
 }
 
-function useRootConfigurationSetup(
+function setupRootConfiguration(
   rootA: string,
   loadConfiguration: (root: string) => Promise<unknown>,
 ) {
@@ -1025,7 +1290,7 @@ function useRootConfigurationSetup(
 }
 
 test("Windows detection failure blocks setup and displays its diagnostic", async () => {
-  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+  setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),
   );
   const setupHandler = invokeHandler;
@@ -1054,7 +1319,7 @@ test("Windows detection failure blocks setup and displays its diagnostic", async
 });
 
 test("a failed Windows blocker instruction is visible instead of an empty blocker", async () => {
-  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+  setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),
   );
   const setupHandler = invokeHandler;
@@ -1073,7 +1338,7 @@ test("a failed Windows blocker instruction is visible instead of an empty blocke
 });
 
 test("a successfully detected missing WSL feature keeps its setup instruction", async () => {
-  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+  setupRootConfiguration("/tmp/openbot-windows-detection-test", async () =>
     emptyConfiguration(),
   );
   const setupHandler = invokeHandler;
@@ -1091,7 +1356,7 @@ test("a successfully detected missing WSL feature keeps its setup instruction", 
 });
 
 test("disabled Virtual Machine Platform displays its feature-specific fix and blocks setup", async () => {
-  useRootConfigurationSetup("/tmp/openbot-vmp-detection-test", async () =>
+  setupRootConfiguration("/tmp/openbot-vmp-detection-test", async () =>
     emptyConfiguration(),
   );
   const setupHandler = invokeHandler;
@@ -1564,9 +1829,118 @@ test("empty Intelligence projects keep sign-in retryable while Start waits for a
   );
 });
 
+async function enterProjectSelection() {
+  setupRootConfiguration("/tmp/create-project", async () =>
+    emptyConfiguration(),
+  );
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "begin_intelligence_sign_in")
+      return "https://copilotkit.test/sign-in";
+    if (command === "finish_intelligence_sign_in") return [];
+    if (command === "intelligence_key_for") return "created-project-key";
+    return previous(command, args);
+  };
+  const view = await renderApp();
+  await enterInstallation(view);
+  await completeInstallation(view);
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.type(view.getByLabelText("OpenAI API key"), "model-test-key");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+  return view;
+}
+
+test("creating a named project connects it only after the user submits", async () => {
+  const view = await enterProjectSelection();
+  const creation = deferred<{ id: string; name: string }>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) =>
+    command === "create_intelligence_project"
+      ? creation.promise
+      : previous(command, args);
+  expect(
+    invokeCalls.some((call) => call.command === "create_intelligence_project"),
+  ).toBe(false);
+  const create = view.getByRole("button", { name: "Create project" });
+  expect(create).toHaveProperty("disabled", true);
+  await userEvent.type(
+    view.getByLabelText("New project name"),
+    "  OpenBot workspace  ",
+  );
+  await userEvent.click(create);
+  expect(invokeCalls).toContainEqual({
+    command: "create_intelligence_project",
+    args: { name: "OpenBot workspace" },
+  });
+  expect(
+    view.getByRole("button", { name: "Creating project…" }),
+  ).toHaveProperty("disabled", true);
+  expect(view.getByLabelText("New project name")).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () =>
+    creation.resolve({ id: "new-project", name: "OpenBot workspace" }),
+  );
+  expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+  expect(invokeCalls).toContainEqual({
+    command: "intelligence_key_for",
+    args: { project: "new-project" },
+  });
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
+test("project creation failure preserves the name and retries without losing a created project", async () => {
+  const view = await enterProjectSelection();
+  const previous = invokeHandler;
+  let creations = 0;
+  let provisions = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "create_intelligence_project") {
+      if (++creations === 1)
+        throw { said: "The project could not be created." };
+      return { id: "new-project", name: "OpenBot workspace" };
+    }
+    if (command === "intelligence_key_for" && ++provisions === 1)
+      throw { said: "The project key could not be created." };
+    return previous(command, args);
+  };
+  await userEvent.type(
+    view.getByLabelText("New project name"),
+    "OpenBot workspace",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Create project" }));
+  expect(view.getByRole("alert").textContent).toContain(
+    "The project could not be created.",
+  );
+  expect(view.getByLabelText("New project name")).toHaveProperty(
+    "value",
+    "OpenBot workspace",
+  );
+  expect(view.getByRole("button", { name: "Create project" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  await userEvent.click(view.getByRole("button", { name: "Create project" }));
+  expect(view.getByRole("alert").textContent).toContain(
+    "The project key could not be created.",
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "OpenBot workspace" }),
+  );
+  expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+  expect(creations).toBe(2);
+});
+
 test("mount navigates to OpenBot only when the selected root is already owned and running", async () => {
   const root = "/tmp/openbot-owned-running-root";
-  useRootConfigurationSetup(root, async () => emptyConfiguration());
+  setupRootConfiguration(root, async () => emptyConfiguration());
   const setupHandler = invokeHandler;
   invokeHandler = async (command, args) => {
     if (command === "already_running") {
@@ -1584,7 +1958,7 @@ test("mount navigates to OpenBot only when the selected root is already owned an
 
 test("mount leaves setup visible when the shared port answers without selected root ownership", async () => {
   const root = "/tmp/openbot-unowned-running-root";
-  useRootConfigurationSetup(root, async () => emptyConfiguration());
+  setupRootConfiguration(root, async () => emptyConfiguration());
 
   const view = await renderApp();
 
@@ -1598,7 +1972,7 @@ test("mount leaves setup visible when the shared port answers without selected r
 
 for (const staleProbe of [false, true]) {
   test(`recovery mount keeps setup available after ${staleProbe ? "a stale positive" : "a negative"} adoption probe`, async () => {
-    useRootConfigurationSetup("/tmp/openbot-worker-recovery", async () =>
+    setupRootConfiguration("/tmp/openbot-worker-recovery", async () =>
       emptyConfiguration(),
     );
     const setupHandler = invokeHandler;
@@ -1726,7 +2100,7 @@ test("root edits reload saved configuration for that root and ignore stale saved
   const emptyForRootB = deferred<ReturnType<typeof emptyConfiguration>>();
   const savedForRootC = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
 
-  useRootConfigurationSetup(rootA, async (requestedRoot) => {
+  setupRootConfiguration(rootA, async (requestedRoot) => {
     if (requestedRoot === rootA) return savedForRootA.promise;
     if (requestedRoot === rootB) return emptyForRootB.promise;
     if (requestedRoot === rootC) return savedForRootC.promise;
@@ -1818,7 +2192,7 @@ test("root edits reload saved configuration for that root and ignore stale saved
 test("same-process setup remount prefers the retained selected root", async () => {
   const rootA = "/tmp/openbot-default-root";
   const rootB = "/tmp/openbot-retained-root";
-  useRootConfigurationSetup(rootA, async (requestedRoot) => {
+  setupRootConfiguration(rootA, async (requestedRoot) => {
     if (requestedRoot !== rootB)
       throw new Error(`unexpected already_configured root ${requestedRoot}`);
     return savedOpenAiConfiguration();
@@ -1880,7 +2254,7 @@ test.each([
       root: string;
       response: Deferred<ReturnType<typeof savedOpenAiConfiguration>>;
     }> = [];
-    useRootConfigurationSetup(rootA, async (root) => {
+    setupRootConfiguration(rootA, async (root) => {
       const response = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
       requests.push({ root, response });
       return response.promise;
@@ -2337,7 +2711,7 @@ for (const provider of [
     async (session) => {
       const planToken = `synthetic-${provider.id}-plan-token`;
       const hiddenKey = `sk-synthetic-${provider.id}-hidden`;
-      useRootConfigurationSetup("/tmp/openbot-app-test", async () => ({
+      setupRootConfiguration("/tmp/openbot-app-test", async () => ({
         ...emptyConfiguration(),
         saved: {
           ...emptyConfiguration().saved,
@@ -2542,7 +2916,7 @@ for (const provider of [
 ]) {
   for (const login of ["plan", "api-key"] as const) {
     test(`unknown legacy ${provider.name} ${login} and Intelligence reuse stays passive until Start`, async () => {
-      useRootConfigurationSetup("/tmp/synthetic-legacy-root", async () => ({
+      setupRootConfiguration("/tmp/synthetic-legacy-root", async () => ({
         values: {},
         saved: {},
       }));
@@ -2597,9 +2971,7 @@ for (const provider of [
       );
       expect(view.queryByText("Connected to CopilotKit.")).toBeNull();
       // Returning to the provider screen retains deliberate reuse without signing in automatically.
-      await userEvent.click(
-        view.getByRole("button", { name: "Change AI connection" }),
-      );
+      await userEvent.click(view.getByRole("button", { name: "Back" }));
       await userEvent.click(
         await view.findByRole("button", { name: "Continue" }),
       );

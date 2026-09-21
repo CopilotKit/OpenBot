@@ -1,8 +1,9 @@
 //! Metrics for an explicit image pull, before containers or provider sign-in start.
 
 use std::collections::HashMap;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::time::Instant;
 
 use serde::Deserialize;
@@ -76,38 +77,49 @@ struct Progress {
     current: Option<u64>,
 }
 
-/// Compose's JSON writer carries Docker's byte counters as integers:
-/// https://github.com/docker/compose/blob/v2.39.2/pkg/compose/pull.go#L391-L440
-/// The same layer can appear beneath multiple services. Keep its maximum download counter,
-/// regardless of parent, and never add extraction progress or the advertised total size.
-fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
-    let mut layers: HashMap<String, u64> = HashMap::new();
-    for output in [stdout, stderr] {
-        for line in output.split(|byte| *byte == b'\n') {
-            let Ok(progress) = serde_json::from_slice::<Progress>(line) else {
-                continue;
-            };
-            if progress.text != "Downloading"
-                || progress.id.is_empty()
-                || progress.parent_id.as_deref().unwrap_or_default().is_empty()
-            {
-                continue;
-            }
+#[derive(Default)]
+struct DownloadBytes(HashMap<String, u64>);
+
+impl DownloadBytes {
+    fn observe(&mut self, progress: Progress) {
+        if progress.text == "Downloading"
+            && !progress.id.is_empty()
+            && !progress.parent_id.as_deref().unwrap_or_default().is_empty()
+        {
             if let Some(current) = progress.current {
-                layers
+                self.0
                     .entry(progress.id)
                     .and_modify(|maximum| *maximum = (*maximum).max(current))
                     .or_insert(current);
             }
         }
     }
-    if layers.is_empty() {
-        None
-    } else {
-        layers
+
+    fn total(&self) -> Option<u64> {
+        if self.0.is_empty() {
+            return None;
+        }
+        self.0
             .values()
             .try_fold(0_u64, |sum, current| sum.checked_add(*current))
     }
+}
+
+/// Compose's JSON writer carries Docker's byte counters as integers:
+/// https://github.com/docker/compose/blob/v2.39.2/pkg/compose/pull.go#L391-L440
+/// The same layer can appear beneath multiple services. Keep its maximum download counter,
+/// regardless of parent, and never add extraction progress or the advertised total size.
+fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
+    let mut layers = DownloadBytes::default();
+    for output in [stdout, stderr] {
+        for line in output.split(|byte| *byte == b'\n') {
+            let Ok(progress) = serde_json::from_slice::<Progress>(line) else {
+                continue;
+            };
+            layers.observe(progress);
+        }
+    }
+    layers.total()
 }
 
 /// Pull a provider sign-in image without starting its CLI or creating a container.
@@ -116,6 +128,7 @@ fn download_bytes(stdout: &[u8], stderr: &[u8]) -> Option<u64> {
 pub fn pull_image(
     engine: &Address,
     image: &str,
+    on_progress: impl FnMut(u64),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     if crate::preparation::image_present(engine, image)? {
@@ -124,7 +137,7 @@ pub fn pull_image(
     let Some(json_progress) = compose_pull_progress(engine) else {
         let mut command = engine.command();
         command.args(["pull", image]);
-        return run(command, None, false, on_complete);
+        return run_with_progress(command, None, false, on_progress, on_complete);
     };
     let mut command = engine.command();
     command.arg("compose");
@@ -141,10 +154,11 @@ pub fn pull_image(
         "missing",
     ]);
     let project = serde_json::json!({"services": {"image": {"image": image}}}).to_string();
-    run(
+    run_with_progress(
         command,
         Some(project.as_bytes()),
         json_progress,
+        on_progress,
         on_complete,
     )
 }
@@ -152,9 +166,19 @@ pub fn pull_image(
 /// Complete one explicit pull and report its outcome before the caller can start containers.
 /// A failed pull is returned as the same two-part Problem used by the existing startup path.
 pub(crate) fn run(
+    command: Command,
+    input: Option<&[u8]>,
+    json_progress: bool,
+    on_complete: impl FnOnce(PullMetrics),
+) -> Result<(), Problem> {
+    run_with_progress(command, input, json_progress, |_| {}, on_complete)
+}
+
+fn run_with_progress(
     mut command: Command,
     input: Option<&[u8]>,
     json_progress: bool,
+    mut on_progress: impl FnMut(u64),
     on_complete: impl FnOnce(PullMetrics),
 ) -> Result<(), Problem> {
     command
@@ -180,7 +204,41 @@ pub(crate) fn run(
                 return Err(error);
             }
         }
-        child.wait_with_output()
+        // Drain both pipes concurrently, just as wait_with_output does, while forwarding only
+        // structured byte counters. Raw engine output stays in the existing error diagnostics.
+        let stdout = child.stdout.take().expect("piped pull stdout");
+        let stderr = child.stderr.take().expect("piped pull stderr");
+        std::thread::scope(|scope| {
+            let (sender, receiver) = sync_channel(64);
+            let stdout_sender = sender.clone();
+            let out = scope.spawn(move || read_output(stdout, json_progress, stdout_sender));
+            let err = scope.spawn(move || read_output(stderr, json_progress, sender));
+            let mut layers = DownloadBytes::default();
+            let mut last = None;
+            for progress in receiver {
+                layers.observe(progress);
+                let total = layers.total();
+                if total != last {
+                    if let Some(bytes) = total {
+                        on_progress(bytes);
+                    }
+                    last = total;
+                }
+            }
+            let stdout = out
+                .join()
+                .map_err(|_| std::io::Error::other("pull stdout reader panicked"));
+            let stderr = err
+                .join()
+                .map_err(|_| std::io::Error::other("pull stderr reader panicked"));
+            // Always reap the child, including when reading a pipe failed.
+            let status = child.wait()?;
+            Ok(Output {
+                status,
+                stdout: stdout??,
+                stderr: stderr??,
+            })
+        })
     })();
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     let success = output.as_ref().is_ok_and(|output| output.status.success());
@@ -215,9 +273,84 @@ pub(crate) fn run(
     Err(Problem::with(crate::problem::said_about(&raw), raw))
 }
 
+fn read_output(
+    pipe: impl Read,
+    json_progress: bool,
+    sender: SyncSender<Progress>,
+) -> std::io::Result<Vec<u8>> {
+    let mut reader = BufReader::new(pipe);
+    let mut output = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            return Ok(output);
+        }
+        output.extend_from_slice(&line);
+        if json_progress {
+            if let Ok(progress) = serde_json::from_slice(&line) {
+                sender
+                    .send(progress)
+                    .map_err(|_| std::io::Error::other("pull progress receiver closed"))?;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streams_download_bytes_before_the_child_exits() {
+        let root = crate::test_support::temp_root("live-pull-progress");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("progress.rs");
+        let binary = root.join(format!("progress{}", std::env::consts::EXE_SUFFIX));
+        let acknowledgement = root.join("progress-observed");
+        std::fs::write(
+            &source,
+            r#"
+use std::io::Write;
+fn main() {
+    let acknowledgement = std::env::args().nth(1).unwrap();
+    println!("{{\"id\":\"a\",\"parent_id\":\"image\",\"text\":\"Downloading\",\"current\":7}}");
+    std::io::stdout().flush().unwrap();
+    eprintln!("{{\"id\":\"b\",\"parent_id\":\"image\",\"text\":\"Downloading\",\"current\":5}}");
+    for _ in 0..300 {
+        if std::path::Path::new(&acknowledgement).exists() { return; }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    eprintln!("progress was not delivered while the pull was running");
+    std::process::exit(71);
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &binary);
+        let mut command = crate::quiet::command(&binary);
+        command.arg(&acknowledgement);
+        let mut updates = Vec::new();
+        let mut metrics = Vec::new();
+        let result = run_with_progress(
+            command,
+            None,
+            true,
+            |bytes| {
+                updates.push(bytes);
+                if bytes == 12 {
+                    std::fs::write(&acknowledgement, "received").unwrap();
+                }
+            },
+            |metric| metrics.push(metric),
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(updates.last(), Some(&12));
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].bytes, Some(12));
+        assert_eq!(metrics[0].outcome, Outcome::Success);
+    }
 
     #[test]
     fn older_compose_explicitly_downloads_missing_images_and_reuses_cached_images() {
@@ -246,16 +379,26 @@ fn main() {
         std::env::set_var("PATH", &root);
         let address = Address::new(crate::engine::Engine::Docker, None);
         let mut outcomes = Vec::new();
-        pull_image(&address, "synthetic-image", |metric| {
-            outcomes.push(metric.outcome)
-        })
+        pull_image(
+            &address,
+            "synthetic-image",
+            |_| {},
+            |metric| outcomes.push(metric.outcome),
+        )
         .unwrap();
-        pull_image(&address, "synthetic-image", |_| {
-            panic!("cached image must not be downloaded again")
-        })
+        pull_image(
+            &address,
+            "synthetic-image",
+            |_| {},
+            |_| panic!("cached image must not be downloaded again"),
+        )
         .unwrap();
-        assert!(pull_image(&address, "missing-image", |metric| outcomes
-            .push(metric.outcome))
+        assert!(pull_image(
+            &address,
+            "missing-image",
+            |_| {},
+            |metric| outcomes.push(metric.outcome)
+        )
         .is_err());
         assert_eq!(outcomes, [Outcome::Success, Outcome::Failure]);
         std::fs::remove_dir_all(root).unwrap();

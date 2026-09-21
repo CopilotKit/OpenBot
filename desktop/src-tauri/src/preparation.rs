@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{deployment, engine::Address, harness::HarnessChoice, problem::Problem, quiet, stack};
+use crate::{deployment, engine::Address, harness::HarnessChoice, problem::Problem, stack};
 
 pub const REQUIRED: &str = "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.";
 pub const FILE: &str = ".openbot-prepared.json";
@@ -228,15 +228,8 @@ pub fn dependencies_ready(root: &Path) -> Result<PathBuf, Problem> {
         ));
     }
     // This executes only the installed runtime's version probe; it cannot install packages.
-    if !quiet::command(&record.bun)
-        .arg("--version")
-        .output()
-        .map_err(|e| required(e.to_string()))?
-        .status
-        .success()
-    {
-        return Err(required("The installed app runtime is unavailable."));
-    }
+    crate::install::verify_bun(&record.bun)
+        .map_err(|problem| required(problem.detail.unwrap_or(problem.said)))?;
     Ok(record.bun)
 }
 
@@ -383,7 +376,11 @@ mod tests {
 use std::io::Write;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args == ["--version"] { println!("1.3.14"); return; }
+    if args == ["--version"] {
+        let version = std::env::current_exe().unwrap().parent().unwrap().join("runtime-version");
+        println!("{}", std::fs::read_to_string(version).unwrap_or_else(|_| "1.3.14".into()));
+        return;
+    }
     assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
     let previous = std::fs::read_to_string("installs").unwrap_or_default();
     writeln!(std::fs::OpenOptions::new().create(true).append(true).open("installs").unwrap(), "install").unwrap();
@@ -450,6 +447,19 @@ fn main() {
             std::fs::read_to_string(f.root.join(".env")).unwrap(),
             "KEEP_THIS_PUBLIC_SETTING=yes\n"
         );
+    }
+
+    #[test]
+    fn cached_dependencies_with_unsupported_runtime_require_installation_before_start() {
+        let f = Fixture::new();
+        f.dependencies();
+        std::fs::write(f.root.join("runtime-version"), "1.2.15").unwrap();
+        let problem = dependencies_ready(&f.root).expect_err("a cached older runtime is not ready");
+        assert!(problem.said.contains("Finish installing"));
+        assert!(problem
+            .detail
+            .unwrap_or_default()
+            .contains(crate::install::BUN));
     }
 
     #[test]

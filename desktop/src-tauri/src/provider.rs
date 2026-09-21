@@ -1,9 +1,7 @@
 //! The model provider screen's list, as data.
 //!
-//! Two providers are first-class and everything else is one row. That is not a shortlist waiting to
-//! be grown: it is the shape, and growing it is how this screen turns into a directory nobody
-//! maintains. Most people have a plan with one of two companies; everybody else has something that
-//! speaks the OpenAI wire format, because at this point everything does.
+//! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
+//! presets with API keys; their official addresses are supplied by the frontend.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -89,9 +87,25 @@ pub fn catalogue() -> Vec<Provider> {
             }),
         },
         Provider {
+            id: "google".into(),
+            name: "Google Gemini".into(),
+            summary: "Use Gemini with a Google AI Studio API key.".into(),
+            logins: vec![Login::Endpoint],
+            mark: None,
+            caution: None,
+        },
+        Provider {
+            id: "xai".into(),
+            name: "xAI".into(),
+            summary: "Use Grok with an xAI API key.".into(),
+            logins: vec![Login::Endpoint],
+            mark: None,
+            caution: None,
+        },
+        Provider {
             id: "openai-compatible".into(),
             name: "Any OpenAI-compatible endpoint".into(),
-            summary: "Azure, Bedrock, Mistral, DeepSeek, xAI, Ollama, vLLM or your own.".into(),
+            summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
             logins: vec![Login::Endpoint],
             // Deliberately unmarked: it stands for every provider rather than one, so any single
             // vendor's logo here would be a lie about what the row does.
@@ -105,16 +119,21 @@ pub fn catalogue() -> Vec<Provider> {
 mod tests {
     use super::*;
 
-    /// The audience rule, as a test. A base URL is a developer's tool, and exactly one row may ask
-    /// for one; if a second ever does, the main path has grown a terminal-shaped step.
+    /// Named endpoint presets use API keys and never claim support for a subscription sign-in.
     #[test]
-    fn only_one_row_asks_for_a_url() {
+    fn endpoint_providers_do_not_offer_plan_sign_in() {
         let asking: Vec<String> = catalogue()
             .into_iter()
             .filter(|p| p.logins.contains(&Login::Endpoint))
             .map(|p| p.id)
             .collect();
-        assert_eq!(asking, vec!["openai-compatible".to_string()]);
+        assert_eq!(asking, vec!["google", "xai", "openai-compatible"]);
+        for provider in catalogue()
+            .into_iter()
+            .filter(|provider| provider.logins.contains(&Login::Endpoint))
+        {
+            assert_eq!(provider.logins, vec![Login::Endpoint]);
+        }
     }
 
     /// Where a plan can stand in for a key, it is the default. Reordering these is a product change
@@ -133,14 +152,15 @@ mod tests {
         }
     }
 
-    /// Two first-class providers and one escape hatch. Growing this list is how the screen becomes
-    /// a directory, so it fails here rather than in review.
+    /// Named providers stay ahead of the custom endpoint escape hatch.
     #[test]
-    fn two_named_providers_and_one_way_in_for_everything_else() {
+    fn four_named_providers_and_one_custom_endpoint() {
         let rows = catalogue();
-        assert_eq!(rows.len(), 3, "the provider list grew");
-        assert_eq!(rows[0].id, "openai");
-        assert_eq!(rows[1].id, "anthropic");
+        let ids: Vec<&str> = rows.iter().map(|provider| provider.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["openai", "anthropic", "google", "xai", "openai-compatible"]
+        );
     }
 
     /// Every row is readable without recognising a logo.

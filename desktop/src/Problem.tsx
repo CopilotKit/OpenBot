@@ -1,3 +1,5 @@
+import { ExternalLink } from "./ExternalLink";
+
 /**
  * A failure, in both registers, wherever one happens.
  *
@@ -20,6 +22,18 @@ export function asProblem(thrown: unknown): Problem {
   return { said: String(thrown) };
 }
 
+function SetupHelp() {
+  // Whitelabel builds can choose their own support page. Never prefill it with error data.
+  const url =
+    import.meta.env.VITE_OPENBOT_SUPPORT_URL?.trim() ||
+    "https://github.com/CopilotKit/OpenBot/issues/new/choose";
+  return (
+    <ExternalLink className="setup-help" href={url}>
+      Get setup help
+    </ExternalLink>
+  );
+}
+
 export function Failure({ problem }: { problem: Problem }) {
   return (
     <div className="blocker" role="alert">
@@ -33,6 +47,7 @@ export function Failure({ problem }: { problem: Problem }) {
           <pre>{problem.detail}</pre>
         </details>
       )}
+      <SetupHelp />
     </div>
   );
 }
@@ -54,6 +69,7 @@ export function InlineFailure({ problem }: { problem: Problem }) {
           <pre>{problem.detail}</pre>
         </details>
       )}
+      <SetupHelp />
     </div>
   );
 }

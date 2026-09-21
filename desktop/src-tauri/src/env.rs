@@ -38,8 +38,8 @@ somebody switches away from the plan.
 pub const CHATGPT_STORE_FILE: &str = ".langchain/chatgpt-auth.json";
 pub const CHATGPT_STORE_INSIDE: &str = "/root/.langchain/chatgpt-auth.json";
 
-/// Ports the stack publishes. Matched to `docker-compose.yml` defaults so a person who later runs
-/// Compose by hand finds the deployment where the documentation says it is.
+/// Host ports, persisted in this deployment's .env and reused while they remain available.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ports {
     pub app: u16,
     pub server: u16,
@@ -48,6 +48,7 @@ pub struct Ports {
     pub bot: u16,
     pub langgraph: u16,
     pub supervisor: u16,
+    pub harness: Option<u16>,
 }
 
 impl Default for Ports {
@@ -60,7 +61,264 @@ impl Default for Ports {
             bot: 4200,
             langgraph: 4201,
             supervisor: 4500,
+            harness: None,
         }
+    }
+}
+
+impl Ports {
+    pub fn read(root: &Path) -> std::io::Result<Self> {
+        let values = read_already_set(
+            &root.join(".env"),
+            &[
+                "APP_PORT",
+                "SERVER_PORT",
+                "POSTGRES_PORT",
+                "COMPUTER_PORT",
+                "BOT_PORT",
+                "LANGGRAPH_PORT",
+                "SUPERVISOR_PORT",
+                "PICKED_HARNESS_HOST_PORT",
+            ],
+        )?;
+        let mut ports = Self::default();
+        for (key, port) in [
+            ("APP_PORT", &mut ports.app),
+            ("SERVER_PORT", &mut ports.server),
+            ("POSTGRES_PORT", &mut ports.postgres),
+            ("COMPUTER_PORT", &mut ports.computer),
+            ("BOT_PORT", &mut ports.bot),
+            ("LANGGRAPH_PORT", &mut ports.langgraph),
+            ("SUPERVISOR_PORT", &mut ports.supervisor),
+        ] {
+            if let Some(value) = values.get(key) {
+                *port = parse_port(key, value)?;
+            }
+        }
+        ports.harness = values
+            .get("PICKED_HARNESS_HOST_PORT")
+            .map(|value| parse_port("PICKED_HARNESS_HOST_PORT", value))
+            .transpose()?;
+        Ok(ports)
+    }
+
+    pub fn settings(&self) -> BTreeMap<String, String> {
+        let mut settings: BTreeMap<_, _> = [
+            ("APP_PORT", self.app),
+            ("SERVER_PORT", self.server),
+            ("POSTGRES_PORT", self.postgres),
+            ("COMPUTER_PORT", self.computer),
+            ("BOT_PORT", self.bot),
+            ("LANGGRAPH_PORT", self.langgraph),
+            ("SUPERVISOR_PORT", self.supervisor),
+        ]
+        .into_iter()
+        .map(|(key, port)| (key.to_string(), port.to_string()))
+        .collect();
+        if let Some(port) = self.harness {
+            settings.insert("PICKED_HARNESS_HOST_PORT".into(), port.to_string());
+        }
+        settings
+    }
+
+    /// A connect probe misses Windows excluded ports: only a bind proves a port is usable.
+    /// Hold the probes until every port is chosen so allocations cannot collide with each other.
+    /// Existing containers from this exact Compose project are reusable, never foreign listeners.
+    pub fn available(
+        self,
+        ours: &std::collections::HashSet<u16>,
+        harness: Option<u16>,
+    ) -> std::io::Result<Self> {
+        let mut held = Vec::new();
+        let mut chosen = std::collections::HashSet::new();
+        let mut choose = |preferred, container: bool| -> std::io::Result<u16> {
+            if !chosen.contains(&preferred) {
+                if container && ours.contains(&preferred) {
+                    chosen.insert(preferred);
+                    return Ok(preferred);
+                }
+                if let Ok(listeners) = bind_loopbacks(preferred) {
+                    held.extend(listeners);
+                    chosen.insert(preferred);
+                    return Ok(preferred);
+                }
+            }
+            let mut last = None;
+            for _ in 0..32 {
+                match bind_loopbacks(0) {
+                    Ok(listeners) => {
+                        let port = listeners[0].local_addr()?.port();
+                        if chosen.insert(port) {
+                            held.extend(listeners);
+                            return Ok(port);
+                        }
+                    }
+                    Err(error) => last = Some(error),
+                }
+            }
+            Err(last.unwrap_or_else(|| {
+                std::io::Error::other("could not allocate distinct local ports")
+            }))
+        };
+        Ok(Self {
+            app: choose(self.app, false)?,
+            server: choose(self.server, false)?,
+            postgres: choose(self.postgres, true)?,
+            computer: choose(self.computer, true)?,
+            bot: choose(self.bot, true)?,
+            langgraph: choose(self.langgraph, true)?,
+            supervisor: choose(self.supervisor, true)?,
+            harness: harness
+                .map(|default| choose(self.harness.unwrap_or(default), true))
+                .transpose()?,
+        })
+    }
+}
+
+fn parse_port(key: &str, value: &str) -> std::io::Result<u16> {
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{key} must be a port from 1 to 65535"),
+            )
+        })
+}
+
+fn bind_loopbacks(port: u16) -> std::io::Result<Vec<std::net::TcpListener>> {
+    let ipv4 = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))?;
+    let port = ipv4.local_addr()?.port();
+    let mut held = vec![ipv4];
+    match std::net::TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)) {
+        Ok(ipv6) => held.push(ipv6),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+            ) => {}
+        Err(error) => return Err(error),
+    }
+    Ok(held)
+}
+
+#[cfg(test)]
+mod port_tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::net::{TcpListener, TcpStream};
+
+    #[test]
+    fn occupied_ports_are_replaced_with_distinct_bindable_loopback_ports() {
+        let foreign = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = foreign.local_addr().unwrap().port();
+        let preferred = Ports {
+            app: port,
+            server: port,
+            postgres: port,
+            computer: port,
+            bot: port,
+            langgraph: port,
+            supervisor: port,
+            harness: Some(port),
+        };
+        let chosen = preferred.available(&HashSet::new(), Some(port)).unwrap();
+        let values: HashSet<u16> = chosen
+            .settings()
+            .values()
+            .map(|value| value.parse().unwrap())
+            .collect();
+        assert_eq!(values.len(), 8);
+        assert!(!values.contains(&port));
+        for value in values {
+            assert!(bind_loopbacks(value).is_ok(), "port {value} is unavailable");
+        }
+        assert!(
+            TcpStream::connect(foreign.local_addr().unwrap()).is_ok(),
+            "foreign listener must remain untouched"
+        );
+    }
+
+    #[test]
+    fn occupied_ipv6_port_is_not_treated_as_available_ipv4_port() {
+        let foreign = TcpListener::bind("[::1]:0").unwrap();
+        let port = foreign.local_addr().unwrap().port();
+        let preferred = Ports {
+            postgres: port,
+            ..Ports::default()
+        };
+        let chosen = preferred.available(&HashSet::new(), None).unwrap();
+        assert_ne!(chosen.postgres, port);
+    }
+
+    #[test]
+    fn saved_ports_survive_reopen_and_only_a_new_conflict_moves() {
+        let root = crate::test_support::temp_root("saved-local-ports");
+        std::fs::create_dir_all(&root).unwrap();
+        let chosen = Ports::default()
+            .available(&HashSet::new(), Some(4206))
+            .unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "CUSTOM=kept\nOPENAI_API_KEY=synthetic-kept\n",
+        )
+        .unwrap();
+        write(&root.join(".env"), &chosen.settings(), &BTreeMap::new()).unwrap();
+        let reopened = Ports::read(&root).unwrap();
+        assert_eq!(reopened, chosen);
+        assert_eq!(
+            reopened.available(&HashSet::new(), Some(4206)).unwrap(),
+            chosen
+        );
+        let foreign = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, chosen.server)).unwrap();
+        let changed = reopened.available(&HashSet::new(), Some(4206)).unwrap();
+        assert_ne!(changed.server, chosen.server);
+        assert_eq!(
+            Ports {
+                server: chosen.server,
+                ..changed
+            },
+            chosen
+        );
+        let settings = std::fs::read_to_string(root.join(".env")).unwrap();
+        assert!(settings.contains("CUSTOM=kept"));
+        assert!(settings.contains("OPENAI_API_KEY=synthetic-kept"));
+        drop(foreign);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn own_published_container_ports_are_reused_but_do_not_authorize_host_port_reuse() {
+        let owned = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = owned.local_addr().unwrap().port();
+        let preferred = Ports {
+            postgres: port,
+            server: port,
+            ..Ports::default()
+        };
+        let chosen = preferred.available(&HashSet::from([port]), None).unwrap();
+        assert_eq!(chosen.postgres, port);
+        assert_ne!(chosen.server, port);
+        assert_ne!(
+            preferred.available(&HashSet::new(), None).unwrap().postgres,
+            port
+        );
+    }
+
+    #[test]
+    fn invalid_saved_ports_fail_instead_of_probing_an_unrelated_default() {
+        let root = crate::test_support::temp_root("invalid-local-ports");
+        std::fs::create_dir_all(&root).unwrap();
+        for value in ["0", "65536", "unknown"] {
+            std::fs::write(root.join(".env"), format!("SERVER_PORT={value}\n")).unwrap();
+            assert_eq!(
+                Ports::read(&root).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidData
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -351,6 +609,7 @@ pub fn compose(
                 run_path,
                 remote_agent_id,
             } => {
+                let host_port = ports.harness.unwrap_or(*port);
                 env.insert("PICKED_HARNESS_IMAGE".into(), image.clone());
                 env.insert("PICKED_HARNESS_PORT".into(), port.to_string());
                 env.insert("PICKED_HARNESS_NAME".into(), name.clone());
@@ -358,11 +617,11 @@ pub fn compose(
                 env.insert(
                     "PICKED_HARNESS_URL".into(),
                     if run_path.is_empty() {
-                        format!("http://127.0.0.1:{port}")
+                        format!("http://127.0.0.1:{host_port}")
                     } else if run_path.starts_with('/') {
-                        format!("http://127.0.0.1:{port}{run_path}")
+                        format!("http://127.0.0.1:{host_port}{run_path}")
                     } else {
-                        format!("http://127.0.0.1:{port}/{run_path}")
+                        format!("http://127.0.0.1:{host_port}/{run_path}")
                     },
                 );
                 /*
@@ -411,13 +670,14 @@ pub fn compose(
         format!("http://127.0.0.1:{}", ports.server),
     );
 
-    env.insert("APP_PORT".into(), ports.app.to_string());
-    env.insert("SERVER_PORT".into(), ports.server.to_string());
-    env.insert("POSTGRES_PORT".into(), ports.postgres.to_string());
-    env.insert("COMPUTER_PORT".into(), ports.computer.to_string());
-    env.insert("BOT_PORT".into(), ports.bot.to_string());
-    env.insert("LANGGRAPH_PORT".into(), ports.langgraph.to_string());
-    env.insert("SUPERVISOR_PORT".into(), ports.supervisor.to_string());
+    env.extend(ports.settings());
+    env.insert(
+        "OPENBOT_TOOL_URL".into(),
+        format!(
+            "http://host.docker.internal:{}/api/agent-tools/call",
+            ports.server
+        ),
+    );
 
     // The whole deployment is on this machine, so the server must be allowed to talk to it.
     //
@@ -1585,6 +1845,41 @@ HTTPS_PROXY=http://proxy:8080
             value_of(&written, "SERVER_INTERNAL_URL"),
             "http://127.0.0.1:3999",
             "a setting that is not a secret was carried forward and is now stale"
+        );
+        assert_eq!(
+            value_of(&written, "OPENBOT_TOOL_URL"),
+            "http://host.docker.internal:3999/api/agent-tools/call",
+            "container tools must call the selected API port"
+        );
+    }
+
+    #[test]
+    fn selected_harness_uses_dynamic_host_port_without_changing_image_port() {
+        let ports = Ports {
+            harness: Some(52106),
+            ..Ports::default()
+        };
+        let settings = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &ports,
+            &pinned(),
+            Some(&PickedHarness::Installed {
+                image: "synthetic:local".into(),
+                port: 4206,
+                name: "Synthetic".into(),
+                mastra: false,
+                run_path: "/ag-ui".into(),
+                remote_agent_id: String::new(),
+            }),
+            &BTreeMap::new(),
+        );
+        assert_eq!(settings["PICKED_HARNESS_PORT"], "4206");
+        assert_eq!(settings["PICKED_HARNESS_HOST_PORT"], "52106");
+        assert_eq!(
+            settings["PICKED_HARNESS_URL"],
+            "http://127.0.0.1:52106/ag-ui"
         );
     }
 }

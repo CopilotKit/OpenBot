@@ -191,6 +191,9 @@ struct Progress {
     step: String,
     ok: bool,
     detail: String,
+    running: bool,
+    #[serde(rename = "downloadBytes", skip_serializing_if = "Option::is_none")]
+    download_bytes: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -302,6 +305,26 @@ fn report<R: tauri::Runtime>(
             step: step.into(),
             ok,
             detail: detail.into(),
+            running: false,
+            download_bytes: None,
+        },
+    );
+}
+
+fn report_running<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    detail: impl Into<String>,
+    download_bytes: Option<u64>,
+) {
+    let _ = app.emit(
+        "setup:progress",
+        Progress {
+            step: step.into(),
+            ok: true,
+            detail: detail.into(),
+            running: true,
+            download_bytes,
         },
     );
 }
@@ -432,20 +455,39 @@ async fn prepare_installation(
         if let Some(problem) = stack::deployment_problem(&root) {
             return Err(Problem::from(problem));
         }
-        report(
+        report_running(
             &handle,
             "dependencies",
-            true,
             "Preparing the app's dependencies.",
+            None,
         );
         preparation::install_dependencies_if_needed(&root, || {
-            install::ensure_bun(&root, which_bun())
+            report_running(
+                &handle,
+                "dependencies",
+                "Preparing the local runtime.",
+                None,
+            );
+            let bun = install::ensure_bun(&root, which_bun())?;
+            report_running(
+                &handle,
+                "dependencies",
+                "Installing the app's packages.",
+                None,
+            );
+            Ok(bun)
         })?;
         report(
             &handle,
             "dependencies",
             true,
             "The app's dependencies are installed.",
+        );
+        report_running(
+            &handle,
+            "images",
+            "Checking which local software to download.",
+            None,
         );
         let settings = preparation::image_settings(&root, picked.as_ref())?;
         let installed = picked
@@ -463,20 +505,30 @@ async fn prepare_installation(
         images.dedup();
         for (index, image) in images.iter().enumerate() {
             attempt.require_current()?;
-            report(
-                &handle,
-                "images",
-                true,
-                format!(
-                    "Downloading local software ({}/{}).",
-                    index + 1,
-                    images.len()
-                ),
+            let detail = format!(
+                "Downloading local software ({}/{}).",
+                index + 1,
+                images.len()
             );
-            pull_metrics::pull_image(&address, image, |metrics| {
-                desktop_telemetry::pull_completed(&handle, metrics)
-            })?;
+            report_running(&handle, "images", &detail, None);
+            pull_metrics::pull_image(
+                &address,
+                image,
+                |bytes| report_running(&handle, "images", &detail, Some(bytes)),
+                |metrics| desktop_telemetry::pull_completed(&handle, metrics),
+            )?;
         }
+        report(
+            &handle,
+            "images",
+            true,
+            format!(
+                "Local software is downloaded ({}/{}).",
+                images.len(),
+                images.len()
+            ),
+        );
+        report_running(&handle, "installation", "Finishing installation.", None);
         attempt.require_current()?;
         preparation::complete(&root, harness.as_ref(), images, &address)?;
         preparation::save_selected_root(
@@ -510,6 +562,7 @@ async fn prepare_installation(
 /// Reported step by step rather than as one result, because these take minutes and a window with
 /// nothing moving in it reads as a hang.
 async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem> {
+    report_running(app, "engine", "Checking the software OpenBot needs.", None);
     let found = engine::detect();
     desktop_telemetry::observe_engine(app, &found);
     let root = stack::default_root();
@@ -567,11 +620,11 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
     // On a blocking thread for the reason the deployment fetch is: a blocking HTTP client dropped
     // inside an async context panics the worker instead of returning an error, and the window
     // survives that with a step that never ends.
-    report(
+    report_running(
         app,
         "install-engine",
-        true,
         "Looking for the software OpenBot runs on.",
+        None,
     );
     let telemetry_app = app.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
@@ -609,18 +662,26 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
     // One at a time, and each only if the last one worked. Written as a loop over an array once,
     // which ran all three before the first was checked: a failed `machine init` was still followed
     // by `machine start`.
+    report_running(app, "create-machine", "Preparing the engine machine.", None);
     let created = acquire::create_machine(4, 6144, 60);
     report(app, "create-machine", created.ok, created.said.clone());
     if !created.ok {
         return Err(created.problem());
     }
 
+    report_running(app, "start-machine", "Starting the engine machine.", None);
     let started = acquire::start_machine();
     report(app, "start-machine", started.ok, started.said.clone());
     if !started.ok {
         return Err(started.problem());
     }
 
+    report_running(
+        app,
+        "health-gate",
+        "Waiting for the engine to answer.",
+        None,
+    );
     let gate = acquire::health_gate(&acquire::address());
     report(app, "health-gate", gate.ok, gate.said.clone());
     if !gate.ok {
@@ -629,7 +690,7 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
 
     let ready = engine::detect();
     desktop_telemetry::observe_engine(app, &ready);
-    ready
+    let address = ready
         .address
         .clone()
         .filter(|_| ready.responding)
@@ -638,7 +699,9 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
                 "OpenBot set up the software it runs on, but it is still not answering. Try again.",
                 ready.detail,
             )
-        })
+        })?;
+    report(app, "engine", true, "The container engine is answering.");
+    Ok(address)
 }
 
 /// Called while holding startup so Quit cannot retire the service during its acquisition.
@@ -664,6 +727,7 @@ async fn deployment_ready<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     root: &Path,
 ) -> Result<(), Problem> {
+    report_running(app, "deployment", "Checking the OpenBot release.", None);
     // Both release discovery and downloading use blocking HTTP. Keeping them in a blocking task
     // avoids dropping reqwest's runtime inside this async context.
     let target = root.to_path_buf();
@@ -671,7 +735,12 @@ async fn deployment_ready<R: tauri::Runtime>(
     let version = tauri::async_runtime::spawn_blocking(move || {
         let version = deployment_release::resolve_version(&target)?;
         if deployment::needs_fetch(&target, &version) {
-            report(&handle, "deployment", true, format!("fetching {version}"));
+            report_running(
+                &handle,
+                "deployment",
+                format!("Downloading OpenBot {version}."),
+                None,
+            );
             deployment::fetch(&target, &version)?;
         }
         Ok::<_, String>(version)
@@ -1071,7 +1140,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
 
-    let (logs, bun, mut secrets) = {
+    let (logs, bun, mut secrets, ports) = {
         let _startup = attempt.lock_current()?;
 
         // Belt and braces: a fetch that reported success and left something out is still not a
@@ -1121,6 +1190,30 @@ async fn start_stack_inner<R: tauri::Runtime>(
             stack::postgres_volume_exists(&found, &root, &existing_secrets)
         })?;
 
+        // Only this deployment's recorded hosts are reclaimed; its existing containers are reusable.
+        let previous_ports = openbot_env::Ports::read(&root).map_err(|error| {
+            Problem::with("OpenBot could not read its local ports.", error.to_string())
+        })?;
+        let reclaimed = cleanup_before_start(&app, &attempt, &root, stack::stop_processes_under)?;
+        if reclaimed > 0 {
+            stack::wait_for_ports_to_clear(
+                &[previous_ports.server, previous_ports.app],
+                std::time::Duration::from_secs(5),
+            );
+        }
+        let ours = stack::ports_we_already_publish(&found, &root);
+        let ports = previous_ports
+            .available(
+                &ours,
+                picked.as_ref().and_then(|picked| picked.installed_port()),
+            )
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not find available local ports. Try Start again.",
+                    error.to_string(),
+                )
+            })?;
+
         let mut settings = openbot_env::compose(
             &openbot_env::Intelligence {
                 api_url,
@@ -1131,7 +1224,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 credential: credential.clone(),
             },
             &status,
-            &openbot_env::Ports::default(),
+            &ports,
             &deployment::image_variables(&root)?,
             picked.as_ref(),
             // What a previous start of this deployment already minted. Without it every Start writes a
@@ -1173,38 +1266,19 @@ async fn start_stack_inner<R: tauri::Runtime>(
             &credential,
         )?;
         report(&app, "env", true, "settings written, credentials stored");
+        // Compose gives inherited environment precedence over .env. Pin this run's chosen ports.
+        secrets.extend(ports.settings());
+        for key in ["PICKED_HARNESS_PORT", "OPENBOT_TOOL_URL"] {
+            if let Some(value) = settings.get(key) {
+                secrets.insert(key.into(), value.clone());
+            }
+        }
         // Set before Bun imports the runtime, and retained for supervised restarts.
         secrets.extend(desktop_telemetry::runtime_env(&app));
 
         // Installation already verified these images. Start only raises the local containers;
         // its no-pull policy sends missing assets back to the installation step.
-        report(&app, "services", true, "starting installed containers");
-        /*
-         * The harness's port, before the containers rather than after.
-         *
-         * The check below covers the host processes, and it runs too late for this: a port already held
-         * makes `compose up` fail inside the daemon, and what reaches the person is
-         * "Bind for 0.0.0.0:4202 failed: port is already allocated". Every harness has a fixed port of
-         * its own, so this is not a rare case — anything else using it, including a previous run's
-         * container, produces that sentence.
-         */
-        /*
-         * Our own containers are not somebody else on the port.
-         *
-         * A start that failed after the containers went up left them running, and the next press of
-         * Start refused because of them, naming a port the person never chose and cannot find. See
-         * `ports_we_already_publish`. `compose up` reuses what is already there, so the only thing this
-         * check is for is a stranger on the port.
-         */
-        let ours = stack::ports_we_already_publish(&found, &root);
-        if let Some(port) = picked.as_ref().and_then(|picked| picked.installed_port()) {
-            if let Some(problem) =
-                stack::port_already_taken_except(&[("Bot you picked", port)], &ours)
-            {
-                report(&app, "ports", false, problem.clone());
-                return Err(problem.into());
-            }
-        }
+        report_running(&app, "services", "starting installed containers", None);
 
         // Only an installed harness needs the local service; a BYO endpoint is already running elsewhere.
         let installed_harness = picked
@@ -1229,7 +1303,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             stack::up(&found, &root, installed_harness, bundled_bots, &secrets)?;
         report(&app, "services", true, "containers up");
 
-        report(&app, "migrate", true, "applying migrations");
+        report_running(&app, "migrate", "applying migrations", None);
         stack::migrate(&found, &root, &secrets)?;
         report(&app, "migrate", true, "migrations applied");
 
@@ -1240,27 +1314,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
             report(&app, "services", false, detail);
         })?;
 
-        /*
-         * Reclaim this deployment's own host processes before deciding the ports are taken.
-         *
-         * Same failure as the containers above, by a different route: a start that got as far as
-         * spawning the server and then stopped left it running, and the next attempt refused because
-         * port 3001 was held. By its own server. These are found by working directory, so anything this
-         * stops belongs to this deployment and to no other.
-         */
-        let reclaimed = cleanup_before_start(&app, &attempt, &root, stack::stop_processes_under)?;
-
         // Before spawning: if these are still held, whatever answers later is not ours.
-        let ports = openbot_env::Ports::default();
-        if reclaimed > 0 {
-            // A kill is not instant and the check is. Without this the socket of a process this run
-            // just stopped reads as somebody else's, and the refusal names a process that no longer
-            // exists. See `wait_for_ports_to_clear`.
-            stack::wait_for_ports_to_clear(
-                &[ports.server, ports.app],
-                std::time::Duration::from_secs(5),
-            );
-        }
         if let Some(problem) =
             stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
         {
@@ -1269,7 +1323,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         }
 
         let logs = root.join(".logs");
-        (logs, bun, secrets)
+        (logs, bun, secrets, ports)
     };
 
     // Never persisted or passed to Compose. Only the server process receives this credential;
@@ -1292,15 +1346,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
                 started,
                 &logs_for_wait,
                 &stack::Ready {
-                    api: openbot_env::Ports::default().server,
-                    app: openbot_env::Ports::default().app,
+                    api: ports.server,
+                    app: ports.app,
                 },
                 std::time::Duration::from_secs(180),
             )
         },
     )
     .await
-    .inspect_err(|problem| report(&app, "answering", false, problem_detail(problem.clone())))?;
+    .inspect_err(|problem| report(&app, "answering", false, problem.said.clone()))?;
     // Stop must not finish between accepting readiness and reporting a successful Start.
     let _startup = attempt.lock_current()?;
     // Only a stack that answered successfully acquires a restart policy.
@@ -1312,7 +1366,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         .map(|owned| owned.address.clone())
         .ok_or_else(|| Problem::plain("The local container runtime is unavailable."))?;
     let config = host_access::HostAccessConfig::new(
-        format!("http://127.0.0.1:{}", openbot_env::Ports::default().server),
+        format!("http://127.0.0.1:{}", ports.server),
         host_token,
         address,
         deployment::reference(&root, "agent-computer")?,
@@ -1332,7 +1386,7 @@ async fn start_stack_inner<R: tauri::Runtime>(
         )
     })?;
     preparation::save_selected_root(&config, &root)?;
-    supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
+    supervise_host_processes(app.clone(), root, logs, bun, secrets, generation, ports);
 
     report(&app, "answering", true, "the API and the app are answering");
     Ok(())
@@ -1680,7 +1734,16 @@ where
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
     );
-    finish_host_start(attempt, root, started, outcome)
+    let readiness_failure = outcome.as_ref().err().cloned();
+    finish_host_start(attempt, root, started, outcome).map_err(|problem| {
+        // Preserve cancellation and lifecycle failures. Only the actual readiness error gets
+        // the startup headline; cleanup details remain attached and are redacted with it.
+        if readiness_failure.as_deref() == Some(problem.said.as_str()) {
+            stack::startup_problem(problem, secrets)
+        } else {
+            problem
+        }
+    })
 }
 
 fn finish_host_start(
@@ -2090,10 +2153,20 @@ where
 #[tauri::command]
 async fn show_openbot<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), Problem> {
     tauri::async_runtime::spawn_blocking(move || {
-        show_openbot_on(app, &openbot_env::Ports::default())
+        let ports = ports_for_shell(&app)?;
+        show_openbot_on(app, &ports)
     })
     .await
     .map_err(|error| Problem::with("OpenBot could not open its window.", error.to_string()))?
+}
+
+fn ports_for_shell<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<openbot_env::Ports, Problem> {
+    let root = cleanup_root(&app.state::<Shell>(), &stack::default_root());
+    openbot_env::Ports::read(&root).map_err(|error| {
+        Problem::with("OpenBot could not read its local ports.", error.to_string())
+    })
 }
 
 fn show_openbot_on<R: tauri::Runtime>(
@@ -2307,7 +2380,7 @@ fn already_running<R: tauri::Runtime>(app: tauri::AppHandle<R>, root: String) ->
     let shell = app.state::<Shell>();
     let _startup = shell.startup.lock().unwrap();
     !recovery_required_or_pending_quit_notice(&shell, &root)
-        && already_running_at(&root, &openbot_env::Ports::default())
+        && openbot_env::Ports::read(&root).is_ok_and(|ports| already_running_at(&root, &ports))
 }
 
 fn already_running_at(root: &Path, ports: &openbot_env::Ports) -> bool {
@@ -2758,6 +2831,26 @@ async fn finish_intelligence_sign_in(
     Ok(projects)
 }
 
+/// Create a project using the account already signed in, without exposing its credential to the UI.
+#[tauri::command]
+async fn create_intelligence_project(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<openbot_desktop_lib::intelligence::Project, Problem> {
+    let credential = app
+        .state::<Shell>()
+        .intelligence_credential
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| Problem::plain("Sign in to CopilotKit first."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::intelligence::create_project(&credential, &name)
+    })
+    .await
+    .map_err(|error| Problem::with("Your project could not be created.", error.to_string()))?
+}
+
 /// Create a key for the project somebody chose, and hand it back for the field.
 #[tauri::command]
 async fn intelligence_key_for(
@@ -2919,6 +3012,10 @@ fn publish_connection_failure<R: tauri::Runtime>(
     Ok(true)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Retain selected ports alongside the supervised run's identity and credentials."
+)]
 fn supervise_host_processes<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     root: PathBuf,
@@ -2928,6 +3025,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
     // already wrong, and a credential prompt at that moment is the worst time to ask for one.
     secrets: stack::Secrets,
     generation: u64,
+    ports: openbot_env::Ports,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         eprintln!(
@@ -2964,11 +3062,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     &connection_client,
                     secrets.get("OPENBOT_DESKTOP_HOST_TOKEN"),
                 ) {
-                    match desktop_connection::poll(
-                        client,
-                        openbot_env::Ports::default().server,
-                        token,
-                    ) {
+                    match desktop_connection::poll(client, ports.server, token) {
                         Ok(Some(connection)) => {
                             match publish_connection_failure(&app, &root, generation, connection) {
                                 Ok(published) => connection_notice_sent = published,
@@ -3126,7 +3220,15 @@ where
 /// Used by the tray and by a second launch, both of which happen at moments when the caller has no
 /// idea which of the two the person should be looking at.
 fn show_whichever_applies(app: &tauri::AppHandle) {
-    restore_window_on(app, &openbot_env::Ports::default());
+    match ports_for_shell(app) {
+        Ok(ports) => restore_window_on(app, &ports),
+        Err(problem) => {
+            *app.state::<Shell>().last_failure.lock().unwrap() = Some(problem);
+            if let Err(error) = show_setup_and_focus(app.clone()) {
+                eprintln!("{error}");
+            }
+        }
+    }
 }
 
 fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openbot_env::Ports) {
@@ -3294,6 +3396,7 @@ fn main() {
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,
+            create_intelligence_project,
             begin_organization_sign_in,
             finish_organization_sign_in,
             cancel_organization_sign_in,
@@ -7616,6 +7719,7 @@ fn main() {
             fixture.host.bun.clone(),
             stack::Secrets::new(),
             generation,
+            openbot_env::Ports::default(),
         ));
         // The actual watcher exhausts its actual budget and backoffs after this role fails.
         std::fs::write(fixture.host.root.join(failed_role).join("fail"), "").unwrap();
@@ -7814,6 +7918,7 @@ fn main() {
             fixture.host.bun.clone(),
             stack::Secrets::new(),
             generation,
+            openbot_env::Ports::default(),
         ));
         std::fs::write(fixture.host.root.join("worker/fail"), "").unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
@@ -7937,6 +8042,7 @@ fn main() {
             fixture.host.bun.clone(),
             stack::Secrets::new(),
             generation,
+            openbot_env::Ports::default(),
         ));
         let original = {
             let mut children = shell.children.lock().unwrap();
@@ -8262,7 +8368,22 @@ fn main() {
                 "wait-panics" => "the wait did not run:",
                 _ => unreachable!(),
             };
-            assert!(problem.said.starts_with(expected), "{problem:?}");
+            if matches!(mode, "wait-fails" | "wait-panics") {
+                assert!(
+                    problem.said.contains("could not finish starting"),
+                    "{problem:?}"
+                );
+                assert!(
+                    problem
+                        .detail
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with(expected),
+                    "{problem:?}"
+                );
+            } else {
+                assert!(problem.said.starts_with(expected), "{problem:?}");
+            }
             if mode == "cleanup-refuses" {
                 assert_eq!(alive.len(), 1);
                 assert_eq!(shell.children.lock().unwrap().len(), 1);
@@ -9288,6 +9409,40 @@ fn main() {
         window.navigate(current.parse().unwrap()).unwrap();
         restore_window_on(app.handle(), &f.ports);
         assert_eq!(window.url().unwrap().as_str(), current);
+    }
+
+    #[test]
+    fn reopening_uses_persisted_ports_and_still_requires_deployment_ownership() {
+        let f = RestoreFixture::new();
+        for root in [&f.owned, &f.selected] {
+            openbot_env::write(
+                &root.join(".env"),
+                &f.ports.settings(),
+                &std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+        }
+        let app = f.app(&f.owned, "tauri://localhost/");
+        assert_eq!(ports_for_shell(app.handle()).unwrap(), f.ports);
+        assert!(already_running(
+            app.handle().clone(),
+            f.owned.to_string_lossy().into_owned()
+        ));
+        tauri::async_runtime::block_on(show_openbot(app.handle().clone())).unwrap();
+        assert_eq!(
+            app.get_webview_window("main")
+                .unwrap()
+                .url()
+                .unwrap()
+                .port(),
+            Some(f.ports.app)
+        );
+        let other = f.app(&f.selected, "tauri://localhost/");
+        assert!(!already_running(
+            other.handle().clone(),
+            f.selected.to_string_lossy().into_owned()
+        ));
+        assert!(tauri::async_runtime::block_on(show_openbot(other.handle().clone())).is_err());
     }
 
     #[test]
