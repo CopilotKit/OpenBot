@@ -125,19 +125,6 @@ documented and hoped for:
 A deployment that names no domains and leaves the tenant multi-tenant warns instead of refusing,
 because genuinely multi-tenant is a real deployment.
 
-<<<<<<< HEAD
-### Under a multi-tenant Entra audience, the verified claim decides who somebody is
-
-`mapEntraProfile` read `email` first, which is populated from directory attributes Microsoft does
-not verify against a domain. In your own tenant that is right and unchanged. Under `common`,
-`organizations` or `consumers` it is not your directory: anybody may create a tenant and write
-`ceo@yourcompany.com` into their own user's `mail`. That string then becomes the identity every
-authorization decision is keyed on, `INITIAL_ADMIN_EMAILS` included. On those three audiences `upn`
-is preferred, whose suffix must be a domain verified in the tenant. Single-tenant deployments see no
-change.
-
-=======
->>>>>>> 71c659ad (Drop the Entra claim reordering, and refuse every audience that names no directory)
 ### A coworker can be a file of its own
 
 The example package declared every coworker in one `agents.yaml`, so adding one meant editing a file
