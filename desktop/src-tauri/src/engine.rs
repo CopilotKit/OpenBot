@@ -221,11 +221,8 @@ impl Address {
     /// because that file belongs to whoever else may have configured it.
     pub fn command(&self) -> Command {
         let (binary, arguments) = self.parts();
-        let mut command = command(binary);
+        let mut command = command_at(self.engine, &binary);
         command.args(arguments);
-        if let Some(dir) = tools_dir() {
-            command.env("PATH", path_with(dir));
-        }
         command
     }
 
@@ -329,9 +326,48 @@ fn tools_dir() -> Option<&'static PathBuf> {
 
 /// A command that runs this engine's binary, wherever it actually is.
 pub fn tool(engine: Engine) -> Command {
-    let mut built = command(program(engine).unwrap_or_else(|| PathBuf::from(engine.binary())));
-    if let Some(dir) = tools_dir() {
-        built.env("PATH", path_with(dir));
+    command_at(
+        engine,
+        &program(engine).unwrap_or_else(|| PathBuf::from(engine.binary())),
+    )
+}
+
+fn command_at(engine: Engine, binary: &Path) -> Command {
+    let mut built = command(binary);
+    let mut path = tools_dir()
+        .map(|dir| path_with(dir))
+        .or_else(|| std::env::var_os("PATH"));
+    if engine == Engine::Docker && binary.is_absolute() {
+        // A GUI can find Docker via its installation path while its PATH cannot find Docker's
+        // credential helper. Desktop ships them together, sometimes behind a CLI symlink.
+        // Append to preserve the person's chosen helpers and our Compose-provider precedence.
+        let resolved = std::fs::canonicalize(binary).ok();
+        for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
+            .into_iter()
+            .flatten()
+        {
+            let existing: Vec<_> = path
+                .as_deref()
+                .map(std::env::split_paths)
+                .into_iter()
+                .flatten()
+                .collect();
+            if existing.iter().any(|entry| entry == directory) {
+                continue;
+            }
+            // A directory containing the platform PATH separator cannot be represented here.
+            // Keep the original environment in that case; Docker still reports its real error.
+            if let Ok(expanded) = std::env::join_paths(
+                existing
+                    .into_iter()
+                    .chain(std::iter::once(directory.to_path_buf())),
+            ) {
+                path = Some(expanded);
+            }
+        }
+    }
+    if let Some(path) = path {
+        built.env("PATH", path);
     }
     built
 }
@@ -527,6 +563,104 @@ fn socket_override(engine: Engine) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_credential_helper_is_found_beside_resolved_cli_without_changing_config() {
+        if crate::test_support::isolated_process(
+            "engine::tests::docker_credential_helper_is_found_beside_resolved_cli_without_changing_config",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("docker credential helper path");
+        let bin = root.join("Docker application/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let source = root.join("fixture.rs");
+        let docker = bin.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        let helper = bin.join(format!(
+            "docker-credential-desktop{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    if std::env::current_exe().unwrap().file_stem().unwrap() == "docker-credential-desktop" {
+        println!("configured helper used");
+        return;
+    }
+    let filename = format!("docker-credential-desktop{}", std::env::consts::EXE_SUFFIX);
+    let path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|directory| directory.join(&filename)).find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!("docker-credential-desktop: executable file not found in PATH");
+        std::process::exit(41);
+    };
+    let output = std::process::Command::new(path).arg("get").output().unwrap();
+    assert!(output.status.success());
+    print!("{}", String::from_utf8(output.stdout).unwrap());
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &docker);
+        std::fs::copy(&docker, &helper).unwrap();
+        let config = root.join("config.json");
+        let original = br#"{"credsStore":"desktop","credHelpers":{"private.example":"custom"}}"#;
+        std::fs::write(&config, original).unwrap();
+        std::env::set_var("PATH", root.join("gui-path-without-docker"));
+        let output = command_at(Engine::Docker, &docker)
+            .env("DOCKER_CONFIG", &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"configured helper used\n");
+        assert_eq!(std::fs::read(config).unwrap(), original);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_symlink_adds_target_helpers_after_inherited_paths_and_managed_compose() {
+        if crate::test_support::isolated_process(
+            "engine::tests::docker_symlink_adds_target_helpers_after_inherited_paths_and_managed_compose",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("docker symlink helper path");
+        let target = root.join("Docker.app/Contents/Resources/bin");
+        let links = root.join("usr/local/bin");
+        for directory in [&target, &links] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(target.join("docker"), "fixture").unwrap();
+        std::os::unix::fs::symlink(target.join("docker"), links.join("docker")).unwrap();
+        let inherited = root.join("custom-helpers");
+        let managed = root.join("managed-compose");
+        std::env::set_var("PATH", &inherited);
+        tools_live_in(managed.clone());
+        let command = command_at(Engine::Docker, &links.join("docker"));
+        let path = command
+            .get_envs()
+            .find(|(key, _)| *key == "PATH")
+            .unwrap()
+            .1
+            .unwrap();
+        let directories: Vec<_> = std::env::split_paths(path).collect();
+        assert_eq!(
+            directories,
+            [
+                managed,
+                inherited,
+                links,
+                std::fs::canonicalize(target).unwrap()
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn runtime_selectors_keep_the_existing_status_wire_shape() {
