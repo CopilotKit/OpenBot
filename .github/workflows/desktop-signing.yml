@@ -118,6 +118,9 @@ jobs:
       - name: Build and sign
         env:
           WINDOWS_SIGNING: keyvault
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
         run: bun run tauri build --config src-tauri/tauri.windows-signing.conf.json --config src-tauri/tauri.build-version.conf.json --bundles nsis
         working-directory: desktop
       # Tauri restores the unsigned build output after bundling. Verify the app

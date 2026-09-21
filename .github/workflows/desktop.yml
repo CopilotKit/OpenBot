@@ -10,6 +10,9 @@ on:
     branches: [main]
     paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
+    secrets:
+      OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:
+        required: false
 
 permissions:
   contents: read
@@ -101,6 +104,9 @@ jobs:
         working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.platform.name == 'macos' && '-' || '' }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
+          OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
       - name: Verify packaged Mac version and ad-hoc signature
         if: matrix.platform.name == 'macos'
         run: |

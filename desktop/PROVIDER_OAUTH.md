@@ -17,6 +17,20 @@ process environment variables can override those defaults:
 - `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`: the client secret, when issued.
 - `OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT`: the project that supplies API quota.
 
+For GitHub-built artifacts, configure repository Actions **variables** named
+`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID` and
+`OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT`, plus an Actions **secret** named
+`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` when the client has one. Both the
+Desktop artifact workflow and the Windows signing workflow pass these settings
+to the native build. They become defaults inside the distributed desktop app;
+the desktop client credential is not a user access or refresh token.
+
+When calling the Desktop workflow as a reusable workflow, pass its optional
+`OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` secret explicitly or use
+`secrets: inherit`. GitHub does not provide repository secrets to fork pull
+requests. Missing settings do not fail the build; API-key connections remain
+available, and Google sign-in requires a configured build or runtime settings.
+
 Do not reuse OpenBot's web SSO credentials (`GOOGLE_OAUTH_CLIENT_ID` and
 `GOOGLE_OAUTH_CLIENT_SECRET`): their callback and permissions serve a different
 purpose. Configure the consent screen and test users, and complete Google's
