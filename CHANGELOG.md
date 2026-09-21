@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.14
+
 ### A tool cannot be granted for an app this deployment has not added
 
 Granting a Bot a connector's tool checked only that the person asking was an administrator, so a
