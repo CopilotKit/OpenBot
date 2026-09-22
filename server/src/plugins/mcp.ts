@@ -58,6 +58,9 @@ export function resultText(
       const item = part as {
         type?: string;
         text?: string;
+        uri?: unknown;
+        name?: unknown;
+        description?: unknown;
         resource?: { text?: unknown } | null;
       };
       if (item.type === "text" && typeof item.text === "string") {
@@ -68,6 +71,16 @@ export function resultText(
       // carrying bytes (`blob`) has no text to read and is named below like any other part.
       if (item.type === "resource" && typeof item.resource?.text === "string") {
         return item.resource.text;
+      }
+      // A resource_link is a pointer, not the file: URI, name, and often a sentence of what it is.
+      // Named as "[resource_link]", the model was told a link arrived and never shown where it went,
+      // so a search that answered with pages produced no page it could open.
+      if (item.type === "resource_link") {
+        const shown = [item.name, item.uri, item.description].filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim() !== "",
+        );
+        if (shown.length > 0) return shown.join("\n");
       }
       // A non-text part is named rather than dropped. A model told "[image]" can say the tool
       // returned an image; a model handed nothing concludes the tool returned nothing.

@@ -130,6 +130,53 @@ describe("a result with something in it", () => {
     );
   });
 
+  test("reads a resource_link's name, uri and description, as a server points at a file", () => {
+    // MCP's resource_link is a pointer, not the file: a URI, a name, and often a sentence of
+    // what it is. Named as "[resource_link]", the model was told a link arrived and never shown
+    // where it went, so a search that answered with pages produced no pages it could open.
+    expect(
+      resultText([
+        {
+          type: "resource_link",
+          uri: "notion://page/q3-budget",
+          name: "Q3 budget",
+          description: "The approved numbers for the quarter",
+          mimeType: "text/html",
+        },
+      ]).text,
+    ).toBe(
+      "Q3 budget\nnotion://page/q3-budget\nThe approved numbers for the quarter",
+    );
+  });
+
+  test("a resource_link with only a uri is still that uri, not an empty name", () => {
+    expect(
+      resultText([{ type: "resource_link", uri: "file:///notes.md" }]).text,
+    ).toBe("file:///notes.md");
+  });
+
+  test("a resource_link that names nothing is still named, rather than dropped", () => {
+    expect(resultText([{ type: "resource_link" }]).text).toBe(
+      "[resource_link]",
+    );
+    expect(
+      resultText([{ type: "resource_link", uri: "   ", name: "" }]).text,
+    ).toBe("[resource_link]");
+  });
+
+  test("joins a resource_link beside a text part", () => {
+    expect(
+      resultText([
+        { type: "text", text: "matching pages:" },
+        {
+          type: "resource_link",
+          uri: "https://example.com/policy",
+          name: "Expense policy",
+        },
+      ]).text,
+    ).toBe("matching pages:\nExpense policy\nhttps://example.com/policy");
+  });
+
   test("names a null or non-object part rather than throwing", () => {
     // Content arrives from a vendor's server; a null entry must not throw.
     expect(resultText([null]).text).toBe("[unknown]");

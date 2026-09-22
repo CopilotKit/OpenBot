@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### An MCP tool that answers with a resource link is no longer read as an empty name
+
+A tool that points at a file or a page often returns a `resource_link`: a URI, a name, and a
+sentence of what it is, rather than the contents themselves. That part was named `[resource_link]`
+and the URI was dropped, so the model was told a link arrived and never shown where it went. A
+search that answered with pages produced no page it could open. The URI, name and description are
+now read. A part that already carried text is unchanged.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer
