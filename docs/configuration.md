@@ -63,6 +63,7 @@ at `agent-langgraph` on a laptop.
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
+| `OPENBOT_ACCESSIBILITY_DISABLED` | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
@@ -179,6 +180,15 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
 | `OPENBOT_PUBLIC_URL`         | Public address of this API. Defaults to `BETTER_AUTH_URL`.                              |
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
+| `SIGNIN_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains admitted at sign-in. Empty means no opinion. Exact, no wildcards. |
+| `OPENBOT_ORGANIZATION_AUTH_URL` | An OpenBot deployment that verifies employee identity and roles. Decides sign-in ahead of `OPENBOT_SINGLE_USER`. |
+
+**Some variables belong to the desktop app, not to you.** A desktop installation writes these into
+its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`
+and `CLAUDE_CODE_OAUTH_TOKEN`. When a model provider is connected by OAuth rather than by key, the
+desktop also points `OPENAI_BASE_URL` at OpenBot's own loopback route and sets `OPENAI_API_KEY` to a
+local proxy credential rather than a provider key, so those two do not mean what the table above says
+in that mode. A server you configure yourself is unaffected by all of this.
 
 **With no provider at all, `OPENBOT_SINGLE_USER=true` is required.** A deployment that configures
 nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
@@ -193,6 +203,22 @@ private address is allowed and warned about once at boot, because a home server,
 address and a `.local` name are what this flag is mostly used for, and anybody on that network is
 the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
 it.
+
+**`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
+administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
+`sub.example.com` nor `evil-example.com`, and both sides go through the same IDNA normalisation, so
+a rule may be written `@Example.COM.` or in punycode and still mean what it says. Two arrangements
+are refused at start-up rather than documented and hoped for: a list that normalises to nothing,
+which `@` and a stray `.` both produce, because it is a non-empty list no address can match; and a
+list combined with a `MICROSOFT_OAUTH_TENANT_ID` that names no directory (`common`, `organizations`
+or `consumers`), because there the address the list is checked against is one the signing-in tenant
+writes for itself. A production deployment that names no domains and leaves the tenant multi-tenant
+is warned rather than refused.
+
+**`OPENBOT_ORGANIZATION_AUTH_URL` names an authority, not a provider.** It must be an HTTPS OpenBot
+origin, or HTTP on loopback, and a bare origin: a username, password, query, fragment or any path
+other than `/` is refused at start-up. Naming one settles sign-in by itself, ahead of
+`OPENBOT_SINGLE_USER`.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires

@@ -56,6 +56,11 @@ apply.
 References: [xAI's OpenCode integration](https://x.ai/news/grok-opencode) and
 [xAI OAuth discovery](https://auth.x.ai/.well-known/openid-configuration).
 
+## Other build-time settings
+
+`VITE_OPENBOT_SUPPORT_URL` replaces the support link a startup failure offers. Unset, it points at
+this repository's issues. A whitelabel build points it at its own support channel.
+
 ## Credential lifecycle
 
 The desktop's provider credentials remain in its local deployment; React does

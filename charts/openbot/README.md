@@ -466,6 +466,33 @@ install rather than found as a browser that fails on every page.
 
 ## Upgrades
 
+### Coming from a release before 0.0.14: a computer now runs as uid 1001
+
+`computers.podSecurityContext` runs a Bot's computer as `pwuser`, uid 1001, in both `shared` and
+`sandbox` mode. It was root before. The volumes an existing release created are root-owned, so
+something has to hand them over, and that something is `fsGroup`: the kubelet takes ownership of a
+volume's contents on mount.
+
+**It does that only where the volume plugin says it can.** The EBS, PD and Azure Disk CSI drivers
+do. `hostPath` does not, and `hostPath` is what rancher/local-path-provisioner hands out, which is
+the default StorageClass on k3s. There the computer starts as 1001, finds a directory it cannot
+write, and refuses to start rather than coming up healthy with a browser profile Chromium silently
+replaced. The message names this. Two ways out:
+
+```sh
+# Either hand the existing directories to 1001 on the node, or go back to root:
+helm upgrade openbot ./charts/openbot --set computers.podSecurityContext=null
+```
+
+**`--reuse-values` will not pick this up.** A new key is not in the old release's values, so an
+upgrade run that way keeps running as root and says nothing. Pass the value, or drop the flag.
+
+`fsGroupChangePolicy: OnRootMismatch` is deliberate. Unset means `Always`, which walks every file on
+every mount, and a real Chromium profile is tens of thousands of small ones; in `sandbox` mode that
+pass would run again on every resume from idle.
+
+### How a rollout is sequenced
+
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
 has not seen. An init container would mean every replica racing to migrate the same database.
 

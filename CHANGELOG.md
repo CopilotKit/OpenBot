@@ -8,16 +8,77 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### Desktop setup shows progress and works around occupied local ports
+### A model provider's own sign-in can stand in for an API key
 
-Downloads show transferred bytes and elapsed time, Back preserves saved connections, and repair
-stays under Installation options after setup. OpenBot selects and remembers usable local ports,
-including when Windows reserves a default port. Setup can create a CopilotKit project and offers
-Google Gemini and xAI API-key choices, plus OAuth sign-in with automatic token refresh. Google
-OAuth requires the distributor's desktop client and quota-project configuration. Unsupported Bun
-installations are replaced with the pinned runtime; startup errors retain useful details and provide a configurable setup-help link.
-Docker image downloads can find the credential helper bundled beside Docker even when it is
-missing from the desktop app's PATH. Existing Docker credentials and helper preferences are preserved.
+`OPENBOT_MODEL_OAUTH_FILE` names a credential file holding a Google or xAI OAuth grant. Set it and
+the server mounts `POST /api/model-provider/v1/chat/completions`, which answers an ordinary Chat
+Completions request using that grant, refreshing the access token 120 seconds before it expires and
+again on a provider 401, and persisting the rotation under a lock the writer and the desktop share.
+Leave it unset, which is every deployment that does not set it, and the route does not exist.
+
+The caller authenticates with a separate local bearer taken from that file, compared in constant
+time, never with the provider's own token: a refresh token never leaves the server process. The file
+itself is refused unless it is a regular file under 64KB owned readable by nobody else, and a Google
+grant must name a quota project. The upstream host, path and headers are fixed, so nothing a caller
+sends can redirect the request.
+
+Google is reached through its native generation API rather than a compatibility endpoint, with a
+translation layer that carries streaming, tool calls and their results, inline images and
+function-call thought signatures across in both directions. An API-key connection is unchanged and
+still uses the compatibility endpoint.
+
+**A provider 403 no longer reads as an expired sign-in.** It usually means a missing project or
+resource permission, which signing in again cannot fix, so only a 401 now raises "sign in again".
+
+### Desktop setup shows progress, chooses its own local ports, and can sign in to a provider
+
+Downloads report transferred bytes, every running step reports elapsed time, and running, completed
+and failed stages are told apart. Back preserves the connections already entered.
+
+OpenBot now chooses its local ports by binding them rather than assuming them, holds them until the
+whole set is settled, and writes them to the deployment's `.env` so a restart keeps the same
+addresses. That covers a port another program holds and a port Windows has reserved, neither of
+which the old fixed defaults survived. A port that becomes unavailable between choosing and starting
+now says so and asks for another Start, where it previously refused before trying.
+
+Setup can create a CopilotKit project, and offers Google Gemini and xAI as API-key choices alongside
+OAuth sign-in. Google sign-in requires this build's own registered desktop client and quota project,
+set at build time or by environment variable, and refuses with a message saying so when it has
+neither; xAI falls back to a public client and works in any build. `desktop/PROVIDER_OAUTH.md`
+describes what a distributor configures.
+
+A deployment left behind by an earlier installation can be detected and reset from the app, which
+removes that deployment's database volume and nothing else.
+
+Startup failures keep enough of the log to name the cause, with every secret value redacted, and
+carry a support link a whitelabel build can point elsewhere.
+
+### A Bot's image pull finds the Docker credential helper beside Docker
+
+A Docker install whose credential helper sits next to the `docker` binary rather than on the desktop
+app's own PATH failed the pull with a PATH error naming the helper. The directory holding the
+resolved `docker`, and the directory holding what it points at when it is a symlink, are now appended
+to the PATH the engine is invoked with. Appended, so an existing helper still wins, and the inherited
+PATH is now kept rather than replaced, which it was not before.
+
+### OpenBot starts only on the Bun it pins
+
+An installed or cached Bun that is not the pinned version is no longer accepted, on install and on
+every start, and OpenBot acquires its own copy instead. The version already on the machine is left
+exactly as it is and simply not used.
+
+### Organization sign-in survives a callback that arrives in pieces
+
+The loopback listener that receives an organization or provider sign-in read the callback once and
+gave up if the whole request had not arrived, and on Windows the accepted socket inherited the
+listener's non-blocking mode, so a timeout did not apply. A good sign-in could be answered "Sign-in
+did not match". Both paths now read until the request line is complete, with a real timeout.
+
+### Compose file lists separate correctly on Windows
+
+The separator between Compose files fell back to `:` everywhere, which is right on macOS and Linux
+and wrong on Windows, where a drive letter contains one. It now follows the platform. This is
+reachable on every platform now that a port overlay is passed, where before it was macOS only.
 
 ## 0.0.14
 
