@@ -33,6 +33,9 @@ pub struct Problem {
     /// The credential operation that failed, never inferred from provider log text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection: Option<Connection>,
+    /// The full, verified Compose volume name offered for an explicit fresh-install reset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_reset: Option<String>,
 }
 
 impl Problem {
@@ -42,6 +45,7 @@ impl Problem {
             said: said.into(),
             detail: None,
             connection: None,
+            database_reset: None,
         }
     }
 
@@ -52,6 +56,7 @@ impl Problem {
             said: said.into(),
             detail: (!detail.trim().is_empty()).then_some(detail),
             connection: None,
+            database_reset: None,
         }
     }
 

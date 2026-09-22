@@ -12,6 +12,7 @@ export type Problem = {
   said: string;
   detail?: string | null;
   connection?: "model" | "intelligence" | "organization" | null;
+  database_reset?: string | null;
 };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */

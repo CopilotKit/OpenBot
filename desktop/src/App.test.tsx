@@ -1227,6 +1227,107 @@ function emptyConfiguration() {
   };
 }
 
+test("leftover database recovery requires confirmation and keeps setup ready to retry", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  const reset = deferred<void>();
+  let starts = 0;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack" && ++starts === 1)
+      throw {
+        said: "A previous OpenBot database remains without its encryption key.",
+        database_reset: "fixture_postgres-data",
+      };
+    if (command === "reset_leftover_database") return reset.promise;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://model.example/v1",
+    "synthetic-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const resets = () =>
+    invokeCalls.filter((call) => call.command === "reset_leftover_database");
+  await userEvent.click(
+    await view.findByRole("button", { name: "Reset leftover database" }),
+  );
+  expect(view.getByText(/permanently deletes/)).toBeTruthy();
+  expect(resets()).toHaveLength(0);
+  await userEvent.click(view.getByRole("button", { name: "Keep saved data" }));
+  expect(resets()).toHaveLength(0);
+  expect(view.queryByRole("button", { name: "Delete saved data" })).toBeNull();
+  await userEvent.click(
+    view.getByRole("button", { name: "Reset leftover database" }),
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "Delete saved data" }),
+  );
+  expect(resets()).toEqual([
+    {
+      command: "reset_leftover_database",
+      args: {
+        root: "/tmp/openbot-app-test",
+        volume: "fixture_postgres-data",
+        confirmed: true,
+      },
+    },
+  ]);
+  expect(
+    view.getByRole("button", { name: "Deleting saved data…" }),
+  ).toHaveProperty("disabled", true);
+  expect(view.getByRole("button", { name: "Working…" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => reset.resolve());
+  expect(
+    view.queryByRole("button", { name: "Reset leftover database" }),
+  ).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(starts).toBe(1);
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await view.findByRole("button", { name: "Ask" });
+  expect(installationCalls()).toHaveLength(1);
+});
+
+test("database recovery failure is shown without restarting services", async () => {
+  useCompatibleEndpointSetup({});
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "A previous database remains.",
+        database_reset: "fixture_postgres-data",
+      };
+    if (command === "reset_leftover_database")
+      throw {
+        said: "The database is still in use. Close the other OpenBot installation first.",
+      };
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://model.example/v1",
+    "synthetic-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Reset leftover database" }),
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "Delete saved data" }),
+  );
+  expect(await view.findByText(/database is still in use/)).toBeTruthy();
+  expect(
+    invokeCalls.filter((call) => call.command === "start_stack"),
+  ).toHaveLength(1);
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
 function setupRootConfiguration(
   rootA: string,
   loadConfiguration: (root: string) => Promise<unknown>,
