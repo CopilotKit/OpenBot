@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { attachmentModality } from "@/components/channels/chat-messages";
+import { IconWaveform } from "@/components/icons/waveform";
 import {
   attachmentUrl,
   classifyAttachment,
@@ -127,6 +128,7 @@ export type ComposerProps = {
    */
   editorClassName?: string;
   compact?: boolean;
+  voiceCall?: { active: boolean; supported: boolean; onStart(): void };
   /** Agents that `@` can address. Empty means the mention menu reports an empty channel. */
   agents?: readonly AgentOption[];
   commands?: readonly CommandOption[];
@@ -314,6 +316,7 @@ export function Composer({
   className,
   editorClassName,
   compact = false,
+  voiceCall,
   agents = [],
   commands = PLACEHOLDER_COMMANDS,
   onSubmit,
@@ -352,11 +355,14 @@ export function Composer({
   /** A send has completed and the caret is owed back, as soon as the editor will take it. */
   const wantsFocus = useRef(false);
   const sendDictatedDraft = useRef(false);
-  const dictation = useDictation((transcript, intent) => {
-    setValue((current) => appendDictation(current, transcript));
-    sendDictatedDraft.current = intent === "send";
-    wantsFocus.current = true;
-  }, disabled);
+  const dictation = useDictation(
+    (transcript, intent) => {
+      setValue((current) => appendDictation(current, transcript));
+      sendDictatedDraft.current = intent === "send";
+      wantsFocus.current = true;
+    },
+    disabled || voiceCall?.active === true,
+  );
   /** `autoFocus` has been honoured once, and is not owed again for the life of this composer. */
   const claimedAutoFocus = useRef(false);
   /**
@@ -1312,6 +1318,52 @@ export function Composer({
    * lie told to exactly the people who cannot see the queue it lands in.
    */
   const sendLabel = parking ? "Queue message" : "Send message";
+  const callAction =
+    draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
+  const actionClassName = cn(
+    "rounded-full p-0",
+    compact ? "size-8 self-end" : "size-7",
+  );
+  const primaryAction = canStop ? (
+    <Button
+      aria-label="Stop the Bot"
+      className={actionClassName}
+      data-testid="composer-stop"
+      onClick={onStop}
+      size="icon"
+      type="button"
+    >
+      <IconPlayerStopFilled className="size-3" />
+    </Button>
+  ) : callAction ? (
+    <Button
+      aria-label={callAction.active ? "Show voice call" : "Start voice call"}
+      title={
+        callAction.supported
+          ? callAction.active
+            ? "Show voice call"
+            : "Call this agent"
+          : "Voice calls need HTTPS or localhost and microphone support"
+      }
+      className={actionClassName}
+      disabled={disabled || dictation.busy || !callAction.supported}
+      onClick={callAction.onStart}
+      size="icon"
+      type="button"
+    >
+      <IconWaveform className="size-4" />
+    </Button>
+  ) : (
+    <Button
+      aria-label={sendLabel}
+      className={actionClassName}
+      disabled={!canSend}
+      size="icon"
+      type="submit"
+    >
+      <IconArrowUp className="size-3.5" />
+    </Button>
+  );
 
   /**
    * EVERY COMPOSER IS A DROP TARGET. What changes with `canAttach` is what happens to the file,
@@ -1491,29 +1543,11 @@ export function Composer({
                 triggers={triggers}
                 value={value}
               />
-              <DictationButton dictation={dictation} disabled={disabled} />
-              {canStop ? (
-                <Button
-                  aria-label="Stop the Bot"
-                  className="size-8 self-end rounded-full p-0"
-                  data-testid="composer-stop"
-                  onClick={onStop}
-                  size="icon"
-                  type="button"
-                >
-                  <IconPlayerStopFilled className="size-3" />
-                </Button>
-              ) : (
-                <Button
-                  aria-label={sendLabel}
-                  className="size-8 self-end rounded-full p-0"
-                  disabled={!canSend}
-                  size="icon"
-                  type="submit"
-                >
-                  <IconArrowUp className="size-3.5" />
-                </Button>
-              )}
+              <DictationButton
+                dictation={dictation}
+                disabled={disabled || voiceCall?.active === true}
+              />
+              {primaryAction}
             </div>
           </DictationSurface>
         </form>
@@ -1585,27 +1619,11 @@ export function Composer({
             )}
 
             <div className="flex items-center gap-1">
-              <DictationButton dictation={dictation} disabled={disabled} />
-              {canStop ? (
-                <Button
-                  aria-label="Stop the Bot"
-                  className="size-7 rounded-full bg-primary p-0"
-                  data-testid="composer-stop"
-                  onClick={onStop}
-                  type="button"
-                >
-                  <IconPlayerStopFilled className="size-3" />
-                </Button>
-              ) : (
-                <Button
-                  aria-label={sendLabel}
-                  className="size-7 rounded-full bg-primary p-0 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!canSend}
-                  type="submit"
-                >
-                  <IconArrowUp className="size-3.5 fill-primary" />
-                </Button>
-              )}
+              <DictationButton
+                dictation={dictation}
+                disabled={disabled || voiceCall?.active === true}
+              />
+              {primaryAction}
             </div>
           </div>
         </DictationSurface>

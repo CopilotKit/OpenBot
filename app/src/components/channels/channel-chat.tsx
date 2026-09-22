@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
+import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
 import {
   seedMessage,
   takeFirstMessage,
@@ -34,6 +35,20 @@ import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import {
+  askChannelAgent,
+  messageText,
+  voiceContext,
+  withVoiceContext,
+} from "@/lib/voice/agent-bridge";
+import { useVoiceCall } from "@/lib/voice/use-voice-call";
+import {
+  loadVoiceArchive,
+  cachedVoiceArchive,
+  useVoiceArchive,
+  voiceArchiveContext,
+  withVoiceChats,
+} from "@/lib/voice/archive";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
 
@@ -290,6 +305,10 @@ export function ChannelChat({
    */
   const agentRef = useRef(agent);
   agentRef.current = agent;
+  const voiceArchive = useVoiceArchive(channel.id);
+  const [voiceContextNotice, setVoiceContextNotice] = useState<string | null>(
+    null,
+  );
 
   /**
    * History has been asked for and has not arrived. True for a channel opened from the roster, where
@@ -615,7 +634,29 @@ export function ChannelChat({
 
     // Every wait is behind us, so this is the agent the screen is actually rendering. Read once and
     // used throughout, so the message, the repair and the run cannot land on two different agents.
+    // Give initial voice history time to restore, while keeping ordinary chat usable on failure.
+    setVoiceContextNotice(null);
+    let voiceHistoryTimer: ReturnType<typeof setTimeout> | undefined;
+    const priorCalls = await Promise.race([
+      loadVoiceArchive(channel.id),
+      new Promise<never>((_resolve, reject) => {
+        voiceHistoryTimer = setTimeout(
+          () => reject(new Error("Voice history timed out")),
+          2000,
+        );
+      }),
+    ])
+      .catch(() => {
+        setVoiceContextNotice(
+          "Earlier voice context wasn’t available for this message. The agent may need you to repeat details from the call.",
+        );
+        return cachedVoiceArchive(channel.id);
+      })
+      .finally(() => clearTimeout(voiceHistoryTimer));
     const target = agentRef.current;
+    const existingMessageIds = new Set(
+      target.messages.map((message) => message.id),
+    );
 
     setRunError(null);
     turnFailure.current = null;
@@ -646,6 +687,18 @@ export function ChannelChat({
       });
     }
 
+    const voiceHistory = voiceArchiveContext(priorCalls);
+    // Older development calls used a system row, which built-in agents discard.
+    const previousVoiceContextId = `voice-history:${channel.id}`;
+    if (
+      target.messages.some((message) => message.id === previousVoiceContextId)
+    )
+      target.setMessages(
+        target.messages.filter(
+          (message) => message.id !== previousVoiceContextId,
+        ),
+      );
+
     target.addMessage({
       content: toMessageContent(trimmed, attachments),
       id: newId(),
@@ -661,7 +714,9 @@ export function ChannelChat({
 
     setRunsInFlight((count) => count + 1);
     try {
-      await copilotkit.runAgent({ agent: target });
+      await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
+        copilotkit.runAgent({ agent: target }),
+      );
     } finally {
       setRunsInFlight((count) => count - 1);
     }
@@ -689,6 +744,14 @@ export function ChannelChat({
     if (turnFailure.current !== null) {
       throw new Error(turnFailure.current);
     }
+    return target.messages
+      .filter(
+        (message) =>
+          message.role === "assistant" && !existingMessageIds.has(message.id),
+      )
+      .map(messageText)
+      .filter(Boolean)
+      .join("\n\n");
   };
 
   /**
@@ -708,7 +771,14 @@ export function ChannelChat({
     // A pasted screenshot with no caption is still a message to send: `canSendDraft` already
     // unlocks the button for exactly this case, so refusing it here would leave the button
     // enabled and inert.
-    if (!trimmed && attachments.length === 0) return;
+    if (!trimmed && attachments.length === 0) return "";
+
+    // Voice and typed requests share this turn boundary, including gaps between frontend tools.
+    if (turnsRef.current > 0 || agentRef.current.isRunning) {
+      throw new Error(
+        "The agent is still working on another request. Please wait or stop that task first.",
+      );
+    }
 
     turnsRef.current += 1;
     setTurnsInFlight(turnsRef.current);
@@ -716,7 +786,7 @@ export function ChannelChat({
       void setChannelBusy({ channelId: channel.id, busy: true });
     }
     try {
-      await deliver(trimmed, skillInstructions, attachments);
+      return await deliver(trimmed, skillInstructions, attachments);
     } finally {
       turnsRef.current -= 1;
       setTurnsInFlight(turnsRef.current);
@@ -764,6 +834,35 @@ export function ChannelChat({
   /** Stable reference for effects and component callbacks. */
   const sayRef = useRef(say);
   sayRef.current = say;
+  const stopEpoch = useRef(0);
+
+  const call = useVoiceCall({
+    channelId: channel.id,
+    disabled: !channel.active,
+    context: async () =>
+      [
+        voiceArchiveContext(await loadVoiceArchive(channel.id)).slice(-6000),
+        voiceContext(agentRef.current.messages).slice(-6000),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    anchorMessageId: () => agentRef.current.messages.at(-1)?.id ?? null,
+    askAgent: async (request, signal) => {
+      const started = stopEpoch.current;
+      const answer = await askChannelAgent(request, signal, {
+        busy: () => turnsRef.current > 0 || agentRef.current.isRunning,
+        send: (text) => sayRef.current(text),
+      });
+      if (started !== stopEpoch.current)
+        throw new Error("The user stopped this task before it completed.");
+      return answer;
+    },
+  });
+  const stopTask = () => {
+    awaitingReply.current = false;
+    stopEpoch.current++;
+    copilotkit.stopAgent({ agent });
+  };
 
   /**
    * Component buttons speak as user turns without forcing every transcript card to re-render.
@@ -806,100 +905,142 @@ export function ChannelChat({
       threadId={channel.threadId}
     >
       <ConversationProvider ask={askFromComponent}>
-        <ConversationView
-          agents={toAgentOptions(agentProfiles, channel.agentIds)}
-          channelId={channel.id}
-          /*
-           * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
-           * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
-           * "Thinking" line exists for. Same value as `pending`, deliberately.
-           */
-          busy={agent.isRunning || turnsInFlight > 0}
-          // The `/` menu exposes only skills granted to this Bot.
-          commands={skillCommands}
-          // Readiness is handled by `say`; deletion is the only disabled-chat state.
-          disabled={!channel.active}
-          messages={transcriptMessages(agent.messages, seed)}
-          notice={
+        <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
+          <VoiceCallWidget
+            call={call}
+            name={
+              agentProfiles?.find((profile) => profile.id === runtimeAgentId)
+                ?.name ?? channel.name
+            }
+            avatarSeed={
+              agentProfiles?.find((profile) => profile.id === runtimeAgentId)
+                ?.avatarSeed ?? runtimeAgentId
+            }
+            taskRunning={agent.isRunning || runsInFlight > 0}
+          />
+          <ConversationView
+            voiceCall={
+              call.available
+                ? {
+                    active: call.active,
+                    supported: call.supported,
+                    onStart: call.open,
+                  }
+                : undefined
+            }
+            agents={toAgentOptions(agentProfiles, channel.agentIds)}
+            channelId={channel.id}
             /*
-             * Two things can be worth saying at once — a deleted coworker and a history with holes in
-             * it — and they are independent, so neither is an `else` for the other.
+             * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
+             * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
+             * "Thinking" line exists for. Same value as `pending`, deliberately.
              */
-            <>
-              {historyNotice ? (
-                <p className="pb-2 text-sm text-muted-foreground" role="status">
-                  {historyNotice}
-                </p>
-              ) : null}
-              {channel.active ? null : (
-                <p className="pb-2 text-sm text-muted-foreground" role="status">
-                  This coworker has been deleted. The conversation stays
-                  readable, but it can no longer reply.
-                </p>
-              )}
-            </>
-          }
-          onSubmit={async (draft) => {
-            // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
-            // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
-            // per-message mention is a change to that binding, not to the composer.
-            //
-            // `commandIds` are the `/` chips that survived into the send, in the order they were
-            // typed. Resolved against the same list the menu was built from, so a chip left over from
-            // a skill that has since been revoked resolves to nothing rather than to a stale
-            // instruction — the menu is refetched, and this reads from it.
-            const skillInstructions = draft.commandIds
-              .map(
-                (id) =>
-                  skillCommands.find((command) => command.id === id)?.prompt,
-              )
-              .filter((instruction): instruction is string =>
-                Boolean(instruction),
-              );
+            busy={agent.isRunning || turnsInFlight > 0}
+            // The `/` menu exposes only skills granted to this Bot.
+            commands={skillCommands}
+            // Readiness is handled by `say`; deletion is the only disabled-chat state.
+            disabled={!channel.active}
+            messages={withVoiceChats(
+              transcriptMessages(agent.messages, seed),
+              voiceArchive.entries,
+            )}
+            notice={
+              /*
+               * Two things can be worth saying at once — a deleted coworker and a history with holes in
+               * it — and they are independent, so neither is an `else` for the other.
+               */
+              <>
+                {voiceArchive.error && (
+                  <p className="pb-2 text-sm text-destructive" role="alert">
+                    Voice chats couldn’t be loaded. Refresh to try again.
+                  </p>
+                )}
+                {voiceContextNotice && (
+                  <p
+                    className="pb-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    {voiceContextNotice}
+                  </p>
+                )}
+                {historyNotice ? (
+                  <p
+                    className="pb-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    {historyNotice}
+                  </p>
+                ) : null}
+                {channel.active ? null : (
+                  <p
+                    className="pb-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    This coworker has been deleted. The conversation stays
+                    readable, but it can no longer reply.
+                  </p>
+                )}
+              </>
+            }
+            onSubmit={async (draft) => {
+              // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
+              // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
+              // per-message mention is a change to that binding, not to the composer.
+              //
+              // `commandIds` are the `/` chips that survived into the send, in the order they were
+              // typed. Resolved against the same list the menu was built from, so a chip left over from
+              // a skill that has since been revoked resolves to nothing rather than to a stale
+              // instruction — the menu is refetched, and this reads from it.
+              const skillInstructions = draft.commandIds
+                .map(
+                  (id) =>
+                    skillCommands.find((command) => command.id === id)?.prompt,
+                )
+                .filter((instruction): instruction is string =>
+                  Boolean(instruction),
+                );
 
-            await say(draft.text, skillInstructions, draft.attachments);
-          }}
-          /**
-           * Stop through the core so the abort signal reaches frontend tools; `say` repairs any
-           * unanswered tool call before the next turn.
-           */
-          onStop={() => {
-            awaitingReply.current = false;
-            copilotkit.stopAgent({ agent });
-          }}
-          /*
-           * The turn, not the run. A browser action ends one run and starts another, and telling the
-           * conversation it is idle in between is what would drain a parked correction into the
-           * middle of an answer: a second turn racing the first on one thread, with a fabricated
-           * result stitched over a tool call that is still executing.
-           */
-          pending={agent.isRunning || turnsInFlight > 0}
-          /*
-           * A channel outlives its turns, so it is the screen where waiting is worth offering. A
-           * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
-           * moment this one is over — including when it is over because somebody pressed the button
-           * above.
-           */
-          queueWhileBusy
-          restoring={restoring}
-          /*
-           * The run, not the turn. Stop reaches a run through the core's abort controller, and that
-           * controller does not exist until `say` has finished waiting for the runtime agent — so
-           * this is the one place the narrower fact is the honest one to draw a button from.
-           */
-          stoppable={agent.isRunning || runsInFlight > 0}
-          /*
-           * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
-           * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
-           * appear, and the person is already looking at it; an explanation in the composer area is a
-           * different part of the screen from the thing it explains.
-           *
-           * `runError` carries whatever ended the turn, in that thing's own words. A Bot that stopped
-           * streaming says so, because the deployment's stall watchdog writes that sentence into the
-           * run before closing it; see server/src/channels/stall-guard.ts.
-           */
-          stopped={runError ?? undefined}
-        />
+              await say(draft.text, skillInstructions, draft.attachments);
+            }}
+            /**
+             * Stop through the core so the abort signal reaches frontend tools; `say` repairs any
+             * unanswered tool call before the next turn.
+             */
+            onStop={stopTask}
+            /*
+             * The turn, not the run. A browser action ends one run and starts another, and telling the
+             * conversation it is idle in between is what would drain a parked correction into the
+             * middle of an answer: a second turn racing the first on one thread, with a fabricated
+             * result stitched over a tool call that is still executing.
+             */
+            pending={agent.isRunning || turnsInFlight > 0}
+            /*
+             * A channel outlives its turns, so it is the screen where waiting is worth offering. A
+             * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
+             * moment this one is over — including when it is over because somebody pressed the button
+             * above.
+             */
+            queueWhileBusy
+            restoring={restoring}
+            /*
+             * The run, not the turn. Stop reaches a run through the core's abort controller, and that
+             * controller does not exist until `say` has finished waiting for the runtime agent — so
+             * this is the one place the narrower fact is the honest one to draw a button from.
+             */
+            stoppable={agent.isRunning || runsInFlight > 0}
+            /*
+             * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
+             * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
+             * appear, and the person is already looking at it; an explanation in the composer area is a
+             * different part of the screen from the thing it explains.
+             *
+             * `runError` carries whatever ended the turn, in that thing's own words. A Bot that stopped
+             * streaming says so, because the deployment's stall watchdog writes that sentence into the
+             * run before closing it; see server/src/channels/stall-guard.ts.
+             */
+            stopped={runError ?? undefined}
+          />
+        </div>
       </ConversationProvider>
     </CopilotChatConfigurationProvider>
   );

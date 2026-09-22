@@ -302,6 +302,13 @@
       "when": 1789579982431,
       "tag": "0042_plugin_logos",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790035200000,
+      "tag": "0043_voice_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -193,8 +193,57 @@ quotas should also enforce them at their audio gateway. Provider failures never 
 service. OpenBot keeps audio in memory only, retaining a failed recording in the browser for retry
 until cancellation or navigation. Your configured provider's retention policy still applies.
 
-This release supports recorded dictation only; streaming transcription, speech playback, and live
-voice sessions are separate capabilities to add through their own adapters.
+Dictation is separate from live voice calls and does not enable them automatically.
+
+## Live voice calls
+
+The waveform button in an existing channel opens a floating call widget. The realtime voice model
+handles conversation, advice, and brainstorming directly, using the selected agent's identity.
+Requests needing tools, connected accounts, current facts, or specialist work are delegated to that
+channel's existing agent. Delegated requests, agent replies, tools, and generated interfaces use the
+normal AG-UI thread. The voice model speaks the returned result and continues the conversation.
+Joining includes recent thread messages and previous voice chats, capped at 12,000 characters.
+
+Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
+Voice chat card in the same channel. A separate summary request uses the deployment's default chat
+model and its existing credential. A failed summary leaves the saved transcript available with a
+retry button. Interrupted answers are marked as interrupted rather than treated as fully heard.
+Later voice calls and typed agent requests receive the saved voice context. Voice cards are stored
+separately from AG-UI messages; ordinary voice conversation does not trigger an agent run.
+
+The browser temporarily keeps unconfirmed transcripts in a local outbox scoped to the signed-in
+user, so a failed save or closing the tab can be recovered on returning to the channel. Confirmed
+saves are removed from that outbox. No call audio is recorded by OpenBot.
+
+| Variable | Meaning |
+| --- | --- |
+| `VOICE_PROVIDER` | `openai-realtime` or `xai-realtime`. All voice variables unset disables calls. |
+| `VOICE_MODEL` | Required realtime voice model available to your provider account. |
+| `VOICE_API_KEY` | Required server credential. Set explicitly; no chat or dictation credential is inherited. Bun `.env` files can explicitly reference `$OPENAI_API_KEY` or `$XAI_API_KEY`. |
+| `VOICE_NAME` | Provider voice name; defaults to `marin` for OpenAI or `ara` for Grok. |
+
+OpenAI uses WebRTC, with an authenticated OpenBot endpoint exchanging the browser's SDP offer
+using server-owned session configuration. Grok uses WebSocket PCM audio at 24 kHz; OpenBot mints
+a short-lived client credential and returns the configured session. Permanent keys stay on the
+server. Microphone audio travels directly between the browser and the chosen voice provider.
+These are separate transports behind one call interface; an OpenAI-compatible transcription API
+does not imply realtime voice support.
+
+Calls require HTTPS or localhost, microphone permission, and browser audio playback. You can mute,
+minimize, or end the call. Joining is silent: the agent waits for you to speak. Mute affects only
+your microphone; you can still hear the agent. The compact widget shows both participants, with
+optional live captions in call settings. Speaking interrupts audio playback. Agent actions already started
+continue until completion or the stop button in chat is pressed; hanging up does not undo work.
+A second agent request while the thread is busy is refused with an explanation rather than run
+concurrently. Existing typed-message queuing remains available. Switching channels or leaving the
+page ends the call, and calls do not automatically reconnect or repeat actions. The browser ends
+calls after fifteen minutes; this is a UX limit, not an enforceable provider spending quota.
+
+Configuration enables the voice call button but does not prove provider/model availability. Connection
+failures appear in the widget while text chat remains available. The call endpoint verifies channel
+membership and limits connection attempts. OpenBot does not record call audio; provider retention
+policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc) and
+[Grok Voice](https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech).
 
 ## Authentication
 

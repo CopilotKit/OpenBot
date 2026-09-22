@@ -221,6 +221,8 @@ if (import.meta.main) {
       if (url.pathname === "/api/audio/transcriptions") {
         server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
       }
+      if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
+      if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
 
       if (isApiCall(url.pathname)) {
         const target = SERVER + url.pathname + url.search;
@@ -249,7 +251,8 @@ if (import.meta.main) {
           headers: request.headers,
           body: request.body,
           redirect: "manual",
-          ...(url.pathname === "/api/audio/transcriptions"
+          ...(url.pathname === "/api/audio/transcriptions" ||
+          url.pathname === "/api/voice/calls"
             ? { signal: request.signal }
             : {}),
           // @ts-expect-error duplex is required by fetch for a streamed body and is not yet typed.

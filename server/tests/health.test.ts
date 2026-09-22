@@ -46,6 +46,7 @@ describe("runtime capabilities", () => {
       // interface, so it has to be here and not only in the runtime.
       generativeUi: true,
       transcription: false,
+      voice: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
@@ -69,6 +70,7 @@ describe("runtime capabilities", () => {
       "durableHistory",
       "generativeUi",
       "transcription",
+      "voice",
       "authProviders",
       "ssoConfigured",
     ]);

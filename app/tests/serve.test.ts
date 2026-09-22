@@ -334,37 +334,41 @@ async function startProxy(upstreamPort: number) {
   };
 }
 
-test("dictation can wait for a provider past Bun's default idle timeout", async () => {
-  const upstream = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 70,
-    async fetch() {
-      await Bun.sleep(13_000);
-      return Response.json({ text: "A slower transcription" });
-    },
-  });
-  if (upstream.port === undefined) {
-    upstream.stop(true);
-    throw new Error("The test upstream did not bind a TCP port");
-  }
-  const proxy = await startProxy(upstream.port);
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:${proxy.port}/api/audio/transcriptions`,
-      {
-        method: "POST",
-        headers: { "x-openbot-dictation": "1" },
-        signal: AbortSignal.timeout(18_000),
+test.each([
+  ["dictation", "/api/audio/transcriptions", "x-openbot-dictation"],
+  ["voice", "/api/voice/calls", "x-openbot-voice"],
+])(
+  "%s can wait for a provider past Bun's default idle timeout",
+  async (_name, path, header) => {
+    const upstream = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      idleTimeout: 70,
+      async fetch() {
+        await Bun.sleep(13_000);
+        return Response.json({ text: "A slower transcription" });
       },
-    );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ text: "A slower transcription" });
-  } finally {
-    await proxy.stop();
-    upstream.stop(true);
-  }
-}, 20_000);
+    });
+    if (upstream.port === undefined) {
+      upstream.stop(true);
+      throw new Error("The test upstream did not bind a TCP port");
+    }
+    const proxy = await startProxy(upstream.port);
+    try {
+      const response = await fetch(`http://127.0.0.1:${proxy.port}${path}`, {
+        method: "POST",
+        headers: { [header]: "1" },
+        signal: AbortSignal.timeout(18_000),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ text: "A slower transcription" });
+    } finally {
+      await proxy.stop();
+      upstream.stop(true);
+    }
+  },
+  20_000,
+);
 
 async function failedHandshake(url: string, headers: HeadersInit = {}) {
   const events: string[] = [];

@@ -53,6 +53,9 @@ import type { Database } from "./db/client";
 import { withoutStatement } from "./db/query-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
+import { createVoiceProvider } from "./voice/provider";
+import { createVoiceRoutes } from "./voice/routes";
+import type { VoiceSessionServices } from "./voice/session-routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -318,6 +321,7 @@ export function createApp(
    */
   composio?: { broker: ComposioBroker },
   userPreferences?: UserPreferencesStore,
+  voiceSessions?: VoiceSessionServices,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -340,6 +344,7 @@ export function createApp(
        */
       generativeUi: config.generativeUi,
       transcription: Boolean(config.transcription),
+      voice: Boolean(config.voice),
       /*
        * Which identity providers this deployment can sign somebody in with.
        *
@@ -463,6 +468,16 @@ export function createApp(
       config.transcription
         ? createTranscriptionProvider(config.transcription)
         : undefined,
+    ),
+  );
+  app.route(
+    "/api/voice",
+    createVoiceRoutes(
+      requireUser,
+      config.voice ? createVoiceProvider(config.voice) : undefined,
+      channelStore,
+      agentProfileStore,
+      voiceSessions,
     ),
   );
 

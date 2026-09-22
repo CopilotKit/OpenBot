@@ -51,15 +51,21 @@ import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
 import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
+import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
+import {
+  BrowserActivity,
+  groupBrowserSteps,
+  type TranscriptItem,
+} from "./browser-activity";
 import {
   attachmentModality,
   type SentAttachment,
   toVisibleChatItems,
-  type VisibleChatItem,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
+import { VoiceChatCard } from "./voice-chat-card";
 
 type ChatTranscriptProps = {
   busy?: boolean;
@@ -1186,7 +1192,12 @@ const TranscriptActivity = memo(function TranscriptActivity({
   message: ActivityMessage;
 }) {
   const { renderActivityMessage } = useRenderActivityMessage();
-  const drawn = renderActivityMessage(message);
+  const drawn =
+    message.activityType === VOICE_CHAT_ACTIVITY ? (
+      <VoiceChatCard call={message.content.call as VoiceChatEntry} />
+    ) : (
+      renderActivityMessage(message)
+    );
   if (!drawn) return null;
 
   return (
@@ -1328,7 +1339,7 @@ export function isPersonSentMessage(
  * it and the caption beneath it can be told apart while still belonging to one turn. The id of the
  * message they were sent in is the part before the last colon.
  */
-function turnOf(item: VisibleChatItem): string {
+function turnOf(item: TranscriptItem): string {
   if (item.kind !== "attachments") {
     return item.id;
   }
@@ -1356,7 +1367,7 @@ function turnOf(item: VisibleChatItem): string {
  * end to hold: the picture is the top of what the person sent, and anchoring on the caption
  * underneath it would scroll the picture off the top of the pane.
  */
-function anchorRowIds(items: readonly VisibleChatItem[]): Set<string> {
+function anchorRowIds(items: readonly TranscriptItem[]): Set<string> {
   const anchors = new Set<string>();
   const claimed = new Set<string>();
 
@@ -1440,7 +1451,7 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
-  const items = toVisibleChatItems(messages);
+  const items = groupBrowserSteps(toVisibleChatItems(messages));
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -1583,7 +1594,18 @@ export function ChatTranscript({
             </div>
             {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
-              item.kind === "tool" ? (
+              item.kind === "browser" ? (
+                <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <Arriving
+                    delay={delays.delayFor(item.id, index, items.length)}
+                  >
+                    <BrowserActivity
+                      group={item}
+                      active={busy && index === items.length - 1}
+                    />
+                  </Arriving>
+                </MessageScrollerItem>
+              ) : item.kind === "tool" ? (
                 <MessageScrollerItem key={item.id} messageId={item.id}>
                   <TranscriptToolCall
                     args={item.toolCall.function.arguments}

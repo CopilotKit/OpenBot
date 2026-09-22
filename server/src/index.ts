@@ -52,6 +52,8 @@ import {
 } from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
 import { createChannelTitler } from "./channels/titler";
+import { createVoiceSessionStore } from "./voice/sessions";
+import { createVoiceSummarizer } from "./voice/summary";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -1307,6 +1309,14 @@ const app = createApp(
   // nobody could connect.
   composio ? { broker: composio.broker } : undefined,
   createUserPreferencesStore(database),
+  {
+    store: createVoiceSessionStore(database, channelStore),
+    summarize: createVoiceSummarizer({
+      model: runtimeModel.defaultModel,
+      resolveApiKey: resolveRuntimeModelApiKey,
+    }),
+    channels: channelStore,
+  },
 );
 
 /**
@@ -1362,6 +1372,8 @@ serve<SocketData>({
     if (url.pathname === "/api/audio/transcriptions") {
       server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
     }
+    if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
+    if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
     const streamBotId = streamPathBotId(url.pathname);
     if (
       streamBotId !== null &&
