@@ -15,6 +15,10 @@ import {
   skills as skillTable,
   skillTools,
 } from "./db/schema";
+import {
+  parseSurfaceDeclarations,
+  type TenantSurfaceDeclaration,
+} from "./surfaces";
 
 const approvedThemeVariables = new Set([
   "--background",
@@ -116,6 +120,14 @@ type PackageFiles = {
    * package had until now.
    */
   skills?: string;
+  /**
+   * Optional `surfaces.yaml`, declaring the work areas this package brings.
+   *
+   * Read WITHOUT `${NAME}` expansion, unlike every other file here, and that is deliberate: a
+   * surface is drawn for people, so a declaration able to read the environment could publish a
+   * deployment secret as a title. See parseSurfaceDeclarations.
+   */
+  surfaces?: string;
   /**
    * A coworker per file, from `agents/` beside `agents.yaml`, in the order they should be read.
    *
@@ -232,6 +244,8 @@ export type TenantPackage = {
   }[];
   /** What `skills.yaml` ships, or empty for a package that has none. */
   skills: TenantSkill[];
+  /** What `surfaces.yaml` declares, or empty for a package that brings no work area of its own. */
+  surfaces: TenantSurfaceDeclaration[];
   themeCss: string;
 };
 
@@ -505,6 +519,13 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const skillsYaml = files.skills?.trim()
     ? yaml(files.skills, "skills.yaml")
     : {};
+  // Absent is a package that brings no surface of its own, not a malformed one. Present and wrong
+  // is refused, the way every other file here is.
+  const surfaces = parseSurfaceDeclarations(
+    files.surfaces?.trim()
+      ? yaml(files.surfaces, "surfaces.yaml").surfaces
+      : undefined,
+  );
   const tenant = asRecord(brand.tenant, "brand.tenant");
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
@@ -515,6 +536,18 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     omittedAgentIds,
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
+  for (const surface of surfaces) {
+    /*
+     * Checked against this package's own coworkers and nothing else, and refused rather than
+     * dropped. A surface with nobody behind it is a screen the deployment would draw and nothing
+     * would answer on, which looks like work happening until somebody reads the other end.
+     */
+    if (!agentIds.has(surface.agentId)) {
+      throw new Error(
+        `surfaces.yaml surface "${surface.id}" names agent "${surface.agentId}", which this package does not declare`,
+      );
+    }
+  }
   const packageSkills = parseTenantSkills(skillsYaml.skills);
   const skillSlugs = new Set(packageSkills.map((skill) => skill.slug));
   for (const agent of agents) {
@@ -598,6 +631,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     },
     knowledgeSources: sources,
     skills: packageSkills,
+    surfaces,
     themeCss: files.themeCss,
   };
 }
@@ -718,6 +752,20 @@ export async function loadTenantPackage(
       if (error.code === "ENOENT") return "";
       throw error;
     });
+  /*
+   * Optional, like `skills.yaml`, and read without expandEnvironment on purpose.
+   *
+   * Every other file here may read the environment because every value in it configures a
+   * deployment's own machinery. A surface is drawn for people, so the one file whose values end up
+   * in front of somebody is the one file that cannot interpolate one in.
+   */
+  const surfaces = await readFile(
+    join(sourcePath, "surfaces.yaml"),
+    "utf8",
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  });
   const agentFiles = await readAgentFiles(sourcePath);
   const tenantPackage = validateTenantPackage({
     brand,
@@ -726,6 +774,7 @@ export async function loadTenantPackage(
     model,
     knowledge,
     skills,
+    surfaces,
     agentFiles,
     themeCss,
   });

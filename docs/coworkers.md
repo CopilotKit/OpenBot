@@ -109,3 +109,27 @@ A coworker's role does not grant capabilities. Capabilities are governed separat
 - deployment skills are managed by administrators.
 
 See [architecture.md](architecture.md).
+
+## Surfaces
+
+A package can bring work of its own, not only coworkers. `surfaces.yaml` declares it:
+
+```yaml
+surfaces:
+  - id: quotes-desk
+    title: Quotes desk
+    agent_id: quote-clerk
+```
+
+The id names something the deployment that loaded the package serves. The build owns the module and
+the path, and the package names neither, so a package cannot choose where a request of its own lands.
+A declaration this build cannot serve stops the deployment at load, naming the id, rather than
+appearing as a link that leads nowhere.
+
+Three rules follow from a surface being drawn for people. Only `id`, `title` and `agent_id` are read,
+so a declaration cannot carry a credential field; a fourth key is a refusal, not a silence. No value
+may contain `${...}`, so a declaration cannot publish an environment value by rendering it as a
+title. And `agent_id` must name a coworker the same package declares, because a surface with nobody
+behind it is a screen that answers nothing.
+
+`brand.yaml` has a `surfaces` key too, and it names a look. This file names something that runs.
