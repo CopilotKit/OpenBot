@@ -6,6 +6,10 @@
 import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
+import {
+  transcriptionConfig,
+  type TranscriptionConfig,
+} from "./dictation/config";
 
 export type RuntimeCapabilities = {
   mode: "intelligence";
@@ -146,6 +150,8 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /** Audio configuration is independent of agent model providers. */
+  transcription?: TranscriptionConfig;
   /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
   port: number;
   databaseUrl: string;
@@ -1015,6 +1021,7 @@ export function loadConfig(
 
   return {
     port: serverPort(environment),
+    transcription: transcriptionConfig(environment),
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),

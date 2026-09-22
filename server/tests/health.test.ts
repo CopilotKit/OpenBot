@@ -19,6 +19,22 @@ describe("health endpoint", () => {
 });
 
 describe("runtime capabilities", () => {
+  test("reports transcription without exposing its endpoint, model, or key", async () => {
+    const configured = createApp(
+      loadConfig(
+        testEnvironment({
+          TRANSCRIPTION_PROVIDER: "openai-compatible",
+          TRANSCRIPTION_BASE_URL: "https://speech.private.example/v1",
+          TRANSCRIPTION_MODEL: "private-speech-model",
+          TRANSCRIPTION_API_KEY: "private-speech-key",
+        }),
+      ),
+    );
+    const response = await configured.request("/api/capabilities");
+    const body = await response.text();
+    expect(JSON.parse(body).transcription).toBe(true);
+    expect(body).not.toContain("private");
+  });
   test("reports the Intelligence runtime without exposing configuration secrets", async () => {
     const response = await app.request("http://openbot.local/api/capabilities");
 
@@ -29,6 +45,7 @@ describe("runtime capabilities", () => {
       // Default-on. The browser reads this to decide whether to offer the tool that generates an
       // interface, so it has to be here and not only in the runtime.
       generativeUi: true,
+      transcription: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
@@ -51,6 +68,7 @@ describe("runtime capabilities", () => {
       "mode",
       "durableHistory",
       "generativeUi",
+      "transcription",
       "authProviders",
       "ssoConfigured",
     ]);

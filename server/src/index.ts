@@ -6,6 +6,7 @@ import {
 import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { DICTATION_HTTP_IDLE_SECONDS } from "../../shared/dictation";
 import { workOwner } from "../../shared/work-owner";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
@@ -1358,6 +1359,9 @@ serve<SocketData>({
   port,
   async fetch(request, server) {
     const url = new URL(request.url);
+    if (url.pathname === "/api/audio/transcriptions") {
+      server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
+    }
     const streamBotId = streamPathBotId(url.pathname);
     if (
       streamBotId !== null &&

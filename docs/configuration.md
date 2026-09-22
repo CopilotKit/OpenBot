@@ -160,6 +160,42 @@ Most gateways publish a model list, which is the way to check a name before conf
 
 Two things are worth knowing before pointing a deployment at any gateway. Not every catalogue entry accepts tools, and a Bot without tool calling cannot drive its computer; the model list says which do. And `BOT_RESPONSES_API=true` needs an endpoint that implements the Responses API, not only chat completions.
 
+## Voice dictation
+
+Dictation inserts recorded speech into the composer for review before sending. It works with any
+agent because the agent receives an ordinary text message. Audio configuration is independent of
+the chat model provider; neither `OPENAI_BASE_URL` nor `OPENAI_API_KEY` is inherited.
+
+| Variable | Meaning |
+| --- | --- |
+| `TRANSCRIPTION_PROVIDER` | `openai-compatible`, the first transcription adapter. Unset with all other transcription variables unset disables dictation. |
+| `TRANSCRIPTION_BASE_URL` | Explicit API base URL, including the version path if required. The adapter appends `/audio/transcriptions`. |
+| `TRANSCRIPTION_MODEL` | Required model name, passed verbatim to the configured service. |
+| `TRANSCRIPTION_API_KEY` | Dedicated server-side bearer credential. Optional for services that intentionally require no authentication. |
+
+For OpenAI, set the base URL to `https://api.openai.com/v1` and select an available transcription
+model such as `gpt-transcribe`. A compatible local endpoint can instead use
+`http://localhost:8000/v1` and its own model name. Compatibility with chat completions alone does
+not imply transcription support. See the [OpenAI transcription guide](https://developers.openai.com/api/docs/guides/speech-to-text).
+
+The composer shows the microphone when the service is configured. Browser microphone access needs
+HTTPS or localhost. While recording, a live waveform replaces the editor and normal controls.
+Press **Stop** to transcribe into the draft, **Send** to transcribe and submit, or **Cancel** to
+discard the recording. **Retry** retries a failed transcription with the same selected action.
+Text is appended to the current draft, preserving edits, mentions, and files. A failed send restores
+the combined draft through the normal message flow. The waveform shares the recorder's microphone
+stream and does not use an ElevenLabs service or credential.
+
+The browser stops recording at two minutes. Uploads are limited to 10 MiB, and provider requests
+time out after 60 seconds. There is at most one active transcription per user and eight per server
+process. These are concurrency limits, not a distributed usage quota; deployments requiring spend
+quotas should also enforce them at their audio gateway. Provider failures never switch to another
+service. OpenBot keeps audio in memory only, retaining a failed recording in the browser for retry
+until cancellation or navigation. Your configured provider's retention policy still applies.
+
+This release supports recorded dictation only; streaming transcription, speech playback, and live
+voice sessions are separate capabilities to add through their own adapters.
+
 ## Authentication
 
 | Variable                     | Meaning                                                                                |

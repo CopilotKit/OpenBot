@@ -51,6 +51,8 @@ import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { withoutStatement } from "./db/query-failure";
+import { createTranscriptionProvider } from "./dictation/provider";
+import { createDictationRoutes } from "./dictation/routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -337,6 +339,7 @@ export function createApp(
        * both halves, so off means off.
        */
       generativeUi: config.generativeUi,
+      transcription: Boolean(config.transcription),
       /*
        * Which identity providers this deployment can sign somebody in with.
        *
@@ -452,6 +455,16 @@ export function createApp(
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
+
+  app.route(
+    "/api/audio",
+    createDictationRoutes(
+      requireUser,
+      config.transcription
+        ? createTranscriptionProvider(config.transcription)
+        : undefined,
+    ),
+  );
 
   app.get("/api/me", requireUser, async (context) =>
     context.json({

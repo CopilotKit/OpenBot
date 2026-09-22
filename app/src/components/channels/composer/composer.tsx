@@ -36,24 +36,27 @@ import {
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
 import { Button } from "../../ui/button";
+import { AttachmentStrip } from "./attachment-strip";
 import {
   attachmentsConfigFor,
   FILE_PICKER_ACCEPT,
   stagedRowId,
 } from "./attachments";
+import { DictationButton, DictationSurface } from "./dictation-controls";
+import { appendDictation } from "./dictation-draft";
 import {
   applyCommandChips,
-  canSendDraft,
   type CommandOption,
   type ComposerDraft,
+  canSendDraft,
   enforceSingleAgent,
   toDraft,
 } from "./draft";
 import { screenPickedFiles } from "./picked-files";
-import { AttachmentStrip } from "./attachment-strip";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
 import { PLACEHOLDER_COMMANDS } from "./sources";
 import { type AgentOption, buildTriggers } from "./triggers";
+import { useDictation } from "./use-dictation";
 
 /**
  * The SDK's upload failure, derived rather than imported for the reason `attachments.ts` records
@@ -348,6 +351,12 @@ export function Composer({
   const containerRef = useRef<HTMLDivElement>(null);
   /** A send has completed and the caret is owed back, as soon as the editor will take it. */
   const wantsFocus = useRef(false);
+  const sendDictatedDraft = useRef(false);
+  const dictation = useDictation((transcript, intent) => {
+    setValue((current) => appendDictation(current, transcript));
+    sendDictatedDraft.current = intent === "send";
+    wantsFocus.current = true;
+  }, disabled);
   /** `autoFocus` has been honoured once, and is not owed again for the life of this composer. */
   const claimedAutoFocus = useRef(false);
   /**
@@ -1070,7 +1079,12 @@ export function Composer({
       // function through prompt-area's own `onSubmit`, which has never looked at `canSend`. A gate
       // drawn on the button alone would refuse the press and accept the keystroke.
       const submitted = toDraft(segments, staged);
-      if (!canSendDraft(submitted) || overCap(submitted) || disabled) {
+      if (
+        !canSendDraft(submitted) ||
+        overCap(submitted) ||
+        disabled ||
+        dictation.session.getSnapshot().phase !== "idle"
+      ) {
         return;
       }
 
@@ -1198,6 +1212,7 @@ export function Composer({
     },
     [
       disabled,
+      dictation.session,
       dismissRejections,
       isBusy,
       onQueue,
@@ -1208,6 +1223,15 @@ export function Composer({
     ],
   );
 
+  // Submit after the transcript has been committed to the latest draft. The ref is consumed
+  // before invoking the normal send path, so rerenders and StrictMode cannot submit twice.
+  useEffect(() => {
+    if (!sendDictatedDraft.current) return;
+    sendDictatedDraft.current = false;
+    void submitDraft(value);
+  }, [value, submitDraft]);
+
+  const wasDictating = useRef(false);
   /**
    * Put the caret back the moment the composer can accept it again.
    *
@@ -1221,7 +1245,9 @@ export function Composer({
    * had moved it, and a composer that had never been sent from would grab focus mid-conversation.
    */
   useEffect(() => {
-    if (disabled || isBusy) {
+    if (wasDictating.current && !dictation.busy) wantsFocus.current = true;
+    wasDictating.current = dictation.busy;
+    if (disabled || isBusy || dictation.busy) {
       return;
     }
     const owed = wantsFocus.current || (autoFocus && !claimedAutoFocus.current);
@@ -1231,7 +1257,7 @@ export function Composer({
     wantsFocus.current = false;
     claimedAutoFocus.current = true;
     promptAreaRef.current?.focus();
-  }, [autoFocus, disabled, isBusy]);
+  }, [autoFocus, disabled, isBusy, dictation.busy]);
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1256,7 +1282,16 @@ export function Composer({
   const sendable = canSendDraft(draft) && !tooManyStaged;
   /** Something to send, mid-turn, with a queue to put it in. */
   const parking = canQueue && sendable;
-  const canSend = !disabled && sendable && (!isBusy || canQueue);
+  const canSend =
+    !disabled && !dictation.busy && sendable && (!isBusy || canQueue);
+  const canSendRecording =
+    !disabled &&
+    !tooManyStaged &&
+    !draft.attachments.some(
+      (attachment) => attachment.status === "uploading",
+    ) &&
+    (!isBusy || canQueue) &&
+    Boolean(onSubmit || onQueue);
   /**
    * Stop is available only once there is a run for it to reach, and it gives way to Send the moment
    * there is something typed to park.
@@ -1397,87 +1432,90 @@ export function Composer({
           )}
           onSubmit={handleFormSubmit}
         >
-          {filePicker}
-          <AttachmentStrip
-            files={files}
-            images={images}
-            onRemove={discardAttachment}
-          />
-          {/*
-           * `self-end` ON THE THREE CONTROLS, AND IT COSTS NOTHING ON ONE LINE. The row is
-           * `items-center`, which is right while everything in it is a single line high. A long
-           * message grows the editor to `COMPACT_MAX_HEIGHT_PX`, and centred buttons then float to
-           * the middle of that block rather than sitting on the line the person is typing. Empty,
-           * the row is exactly a button tall, so centred and bottom are the same pixel.
-           */}
-          <div className="flex items-center gap-3">
-            {attachmentsEnabled ? (
-              <Button
-                aria-label="Attach a file"
-                className="self-end"
-                // The button stays, and stays labelled: a conversation that cannot take another
-                // message has not lost the ability to attach, it has lost the message. Swapping it
-                // for the "unavailable" placeholder would say the wrong thing about why.
-                disabled={disabled}
-                onClick={() => fileInputRef.current?.click()}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <IconPlus className="size-5" />
-              </Button>
-            ) : (
-              <Button
-                aria-label="More message options unavailable"
-                className="self-end disabled:opacity-100"
-                disabled
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <IconPlus className="size-5" />
-              </Button>
-            )}
-            <PromptArea
-              aria-label="Message"
-              className={cn(
-                "min-w-0 flex-1 border-0 bg-transparent p-0 text-sm shadow-none",
-                editorClassName,
-              )}
-              disabled={disabled}
-              maxHeight={COMPACT_MAX_HEIGHT_PX}
-              minHeight={COMPACT_MIN_HEIGHT_PX}
-              onChange={handleChange}
-              onImagePaste={canAttach ? stagePastedImage : undefined}
-              onSubmit={submitDraft}
-              placeholder="Ask anything"
-              ref={promptAreaRef}
-              triggers={triggers}
-              value={value}
+          <DictationSurface dictation={dictation} canSend={canSendRecording}>
+            {filePicker}
+            <AttachmentStrip
+              files={files}
+              images={images}
+              onRemove={discardAttachment}
             />
-            {canStop ? (
-              <Button
-                aria-label="Stop the Bot"
-                className="size-8 self-end rounded-full p-0"
-                data-testid="composer-stop"
-                onClick={onStop}
-                size="icon"
-                type="button"
-              >
-                <IconPlayerStopFilled className="size-3" />
-              </Button>
-            ) : (
-              <Button
-                aria-label={sendLabel}
-                className="size-8 self-end rounded-full p-0"
-                disabled={!canSend}
-                size="icon"
-                type="submit"
-              >
-                <IconArrowUp className="size-3.5" />
-              </Button>
-            )}
-          </div>
+            {/*
+             * `self-end` ON THE THREE CONTROLS, AND IT COSTS NOTHING ON ONE LINE. The row is
+             * `items-center`, which is right while everything in it is a single line high. A long
+             * message grows the editor to `COMPACT_MAX_HEIGHT_PX`, and centred buttons then float to
+             * the middle of that block rather than sitting on the line the person is typing. Empty,
+             * the row is exactly a button tall, so centred and bottom are the same pixel.
+             */}
+            <div className="flex items-center gap-3">
+              {attachmentsEnabled ? (
+                <Button
+                  aria-label="Attach a file"
+                  className="self-end"
+                  // The button stays, and stays labelled: a conversation that cannot take another
+                  // message has not lost the ability to attach, it has lost the message. Swapping it
+                  // for the "unavailable" placeholder would say the wrong thing about why.
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus className="size-5" />
+                </Button>
+              ) : (
+                <Button
+                  aria-label="More message options unavailable"
+                  className="self-end disabled:opacity-100"
+                  disabled
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus className="size-5" />
+                </Button>
+              )}
+              <PromptArea
+                aria-label="Message"
+                className={cn(
+                  "min-w-0 flex-1 border-0 bg-transparent p-0 text-sm shadow-none",
+                  editorClassName,
+                )}
+                disabled={disabled}
+                maxHeight={COMPACT_MAX_HEIGHT_PX}
+                minHeight={COMPACT_MIN_HEIGHT_PX}
+                onChange={handleChange}
+                onImagePaste={canAttach ? stagePastedImage : undefined}
+                onSubmit={submitDraft}
+                placeholder="Ask anything"
+                ref={promptAreaRef}
+                triggers={triggers}
+                value={value}
+              />
+              <DictationButton dictation={dictation} disabled={disabled} />
+              {canStop ? (
+                <Button
+                  aria-label="Stop the Bot"
+                  className="size-8 self-end rounded-full p-0"
+                  data-testid="composer-stop"
+                  onClick={onStop}
+                  size="icon"
+                  type="button"
+                >
+                  <IconPlayerStopFilled className="size-3" />
+                </Button>
+              ) : (
+                <Button
+                  aria-label={sendLabel}
+                  className="size-8 self-end rounded-full p-0"
+                  disabled={!canSend}
+                  size="icon"
+                  type="submit"
+                >
+                  <IconArrowUp className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </DictationSurface>
         </form>
       </div>
     );
@@ -1498,72 +1536,79 @@ export function Composer({
         className="overflow-hidden rounded-2xl border border-border bg-card"
         onSubmit={handleFormSubmit}
       >
-        {filePicker}
+        <DictationSurface
+          dictation={dictation}
+          canSend={canSendRecording}
+          className="p-3"
+        >
+          {filePicker}
 
-        <div className="grow px-3 pt-3 pb-2">
-          <AttachmentStrip
-            files={files}
-            images={images}
-            onRemove={discardAttachment}
-          />
-          <PromptArea
-            aria-label="Message"
-            autoGrow
-            className={cn(
-              "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-              editorClassName,
-            )}
-            disabled={disabled}
-            maxHeight={MAX_HEIGHT_PX}
-            onChange={handleChange}
-            onImagePaste={canAttach ? stagePastedImage : undefined}
-            onSubmit={submitDraft}
-            placeholder="Ask anything"
-            ref={promptAreaRef}
-            triggers={triggers}
-            value={value}
-          />
-        </div>
-
-        <div className="mb-2 flex items-center justify-between px-2">
-          {attachmentsEnabled ? (
-            <Button
-              aria-label="Attach a file"
-              className="size-7 rounded-full p-0"
+          <div className="grow pb-2">
+            <AttachmentStrip
+              files={files}
+              images={images}
+              onRemove={discardAttachment}
+            />
+            <PromptArea
+              aria-label="Message"
+              autoGrow
+              className={cn(
+                "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                editorClassName,
+              )}
               disabled={disabled}
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-              variant="ghost"
-            >
-              <IconPlus className="size-4" />
-            </Button>
-          ) : (
-            <div />
-          )}
+              maxHeight={MAX_HEIGHT_PX}
+              onChange={handleChange}
+              onImagePaste={canAttach ? stagePastedImage : undefined}
+              onSubmit={submitDraft}
+              placeholder="Ask anything"
+              ref={promptAreaRef}
+              triggers={triggers}
+              value={value}
+            />
+          </div>
 
-          <div>
-            {canStop ? (
+          <div className="flex items-center justify-between">
+            {attachmentsEnabled ? (
               <Button
-                aria-label="Stop the Bot"
-                className="size-7 rounded-full bg-primary p-0"
-                data-testid="composer-stop"
-                onClick={onStop}
+                aria-label="Attach a file"
+                className="size-7 rounded-full p-0"
+                disabled={disabled}
+                onClick={() => fileInputRef.current?.click()}
                 type="button"
+                variant="ghost"
               >
-                <IconPlayerStopFilled className="size-3" />
+                <IconPlus className="size-4" />
               </Button>
             ) : (
-              <Button
-                aria-label={sendLabel}
-                className="size-7 rounded-full bg-primary p-0 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!canSend}
-                type="submit"
-              >
-                <IconArrowUp className="size-3.5 fill-primary" />
-              </Button>
+              <div />
             )}
+
+            <div className="flex items-center gap-1">
+              <DictationButton dictation={dictation} disabled={disabled} />
+              {canStop ? (
+                <Button
+                  aria-label="Stop the Bot"
+                  className="size-7 rounded-full bg-primary p-0"
+                  data-testid="composer-stop"
+                  onClick={onStop}
+                  type="button"
+                >
+                  <IconPlayerStopFilled className="size-3" />
+                </Button>
+              ) : (
+                <Button
+                  aria-label={sendLabel}
+                  className="size-7 rounded-full bg-primary p-0 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!canSend}
+                  type="submit"
+                >
+                  <IconArrowUp className="size-3.5 fill-primary" />
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
+        </DictationSurface>
       </form>
     </div>
   );
