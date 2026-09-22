@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A tenant package can declare the work areas it brings
+
+`surfaces.yaml` is optional and declares the work areas a package brings beside its coworkers
+(`id`, `title`, `agent_id`). A deployment mounts each one only where its own build serves that id,
+and a declaration nothing serves stops the deployment at load, naming the id, rather than appearing
+as a link that leads nowhere. The file is never read from the environment, so a declaration cannot
+publish a deployment value by rendering it. See [docs/coworkers.md](docs/coworkers.md).
+
 ## 0.0.15
 
 ### A model provider's own sign-in can stand in for an API key
