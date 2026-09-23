@@ -4,6 +4,8 @@
  * boot boundary.
  */
 import { singleUserEnabled } from "./auth/dev-actor";
+import { normalizeDomain } from "./auth/email-domain";
+import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 import {
@@ -89,6 +91,13 @@ export type AuthConfig = {
   secret: string;
   trustedOrigins: string[];
   initialAdminEmails: string[];
+  /**
+   * Email domains this deployment admits, on top of whatever the provider decided.
+   *
+   * Empty means no opinion, which is what every deployment running today already does. See
+   * `auth/email-domain.ts` for why the provider's own answer is not this question.
+   */
+  allowedEmailDomains: string[];
   google?: OAuthClient;
   /**
    * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
@@ -251,6 +260,8 @@ export type DeploymentConfig = {
     google?: { clientId: string; clientSecret: string };
   };
   auth?: AuthConfig;
+  /** Customer OpenBot authority for employee desktop sessions, separate from Intelligence. */
+  organizationAuthUrl?: string;
   /**
    * Admit everybody as one fixed administrator instead of requiring sign-in.
    *
@@ -414,6 +425,130 @@ function keyEncryptionKey(environment: Environment): string {
   return value;
 }
 
+/**
+ * Whether this deployment may run with no sign-in at all.
+ *
+ * {@link singleUserEnabled} answers whether somebody ASKED for it, and the flag is how they say so.
+ * That design is deliberate and stays: `single-user.test.ts` pins it, and the boot comment in
+ * `.github/workflows/ci.yml` says the same thing in the same words. This asks the second question
+ * the flag cannot answer, which is not "is this production" but "can anybody else reach it".
+ *
+ * NOT `NODE_ENV`. It looks like the signal and is not one here: `Dockerfile` sets
+ * `NODE_ENV=production` for every container and `openbot.commonEnv` sets it for every chart
+ * install, including the local trial the chart's own `validation.yaml` offers. Gating on it would
+ * refuse a mode the chart advertises and would fail the image-boot job in CI, which runs exactly
+ * this combination on purpose.
+ *
+ * The chart already asks the right question twice, and this is the same question moved to where a
+ * deployment that never goes near Helm is also asked it:
+ *
+ *   config.singleUser + a LoadBalancer with no source ranges -> refused
+ *   config.singleUser + config.publicUrl                     -> refused
+ *
+ * So: one administrator and no sign-in is a thing you run where only you can reach it. A public
+ * URL, or a trusted origin that is not loopback, says somebody else can. `.env.example` ships the
+ * flag on so a clone runs, and README's "Deploy it" hands that same `.env` to `docker run`; what
+ * separates those two is an address, which is what this reads.
+ */
+function singleUserAllowed(
+  environment: Environment,
+  hasProvider: boolean,
+): boolean {
+  if (!singleUserEnabled(environment, hasProvider)) return false;
+
+  const reachable = [
+    optional(environment, "OPENBOT_PUBLIC_URL"),
+    optional(environment, "OPENBOT_APP_URL"),
+    ...commaSeparated(environment, "TRUSTED_ORIGINS"),
+  ].filter((value): value is string => value !== undefined);
+
+  const published = reachable.filter((value) => reachOf(value) === "public");
+  if (published.length > 0) {
+    throw new Error(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, so it cannot be combined with an address the public internet reaches: ${published.join(", ")}. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or serve it somewhere only you reach.`,
+    );
+  }
+
+  /*
+   * A private address is allowed and said out loud. index.ts already warns every boot that there is
+   * no sign-in; what it cannot say, because it never reads an address, is that this one is carried
+   * beyond the machine. Whoever is on that network is an administrator here.
+   */
+  const shared = reachable.filter((value) => reachOf(value) === "private");
+  if (shared.length > 0) {
+    console.warn(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, and this deployment answers on an address beyond this machine: ${shared.join(", ")}. Anybody on that network is that administrator. Configure a sign-in provider before anybody else is on it.`,
+    );
+  }
+
+  return true;
+}
+
+/**
+ * How far an address reaches, which is the question `OPENBOT_SINGLE_USER` actually turns on.
+ *
+ * Not two answers but three, because the middle one is most of the deployments this flag exists
+ * for. "No sign-in, one administrator" is a thing people run on a home server at `192.168.1.10`,
+ * over Tailscale at `100.something`, on a VPN, or at `openbot.local`. None of those is loopback and
+ * none of them is a stranger's to reach, so refusing them would refuse the feature's own audience
+ * while the operator's only recourse is to turn off the flag that describes what they are doing.
+ *
+ * A routable public address is the different thing, and it is the one that refuses.
+ *
+ * UNPARSEABLE COUNTS AS PUBLIC, and so does an unrecognised name. A value nobody could read is not
+ * a value anybody checked, and the safe reading of "I cannot tell" is never "it is fine".
+ */
+type Reach = "loopback" | "private" | "public";
+
+function reachOf(raw: string): Reach {
+  let bare: string;
+  try {
+    bare = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return "public";
+  }
+  bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+
+  if (
+    bare === "localhost" ||
+    bare === "::1" ||
+    bare === "0:0:0:0:0:0:0:1" ||
+    /^127\./.test(bare)
+  ) {
+    return "loopback";
+  }
+
+  if (bare.includes(":")) {
+    // fc00::/7 is the unique local range and fe80::/10 the link-local one. Both are unroutable on
+    // the public internet, which is the only property being asked about here.
+    return /^f[cd]/.test(bare) || /^fe[89ab]/.test(bare) ? "private" : "public";
+  }
+
+  const octets = bare.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part))) {
+    const [a, b] = octets.map(Number) as [number, number, number, number];
+    const privateV4 =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      // 169.254/16 is link-local, and 100.64/10 is the carrier-grade NAT range Tailscale hands out.
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127);
+    return privateV4 ? "private" : "public";
+  }
+
+  // A name rather than an address. `.local` is mDNS, `.internal` and `.home.arpa` are reserved for
+  // exactly this, and a single label with no dot at all is a LAN name that no public resolver
+  // answers. Anything else is a name somebody could look up.
+  const privateName =
+    !bare.includes(".") ||
+    bare.endsWith(".local") ||
+    bare.endsWith(".internal") ||
+    bare.endsWith(".lan") ||
+    bare.endsWith(".home.arpa");
+  return privateName ? "private" : "public";
+}
+
 function url(environment: Environment, name: string): string | undefined {
   const value = optional(environment, name);
   if (!value) {
@@ -522,6 +657,30 @@ function commaSeparated(environment: Environment, name: string): string[] {
 }
 
 /**
+ * Microsoft's three multi-tenant audiences, which name no directory.
+ *
+ * Anything else is a directory this deployment's administrators control, named by GUID or by a
+ * verified domain. `organizations` matters as much as `common` here and is the one a hand-written
+ * check forgets: Microsoft's own description is that it admits any work or school account in any
+ * directory, so a domain allowlist is no more enforceable under it than under `common`.
+ *
+ * Compared folded, because these arrive from an environment variable and `Common` is the same
+ * audience as `common` to Microsoft.
+ */
+const MULTI_TENANT_AUDIENCES = new Set([
+  "common",
+  "organizations",
+  "consumers",
+]);
+
+function namesNoDirectory(tenantId: string | undefined): boolean {
+  return (
+    tenantId !== undefined &&
+    MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
+  );
+}
+
+/**
  * Sign-in, if this deployment has an identity provider to sign people in with.
  *
  * Any one of the three turns authentication on. More than one is allowed and is the normal shape
@@ -578,6 +737,68 @@ function authConfig(
     );
   }
 
+  /**
+   * Who may sign in, as distinct from who is an administrator once they have.
+   *
+   * Normalised through the same function the matcher uses, so a rule cannot mean one thing when
+   * written and another when matched.
+   */
+  const namedDomains = commaSeparated(
+    environment,
+    "SIGNIN_ALLOWED_EMAIL_DOMAINS",
+  );
+  const allowedEmailDomains = namedDomains
+    .map(normalizeDomain)
+    .filter((domain): domain is string => domain !== undefined);
+
+  /*
+   * A list that names nothing is not an empty list, and the difference is every sign-in.
+   *
+   * `commaSeparated` drops blank entries BEFORE this normalisation rather than after it, so `@`,
+   * `.` and `@.` each survive it and then normalise to nothing. That leaves a non-empty list no
+   * address can ever match, every visitor refused at the door, and nothing said at boot. The same
+   * reasoning INITIAL_ADMIN_EMAILS gives three lines up applies: start-up is the cheap moment to
+   * catch it, and somebody's sign-in is the expensive one.
+   */
+  if (namedDomains.length > 0 && allowedEmailDomains.length === 0) {
+    throw new Error(
+      "SIGNIN_ALLOWED_EMAIL_DOMAINS is set but names no domain, so every sign-in would be refused. Write it as example.com,example.co.uk",
+    );
+  }
+
+  /*
+   * A list this deployment cannot enforce is worse than no list.
+   *
+   * `common` is multi-tenant, and OpenBot never sets `requireEmailVerification` or reads
+   * `users.emailVerified`, so the address a rule is applied to is one the signing-in tenant's own
+   * administrator wrote. Anybody may create a tenant. So an allowlist under `common` refuses the
+   * honest and admits the rest, while reading on the Boundaries page as though it were a control.
+   *
+   * Refused rather than warned BECAUSE the operator has said what they want: they named domains.
+   * The warning below is for the deployment that has said nothing, where multi-tenant may well be
+   * the intent.
+   */
+  if (allowedEmailDomains.length > 0 && namesNoDirectory(microsoft?.tenantId)) {
+    throw new Error(
+      `SIGNIN_ALLOWED_EMAIL_DOMAINS names domains, but MICROSOFT_OAUTH_TENANT_ID is \`${microsoft?.tenantId}\`, which names no directory and admits accounts from any of them: the address the list is checked against is one the signing-in tenant writes for itself, so the list cannot hold. Set your directory GUID.`,
+    );
+  }
+
+  /*
+   * Nothing at all deciding who may sign in, on a deployment that is deployed. A warning rather
+   * than a refusal, because a genuinely multi-tenant deployment is a real thing; arriving there by
+   * setting nothing is the case worth naming.
+   */
+  if (
+    isProduction(environment) &&
+    allowedEmailDomains.length === 0 &&
+    namesNoDirectory(microsoft?.tenantId)
+  ) {
+    console.warn(
+      "MICROSOFT_OAUTH_TENANT_ID is unset, so it is `common` and any Microsoft account may sign in, including personal ones, and SIGNIN_ALLOWED_EMAIL_DOMAINS names no domain either. Set your directory GUID, or name the domains you admit.",
+    );
+  }
+
   return {
     baseUrl,
     secret,
@@ -590,6 +811,7 @@ function authConfig(
          */
         ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
     initialAdminEmails,
+    allowedEmailDomains,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),
@@ -1018,6 +1240,13 @@ export function loadConfig(
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
+  const organizationAuthValue = optional(
+    environment,
+    "OPENBOT_ORGANIZATION_AUTH_URL",
+  );
+  const organizationAuthUrl = organizationAuthValue
+    ? organizationAuthority(organizationAuthValue)
+    : undefined;
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
@@ -1047,10 +1276,15 @@ export function loadConfig(
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
     auth,
-    singleUser: singleUserEnabled(
-      environment,
-      configuredAuthProviders(auth).length > 0,
-    ),
+    ...(organizationAuthUrl ? { organizationAuthUrl } : {}),
+    /*
+     * The authority short-circuits this, and that ordering is load-bearing: a white-label
+     * deployment naming an external authority lets it win, and `singleUserAllowed` is never
+     * reached and so cannot refuse a combination that already resolves.
+     */
+    singleUser:
+      !organizationAuthUrl &&
+      singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")

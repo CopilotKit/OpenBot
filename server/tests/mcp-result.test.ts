@@ -33,6 +33,34 @@ describe("a result with nothing in it", () => {
   test("is not reported as truncated", () => {
     expect(resultText([]).truncated).toBe(false);
   });
+
+  test("reads structuredContent when the content list was empty", () => {
+    // Tools that declare an output schema often put the answer only in structuredContent.
+    // An empty content list used to be reported as nothing found, so the model filled the
+    // gap from memory while the vendor had answered.
+    const { text, truncated } = resultText([], {
+      title: "Expense policy",
+      meals: "under $75 need no receipt",
+    });
+    expect(truncated).toBe(false);
+    expect(text).toContain("Expense policy");
+    expect(text).toContain("under $75 need no receipt");
+    expect(text.toLowerCase()).not.toContain("no content");
+  });
+
+  test("does not replace a text part with structuredContent", () => {
+    const { text } = resultText(
+      [{ type: "text", text: "the prose the server chose" }],
+      { title: "ignored" },
+    );
+    expect(text).toBe("the prose the server chose");
+    expect(text).not.toContain("ignored");
+  });
+
+  test("empty content and empty structuredContent still say nothing was found", () => {
+    expect(resultText([], null).text).toBe(resultText([]).text);
+    expect(resultText([], undefined).text).toBe(resultText([]).text);
+  });
 });
 
 describe("a result with something in it", () => {
@@ -61,6 +89,45 @@ describe("a result with something in it", () => {
     // the tool returned nothing, which is a different and false statement.
     expect(resultText([{ type: "image", data: "..." }]).text).toBe("[image]");
     expect(resultText([{}]).text).toBe("[unknown]");
+  });
+
+  test("reads the text of an embedded resource, as a server returns a file it read", () => {
+    // The shape GitHub's MCP server answers `get_file_contents` with for a text file: a line saying
+    // the download worked, then the file itself as an embedded resource. Named as "[resource]", the
+    // model was told the file arrived and never shown what was in it.
+    expect(
+      resultText([
+        { type: "text", text: "successfully downloaded text file (SHA: abc)" },
+        {
+          type: "resource",
+          resource: {
+            uri: "repo://octo/docs/contents/README.md",
+            mimeType: "text/markdown",
+            text: "# Expense policy\n\nMeals under $75 need no receipt.",
+          },
+        },
+      ]).text,
+    ).toBe(
+      "successfully downloaded text file (SHA: abc)\n# Expense policy\n\nMeals under $75 need no receipt.",
+    );
+  });
+
+  test("still names an embedded resource that carries bytes rather than text", () => {
+    expect(
+      resultText([
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///logo.png",
+            mimeType: "image/png",
+            blob: "iVBORw0KGgo=",
+          },
+        },
+      ]).text,
+    ).toBe("[resource]");
+    expect(resultText([{ type: "resource", resource: null }]).text).toBe(
+      "[resource]",
+    );
   });
 
   test("names a null or non-object part rather than throwing", () => {

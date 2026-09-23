@@ -2,6 +2,7 @@
 
 import os
 
+from agent_framework.anthropic import AnthropicClient
 from agent_framework.openai import OpenAIChatClient
 from agent_framework_ag_ui import add_agent_framework_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -9,9 +10,25 @@ from fastapi.responses import JSONResponse
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
-agent = OpenAIChatClient(
-    (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
-).as_agent(instructions="Answer the question you are asked, briefly and correctly.")
+
+def _client() -> AnthropicClient | OpenAIChatClient:
+    """The provider the model screen chose, through Agent Framework's own client for it.
+
+    `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
+    endpoint included. Each client reads its own key from the environment.
+    """
+    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
+    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    if provider == "anthropic":
+        # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
+        base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
+        return AnthropicClient(model=model, base_url=base_url)
+    return OpenAIChatClient(model)
+
+
+agent = _client().as_agent(
+    instructions="Answer the question you are asked, briefly and correctly."
+)
 
 app = FastAPI()
 

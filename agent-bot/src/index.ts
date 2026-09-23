@@ -5,7 +5,12 @@ import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import { toProviderMessages } from "./history";
-import { apiKeyOrPlaceholder, keyIsRequired } from "./model-key";
+import {
+  apiKeyOrPlaceholder,
+  keyIsRequired,
+  modelIsUnusable,
+  modelName,
+} from "./model-key";
 
 /**
  * The built-in Bot is an AG-UI HTTP service registered the same way as any customer-provided Bot.
@@ -39,7 +44,7 @@ if (!MANAGED_AGENT_TOKEN) {
  * `gpt-5.6-*` models require the Responses API for tool use and cannot be used by this
  * chat-completions streaming loop.
  */
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+const MODEL = modelName(process.env.BOT_MODEL);
 /*
  * Refuse a model this file cannot use, rather than discover it one tool call at a time.
  *
@@ -51,7 +56,7 @@ const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
  *
  * Startup is where a deployment can act on it, which is the same posture as the token check above.
  */
-if (/^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL)) {
+if (modelIsUnusable(MODEL)) {
   console.error(
     `BOT_MODEL=${MODEL} cannot be used by this Bot. It speaks /v1/chat/completions directly, and ` +
       "that endpoint refuses function tools for this model, so every tool call would fail with no " +

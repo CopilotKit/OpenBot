@@ -340,6 +340,19 @@ mod stop_ipc {
             return;
         }
         let fixture = Fixture::new();
+        std::fs::write(
+            fixture.root.join(".openbot-prepared.json"),
+            "completed preparation",
+        )
+        .unwrap();
+        preparation::record_launch(&fixture.root, None).unwrap();
+        let configured = || {
+            already_configured(
+                fixture.app.handle().clone(),
+                fixture.root.to_string_lossy().into_owned(),
+            )
+        };
+        assert!(configured().launch.is_some());
         let setup = "tauri://localhost/menu-stop-success";
         *fixture.app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
         let compose = fixture.compose_barrier();
@@ -351,6 +364,22 @@ mod stop_ipc {
         let shell = fixture.app.state::<Shell>();
         assert!(last_failure(fixture.app.handle().clone()).is_none());
         assert!(!recovery_required(&shell, &fixture.root));
+        let stopped = configured();
+        assert!(stopped.launch.is_some(), "Stop retains the installed setup");
+        assert!(!stopped.auto_start, "Stop must survive setup reloading");
+        let reopened = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let resumed = already_configured(
+            reopened.handle().clone(),
+            fixture.root.to_string_lossy().into_owned(),
+        );
+        assert!(resumed.launch.is_some());
+        assert!(
+            resumed.auto_start,
+            "a fresh app session may resume the saved installation"
+        );
     }
 
     #[test]

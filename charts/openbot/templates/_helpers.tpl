@@ -265,6 +265,10 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: INITIAL_ADMIN_EMAILS
   value: {{ .Values.config.initialAdminEmails | quote }}
 {{- end }}
+{{- if .Values.config.allowedEmailDomains }}
+- name: SIGNIN_ALLOWED_EMAIL_DOMAINS
+  value: {{ .Values.config.allowedEmailDomains | quote }}
+{{- end }}
 {{- if .Values.config.singleUser }}
 - name: OPENBOT_SINGLE_USER
   value: "true"
@@ -480,6 +484,14 @@ the container that opens pages a person named and runs commands a model chose wa
 could not do much with it, which is not the point: this is the last pod in the deployment that should
 be able to address the API server at all, and the default is the wrong way round.
 */}}
+{{/*
+`HOME` and `securityContext` below.
+
+This pod overrides the command to run the browser process alone, so it never reaches the s6 service
+that the all-in-one image uses to drop to `pwuser` and to set `HOME=/home/pwuser`. Both are
+therefore set here instead. See `computers.podSecurityContext` in values.yaml for why the uid is
+1001 and what is deliberately NOT set alongside it.
+*/}}
 {{- define "openbot.sandboxPodTemplate" -}}
 {{- $spec := dict
   "podTemplate" (dict
@@ -501,6 +513,8 @@ be able to address the API server at all, and the default is the wrong way round
             (dict "name" "PORT" "value" "4100")
             (dict "name" "WORKSPACE_DIR" "value" "/workspace")
             (dict "name" "PROFILES_DIR" "value" "/profiles")
+            (dict "name" "HOME" "value" "/home/pwuser")
+            (dict "name" "BUN_INSTALL" "value" "/home/pwuser/.bun")
             (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
               "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
               "key" "computer-token"))))
@@ -515,6 +529,8 @@ be able to address the API server at all, and the default is the wrong way round
         "resources" .Values.computers.resources)))) -}}
 {{- $pod := index $spec "podTemplate" -}}
 {{- $podSpec := index $pod "spec" -}}
+{{/* The user the image already built. See `computers.podSecurityContext` in values.yaml. */}}
+{{- with .Values.computers.podSecurityContext }}{{- $_ := set $podSpec "securityContext" . }}{{- end }}
 {{- with .Values.computers.runtimeClassName }}{{- $_ := set $podSpec "runtimeClassName" . }}{{- end }}
 {{- with .Values.imagePullSecrets }}{{- $_ := set $podSpec "imagePullSecrets" . }}{{- end }}
 {{- with .Values.computers.nodeSelector }}{{- $_ := set $podSpec "nodeSelector" . }}{{- end }}

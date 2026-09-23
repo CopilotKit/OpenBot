@@ -36,8 +36,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && ln -s bun /usr/local/bin/bunx \
   && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
   && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/* \
-  && useradd --create-home --shell /bin/bash pwuser \
-  && useradd --create-home --shell /usr/sbin/nologin apiuser
+  # PINNED, BECAUSE THE CHART NAMES THESE NUMBERS. `computers.podSecurityContext` runs a computer
+  # pod as 1001, and without `--uid` that is only where these happen to land today: `ubuntu:24.04`
+  # ships its own `ubuntu` user at 1000, so the next two are 1001 and 1002. Let the base add one
+  # more user ahead of these and every number shifts, the chart keeps asking for 1001, and a Bot's
+  # computer starts as a uid that owns none of its files. Pinning makes it a contract.
+  && useradd --uid 1001 --create-home --shell /bin/bash pwuser \
+  && useradd --uid 1002 --create-home --shell /usr/sbin/nologin apiuser
 
 
 FROM base AS deps

@@ -63,6 +63,7 @@ at `agent-langgraph` on a laptop.
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
+| `OPENBOT_ACCESSIBILITY_DISABLED` | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
@@ -249,7 +250,7 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Ignored when one is. |
+| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Refused on a public address. Ignored when a provider is configured. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
@@ -264,12 +265,45 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
 | `OPENBOT_PUBLIC_URL`         | Public address of this API. Defaults to `BETTER_AUTH_URL`.                              |
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
+| `SIGNIN_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains admitted at sign-in. Empty means no opinion. Exact, no wildcards. |
+| `OPENBOT_ORGANIZATION_AUTH_URL` | An OpenBot deployment that verifies employee identity and roles. Decides sign-in ahead of `OPENBOT_SINGLE_USER`. |
+
+**Some variables belong to the desktop app, not to you.** A desktop installation writes these into
+its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`
+and `CLAUDE_CODE_OAUTH_TOKEN`. When a model provider is connected by OAuth rather than by key, the
+desktop also points `OPENAI_BASE_URL` at OpenBot's own loopback route and sets `OPENAI_API_KEY` to a
+local proxy credential rather than a provider key, so those two do not mean what the table above says
+in that mode. A server you configure yourself is unaffected by all of this.
 
 **With no provider at all, `OPENBOT_SINGLE_USER=true` is required.** A deployment that configures
 nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
 configure, because a public URL where every visitor is an administrator fails silently. `NODE_ENV`
 does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
 configuration at all.
+
+**But not on a public address.** The flag says you meant an open deployment; it does not say who can
+reach it. If `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or any `TRUSTED_ORIGINS` entry is an address
+the public internet routes to, the deployment refuses to start and names it. Loopback is silent. A
+private address is allowed and warned about once at boot, because a home server, a Tailnet, a VPN
+address and a `.local` name are what this flag is mostly used for, and anybody on that network is
+the administrator. A value that cannot be parsed as a URL counts as public, because nobody checked
+it.
+
+**`SIGNIN_ALLOWED_EMAIL_DOMAINS` decides who may sign in**, as distinct from who is an
+administrator once in. Matching is exact with no wildcards, so `example.com` admits neither
+`sub.example.com` nor `evil-example.com`, and both sides go through the same IDNA normalisation, so
+a rule may be written `@Example.COM.` or in punycode and still mean what it says. Two arrangements
+are refused at start-up rather than documented and hoped for: a list that normalises to nothing,
+which `@` and a stray `.` both produce, because it is a non-empty list no address can match; and a
+list combined with a `MICROSOFT_OAUTH_TENANT_ID` that names no directory (`common`, `organizations`
+or `consumers`), because there the address the list is checked against is one the signing-in tenant
+writes for itself. A production deployment that names no domains and leaves the tenant multi-tenant
+is warned rather than refused.
+
+**`OPENBOT_ORGANIZATION_AUTH_URL` names an authority, not a provider.** It must be an HTTPS OpenBot
+origin, or HTTP on loopback, and a bare origin: a username, password, query, fragment or any path
+other than `/` is refused at start-up. Naming one settles sign-in by itself, ahead of
+`OPENBOT_SINGLE_USER`.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires
@@ -489,7 +523,7 @@ Set `OPENBOT_ONE_COMPUTER_EACH=false` when using `start.sh` to run all Bots agai
 
 ## Tenant package
 
-The tenant package contains five required YAML files, and one optional:
+The tenant package contains five required YAML files, and two optional:
 
 ```text
 examples/fintech/
@@ -498,7 +532,9 @@ examples/fintech/
 ├── channels.yaml
 ├── model.yaml
 ├── knowledge.yaml
-└── skills.yaml      (optional)
+├── skills.yaml      (optional)
+└── agents/          (optional)
+    └── expense-review.yaml
 ```
 
 ### `brand.yaml`
@@ -564,6 +600,36 @@ against a local stack, a staging one and production. `${NAME:-fallback}` uses th
 name is unset or empty, which is how the example package points at the Bot in the box without
 requiring any configuration. A name with neither a value nor a fallback stops the server with a
 message saying which file wanted it, rather than leaving a Bot pointed at an address nobody meant.
+
+### `agents/`
+
+A coworker may also be one file of its own, in an `agents/` directory beside `agents.yaml`. Both are
+read, and a package that keeps every coworker in `agents.yaml` is unchanged.
+
+```yaml
+# examples/fintech/agents/expense-review.yaml
+id: expense-review
+name: Expense Review
+title: Finance Operations
+role_description: Check one expense claim at a time against the policy as it is written.
+avatar_seed: expense-review
+type: built-in
+system_prompt: Quote the clause you relied on, and leave the decision to a person.
+skills:
+  - find-a-document
+```
+
+The file holds the coworker on its own, as above, or a list under `agents:` the way `agents.yaml`
+does. Only `.yaml` and `.yml` are read, so a README beside them is left alone. Files are read in
+filename order, and every check that applies to a row in `agents.yaml` applies here too: a refusal
+names the file it came from.
+
+Two files declaring the same `id`, or a file repeating an id `agents.yaml` already uses, stop the
+server and both files are named. Nothing wins by being read later — which coworker a deployment runs
+should not depend on what a directory listing happened to return.
+
+The directory is in the package checksum, so adding, editing or deleting a coworker there is a
+package change like any other and a running deployment notices it on the next boot.
 
 ### `channels.yaml`
 

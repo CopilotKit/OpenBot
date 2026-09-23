@@ -82,7 +82,43 @@ managedNodeGroups:
     maxSize: 4
     volumeSize: 60
     volumeType: gp3
+    # A Bot has a shell, and a shell reaches whatever its pod reaches. These two put the node's
+    # own IAM role out of that reach. See below.
+    disableIMDSv1: true
+    disablePodIMDS: true
 ```
+
+**Why the two IMDS lines.** A node's instance metadata service, at 169.254.169.254, hands out that
+node's IAM role to anything that asks from the node. A Bot's computer is a pod on that node running
+commands a model chose, so `curl` against that address is one `run_command` away, and no rule in
+OpenBot's own policy engine is consulted: the engine decides browser navigation and tool calls, and
+the shell reaches the network directly.
+
+`disablePodIMDS` sets the hop limit to 1, so a packet from a pod, which has one more hop to make
+than one from the node itself, no longer arrives. That hop limit applies to the IMDSv2 token PUT,
+and IMDSv1 is a bare GET with no PUT to limit, so the hop limit only means anything once a token is
+mandatory. It already is: eksctl documents `disableIMDSv1` as defaulting to true, and sets
+`httpTokens: required` for either flag. `disableIMDSv1: true` is written out here to state that
+rather than to change it, since a reader deciding whether this recipe is safe should not have to
+know an upstream default. Note this covers pods on the cluster network; a pod running with
+`hostNetwork: true` is on the node and still reaches the address.
+
+**What the hop limit costs.** The EBS CSI driver reads EC2 instance metadata from IMDS, and its own
+FAQ asks for "the hop limit for IMDSv2 responses ... set to 2 or greater" in a containerized
+environment like EKS. A hop limit of 1 also rules out `MutableCSINodeAllocatableCount`, whose
+documented prerequisites are that the driver "must be using IMDS Metadata" and that IMDS be its only
+enabled or preferred metadata source. Drop these two lines if your cluster needs either, and lean on
+the NetworkPolicy below instead.
+
+Two things eksctl will refuse rather than warn about, both worth knowing before the next edit to
+this file: `disablePodIMDS` cannot be combined with `iam.withAddonPolicies` on the same node group,
+and neither field may be set on a node group that supplies its own `launchTemplate`.
+
+The NetworkPolicy below also excepts `169.254.0.0/16`, and is the better control where it is
+enforced. It is off by default and does nothing on EKS until the VPC CNI is told to enforce it, so
+these two lines are what holds in the configuration a cluster actually starts in. Nothing in OpenBot
+wants pod-level IMDS either way: the chart reaches AWS through IRSA, which is a ServiceAccount
+annotation and a projected token rather than the node's role.
 
 ```sh
 eksctl create cluster -f cluster.yaml
@@ -401,7 +437,9 @@ reach. If your release has `networkPolicy.enabled` and `computers.mode: sandbox`
 set the range and run it again, and the policy is narrow for the first time.
 
 A Bot's computer is allowed 80 and 443 to public addresses and nothing else, which is what stops a
-browser reaching the cluster, the database, or the cloud's credential endpoint. A per-Bot egress
+browser reaching the cluster, the database, or the cloud's credential endpoint. That last one is
+worth closing at the node as well, because this policy is off until somebody turns it on: see
+`disablePodIMDS` in the EKS cluster config above. A per-Bot egress
 proxy is therefore two settings rather than one: the variable that names it, and the rule that lets
 the computer reach it.
 
@@ -427,6 +465,33 @@ upper-cased and anything unusual replaced. Naming a proxy the policy provably bl
 install rather than found as a browser that fails on every page.
 
 ## Upgrades
+
+### Coming from a release before 0.0.14: a computer now runs as uid 1001
+
+`computers.podSecurityContext` runs a Bot's computer as `pwuser`, uid 1001, in both `shared` and
+`sandbox` mode. It was root before. The volumes an existing release created are root-owned, so
+something has to hand them over, and that something is `fsGroup`: the kubelet takes ownership of a
+volume's contents on mount.
+
+**It does that only where the volume plugin says it can.** The EBS, PD and Azure Disk CSI drivers
+do. `hostPath` does not, and `hostPath` is what rancher/local-path-provisioner hands out, which is
+the default StorageClass on k3s. There the computer starts as 1001, finds a directory it cannot
+write, and refuses to start rather than coming up healthy with a browser profile Chromium silently
+replaced. The message names this. Two ways out:
+
+```sh
+# Either hand the existing directories to 1001 on the node, or go back to root:
+helm upgrade openbot ./charts/openbot --set computers.podSecurityContext=null
+```
+
+**`--reuse-values` will not pick this up.** A new key is not in the old release's values, so an
+upgrade run that way keeps running as root and says nothing. Pass the value, or drop the flag.
+
+`fsGroupChangePolicy: OnRootMismatch` is deliberate. Unset means `Always`, which walks every file on
+every mount, and a real Chromium profile is tens of thousands of small ones; in `sandbox` mode that
+pass would run again on every resume from idle.
+
+### How a rollout is sequenced
 
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
 has not seen. An init container would mean every replica racing to migrate the same database.

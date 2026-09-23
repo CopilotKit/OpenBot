@@ -31,6 +31,7 @@ import {
   attachmentUrl,
   classifyAttachment,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  mayBeTruncatedForModel,
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
@@ -1019,6 +1020,26 @@ export function Composer({
           name: attachment.filename ?? "Attachment",
           size: attachment.size,
           loading: attachment.status === "uploading",
+          /*
+           * Warned, never refused. The server accepts the whole file and the
+           * model reads its first MAX_EXTRACTED_CHARACTERS; mayBeTruncatedForModel
+           * is exact in the safe direction (N bytes decode to at most N chars),
+           * so a file at or under the ceiling cannot be cut. Only text reaches
+           * the extraction path: images are excluded by the filter above, and an
+           * unnamed pick whose type is still unknown gets no warning until the
+           * server has sniffed it (then the strip re-renders off the url source).
+           *
+           * THE FILTER IS THE ONLY IMAGE TEST, DELIBERATELY. `attachment.type` is
+           * the browser's claim, fixed at pick time and never revised; the filter
+           * runs `stagedModality`, which prefers what the server sniffed. Testing
+           * both would not narrow this to text, it would only subtract: a file the
+           * browser called a PNG and the server read as text lands in this strip,
+           * goes down the extraction path, and is exactly the one that gets cut.
+           */
+          mayTruncate:
+            attachment.status !== "uploading" &&
+            attachment.size !== undefined &&
+            mayBeTruncatedForModel(attachment.size),
         })),
     [staged],
   );

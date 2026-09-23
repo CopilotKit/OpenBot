@@ -30,6 +30,7 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import { desktopAuthPage } from "./auth/native-browser";
 import {
   createAttachmentRoutes,
   createChannelAttachmentRoutes,
@@ -56,6 +57,7 @@ import { createDictationRoutes } from "./dictation/routes";
 import { createVoiceProvider } from "./voice/provider";
 import { createVoiceRoutes } from "./voice/routes";
 import type { VoiceSessionServices } from "./voice/session-routes";
+import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -70,6 +72,10 @@ import {
   type PluginStore,
 } from "./plugins/store";
 import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
+import {
+  type ModelProviderProxy,
+  mountProviderOAuthProxy,
+} from "./provider-oauth";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
@@ -320,10 +326,14 @@ export function createApp(
    * no app directory to offer, rather than one that lists apps nobody can connect.
    */
   composio?: { broker: ComposioBroker },
+  /** Native model OAuth stays server-side; callers hold only a separate local bearer. */
+  modelProviderProxy?: ModelProviderProxy,
   userPreferences?: UserPreferencesStore,
   voiceSessions?: VoiceSessionServices,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
+  mountDesktopConnectionFailure(app, desktopHostToken);
+  mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
@@ -386,6 +396,16 @@ export function createApp(
   };
 
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
+    if (
+      context.req.method === "GET" &&
+      new URL(context.req.url).pathname === "/api/auth/desktop" &&
+      !config.organizationAuthUrl
+    ) {
+      return desktopAuthPage(
+        context.req.raw,
+        configuredAuthProviders(config.auth),
+      );
+    }
     if (!auth) {
       return context.json(
         { error: "No identity provider is configured." },
@@ -816,6 +836,10 @@ export function createApp(
         person,
         {},
       );
+    }
+
+    if (revoked) {
+      await peopleStore.retireOwned(userId, context.var.actor.id);
     }
 
     return context.json({ person: await peopleStore.find(userId) });

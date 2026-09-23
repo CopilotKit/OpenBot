@@ -92,6 +92,14 @@ spec:
       runtimeClassName: {{ . }}
       {{- end }}
       terminationGracePeriodSeconds: 30
+      {{- /*
+        The user the image already built. See `computers.podSecurityContext` in values.yaml: this
+        pod overrides the command and so skips the s6 drop the all-in-one image performs.
+      */}}
+      {{- with .Values.computers.podSecurityContext }}
+      securityContext:
+{{ toYaml . | indent 8 }}
+      {{- end }}
       {{- with .Values.computers.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}
@@ -122,6 +130,20 @@ spec:
               value: /workspace
             - name: PROFILES_DIR
               value: /profiles
+            {{- /*
+              s6 sets this on the all-in-one path and nothing set it here. Chromium and bun both
+              write caches under it, and a uid with no HOME writes them to `/`, which this pod no
+              longer owns.
+            */}}
+            - name: HOME
+              value: /home/pwuser
+            {{- /*
+              `BUN_INSTALL` defaults to /usr/local, which is root-owned, so `bun add` in a Bot's
+              shell stops working the moment the pod is not root. Installing a tool and using it is
+              the stated point of giving a Bot a shell, so it moves somewhere the Bot owns.
+            */}}
+            - name: BUN_INSTALL
+              value: /home/pwuser/.bun
             - name: COMPUTER_TOKEN
               valueFrom:
                 secretKeyRef:

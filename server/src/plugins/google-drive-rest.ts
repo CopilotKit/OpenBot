@@ -46,6 +46,21 @@ const FILE_FIELDS =
   "id,name,mimeType,modifiedTime,webViewLink,size,owners(emailAddress)";
 
 /**
+ * Shared drives as well as My Drive.
+ *
+ * Drive leaves shared drive items out of every `files.get` and `files.list` that does not say it
+ * supports them. A company's documents often live in shared drives, so a file the person could open
+ * came back from `get_file_metadata` and `read_file_content` as a 404 "File not found", and never
+ * came back from a search at all. The listing also has to ask for those items. It keeps Drive's
+ * default `user` corpus, which Google recommends over `allDrives`.
+ */
+const SHARED_DRIVES = { supportsAllDrives: "true" } as const;
+const SHARED_DRIVE_ITEMS = {
+  ...SHARED_DRIVES,
+  includeItemsFromAllDrives: "true",
+} as const;
+
+/**
  * Google's editor formats, and the plain-text export each one has.
  *
  * A Doc has no bytes to download — `alt=media` refuses it — so it has to be exported. Anything not
@@ -226,7 +241,10 @@ type DriveFile = {
   webViewLink?: string;
   size?: string;
   owners?: { emailAddress?: string }[];
+  shortcutDetails?: { targetId?: string; targetMimeType?: string };
 };
+
+const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 
 /**
  * One file as a line a model can quote.
@@ -261,16 +279,28 @@ function fileLine(file: DriveFile): string {
 }
 
 /**
+ * Only files that are not in the trash.
+ *
+ * `files.list` returns trashed files unless the query says otherwise, so a document somebody had
+ * thrown away came back as a match, or as a recent file, with nothing in its line to say it was in
+ * the trash, and a model answers from what it is handed. A file read by its id is still read, trashed
+ * or not: that is a request for that file.
+ */
+const NOT_TRASHED = "trashed = false";
+
+/**
  * A Drive query string built from what somebody typed.
  *
  * The quote is escaped, not stripped. Drive's `q` syntax delimits with single quotes, so an
  * apostrophe in a search term would otherwise end the clause and change the query's meaning —
  * searching for `don't` would become a syntax error at best, and at worst a different search than
  * the one asked for. Escaped, a term is only ever a term.
+ *
+ * Bracketed, so the {@link NOT_TRASHED} joined to it applies to both halves of the `or`.
  */
 const driveQuery = (query: string) => {
   const escaped = query.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `name contains '${escaped}' or fullText contains '${escaped}'`;
+  return `(name contains '${escaped}' or fullText contains '${escaped}') and ${NOT_TRASHED}`;
 };
 
 /**
@@ -280,8 +310,11 @@ const driveQuery = (query: string) => {
  * transports. The empty case is the one that matters: a search that matched nothing has to SAY so,
  * because an empty string reads to a model as "the tool had nothing to say" and gets filled in from
  * memory — which for a knowledge connector is the exact failure the lane exists to prevent.
+ *
+ * `cut` is true when reading stopped before the file ended (see {@link readOpening}), so the file's
+ * full length is not known and is not claimed.
  */
-function asResult(text: string): McpCallResult {
+function asResult(text: string, cut = false): McpCallResult {
   const joined = text.trim();
   if (joined === "") {
     return {
@@ -290,14 +323,44 @@ function asResult(text: string): McpCallResult {
       truncated: false,
     };
   }
-  if (joined.length <= MAX_RESULT_CHARS) {
+  if (joined.length <= MAX_RESULT_CHARS && !cut) {
     return { text: joined, isError: false, truncated: false };
   }
   return {
-    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: ${cut ? "the file is longer than this" : `the tool returned ${joined.length} characters`}]`,
     isError: false,
     truncated: true,
   };
+}
+
+/**
+ * As much of a file's text as a result can show, and whether there was more.
+ *
+ * `response.text()` held the whole download as one string before all but its opening was dropped,
+ * so a 200 MB log raised the process's memory by more than 600 MB to return 20,000 characters, on
+ * the same process that serves everybody else. Reading stops once there is more than a result can
+ * carry, and the rest of the body is cancelled rather than downloaded.
+ *
+ * Decoded the way `response.text()` decodes: UTF-8, with a byte order mark dropped and anything
+ * malformed replaced.
+ */
+async function readOpening(
+  response: Response,
+): Promise<{ text: string; cut: boolean }> {
+  if (!response.body) return { text: "", cut: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return { text: text + decoder.decode(), cut: false };
+      text += decoder.decode(value, { stream: true });
+      if (text.length > MAX_RESULT_CHARS) return { text, cut: true };
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
 }
 
 const failure = (message: string): McpCallResult => ({
@@ -331,10 +394,13 @@ export async function callTool(
     }
 
     const result = await request(connection, "/files", {
+      ...SHARED_DRIVE_ITEMS,
       pageSize: String(PAGE_SIZE),
       fields: `files(${FILE_FIELDS})`,
       // Drive's own ordering for "recent". Search leaves it to relevance.
-      ...(query ? { q: driveQuery(query) } : { orderBy: "modifiedTime desc" }),
+      ...(query
+        ? { q: driveQuery(query) }
+        : { q: NOT_TRASHED, orderBy: "modifiedTime desc" }),
     });
     if (!result.ok) return failure(result.message);
 
@@ -350,7 +416,7 @@ export async function callTool(
     const result = await request(
       connection,
       `/files/${encodeURIComponent(fileId)}`,
-      { fields: FILE_FIELDS },
+      { ...SHARED_DRIVES, fields: FILE_FIELDS },
     );
     if (!result.ok) return failure(result.message);
 
@@ -379,10 +445,38 @@ export async function callTool(
     const metadata = await request(
       connection,
       `/files/${encodeURIComponent(fileId)}`,
-      { fields: "id,name,mimeType" },
+      {
+        ...SHARED_DRIVES,
+        fields: "id,name,mimeType,shortcutDetails(targetId,targetMimeType)",
+      },
     );
     if (!metadata.ok) return failure(metadata.message);
-    const file = (await metadata.response.json()) as DriveFile;
+    let file = (await metadata.response.json()) as DriveFile;
+    let readId = fileId;
+
+    /*
+     * A shortcut is a pointer, not a document. Drive's search and recent lists return them as
+     * ordinary hits, and reading one by that id used to be refused as a binary
+     * `application/vnd.google-apps.shortcut` — so a file the person could open, that search had
+     * just named, could not be read. Follow the target once. A shortcut that names another
+     * shortcut is declined as that type, rather than walked; loops are not a document.
+     */
+    if (file.mimeType === SHORTCUT_MIME) {
+      const targetId = file.shortcutDetails?.targetId?.trim();
+      if (!targetId) {
+        return failure(
+          `${file.name ?? fileId} is a shortcut that does not name a file.`,
+        );
+      }
+      const target = await request(
+        connection,
+        `/files/${encodeURIComponent(targetId)}`,
+        { ...SHARED_DRIVES, fields: "id,name,mimeType" },
+      );
+      if (!target.ok) return failure(target.message);
+      file = (await target.response.json()) as DriveFile;
+      readId = targetId;
+    }
 
     const exportAs = file.mimeType ? EXPORTABLE[file.mimeType] : undefined;
 
@@ -408,17 +502,18 @@ export async function callTool(
     const content = exportAs
       ? await request(
           connection,
-          `/files/${encodeURIComponent(fileId)}/export`,
+          `/files/${encodeURIComponent(readId)}/export`,
           { mimeType: exportAs },
         )
-      : await request(connection, `/files/${encodeURIComponent(fileId)}`, {
+      : await request(connection, `/files/${encodeURIComponent(readId)}`, {
+          ...SHARED_DRIVES,
           alt: "media",
         });
     if (!content.ok) return failure(content.message);
 
-    const text = await content.response.text();
+    const { text, cut } = await readOpening(content.response);
     // Named, because a model handed only the body cannot cite what it read.
-    return asResult(`${file.name ?? fileId}\n\n${text}`);
+    return asResult(`${file.name ?? fileId}\n\n${text}`, cut);
   }
 
   return failure(

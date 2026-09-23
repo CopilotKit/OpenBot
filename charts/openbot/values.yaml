@@ -121,6 +121,17 @@ config:
   publicUrl: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.
   initialAdminEmails: ""
+  # Email domains admitted at sign-in, comma-separated. Empty admits everybody, which is what the
+  # providers below already do on their own: the Entra tenant is `common` unless you set it, which
+  # is any Microsoft account including personal ones, and Okta has no equivalent setting.
+  #
+  # A filter, not a boundary. It is checked against the address the provider returns, and OpenBot
+  # does not require a verified one, so the server REFUSES this combined with an Entra tenant of
+  # `common`: there the address is written by the tenant signing in. Set `auth.microsoft.tenantId`.
+  #
+  # Matched exactly, no wildcards: `example.com` admits neither `sub.example.com` nor
+  # `evil-example.com`. Name every domain your staff use.
+  allowedEmailDomains: ""
   # Every request is one fixed administrator. Local trials only; the deployment refuses to start
   # with no identity provider unless this says somebody meant it.
   singleUser: false
@@ -199,6 +210,59 @@ computers:
   # do not agree: GKE has managed gVisor, AKS offers Kata and gVisor, and on EKS it is bring your own
   # node configuration. A chart that assumed a RuntimeClass would fail to install without one.
   runtimeClassName: ""
+
+  # Who the browser and the Bot's shell run as.
+  #
+  # KUBERNETES ONLY, and that is the scope rather than the whole of #261. The chart runs the
+  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace`, `/profiles` and
+  # `/app` to it, and drops to it through s6. A computer pod overrides the command to run the
+  # browser process alone, so it never reaches s6 and ran as uid 0. The Compose and supervisor
+  # paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0; that is
+  # the rest of #261's residual and is not this.
+  #
+  # WHAT IT BUYS, honestly. It is not a containment boundary against a Bot's own shell: the image
+  # grants `pwuser` passwordless sudo for apt-get/apt/dpkg, and those escalate to root by design
+  # (`-o APT::Update::Pre-Invoke=`). gVisor and a computer per Bot remain the actual boundary. What
+  # this does buy is real and separate: the org policies and admission rules that reject uid 0
+  # outright, root-owned data stops accumulating in the volumes, and any bug yielding a constrained
+  # primitive lands as 1001 rather than as root.
+  #
+  # It does NOT move the pod between Pod Security Standards. `runAsNonRoot` is a restricted control
+  # rather than a baseline one, and restricted also wants `allowPrivilegeEscalation: false`,
+  # `capabilities.drop: [ALL]` and a seccomp profile, none of which are set here. Baseline was
+  # already met; restricted still is not.
+  #
+  # 1001, not 1000, because the base is `ubuntu:24.04` and its own `ubuntu` user already holds 1000.
+  # Verified by creating the user the way the Dockerfile does:
+  #   docker run --rm ubuntu:24.04 sh -c 'useradd -m pwuser; id pwuser'  ->  uid=1001(pwuser)
+  #
+  # `fsGroup` is what makes an existing volume usable: it is created root-owned and the kubelet
+  # applies the group on mount. `OnRootMismatch` is not a detail. Unset means `Always`, which walks
+  # every file on EVERY mount, and a real Chromium profile is tens of thousands of small ones: in
+  # `mode: sandbox` that pass would run again on every resume from idle, which is the latency
+  # agent-sandbox exists to avoid. `OnRootMismatch` runs it once, when the root still says root.
+  #
+  # A NOTE ON STORAGE. The kubelet applies fsGroup only where the volume plugin says it can.
+  # The EBS, PD and Azure Disk CSI drivers do. `hostPath` does not, and that is what
+  # rancher/local-path-provisioner hands out by default, which is the default StorageClass on k3s.
+  # There the computer now refuses to start with a message saying so, rather than coming up healthy
+  # with an empty profile.
+  #
+  # Set `computers.podSecurityContext: null` to go back to running as root.
+  #
+  # NOTHING ELSE IS SET HERE ON PURPOSE. A capability drop was proposed in #262 and declined,
+  # because gVisor is the sandbox boundary this ships and `apt-get` in a Bot's shell needs CHOWN,
+  # DAC_OVERRIDE, FOWNER, SETUID and SETGID. `allowPrivilegeEscalation: false` is the same question
+  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo apt-get`
+  # depends on. The supervisor path already makes that trade (`docker.ts` sets
+  # `no-new-privileges:true`), and can, because the image it runs installs no sudo at all. Add
+  # either here if your deployment wants it and your Bots never install packages.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    fsGroupChangePolicy: OnRootMismatch
 
   # How many browsers one computer holds at once, and how long an untouched one is kept. Empty means
   # the process default, which is a handful and thirty minutes.

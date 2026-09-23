@@ -17,6 +17,7 @@ export {
   MAX_EXTRACTED_CHARACTERS,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
+  mayBeTruncatedForModel,
   mediaTypeOf,
   namesNoFormat,
   shouldClaimPaste,

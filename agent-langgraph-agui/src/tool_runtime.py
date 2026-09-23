@@ -26,6 +26,7 @@ class RunTools:
     context: tuple[Context, ...] = ()
     deployment: frozenset[str] = frozenset()
     assertion: str = field(default="", repr=False)
+    connection: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 _current: ContextVar[RunTools | None] = ContextVar("openbot_run_tools", default=None)
@@ -73,11 +74,25 @@ class ToolAwareAgent(ParallelToolAgent):
                 super().run(input.model_copy(update={"forwarded_props": clean_props}))
             ) as stream:
                 async for event in stream:
+                    if event.type == EventType.RUN_ERROR and context.connection.get(
+                        "authentication_failed"
+                    ):
+                        event = event.model_copy(
+                            update={"code": "OPENBOT_MODEL_AUTH_REQUIRED"}
+                        )
                     yield event
         except UnofferedToolError:
             yield RunErrorEvent(
                 type=EventType.RUN_ERROR,
                 message="The model requested a tool that was not offered for this run.",
+            )
+        except Exception:
+            if not context.connection.get("authentication_failed"):
+                raise
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                message="Sign in to your model provider again.",
+                code="OPENBOT_MODEL_AUTH_REQUIRED",
             )
         finally:
             _current.reset(token)

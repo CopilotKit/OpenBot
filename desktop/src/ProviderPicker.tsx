@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
+import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 
-export type Login = "plan" | "api-key" | "endpoint";
+export type Login = "plan" | "api-key" | "endpoint" | "oauth";
 
 export type Provider = {
   id: string;
@@ -37,12 +38,16 @@ export type SavedConfiguration = {
     | "claude-plan"
     | "chat-gpt-plan"
     | "compatible-endpoint"
+    | "google-oauth"
+    | "xai-oauth"
     | null;
   intelligenceApiKey?: boolean | null;
   modelApiKeys?: Partial<
     Record<"openai" | "anthropic" | "compatible", boolean | null>
   >;
-  modelSessions?: Partial<Record<"openai" | "anthropic", boolean | null>>;
+  modelSessions?: Partial<
+    Record<"openai" | "anthropic" | "google" | "xai", boolean | null>
+  >;
 };
 
 export type HeldConfiguration = {
@@ -57,7 +62,43 @@ export type HeldConfiguration = {
   saved?: SavedConfiguration;
 };
 
-function recordedModel(held: HeldConfiguration): ModelChoice | null {
+const endpointPresets: Record<
+  string,
+  { baseUrl: string; model: string; keyUrl: string }
+> = {
+  // https://ai.google.dev/gemini-api/docs/openai
+  google: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    model: "gemini-3.8-flash",
+    keyUrl: "https://aistudio.google.com/apikey",
+  },
+  // https://docs.x.ai/developers/model-capabilities/legacy/chat-completions
+  xai: {
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-4.7",
+    keyUrl: "https://console.x.ai/",
+  },
+};
+
+function endpointIdentity(baseUrl: string | undefined): string {
+  if (!baseUrl) return "";
+  try {
+    return new URL(baseUrl.trim()).href.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function endpointProvider(baseUrl: string | undefined): string {
+  return (
+    Object.entries(endpointPresets).find(
+      ([, preset]) =>
+        endpointIdentity(preset.baseUrl) === endpointIdentity(baseUrl),
+    )?.[0] ?? "openai-compatible"
+  );
+}
+
+export function recordedModel(held: HeldConfiguration): ModelChoice | null {
   switch (held.saved?.model) {
     case "open-ai-api-key":
       return { provider: "openai", login: "api-key", saved: true };
@@ -67,6 +108,14 @@ function recordedModel(held: HeldConfiguration): ModelChoice | null {
       return { provider: "anthropic", login: "plan", saved: true };
     case "chat-gpt-plan":
       return { provider: "openai", login: "plan", saved: true };
+    case "google-oauth":
+    case "xai-oauth":
+      return {
+        provider: held.saved.model === "google-oauth" ? "google" : "xai",
+        login: "oauth",
+        saved: true,
+        model: held.BOT_MODEL,
+      };
     case "compatible-endpoint":
       return {
         provider: "openai-compatible",
@@ -84,13 +133,8 @@ function recordedModel(held: HeldConfiguration): ModelChoice | null {
 /**
  * Connect a model.
  *
- * Two providers are first-class and everything else is one row, which is the shape rather than a
- * shortlist. See the build doc: growing this into a directory is how the screen stops being
- * finishable by somebody who has never opened a terminal.
- *
- * A PLAN IS THE DEFAULT WHEREVER ONE EXISTS, and the key sits beside it rather than behind it.
- * Anybody with a key and a base URL to hand is a developer; everybody else has a plan they already
- * pay for, and asking them for a key is asking them to go and get one.
+ * Plans remain the default wherever supported. Google and xAI use the same endpoint credential
+ * route as custom models, while their named rows supply the address for the user.
  */
 export function ProviderPicker({
   chosen,
@@ -98,6 +142,8 @@ export function ProviderPicker({
   root,
   onChoose,
   onBack,
+  returning = false,
+  busy: starting = false,
 }: {
   chosen: ModelChoice | null;
   /**
@@ -110,6 +156,8 @@ export function ProviderPicker({
   root: string;
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
+  returning?: boolean;
+  busy?: boolean;
 }) {
   const initialChoice = chosen ?? recordedModel(held);
   const [reuse, setReuse] = useState(
@@ -119,7 +167,9 @@ export function ProviderPicker({
   );
   const [rows, setRows] = useState<Provider[]>([]);
   const [open, setOpen] = useState<string | null>(
-    initialChoice?.provider ?? null,
+    initialChoice?.provider === "openai-compatible"
+      ? endpointProvider(initialChoice.baseUrl)
+      : (initialChoice?.provider ?? null),
   );
   const [login, setLogin] = useState<Login | null>(
     initialChoice?.login ?? null,
@@ -153,9 +203,8 @@ export function ProviderPicker({
   /*
    * What the sign-in is doing, while it is doing it.
    *
-   * A plan sign-in runs in a container, so on a first run it installs the engine and boots its
-   * machine first, which is minutes. "Starting…" for that long is a hang as far as anybody
-   * watching is concerned, so the same steps the setup screen lists are shown here as one line.
+   * Local software is already installed before this screen. A plan sign-in starts its prepared
+   * container, and progress explains what is happening while its browser session opens.
    */
   const [progress, setProgress] = useState<string | null>(null);
   // A problem, not a string: a sign-in failure carries the container's own output, and
@@ -163,6 +212,96 @@ export function ProviderPicker({
   const [failure, setFailure] = useState<Problem | null>(null);
   const openRef = useRef(open);
   const signInRunRef = useRef(0);
+  const oauthAttempt = useRef<string | null>(null);
+  const [oauthCode, setOauthCode] = useState<string | null>(null);
+  const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
+    initialChoice?.login === "oauth" && initialChoice.saved
+      ? initialChoice.provider
+      : null,
+  );
+
+  async function cancelOAuth() {
+    signInRunRef.current += 1;
+    const attemptId = oauthAttempt.current;
+    oauthAttempt.current = null;
+    setBusy(false);
+    setSignInUrl(null);
+    setOauthCode(null);
+    if (attemptId) {
+      try {
+        await invoke("cancel_model_oauth", { attemptId });
+      } catch (error) {
+        setFailure(asProblem(error));
+      }
+    }
+  }
+
+  async function beginOAuth() {
+    if (!row) return;
+    const providerId = row.id;
+    const run = ++signInRunRef.current;
+    const current = () =>
+      signInRunRef.current === run && openRef.current === providerId;
+    setBusy(true);
+    setFailure(null);
+    setOauthSignedIn(null);
+    try {
+      const authorization = await invoke<{
+        attemptId: string;
+        url: string;
+        userCode: string | null;
+      }>("begin_model_oauth", { root: root.trim(), provider: providerId });
+      if (!current()) {
+        await invoke("cancel_model_oauth", {
+          attemptId: authorization.attemptId,
+        });
+        return;
+      }
+      oauthAttempt.current = authorization.attemptId;
+      setSignInUrl(authorization.url);
+      setOauthCode(authorization.userCode);
+      try {
+        await invoke("plugin:opener|open_url", { url: authorization.url });
+      } catch (error) {
+        if (current()) setFailure(asProblem(error));
+      }
+      await invoke("finish_model_oauth", {
+        attemptId: authorization.attemptId,
+      });
+      if (current()) {
+        setOauthSignedIn(providerId);
+        setSignInUrl(null);
+        setOauthCode(null);
+        setFailure(null);
+      }
+    } catch (error) {
+      if (current()) {
+        setFailure(asProblem(error));
+        setSignInUrl(null);
+        setOauthCode(null);
+      }
+    } finally {
+      if (current()) {
+        oauthAttempt.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  useEffect(
+    () => () => {
+      signInRunRef.current += 1;
+      const attemptId = oauthAttempt.current;
+      if (attemptId) {
+        invoke("cancel_model_oauth", { attemptId }).catch(() => {
+          console.error(
+            "OpenBot could not cancel the pending provider sign-in.",
+          );
+        });
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     openRef.current = open;
@@ -262,6 +401,7 @@ export function ProviderPicker({
   }, []);
 
   const row = rows.find((r) => r.id === open) ?? null;
+  const preset = row ? endpointPresets[row.id] : undefined;
   const token = row ? (tokens[row.id] ?? "") : "";
   const savedPlan =
     row?.id === "openai" || row?.id === "anthropic"
@@ -274,7 +414,7 @@ export function ProviderPicker({
         (reuse?.provider === row.id && reuse.login === "api-key")
       : false;
   const savedEndpointKey =
-    row?.id === "openai-compatible" &&
+    login === "endpoint" &&
     reuseEndpointKey &&
     held.saved?.modelApiKeys?.compatible === true &&
     baseUrl.trim() === held.OPENAI_BASE_URL?.trim();
@@ -284,6 +424,9 @@ export function ProviderPicker({
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
   const ready =
+    (login === "oauth" &&
+      oauthSignedIn === row?.id &&
+      model.trim().length > 0) ||
     (login === "plan" && (token.trim().length > 0 || savedPlan)) ||
     (login === "api-key" && (apiKey.trim().length > 0 || savedApiKey)) ||
     /*
@@ -295,7 +438,8 @@ export function ProviderPicker({
     (login === "endpoint" &&
       isHttpEndpointUrl(baseUrl) &&
       containerBaseUrlIsValid &&
-      model.trim().length > 0);
+      model.trim().length > 0 &&
+      (!preset || apiKey.trim().length > 0 || savedEndpointKey));
 
   function continueWithChoice() {
     if (!row || !login || !ready) return;
@@ -305,19 +449,22 @@ export function ProviderPicker({
     const trimmedModel = model.trim();
     const trimmedContainerBaseUrl = containerBaseUrl.trim();
     onChoose({
-      provider: row.id,
+      provider: login === "endpoint" ? "openai-compatible" : row.id,
       login,
       ...((login === "api-key" || login === "endpoint") && trimmedApiKey
         ? { apiKey: trimmedApiKey }
         : {}),
       ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
+      ...(login === "oauth" ? { saved: true } : {}),
       ...((login === "plan" && !trimmedToken && savedPlan) ||
       (login === "api-key" && !trimmedApiKey && savedApiKey) ||
       (login === "endpoint" && !trimmedApiKey && savedEndpointKey)
         ? { saved: true }
         : {}),
-      ...(trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
-      ...(trimmedContainerBaseUrl
+      ...(login !== "oauth" && trimmedBaseUrl
+        ? { baseUrl: trimmedBaseUrl }
+        : {}),
+      ...(login !== "oauth" && trimmedContainerBaseUrl
         ? { containerBaseUrl: trimmedContainerBaseUrl }
         : {}),
       ...(trimmedModel ? { model: trimmedModel } : {}),
@@ -326,10 +473,10 @@ export function ProviderPicker({
 
   return (
     <div className="sheet">
-      <p className="steps-of">Step 2 of 2</p>
-      <h1>Connect your AI</h1>
+      {!returning && <p className="steps-of">Step 3 of 4</p>}
+      <h1>{returning ? "Refresh your AI connection" : "Connect your AI"}</h1>
       <p className="lede">
-        Sign in to the plan you already pay for. No key needed.
+        Connect your provider with a supported plan or an API key.
       </p>
 
       <fieldset className="picker providers">
@@ -346,6 +493,7 @@ export function ProviderPicker({
               value={r.id}
               checked={open === r.id}
               onChange={() => {
+                if (oauthAttempt.current) void cancelOAuth();
                 signInRunRef.current += 1;
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI
@@ -366,18 +514,23 @@ export function ProviderPicker({
                       ? held.ANTHROPIC_API_KEY
                       : undefined;
                 setApiKey(kept ?? "");
+                const nextPreset = endpointPresets[r.id];
+                const restoreEndpoint =
+                  r.id === "openai-compatible" ||
+                  (nextPreset &&
+                    endpointProvider(held.OPENAI_BASE_URL) === r.id);
                 setReuseEndpointKey(
-                  r.id === "openai-compatible" &&
+                  Boolean(restoreEndpoint) &&
                     held.saved?.modelApiKeys?.compatible === true,
                 );
-                if (r.id === "openai-compatible" && held.OPENAI_BASE_URL) {
+                if (restoreEndpoint && held.OPENAI_BASE_URL) {
                   setBaseUrl(held.OPENAI_BASE_URL);
                   setContainerBaseUrl(held.OPENAI_CONTAINER_BASE_URL ?? "");
-                  setModel(held.BOT_MODEL ?? "");
+                  setModel(held.BOT_MODEL ?? nextPreset?.model ?? "");
                 } else {
-                  setBaseUrl("");
+                  setBaseUrl(nextPreset?.baseUrl ?? "");
                   setContainerBaseUrl("");
-                  setModel("");
+                  setModel(nextPreset?.model ?? "");
                 }
               }}
             />
@@ -399,14 +552,66 @@ export function ProviderPicker({
                   role="tab"
                   aria-selected={login === option}
                   className={login === option ? "on" : ""}
-                  onClick={() => setLogin(option)}
+                  onClick={() => {
+                    if (login === "oauth" && option !== login)
+                      void cancelOAuth();
+                    setLogin(option);
+                  }}
                 >
                   {option === "plan"
                     ? "Sign in with my plan"
-                    : "Use an API key"}
+                    : option === "oauth"
+                      ? "Sign in"
+                      : "Use an API key"}
                 </button>
               ))}
             </div>
+          )}
+
+          {login === "oauth" && (
+            <>
+              <p className="footnote">
+                {row.id === "google"
+                  ? "Authorize Gemini API access using the configured Google Cloud project and its API quota."
+                  : "Authorize OpenBot to use models available to your xAI account."}
+              </p>
+              {oauthSignedIn === row.id ? (
+                <p className="lede">Signed in to {row.name}.</p>
+              ) : signInUrl ? (
+                <>
+                  <p role="status">
+                    Waiting for you to approve sign-in in your browser.
+                  </p>
+                  {oauthCode && (
+                    <p>
+                      Verification code: <strong>{oauthCode}</strong>
+                    </p>
+                  )}
+                  <ExternalLink href={signInUrl}>
+                    Open sign-in page
+                  </ExternalLink>
+                  <button type="button" className="quiet" onClick={cancelOAuth}>
+                    Cancel sign-in
+                  </button>
+                </>
+              ) : null}
+              {!busy && (
+                <button type="button" onClick={beginOAuth}>
+                  Sign in {oauthSignedIn === row.id ? "again " : ""}with{" "}
+                  {row.name}
+                </button>
+              )}
+              {busy && !signInUrl && <p role="status">Preparing sign-in…</p>}
+              <div className="field">
+                <label htmlFor="oauth-model">Model name</label>
+                <input
+                  id="oauth-model"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+            </>
           )}
 
           {login === "plan" &&
@@ -485,23 +690,25 @@ export function ProviderPicker({
                   Opens {row.name} in your browser. Nothing is typed here and no
                   key is stored.
                 </p>
-                <button type="button" disabled={busy} onClick={beginSignIn}>
-                  {busy ? "Starting…" : `Sign in with ${row.name}`}
-                </button>
-                {!busy &&
-                  (row.id === "openai" || row.id === "anthropic") &&
-                  held.saved?.modelSessions?.[row.id] !== false && (
-                    <button
-                      type="button"
-                      className="quiet"
-                      onClick={() =>
-                        setReuse({ provider: row.id, login: "plan" })
-                      }
-                    >
-                      Use a saved{" "}
-                      {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
-                    </button>
-                  )}
+                <div className="provider-sign-in-actions">
+                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                    {busy ? "Starting…" : `Sign in with ${row.name}`}
+                  </button>
+                  {!busy &&
+                    (row.id === "openai" || row.id === "anthropic") &&
+                    held.saved?.modelSessions?.[row.id] !== false && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        onClick={() =>
+                          setReuse({ provider: row.id, login: "plan" })
+                        }
+                      >
+                        Use a saved{" "}
+                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                      </button>
+                    )}
+                </div>
                 {busy && progress && (
                   <p className="footnote" style={{ marginBottom: 0 }}>
                     {progress}
@@ -548,54 +755,60 @@ export function ProviderPicker({
               {savedEndpointKey && !apiKey && (
                 <p className="lede">
                   A saved API key for this endpoint will be used.{" "}
-                  <button
-                    type="button"
-                    className="quiet"
-                    onClick={() => setReuseEndpointKey(false)}
-                  >
-                    Continue without the saved key
-                  </button>
+                  {!preset && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      onClick={() => setReuseEndpointKey(false)}
+                    >
+                      Continue without the saved key
+                    </button>
+                  )}
                 </p>
               )}
-              <div className="field">
-                <label htmlFor="base">Base URL</label>
-                <input
-                  id="base"
-                  value={baseUrl}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setBaseUrl(next);
-                    if (
-                      held.OPENAI_CONTAINER_BASE_URL &&
-                      containerBaseUrl.trim() ===
-                        held.OPENAI_CONTAINER_BASE_URL.trim() &&
-                      next.trim() !== held.OPENAI_BASE_URL?.trim()
-                    ) {
-                      setContainerBaseUrl("");
-                    }
-                  }}
-                  placeholder="https://…/v1"
-                  spellCheck={false}
-                />
-              </div>
-              <details className="field">
-                <summary>Advanced compatible endpoint options</summary>
-                <label htmlFor="container-base">
-                  Container Base URL, if different
-                </label>
-                <input
-                  id="container-base"
-                  value={containerBaseUrl}
-                  onChange={(e) => setContainerBaseUrl(e.target.value)}
-                  placeholder="http://ollama:11434/v1"
-                  spellCheck={false}
-                />
-                <p className="footnote">
-                  Leave this empty unless containers need a different address
-                  for a locally hosted model. Remote endpoints usually use the
-                  same Base URL.
-                </p>
-              </details>
+              {!preset && (
+                <>
+                  <div className="field">
+                    <label htmlFor="base">Base URL</label>
+                    <input
+                      id="base"
+                      value={baseUrl}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setBaseUrl(next);
+                        if (
+                          held.OPENAI_CONTAINER_BASE_URL &&
+                          containerBaseUrl.trim() ===
+                            held.OPENAI_CONTAINER_BASE_URL.trim() &&
+                          next.trim() !== held.OPENAI_BASE_URL?.trim()
+                        ) {
+                          setContainerBaseUrl("");
+                        }
+                      }}
+                      placeholder="https://…/v1"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <details className="field">
+                    <summary>Advanced compatible endpoint options</summary>
+                    <label htmlFor="container-base">
+                      Container Base URL, if different
+                    </label>
+                    <input
+                      id="container-base"
+                      value={containerBaseUrl}
+                      onChange={(e) => setContainerBaseUrl(e.target.value)}
+                      placeholder="http://ollama:11434/v1"
+                      spellCheck={false}
+                    />
+                    <p className="footnote">
+                      Leave this empty unless containers need a different
+                      address for a locally hosted model. Remote endpoints
+                      usually use the same Base URL.
+                    </p>
+                  </details>
+                </>
+              )}
               <div className="field">
                 <label htmlFor="model">Model name</label>
                 <input
@@ -607,7 +820,11 @@ export function ProviderPicker({
                 />
               </div>
               <div className="field">
-                <label htmlFor="ekey">API key, if the endpoint needs one</label>
+                <label htmlFor="ekey">
+                  {preset
+                    ? `${row.name} API key`
+                    : "API key, if the endpoint needs one"}
+                </label>
                 <input
                   id="ekey"
                   type="password"
@@ -617,6 +834,13 @@ export function ProviderPicker({
                   spellCheck={false}
                 />
               </div>
+              {preset && (
+                <p className="footnote">
+                  <ExternalLink key={preset.keyUrl} href={preset.keyUrl}>
+                    Get a {row.name} API key
+                  </ExternalLink>
+                </p>
+              )}
             </>
           )}
 
@@ -639,12 +863,17 @@ export function ProviderPicker({
       )}
 
       <div className="row">
-        <button type="button" className="quiet" onClick={onBack}>
+        <button
+          type="button"
+          className="quiet"
+          onClick={onBack}
+          disabled={starting}
+        >
           Back
         </button>
         <button
           type="button"
-          disabled={!row || !login || !ready}
+          disabled={starting || !row || !login || !ready}
           onClick={continueWithChoice}
         >
           Continue

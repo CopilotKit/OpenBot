@@ -10,9 +10,12 @@ deployment that sets both silently bills the key and the plan goes unused. OpenB
 
 import os
 
-from ag_ui_claude_sdk import ClaudeAgentAdapter, add_claude_fastapi_endpoint
+from ag_ui_claude_sdk import add_claude_fastapi_endpoint
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from .adapter import OpenBotClaudeAgentAdapter
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -59,6 +62,23 @@ async def health():
 
 add_claude_fastapi_endpoint(
     app=app,
-    adapter=ClaudeAgentAdapter(name="openbot"),
+    adapter=OpenBotClaudeAgentAdapter(name="openbot"),
     path="/",
 )
+
+model_adapter = OpenBotClaudeAgentAdapter(name="openbot-model", model_only=True)
+add_claude_fastapi_endpoint(
+    app=app,
+    adapter=model_adapter,
+    path="/model",
+)
+
+
+class CancelModelRun(BaseModel):
+    threadId: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/model/cancel")
+async def cancel_model_run(request: CancelModelRun):
+    await model_adapter.interrupt(request.threadId)
+    return {"ok": True}

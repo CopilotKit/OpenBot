@@ -24,6 +24,17 @@
   },
   "bundle": {
     "active": true,
+    "linux": {
+      "deb": { "depends": ["pkexec", "procps", "lsof", "ca-certificates"] },
+      "rpm": {
+        "depends": [
+          "/usr/bin/pkexec",
+          "/usr/bin/ps",
+          "/usr/bin/lsof",
+          "ca-certificates"
+        ]
+      }
+    },
     "targets": ["dmg", "nsis", "appimage", "deb", "rpm"],
     "icon": [
       "icons/32x32.png",

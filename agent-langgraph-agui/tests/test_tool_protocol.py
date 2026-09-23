@@ -82,6 +82,21 @@ def boundary(monkeypatch):
                 )
                 return
             captured["model"].append(body)
+            if status := captured.get("model_status"):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "error": {
+                                "message": "controlled provider refusal",
+                                "type": "authentication_error",
+                            }
+                        }
+                    ).encode()
+                )
+                return
             messages = body["messages"]
             user = next(m["content"] for m in reversed(messages) if m["role"] == "user")
             names = user.split(",")
@@ -229,6 +244,24 @@ async def run_protocol(body, *, allow_error=False):
     return events
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,expected", [(401, True), (403, True), (400, False)])
+async def test_only_provider_auth_status_emits_model_refresh_code(
+    boundary, status, expected
+):
+    boundary["model_status"] = status
+    if not expected:
+        from openai import BadRequestError
+
+        with pytest.raises(BadRequestError):
+            await run_protocol(run_input([]), allow_error=True)
+        return
+    events = await run_protocol(run_input([]), allow_error=True)
+    errors = [event for event in events if event["type"] == "RUN_ERROR"]
+    assert errors
+    assert (errors[-1].get("code") == "OPENBOT_MODEL_AUTH_REQUIRED") is expected
+
+
 def snapshot(events):
     return next(
         e["messages"] for e in reversed(events) if e["type"] == "MESSAGES_SNAPSHOT"
@@ -239,14 +272,16 @@ def snapshot(events):
 async def test_a2ui_catalog_context_reaches_model_without_entering_history(boundary):
     body = run_input(
         [],
-        messages=[{
-            "id": "context-request", "role": "user", "content": "Draw a trip card"
-        }],
+        messages=[
+            {"id": "context-request", "role": "user", "content": "Draw a trip card"}
+        ],
     )
-    catalog = json.dumps({
-        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
-        "components": {"Card": {"properties": {"component": {"const": "Card"}}}},
-    })
+    catalog = json.dumps(
+        {
+            "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json",
+            "components": {"Card": {"properties": {"component": {"const": "Card"}}}},
+        }
+    )
     body["context"] = [
         {
             "description": (
@@ -264,8 +299,7 @@ async def test_a2ui_catalog_context_reaches_model_without_entering_history(bound
     events = await run_protocol(body)
     model_messages = boundary["model"][0]["messages"]
     system = [
-        message["content"] for message in model_messages
-        if message["role"] == "system"
+        message["content"] for message in model_messages if message["role"] == "system"
     ]
     assert any(catalog in content for content in system)
     assert any("Actions use event.name." in content for content in system)
@@ -603,3 +637,12 @@ async def test_chatgpt_plan_sdk_emits_both_surface_calls_and_consumes_results(
     assert all("public marker 43" in part["output"] for part in results)
     assert "Both client results: public marker 43" in json.dumps(snapshot(second))
     assert "synthetic-access" not in json.dumps(first + second)
+    # Streamed owners and final history must describe the same messages. A
+    # Responses API metadata-only chunk has the provider ID before text/tools.
+    for events in (first, second):
+        final_ids = {message["id"] for message in snapshot(events)}
+        for event in events:
+            if event["type"] == "TEXT_MESSAGE_START":
+                assert event["messageId"] in final_ids
+            elif event["type"] == "TOOL_CALL_START":
+                assert event["parentMessageId"] in final_ids

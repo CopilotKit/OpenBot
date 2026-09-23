@@ -396,6 +396,51 @@ fn list_projects(product: &str) -> Result<Vec<Project>, crate::problem::Problem>
     Ok(found)
 }
 
+fn project_creation_body(name: &str) -> Result<serde_json::Value, crate::problem::Problem> {
+    let name = name.trim();
+    // Match the product API's existing POST /api/projects schema.
+    if name.is_empty() || name.encode_utf16().count() > 255 {
+        return Err(crate::problem::Problem::plain(
+            "Enter a project name between 1 and 255 characters.",
+        ));
+    }
+    Ok(serde_json::json!({"name": name}))
+}
+
+pub fn create_project(product: &str, name: &str) -> Result<Project, crate::problem::Problem> {
+    create_project_at(PRODUCT_API, product, name)
+}
+
+fn create_project_at(
+    api: &str,
+    product: &str,
+    name: &str,
+) -> Result<Project, crate::problem::Problem> {
+    let body = project_creation_body(name)?;
+    let response = client()?
+        .post(format!("{api}/api/projects"))
+        .bearer_auth(product)
+        .json(&body)
+        .send()
+        .map_err(|error| {
+            crate::problem::Problem::with("Your project could not be created.", error.to_string())
+        })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(crate::problem::Problem::with(
+            "CopilotKit could not create that project. Check the name and try again.",
+            format!(
+                "HTTP {status}\n{}",
+                without_credentials(&response.text().unwrap_or_default())
+            ),
+        ));
+    }
+    let raw = read_json(response, "created project")?;
+    projects_in(&serde_json::json!([raw])).into_iter().next().filter(|project| !project.id.trim().is_empty()).ok_or_else(|| {
+        crate::problem::Problem::plain("CopilotKit created a project but did not return its ID. Sign in again to refresh the project list.")
+    })
+}
+
 /// Whether a payload actually says "no projects" rather than saying something unrecognised.
 fn looks_genuinely_empty(raw: &serde_json::Value) -> bool {
     let rows = raw
@@ -530,6 +575,98 @@ pub fn projects_in(raw: &serde_json::Value) -> Vec<Project> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_creation_trims_names_and_rejects_empty_or_overlong_names() {
+        assert_eq!(
+            super::project_creation_body("  Desktop test  ").unwrap(),
+            serde_json::json!({"name":"Desktop test"})
+        );
+        assert!(super::project_creation_body(" \n ").is_err());
+        assert!(super::project_creation_body(&"x".repeat(256)).is_err());
+        assert!(super::project_creation_body(&"x".repeat(255)).is_ok());
+    }
+
+    #[test]
+    fn creates_project_using_the_signed_in_credential_and_parses_numeric_id() {
+        let (url, request) =
+            project_creation_server("201 Created", r#"{"id":42,"name":"Desktop validation"}"#);
+        let project =
+            super::create_project_at(&url, "synthetic-product-session", " Desktop validation ")
+                .unwrap();
+        assert_eq!(
+            project,
+            super::Project {
+                id: "42".into(),
+                name: "Desktop validation".into()
+            }
+        );
+        let (headers, body) = request.join().unwrap();
+        assert!(headers.starts_with("POST /api/projects HTTP/1.1\r\n"));
+        assert!(headers
+            .to_lowercase()
+            .contains("authorization: bearer synthetic-product-session\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"name":"Desktop validation"})
+        );
+    }
+
+    #[test]
+    fn project_creation_preserves_api_failure_and_rejects_missing_id() {
+        for (status, body) in [
+            ("403 Forbidden", r#"{"error":"not allowed"}"#),
+            ("201 Created", r#"{"name":"No ID"}"#),
+        ] {
+            let (url, request) = project_creation_server(status, body);
+            let error =
+                super::create_project_at(&url, "synthetic-product-session", "Desktop validation")
+                    .unwrap_err();
+            if status.starts_with("403") {
+                assert!(error.detail.unwrap().contains("HTTP 403"));
+            } else {
+                assert!(error.said.contains("did not return its ID"));
+            }
+            request.join().unwrap();
+        }
+    }
+
+    fn project_creation_server(
+        status: &'static str,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<(String, Vec<u8>)>) {
+        use std::io::{BufRead, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let request = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = std::io::BufReader::new(stream);
+            let mut headers = String::new();
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                headers.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().unwrap())
+                })
+                .unwrap();
+            let mut request_body = vec![0; length];
+            reader.read_exact(&mut request_body).unwrap();
+            write!(reader.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            (headers, request_body)
+        });
+        (url, request)
+    }
     /// The field name that broke a whole sign-in, read off the real response.
     #[test]
     fn the_session_is_read_from_the_name_the_endpoint_uses() {

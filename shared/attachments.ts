@@ -95,6 +95,18 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_EXTRACTED_CHARACTERS = 120_000;
 
 /**
+ * Whether a file of this many BYTES may reach the model truncated.
+ *
+ * Exact in the safe direction: UTF-8 decodes N bytes to at most N characters,
+ * so `size <= MAX_EXTRACTED_CHARACTERS` cannot be cut, and `size > ...` may be
+ * (fewer characters for multi-byte scripts, hence "may"). Callers show a
+ * warning, never a refusal — the server still accepts and reads the prefix.
+ */
+export function mayBeTruncatedForModel(sizeBytes: number): boolean {
+  return sizeBytes > MAX_EXTRACTED_CHARACTERS;
+}
+
+/**
  * `image/svg+xml` is deliberately absent.
  *
  * An SVG is an image and can also carry script. Served inline from this app's own origin, one

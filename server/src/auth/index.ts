@@ -1,4 +1,5 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { electron } from "@better-auth/electron";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
@@ -15,6 +16,7 @@ import {
   users,
   verifications,
 } from "../db/schema";
+import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
 import { applyConfiguredAdmin, seedRole } from "./roles";
 
@@ -150,6 +152,7 @@ export function createAuth(
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
   const plugins = [
+    electron({ clientID: "openbot-desktop", codeExpiresIn: 120 }),
     ...(authConfig.okta
       ? [
           genericOAuth({
@@ -254,6 +257,25 @@ export function createAuth(
            * list is keyed on the address rather than the id.
            */
           before: async (user) => {
+            /*
+             * Asked before the deny list because it needs no query, and before the account exists
+             * because an address this deployment does not admit must not leave a user row behind.
+             */
+            if (
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (await isRevoked?.(user.email)) {
               // The row a removed person coming back produces. Nothing else records the attempt:
               // no user row is written and no session exists to look at afterwards.
@@ -298,6 +320,29 @@ export function createAuth(
               .from(users)
               .where(eq(users.id, session.userId))
               .limit(1);
+            /*
+             * And again for an account that already exists, for the reason the deny list is checked
+             * twice: the user hook fires only for a new one, so a domain later removed from the
+             * list would otherwise keep admitting everybody who had already signed in once.
+             */
+            if (
+              user &&
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                targetId: session.userId,
+                actorUserId: session.userId,
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (user && (await isRevoked?.(user.email))) {
               await record(auditStore, {
                 eventType: "session.refused",

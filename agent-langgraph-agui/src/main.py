@@ -90,9 +90,7 @@ def _resolve_provider(provider: str):
 def _chatgpt_auth_file(store: str) -> Path:
     path = Path(store)
     if not path.exists():
-        raise FileNotFoundError(
-            f"CHATGPT_AUTH_FILE points to a missing file: {path}"
-        )
+        raise FileNotFoundError(f"CHATGPT_AUTH_FILE points to a missing file: {path}")
     if path.is_dir():
         raise IsADirectoryError(
             f"CHATGPT_AUTH_FILE must point to a file, not a directory: {path}"
@@ -157,9 +155,60 @@ def _model():
     )
 
 
+def _system_turns_first(messages):
+    """Every system message ahead of the conversation, in the order it was given.
+
+    ANTHROPIC TAKES ONE SYSTEM PROMPT, AT THE TOP. `langchain-anthropic` joins system messages that
+    follow one another into it, and refuses one that comes after a conversation turn: "Received
+    multiple non-consecutive system messages." A skill somebody picks arrives as a system turn just
+    ahead of their message and stays in the thread, so from then on every run in that conversation
+    failed on Anthropic before the model was asked.
+
+    Moved rather than merged, because the integration already joins the ones that are adjacent.
+    Only for Anthropic: OpenAI takes a system turn anywhere, so a skill stays beside the message it
+    was picked for, and `langchain-google-genai` already gathers every system message into Gemini's
+    one system instruction by itself.
+    """
+    from langchain_core.messages import SystemMessage, convert_to_messages
+
+    messages = convert_to_messages(messages)
+    return [
+        *(message for message in messages if isinstance(message, SystemMessage)),
+        *(message for message in messages if not isinstance(message, SystemMessage)),
+    ]
+
+
+def _wants_system_turns_first(model) -> bool:
+    """
+    Anthropic is the provider that refuses non-consecutive system turns, and it is asked for by
+    class rather than by `BOT_PROVIDER` because `BOT_MODEL` can name a provider on its own.
+
+    The import is here rather than at the top of the file because this module is imported to read
+    a deployment's provider configuration in places that install no provider package at all, and a
+    missing import there would answer that question with a crash.
+    """
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError:
+        return False
+    return isinstance(model, ChatAnthropic)
+
+
 async def answer(state: MessagesState):
-    messages = model_messages(state["messages"])
-    return {"messages": [await bind_tools(_model()).ainvoke(messages)]}
+    from openai import AuthenticationError, PermissionDeniedError
+    from langchain_openai.chatgpt_oauth import _ChatGPTOAuthRefreshError
+    from .tool_runtime import current_tools
+
+    try:
+        model = _model()
+        messages = model_messages(state["messages"])
+        if _wants_system_turns_first(model):
+            messages = _system_turns_first(messages)
+        return {"messages": [await bind_tools(model).ainvoke(messages)]}
+    except (AuthenticationError, PermissionDeniedError, _ChatGPTOAuthRefreshError):
+        # Typed provider boundary only. A callback or harness 401 is a different credential.
+        current_tools().connection["authentication_failed"] = True
+        raise
 
 
 builder = StateGraph(MessagesState)
@@ -193,8 +242,6 @@ async def health():
 
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=ToolAwareAgent(
-        name="openbot", graph=graph, config={"recursion_limit": 25}
-    ),
+    agent=ToolAwareAgent(name="openbot", graph=graph, config={"recursion_limit": 25}),
     path="/",
 )

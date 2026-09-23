@@ -204,7 +204,7 @@ describe("a search becomes the right Drive request", () => {
       "https://www.googleapis.com/drive/v3/files",
     );
     expect(url.searchParams.get("q")).toBe(
-      "name contains 'roadmap' or fullText contains 'roadmap'",
+      "(name contains 'roadmap' or fullText contains 'roadmap') and trashed = false",
     );
     expect(calls[0].authorization).toBe("Bearer test-token");
   });
@@ -220,17 +220,22 @@ describe("a search becomes the right Drive request", () => {
 
     const q = new URL(calls[0].url).searchParams.get("q");
     expect(q).toBe(
-      "name contains 'don\\'t ship' or fullText contains 'don\\'t ship'",
+      "(name contains 'don\\'t ship' or fullText contains 'don\\'t ship') and trashed = false",
     );
   });
 
-  test("recent files are ordered by Drive rather than filtered", async () => {
+  /*
+   * `files.list` returns trashed files unless the query excludes them, so a document somebody had
+   * thrown away came back as a recent file, or as a match above, with nothing in its line to say it
+   * was in the trash. Both listings ask Drive to leave the trash out.
+   */
+  test("recent files are ordered by Drive, and filtered only by the trash", async () => {
     const calls = stubFetch({ files: [] });
     await callTool(connection, "list_recent_files", {});
 
     const url = new URL(calls[0].url);
     expect(url.searchParams.get("orderBy")).toBe("modifiedTime desc");
-    expect(url.searchParams.has("q")).toBe(false);
+    expect(url.searchParams.get("q")).toBe("trashed = false");
   });
 
   test("a search with nothing to search for is refused before the network", async () => {
@@ -355,7 +360,165 @@ describe("reading a file asks Drive what it is first", () => {
     // One call: the metadata lookup. No download followed it.
     expect(calls).toHaveLength(1);
   });
+});
 
+/*
+ * Drive's search and recent lists return shortcuts as ordinary hits. Reading one by that id used
+ * to be refused as a binary `application/vnd.google-apps.shortcut`, so a document the person could
+ * open — and that search had just named — could not be read.
+ */
+describe("a shortcut is read as the file it points at", () => {
+  test("a shortcut to a Google Doc is exported from the target", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "shortcut1",
+            name: "Notes",
+            mimeType: "application/vnd.google-apps.shortcut",
+            shortcutDetails: {
+              targetId: "doc1",
+              targetMimeType: "application/vnd.google-apps.document",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (served === 2) {
+        return new Response(
+          JSON.stringify({
+            id: "doc1",
+            name: "Notes",
+            mimeType: "application/vnd.google-apps.document",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("the document body", {
+        headers: { "content-type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut1",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("the document body");
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toContain("/files/doc1?");
+    expect(calls[2]).toContain("/files/doc1/export");
+    expect(calls[2]).not.toContain("/files/shortcut1/");
+  });
+
+  test("a shortcut to a text file is downloaded from the target", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "shortcut2",
+            name: "notes.txt",
+            mimeType: "application/vnd.google-apps.shortcut",
+            shortcutDetails: {
+              targetId: "txt1",
+              targetMimeType: "text/plain",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (served === 2) {
+        return new Response(
+          JSON.stringify({
+            id: "txt1",
+            name: "notes.txt",
+            mimeType: "text/plain",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("plain notes", {
+        headers: { "content-type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut2",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toContain("plain notes");
+    expect(new URL(calls[2]).searchParams.get("alt")).toBe("media");
+    expect(calls[2]).toContain("/files/txt1?");
+    expect(calls[2]).not.toContain("/export");
+  });
+
+  test("a shortcut that names no file is refused without a second request", async () => {
+    const calls = stubFetch({
+      id: "shortcut3",
+      name: "Broken",
+      mimeType: "application/vnd.google-apps.shortcut",
+      shortcutDetails: {},
+    });
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut3",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text.toLowerCase()).toContain("shortcut");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a shortcut to a PDF is declined as a PDF, and the PDF is not downloaded", async () => {
+    const calls: string[] = [];
+    let served = 0;
+    globalThis.fetch = (async (input: string | URL) => {
+      calls.push(String(input));
+      served += 1;
+      return new Response(
+        JSON.stringify(
+          served === 1
+            ? {
+                id: "shortcut4",
+                name: "Contract",
+                mimeType: "application/vnd.google-apps.shortcut",
+                shortcutDetails: {
+                  targetId: "pdf1",
+                  targetMimeType: "application/pdf",
+                },
+              }
+            : {
+                id: "pdf1",
+                name: "Contract.pdf",
+                mimeType: "application/pdf",
+              },
+        ),
+        { headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "shortcut4",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("application/pdf");
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("reading a file asks Drive what it is first", () => {
   test("a file id is required, and no request is made without one", async () => {
     const calls = stubFetch({});
     const result = await callTool(connection, "read_file_content", {});
@@ -392,5 +555,131 @@ describe("reading a file asks Drive what it is first", () => {
 
     expect(result.truncated).toBe(true);
     expect(result.text.split("\n\n[truncated")[0]).toBe(`${heading}${filler}`);
+  });
+
+  /*
+   * Only the opening of a long file is shown, so only the opening is read.
+   *
+   * The whole download used to be held as one string before all but the first MAX_RESULT_CHARS
+   * characters were dropped: a 200 MB log took the process up by more than 600 MB to return 20,000
+   * characters. The body here counts what is pulled from it, so reading it to the end fails.
+   */
+  test("a file far longer than one result is not downloaded whole", async () => {
+    const line = new TextEncoder().encode(`${"x".repeat(1023)}\n`);
+    const size = 16 * 1024 * 1024;
+    let pulled = 0;
+    let served = 0;
+    globalThis.fetch = (async () => {
+      served += 1;
+      if (served === 1) {
+        return new Response(
+          JSON.stringify({
+            id: "log1",
+            name: "big.log",
+            mimeType: "text/plain",
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= size) {
+            controller.close();
+            return;
+          }
+          pulled += line.length;
+          controller.enqueue(line);
+        },
+      });
+      return new Response(body, { headers: { "content-type": "text/plain" } });
+    }) as unknown as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "log1",
+    });
+
+    expect(pulled).toBeLessThan(size / 16);
+    expect(result.isError).toBe(false);
+    expect(result.truncated).toBe(true);
+    expect(result.text.startsWith(`big.log\n\n${"x".repeat(1023)}\n`)).toBe(
+      true,
+    );
+    // The file's length is not known, so none is claimed.
+    expect(
+      result.text.endsWith("\n\n[truncated: the file is longer than this]"),
+    ).toBe(true);
+  });
+
+  test("a download with no body at all reads as an empty file", async () => {
+    let served = 0;
+    globalThis.fetch = (async () => {
+      served += 1;
+      return served === 1
+        ? new Response(
+            JSON.stringify({
+              id: "empty1",
+              name: "empty.txt",
+              mimeType: "text/plain",
+            }),
+            { headers: { "content-type": "application/json" } },
+          )
+        : new Response(null);
+    }) as unknown as typeof fetch;
+
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "empty1",
+    });
+
+    expect(result).toEqual({
+      text: "empty.txt",
+      isError: false,
+      truncated: false,
+    });
+  });
+});
+
+/*
+ * Drive leaves shared drive items out of any `files.get` or `files.list` that does not say it supports
+ * them. Without these parameters a document the person could open in a shared drive was a 404 by id
+ * and missing from every search, and shared drives are where many companies keep their documents.
+ */
+describe("a file in a shared drive is reached like one in My Drive", () => {
+  test("both listings ask Drive for shared drive items", async () => {
+    const calls = stubFetch({ files: [] });
+    await callTool(connection, "search_files", { query: "roadmap" });
+    await callTool(connection, "list_recent_files", {});
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const params = new URL(call.url).searchParams;
+      expect(params.get("supportsAllDrives")).toBe("true");
+      expect(params.get("includeItemsFromAllDrives")).toBe("true");
+    }
+  });
+
+  test("looking a file up says the caller supports shared drives", async () => {
+    const calls = stubFetch({ id: "shared1", name: "Plan" });
+    await callTool(connection, "get_file_metadata", { fileId: "shared1" });
+
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).searchParams.get("supportsAllDrives")).toBe(
+      "true",
+    );
+  });
+
+  test("reading a file says so on the lookup and on the download", async () => {
+    const calls = stubFetch({
+      id: "shared2",
+      name: "notes.txt",
+      mimeType: "text/plain",
+    });
+    await callTool(connection, "read_file_content", { fileId: "shared2" });
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(new URL(call.url).searchParams.get("supportsAllDrives")).toBe(
+        "true",
+      );
+    }
   });
 });

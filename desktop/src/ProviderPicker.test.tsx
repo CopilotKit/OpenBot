@@ -2,7 +2,11 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { HeldConfiguration, Provider } from "./ProviderPicker";
+import type {
+  HeldConfiguration,
+  ModelChoice,
+  Provider,
+} from "./ProviderPicker";
 
 const providers: Provider[] = [
   {
@@ -34,6 +38,38 @@ const endpointProviders: Provider[] = [
   },
 ];
 
+const cloudProviders = [
+  {
+    id: "google",
+    name: "Google Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    model: "gemini-3.8-flash",
+    keyUrl: "https://aistudio.google.com/apikey",
+  },
+  {
+    id: "xai",
+    name: "xAI",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-4.7",
+    keyUrl: "https://console.x.ai/",
+  },
+];
+
+const allProviders: Provider[] = [
+  ...providers,
+  ...cloudProviders.map(
+    (provider): Provider => ({
+      id: provider.id,
+      name: provider.name,
+      summary: "Use an API key.",
+      logins: ["endpoint"],
+      mark: null,
+      caution: null,
+    }),
+  ),
+  ...endpointProviders,
+];
+
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
@@ -58,7 +94,11 @@ mock.module("./Mark", () => ({
 
 const { ProviderPicker } = await import("./ProviderPicker");
 
-beforeAll(() => GlobalRegistrator.register());
+beforeAll(() =>
+  GlobalRegistrator.register({
+    settings: { navigation: { disableChildPageNavigation: true } },
+  }),
+);
 afterEach(() => {
   invokeCalls = [];
   cleanup();
@@ -767,3 +807,283 @@ test("a saved keyless endpoint never requests a saved first-party key", async ()
     },
   ]);
 });
+
+test("OAuth tab switch cancels a late authorization before opening the browser", async () => {
+  let resolveBegin!: (value: unknown) => void;
+  invokeHandler = async (command) => {
+    if (command === "providers")
+      return allProviders.map((row) =>
+        row.id === "xai" ? { ...row, logins: ["endpoint", "oauth"] } : row,
+      );
+    if (command === "begin_model_oauth")
+      return new Promise((resolve) => {
+        resolveBegin = resolve;
+      });
+    if (command === "cancel_model_oauth") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.click(await view.findByRole("radio", { name: /xAI/ }));
+  await user.click(view.getByRole("tab", { name: "Sign in" }));
+  await user.click(view.getByRole("button", { name: "Sign in with xAI" }));
+  await user.click(view.getByRole("tab", { name: "Use an API key" }));
+  await act(async () => {
+    resolveBegin({
+      attemptId: "late-attempt",
+      url: "https://authorization.example.test",
+      userCode: null,
+    });
+  });
+  expect(invokeCalls).toContainEqual({
+    command: "cancel_model_oauth",
+    args: { attemptId: "late-attempt" },
+  });
+  expect(
+    invokeCalls.some((call) => call.command === "plugin:opener|open_url"),
+  ).toBe(false);
+  expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+});
+
+for (const provider of cloudProviders) {
+  test(`${provider.name} OAuth completes through native storage without exposing tokens`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers")
+        return allProviders.map((row) =>
+          row.id === provider.id
+            ? { ...row, logins: ["endpoint", "oauth"] }
+            : row,
+        );
+      if (command === "begin_model_oauth")
+        return {
+          attemptId: "synthetic-attempt",
+          url: "https://authorization.example.test/approve",
+          userCode: "SYNTHETIC",
+        };
+      if (
+        command === "plugin:opener|open_url" ||
+        command === "finish_model_oauth"
+      )
+        return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+    await user.click(view.getByRole("tab", { name: "Sign in" }));
+    await user.click(
+      view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+    );
+    await view.findByText(`Signed in to ${provider.name}.`);
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices).toEqual([
+      {
+        provider: provider.id,
+        login: "oauth",
+        model: provider.model,
+        saved: true,
+      },
+    ]);
+    expect(invokeCalls).toContainEqual({
+      command: "begin_model_oauth",
+      args: { root: "/tmp/openbot-provider-root", provider: provider.id },
+    });
+    expect(invokeCalls).toContainEqual({
+      command: "finish_model_oauth",
+      args: { attemptId: "synthetic-attempt" },
+    });
+  });
+
+  test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return allProviders;
+      if (command === "plugin:opener|open_url") return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const view = await renderPicker();
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+    await user.type(
+      view.getByLabelText(`${provider.name} API key`),
+      "synthetic-private-api-key",
+    );
+    expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+    await user.click(
+      view.getByRole("link", { name: `Get a ${provider.name} API key` }),
+    );
+    expect(invokeCalls).toEqual([
+      { command: "providers", args: undefined },
+      { command: "plugin:opener|open_url", args: { url: provider.keyUrl } },
+    ]);
+  });
+
+  test(`${provider.name} uses its official endpoint and editable model with an API key`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return allProviders;
+      throw new Error(`unexpected protected command ${command}`);
+    };
+    const user = userEvent.setup({ document });
+    const choices: unknown[] = [];
+    const view = await renderPicker((choice) => choices.push(choice));
+    await user.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+
+    expect(view.getByLabelText("Model name")).toHaveProperty(
+      "value",
+      provider.model,
+    );
+    expect(view.queryByLabelText("Base URL")).toBeNull();
+    expect(
+      view.queryByRole("tab", { name: "Sign in with my plan" }),
+    ).toBeNull();
+    expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await user.type(
+      view.getByLabelText(`${provider.name} API key`),
+      "synthetic-provider-key",
+    );
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[0]).toEqual({
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      apiKey: "synthetic-provider-key",
+    });
+    await user.clear(view.getByLabelText("Model name"));
+    await user.type(
+      view.getByLabelText("Model name"),
+      "another-compatible-model",
+    );
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[1]).toEqual({
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: provider.baseUrl,
+      model: "another-compatible-model",
+      apiKey: "synthetic-provider-key",
+    });
+  });
+
+  test(`${provider.name} restores its choice when returning from the next setup step`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return allProviders;
+      throw new Error(`unexpected protected command ${command}`);
+    };
+    const chosen: ModelChoice = {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: provider.baseUrl,
+      model: "chosen-model",
+      apiKey: "synthetic-returning-key",
+    };
+    const choices: ModelChoice[] = [];
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(
+        <ProviderPicker
+          chosen={chosen}
+          held={{}}
+          root="/tmp/provider-return"
+          onBack={() => {}}
+          onChoose={(choice) => choices.push(choice)}
+        />,
+      );
+    });
+    expect(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    ).toHaveProperty("checked", true);
+    expect(view.getByLabelText(`${provider.name} API key`)).toHaveProperty(
+      "value",
+      "synthetic-returning-key",
+    );
+    expect(view.getByLabelText("Model name")).toHaveProperty(
+      "value",
+      "chosen-model",
+    );
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices).toEqual([chosen]);
+  });
+
+  test(`${provider.name} recognizes a saved endpoint but never carries its key to another provider`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "providers") return allProviders;
+      throw new Error(`unexpected protected command ${command}`);
+    };
+    // A trailing slash is an equivalent UI identity, but the saved URL itself must
+    // survive unchanged so backend credential matching remains endpoint-scoped.
+    const savedUrl = provider.baseUrl.endsWith("/")
+      ? provider.baseUrl.slice(0, -1)
+      : `${provider.baseUrl}/`;
+    const choices: unknown[] = [];
+    const view = await renderPickerWithHeld(
+      {
+        OPENAI_BASE_URL: savedUrl,
+        BOT_MODEL: "saved-model",
+        saved: {
+          model: "compatible-endpoint",
+          modelApiKeys: { compatible: true, openai: true },
+        },
+      },
+      (choice) => choices.push(choice),
+    );
+    expect(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    ).toHaveProperty("checked", true);
+    expect(view.getByLabelText(`${provider.name} API key`)).toHaveProperty(
+      "value",
+      "",
+    );
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[0]).toEqual({
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: savedUrl,
+      model: "saved-model",
+      saved: true,
+    });
+
+    await userEvent.type(
+      view.getByLabelText(`${provider.name} API key`),
+      "synthetic-replacement-key",
+    );
+    const other = cloudProviders.find(
+      (candidate) => candidate.id !== provider.id,
+    )!;
+    await userEvent.click(
+      view.getByRole("radio", { name: new RegExp(other.name) }),
+    );
+    expect(view.getByLabelText(`${other.name} API key`)).toHaveProperty(
+      "value",
+      "",
+    );
+    expect(view.queryByText(/A saved API key for this endpoint/)).toBeNull();
+    expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await userEvent.type(
+      view.getByLabelText(`${other.name} API key`),
+      "synthetic-other-key",
+    );
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    expect(choices[1]).toEqual({
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: other.baseUrl,
+      model: other.model,
+      apiKey: "synthetic-other-key",
+    });
+  });
+}

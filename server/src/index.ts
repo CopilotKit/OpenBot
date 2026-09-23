@@ -31,8 +31,11 @@ import {
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
+import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
+import { createOrganizationAuth } from "./auth/organization";
+import { organizationUserStore } from "./auth/organization-store";
 import type { OpenBotRole } from "./auth/roles";
 import {
   loadAttachmentForTurn,
@@ -73,6 +76,7 @@ import {
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
+  normalizeModelBaseUrls,
   resolveRuntimeAgents,
   runtimeModelForEnvironment,
   type ToolSelection,
@@ -86,8 +90,10 @@ import { createDatabase } from "./db/client";
 import { intelligenceChannelMappings } from "./db/schema";
 import { createHostAccessBroker } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
+import { createProviderOAuthProxy } from "./provider-oauth";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
@@ -134,7 +140,9 @@ async function resolveRequestActor(request: Request): Promise<{
   if (!user) {
     throw new Error("A CopilotKit run requires a signed-in user.");
   }
-  const roles = await roleRepository.rolesForUser(user.id);
+  const roles = user.role
+    ? [user.role]
+    : await roleRepository.rolesForUser(user.id);
   if (!roles.includes("admin") && !roles.includes("user")) {
     throw new Error("A CopilotKit run requires an authorized user.");
   }
@@ -249,14 +257,19 @@ const identityProviderStore = createIdentityProviderStore(database);
  * store that receives those rows has to exist before anything can sign in.
  */
 const signInAuditStore = createAuditStore(database);
-const auth = config.auth
-  ? createAuth(
-      config,
-      database,
-      (email) => peopleStore.isRevoked(email),
-      signInAuditStore,
-    )
-  : undefined;
+const auth: AuthService | undefined = config.organizationAuthUrl
+  ? createOrganizationAuth({
+      authorityUrl: config.organizationAuthUrl,
+      materializeUser: organizationUserStore(database),
+    })
+  : config.auth
+    ? createAuth(
+        config,
+        database,
+        (email) => peopleStore.isRevoked(email),
+        signInAuditStore,
+      )
+    : undefined;
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
@@ -520,6 +533,7 @@ const stallGuard = createStallGuard({
   auditStore: bootAuditStore,
 });
 
+normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
 
 const intentRouter = createIntentRouter({
@@ -529,7 +543,7 @@ const intentRouter = createIntentRouter({
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
-        provider: tenantPackage.model.provider,
+        provider: runtimeModel.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
       }),
@@ -548,7 +562,7 @@ const chooseSkills = createModelCompleter({
     resolveModelApiKey({
       encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
-      provider: tenantPackage.model.provider,
+      provider: runtimeModel.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
     }),
@@ -570,7 +584,7 @@ const resolveRuntimeModelApiKey = () =>
   resolveModelApiKey({
     encryptionKey: config.keyEncryptionKey,
     reader: credentialStore,
-    provider: tenantPackage.model.provider,
+    provider: runtimeModel.provider,
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
   });
@@ -861,11 +875,13 @@ const buildAgentFor = async ({
  * connection, but its `threads` map is per instance, and a runner per turn would fragment the
  * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
  */
-const routineIntelligence = new CopilotKitIntelligence({
-  apiUrl: config.runtime.intelligence.apiUrl,
-  wsUrl: config.runtime.intelligence.gatewayWsUrl,
-  apiKey: config.runtime.intelligence.apiKey,
-});
+const routineIntelligence = observeIntelligenceAuthentication(
+  new CopilotKitIntelligence({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    wsUrl: config.runtime.intelligence.gatewayWsUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+);
 const routineAgentRunner = new IntelligenceAgentRunner({
   url: routineIntelligence.ɵgetRunnerWsUrl(),
   authToken: routineIntelligence.ɵgetRunnerAuthToken(),
@@ -1308,6 +1324,9 @@ const app = createApp(
   // Absent without a key, which leaves the routes reporting no broker rather than listing apps
   // nobody could connect.
   composio ? { broker: composio.broker } : undefined,
+  process.env.OPENBOT_MODEL_OAUTH_FILE?.trim()
+    ? createProviderOAuthProxy(process.env.OPENBOT_MODEL_OAUTH_FILE.trim())
+    : undefined,
   createUserPreferencesStore(database),
   {
     store: createVoiceSessionStore(database, channelStore),

@@ -2,11 +2,13 @@
 
 import os
 
-from ag_ui_langroid import LangroidAgent, create_langroid_app
+from ag_ui_langroid import create_langroid_app
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from langroid import ChatAgent, ChatAgentConfig
 from langroid.language_models import OpenAIGPTConfig
+
+from .frontend_tools import FrontendToolsAgent
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
@@ -24,14 +26,24 @@ def _model_id() -> str:
     return f"litellm/{provider}/{model}"
 
 
+# An empty `OPENAI_API_KEY` is no key. Compose writes the keys a model choice does not use as empty
+# rather than leaving them out, and Langroid reads `OPENAI_API_KEY` as its own setting: given an empty
+# one it builds an OpenAI client with it, even for a model it hands to litellm, and the client refuses
+# to be built. Unset, Langroid uses its placeholder and litellm reads the chosen provider's own key.
+if not os.environ.get("OPENAI_API_KEY"):
+    os.environ.pop("OPENAI_API_KEY", None)
+
 agent = ChatAgent(
     ChatAgentConfig(
-        llm=OpenAIGPTConfig(chat_model=_model_id()),
+        llm=OpenAIGPTConfig(chat_model=_model_id(), parallel_tool_calls=False),
+        add_to_registry=False,
+        use_functions_api=True,
+        use_tools=False,
         system_message="Answer the question you are asked, briefly and correctly.",
     )
 )
 
-app = create_langroid_app(LangroidAgent(name="openbot", agent=agent))
+app = create_langroid_app(FrontendToolsAgent(name="openbot", agent=agent))
 
 
 @app.middleware("http")

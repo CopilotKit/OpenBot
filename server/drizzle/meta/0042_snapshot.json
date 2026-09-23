@@ -1,6 +1,6 @@
 {
-  "id": "782bff1c-370a-4159-a632-4073209b1a09",
-  "prevId": "fcebf83b-a809-4faf-8985-67d7e3d62a09",
+  "id": "fcebf83b-a809-4faf-8985-67d7e3d62a09",
+  "prevId": "ce55bd99-03b9-4e16-bff7-14e04d1c4288",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2582,12 +2582,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "vendor": {
           "name": "vendor",

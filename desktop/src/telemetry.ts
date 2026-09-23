@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ModelChoice } from "./ProviderPicker";
 
-export type SetupStep = "welcome" | "harness" | "model" | "install" | "ask";
+export type SetupStep =
+  | "welcome"
+  | "harness"
+  | "install"
+  | "model"
+  | "connect"
+  | "ask";
 
 const HARNESSES = {
   crewai: "crewai",

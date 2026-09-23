@@ -221,11 +221,8 @@ impl Address {
     /// because that file belongs to whoever else may have configured it.
     pub fn command(&self) -> Command {
         let (binary, arguments) = self.parts();
-        let mut command = command(binary);
+        let mut command = command_at(self.engine, &binary);
         command.args(arguments);
-        if let Some(dir) = tools_dir() {
-            command.env("PATH", path_with(dir));
-        }
         command
     }
 
@@ -329,9 +326,48 @@ fn tools_dir() -> Option<&'static PathBuf> {
 
 /// A command that runs this engine's binary, wherever it actually is.
 pub fn tool(engine: Engine) -> Command {
-    let mut built = command(program(engine).unwrap_or_else(|| PathBuf::from(engine.binary())));
-    if let Some(dir) = tools_dir() {
-        built.env("PATH", path_with(dir));
+    command_at(
+        engine,
+        &program(engine).unwrap_or_else(|| PathBuf::from(engine.binary())),
+    )
+}
+
+fn command_at(engine: Engine, binary: &Path) -> Command {
+    let mut built = command(binary);
+    let mut path = tools_dir()
+        .map(|dir| path_with(dir))
+        .or_else(|| std::env::var_os("PATH"));
+    if engine == Engine::Docker && binary.is_absolute() {
+        // A GUI can find Docker via its installation path while its PATH cannot find Docker's
+        // credential helper. Desktop ships them together, sometimes behind a CLI symlink.
+        // Append to preserve the person's chosen helpers and our Compose-provider precedence.
+        let resolved = std::fs::canonicalize(binary).ok();
+        for directory in [binary.parent(), resolved.as_deref().and_then(Path::parent)]
+            .into_iter()
+            .flatten()
+        {
+            let existing: Vec<_> = path
+                .as_deref()
+                .map(std::env::split_paths)
+                .into_iter()
+                .flatten()
+                .collect();
+            if existing.iter().any(|entry| entry == directory) {
+                continue;
+            }
+            // A directory containing the platform PATH separator cannot be represented here.
+            // Keep the original environment in that case; Docker still reports its real error.
+            if let Ok(expanded) = std::env::join_paths(
+                existing
+                    .into_iter()
+                    .chain(std::iter::once(directory.to_path_buf())),
+            ) {
+                path = Some(expanded);
+            }
+        }
+    }
+    if let Some(path) = path {
+        built.env("PATH", path);
     }
     built
 }
@@ -380,11 +416,13 @@ fn where_installers_put(engine: Engine) -> Option<PathBuf> {
     let places: Vec<PathBuf> = match engine {
         #[cfg(target_os = "windows")]
         Engine::Podman => {
-            // The per-user MSI first: it is the one OpenBot runs. A machine-wide install left by
-            // somebody else is still found by the second.
+            // The MSI uses Programs\Podman per user and Program Files\Podman per machine.
+            // Keep the legacy RedHat location for installations from the older EXE installer.
             [
                 std::env::var_os("LOCALAPPDATA")
                     .map(|local| PathBuf::from(local).join("Programs\\Podman\\podman.exe")),
+                std::env::var_os("ProgramFiles")
+                    .map(|files| PathBuf::from(files).join("Podman\\podman.exe")),
                 std::env::var_os("ProgramFiles")
                     .map(|files| PathBuf::from(files).join("RedHat\\Podman\\podman.exe")),
             ]
@@ -527,6 +565,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn docker_credential_helper_is_found_beside_resolved_cli_without_changing_config() {
+        if crate::test_support::isolated_process(
+            "engine::tests::docker_credential_helper_is_found_beside_resolved_cli_without_changing_config",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("docker credential helper path");
+        let bin = root.join("Docker application/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let source = root.join("fixture.rs");
+        let docker = bin.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
+        let helper = bin.join(format!(
+            "docker-credential-desktop{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    if std::env::current_exe().unwrap().file_stem().unwrap() == "docker-credential-desktop" {
+        println!("configured helper used");
+        return;
+    }
+    let filename = format!("docker-credential-desktop{}", std::env::consts::EXE_SUFFIX);
+    let path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|directory| directory.join(&filename)).find(|path| path.is_file());
+    let Some(path) = path else {
+        eprintln!("docker-credential-desktop: executable file not found in PATH");
+        std::process::exit(41);
+    };
+    let output = std::process::Command::new(path).arg("get").output().unwrap();
+    assert!(output.status.success());
+    print!("{}", String::from_utf8(output.stdout).unwrap());
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &docker);
+        std::fs::copy(&docker, &helper).unwrap();
+        let config = root.join("config.json");
+        let original = br#"{"credsStore":"desktop","credHelpers":{"private.example":"custom"}}"#;
+        std::fs::write(&config, original).unwrap();
+        std::env::set_var("PATH", root.join("gui-path-without-docker"));
+        let output = command_at(Engine::Docker, &docker)
+            .env("DOCKER_CONFIG", &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"configured helper used\n");
+        assert_eq!(std::fs::read(config).unwrap(), original);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_symlink_adds_target_helpers_after_inherited_paths_and_managed_compose() {
+        if crate::test_support::isolated_process(
+            "engine::tests::docker_symlink_adds_target_helpers_after_inherited_paths_and_managed_compose",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("docker symlink helper path");
+        let target = root.join("Docker.app/Contents/Resources/bin");
+        let links = root.join("usr/local/bin");
+        for directory in [&target, &links] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(target.join("docker"), "fixture").unwrap();
+        std::os::unix::fs::symlink(target.join("docker"), links.join("docker")).unwrap();
+        let inherited = root.join("custom-helpers");
+        let managed = root.join("managed-compose");
+        std::env::set_var("PATH", &inherited);
+        tools_live_in(managed.clone());
+        let command = command_at(Engine::Docker, &links.join("docker"));
+        let path = command
+            .get_envs()
+            .find(|(key, _)| *key == "PATH")
+            .unwrap()
+            .1
+            .unwrap();
+        let directories: Vec<_> = std::env::split_paths(path).collect();
+        assert_eq!(
+            directories,
+            [
+                managed,
+                inherited,
+                links,
+                std::fs::canonicalize(target).unwrap()
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn runtime_selectors_keep_the_existing_status_wire_shape() {
         let mut address = Address::new(Engine::Docker, None);
         address.selector = Some(RuntimeSelector::DockerContext("owned".into()));
@@ -613,6 +749,48 @@ mod tests {
         assert_eq!(on_path("openbot-not-a-real-binary"), None);
     }
 
+    #[test]
+    #[cfg(windows)]
+    fn windows_installed_podman_runs_without_an_inherited_path_entry() {
+        if crate::test_support::isolated_process(
+            "engine::tests::windows_installed_podman_runs_without_an_inherited_path_entry",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("podman install locations");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("engine.rs");
+        let binary = root.join("fixture.exe");
+        std::fs::write(&source, "fn main() { println!(\"1.44\"); }").unwrap();
+        crate::test_support::compile_fixture(&source, &binary);
+        let local = root.join("Local");
+        let program_files = root.join("Program Files");
+        std::env::set_var("LOCALAPPDATA", &local);
+        std::env::set_var("ProgramFiles", &program_files);
+        std::env::set_var("PATH", root.join("empty-path"));
+
+        for installation in [
+            local.join("Programs/Podman/podman.exe"),
+            program_files.join("Podman/podman.exe"),
+            program_files.join("RedHat/Podman/podman.exe"),
+        ] {
+            std::fs::create_dir_all(installation.parent().unwrap()).unwrap();
+            std::fs::copy(&binary, &installation).unwrap();
+            assert_eq!(program(Engine::Podman).as_ref(), Some(&installation));
+            let address = Address::new(Engine::Podman, Some("openbot".into()));
+            assert_eq!(address.parts().0, installation);
+            assert!(address.responds(), "resolved engine should actually run");
+            assert!(tool(Engine::Podman)
+                .arg("--version")
+                .output()
+                .unwrap()
+                .status
+                .success());
+            std::fs::remove_file(installation).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// The provider directory has to be in *front* of PATH: a broken `docker-compose` earlier on
     /// somebody's PATH would otherwise be the one Podman runs.
     #[test]
@@ -643,5 +821,390 @@ mod tests {
             status.address.unwrap().connection.as_deref(),
             Some("openbot")
         );
+    }
+}
+
+/// A native Podman API service belongs to the desktop session only when this session spawned it.
+/// Existing user/systemd services are probed and reused, never stopped or reconfigured.
+#[cfg(any(target_os = "linux", all(test, unix)))]
+pub mod local_api {
+    use crate::problem::Problem;
+    use std::io::{Read, Write};
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    use std::os::unix::net::UnixStream;
+    use std::os::unix::process::CommandExt;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    #[derive(Default)]
+    pub struct Service {
+        child: Option<Child>,
+        socket: Option<(PathBuf, u64, u64)>,
+    }
+
+    fn problem(detail: impl Into<String>) -> Problem {
+        Problem::with(
+            "OpenBot could not prepare its container API. Try again.",
+            detail,
+        )
+    }
+
+    fn ping(socket: &Path) -> Result<Option<u32>, String> {
+        let probe = || -> std::io::Result<(String, Option<u32>)> {
+            let mut stream = UnixStream::connect(socket)?;
+            #[cfg(target_os = "linux")]
+            let peer = {
+                use std::os::fd::AsRawFd;
+                let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+                let mut size = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+                if unsafe {
+                    libc::getsockopt(
+                        stream.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_PEERCRED,
+                        (&mut credentials as *mut libc::ucred).cast(),
+                        &mut size,
+                    )
+                } != 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Some(credentials.pid as u32)
+            };
+            #[cfg(not(target_os = "linux"))]
+            let peer = None;
+            stream.set_read_timeout(Some(Duration::from_millis(300)))?;
+            stream.set_write_timeout(Some(Duration::from_millis(300)))?;
+            stream.write_all(
+                b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )?;
+            let mut response = String::new();
+            stream.take(4096).read_to_string(&mut response)?;
+            Ok((response, peer))
+        };
+        let (response, peer) = probe().map_err(|error| format!("{}: {error}", socket.display()))?;
+        if response.starts_with("HTTP/1.1 200 ") || response.starts_with("HTTP/1.0 200 ") {
+            Ok(peer)
+        } else {
+            Err(format!(
+                "{}: Podman API ping failed: {response}",
+                socket.display()
+            ))
+        }
+    }
+
+    impl Service {
+        #[cfg(target_os = "linux")]
+        pub fn ensure(&mut self, address: &super::Address, root: &Path) -> Result<(), Problem> {
+            if !matches!(address.selector, Some(super::RuntimeSelector::PodmanLocal)) {
+                return Ok(());
+            }
+            let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }))
+                });
+            let socket = runtime.join("podman/podman.sock");
+            let log = root.join("logs/podman-api.log");
+            self.ensure_with(&socket, &log, || {
+                let mut command = address.command();
+                command
+                    .args(["system", "service", "--time=0"])
+                    .arg(format!("unix://{}", socket.display()));
+                command
+            })
+        }
+
+        pub(super) fn ensure_with(
+            &mut self,
+            socket: &Path,
+            log: &Path,
+            spawn: impl FnOnce() -> Command,
+        ) -> Result<(), Problem> {
+            if let Some(child) = self.child.as_mut() {
+                if let Some(status) = child
+                    .try_wait()
+                    .map_err(|error| problem(error.to_string()))?
+                {
+                    self.stop()?;
+                    return Err(problem(format!(
+                        "The owned Podman API exited with {status}. Log: {}",
+                        log.display()
+                    )));
+                }
+            }
+            match std::fs::symlink_metadata(socket) {
+                Ok(_) => return ping(socket).map(|_| ()).map_err(problem),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(problem(format!("{}: {error}", socket.display()))),
+            }
+            if self.child.is_some() {
+                return Err(problem("The owned Podman API lost its socket."));
+            }
+            for directory in [socket.parent(), log.parent()].into_iter().flatten() {
+                std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(directory)
+                    .map_err(|error| problem(format!("{}: {error}", directory.display())))?;
+            }
+            let output = std::fs::File::create(log)
+                .map_err(|error| problem(format!("{}: {error}", log.display())))?;
+            let error_output = output
+                .try_clone()
+                .map_err(|error| problem(error.to_string()))?;
+            self.child = Some(
+                spawn()
+                    .process_group(0)
+                    .stdin(Stdio::null())
+                    .stdout(output)
+                    .stderr(error_output)
+                    .spawn()
+                    .map_err(|error| problem(format!("could not start Podman API: {error}")))?,
+            );
+            let until = Instant::now() + Duration::from_secs(10);
+            let failure = loop {
+                match self.child.as_mut().unwrap().try_wait() {
+                    Ok(Some(status)) => break format!("Podman API exited with {status}"),
+                    Err(error) => break format!("could not observe Podman API: {error}"),
+                    Ok(None) => {}
+                }
+                match ping(socket) {
+                    Ok(peer) => {
+                        let child = self.child.as_ref().unwrap().id();
+                        if peer
+                            .is_some_and(|pid| unsafe { libc::getpgid(pid as i32) } != child as i32)
+                        {
+                            // Another service won the bind race. Retire ours without claiming its socket.
+                            self.stop()?;
+                            return ping(socket).map(|_| ()).map_err(problem);
+                        }
+                        match std::fs::symlink_metadata(socket) {
+                            Ok(metadata) => {
+                                self.socket =
+                                    Some((socket.to_path_buf(), metadata.dev(), metadata.ino()))
+                            }
+                            Err(error) => break format!("{}: {error}", socket.display()),
+                        }
+                        return Ok(());
+                    }
+                    Err(error) if Instant::now() >= until => break error,
+                    Err(_) => std::thread::sleep(Duration::from_millis(50)),
+                }
+            };
+            let diagnostic = match std::fs::read_to_string(log) {
+                Ok(contents) => contents,
+                Err(error) => format!("could not read {}: {error}", log.display()),
+            };
+            let cleanup = self.stop();
+            Err(problem(match cleanup {
+                Ok(()) => format!("{failure}\n{diagnostic}"),
+                Err(cleanup) => format!(
+                    "{failure}\n{diagnostic}\nCleanup: {} {:?}",
+                    cleanup.said, cleanup.detail
+                ),
+            }))
+        }
+
+        pub fn stop(&mut self) -> Result<(), Problem> {
+            if let Some(child) = self.child.as_mut() {
+                if child
+                    .try_wait()
+                    .map_err(|error| problem(error.to_string()))?
+                    .is_none()
+                {
+                    // Terminate the exact held child, never a PID read from a previous session.
+                    if unsafe { libc::kill(-(child.id() as i32), libc::SIGTERM) } != 0 {
+                        let error = std::io::Error::last_os_error();
+                        if error.raw_os_error() != Some(libc::ESRCH) {
+                            return Err(problem(format!("could not stop Podman API: {error}")));
+                        }
+                    }
+                    let until = Instant::now() + Duration::from_secs(2);
+                    while child
+                        .try_wait()
+                        .map_err(|error| problem(error.to_string()))?
+                        .is_none()
+                    {
+                        if Instant::now() >= until {
+                            if unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) } != 0 {
+                                let error = std::io::Error::last_os_error();
+                                if error.raw_os_error() != Some(libc::ESRCH) {
+                                    return Err(problem(error.to_string()));
+                                }
+                            }
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                child.wait().map_err(|error| problem(error.to_string()))?;
+                self.child = None;
+            }
+            if let Some((socket, device, inode)) = &self.socket {
+                match std::fs::symlink_metadata(socket) {
+                    Ok(metadata) if metadata.dev() == *device && metadata.ino() == *inode => {
+                        std::fs::remove_file(socket)
+                            .map_err(|error| problem(format!("{}: {error}", socket.display())))?;
+                    }
+                    Ok(_) => {} // A replacement socket is not ours.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(problem(error.to_string())),
+                }
+                self.socket = None;
+            }
+            Ok(())
+        }
+
+        #[cfg(test)]
+        pub(super) fn child_id(&self) -> Option<u32> {
+            self.child.as_ref().map(Child::id)
+        }
+    }
+
+    impl Drop for Service {
+        fn drop(&mut self) {
+            if let Err(error) = self.stop() {
+                eprintln!(
+                    "[podman-api] cleanup failed: {} {:?}",
+                    error.said, error.detail
+                );
+            }
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod local_api_tests {
+    use super::local_api::Service;
+    use crate::test_support::temp_root;
+    use std::path::Path;
+    use std::process::Command;
+
+    fn fixture(socket: &Path) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "engine::local_api_tests::api_fixture_child",
+                "--nocapture",
+            ])
+            .env("OPENBOT_API_FIXTURE_SOCKET", socket);
+        command
+    }
+
+    #[test]
+    fn api_fixture_child() {
+        let Some(socket) = std::env::var_os("OPENBOT_API_FIXTURE_SOCKET") else {
+            return;
+        };
+        use std::io::{Read, Write};
+        let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0; 1];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+                assert!(request.len() < 4096, "fixture request must be bounded");
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn linux_api_starts_a_real_socket_and_reaps_only_its_own_child() {
+        let root = temp_root("linux-api");
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("api.sock");
+        let log = root.join("api.log");
+        let mut owned = Service::default();
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        let pid = owned.child_id().expect("new service is owned");
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
+        let mut borrowed = Service::default();
+        borrowed
+            .ensure_with(&socket, &log, || panic!("reuse the existing API"))
+            .unwrap();
+        borrowed.stop().unwrap();
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            0,
+            "unowned service must remain alive"
+        );
+        owned.stop().unwrap();
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            -1,
+            "owned child must be reaped"
+        );
+        assert!(
+            !socket.exists(),
+            "owned socket must not prevent a later start"
+        );
+        owned
+            .ensure_with(&socket, &log, || fixture(&socket))
+            .unwrap();
+        owned.stop().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn linux_api_drop_reaps_the_owned_service_without_removing_a_replacement_socket() {
+        let root = temp_root("linux-api-drop");
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("api.sock");
+        let mut service = Service::default();
+        service
+            .ensure_with(&socket, &root.join("api.log"), || fixture(&socket))
+            .unwrap();
+        let pid = service.child_id().unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        let replacement = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        drop(service);
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
+        assert!(socket.exists(), "replaced socket belongs to another owner");
+        drop(replacement);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn linux_api_start_failure_preserves_diagnostics_and_reaps_child() {
+        let root = temp_root("linux-api-failed");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut service = Service::default();
+        let problem = service
+            .ensure_with(&root.join("api.sock"), &root.join("api.log"), || {
+                let mut command = Command::new("/bin/sh");
+                command.args(["-c", "echo native-service-failed >&2; exit 19"]);
+                command
+            })
+            .unwrap_err();
+        assert!(problem.detail.unwrap().contains("native-service-failed"));
+        assert!(service.child_id().is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn linux_api_refuses_an_unresponsive_existing_socket_without_replacing_it() {
+        let root = temp_root("linux-api-existing");
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("api.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let mut service = Service::default();
+        assert!(service
+            .ensure_with(&socket, &root.join("api.log"), || panic!(
+                "must not replace existing socket"
+            ))
+            .is_err());
+        assert!(socket.exists());
+        drop(listener);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

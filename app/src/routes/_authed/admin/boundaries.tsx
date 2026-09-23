@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isComposing } from "@/lib/composing";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
@@ -224,6 +225,9 @@ function BoundariesPage() {
         <div className="mt-3 flex gap-2">
           <Input
             aria-label="A rule, written in CEL"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             className="min-w-0 flex-1 font-mono text-xs"
             onChange={(event) => {
               setDraft(event.target.value);
@@ -231,7 +235,9 @@ function BoundariesPage() {
               setTested(null);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter") addRule(draft);
+              // Not the Enter that confirms a composed character, which would put a half-typed
+              // rule into the policy in force.
+              if (event.key === "Enter" && !isComposing(event)) addRule(draft);
             }}
             placeholder='tool.name == "computer_click" && contains(element.name, "submit")'
             value={draft}

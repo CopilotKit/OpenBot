@@ -12,6 +12,14 @@
 
 use serde::Serialize;
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Connection {
+    Model,
+    Intelligence,
+    Organization,
+}
+
 /// A failure, in both registers.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Problem {
@@ -22,6 +30,12 @@ pub struct Problem {
     /// `None` where the plain sentence IS the whole truth — a refusal this deployment decided, with
     /// no underlying output behind it.
     pub detail: Option<String>,
+    /// The credential operation that failed, never inferred from provider log text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<Connection>,
+    /// The full, verified Compose volume name offered for an explicit fresh-install reset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_reset: Option<String>,
 }
 
 impl Problem {
@@ -30,6 +44,8 @@ impl Problem {
         Self {
             said: said.into(),
             detail: None,
+            connection: None,
+            database_reset: None,
         }
     }
 
@@ -39,7 +55,14 @@ impl Problem {
         Self {
             said: said.into(),
             detail: (!detail.trim().is_empty()).then_some(detail),
+            connection: None,
+            database_reset: None,
         }
+    }
+
+    pub fn connection(mut self, connection: Connection) -> Self {
+        self.connection = Some(connection);
+        self
     }
 }
 

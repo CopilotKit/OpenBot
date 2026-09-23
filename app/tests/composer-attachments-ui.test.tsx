@@ -404,3 +404,45 @@ test("a file the browser called an image is drawn as a file once the server read
   expect(container.querySelector("img")).toBeNull();
   expect(container.textContent).toContain("notes.png");
 });
+
+/**
+ * THE WARNING IS DERIVED, AND THIS IS THE CASE THE DERIVATION CAN GET WRONG.
+ *
+ * A tile renders the warning it is handed; whether it is handed one is decided in the composer, off
+ * the same `stagedModality` the file filter uses. Those have to be the same test. The file below is
+ * the one that proves it: the browser calls it a PNG, the server reads it as text, so it lands in
+ * the file strip and goes down the extraction path, and at 120,001 bytes the model sees roughly a
+ * tenth of it. Deciding on the browser's claim instead would drop the warning on exactly this file.
+ */
+test("warns on a large file the browser called an image and the server read as text", async () => {
+  serverSniffs("text/plain");
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+  const { container } = view;
+
+  drop(container.querySelector("form") as HTMLFormElement, [
+    new File(["x".repeat(120_001)], "notes.png", { type: "image/png" }),
+  ]);
+
+  await uploaded(view, "notes.png");
+
+  expect(container.textContent).toContain("may be cut");
+});
+
+/** The same file under the ceiling earns no warning, so the one above is the size and not the path. */
+test("does not warn on a small file the server read as text", async () => {
+  serverSniffs("text/plain");
+  const view = render(
+    <Composer channelId="channel-1" compact onSubmit={() => {}} />,
+  );
+  const { container } = view;
+
+  drop(container.querySelector("form") as HTMLFormElement, [
+    new File(["hello"], "notes.png", { type: "image/png" }),
+  ]);
+
+  await uploaded(view, "notes.png");
+
+  expect(container.textContent).not.toContain("may be cut");
+});

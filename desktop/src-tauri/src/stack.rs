@@ -49,9 +49,9 @@ impl BundledBots {
     pub fn for_credential(credential: &crate::env::ModelCredential) -> Self {
         use crate::env::ModelCredential;
         match credential {
-            ModelCredential::OpenAi { .. } | ModelCredential::Compatible { .. } => {
-                Self::openai_compatible()
-            }
+            ModelCredential::OpenAi { .. }
+            | ModelCredential::Compatible { .. }
+            | ModelCredential::ProviderOAuth { .. } => Self::openai_compatible(),
             ModelCredential::Anthropic { .. } => Self::anthropic(),
             ModelCredential::None
             | ModelCredential::ClaudePlan { .. }
@@ -179,10 +179,413 @@ fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command 
     command
 }
 
+/// Check the actual selected deployment before minting an encryption key. Compose resolves
+/// project names, explicit volume names, and override files; the pinned engine owns the volume.
+/// Never include config output in diagnostics: interpolation may have put credentials in it.
+pub fn postgres_volume_exists(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<bool, Problem> {
+    let configuration = postgres_configuration(engine, root, secrets)?;
+    let volume = postgres_volume_name(&configuration)?;
+    named_volume_exists(engine, root, &volume)
+}
+
+fn postgres_configuration(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<Vec<u8>, Problem> {
+    let configuration = compose_command(engine, root, secrets)
+        .args(["config", "--format", "json"])
+        .output()
+        .map_err(|error| {
+            postgres_volume_problem(format!("Could not run Compose config: {error}"))
+        })?;
+    if !configuration.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Compose config exited with {}. Output omitted because it can contain credentials.",
+            configuration.status
+        )));
+    }
+    Ok(configuration.stdout)
+}
+
+fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bool, Problem> {
+    let inventory = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "ls", "--format", "{{.Name}}"])
+        .output()
+        .map_err(|error| postgres_volume_problem(format!("Could not list volumes: {error}")))?;
+    if !inventory.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Volume inventory exited with {}.",
+            inventory.status
+        )));
+    }
+    let names = std::str::from_utf8(&inventory.stdout)
+        .map_err(|_| postgres_volume_problem("Volume inventory was not valid UTF-8."))?;
+    Ok(names.lines().any(|name| name.trim() == volume))
+}
+
+fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify whether this installation has saved database data. No encryption key was created. Check the selected container engine and Compose configuration, then try again.",
+        detail,
+    )
+}
+
+/// A surviving database is recoverable only when Compose and the engine agree it is owned.
+pub fn leftover_database_volume(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<Option<String>, Problem> {
+    let configuration = postgres_configuration(engine, root, secrets)?;
+    let config: serde_json::Value = serde_json::from_slice(&configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
+    let Some((source, definition)) = postgres_data_volume(&config) else {
+        return Ok(None);
+    };
+    let Some(project) = config["name"].as_str().filter(|name| !name.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(name) = definition["name"].as_str() else {
+        return Ok(None);
+    };
+    // Compose's explicit names and external volumes can refer to somebody else's database.
+    // Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
+    if name != format!("{project}_{source}")
+        || !name.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphanumeric() || (index > 0 && b"_.-".contains(&byte))
+        })
+        || !matches!(
+            definition.get("external"),
+            None | Some(serde_json::Value::Bool(false))
+        )
+        || definition["driver"]
+            .as_str()
+            .is_some_and(|driver| driver != "local")
+        || !empty_volume_options(&definition["driver_opts"])
+        || config["services"].as_object().is_some_and(|services| {
+            services.iter().any(|(service, configuration)| {
+                service != "postgres"
+                    && configuration["volumes"].as_array().is_some_and(|mounts| {
+                        mounts.iter().any(|mount| {
+                            mount["source"].as_str().is_some_and(|other_source| {
+                                other_source == source
+                                    || config["volumes"][other_source]["name"].as_str()
+                                        == Some(name)
+                            })
+                        })
+                    })
+            })
+        })
+    {
+        return Ok(None);
+    }
+    if !named_volume_exists(engine, root, name)? {
+        return Ok(None);
+    }
+    let inspect = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "inspect", name])
+        .output()
+        .map_err(|error| {
+            postgres_volume_problem(format!("Could not inspect the database volume: {error}"))
+        })?;
+    if !inspect.status.success() {
+        return Err(postgres_volume_problem(format!("Database volume inspection exited with {}. Output omitted because it can contain credentials.", inspect.status)));
+    }
+    let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
+        postgres_volume_problem("Database volume inspection did not return valid JSON.")
+    })?;
+    let Some(volumes) = inspected.as_array().filter(|volumes| volumes.len() == 1) else {
+        return Ok(None);
+    };
+    let volume = &volumes[0];
+    // Podman accepts unique name prefixes. Exact inventory and inspect matches keep the command
+    // tied to the full name the person confirmed, never a similarly named backup.
+    Ok((volume["Name"].as_str() == Some(name)
+        && volume["Driver"].as_str() == Some("local")
+        && empty_volume_options(&volume["Options"])
+        && volume["Labels"]["com.docker.compose.project"].as_str() == Some(project)
+        && volume["Labels"]["com.docker.compose.volume"].as_str() == Some(source))
+    .then(|| name.to_owned()))
+}
+
+pub fn reset_leftover_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    confirmed_volume: &str,
+) -> Result<(), Problem> {
+    if leftover_database_volume(engine, root, secrets)?.as_deref() != Some(confirmed_volume) {
+        return Err(Problem::plain("The leftover database no longer matches the volume you confirmed, or OpenBot could not verify that it owns the volume. Nothing was removed. Try Start again."));
+    }
+    // Never force this operation: the engine must refuse any container attachment, including a
+    // stopped container or one created after inspection. Do not stop containers to make it pass.
+    let removed = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "rm", confirmed_volume])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not reset the leftover database. Nothing else was removed.",
+                format!("Could not run volume removal: {error}"),
+            )
+        })?;
+    if !removed.status.success() {
+        return Err(Problem::with("OpenBot could not reset the leftover database. It may still be attached to a container. Nothing else was removed; stop the installation using it before trying again.", format!("Volume removal exited with {}. Output omitted because it can contain credentials.", removed.status)));
+    }
+    Ok(())
+}
+
+fn empty_volume_options(options: &serde_json::Value) -> bool {
+    options.is_null()
+        || options
+            .as_object()
+            .is_some_and(|options| options.is_empty())
+}
+
+fn postgres_volume_name(configuration: &[u8]) -> Result<String, Problem> {
+    let config: serde_json::Value = serde_json::from_slice(configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
+    postgres_data_volume(&config)
+        .and_then(|(_, definition)| definition["name"].as_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            postgres_volume_problem("Compose did not resolve a named volume for Postgres data.")
+        })
+}
+
+fn postgres_data_volume(config: &serde_json::Value) -> Option<(&str, &serde_json::Value)> {
+    let postgres = &config["services"]["postgres"];
+    let data = postgres["environment"]["PGDATA"]
+        .as_str()
+        .unwrap_or("/var/lib/postgresql/data");
+    // A PGDATA subdirectory still belongs to its containing mount. Prefer the closest mount
+    // so a nested override cannot make us inspect an unrelated volume.
+    let mount = postgres["volumes"].as_array().and_then(|mounts| {
+        mounts
+            .iter()
+            .filter(|mount| {
+                mount["target"].as_str().is_some_and(|target| {
+                    data == target
+                        || data.starts_with(&format!("{}/", target.trim_end_matches('/')))
+                })
+            })
+            .max_by_key(|mount| mount["target"].as_str().unwrap().len())
+    });
+    mount
+        .filter(|mount| mount["type"].as_str() == Some("volume"))
+        .and_then(|mount| mount["source"].as_str())
+        .and_then(|source| {
+            config["volumes"]
+                .get(source)
+                .map(|definition| (source, definition))
+        })
+}
+
+const MACOS_PODMAN_PORTS_FILE: &str = ".openbot-macos-podman.yml";
+const MACOS_PODMAN_PORTS: &str = include_str!("macos-podman-ports.yml");
+const HARNESS_PORT_FILE: &str = ".openbot-harness-port.yml";
+
+fn harness_port_overlay(root: &Path, ipv4_only: bool) -> Result<Option<String>, Problem> {
+    let values = crate::env::read_already_set(
+        &root.join(".env"),
+        &["PICKED_HARNESS_HOST_PORT", "PICKED_HARNESS_PORT"],
+    )
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not read the Bot's local port.",
+            error.to_string(),
+        )
+    })?;
+    let Some(host) = values.get("PICKED_HARNESS_HOST_PORT") else {
+        return Ok(None);
+    };
+    let parse = |value: &str| {
+        value
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or_else(|| {
+                Problem::plain("The Bot's local port setting is invalid. Try Start again.")
+            })
+    };
+    let host = parse(host)?;
+    let target = parse(
+        values
+            .get("PICKED_HARNESS_PORT")
+            .map(String::as_str)
+            .unwrap_or("4202"),
+    )?;
+    if host == target {
+        return Ok(None);
+    }
+    let mut overlay = format!("services:\n  agent-harness:\n    ports: !override\n      - \"127.0.0.1:{host}:{target}\"\n");
+    if !ipv4_only {
+        overlay.push_str(&format!("      - \"[::1]:{host}:{target}\"\n"));
+    }
+    Ok(Some(overlay))
+}
+
+/// Only service creation needs the Mac Podman port overlay. In particular, `run migrate` can
+/// create its Postgres dependency, so it must use the same configuration as `up`.
+fn compose_start_command(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    os: &str,
+) -> Result<Command, Problem> {
+    let mut command = compose_command(engine, root, secrets);
+    let macos_podman = os == "macos" && engine.engine == crate::engine::Engine::Podman;
+    let harness_ports = harness_port_overlay(root, macos_podman)?;
+    if !macos_podman && harness_ports.is_none() {
+        return Ok(command);
+    }
+
+    // Let Compose read/interpolate .env and COMPOSE_ENV_FILES itself. Adding -f directly would
+    // otherwise discard both implicit override files and COMPOSE_FILE from that environment.
+    // This output can contain credentials: retain only file-selection settings, never log it.
+    let environment = compose_command(engine, root, secrets)
+        .args(["config", "--environment"])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not read the deployment's Compose settings.",
+                error.to_string(),
+            )
+        })?;
+    if !environment.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not read the deployment's Compose settings.",
+            command_said(&environment.stderr),
+        ));
+    }
+    let environment = String::from_utf8(environment.stdout)
+        .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
+    let files = compose_files(root, &environment)?;
+    for file in files {
+        command.arg("-f").arg(file);
+    }
+    for (file, contents) in [
+        (
+            MACOS_PODMAN_PORTS_FILE,
+            macos_podman.then_some(MACOS_PODMAN_PORTS),
+        ),
+        (HARNESS_PORT_FILE, harness_ports.as_deref()),
+    ] {
+        if let Some(contents) = contents {
+            let overlay = root.join(file);
+            if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
+                std::fs::write(&overlay, contents).map_err(|error| {
+                    Problem::with(
+                        "OpenBot could not prepare its local port settings.",
+                        error.to_string(),
+                    )
+                })?;
+            }
+            command.arg("-f").arg(file);
+        }
+    }
+    Ok(command)
+}
+
+fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
+    let setting = |key: &str| {
+        environment.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name == key).then_some(value)
+        })
+    };
+    if let Some(files) = setting("COMPOSE_FILE") {
+        let separator = setting("COMPOSE_PATH_SEPARATOR")
+            .filter(|value| !value.is_empty())
+            .unwrap_or(if cfg!(windows) { ";" } else { ":" });
+        return Ok(files.split(separator).map(str::to_owned).collect());
+    }
+
+    // Compose-go's default discovery order. A valid installed deployment contains its base
+    // file in this directory, so there is no need to search outside the selected installation.
+    let first = |names: &[&str]| {
+        names
+            .iter()
+            .find(|name| root.join(name).exists())
+            .map(|name| (*name).to_owned())
+    };
+    let base = first(&[
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    ])
+    .ok_or_else(|| Problem::plain("The selected installation has no Compose file."))?;
+    let mut files = vec![base];
+    if let Some(existing) = first(&[
+        "compose.override.yml",
+        "compose.override.yaml",
+        "docker-compose.override.yml",
+        "docker-compose.override.yaml",
+    ]) {
+        files.push(existing);
+    }
+    Ok(files)
+}
+
+/// Resolve only image references, using public installation overrides before credentials exist.
+pub fn installation_images(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    settings: &Secrets,
+) -> Result<Vec<String>, Problem> {
+    let mut requested = selected_services(harness, BundledBots::openai_compatible());
+    requested.push("migrate");
+    let mut command = compose_command(engine, root, settings);
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    let output = command
+        .args(["config", "--images"])
+        .args(requested)
+        .output()
+        .map_err(|e| {
+            Problem::with(
+                "OpenBot could not check which software to install.",
+                e.to_string(),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not check which software to install.",
+            command_said(&output.stderr),
+        ));
+    }
+    let images: std::collections::BTreeSet<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    if images.is_empty() {
+        return Err(Problem::plain(
+            "This deployment does not identify the software OpenBot needs to install.",
+        ));
+    }
+    Ok(images.into_iter().collect())
+}
+
 /// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
 /// Keep this separate from `up`: image transfer must not include container startup or migrations.
-/// Older providers without a missing-only pull policy retain the existing implicit pull in `up`;
-/// no pull metric is reported for that unmeasurable path.
+/// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
+/// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
 pub fn pull(
     engine: &Address,
     root: &Path,
@@ -231,12 +634,12 @@ pub fn up(
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
     let requested = selected_services(harness, bots);
-    let mut command = compose_command(engine, root, secrets);
+    let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
     if harness {
         command.args(["--profile", "harness"]);
     }
     let output = command
-        .args(["up", "-d", "--no-build"])
+        .args(["up", "-d", "--no-build", "--pull", "never"])
         .args(&requested)
         .output()
         .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
@@ -263,11 +666,10 @@ pub fn migrate(
     root: &Path,
     secrets: &Secrets,
 ) -> Result<(), crate::problem::Problem> {
-    // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
-    // than on anything to do with migrations. Building is prevented the other way, by
-    // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
-    let output = compose_command(engine, root, secrets)
-        .args(["run", "--rm", "migrate"])
+    // The installation step supplies this image. `run` does not accept `--no-build`, and its
+    // explicit no-pull policy must report a missing image without starting another download.
+    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)?
+        .args(["run", "--rm", "--pull", "never", "migrate"])
         .output()
         .map_err(|error| format!("could not run migrations: {error}"))?;
 
@@ -748,6 +1150,11 @@ pub fn spawn_host_process(
      * fought with.
      */
     configure_host_process_env(&mut command, process.name, secrets);
+    let ports = crate::env::Ports::read(root)?;
+    command.envs(ports.settings());
+    if process.name == "server" {
+        command.env("PORT", ports.server.to_string());
+    }
     if process.script.is_empty() {
         command.args(["run", process.package_script]);
     } else {
@@ -2320,8 +2727,7 @@ pub fn port_already_taken_except(
         }
         if something_answers(*port) {
             return Some(format!(
-                "Something is already listening on port {port}, which OpenBot uses for the {name}. \
-                 Stop it, or change the port, and start again."
+                "Port {port} for the {name} became unavailable. Try Start again so OpenBot can choose another local port."
             ));
         }
     }
@@ -2427,23 +2833,71 @@ pub fn wait_until_answering(
     ))
 }
 
-/// The last few lines of a process's log, which is where the reason is.
+/// The last build error can precede Bun's wrapper stack, version, and exit message.
+/// Bound both the file read and displayed lines while preserving that useful context.
 fn tail_of(logs: &Path, name: &str) -> String {
-    let Ok(text) = std::fs::read_to_string(logs.join(format!("{name}.log"))) else {
-        return format!("Nothing was written to {name}.log.");
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BYTES: u64 = 8 * 1024;
+    let read = || -> std::io::Result<Vec<u8>> {
+        let mut file = std::fs::File::open(logs.join(format!("{name}.log")))?;
+        let offset = file.metadata()?.len().saturating_sub(MAX_BYTES);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_BYTES).read_to_end(&mut bytes)?;
+        // Do not show a truncated first line, which may include part of a credential.
+        if offset > 0 {
+            let first_line = bytes.iter().position(|byte| *byte == b'\n');
+            bytes.drain(..first_line.map_or(bytes.len(), |index| index + 1));
+        }
+        Ok(bytes)
     };
+    let bytes = match read() {
+        Ok(bytes) => bytes,
+        Err(error) => return format!("Could not read {name}.log: {error}"),
+    };
+    let text = String::from_utf8_lossy(&bytes);
     let tail: Vec<&str> = text
         .lines()
         .filter(|line| !line.trim().is_empty())
         .rev()
-        .take(3)
+        .take(40)
         .collect();
     if tail.is_empty() {
-        return format!("{name}.log is empty.");
+        return format!("No complete lines were available in the tail of {name}.log.");
     }
     let mut lines = tail;
     lines.reverse();
-    format!("Last from {name}.log: {}", lines.join(" / "))
+    format!(
+        "Last from {name}.log (up to 40 lines, 8 KiB):\n{}",
+        lines.join("\n")
+    )
+}
+
+/// Keep a short startup headline and useful local diagnostics, with credentials removed.
+pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
+    let database_reset = problem.database_reset;
+    let mut detail = problem.said;
+    if let Some(cleanup) = problem.detail {
+        detail.push('\n');
+        detail.push_str(&cleanup);
+    }
+    let mut credentials: Vec<_> = secrets
+        .iter()
+        .filter(|(key, value)| {
+            !value.is_empty()
+                && (crate::vault::is_secret(key) || key.as_str() == "OPENBOT_DESKTOP_HOST_TOKEN")
+        })
+        .collect();
+    credentials.sort_by_key(|(_, value)| std::cmp::Reverse(value.len()));
+    for (key, value) in credentials {
+        detail = detail.replace(value, &format!("<{key}>"));
+    }
+    let mut problem = Problem::with(
+        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
+        detail,
+    );
+    problem.database_reset = database_reset;
+    problem
 }
 
 /// What a directory has to contain before it can be raised.
@@ -2560,6 +3014,350 @@ mod tests {
     use crate::test_support::temp_root;
 
     #[test]
+    fn startup_log_tail_retains_build_error_before_wrapper_without_loading_whole_log() {
+        let root = temp_root("startup-build-diagnostic");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut log = "old output must be omitted\n".repeat(1_000);
+        log.push_str("error during build: Could not resolve imported module\n");
+        log.push_str(&"    at synthetic build frame\n".repeat(20));
+        log.push_str("    at run (app/scripts/serve-or-build.ts:36:11)\n");
+        log.push_str("Bun v1.2.15 (macOS arm64)\nerror: script serve exited with code 1\n");
+        std::fs::write(root.join("app.log"), log).unwrap();
+
+        let detail = tail_of(&root, "app");
+        assert!(
+            detail.contains("Could not resolve imported module"),
+            "{detail}"
+        );
+        assert!(detail.contains("serve-or-build.ts:36:11"), "{detail}");
+        assert!(!detail.contains(&"old output must be omitted\n".repeat(20)));
+        assert!(detail.len() < 8_500, "unbounded startup diagnostic");
+        assert!(detail.lines().count() <= 42, "too many startup log lines");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
+        let secrets = Secrets::from([
+            ("OPENAI_API_KEY".into(), "synthetic+key.long".into()),
+            (
+                "OPENBOT_DESKTOP_HOST_TOKEN".into(),
+                "synthetic-host-token".into(),
+            ),
+            ("APP_PORT".into(), "4567".into()),
+        ]);
+        let mut original = Problem::with(
+            "app stopped: Could not resolve imported module; key=synthetic+key.long",
+            "cleanup failed: port 4567 token=synthetic-host-token",
+        );
+        original.database_reset = Some("openbot_postgres-data".into());
+        let problem = startup_problem(original, &secrets);
+        assert_eq!(
+            problem.database_reset.as_deref(),
+            Some("openbot_postgres-data")
+        );
+        assert!(problem.said.len() < 120);
+        assert!(!problem.said.contains("Could not resolve"));
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("Could not resolve imported module"));
+        assert!(detail.contains("cleanup failed: port 4567"));
+        assert!(detail.contains("<OPENAI_API_KEY>"));
+        assert!(detail.contains("<OPENBOT_DESKTOP_HOST_TOKEN>"));
+        assert!(!detail.contains("synthetic+key.long"));
+        assert!(!detail.contains("synthetic-host-token"));
+    }
+
+    fn postgres_config_fixture(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "services": {"postgres": {"volumes": [{
+                "type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"
+            }]}},
+            "volumes": {"postgres-data": {"name": name}}
+        })
+    }
+
+    #[test]
+    fn postgres_volume_uses_resolved_names_and_the_mount_containing_pgdata() {
+        for name in ["openbot_postgres-data", "explicit-external-database"] {
+            let mut config = postgres_config_fixture(name);
+            config["services"]["postgres"]["environment"] =
+                serde_json::json!({"PGDATA": "/var/lib/postgresql/data/pgdata"});
+            assert_eq!(
+                postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+                name
+            );
+        }
+        let mut config = postgres_config_fixture("outer-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"PGDATA": "/var/lib/postgresql/data/nested"});
+        config["services"]["postgres"]["volumes"].as_array_mut().unwrap().push(
+            serde_json::json!({"type":"volume", "source":"inner", "target":"/var/lib/postgresql/data/nested"})
+        );
+        config["volumes"]["inner"] = serde_json::json!({"name":"actual-data-volume"});
+        assert_eq!(
+            postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+            "actual-data-volume"
+        );
+    }
+
+    #[test]
+    fn postgres_volume_refuses_unresolved_or_non_volume_storage_without_disclosing_config() {
+        let mut config = postgres_config_fixture("selected-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"SECRET": "synthetic-secret-must-not-appear-in-diagnostics"});
+        config["services"]["postgres"]["volumes"][0]["type"] = "bind".into();
+        let mut missing_name = postgres_config_fixture("selected-volume");
+        missing_name["volumes"] = serde_json::json!({});
+        for content in [
+            config.to_string(),
+            missing_name.to_string(),
+            "{}".into(),
+            "invalid-json-secret".into(),
+        ] {
+            let error = postgres_volume_name(content.as_bytes()).unwrap_err();
+            assert!(error.said.contains("No encryption key was created"));
+            assert!(!format!("{error:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed() {
+        if crate::test_support::isolated_process(
+            "stack::tests::postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed",
+        ) { return; }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-deployment", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            std::fs::write(
+                root.join(".fixture-config"),
+                postgres_config_fixture("selected-db").to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                root.join(".fixture-volumes"),
+                "other-db\nselected-db-backup\n",
+            )
+            .unwrap();
+            assert!(!postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            std::fs::write(root.join(".fixture-volumes"), "other-db\nselected-db\n").unwrap();
+            assert!(postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            for failure in [".fixture-volume-failure", ".fixture-config-failure"] {
+                std::fs::write(root.join(failure), "").unwrap();
+                let error = postgres_volume_exists(&address, &root, &Secrets::new()).unwrap_err();
+                assert!(error.said.contains("No encryption key was created"));
+                assert!(!format!("{error:?}").contains("synthetic-secret"));
+                std::fs::remove_file(root.join(failure)).unwrap();
+            }
+            let log = std::fs::read_to_string(record).unwrap();
+            for line in log.lines() {
+                let (cwd, command) = line.split_once('\t').unwrap();
+                assert_eq!(
+                    Path::new(cwd).canonicalize().unwrap(),
+                    root.canonicalize().unwrap()
+                );
+                let command = if address.engine == crate::engine::Engine::Podman {
+                    command
+                        .strip_prefix("--connection fixture-machine ")
+                        .expect("retain selected Podman connection")
+                } else {
+                    command
+                };
+                assert!(matches!(
+                    command,
+                    "compose config --format json" | "volume ls --format {{.Name}}"
+                ));
+            }
+        }
+    }
+
+    fn leftover_database_fixture(root: &Path) -> serde_json::Value {
+        let mut config = postgres_config_fixture("openbot_postgres-data");
+        config["name"] = "openbot".into();
+        std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+        std::fs::write(
+            root.join(".fixture-volumes"),
+            "unrelated\nopenbot_postgres-data\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".fixture-inspect"), serde_json::json!([{
+            "Name": "openbot_postgres-data", "Driver": "local", "Options": {},
+            "Labels": {"com.docker.compose.project":"openbot", "com.docker.compose.volume":"postgres-data"}
+        }]).to_string()).unwrap();
+        config
+    }
+
+    #[test]
+    fn leftover_database_reset_uses_only_confirmed_compose_owned_volume() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_database_reset_uses_only_confirmed_compose_owned_volume",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path.bin.join(format!("{}-reset", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_database_fixture(&root);
+            assert_eq!(
+                leftover_database_volume(&address, &root, &Secrets::new()).unwrap(),
+                Some("openbot_postgres-data".into())
+            );
+            assert!(
+                reset_leftover_database(&address, &root, &Secrets::new(), "unrelated").is_err()
+            );
+            assert!(!std::fs::read_to_string(&record)
+                .unwrap()
+                .contains("volume rm"));
+            reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-volumes")).unwrap(),
+                "unrelated\n"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter(|line| line.contains("volume rm"))
+                .collect();
+            assert_eq!(removals.len(), 1);
+            assert!(removals[0].ends_with("volume rm openbot_postgres-data"));
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            if address.engine == crate::engine::Engine::Podman {
+                assert!(log.lines().all(|line| line
+                    .split_once('\t')
+                    .unwrap()
+                    .1
+                    .starts_with("--connection fixture-machine ")));
+            }
+        }
+    }
+
+    #[test]
+    fn leftover_database_reset_refuses_shared_unowned_changed_or_attached_volumes() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_database_reset_refuses_shared_unowned_changed_or_attached_volumes",
+        ) { return; }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[1].clone();
+        let root = path.bin.join("reset-refusals");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        for scenario in [
+            "external",
+            "custom-name",
+            "driver",
+            "driver-options",
+            "shared-service",
+            "shared-alias",
+            "foreign-label",
+            "missing-label",
+            "prefix-inspect",
+            "missing",
+            "config-failure",
+            "inventory-failure",
+            "inspect-failure",
+            "attached",
+        ] {
+            let mut config = leftover_database_fixture(&root);
+            std::fs::write(&record, "").unwrap();
+            let marker = match scenario {
+                "external" => {
+                    config["volumes"]["postgres-data"]["external"] = true.into();
+                    None
+                }
+                "custom-name" => {
+                    config["volumes"]["postgres-data"]["name"] = "shared-database".into();
+                    None
+                }
+                "driver" => {
+                    config["volumes"]["postgres-data"]["driver"] = "nfs".into();
+                    None
+                }
+                "driver-options" => {
+                    config["volumes"]["postgres-data"]["driver_opts"] =
+                        serde_json::json!({"device":"/shared"});
+                    None
+                }
+                "shared-service" => {
+                    config["services"]["other"] = config["services"]["postgres"].clone();
+                    None
+                }
+                "shared-alias" => {
+                    config["services"]["other"] = config["services"]["postgres"].clone();
+                    config["services"]["other"]["volumes"][0]["source"] = "backup-alias".into();
+                    config["volumes"]["backup-alias"] =
+                        serde_json::json!({"name": "openbot_postgres-data"});
+                    None
+                }
+                "foreign-label" | "missing-label" | "prefix-inspect" => {
+                    let mut inspect: serde_json::Value = serde_json::from_str(
+                        &std::fs::read_to_string(root.join(".fixture-inspect")).unwrap(),
+                    )
+                    .unwrap();
+                    if scenario == "foreign-label" {
+                        inspect[0]["Labels"]["com.docker.compose.project"] =
+                            "another-project".into();
+                    }
+                    if scenario == "missing-label" {
+                        inspect[0]["Labels"] = serde_json::json!({});
+                    }
+                    if scenario == "prefix-inspect" {
+                        inspect[0]["Name"] = "openbot_postgres-data-backup".into();
+                    }
+                    std::fs::write(root.join(".fixture-inspect"), inspect.to_string()).unwrap();
+                    None
+                }
+                "missing" => {
+                    std::fs::write(root.join(".fixture-volumes"), "unrelated\n").unwrap();
+                    None
+                }
+                "config-failure" => Some(".fixture-config-failure"),
+                "inventory-failure" => Some(".fixture-volume-failure"),
+                "inspect-failure" => Some(".fixture-inspect-failure"),
+                "attached" => Some(".fixture-attached"),
+                _ => unreachable!(),
+            };
+            std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+            if let Some(marker) = marker {
+                std::fs::write(root.join(marker), "").unwrap();
+            }
+            let error =
+                reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
+                    .expect_err(scenario);
+            assert!(
+                !format!("{error:?}").contains("synthetic-secret"),
+                "{scenario}"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            assert_eq!(
+                log.contains("volume rm"),
+                scenario == "attached",
+                "{scenario}: {log}"
+            );
+            assert!(!log.contains("--force"));
+            assert!(std::fs::read_to_string(root.join(".fixture-volumes"))
+                .unwrap()
+                .contains("unrelated"));
+            if scenario == "attached" {
+                assert!(std::fs::read_to_string(root.join(".fixture-volumes"))
+                    .unwrap()
+                    .contains("openbot_postgres-data"));
+            }
+            if let Some(marker) = marker {
+                std::fs::remove_file(root.join(marker)).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn desktop_approval_transport_credential_reaches_only_the_server() {
         let secrets = Secrets::from([
             ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "fixture-only".into()),
@@ -2579,6 +3377,58 @@ mod tests {
                 Some(std::ffi::OsStr::new("other-fixture"))
             );
         }
+    }
+
+    #[test]
+    fn host_processes_receive_persisted_ports_on_start_and_restart() {
+        let root = temp_root("host-selected-ports");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("ports.rs");
+        let bun = root.join(format!("ports{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    let role = std::env::current_dir().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(std::env::var("APP_PORT").unwrap(), "52110");
+    assert_eq!(std::env::var("SERVER_PORT").unwrap(), "52101");
+    if role == "server" { assert_eq!(std::env::var("PORT").unwrap(), "52101"); }
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &bun);
+        let ports = crate::env::Ports {
+            app: 52110,
+            server: 52101,
+            ..Default::default()
+        };
+        crate::env::write(
+            &root.join(".env"),
+            &ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let stale = Secrets::from([
+            ("SERVER_PORT".into(), "3001".into()),
+            ("APP_PORT".into(), "3010".into()),
+            ("PORT".into(), "3001".into()),
+        ]);
+        for _ in 0..2 {
+            for process in HOST_PROCESSES {
+                std::fs::create_dir_all(root.join(process.cwd)).unwrap();
+                let status = spawn_host_process(&process, &root, &root.join(".logs"), &bun, &stale)
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+                assert!(
+                    status.success(),
+                    "{} did not receive selected ports",
+                    process.name
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -3889,6 +4739,52 @@ fn main() {
         writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
     }
     let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    if scenario == "postgres-volume" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let (file, failure) = if actual == ["compose", "config", "--format", "json"] {
+            (".fixture-config", ".fixture-config-failure")
+        } else if actual == ["volume", "ls", "--format", "{{.Name}}"] {
+            (".fixture-volumes", ".fixture-volume-failure")
+        } else if actual == ["volume", "inspect", "openbot_postgres-data"] {
+            (".fixture-inspect", ".fixture-inspect-failure")
+        } else if actual == ["volume", "rm", "openbot_postgres-data"] {
+            if std::path::Path::new(".fixture-attached").exists() {
+                eprintln!("synthetic-secret attached container");
+                std::process::exit(2);
+            }
+            let inventory = std::fs::read_to_string(".fixture-volumes").unwrap();
+            let remaining: String = inventory.lines().filter(|name| *name != "openbot_postgres-data").map(|name| format!("{name}\n")).collect();
+            std::fs::write(".fixture-volumes", remaining).unwrap();
+            return;
+        } else { panic!("unexpected volume probe command: {actual:?}"); };
+        if std::path::Path::new(failure).exists() {
+            eprintln!("synthetic-secret-must-not-appear-in-diagnostics");
+            std::process::exit(17);
+        }
+        print!("{}", std::fs::read_to_string(file).unwrap());
+        return;
+    }
+    if scenario == "macos-podman-start" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual == ["compose", "config", "--environment"] {
+            if std::path::Path::new(".fixture-config-failure").exists() {
+                eprintln!("synthetic invalid deployment override");
+                std::process::exit(17);
+            }
+            print!("{}", std::fs::read_to_string(".fixture-compose-environment").unwrap_or_default());
+            return;
+        }
+        if actual.iter().any(|arg| arg == "up" || arg == "run") {
+            let files: Vec<_> = actual.windows(2).filter(|pair| pair[0] == "-f").map(|pair| &pair[1]).collect();
+            if !files.iter().any(|file| file.ends_with(".openbot-macos-podman.yml")) {
+                eprintln!("Error response from daemon: rootlessport conflict with ID 1");
+                std::process::exit(126);
+            }
+            for file in files { assert!(std::path::Path::new(file).is_file(), "missing compose file {file}"); }
+            return;
+        }
+        panic!("unexpected startup command: {actual:?}");
+    }
     if scenario == "computer-stop" {
         let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
         let race = root.join(".fixture-race").exists();
@@ -5972,6 +6868,273 @@ fn main() {
         let patience = std::time::Duration::from_secs(3);
         wait_for_ports_to_clear(&[port], patience);
         assert!(started.elapsed() < patience, "a released port kept waiting");
+    }
+
+    #[test]
+    fn compose_port_overlay_is_limited_to_macos_podman() {
+        let root = temp_root("compose-platform-policy");
+        let secrets = Secrets::from([("SYNTHETIC_SETTING".into(), "preserved".into())]);
+        for (engine, os) in [
+            (crate::engine::Engine::Docker, "macos"),
+            (crate::engine::Engine::Docker, "linux"),
+            (crate::engine::Engine::Docker, "windows"),
+            (crate::engine::Engine::Podman, "linux"),
+            (crate::engine::Engine::Podman, "windows"),
+        ] {
+            let command =
+                compose_start_command(&Address::new(engine, None), &root, &secrets, os).unwrap();
+            assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+            assert_eq!(command.get_current_dir(), Some(root.as_path()));
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == "SYNTHETIC_SETTING"
+                    && value == Some(std::ffi::OsStr::new("preserved"))));
+            assert!(
+                !root.exists(),
+                "{engine:?} on {os} must not write a Mac Podman overlay"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_port_overlay_preserves_discovery_and_explicit_file_selection() {
+        let root = temp_root("compose-file-selection");
+        std::fs::create_dir_all(&root).unwrap();
+        for file in ["docker-compose.yml", "docker-compose.override.yml"] {
+            std::fs::write(root.join(file), "services: {}\n").unwrap();
+        }
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["docker-compose.yml", "docker-compose.override.yml"]
+        );
+        std::fs::write(root.join("compose.yaml"), "services: {}\n").unwrap();
+        std::fs::write(root.join("compose.override.yml"), "services: {}\n").unwrap();
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["compose.yaml", "compose.override.yml"]
+        );
+        assert_eq!(
+            compose_files(
+                &root,
+                "COMPOSE_FILE=first.yml:folder/custom file.yml\nCOMPOSE_PATH_SEPARATOR=:\n"
+            )
+            .unwrap(),
+            ["first.yml", "folder/custom file.yml"]
+        );
+        assert_eq!(
+            compose_files(
+                &root,
+                "COMPOSE_FILE=first.yml|custom.yml\nCOMPOSE_PATH_SEPARATOR=|\n"
+            )
+            .unwrap(),
+            ["first.yml", "custom.yml"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dynamic_harness_overlay_keeps_container_port_and_loopback_policy() {
+        let root = temp_root("dynamic-harness-port");
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(harness_port_overlay(&root, false).unwrap().is_none());
+        std::fs::write(
+            root.join(".env"),
+            "PICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT=52106\n",
+        )
+        .unwrap();
+        let dual = harness_port_overlay(&root, false).unwrap().unwrap();
+        assert!(dual.contains("ports: !override"));
+        assert!(dual.contains("127.0.0.1:52106:4206"));
+        assert!(dual.contains("[::1]:52106:4206"));
+        let mac_podman = harness_port_overlay(&root, true).unwrap().unwrap();
+        assert!(mac_podman.contains("127.0.0.1:52106:4206"));
+        assert!(!mac_podman.contains("[::1]"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires Docker Compose; configuration only, no running engine needed"]
+    fn dynamic_harness_port_is_applied_by_real_compose_without_changing_container_ports() {
+        let root = temp_root("dynamic-harness-compose");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), source).unwrap();
+        std::fs::write(
+            root.join("docker-compose.override.yml"),
+            "services:\n  agent-harness:\n    labels:\n      regression: preserved\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".env"), "PICKED_HARNESS_IMAGE=synthetic:local\nPICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT=52106\nPOSTGRES_PORT=55432\n").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::new(),
+            "windows",
+        )
+        .unwrap();
+        let output = {
+            let mut command = command;
+            command
+                .args(["--profile", "*", "config", "--format", "json"])
+                .output()
+                .unwrap()
+        };
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let config: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let harness = &config["services"]["agent-harness"];
+        assert_eq!(harness["labels"]["regression"], "preserved");
+        let ports = harness["ports"].as_array().unwrap();
+        assert_eq!(ports.len(), 2);
+        for port in ports {
+            assert_eq!(port["published"], "52106");
+            assert_eq!(port["target"], 4206);
+            assert!(matches!(
+                port["host_ip"].as_str(),
+                Some("127.0.0.1" | "::1")
+            ));
+        }
+        for port in config["services"]["postgres"]["ports"].as_array().unwrap() {
+            assert_eq!(port["published"], "55432");
+            assert_eq!(port["target"], 5432);
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            source
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
+    /// This only reads configuration; it never contacts a container engine or registry.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn macos_podman_port_overlay_replaces_all_six_ports_and_preserves_other_settings() {
+        let root = temp_root("compose-ports-merge");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), source).unwrap();
+        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: bool| {
+            let mut command = Command::new(&docker);
+            command
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"));
+            command.arg("compose");
+            if overlay {
+                command.args([
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    "docker-compose.override.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ]);
+            }
+            let output = command
+                .args(["--profile", "*", "config", "--format", "json"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        for settings in [
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\n".to_string(),
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\nPOSTGRES_PORT=15432\nSUPERVISOR_PORT=14500\nCOMPUTER_PORT=14100\nBOT_PORT=14200\nLANGGRAPH_PORT=14201\nPICKED_HARNESS_PORT=14206\n".to_string(),
+        ] {
+            std::fs::write(root.join(".env"), &settings).unwrap();
+            let mut before = config(false);
+            let after = config(true);
+            let mut published = 0;
+            for (_, service) in before["services"].as_object_mut().unwrap() {
+                if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
+                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    ports.retain(|port| port["host_ip"] == "127.0.0.1");
+                    assert_eq!(ports.len(), 1);
+                    published += 1;
+                }
+            }
+            assert_eq!(published, 6, "all published services must be covered");
+            assert_eq!(after, before, "only the duplicate IPv6 loopback mappings may change");
+            assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), settings);
+            assert_eq!(std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(), source);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports() {
+        if crate::test_support::isolated_process("stack::tests::macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports") { return; }
+        let path = PathFixture::with_fake_engine("macos-podman-start");
+        let [_, podman] = computer_stop_addresses(&path);
+        let (root, record) = computer_stop_root(&path, "podman-start", "{}");
+        let original = "services: {}\n";
+        let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
+        std::fs::write(root.join(".env"), settings).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
+        let services = up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
+        assert_eq!(
+            services,
+            ["postgres", "supervisor", "agent-computer", "agent-harness"]
+        );
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        for action in [
+            "--profile harness up -d --no-build --pull never",
+            "run --rm --pull never migrate",
+        ] {
+            let line = log.lines().find(|line| line.contains(action)).unwrap();
+            let base = line.find("-f docker-compose.yml").unwrap();
+            let existing = line.find("-f docker-compose.override.yml").unwrap();
+            let desktop = line.find(".openbot-macos-podman.yml").unwrap();
+            assert!(base < existing && existing < desktop, "{line}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            original
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".env")).unwrap(),
+            settings
+        );
+
+        std::fs::write(root.join("custom override.yml"), "services: {}\n").unwrap();
+        std::fs::write(
+            root.join(".fixture-compose-environment"),
+            "COMPOSE_FILE=docker-compose.yml;custom override.yml\nCOMPOSE_PATH_SEPARATOR=;\n",
+        )
+        .unwrap();
+        std::fs::remove_file(&record).unwrap();
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        assert!(
+            log.contains("-f docker-compose.yml -f custom override.yml"),
+            "{log}"
+        );
+        assert!(!log.contains("docker-compose.override.yml"), "{log}");
+
+        std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
+        std::fs::remove_file(&record).unwrap();
+        assert!(
+            up(&podman, &root, true, BundledBots::none(), &Secrets::new())
+                .unwrap_err()
+                .detail
+                .unwrap()
+                .contains("synthetic invalid deployment override")
+        );
+        assert!(!std::fs::read_to_string(record).unwrap().contains(" up "));
     }
 
     #[test]

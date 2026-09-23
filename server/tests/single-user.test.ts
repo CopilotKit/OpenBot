@@ -11,6 +11,12 @@ import { singleUserEnabled } from "../src/auth/dev-actor";
  * outside. It now takes an explicit flag and refuses to start without one.
  *
  * The cases below are the four a deployment can actually be in.
+ *
+ * This function still reads only the flag, which is what these cases pin, and `NODE_ENV` still
+ * decides nothing here. Whether a deployment may HAVE no sign-in is a second question, asked by
+ * `singleUserAllowed` in config.ts, which refuses it on any address other people can reach. The old
+ * lock is not back: that one granted permission from a variable unset by default, and this one only
+ * ever adds a refusal.
  */
 describe("running with no sign-in", () => {
   test("a configured provider always wins, whatever else is set", () => {

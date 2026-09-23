@@ -19,6 +19,8 @@ pub enum Category {
     ClaudePlan,
     ChatGptPlan,
     CompatibleEndpointApiKey,
+    GoogleOauth,
+    XaiOauth,
 }
 
 // A closed enum intentionally cannot contain fields from the secret-bearing ChosenModel request.
@@ -30,6 +32,8 @@ pub enum ModelIntent {
     ClaudePlan,
     ChatGptPlan,
     CompatibleEndpoint,
+    GoogleOauth,
+    XaiOauth,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -102,6 +106,11 @@ impl SavedIntent {
         }
         // write_plan_store persists the selected plan, and clears it for other selections.
         self.categories.remove(&Category::ChatGptPlan);
+        self.categories.remove(&Category::GoogleOauth);
+        self.categories.remove(&Category::XaiOauth);
+        if matches!(credential, ModelCredential::ProviderOAuth { .. }) {
+            self.categories.remove(&Category::OpenAiApiKey);
+        }
         if matches!(credential, ModelCredential::None) {
             self.model = None;
             return;
@@ -118,6 +127,15 @@ impl SavedIntent {
                 ModelIntent::ChatGptPlan
             }
             ModelCredential::Compatible { .. } => ModelIntent::CompatibleEndpoint,
+            ModelCredential::ProviderOAuth { provider, .. } => {
+                if provider == "google" {
+                    self.categories.insert(Category::GoogleOauth);
+                    ModelIntent::GoogleOauth
+                } else {
+                    self.categories.insert(Category::XaiOauth);
+                    ModelIntent::XaiOauth
+                }
+            }
         });
     }
 

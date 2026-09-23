@@ -187,10 +187,22 @@ breaks the first time a hint or a colour is added, and breaking here means telli
 approved in their browser that it failed.
 */
 pub fn token_in(output: &str) -> Option<String> {
-    plain(output)
-        .split(|c: char| c.is_whitespace() || c == '"' || c == '\'')
-        .map(|word| word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_'))
-        .find(|word| word.starts_with(PLAN_TOKEN_PREFIX) && word.len() > 30)
+    fn token_character(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '-' || c == '_'
+    }
+
+    let text = plain(output);
+    // Cursor positioning can separate a label from its token visually without a space
+    // in the stream. Accept the prefix after punctuation, but not inside another word.
+    text.match_indices(PLAN_TOKEN_PREFIX)
+        .filter(|(at, _)| !matches!(text[..*at].chars().next_back(), Some(c) if token_character(c)))
+        .map(|(at, _)| {
+            text[at..]
+                .split(|c| !token_character(c))
+                .next()
+                .unwrap_or("")
+        })
+        .find(|token| token.len() > 30)
         .map(str::to_string)
 }
 
@@ -202,6 +214,12 @@ pub struct SigningIn {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     writer: Box<dyn std::io::Write + Send>,
     output: std::sync::Arc<std::sync::Mutex<String>>,
+    // ConPTY's pipe clones do not own its console. Dropping the last master closes the
+    // console and its child, so retain it through the code/token exchange on Windows.
+    #[cfg(windows)]
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+    #[cfg(windows)]
+    cursor_reported: bool,
 }
 
 /// How long to wait for the CLI to show the URL. Machine time: a container start and an HTTP call.
@@ -250,6 +268,7 @@ impl SigningIn {
             command.arg(argument);
         }
         command.arg("run");
+        command.arg("--pull=never");
         command.arg("--rm");
         command.arg("-i");
         command.arg("-t");
@@ -298,6 +317,10 @@ impl SigningIn {
             child,
             writer,
             output,
+            #[cfg(windows)]
+            _master: pty.master,
+            #[cfg(windows)]
+            cursor_reported: false,
         };
         let url = signing
             .wait_for(authorize_url_in, PATIENCE_FOR_THE_LINK)
@@ -387,6 +410,16 @@ impl SigningIn {
         let began = Instant::now();
         while began.elapsed() < patience {
             if let Ok(seen) = self.output.lock() {
+                // portable-pty enables ConPTY's INHERIT_CURSOR flag. It waits for this
+                // reply before emitting the child's output, and can hang on close without it.
+                // This hidden terminal starts at 1;1. Accumulating output also handles a
+                // query split across reads; reply once to the initial inheritance request.
+                #[cfg(windows)]
+                if !self.cursor_reported && seen.contains("\x1b[6n") {
+                    self.writer.write_all(b"\x1b[1;1R").ok()?;
+                    self.writer.flush().ok()?;
+                    self.cursor_reported = true;
+                }
                 if let Some(value) = found(&seen) {
                     return Some(value);
                 }
@@ -450,6 +483,29 @@ const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";
 /// Two different numbers on purpose. See `CHATGPT_LOGIN`.
 const CHATGPT_LOOPBACK: u16 = 1455;
 const CHATGPT_RELAY: u16 = 1456;
+
+fn publish_chatgpt_callback(
+    command: &mut std::process::Command,
+    engine: crate::engine::Engine,
+    os: &str,
+) {
+    // macOS Podman clears HostIP inside its VM, so dual loopback publishes become duplicate
+    // mappings and rootlessport rejects them with "conflict with ID 1". See Podman's
+    // libpod/networking_common.go::convertPortMappings. Windows Podman's IPv6 forward instead
+    // accepts TCP but drops HTTP, preventing localhost from trying IPv4 (RFC 8305, sections 5/9.2).
+    // Publish IPv4 only on these hosts: IPv6 refuses, allowing the registered localhost callback
+    // to reach IPv4. Docker and native Linux Podman retain both loopback bindings.
+    let hosts: &[&str] =
+        if matches!(os, "windows" | "macos") && engine == crate::engine::Engine::Podman {
+            &["127.0.0.1"]
+        } else {
+            &["127.0.0.1", "[::1]"]
+        };
+    for host in hosts {
+        command.arg("-p");
+        command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
+    }
+}
 
 /**
 The ChatGPT sign-in, as a program handed to the harness image.
@@ -562,19 +618,16 @@ impl SigningInToChatGpt {
         let mut command = crate::quiet::command(binary);
         command.args(arguments);
         command.arg("run");
+        command.arg("--pull=never");
         command.arg("--rm");
         /*
          * Published on loopback only, and on the number the vendor's login advertises.
          *
          * The container's relay listens on `CHATGPT_RELAY` and forwards to the login's own
-         * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine. Both families
-         * are published because a browser resolving the registered `localhost` may pick either, and
-         * which one it picks is not ours to decide.
+         * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine.
+         * publish_chatgpt_callback handles the macOS and Windows Podman forwarding limitations.
          */
-        for host in ["127.0.0.1", "[::1]"] {
-            command.arg("-p");
-            command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
-        }
+        publish_chatgpt_callback(&mut command, engine.engine, std::env::consts::OS);
         command.arg(image);
         command.arg("python");
         command.arg("-u");
@@ -721,6 +774,140 @@ pub fn openai_url_in(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::Engine;
+
+    #[test]
+    fn subscription_containers_never_download_software() {
+        if crate::test_support::isolated_process(
+            "plan::tests::subscription_containers_never_download_software",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("subscription-without-downloads");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("docker.rs");
+        std::fs::write(&source, r#"
+use std::io::Write;
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    assert_eq!(args.first().map(String::as_str), Some("run"));
+    assert!(args.iter().any(|arg| arg == "--pull=never"), "subscription login must refuse missing images");
+    print!("\x1b]8;;https://claude.ai/oauth/authorize?synthetic=prepared\x1b\\Sign in\x1b]8;;\x1b\\\r\n");
+    println!("https://auth.openai.com/oauth/authorize?synthetic=prepared");
+    std::io::stdout().flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(30));
+}
+"#).unwrap();
+        crate::test_support::compile_fixture(
+            &source,
+            &root.join(format!("docker{}", std::env::consts::EXE_SUFFIX)),
+        );
+        std::env::set_var("PATH", &root);
+        let address = crate::engine::Address::new(Engine::Docker, None);
+        let (mut claude, url) = SigningIn::begin(&address, "synthetic-claude").unwrap();
+        assert!(url.contains("synthetic=prepared"));
+        claude.stop();
+        let (mut chatgpt, url) = SigningInToChatGpt::begin(&address, "synthetic-chatgpt").unwrap();
+        assert!(url.contains("synthetic=prepared"));
+        chatgpt.stop();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_claude_sign_in_keeps_its_terminal_until_the_flow_finishes() {
+        if crate::test_support::isolated_process(
+            "plan::tests::windows_claude_sign_in_keeps_its_terminal_until_the_flow_finishes",
+        ) {
+            return;
+        }
+        let root = crate::test_support::temp_root("claude-terminal-lifetime");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("podman.rs");
+        std::fs::write(
+            &source,
+            r#"use std::io::Write;
+            fn main() {
+                print!("\x1b]8;;https://claude.ai/oauth/authorize?synthetic=terminal-lifetime\x1b\\Sign in\x1b]8;;\x1b\\\r\n");
+                println!("Paste code here if prompted");
+                std::io::stdout().flush().unwrap();
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).unwrap();
+                assert_eq!(input.trim(), format!("{}#{}", "c".repeat(43), "s".repeat(48)));
+                print!("Your OAuth token (valid for 1 year):");
+                std::io::stdout().flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                println!("\x1b[40G\x1b[32msk-ant-oat01-{}\x1b[0m", "s".repeat(95));
+            }"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &root.join("podman.exe"));
+        std::env::set_var("PATH", &root);
+
+        // Bound begin and cleanup, including any destructor run before either returns.
+        // The fixture prints a synthetic URL and waits; no provider or container is contacted.
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = (|| {
+                let (mut signing, url) = SigningIn::begin(
+                    &crate::engine::Address::new(Engine::Podman, None),
+                    "synthetic-sign-in-image",
+                )?;
+                assert_eq!(
+                    url,
+                    "https://claude.ai/oauth/authorize?synthetic=terminal-lifetime"
+                );
+                assert!(
+                    signing.child.try_wait().unwrap().is_none(),
+                    "the login child must survive until the code can be supplied"
+                );
+                let draining = std::sync::Arc::downgrade(&signing.output);
+                let code = format!("{}#{}", "c".repeat(43), "s".repeat(48));
+                assert_eq!(
+                    signing.finish(&code)?,
+                    format!("sk-ant-oat01-{}", "s".repeat(95))
+                );
+                // Modern ClosePseudoConsole returns before its clients disconnect. The
+                // reader's EOF, not the master's drop, marks completed console cleanup.
+                // Keep this inside the deadline before deleting the fixture executable.
+                while draining.strong_count() != 0 {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok::<_, String>(())
+            })();
+            let _ = sent.send(result);
+        });
+        received
+            .recv_timeout(Duration::from_secs(10))
+            .expect("begin and cleanup must finish without a terminal teardown deadlock")
+            .expect("the synthetic login should provide a URL");
+        worker.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn chatgpt_callback_uses_one_loopback_mapping_for_macos_and_windows_podman() {
+        for (engine, os, hosts) in [
+            (Engine::Podman, "windows", vec!["127.0.0.1"]),
+            (Engine::Podman, "macos", vec!["127.0.0.1"]),
+            (Engine::Podman, "linux", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "windows", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "macos", vec!["127.0.0.1", "[::1]"]),
+            (Engine::Docker, "linux", vec!["127.0.0.1", "[::1]"]),
+        ] {
+            let mut command = crate::quiet::command(engine.binary());
+            publish_chatgpt_callback(&mut command, engine, os);
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_str().unwrap())
+                .collect();
+            let expected: Vec<String> = hosts
+                .into_iter()
+                .flat_map(|host| ["-p".into(), format!("{host}:1455:1456")])
+                .collect();
+            assert_eq!(args, expected, "{engine:?}, OS={os}");
+        }
+    }
 
     /// Fixtures are composed from the prefix rather than written out, so no credential-shaped
     /// literal sits in this repository for a scanner to find or a person to copy.
@@ -909,6 +1096,16 @@ mod tests {
     fn nothing_in_nothing() {
         assert_eq!(token_in(""), None);
         assert_eq!(authorize_url_in(""), None);
+    }
+
+    #[test]
+    fn token_after_a_cursor_positioned_label_is_found_in_full() {
+        let token = format!("{PLAN_TOKEN_PREFIX}01-{}", "s".repeat(95));
+        let output = format!(
+            "Your OAuth token (valid for 1 year):\x1b[1G\x1b[32m{token}\x1b[0m\nStore this token safely."
+        );
+        assert_eq!(token_in(&output), Some(token.clone()));
+        assert_eq!(token_in(&format!("other-{token}")), None);
     }
 
     /// The stripper has to survive what a TUI actually emits, including a bare ESC pair.
