@@ -68,6 +68,32 @@ test("the checked-in Tauri version resolves the root release number", () => {
   expect(config.version).toBe("../../package.json");
 });
 
+test("macOS microphone capture has a nonempty system permission description", () => {
+  // Tauri merges this conventional file even when a build-version plist is supplied.
+  const plist = readFileSync(
+    resolve(import.meta.dir, "../src-tauri/Info.plist"),
+    "utf8",
+  );
+  expect(plist).toMatch(
+    /<key>NSMicrophoneUsageDescription<\/key>\s*<string>\s*[^<\s][^<]*<\/string>/,
+  );
+});
+
+test("macOS signing uses the audio-input entitlement for microphone capture", () => {
+  const native = resolve(import.meta.dir, "../src-tauri");
+  const config = JSON.parse(
+    readFileSync(join(native, "tauri.conf.json"), "utf8"),
+  );
+  expect(config.bundle.macOS.entitlements).toBe("./Entitlements.plist");
+  const plist = readFileSync(
+    join(native, config.bundle.macOS.entitlements),
+    "utf8",
+  );
+  expect(plist).toMatch(
+    /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/,
+  );
+});
+
 test("sync changes only the desktop package versions and check rejects drift", () => {
   const f = fixture();
   f.write("package.json", '{"version":"0.0.11"}');

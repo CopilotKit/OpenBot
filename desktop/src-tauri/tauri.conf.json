@@ -24,6 +24,9 @@
   },
   "bundle": {
     "active": true,
+    "macOS": {
+      "entitlements": "./Entitlements.plist"
+    },
     "linux": {
       "deb": { "depends": ["pkexec", "procps", "lsof", "ca-certificates"] },
       "rpm": {
