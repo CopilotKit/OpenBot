@@ -180,14 +180,18 @@ describe("reading a person's channels", () => {
     expect(page.channels.length).toBeLessThanOrEqual(200);
   });
 
-  test("a nonsense cursor reads as the first page", async () => {
+  test("a nonsense cursor is a caller error, not the first page", async () => {
+    // A stale link or a hand-edited URL used to read as the first page, so a client paging
+    // with a bad bookmark looped forever re-serving page one with a `nextCursor` that never
+    // errors — while the audit trail answered the same mistake with 400. Refusing names the
+    // parameter the caller has to fix, the way a bad `limit` already does.
     const owner = await createUser();
     const agentId = await createAgent(owner);
     await createChannel(owner, [agentId]);
 
-    const page = await store.list(owner, { cursor: "not-a-cursor" });
-
-    expect(page.channels).toHaveLength(1);
+    await expect(store.list(owner, { cursor: "not-a-cursor" })).rejects.toThrow(
+      "cursor must be a valid channel page cursor",
+    );
   });
 
   test("somebody with no channels gets an empty page and no cursor", async () => {
