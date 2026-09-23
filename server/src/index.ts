@@ -1331,7 +1331,7 @@ const app = createApp(
   {
     store: createVoiceSessionStore(database, channelStore),
     summarize: createVoiceSummarizer({
-      model: runtimeModel.defaultModel,
+      model: runtimeModel,
       resolveApiKey: resolveRuntimeModelApiKey,
     }),
     channels: channelStore,

@@ -38,7 +38,7 @@ test("voice transcripts enforce bounds, roles, unique IDs, and chronological dat
 test("voice summary uses the chat credential and treats transcript as quoted data", async () => {
   let calls = 0;
   const summarize = createVoiceSummarizer({
-    model: "chat-model",
+    model: { provider: "openai", defaultModel: "chat-model" },
     resolveApiKey: async () => "chat-key",
     fetchImpl: async (_url, init) => {
       calls++;
@@ -69,9 +69,10 @@ test("voice summary uses the chat credential and treats transcript as quoted dat
 
 test("missing keys and provider failures cannot appear as successful summaries", async () => {
   await expect(
-    createVoiceSummarizer({ model: "chat", resolveApiKey: async () => null })(
-      input.transcript,
-    ),
+    createVoiceSummarizer({
+      model: { provider: "openai", defaultModel: "chat" },
+      resolveApiKey: async () => null,
+    })(input.transcript),
   ).rejects.toThrow();
   for (const response of [
     new Response("upstream secret", { status: 500 }),
@@ -79,7 +80,7 @@ test("missing keys and provider failures cannot appear as successful summaries",
   ]) {
     await expect(
       createVoiceSummarizer({
-        model: "chat",
+        model: { provider: "openai", defaultModel: "chat" },
         resolveApiKey: async () => "key",
         fetchImpl: async () => response,
       })(input.transcript),
