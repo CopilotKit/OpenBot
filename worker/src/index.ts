@@ -27,12 +27,14 @@ import {
 } from "../../server/src/routines/sweep";
 import { createWorkQueue } from "../../server/src/work/queue";
 import { loadWorkerEnv, routineRunUrl } from "./env";
+import { type FetchLike, dispatchWithRetry } from "./retry";
+import { createShutdownController, interruptibleSleep } from "./shutdown";
 import { workerStatus } from "./status";
 
 console.info(`OpenBot worker status: ${workerStatus().status}`);
 
 /*
- * The worker's three settings, parsed and validated in one place (`./env`).
+ * The worker's settings, parsed and validated in one place (`./env`).
  *
  * Refused up front, for the reason `fire-routines.ts` refuses up front: a loop that
  * started anyway would open a run row for every routine it offers itself and collect
@@ -43,13 +45,23 @@ console.info(`OpenBot worker status: ${workerStatus().status}`);
  * Read from the environment rather than from `DeploymentConfig`/`loadConfig`, and
  * deliberately so. `loadConfig` demands the whole server deployment's configuration —
  * Intelligence credentials, key encryption, auth — because it answers "what can this
- * deployment do". This process is handed exactly three settings by `scripts/start.sh`
- * (`DATABASE_URL`, `SERVER_INTERNAL_URL`, `WORKER_SHARED_SECRET`); calling
- * `loadConfig(process.env)` here would refuse to start over settings this loop has no
- * opinion about and does not need.
+ * deployment do". This process is handed its settings by `scripts/start.sh`
+ * (`DATABASE_URL`, `SERVER_INTERNAL_URL`, `WORKER_SHARED_SECRET` and the optional
+ * `WORKER_*` cadence knobs); calling `loadConfig(process.env)` here would refuse to
+ * start over settings this loop has no opinion about and does not need.
  */
-const { workerSharedSecret, serverInternalUrl, databaseUrl, owner } =
-  loadWorkerEnv();
+const {
+  workerSharedSecret,
+  serverInternalUrl,
+  databaseUrl,
+  owner,
+  tickMs,
+  purgeEveryNTicks,
+  purgeOlderThanMs,
+  dispatchRetries,
+  dispatchTimeoutMs,
+  dispatchRetryBaseMs,
+} = loadWorkerEnv();
 
 const database = createDatabase(databaseUrl);
 const queue = createWorkQueue(database);
@@ -58,52 +70,46 @@ const routineStore = createRoutineStore(database);
 /**
  * Hand one opened run to the server, which owns everything about running it.
  *
- * Identical to `fire-routines.ts`'s `dispatch`: the run id is all that crosses, the header string
- * (casing and the one space included) is the whole credential the server compares, and anything but
- * a 202 throws — naming the status, because that is the whole diagnosis a person reading
- * `last_error` needs.
+ * Identical to `fire-routines.ts`'s `dispatch` except for the retry: the run id is
+ * all that crosses, the header string (casing and the one space included) is the
+ * whole credential the server compares, and anything but a 202 throws — naming the
+ * status, because that is the whole diagnosis a person reading `last_error` needs.
+ * Transient answers (408/429/502/503/504) and transport failures are retried with
+ * exponential backoff inside the handoff; a 400/401/404 throws immediately, because
+ * repeating a handoff the deployment refused only fills the audit trail.
  */
 async function dispatch(routineRunId: string): Promise<void> {
-  const response = await fetch(routineRunUrl(serverInternalUrl), {
-    method: "POST",
-    headers: {
+  await dispatchWithRetry(
+    fetch as unknown as FetchLike,
+    routineRunUrl(serverInternalUrl),
+    {
       authorization: `Bearer ${workerSharedSecret}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ routineRunId }),
-    // The `for(;;)` loop below has no CronJob around it at all, so nothing bounds this call from
-    // outside the process the way `activeDeadlineSeconds` bounds the CronJob's job; a wedged server
-    // must not stall the only thing firing routines.
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (response.status !== 202) {
-    throw new Error(
-      `the server answered ${response.status} rather than 202 when handed a routine run`,
-    );
-  }
+    JSON.stringify({ routineRunId }),
+    {
+      retries: dispatchRetries,
+      timeoutMs: dispatchTimeoutMs,
+      baseMs: dispatchRetryBaseMs,
+    },
+  );
 }
 
 const options: RoutineSweepOptions = { routineStore, queue, dispatch, owner };
-
-/** How often both sweep phases run. A laptop's clock, standing in for the CronJob's schedule. */
-const TICK_MS = 30_000;
 
 /*
  * How often the queue is purged of finished (and wedged) `routine.fire` items, in ticks rather than
  * milliseconds, so the two cadences cannot drift apart by editing one constant and not the other.
  *
- * Once every 120 ticks — roughly hourly at a 30-second tick — not once a tick. `queue.purge` deletes
- * rows older than the 24-hour window it is given below; running that DELETE every 30 seconds is three
- * orders of magnitude more query load than the window needs, for a retention job whose whole job is
- * to keep a day's worth of history. Hourly still purges comfortably inside the 24h window, with
- * enormous room to spare if a tick is ever missed.
+ * Every `purgeEveryNTicks` ticks — roughly hourly at the default 30-second tick — not once a tick.
+ * `queue.purge` deletes rows older than the window it is given; running that DELETE every tick is
+ * three orders of magnitude more query load than the window needs, for a retention job whose whole
+ * job is to keep a day's worth of history. Hourly still purges comfortably inside the 24h window,
+ * with enormous room to spare if a tick is ever missed. Both numbers are `WORKER_*` overrides now,
+ * so a quiet laptop can sweep less often without changing what the purge keeps.
  */
-const PURGE_EVERY_N_TICKS = 120;
-const PURGE_OLDER_THAN_MS = 24 * 60 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const shutdown = createShutdownController();
 
 let tick = 0;
 
@@ -113,7 +119,7 @@ async function runOneTick(): Promise<void> {
   /*
    * Both sweep phases, in one try/catch: this is the phase that runs every tick, and the one
    * `fire-routines.ts` lets throw. Here it does not — it is logged and the loop moves on to the next
-   * tick 30 seconds later, per the file header above. A routine due right now that was missed by a
+   * tick, per the file header above. A routine due right now that was missed by a
    * failed tick is still due on the next one; nothing about being late loses it (see `DEFAULT_GRACE_MS`
    * in `../../server/src/routines/sweep.ts`).
    */
@@ -142,11 +148,12 @@ async function runOneTick(): Promise<void> {
   // is worth logging and retrying next hour, not a reason to stop offering and firing routines.
   // Also on the very first tick: a laptop restarted every 40 minutes would otherwise never survive
   // to tick 120, and would never reap.
-  if (tick === 1 || tick % PURGE_EVERY_N_TICKS === 0) {
+  if (tick === 1 || tick % purgeEveryNTicks === 0) {
+    if (shutdown.shutdownRequested) return;
     try {
       const purged = await queue.purge({
         kind: ROUTINE_FIRE_KIND,
-        olderThanMs: PURGE_OLDER_THAN_MS,
+        olderThanMs: purgeOlderThanMs,
       });
       console.info(JSON.stringify({ type: "routine-sweep-purge", purged }));
     } catch (error) {
@@ -161,12 +168,29 @@ async function runOneTick(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Loop for ever, one tick every TICK_MS, awaiting each tick fully before scheduling the next so two
-  // ticks are never in flight at once.
-  for (;;) {
-    await runOneTick();
-    await sleep(TICK_MS);
+  const uninstall = shutdown.install();
+  try {
+    // Loop until SIGTERM/SIGINT, awaiting each tick fully before scheduling the next so two
+    // ticks are never in flight at once. The sleep wakes early on shutdown so the container
+    // does not sit out its whole grace period after the tick already finished.
+    for (;;) {
+      if (shutdown.shutdownRequested) break;
+      await runOneTick();
+      if (shutdown.shutdownRequested) break;
+      const slept = await interruptibleSleep(
+        tickMs,
+        () => shutdown.shutdownRequested,
+      );
+      if (!slept) break;
+    }
+    console.info(JSON.stringify({ type: "worker-shutdown-complete", tick }));
+  } finally {
+    uninstall();
   }
 }
 
-void main();
+// Guarded so importing this module (in tests, or from another entrypoint) does not open
+// a database, start sweeping, and hang the process: only the worker entrypoint loops.
+if (import.meta.main) {
+  void main();
+}
