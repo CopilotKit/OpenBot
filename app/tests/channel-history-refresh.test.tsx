@@ -131,6 +131,8 @@ beforeAll(() => {
       }
       if (/\/api\/channels\/[^/]+\/busy$/.test(url.pathname))
         return new NativeResponse(null, { status: 204 });
+      if (url.pathname === "/api/voice/sessions")
+        return NativeResponse.json({ sessions: [], nextCursor: null });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {
         const threadId = match[1];
