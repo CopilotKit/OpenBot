@@ -17,6 +17,11 @@ and actions to the existing Bot in the same thread. Ending a call saves its tran
 summary; later voice calls and typed messages receive that history. Calls start silently, and muting
 affects the person's microphone. See [configuration](docs/configuration.md#live-voice-calls).
 
+Voice summaries use the configured chat provider, including Anthropic keys and Claude or ChatGPT
+plan sign-in. Retrying a failed summary refreshes its sidebar preview without replacing newer
+activity. The macOS app includes the microphone permission description and audio-input entitlement
+needed for dictation and voice calls.
+
 ### Find older conversations and keep chat preferences across devices
 
 The sidebar loads older conversations as the person scrolls. Settings save the choice to emphasize

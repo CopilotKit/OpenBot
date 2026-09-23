@@ -207,8 +207,12 @@ Joining includes recent thread messages and previous voice chats, capped at 12,0
 
 Ending a nonempty call saves its text transcript to the database and creates a compact, expandable
 Voice chat card in the same channel. A separate summary request uses the deployment's default chat
-model and its existing credential. A failed summary leaves the saved transcript available with a
-retry button. Interrupted answers are marked as interrupted rather than treated as fully heard.
+model and its existing credential: OpenAI-compatible or Anthropic API keys, Claude or ChatGPT plan
+sign-in, or the deployment's Google/xAI OAuth proxy. It does not need a separate OpenAI key when
+another provider is selected. Plan summaries use an isolated conversation with no tools. A failed
+summary leaves the saved transcript available with a retry button. A successful retry updates the
+sidebar preview only while that call is still the latest activity. Interrupted answers are marked
+as interrupted rather than treated as fully heard.
 Later voice calls and typed agent requests receive the saved voice context. Voice cards are stored
 separately from AG-UI messages; ordinary voice conversation does not trigger an agent run.
 
