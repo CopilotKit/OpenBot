@@ -15,6 +15,12 @@ describe("worker env", () => {
       workerSharedSecret: "secret",
       serverInternalUrl: "http://server:3001",
       databaseUrl: "postgres://localhost:5432/openbot",
+      tickMs: 30_000,
+      purgeEveryNTicks: 120,
+      purgeOlderThanMs: 24 * 60 * 60 * 1000,
+      dispatchRetries: 3,
+      dispatchTimeoutMs: 30_000,
+      dispatchRetryBaseMs: 500,
     });
     expect(owner).toMatch(/^routines\/laptop-[0-9a-f]{8}$/);
   });
@@ -83,7 +89,79 @@ describe("worker env", () => {
   test("two workers on one host never share an owner", () => {
     expect(loadWorkerEnv(base()).owner).not.toBe(loadWorkerEnv(base()).owner);
   });
+
+  test.each([
+    ["WORKER_TICK_MS", "tickMs", "30000", 30_000],
+    ["WORKER_PURGE_EVERY_N_TICKS", "purgeEveryNTicks", "60", 60],
+    ["WORKER_PURGE_OLDER_THAN_MS", "purgeOlderThanMs", "3600000", 3_600_000],
+    ["WORKER_DISPATCH_RETRIES", "dispatchRetries", "5", 5],
+    ["WORKER_DISPATCH_TIMEOUT_MS", "dispatchTimeoutMs", "10000", 10_000],
+    ["WORKER_DISPATCH_RETRY_BASE_MS", "dispatchRetryBaseMs", "1000", 1000],
+  ])("reads %s as %s", (name, field, raw, expected) => {
+    const env = loadWorkerEnv({ ...base(), [name]: raw });
+    expect(env[field as keyof typeof env]).toBe(expected);
+  });
+
+  test.each([
+    "WORKER_TICK_MS",
+    "WORKER_PURGE_EVERY_N_TICKS",
+    "WORKER_PURGE_OLDER_THAN_MS",
+    "WORKER_DISPATCH_RETRIES",
+    "WORKER_DISPATCH_TIMEOUT_MS",
+    "WORKER_DISPATCH_RETRY_BASE_MS",
+  ])("treats a blank %s as unset", (name) => {
+    const env = loadWorkerEnv({ ...base(), [name]: "   " });
+    const defaults = loadWorkerEnv(base());
+    expect(env[nameToField(name) as keyof typeof env]).toBe(
+      defaults[nameToField(name) as keyof typeof defaults],
+    );
+  });
+
+  test.each([
+    ["WORKER_TICK_MS", "30s"],
+    ["WORKER_TICK_MS", "12abc"],
+    ["WORKER_TICK_MS", "3.9"],
+    ["WORKER_TICK_MS", "-5000"],
+    ["WORKER_PURGE_EVERY_N_TICKS", "hourly"],
+    ["WORKER_DISPATCH_RETRIES", "many"],
+    ["WORKER_DISPATCH_TIMEOUT_MS", "30s"],
+  ])("refuses a non-numeric %s=%p", (name, raw) => {
+    expect(() => loadWorkerEnv({ ...base(), [name]: raw as string })).toThrow(
+      name,
+    );
+  });
+
+  test.each([
+    ["WORKER_TICK_MS", "10"],
+    ["WORKER_TICK_MS", "3600001"],
+    ["WORKER_PURGE_EVERY_N_TICKS", "0"],
+    ["WORKER_PURGE_OLDER_THAN_MS", "1000"],
+    ["WORKER_DISPATCH_RETRIES", "11"],
+    ["WORKER_DISPATCH_RETRIES", "-1"],
+    ["WORKER_DISPATCH_TIMEOUT_MS", "10"],
+    ["WORKER_DISPATCH_RETRY_BASE_MS", "1"],
+  ])("refuses an out-of-range %s=%p", (name, raw) => {
+    expect(() => loadWorkerEnv({ ...base(), [name]: raw as string })).toThrow(
+      name,
+    );
+  });
+
+  test("allows zero dispatch retries to switch the retry off", () => {
+    expect(
+      loadWorkerEnv({ ...base(), WORKER_DISPATCH_RETRIES: "0" })
+        .dispatchRetries,
+    ).toBe(0);
+  });
 });
+
+function nameToField(name: string): string {
+  if (name === "WORKER_TICK_MS") return "tickMs";
+  if (name === "WORKER_PURGE_EVERY_N_TICKS") return "purgeEveryNTicks";
+  if (name === "WORKER_PURGE_OLDER_THAN_MS") return "purgeOlderThanMs";
+  if (name === "WORKER_DISPATCH_RETRIES") return "dispatchRetries";
+  if (name === "WORKER_DISPATCH_TIMEOUT_MS") return "dispatchTimeoutMs";
+  return "dispatchRetryBaseMs";
+}
 
 describe("routineRunUrl", () => {
   test("joins the run path onto the base URL", () => {
