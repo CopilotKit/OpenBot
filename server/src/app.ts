@@ -63,7 +63,12 @@ import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
 import { parsePageLimit } from "./paging";
 import type { OnboardingStore } from "./people/onboarding";
-import { MAX_PAGE, type PeopleStore } from "./people/store";
+import {
+  MAX_PAGE,
+  PeopleCursorError,
+  decodeCursor as decodePeopleCursor,
+  type PeopleStore,
+} from "./people/store";
 import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
 import {
@@ -697,18 +702,41 @@ export function createApp(
         400,
       );
     }
+    /*
+     * Fail fast on a stale or hand-edited bookmark, before the store is reached. Without
+     * this the raw string travelled into `list`, where a lenient decoder read it as the
+     * first page: a client paging with a bad cursor looped forever re-serving page one
+     * with a `nextCursor` that never errors, while the audit trail answered the same
+     * mistake with 400. A corrupt cursor is a caller error, not a server failure.
+     */
+    const rawCursor = url.searchParams.get("cursor");
+    if (rawCursor !== null) {
+      try {
+        decodePeopleCursor(rawCursor);
+      } catch (error) {
+        if (error instanceof PeopleCursorError) {
+          return context.json({ error: error.message }, 400);
+        }
+        throw error;
+      }
+    }
 
-    return context.json(
-      await peopleStore.list({
-        ...(url.searchParams.get("search")
-          ? { search: url.searchParams.get("search") as string }
-          : {}),
-        ...(url.searchParams.get("cursor")
-          ? { cursor: url.searchParams.get("cursor") as string }
-          : {}),
-        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
-      }),
-    );
+    try {
+      return context.json(
+        await peopleStore.list({
+          ...(url.searchParams.get("search")
+            ? { search: url.searchParams.get("search") as string }
+            : {}),
+          ...(rawCursor ? { cursor: rawCursor } : {}),
+          ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof PeopleCursorError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
   });
 
   app.post("/api/admin/people/:userId/role", requireUser, async (context) => {

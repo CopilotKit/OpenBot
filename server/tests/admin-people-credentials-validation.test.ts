@@ -130,18 +130,20 @@ describe("POST /api/admin/credentials input", () => {
 
 /**
  * A well-formed cursor carrying a non-date `lastSignedInAt` used to reach
- * `${cursor.lastSignedInAt}::timestamptz` in SQL and answer 500. It now falls back to the
- * first page like any other stale cursor.
+ * `${cursor.lastSignedInAt}::timestamptz` in SQL and answer 500, then fell back to the
+ * first page like any other stale cursor. Both hid the caller's mistake: the page came
+ * from the wrong end of the list (or the start of it) with nothing saying so, while the
+ * audit trail answered the same mistake with 400. It is refused instead.
  */
 describe("decodeCursor", () => {
   function encode(value: unknown): string {
     return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
   }
 
-  test("falls back on a non-date lastSignedInAt", () => {
-    expect(
+  test("refuses a non-date lastSignedInAt", () => {
+    expect(() =>
       decodeCursor(encode({ email: "a@x.test", lastSignedInAt: "not-a-date" })),
-    ).toBeUndefined();
+    ).toThrow("cursor must be a valid people page cursor");
   });
 
   test("keeps a valid cursor", () => {

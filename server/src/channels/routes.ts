@@ -108,32 +108,53 @@ const MAX_CHANNEL_PAGE = 200;
  */
 type ChannelCursor = { pinned: boolean; recency: string; id: string };
 
-function encodeChannelCursor(cursor: ChannelCursor): string {
+export function encodeChannelCursor(cursor: ChannelCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
+/** A cursor no page could have come from: garbage, the wrong shape, or a bad date. */
+export class ChannelCursorError extends Error {
+  constructor(message = "cursor must be a valid channel page cursor") {
+    super(message);
+    this.name = "ChannelCursorError";
+  }
+}
+
 /**
- * A malformed cursor reads as the first page, which is the honest answer to a stale link.
+ * Read a cursor a client sent back, strictly.
  *
- * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
- * describes a position in an ordering this query no longer has.
+ * A malformed cursor is a caller error, not the first page. Falling back used to answer a
+ * stale or hand-edited cursor with page one and a `nextCursor` that walks on from there,
+ * so a client paging with a bad bookmark looped forever re-serving page one with nothing
+ * saying so — while the audit trail on the same deployment answered the same mistake with
+ * 400. A well-formed cursor carrying a non-date `recency` is refused for the same reason
+ * it is checked: it would reach `${cursor.recency}::timestamptz` in SQL and answer 500.
+ *
+ * What is returned is the three fields, rebuilt, so nothing else the caller packed into
+ * the cursor travels on into the query.
  */
-function decodeChannelCursor(
+export function decodeChannelCursor(
   value: string | undefined,
 ): ChannelCursor | undefined {
   if (!value) return undefined;
+  let parsed: Partial<ChannelCursor> | null | undefined;
   try {
-    const parsed = JSON.parse(
+    parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
-    ) as ChannelCursor;
-    return typeof parsed?.id === "string" &&
-      typeof parsed?.recency === "string" &&
-      typeof parsed?.pinned === "boolean"
-      ? parsed
-      : undefined;
+    ) as Partial<ChannelCursor>;
   } catch {
-    return undefined;
+    throw new ChannelCursorError();
   }
+  if (
+    typeof parsed?.id !== "string" ||
+    parsed.id.length === 0 ||
+    typeof parsed?.recency !== "string" ||
+    Number.isNaN(Date.parse(parsed.recency)) ||
+    typeof parsed?.pinned !== "boolean"
+  ) {
+    throw new ChannelCursorError();
+  }
+  return { pinned: parsed.pinned, recency: parsed.recency, id: parsed.id };
 }
 
 /**
@@ -1094,10 +1115,19 @@ export function createChannelRoutes(
         MAX_CHANNEL_PAGE,
       );
       if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+      /*
+       * Fail fast on a stale or hand-edited bookmark, before the store is reached. Without
+       * this the raw string travelled into `list`, where a lenient decoder read it as the
+       * first page: a client paging with a bad cursor looped forever re-serving page one
+       * with a `nextCursor` that never errors, while the audit trail answered the same
+       * mistake with 400. A corrupt cursor is a caller error, not a server failure.
+       */
+      const rawCursor = url.searchParams.get("cursor");
+      if (rawCursor !== null) {
+        decodeChannelCursor(rawCursor);
+      }
       const page = await store.list(context.var.actor, {
-        ...(url.searchParams.get("cursor")
-          ? { cursor: url.searchParams.get("cursor") as string }
-          : {}),
+        ...(rawCursor ? { cursor: rawCursor } : {}),
         ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
@@ -1244,6 +1274,9 @@ function channelSummaryDto(channel: ChannelSummary) {
 }
 
 function mapStoreError(context: Context, error: unknown): Response {
+  if (error instanceof ChannelCursorError) {
+    return context.json({ error: error.message }, 400);
+  }
   if (error instanceof AgentNotFoundError) {
     return context.json({ error: "Agent not found." }, 404);
   }

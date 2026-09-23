@@ -165,13 +165,16 @@ describe("reading the people in a deployment", () => {
     expect(asked.people.length).toBeLessThanOrEqual(200);
   });
 
-  test("a nonsense cursor reads as the first page rather than an error", async () => {
-    // A stale link or a hand-edited URL. There is nothing here worth refusing over, and the first
-    // page is the honest answer to "I do not know where you were".
+  test("a nonsense cursor is a caller error, not the first page", async () => {
+    // A stale link or a hand-edited URL used to read as the first page, so a client paging
+    // with a bad bookmark looped forever re-serving page one with a `nextCursor` that never
+    // errors — while the audit trail answered the same mistake with 400. Refusing names the
+    // parameter the caller has to fix, the way a bad `limit` already does.
     await person(0, new Date());
 
-    const result = await store.list({ cursor: "not-a-cursor", limit: 5 });
-    expect(result.people.length).toBeGreaterThan(0);
+    await expect(
+      store.list({ cursor: "not-a-cursor", limit: 5 }),
+    ).rejects.toThrow("cursor must be a valid people page cursor");
   });
 
   test("finding one person does not read the deployment", async () => {
