@@ -152,7 +152,7 @@ export function LiveWaveform({
             : "Live audio waveform"
       }
     >
-      <canvas ref={canvasRef} className="block size-full" aria-hidden="true" />
+      <canvas ref={canvasRef} className="block size-full" />
       {unavailable && (
         <span className="absolute inset-0 flex items-center bg-card text-xs text-muted-foreground">
           Recording · waveform unavailable
