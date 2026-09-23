@@ -318,6 +318,8 @@ export const channels = pgTable(
      * cache of what a client observed rather than an authoritative mirror of the thread.
      */
     lastMessage: text("last_message"),
+    /** Internal source identity for enriching a delayed preview without replacing other activity. */
+    lastMessageSourceId: text("last_message_source_id"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     /** Which agent spoke, so a channel with several can show the right one. Null for a person. */
     lastMessageAgentId: text("last_message_agent_id").references(

@@ -305,12 +305,25 @@ export function createVoiceSessionStore(
           .update(voiceSessions)
           .set({ summary: summary.trim(), summaryStatus: "ready" })
           .where(
-            and(eq(voiceSessions.id, id), eq(voiceSessions.userId, actor.id)),
+            and(
+              eq(voiceSessions.id, id),
+              eq(voiceSessions.userId, actor.id),
+              eq(voiceSessions.summaryStatus, "failed"),
+            ),
           )
           .returning();
-        if (!updated)
+        if (updated) return record(updated);
+        // A competing replica may have finished first. Return its durable summary so both
+        // callers publish the same preview, and later retries never replace a ready summary.
+        const [ready] = await transaction
+          .select()
+          .from(voiceSessions)
+          .where(
+            and(eq(voiceSessions.id, id), eq(voiceSessions.userId, actor.id)),
+          );
+        if (!ready)
           throw new VoiceSessionError("Voice session not found.", 404);
-        return record(updated);
+        return record(ready);
       });
     },
   };

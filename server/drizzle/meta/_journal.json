@@ -316,6 +316,13 @@
       "when": 1790035200000,
       "tag": "0044_voice_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790164423415,
+      "tag": "0045_channel_activity_source",
+      "breakpoints": true
     }
   ]
 }

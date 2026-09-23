@@ -117,11 +117,19 @@ async function finish(
     if (summary)
       session = await services.store.summarize(actor, session.id, summary);
   }
-  await services.channels.recordActivity(actor, session.channelId, {
-    text: `Voice chat${session.summary ? `: ${session.summary}` : ""}`,
-    agentId: null,
-    at: new Date(session.endedAt),
-  });
+  await services.channels.recordActivity(
+    actor,
+    session.channelId,
+    {
+      text: `Voice chat${session.summary ? `: ${session.summary}` : ""}`,
+      agentId: null,
+      at: new Date(session.endedAt),
+    },
+    {
+      id: `voice:${session.id}`,
+      enrichFrom: session.summary ? "Voice chat" : undefined,
+    },
+  );
   return session;
 }
 

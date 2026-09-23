@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -193,6 +194,11 @@ export type ChannelStore = {
     actor: AgentActor,
     channelId: string,
     activity: ChannelActivity,
+    source?: {
+      id: string;
+      /** Enrich this source's preview at the same timestamp only while this text still matches. */
+      enrichFrom?: string;
+    },
   ): Promise<void>;
   /**
    * Tell a channel's members that a turn started or ended in it, by the thread it runs in.
@@ -698,7 +704,7 @@ export function createChannelStore(
       );
     },
 
-    recordActivity(actor, channelId, activity) {
+    recordActivity(actor, channelId, activity, source) {
       return database.transaction(
         async (transaction) => {
           const [membership] = await transaction
@@ -739,12 +745,14 @@ export function createChannelStore(
           }
 
           // A person's message and the agent's reply are reported separately, so they can arrive out
-          // of order. Only ever move forwards.
+          // of order. Only move forwards, except to enrich the same source's placeholder.
+          // The source, timestamp and text comparison is atomic across server replicas.
           const lastMessage = previewOf(activity.text);
           const applied = await transaction
             .update(channels)
             .set({
               lastMessage,
+              lastMessageSourceId: source?.id ?? null,
               lastMessageAt: activity.at,
               lastMessageAgentId: activity.agentId,
               updatedAt: new Date(),
@@ -755,6 +763,17 @@ export function createChannelStore(
                 or(
                   isNull(channels.lastMessageAt),
                   lt(channels.lastMessageAt, activity.at),
+                  source?.enrichFrom !== undefined
+                    ? and(
+                        eq(channels.lastMessageAt, activity.at),
+                        eq(channels.lastMessageSourceId, source.id),
+                        eq(channels.lastMessage, previewOf(source.enrichFrom)),
+                        ne(channels.lastMessage, lastMessage),
+                        activity.agentId === null
+                          ? isNull(channels.lastMessageAgentId)
+                          : eq(channels.lastMessageAgentId, activity.agentId),
+                      )
+                    : undefined,
                 ),
               ),
             )
