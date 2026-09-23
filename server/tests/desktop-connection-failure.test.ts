@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventType } from "@ag-ui/client";
 import { Hono } from "hono";
 import { firstValueFrom, of, throwError } from "rxjs";
@@ -10,10 +10,12 @@ import {
   recordDesktopConnectionFailure,
 } from "../src/desktop-connection-failure";
 
-afterEach(() => {
+function clearFailures() {
   for (const connection of ["model", "intelligence", "organization"] as const)
     clearDesktopConnectionFailure(connection);
-});
+}
+beforeEach(clearFailures);
+afterEach(clearFailures);
 
 function endpoint() {
   const app = new Hono();

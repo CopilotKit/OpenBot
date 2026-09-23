@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { electron } from "@better-auth/electron";
 import { betterAuth } from "better-auth";
@@ -10,6 +10,12 @@ import {
   clearDesktopConnectionFailure,
   mountDesktopConnectionFailure,
 } from "../src/desktop-connection-failure";
+
+// The native status store is process-wide and survives between test files.
+const clearOrganizationFailure = () =>
+  clearDesktopConnectionFailure("organization");
+beforeEach(clearOrganizationFailure);
+afterEach(clearOrganizationFailure);
 
 const employee = {
   id: "employee-1",
@@ -38,7 +44,6 @@ test("missing local cookie requests focused refresh; transient authority failure
       })
     ).json();
   try {
-    clearDesktopConnectionFailure("organization");
     expect(await auth.api.getSession({ headers: new Headers() })).toBeNull();
     expect(await failure()).toEqual({
       connection: "organization",
@@ -75,7 +80,6 @@ test("missing local cookie requests focused refresh; transient authority failure
     expect(signout.headers.get("set-cookie")).toBeNull();
     expect(await failure()).toBeNull();
   } finally {
-    clearDesktopConnectionFailure("organization");
     authority.stop(true);
   }
 });
