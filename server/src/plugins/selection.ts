@@ -129,33 +129,58 @@ export function readChosenSkills(
   skills: readonly SelectableSkill[],
 ): string[] | null {
   /*
-   * The object in the answer, not the answer as a whole.
+   * The first complete object with a skills list, not the answer as a whole.
    *
    * `response_format` asks for bare JSON and does not guarantee it: Anthropic's OpenAI-compatible
    * endpoint ignores the field, and a model left to itself often fences its object or leads with a
    * sentence. Parsed whole, every such answer read as a selector that could not say, and a Bot on
-   * that model was offered its entire catalogue on every run. The router reads its answer from the
-   * same completer this way already (`classify.ts`); an answer with no object in it is still null.
+   * that model was offered its entire catalogue on every run. A greedy brace match also swallows
+   * two adjacent objects into invalid JSON. An answer with no usable object is still null.
    */
-  const object = answer.match(/\{[\s\S]*\}/);
-  if (!object) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(object[0]);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const chosen = (parsed as { skills?: unknown }).skills;
-  if (!Array.isArray(chosen)) return null;
   const known = new Set(skills.map((skill) => skill.slug));
-  return [
-    ...new Set(
-      chosen.filter(
-        (slug): slug is string => typeof slug === "string" && known.has(slug),
-      ),
-    ),
-  ];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < answer.length; index += 1) {
+    const char = answer[index];
+    if (depth === 0) {
+      if (char === "{") {
+        start = index;
+        depth = 1;
+      }
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth !== 0) continue;
+      try {
+        const parsed: unknown = JSON.parse(answer.slice(start, index + 1));
+        if (typeof parsed !== "object" || parsed === null) continue;
+        const chosen = (parsed as { skills?: unknown }).skills;
+        if (!Array.isArray(chosen)) continue;
+        return [
+          ...new Set(
+            chosen.filter(
+              (slug): slug is string =>
+                typeof slug === "string" && known.has(slug),
+            ),
+          ),
+        ];
+      } catch {
+        // A brace pair in the surrounding prose is not necessarily JSON.
+      }
+    }
+  }
+  return null;
 }
 
 /**

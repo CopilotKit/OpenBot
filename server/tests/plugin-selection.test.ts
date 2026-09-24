@@ -307,6 +307,22 @@ describe("reading pass one's answer", () => {
     expect(readChosenSkills(padded, skills)).toEqual(["slack-digest"]);
   });
 
+  test("an extra JSON object after the selection does not swallow it", async () => {
+    const answer = `Here is {the choice}:\n${JSON.stringify({ skills: ["drive-audit"], reason: { text: "read {drive}" } })}\n${JSON.stringify({ note: "done" })}`;
+    expect(readChosenSkills(answer, skills)).toEqual(["drive-audit"]);
+
+    const selection = await selectTools({
+      tools: manyTools,
+      skills,
+      text: "read my drive",
+      choose: async () => answer,
+    });
+    expect(selection.reason).toBe("selected");
+    expect(selection.offered.map((entry) => entry.ref)).not.toContain(
+      "slack/tool_0",
+    );
+  });
+
   test("an answer naming only unknown slugs is an empty choice, not a failure", () => {
     // The model answered; it just named nothing real. That is "none apply", and the caller offers
     // everything either way, but the two are different facts and the row says which.
