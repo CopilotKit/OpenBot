@@ -130,10 +130,11 @@ describe("a result with something in it", () => {
     );
   });
 
-  test("reads a resource_link's name, uri and description, as a server points at a file", () => {
+  test("reads a resource_link's uri, name and description, as a server points at a file", () => {
     // MCP's resource_link is a pointer, not the file: a URI, a name, and often a sentence of
     // what it is. Named as "[resource_link]", the model was told a link arrived and never shown
     // where it went, so a search that answered with pages produced no pages it could open.
+    // The URI leads and each field is labelled, so the model tells them apart by name.
     expect(
       resultText([
         {
@@ -145,14 +146,53 @@ describe("a result with something in it", () => {
         },
       ]).text,
     ).toBe(
-      "Q3 budget\nnotion://page/q3-budget\nThe approved numbers for the quarter",
+      "uri: notion://page/q3-budget\nname: Q3 budget\ndescription: The approved numbers for the quarter",
     );
+  });
+
+  test("shows a resource_link's title over its name, when the server gives one", () => {
+    // The spec's `title` is the name meant for people; `name` is the one meant for programs.
+    expect(
+      resultText([
+        {
+          type: "resource_link",
+          uri: "notion://page/q3-budget",
+          name: "q3_budget",
+          title: "Q3 budget",
+        },
+      ]).text,
+    ).toBe("uri: notion://page/q3-budget\ntitle: Q3 budget");
   });
 
   test("a resource_link with only a uri is still that uri, not an empty name", () => {
     expect(
       resultText([{ type: "resource_link", uri: "file:///notes.md" }]).text,
-    ).toBe("file:///notes.md");
+    ).toBe("uri: file:///notes.md");
+  });
+
+  test("a resource_link's long name cannot push its uri past the result cap", () => {
+    // The URI is the link's identity; the name is metadata. Truncation may lose what a resource
+    // was called, never where it is: a name as long as the whole cap must leave the pointer
+    // readable, rather than a link with nowhere to go, which is the failure this reader removes.
+    const { text, truncated } = resultText([
+      {
+        type: "resource_link",
+        name: "x".repeat(MAX_RESULT_CHARS),
+        uri: "https://example.com/source",
+      },
+    ]);
+    expect(text.startsWith("uri: https://example.com/source\n")).toBe(true);
+    expect(text).toContain("https://example.com/source");
+    expect(truncated).toBe(false);
+    expect(text.length).toBeLessThan(MAX_RESULT_CHARS);
+  });
+
+  test("bounds a resource_link's description, and marks the cut", () => {
+    const description = "d".repeat(1_000);
+    const { text } = resultText([
+      { type: "resource_link", uri: "file:///a.md", description },
+    ]);
+    expect(text).toBe(`uri: file:///a.md\ndescription: ${"d".repeat(400)}…`);
   });
 
   test("a resource_link that names nothing is still named, rather than dropped", () => {
@@ -174,7 +214,9 @@ describe("a result with something in it", () => {
           name: "Expense policy",
         },
       ]).text,
-    ).toBe("matching pages:\nExpense policy\nhttps://example.com/policy");
+    ).toBe(
+      "matching pages:\nuri: https://example.com/policy\nname: Expense policy",
+    );
   });
 
   test("names a null or non-object part rather than throwing", () => {
