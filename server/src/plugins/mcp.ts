@@ -44,6 +44,52 @@ export const MAX_RESULT_CHARS = 20_000;
  * from memory. For a knowledge connector that is precisely the failure the whole slice exists to
  * prevent — an answer with nothing behind it. So nothing is stated, in words.
  */
+/**
+ * How much of a resource link's title, name or description a model is shown.
+ *
+ * Long enough for a heading and a sentence, short enough that a link's own metadata cannot spend
+ * the result cap its pointer has to fit in.
+ */
+const LINK_FIELD_CHARS = 400;
+
+/**
+ * A resource_link as the lines a model reads: the pointer first, then bounded metadata.
+ *
+ * The URI is the link's identity; the title or name and the description are metadata. The URI
+ * therefore leads, whole, and the other two are cut, so that a server's long name cannot push its
+ * own pointer past {@link MAX_RESULT_CHARS} below and leave the model holding a link with nowhere
+ * to go. Truncation may lose what a resource was called, never where it is. Each line is labelled,
+ * so the fields are told apart by name rather than by position.
+ *
+ * The spec's `title` is the name meant for people, `name` the one meant for programs; the title is
+ * shown when a server gives one. Null when the link names nothing, so the caller names its type.
+ */
+function resourceLinkText(item: {
+  uri?: unknown;
+  name?: unknown;
+  title?: unknown;
+  description?: unknown;
+}): string | null {
+  const field = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value : null;
+  const bounded = (value: string) =>
+    value.length > LINK_FIELD_CHARS
+      ? `${value.slice(0, LINK_FIELD_CHARS)}…`
+      : value;
+  const lines: string[] = [];
+  const uri = field(item.uri);
+  if (uri !== null) lines.push(`uri: ${uri}`);
+  const title = field(item.title);
+  const name = field(item.name);
+  if (title !== null) lines.push(`title: ${bounded(title)}`);
+  else if (name !== null) lines.push(`name: ${bounded(name)}`);
+  const description = field(item.description);
+  if (description !== null) {
+    lines.push(`description: ${bounded(description)}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
 export function resultText(
   content: unknown,
   structuredContent?: unknown,
@@ -58,6 +104,10 @@ export function resultText(
       const item = part as {
         type?: string;
         text?: string;
+        uri?: unknown;
+        name?: unknown;
+        title?: unknown;
+        description?: unknown;
         resource?: { text?: unknown } | null;
       };
       if (item.type === "text" && typeof item.text === "string") {
@@ -68,6 +118,14 @@ export function resultText(
       // carrying bytes (`blob`) has no text to read and is named below like any other part.
       if (item.type === "resource" && typeof item.resource?.text === "string") {
         return item.resource.text;
+      }
+      // A resource_link is a pointer, not the file: a URI, a name, sometimes a title, and often a
+      // sentence of what it is. Named as "[resource_link]", the model was told a link arrived and
+      // never shown where it went, so a search that answered with pages produced no page it could
+      // open.
+      if (item.type === "resource_link") {
+        const shown = resourceLinkText(item);
+        if (shown !== null) return shown;
       }
       // A non-text part is named rather than dropped. A model told "[image]" can say the tool
       // returned an image; a model handed nothing concludes the tool returned nothing.
