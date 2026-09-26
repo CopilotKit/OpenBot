@@ -113,6 +113,7 @@ export type IntelligenceLike = {
     threadId: string;
     userId: string;
     agentId: string;
+    learningContainerId?: string;
   }): Promise<unknown>;
   getThreadMessages(params: {
     threadId: string;
@@ -124,6 +125,7 @@ export type IntelligenceLike = {
     userId: string;
     agentId: string;
     ttlSeconds?: number;
+    learningContainerId?: string;
   }): Promise<unknown>;
   /** NOTE: no `userId` and no `agentId` — renew is identified by the thread and the run alone. */
   ɵrenewThreadLock(params: {
@@ -232,6 +234,11 @@ export { frameFiring };
 export function createTurnRunner(options: {
   intelligence: IntelligenceLike;
   runner: RunnerLike;
+  learningContainerForThread?: (input: {
+    threadId: string;
+    agentId: string;
+    userId: string;
+  }) => Promise<string | undefined>;
   /** The owner's coworkers, resolved as the owner. Built per turn, keyed by registry id. */
   buildAgentFor: (input: {
     ownerUserId: string;
@@ -249,6 +256,7 @@ export function createTurnRunner(options: {
     intelligence,
     runner,
     buildAgentFor,
+    learningContainerForThread,
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
     lockTtlSeconds = DEFAULT_LOCK_TTL_SECONDS,
     heartbeatMs = DEFAULT_HEARTBEAT_MS,
@@ -277,10 +285,16 @@ export function createTurnRunner(options: {
      * of. `getOrCreateThread` is public API, idempotent, and already handles the 409 create-race
      * (`client.d.mts:603-621`), so it is safe on the thousandth firing as well as the first.
      */
+    const learningContainerId = await learningContainerForThread?.({
+      threadId,
+      agentId,
+      userId: ownerUserId,
+    });
     await intelligence.getOrCreateThread({
       threadId,
       userId: ownerUserId,
       agentId,
+      ...(learningContainerId ? { learningContainerId } : {}),
     });
 
     /*
@@ -378,6 +392,7 @@ export function createTurnRunner(options: {
       userId: ownerUserId,
       agentId,
       ttlSeconds: lockTtlSeconds,
+      ...(learningContainerId ? { learningContainerId } : {}),
     });
 
     let heartbeat: ReturnType<typeof setInterval> | undefined;

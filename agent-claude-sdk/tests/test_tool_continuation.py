@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.adapter import OpenBotClaudeAgentAdapter
 
 
-def request(thread="thread-a", run="run-1", results=(), tool_count=1):
+def request(thread="thread-a", run="run-1", results=(), tool_count=1, tool_name="computer_navigate"):
     return RunAgentInput.model_validate(
         {
             "threadId": thread,
@@ -47,19 +47,24 @@ def request(thread="thread-a", run="run-1", results=(), tool_count=1):
             ],
             "tools": [
                 {
-                    "name": "computer_navigate",
+                    "name": tool_name,
                     "description": "Navigate",
                     "parameters": {"type": "object", "properties": {}},
                 }
             ],
-            "context": [],
+            "context": [{"description": "OpenBot learned skills", "value": "LEARNED_CATALOG_MARKER"}],
             "forwardedProps": {},
         }
     )
 
 
 @pytest.fixture
-def sdk(monkeypatch):
+def tool_name():
+    return "computer_navigate"
+
+
+@pytest.fixture
+def sdk(monkeypatch, tool_name):
     clients = []
 
     class Client:
@@ -106,7 +111,7 @@ def sdk(monkeypatch):
             calls = [
                 ToolUseBlock(
                     id=f"{thread}-tool-{i}",
-                    name="mcp__ag_ui__computer_navigate",
+                    name=f"mcp__ag_ui__{tool_name}",
                     input={},
                 )
                 for i in range(count)
@@ -206,7 +211,8 @@ async def events(adapter, input_data):
 
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("model_only", [False, True])
-def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only):
+@pytest.mark.parametrize("tool_name", ["computer_navigate", "copilotkit_load_skill", "copilotkit_read_skill_file"])
+def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only, tool_name):
     async def scenario():
         adapter = OpenBotClaudeAgentAdapter(
             name="test",
@@ -214,7 +220,7 @@ def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only):
             model_only=model_only,
         )
         try:
-            first = await events(adapter, request())
+            first = await events(adapter, request(tool_name=tool_name))
             assert any(event.type == "TOOL_CALL_END" for event in first)
             opened = [
                 event.message_id
@@ -231,6 +237,7 @@ def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only):
                 adapter,
                 request(
                     run="run-2",
+                    tool_name=tool_name,
                     results=[
                         (
                             "thread-a-tool-0",
@@ -239,6 +246,7 @@ def test_client_result_resumes_original_sdk_query(sdk, streaming, model_only):
                     ],
                 ),
             )
+            assert "LEARNED_CATALOG_MARKER" in str(sdk[0].options.system_prompt)
             assert sdk[0].queries == [("1", "thread-a")], (
                 "a tool result must not become another SDK user prompt"
             )

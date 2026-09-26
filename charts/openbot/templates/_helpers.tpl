@@ -327,6 +327,15 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: {{ $maxDepth | quote }}
 - name: BOT_HANDOFF_MAX_PER_RUN
   value: {{ $maxPerRun | quote }}
+{{- $learning := .Values.config.learning | default dict }}
+{{- with $learning.containerId }}
+- name: CPK_INTELLIGENCE_LEARNING_CONTAINER_ID
+  value: {{ . | quote }}
+{{- end }}
+{{- with $learning.revision }}
+- name: CPK_INTELLIGENCE_SKILLS_REVISION
+  value: {{ . | quote }}
+{{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL

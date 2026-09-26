@@ -160,6 +160,10 @@ config:
     apiUrl: ""
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
+  # Optional initial defaults; saved Admin → Automatic Learning settings take precedence.
+  learning:
+    containerId: ""
+    revision: ""
   # How far one Bot may hand work to another.
   #
   # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what

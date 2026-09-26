@@ -130,11 +130,11 @@ test("a chip removed mid-upload gives its row back once the upload lands", async
   );
 });
 
-test("only the removed one is given back when two uploads are in the air", async () => {
+test("only the removed one is given back when two files are pending", async () => {
   /*
-   * The half a reconciler gets wrong. Two uploads are in flight at once — two drops, two
-   * concurrent `processFiles` calls, since the SDK's own loop is sequential within one call — and
-   * only one chip is removed. Giving back both, or giving back the wrong one, would leave a live
+   * The half a reconciler gets wrong. Two files are pending across separate drops and only one
+   * chip is removed. The SDK shares its default single upload slot across batches, so the second
+   * upload starts once the first settles. Giving back both, or the wrong one, would leave a live
    * chip on the strip pointing at a row that has just been deleted: a message sent carrying a link
    * to nothing, which is worse than the leak.
    */
@@ -151,6 +151,10 @@ test("only the removed one is given back when two uploads are in the air", async
   });
 
   fireEvent.click(view.getByLabelText("Remove gone.txt"));
+  releaseUploads();
+  // The kept file was queued behind the removed file. Let its actual upload finish as well;
+  // reconciliation intentionally waits until no attachments are uploading.
+  await waitFor(() => expect(held).toHaveLength(1));
   releaseUploads();
 
   await waitFor(() =>

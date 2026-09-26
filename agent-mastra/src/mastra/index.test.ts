@@ -34,6 +34,7 @@ async function configuredModelId(botModel: string | undefined) {
   const child = Bun.spawn(
     [
       Bun.argv[0],
+      "--no-env-file",
       "-e",
       [
         'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
@@ -76,6 +77,7 @@ async function configuredPort(port: string | undefined) {
   const child = Bun.spawn(
     [
       Bun.argv[0],
+      "--no-env-file",
       "-e",
       [
         'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
@@ -105,6 +107,32 @@ async function configuredPort(port: string | undefined) {
 }
 
 describe("OpenBot Mastra receiver instructions", () => {
+  test("delivers the learned catalog after the standing role and tool guidance", () => {
+    expect(
+      buildOpenBotInstructions({
+        requestContext: requestContextWith([
+          {
+            description: "OpenBot learned skills",
+            value: "Published skill: refunds",
+          },
+          {
+            description: "OpenBot signed run assertion",
+            value: "secret-assertion",
+          },
+          {
+            description: "OpenBot standing role",
+            value: "Follow company policy.",
+          },
+        ]),
+      }),
+    ).toBe(
+      [
+        openbotBaseInstructions,
+        "Follow company policy.",
+        "Published skill: refunds",
+      ].join("\n\n"),
+    );
+  });
   test("adds model-visible OpenBot role context in receiver order", () => {
     const instructions = buildOpenBotInstructions({
       requestContext: requestContextWith([
@@ -360,6 +388,7 @@ describe("OpenBot Mastra provider requests", () => {
       const child = Bun.spawn(
         [
           Bun.argv[0],
+          "--no-env-file",
           "-e",
           [
             // Only HTTP is replaced: the real Mastra Agent and provider SDK build the request.
