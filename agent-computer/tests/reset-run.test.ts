@@ -170,12 +170,24 @@ describe.skipIf(!asked)("the run this computer reports", () => {
      * governed action, including the ones it is about to refuse, so a 409 here would turn every ref
      * it holds into an unanswerable question for as long as somebody was driving.
      */
+    const requested = await fetch(`${BASE}/control/request`, {
+      method: "POST",
+      headers: {
+        "x-openbot-bot-id": "bot-8",
+        "x-openbot-computer-token": TOKEN,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ reason: "Read the run while a human drives" }),
+    });
+    const state: { request: { id: string } } = await requested.json();
     const taken = await fetch(`${BASE}/control/take`, {
       method: "POST",
       headers: {
         "x-openbot-bot-id": "bot-8",
         "x-openbot-computer-token": TOKEN,
+        "content-type": "application/json",
       },
+      body: JSON.stringify({ requestId: state.request.id }),
     });
     expect(taken.status).toBe(200);
 

@@ -30,6 +30,7 @@ export {
   ComputerUnavailableError,
   ElementNotFoundError,
   HumanHasControlError,
+  HandoffRequestError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
@@ -135,6 +136,7 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult>;
   click(
     botId: string,
@@ -180,14 +182,28 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: WriteFileInput,
   ): Promise<WriteFileResult>;
-  control(botId: string): Promise<ControlState>;
+  control(botId: string, requestId?: string): Promise<ControlState>;
   requestHelp(
     botId: string,
     actor: ActionActor,
     reason: string,
+    toolCallId?: string,
   ): Promise<ControlState>;
-  takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
-  releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  takeControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  releaseControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  cancelControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
   requestSecret(
     botId: string,
     actor: ActionActor,
@@ -663,9 +679,15 @@ export function createComputerGateway(
      * row and do not ask. What IS recorded is the period: who, when, and why the Bot asked, the fact
      * an investigator wants is that a human drove this browser between two times.
      */
-    async requestHelp(botId: string, actor: ActionActor, reason: string) {
+    async requestHelp(
+      botId: string,
+      actor: ActionActor,
+      reason: string,
+      toolCallId?: string,
+    ) {
       const state = await post<ControlState>(botId, "/control/request", {
         reason,
+        ...(toolCallId ? { toolCallId } : {}),
       });
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
@@ -675,8 +697,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async takeControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/take", {});
+    async takeControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/take", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
@@ -687,8 +711,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async releaseControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/release", {});
+    async releaseControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/release", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
@@ -696,8 +722,22 @@ export function createComputerGateway(
       return state;
     },
 
-    control(botId: string): Promise<ControlState> {
-      return get<ControlState>(botId, "/control");
+    async cancelControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/cancel", {
+        requestId,
+      });
+      await writeControlEvent(auditStore, "computer.help_cancelled", {
+        botId,
+        actor,
+      });
+      return state;
+    },
+
+    control(botId: string, requestId?: string): Promise<ControlState> {
+      return get<ControlState>(
+        botId,
+        `/control${requestId ? `?requestId=${encodeURIComponent(requestId)}` : ""}`,
+      );
     },
 
     /** Return every computer that the configured provider owns. */
@@ -835,13 +875,19 @@ export function createComputerGateway(
      * The transport applies its target guard before it sends a request. This is
      * the minimum rule that applies even when the action policy permits the URL.
      */
-    navigate(botId: string, actor: ActionActor, url: string) {
+    navigate(
+      botId: string,
+      actor: ActionActor,
+      url: string,
+      toolCallId?: string,
+    ) {
       return govern(
         "computer_navigate",
         botId,
         actor,
         { targetUrl: url },
-        async () => transport.navigate(await locate(botId), botId, url),
+        async () =>
+          transport.navigate(await locate(botId), botId, url, toolCallId),
       );
     },
 
@@ -1203,6 +1249,7 @@ async function writeControlEvent(
   auditStore: AuditStore,
   eventType:
     | "computer.help_requested"
+    | "computer.help_cancelled"
     | "computer.control_taken"
     | "computer.control_released"
     | "computer.secret_requested"

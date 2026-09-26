@@ -21,11 +21,12 @@
  *
  * The `Map` below is per-process state, and is allowed to be: it is one container's view of the
  * browsers it is running, not state that has to survive a replica or agree with one. A restart
- * dropping it is precisely the case the run exists for, since nothing else would say the browsers
- * were replaced.
+ * dropping it is precisely the case the run exists for. Request identities are the exception: the
+ * separate control store retains their outcomes and marks active handoffs interrupted on reload.
  */
 import type { Page } from "playwright";
 import { type Control, createControl } from "./control";
+import { createControlStore } from "./control-store";
 import { createViewerSlot, type ViewerSlot } from "./viewer";
 
 /** Per-Bot browser-control state. Profiles are isolated, but this process is not a security boundary. */
@@ -43,6 +44,8 @@ export type BotSession = {
   run: string;
   /** The page this Bot was last handed, so a change of page can retire its refs. */
   livePage?: Page;
+  /** Context identity separates popup changes from actual browser replacement. */
+  browserContext?: object;
   /**
    * This Bot's live screen, and who owns it.
    *
@@ -57,6 +60,8 @@ export type SessionsOptions = {
   isLive: (botId: string) => boolean;
   /** How many sessions may accumulate before the sweep runs. */
   cap?: number;
+  /** Atomic handoff history outside each Chromium profile. */
+  profilesDirectory?: string;
   /** Injected so a test can name the run it expects rather than match a uuid. */
   mintRun?: () => string;
 };
@@ -92,6 +97,11 @@ export function createSessions(options: SessionsOptions) {
     for (const [botId, session] of [...sessions.entries()]) {
       if (session.viewer.occupied()) continue;
       if (options.isLive(botId)) continue;
+      if (
+        session.control.get().request?.status === "waiting" ||
+        session.control.get().holder === "human"
+      )
+        continue;
       sessions.delete(botId);
     }
   }
@@ -99,9 +109,22 @@ export function createSessions(options: SessionsOptions) {
   function sessionFor(botId: string): BotSession {
     const existing = sessions.get(botId);
     if (existing) return existing;
+    let generation = 0;
     const created: BotSession = {
-      control: createControl(),
-      snapshotId: 0,
+      control: createControl(undefined, {
+        ...(options.profilesDirectory
+          ? { store: createControlStore(options.profilesDirectory, botId) }
+          : {}),
+        invalidateSnapshot: () => {
+          generation += 1;
+        },
+      }),
+      get snapshotId() {
+        return generation;
+      },
+      set snapshotId(value: number) {
+        generation = value;
+      },
       run: mintRun(),
       viewer: createViewerSlot(),
     };
@@ -113,6 +136,16 @@ export function createSessions(options: SessionsOptions) {
 
   return {
     for: sessionFor,
+
+    observeBrowser(botId: string, context: object): boolean {
+      const session = sessionFor(botId);
+      const replaced =
+        session.browserContext !== undefined &&
+        session.browserContext !== context;
+      if (replaced) this.renewRun(botId);
+      session.browserContext = context;
+      return replaced;
+    },
 
     /**
      * The session this Bot already has, or nothing.
@@ -141,6 +174,11 @@ export function createSessions(options: SessionsOptions) {
       const existing = sessions.get(botId);
       // Nothing to renew: a Bot nobody has touched yet gets a session, and its run is already new.
       if (!existing) return sessionFor(botId).run;
+      existing.control.interrupt(
+        "The browser was stopped or replaced; request help again to continue.",
+      );
+      existing.livePage = undefined;
+      existing.browserContext = undefined;
       existing.run = mintRun();
       return existing.run;
     },

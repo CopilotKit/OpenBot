@@ -137,7 +137,7 @@ describe("renewing a run", () => {
     expect(sessions.renewRun("bot-1")).toBe("run-1");
   });
 
-  test("the generation carries on, because the browser is what restarts it", () => {
+  test("replacement invalidates snapshots without resetting the generation", () => {
     // Deliberately not reset here. The counter belongs to the browser, and `sessionFor` mints it at
     // zero for a session that is new; a renew that also zeroed it would make a fresh generation one
     // arrive under a fresh run, which is the pair the server has no way to order.
@@ -148,6 +148,22 @@ describe("renewing a run", () => {
     const session = sessions.for("bot-1");
     session.snapshotId = 7;
     sessions.renewRun("bot-1");
-    expect(sessions.for("bot-1").snapshotId).toBe(7);
+    expect(sessions.for("bot-1").snapshotId).toBe(8);
   });
+});
+
+test("a replacement context interrupts a live handoff; the same context keeps it", async () => {
+  const sessions = createSessions({ isLive: () => true, mintRun: counting() });
+  const context = {};
+  const session = sessions.for("bot-1");
+  expect(sessions.observeBrowser("bot-1", context)).toBe(false);
+  const request = session.control.requestHelp("Sign in").request!;
+  await session.control.take(request.id);
+  const originalRun = session.run;
+  expect(sessions.observeBrowser("bot-1", context)).toBe(false);
+  expect(session.control.get().request?.status).toBe("taken");
+  expect(sessions.observeBrowser("bot-1", {})).toBe(true);
+  expect(session.run).not.toBe(originalRun);
+  expect(session.control.get(request.id).request?.status).toBe("interrupted");
+  expect(session.control.humanMayDrive()).toBe(false);
 });

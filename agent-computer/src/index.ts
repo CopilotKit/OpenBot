@@ -9,15 +9,18 @@ import {
 } from "./aria-snapshot";
 import {
   actsOnTheComputer,
+  mutatesBrowser,
   isOpenPath,
   matchesToken,
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
-import { browserModeFromEnv } from "./browser-mode";
+import { browserRuntimeFromEnv } from "./browser-runtime";
+import { detectChallenge } from "./challenge";
 import {
   ControlError,
   ControlRequestError,
+  SnapshotRequiredError,
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
@@ -84,8 +87,11 @@ if (!COMPUTER_TOKEN) {
   process.exit(1);
 }
 
-const BROWSER_MODE = browserModeFromEnv(process.env.COMPUTER_BROWSER_MODE);
-const VIRTUAL_DISPLAY = await startVirtualDisplay(BROWSER_MODE);
+const RUNTIME = browserRuntimeFromEnv(process.env);
+const BROWSER_MODE = RUNTIME.mode;
+const VIRTUAL_DISPLAY = await startVirtualDisplay(
+  RUNTIME.useVirtualDisplay ? "headed" : "headless",
+);
 if (VIRTUAL_DISPLAY) process.env.DISPLAY = VIRTUAL_DISPLAY.name;
 console.info(
   JSON.stringify({
@@ -134,7 +140,10 @@ const TEXT_EXTRACT_LIMIT = 6000;
  * rules about when a run changes are testable there, and not here, because this file launches a
  * browser the moment it is imported.
  */
-const sessions = createSessions({ isLive: (botId) => profiles.isLive(botId) });
+const sessions = createSessions({
+  isLive: (botId) => profiles.isLive(botId),
+  profilesDirectory: process.env.PROFILES_DIR?.trim() || "/profiles",
+});
 
 /**
  * Sent by the server as a header on every call. Absent means the caller does not know or does not
@@ -232,7 +241,10 @@ const workspace = createWorkspace(
  */
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
-  (botId) => sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED),
+  async (botId) => {
+    if (sessions.get(botId)) sessions.renewRun(botId);
+    await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
+  },
 );
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
@@ -258,6 +270,16 @@ const DEFAULT_BOT_ID = (() => {
 async function currentPage(botId: string): Promise<Page> {
   const session = sessions.for(botId);
   const page = await profiles.page(botId);
+  sessions.observeBrowser(botId, page.context());
+  if (
+    RUNTIME.backend === "local-chrome" &&
+    page.url() !== "about:blank" &&
+    !/^https?:\/\//i.test(page.url())
+  ) {
+    throw new Error(
+      "Local Chrome computer tools can access only web pages. Use the approved host-access tools for local files.",
+    );
+  }
   // A ref names an element on the page it was taken from, so moving to a window the site opened has
   // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
@@ -319,12 +341,20 @@ async function snapshotPage(
   elements: SnapshotElement[];
   truncated: boolean;
 }> {
-  session.snapshotId += 1;
+  const snapshotId = ++session.snapshotId;
+  const before = session.control.get();
   const yaml = await target.ariaSnapshot({ mode: "ai" });
+  const title = await target.title();
+  if (
+    session.snapshotId === snapshotId &&
+    before.holder === "bot" &&
+    !before.requested
+  )
+    session.control.snapshotTaken();
   return {
-    snapshotId: session.snapshotId,
+    snapshotId,
     url: target.url(),
-    title: await target.title(),
+    title,
     ...parseAriaSnapshot(yaml),
   };
 }
@@ -413,6 +443,7 @@ type StreamData = { botId: string };
 
 serve<StreamData>({
   port: PORT,
+  ...(RUNTIME.hostname ? { hostname: RUNTIME.hostname } : {}),
   idleTimeout: 120,
   /**
    * The live screen, pushed by Chrome rather than polled.
@@ -618,511 +649,594 @@ serve<StreamData>({
      * the browser at a login wall. `actsOnTheComputer` is the list, and a new acting endpoint is
      * refused by being added to it rather than by remembering to repeat this.
      */
-    if (actsOnTheComputer(url.pathname)) {
-      try {
-        session.control.assertBotMayAct();
-      } catch (error) {
-        // A person holding the wheel is not a failure of the action; the Bot should wait and say so.
-        if (error instanceof ControlError) {
-          return json({ error: error.message, humanHasControl: true }, 409);
-        }
-        throw error;
-      }
-    }
-
-    if (url.pathname === "/stream") {
-      /*
-       * The socket carries the Bot in the query because it cannot do it in a header. Every other call here names
-       * its Bot in `x-openbot-bot-id`, but a websocket client sends no custom headers on the upgrade,
-       * so the stream, and only the stream, also accepts the Bot as a query parameter. The header
-       * still wins where there is one.
-       */
-      const streamBotId = botIdOf(request, url.searchParams.get("bot"));
-      if (!isPlainBotId(streamBotId)) {
-        return json({ error: "That is not a usable bot id." }, 400);
-      }
-      if (server.upgrade(request, { data: { botId: streamBotId } }))
-        return undefined as unknown as Response;
-      return json({ error: "Expected a WebSocket upgrade." }, 400);
-    }
-
-    /*
-     * `/live` stays absent. A page served by this process can only be opened by putting the secret in
-     * a URL, where it lands in history and logs. The React app is the guarded way to watch a Bot.
-     */
-
-    // Who has the wheel. Polled by the surface alongside the screen, so the person sees the Bot ask
-    // for help without having to reload anything.
-    if (url.pathname === "/control" && request.method === "GET") {
-      return json(session.control.get());
-    }
-
-    // The Bot asking for help. It does not take control: it says it is stuck and why, and a person
-    // decides. A Bot that could hand itself to a human could also hand a human a page they never
-    // asked to see.
-    if (url.pathname === "/control/request" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        reason?: unknown;
-      } | null;
-      return json(session.control.requestHelp(body?.reason));
-    }
-
-    // The Bot asking for one value it must not be told. It has already focused the field.
-    if (url.pathname === "/control/secret" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        label?: unknown;
-        ref?: unknown;
-        snapshotId?: unknown;
-      } | null;
-      try {
-        return json(session.control.requestSecret(body ?? {}));
-      } catch (error) {
-        if (error instanceof ControlRequestError) {
-          return json({ error: error.message }, 400);
-        }
-        throw error;
-      }
-    }
-
-    /**
-     * A person supplying that value.
-     *
-     * Scoped by the pending request rather than by a control handover: it is usable only while the Bot
-     * has actually asked for a secret, and the request is cleared the moment it is answered, so this
-     * cannot be used as a general back door to type into the page.
-     *
-     * The value is typed and forgotten. Not stored on `control`, not returned in the response, not
-     * logged. The response says how many characters arrived, which is enough for the surface to
-     * confirm something was sent and useless to anybody reading it later.
-     *
-     * It types and does not submit. Committing a form is a separate action through the gateway and
-     * audit trail; secret entry only places the value in the named field.
-     */
-    if (url.pathname === "/human/secret" && request.method === "POST") {
-      const pending = session.control.pendingSecret();
-      if (!pending) {
-        return json({ error: NO_SECRET_PENDING }, 409);
-      }
-      const body = (await request.json().catch(() => null)) as {
-        text?: unknown;
-      } | null;
-      if (typeof body?.text !== "string" || !body.text) {
-        return json({ error: "A value is required." }, 400);
-      }
-      try {
-        const target = await currentPage(botId);
-        // Focus the field the Bot named, and let this throw if it cannot be found. A secret must not
-        // be reported as delivered unless a field receives it.
-        //
-        // No generation check here: a Bot may take another snapshot after asking for a secret, while
-        // the ref remains protected by Playwright's `aria-ref` rules.
-        //
-        // `aria-ref` resolves a ref only against the most recent snapshot, only while the element is
-        // still connected, and mints a
-        // new ref when an element's role or accessible name changes, so a recycled node cannot
-        // inherit an old one. If the ref resolves, it is the field the Bot meant. If it does not,
-        // nothing is typed, which is the outcome the generation check existed to guarantee.
-        const field = locateRef(session, target, pending.ref, undefined);
-        await field.click({ timeout: ACTION_TIMEOUT_MS });
-        await field.fill(body.text, { timeout: ACTION_TIMEOUT_MS });
-        const characters = body.text.length;
-        // Cleared only after it actually landed, so a failure leaves the request open and the person
-        // can try again rather than being told to start over.
-        session.control.secretSupplied();
-        return json({ supplied: true, characters, url: target.url() });
-      } catch (error) {
-        if (error instanceof StaleSnapshotError) {
-          return json({ error: error.message, stale: true }, 409);
-        }
-        // The field is gone, which is unretryable, so the request is closed rather than left open.
-        // Keeping it open is right for a mistyped value and wrong here: the person would retype their
-        // password into the same dead ref for ever. Clearing it also unblocks the Bot, which can see
-        // on its next turn that nothing is pending and ask again against a fresh snapshot.
-        session.control.secretSupplied();
-        return json(
-          {
-            error: describe(
-              error,
-              "That value could not be entered: the field is no longer on the page. Ask the assistant to request it again.",
-            ),
-          },
-          502,
+    let releaseAction: (() => void) | undefined;
+    try {
+      if (actsOnTheComputer(url.pathname)) {
+        releaseAction = session.control.admitBotAction(
+          mutatesBrowser(url.pathname),
         );
       }
-    }
 
-    if (url.pathname === "/control/take" && request.method === "POST") {
-      return json(session.control.take());
-    }
-
-    if (url.pathname === "/control/release" && request.method === "POST") {
-      // `reason` is dropped on release: it described the thing the person was asked to do, and once
-      // they have done it, leaving it set would have the surface still showing the old request.
-      return json(session.control.release());
-    }
-
-    // A person's input, by pixel. The Bot addresses elements by reference because it reads a list; a
-    // person addresses them by pointing, because they are looking at a picture. Different problem,
-    // different endpoint, and only usable while they hold the wheel.
-    if (HUMAN_INPUT.has(url.pathname) && request.method === "POST") {
-      if (!session.control.humanMayDrive()) {
-        return json({ error: TAKE_CONTROL_FIRST }, 409);
-      }
-      const body = (await request.json().catch(() => null)) as Record<
-        string,
-        unknown
-      > | null;
-      if (url.pathname === "/human/scroll") {
-        const parsed = parseScrollDelta(body?.deltaY);
-        if (!parsed.ok) {
-          return json({ error: parsed.error }, 400);
-        }
-      }
-      try {
-        const target = await currentPage(botId);
-        return json(await performHumanInput(target, url.pathname, body ?? {}));
-      } catch (error) {
-        return json({ error: describe(error, "That did not work.") }, 502);
-      }
-    }
-
-    if (url.pathname === "/health") {
-      const [profile] = profiles.summary([botId]);
-      return json({
-        status: "ok",
-        // `browser` kept as it was: it is in the published contract and start.sh reads it.
-        browser: profile?.running ?? false,
-        profile,
-        // Which Bot this computer can prove it is, when the deployment runs SPIRE. Null is a
-        // deployment without it, not a failure, and it is reported rather than omitted so the
-        // difference between "no identity here" and "identity broken" is visible.
-        identity: await identity(),
-        browserMode: BROWSER_MODE,
-      });
-    }
-
-    /**
-     * Which run of this Bot's browser the caller is looking at.
-     *
-     * The server orders snapshots on `(run, generation)`, and the generation alone cannot carry it:
-     * this process mints one at zero for every session that is new, so a restart, a redeploy, an
-     * eviction from the idle sweep and a reset all produce a page at generation one that looks older
-     * than the page the server still has. Ordering on the run as well is what lets the fresh one land
-     * and the dead one stop resolving.
-     *
-     * A read, and deliberately not on the acting list: a person holding the wheel must not turn every
-     * ref the server holds into an unanswerable question.
-     *
-     * Its own endpoint rather than a field on `/computers`, because that one reads the profile
-     * directory and this is asked on the path of every governed action.
-     */
-    if (url.pathname === "/run" && request.method === "GET") {
-      return json({ run: session.run });
-    }
-
-    /**
-     * The computers this process holds. The shape is a list because the admin surface is a
-     * list, and because a Bot that has a profile has a computer whether or not a browser is running
-     * for it this second.
-     */
-    if (url.pathname === "/computers" && request.method === "GET") {
-      return json({ computers: profiles.summary(await profiles.known()) });
-    }
-
-    /**
-     * Stop the browser, keep what it knows.
-     *
-     * Closed gracefully so Chromium flushes its profile, and deliberately
-     * not restarted here: the next request starts it again, which is the same path as a first ever
-     * start, so there is no second way for a browser to come into existence.
-     */
-    if (url.pathname === "/computers/stop" && request.method === "POST") {
-      const wasRunning = await profiles.stop(botId);
-      // The wheel goes back to the Bot because the controlled browser no longer exists.
-      session.control.release();
-      return json({ stopped: true, wasRunning });
-    }
-
-    /**
-     * Forget everything and start over.
-     *
-     * Signs the computer out of everything by deleting the profile. Irreversible, which is why it is
-     * its own endpoint rather than a flag on the one above: a person clicking "stop" must not be able
-     * to discard a login by mistyping a parameter.
-     */
-    if (url.pathname === "/computers/reset" && request.method === "POST") {
-      await profiles.reset(botId);
-      // Reset releases control because any previous browser session and pending secret request are gone.
-      session.control.release();
-      /*
-       * And a new run, because the browser this session described is gone.
-       *
-       * Nothing else here says so. The entry stays in the map and the generation counter carries on,
-       * so a snapshot that was in flight when the wipe landed arrives at the server carrying the same
-       * run and the same generation as the fresh browser's would: the server deletes its row on
-       * reset, the late save inserts the wiped page straight back, and every ref on it goes on
-       * resolving. A new run is what makes those two distinguishable at the far end.
-       */
-      sessions.renewRun(botId);
-      return json({ reset: true, botId });
-    }
-
-    if (url.pathname === "/navigate" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        url?: unknown;
-      } | null;
-      const parsed = parseNavigateUrl(body?.url);
-      if (!parsed.ok) {
-        return json({ error: parsed.error }, 400);
-      }
-
-      const startedAt = Date.now();
-      try {
-        const target = await currentPage(botId);
-        await target.goto(parsed.url, {
-          waitUntil: "domcontentloaded",
-          timeout: NAVIGATION_TIMEOUT_MS,
-        });
-        // A new document wipes every stamp, so every ref handed out before now is meaningless.
-        // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
-        // than fall through to a selector that matches nothing and read as a missing element.
-        session.snapshotId += 1;
-        const extract = await readablePageText(target);
-        return json({
-          url: target.url(),
-          title: await target.title(),
-          text: extract.text,
-          truncated: extract.truncated,
-          elapsedMs: Date.now() - startedAt,
-        });
-      } catch (error) {
-        // The page is the Bot's working surface, so a failed navigation is reported rather than
-        // thrown: the transcript needs to say what happened, and the browser stays usable.
-        return json(
-          {
-            error:
-              error instanceof Error ? error.message : "Navigation failed.",
-          },
-          502,
-        );
-      }
-    }
-
-    if (url.pathname === "/screenshot" && request.method === "GET") {
-      try {
-        const target = await currentPage(botId);
-        const buffer = await target.screenshot({ type: "png" });
-        const size = target.viewportSize() ?? { width: 1280, height: 800 };
-        return json({
-          base64: buffer.toString("base64"),
-          width: size.width,
-          height: size.height,
-          capturedAt: new Date().toISOString(),
-          // Which page this is a picture of. A browser that has not been sent anywhere sits on
-          // `about:blank`, and a screenshot of that is a valid, entirely white PNG, indistinguishable
-          // from a real page to anything looking only at the bytes. The transcript needs to tell
-          // those apart to avoid presenting a blank browser as though it were a loaded page.
-          url: target.url(),
-        });
-      } catch (error) {
-        return json(
-          {
-            error:
-              error instanceof Error ? error.message : "Screenshot failed.",
-          },
-          502,
-        );
-      }
-    }
-
-    // The Bot's files. Confined to the workspace by workspace.ts. Nothing here decides whether a Bot
-    // MAY touch a path: the gateway in front of this process does that.
-    if (url.pathname === "/files/read" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        path?: unknown;
-      } | null;
-      try {
-        return json(await workspace.read(String(body?.path ?? "")));
-      } catch (error) {
-        return json(
-          { error: describe(error, "The file could not be read.") },
-          fileStatus(error),
-        );
-      }
-    }
-
-    if (url.pathname === "/files/list" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        path?: unknown;
-      } | null;
-      try {
-        return json(
-          await workspace.list(
-            typeof body?.path === "string" ? body.path : undefined,
-          ),
-        );
-      } catch (error) {
-        return json(
-          { error: describe(error, "The folder could not be listed.") },
-          fileStatus(error),
-        );
-      }
-    }
-
-    /*
-     * A command on this computer.
-     *
-     * Nothing here decides whether it may run: the gateway already asked the deployment's policy and
-     * wrote the audit row before this was called. Refusing again here would be a second, quieter
-     * policy nobody configured.
-     */
-    if (url.pathname === "/exec" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        command?: unknown;
-        timeoutMs?: unknown;
-      } | null;
-      if (typeof body?.command !== "string" || !body.command.trim()) {
-        return json({ error: "A command is required." }, 400);
-      }
-      const timeout = parseExecTimeout(body.timeoutMs);
-      if (!timeout.ok) {
-        return json({ error: timeout.error }, 400);
-      }
-      try {
-        return json(
-          await shell.run({
-            command: body.command,
-            ...(timeout.timeoutMs !== undefined
-              ? { timeoutMs: timeout.timeoutMs }
-              : {}),
-            signal: request.signal,
-          }),
-        );
-      } catch (error) {
-        return json(
-          { error: describe(error, "The command could not be run.") },
-          500,
-        );
-      }
-    }
-
-    if (url.pathname === "/files/write" && request.method === "POST") {
-      const body = (await request.json().catch(() => null)) as {
-        path?: unknown;
-        contents?: unknown;
-        append?: unknown;
-      } | null;
-      if (typeof body?.contents !== "string") {
-        return json({ error: "The contents to write are required." }, 400);
-      }
-      try {
-        return json(
-          await workspace.write(String(body?.path ?? ""), body.contents, {
-            append: body.append === true,
-          }),
-        );
-      } catch (error) {
-        return json(
-          { error: describe(error, "The file could not be written.") },
-          fileStatus(error),
-        );
-      }
-    }
-
-    // The current page as text, without navigating anywhere.
-    //
-    // Reading must be available after actions too. Returning page text only from `/navigate` would be enough if
-    // opening a page were the only way to change what is on screen. It is not: the Bot presses
-    // "Submit order", the page becomes a confirmation, and it has no way to find out what the
-    // confirmation said. "I clicked the button" is not an answer to what happened.
-    if (url.pathname === "/read" && request.method === "GET") {
-      try {
-        const target = await currentPage(botId);
-        const extract = await readablePageText(target);
-        return json({
-          url: target.url(),
-          title: await target.title(),
-          text: extract.text,
-          truncated: extract.truncated,
-        });
-      } catch (error) {
-        return json(
-          { error: describe(error, "Reading the page failed.") },
-          502,
-        );
-      }
-    }
-
-    // The list of things on the page a Bot can act on. POST rather than GET because it mutates the
-    // page, stamping every element it describes, and a GET that changes the document is a lie that
-    // caches and prefetchers eventually punish.
-    if (url.pathname === "/snapshot" && request.method === "POST") {
-      try {
-        return json(await snapshotPage(session, await currentPage(botId)));
-      } catch (error) {
-        return json({ error: describe(error, "Snapshot failed.") }, 502);
-      }
-    }
-
-    if (ACTIONS.has(url.pathname) && request.method === "POST") {
-      const body = (await request
-        .json()
-        .catch(() => null)) as ActionBody | null;
-      if (!body) {
-        return json({ error: "An action needs a JSON body." }, 400);
-      }
-      if (url.pathname === "/scroll") {
-        const parsed = parseScrollDelta(body.deltaY);
-        if (!parsed.ok) {
-          return json({ error: parsed.error }, 400);
-        }
-      }
-
-      const startedAt = Date.now();
-      try {
-        const target = await currentPage(botId);
-        const detail = await performAction(
-          session,
-          target,
-          url.pathname,
-          body,
-          // The caller going away is the stop signal: the surface aborts its request, the server
-          // aborts the one it made to this computer, and Bun aborts this one in turn.
-          request.signal,
-        );
-        return json({ ...detail, elapsedMs: Date.now() - startedAt });
-      } catch (error) {
+      if (url.pathname === "/stream") {
         /*
-         * Stopped, not failed. The signal is checked rather than the error text: Playwright words an
-         * abort differently per call, and the caller's own request going away is the fact that
-         * matters either way.
-         *
-         * Logged because the response is not observed after the caller aborts. The log distinguishes
-         * "stopped in time" from "ran to completion after cancellation".
+         * The socket carries the Bot in the query because it cannot do it in a header. Every other call here names
+         * its Bot in `x-openbot-bot-id`, but a websocket client sends no custom headers on the upgrade,
+         * so the stream, and only the stream, also accepts the Bot as a query parameter. The header
+         * still wins where there is one.
          */
-        if (request.signal.aborted) {
-          console.info(
-            JSON.stringify({
-              type: "action-stopped",
-              action: url.pathname,
-              ref: typeof body.ref === "string" ? body.ref : undefined,
-              elapsedMs: Date.now() - startedAt,
+        const streamBotId = botIdOf(request, url.searchParams.get("bot"));
+        if (!isPlainBotId(streamBotId)) {
+          return json({ error: "That is not a usable bot id." }, 400);
+        }
+        if (server.upgrade(request, { data: { botId: streamBotId } }))
+          return undefined as unknown as Response;
+        return json({ error: "Expected a WebSocket upgrade." }, 400);
+      }
+
+      /*
+       * `/live` stays absent. A page served by this process can only be opened by putting the secret in
+       * a URL, where it lands in history and logs. The React app is the guarded way to watch a Bot.
+       */
+
+      // Who has the wheel. Polled by the surface alongside the screen, so the person sees the Bot ask
+      // for help without having to reload anything.
+      if (url.pathname === "/control" && request.method === "GET") {
+        return json(
+          session.control.get(url.searchParams.get("requestId") ?? undefined),
+        );
+      }
+
+      // The Bot asking for help. It does not take control: it says it is stuck and why, and a person
+      // decides. A Bot that could hand itself to a human could also hand a human a page they never
+      // asked to see.
+      if (url.pathname === "/control/request" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          reason?: unknown;
+          toolCallId?: unknown;
+        } | null;
+        if (
+          body?.toolCallId !== undefined &&
+          typeof body.toolCallId !== "string"
+        )
+          return json({ error: "toolCallId must be a string." }, 400);
+        return json(
+          session.control.requestHelp(body?.reason, body?.toolCallId),
+        );
+      }
+
+      // The Bot asking for one value it must not be told. It has already focused the field.
+      if (url.pathname === "/control/secret" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          label?: unknown;
+          ref?: unknown;
+          snapshotId?: unknown;
+        } | null;
+        try {
+          return json(session.control.requestSecret(body ?? {}));
+        } catch (error) {
+          if (error instanceof ControlRequestError) {
+            return json({ error: error.message }, 400);
+          }
+          throw error;
+        }
+      }
+
+      /**
+       * A person supplying that value.
+       *
+       * Scoped by the pending request rather than by a control handover: it is usable only while the Bot
+       * has actually asked for a secret, and the request is cleared the moment it is answered, so this
+       * cannot be used as a general back door to type into the page.
+       *
+       * The value is typed and forgotten. Not stored on `control`, not returned in the response, not
+       * logged. The response says how many characters arrived, which is enough for the surface to
+       * confirm something was sent and useless to anybody reading it later.
+       *
+       * It types and does not submit. Committing a form is a separate action through the gateway and
+       * audit trail; secret entry only places the value in the named field.
+       */
+      if (url.pathname === "/human/secret" && request.method === "POST") {
+        const pending = session.control.pendingSecret();
+        if (!pending) {
+          return json({ error: NO_SECRET_PENDING }, 409);
+        }
+        const body = (await request.json().catch(() => null)) as {
+          text?: unknown;
+        } | null;
+        if (typeof body?.text !== "string" || !body.text) {
+          return json({ error: "A value is required." }, 400);
+        }
+        try {
+          const target = await currentPage(botId);
+          // Focus the field the Bot named, and let this throw if it cannot be found. A secret must not
+          // be reported as delivered unless a field receives it.
+          //
+          // No generation check here: a Bot may take another snapshot after asking for a secret, while
+          // the ref remains protected by Playwright's `aria-ref` rules.
+          //
+          // `aria-ref` resolves a ref only against the most recent snapshot, only while the element is
+          // still connected, and mints a
+          // new ref when an element's role or accessible name changes, so a recycled node cannot
+          // inherit an old one. If the ref resolves, it is the field the Bot meant. If it does not,
+          // nothing is typed, which is the outcome the generation check existed to guarantee.
+          const field = locateRef(session, target, pending.ref, undefined);
+          await field.click({ timeout: ACTION_TIMEOUT_MS });
+          await field.fill(body.text, { timeout: ACTION_TIMEOUT_MS });
+          const characters = body.text.length;
+          // Cleared only after it actually landed, so a failure leaves the request open and the person
+          // can try again rather than being told to start over.
+          session.control.secretSupplied();
+          return json({ supplied: true, characters, url: target.url() });
+        } catch (error) {
+          if (error instanceof StaleSnapshotError) {
+            return json({ error: error.message, stale: true }, 409);
+          }
+          // The field is gone, which is unretryable, so the request is closed rather than left open.
+          // Keeping it open is right for a mistyped value and wrong here: the person would retype their
+          // password into the same dead ref for ever. Clearing it also unblocks the Bot, which can see
+          // on its next turn that nothing is pending and ask again against a fresh snapshot.
+          session.control.secretSupplied();
+          return json(
+            {
+              error: describe(
+                error,
+                "That value could not be entered: the field is no longer on the page. Ask the assistant to request it again.",
+              ),
+            },
+            502,
+          );
+        }
+      }
+
+      if (
+        ["/control/take", "/control/release", "/control/cancel"].includes(
+          url.pathname,
+        ) &&
+        request.method === "POST"
+      ) {
+        const body = (await request.json().catch(() => null)) as {
+          requestId?: unknown;
+        } | null;
+        if (typeof body?.requestId !== "string" || !body.requestId.trim())
+          return json({ error: "A requestId is required." }, 400);
+        if (url.pathname === "/control/take")
+          return json(await session.control.take(body.requestId));
+        if (url.pathname === "/control/cancel")
+          return json(session.control.cancel(body.requestId));
+        return json(session.control.release(body.requestId));
+      }
+
+      // A person's input, by pixel. The Bot addresses elements by reference because it reads a list; a
+      // person addresses them by pointing, because they are looking at a picture. Different problem,
+      // different endpoint, and only usable while they hold the wheel.
+      if (HUMAN_INPUT.has(url.pathname) && request.method === "POST") {
+        if (!session.control.humanMayDrive()) {
+          return json({ error: TAKE_CONTROL_FIRST }, 409);
+        }
+        const body = (await request.json().catch(() => null)) as Record<
+          string,
+          unknown
+        > | null;
+        if (url.pathname === "/human/scroll") {
+          const parsed = parseScrollDelta(body?.deltaY);
+          if (!parsed.ok) {
+            return json({ error: parsed.error }, 400);
+          }
+        }
+        try {
+          const target = await currentPage(botId);
+          return json(
+            await performHumanInput(target, url.pathname, body ?? {}),
+          );
+        } catch (error) {
+          return json({ error: describe(error, "That did not work.") }, 502);
+        }
+      }
+
+      if (url.pathname === "/health") {
+        const [profile] = profiles.summary([botId]);
+        return json({
+          status: "ok",
+          // `browser` kept as it was: it is in the published contract and start.sh reads it.
+          browser: profile?.running ?? false,
+          profile,
+          // Which Bot this computer can prove it is, when the deployment runs SPIRE. Null is a
+          // deployment without it, not a failure, and it is reported rather than omitted so the
+          // difference between "no identity here" and "identity broken" is visible.
+          identity: await identity(),
+          browserMode: BROWSER_MODE,
+          browserBackend: RUNTIME.backend,
+          browserChannel: RUNTIME.channel,
+        });
+      }
+
+      /**
+       * Which run of this Bot's browser the caller is looking at.
+       *
+       * The server orders snapshots on `(run, generation)`, and the generation alone cannot carry it:
+       * this process mints one at zero for every session that is new, so a restart, a redeploy, an
+       * eviction from the idle sweep and a reset all produce a page at generation one that looks older
+       * than the page the server still has. Ordering on the run as well is what lets the fresh one land
+       * and the dead one stop resolving.
+       *
+       * A read, and deliberately not on the acting list: a person holding the wheel must not turn every
+       * ref the server holds into an unanswerable question.
+       *
+       * Its own endpoint rather than a field on `/computers`, because that one reads the profile
+       * directory and this is asked on the path of every governed action.
+       */
+      if (url.pathname === "/run" && request.method === "GET") {
+        return json({ run: session.run });
+      }
+
+      /**
+       * The computers this process holds. The shape is a list because the admin surface is a
+       * list, and because a Bot that has a profile has a computer whether or not a browser is running
+       * for it this second.
+       */
+      if (url.pathname === "/computers" && request.method === "GET") {
+        return json({ computers: profiles.summary(await profiles.known()) });
+      }
+
+      /**
+       * Stop the browser, keep what it knows.
+       *
+       * Closed gracefully so Chromium flushes its profile, and deliberately
+       * not restarted here: the next request starts it again, which is the same path as a first ever
+       * start, so there is no second way for a browser to come into existence.
+       */
+      if (url.pathname === "/computers/stop" && request.method === "POST") {
+        const wasRunning = await profiles.stop(botId);
+        session.control.interrupt(
+          "The computer stopped; the previous task was interrupted.",
+        );
+        return json({ stopped: true, wasRunning });
+      }
+
+      /**
+       * Forget everything and start over.
+       *
+       * Signs the computer out of everything by deleting the profile. Irreversible, which is why it is
+       * its own endpoint rather than a flag on the one above: a person clicking "stop" must not be able
+       * to discard a login by mistyping a parameter.
+       */
+      if (url.pathname === "/computers/reset" && request.method === "POST") {
+        await profiles.reset(botId);
+        session.control.interrupt(
+          "The computer was reset; the previous task was interrupted.",
+        );
+        /*
+         * And a new run, because the browser this session described is gone.
+         *
+         * Nothing else here says so. The entry stays in the map and the generation counter carries on,
+         * so a snapshot that was in flight when the wipe landed arrives at the server carrying the same
+         * run and the same generation as the fresh browser's would: the server deletes its row on
+         * reset, the late save inserts the wiped page straight back, and every ref on it goes on
+         * resolving. A new run is what makes those two distinguishable at the far end.
+         */
+        sessions.renewRun(botId);
+        return json({ reset: true, botId });
+      }
+
+      if (url.pathname === "/navigate" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          url?: unknown;
+          toolCallId?: unknown;
+        } | null;
+        const parsed = parseNavigateUrl(body?.url);
+        if (!parsed.ok) {
+          return json({ error: parsed.error }, 400);
+        }
+
+        const startedAt = Date.now();
+        try {
+          const target = await currentPage(botId);
+          session.control.assertBotMayAct(true);
+          const response = await target.goto(parsed.url, {
+            waitUntil: "domcontentloaded",
+            timeout: NAVIGATION_TIMEOUT_MS,
+          });
+          // A new document wipes every stamp, so every ref handed out before now is meaningless.
+          // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
+          // than fall through to a selector that matches nothing and read as a missing element.
+          session.snapshotId += 1;
+          const extract = await readablePageText(target);
+          return json({
+            url: target.url(),
+            title: await target.title(),
+            text: extract.text,
+            truncated: extract.truncated,
+            elapsedMs: Date.now() - startedAt,
+            challenge: await detectChallenge(target, session.control, {
+              cfMitigated: response
+                ? await response.headerValue("cf-mitigated")
+                : undefined,
+              toolCallId:
+                typeof body?.toolCallId === "string"
+                  ? body.toolCallId
+                  : undefined,
+            }),
+          });
+        } catch (error) {
+          if (
+            error instanceof ControlError ||
+            error instanceof SnapshotRequiredError
+          )
+            throw error;
+          // The page is the Bot's working surface, so a failed navigation is reported rather than
+          // thrown: the transcript needs to say what happened, and the browser stays usable.
+          return json(
+            {
+              error:
+                error instanceof Error ? error.message : "Navigation failed.",
+            },
+            502,
+          );
+        }
+      }
+
+      if (url.pathname === "/screenshot" && request.method === "GET") {
+        try {
+          const target = await currentPage(botId);
+          const buffer = await target.screenshot({ type: "png" });
+          const size = target.viewportSize() ?? { width: 1280, height: 800 };
+          return json({
+            base64: buffer.toString("base64"),
+            width: size.width,
+            height: size.height,
+            capturedAt: new Date().toISOString(),
+            // Which page this is a picture of. A browser that has not been sent anywhere sits on
+            // `about:blank`, and a screenshot of that is a valid, entirely white PNG, indistinguishable
+            // from a real page to anything looking only at the bytes. The transcript needs to tell
+            // those apart to avoid presenting a blank browser as though it were a loaded page.
+            url: target.url(),
+          });
+        } catch (error) {
+          return json(
+            {
+              error:
+                error instanceof Error ? error.message : "Screenshot failed.",
+            },
+            502,
+          );
+        }
+      }
+
+      // The Bot's files. Confined to the workspace by workspace.ts. Nothing here decides whether a Bot
+      // MAY touch a path: the gateway in front of this process does that.
+      if (url.pathname === "/files/read" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          path?: unknown;
+        } | null;
+        try {
+          return json(await workspace.read(String(body?.path ?? "")));
+        } catch (error) {
+          return json(
+            { error: describe(error, "The file could not be read.") },
+            fileStatus(error),
+          );
+        }
+      }
+
+      if (url.pathname === "/files/list" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          path?: unknown;
+        } | null;
+        try {
+          return json(
+            await workspace.list(
+              typeof body?.path === "string" ? body.path : undefined,
+            ),
+          );
+        } catch (error) {
+          return json(
+            { error: describe(error, "The folder could not be listed.") },
+            fileStatus(error),
+          );
+        }
+      }
+
+      /*
+       * A command on this computer.
+       *
+       * Nothing here decides whether it may run: the gateway already asked the deployment's policy and
+       * wrote the audit row before this was called. Refusing again here would be a second, quieter
+       * policy nobody configured.
+       */
+      if (url.pathname === "/exec" && request.method === "POST") {
+        if (!RUNTIME.allowExec)
+          return json(
+            {
+              error:
+                "Shell execution is disabled for local Chrome. Use the approved host-access tools to run commands on this computer.",
+            },
+            403,
+          );
+        const body = (await request.json().catch(() => null)) as {
+          command?: unknown;
+          timeoutMs?: unknown;
+        } | null;
+        if (typeof body?.command !== "string" || !body.command.trim()) {
+          return json({ error: "A command is required." }, 400);
+        }
+        const timeout = parseExecTimeout(body.timeoutMs);
+        if (!timeout.ok) {
+          return json({ error: timeout.error }, 400);
+        }
+        try {
+          return json(
+            await shell.run({
+              command: body.command,
+              ...(timeout.timeoutMs !== undefined
+                ? { timeoutMs: timeout.timeoutMs }
+                : {}),
+              signal: request.signal,
             }),
           );
-          // 499, the convention for a client that closed the request: this is not the computer
-          // failing, and a 502 here would be counted as one.
-          return json({ error: "Stopped.", stopped: true }, 499);
+        } catch (error) {
+          return json(
+            { error: describe(error, "The command could not be run.") },
+            500,
+          );
         }
-        // A stale ref is the caller's mistake and is fixable by taking a new snapshot, so it is a 409
-        // rather than a 502: the computer is fine and retrying the same call unchanged will not help.
-        if (error instanceof StaleSnapshotError) {
-          return json({ error: error.message, stale: true }, 409);
-        }
-        return json({ error: describe(error, "The action failed.") }, 502);
       }
-    }
 
-    return json({ error: "Not found." }, 404);
+      if (url.pathname === "/files/write" && request.method === "POST") {
+        const body = (await request.json().catch(() => null)) as {
+          path?: unknown;
+          contents?: unknown;
+          append?: unknown;
+        } | null;
+        if (typeof body?.contents !== "string") {
+          return json({ error: "The contents to write are required." }, 400);
+        }
+        try {
+          return json(
+            await workspace.write(String(body?.path ?? ""), body.contents, {
+              append: body.append === true,
+            }),
+          );
+        } catch (error) {
+          return json(
+            { error: describe(error, "The file could not be written.") },
+            fileStatus(error),
+          );
+        }
+      }
+
+      // The current page as text, without navigating anywhere.
+      //
+      // Reading must be available after actions too. Returning page text only from `/navigate` would be enough if
+      // opening a page were the only way to change what is on screen. It is not: the Bot presses
+      // "Submit order", the page becomes a confirmation, and it has no way to find out what the
+      // confirmation said. "I clicked the button" is not an answer to what happened.
+      if (url.pathname === "/read" && request.method === "GET") {
+        try {
+          const target = await currentPage(botId);
+          const extract = await readablePageText(target);
+          return json({
+            url: target.url(),
+            title: await target.title(),
+            text: extract.text,
+            truncated: extract.truncated,
+            challenge: await detectChallenge(target, session.control),
+          });
+        } catch (error) {
+          return json(
+            { error: describe(error, "Reading the page failed.") },
+            502,
+          );
+        }
+      }
+
+      // The list of things on the page a Bot can act on. POST rather than GET because it mutates the
+      // page, stamping every element it describes, and a GET that changes the document is a lie that
+      // caches and prefetchers eventually punish.
+      if (url.pathname === "/snapshot" && request.method === "POST") {
+        try {
+          const target = await currentPage(botId);
+          const snapshot = await snapshotPage(session, target);
+          return json({
+            ...snapshot,
+            challenge: await detectChallenge(target, session.control),
+          });
+        } catch (error) {
+          return json({ error: describe(error, "Snapshot failed.") }, 502);
+        }
+      }
+
+      if (ACTIONS.has(url.pathname) && request.method === "POST") {
+        const body = (await request
+          .json()
+          .catch(() => null)) as ActionBody | null;
+        if (!body) {
+          return json({ error: "An action needs a JSON body." }, 400);
+        }
+        if (url.pathname === "/scroll") {
+          const parsed = parseScrollDelta(body.deltaY);
+          if (!parsed.ok) {
+            return json({ error: parsed.error }, 400);
+          }
+        }
+
+        const startedAt = Date.now();
+        try {
+          const target = await currentPage(botId);
+          session.control.assertBotMayAct(true);
+          const detail = await performAction(
+            session,
+            target,
+            url.pathname,
+            body,
+            // The caller going away is the stop signal: the surface aborts its request, the server
+            // aborts the one it made to this computer, and Bun aborts this one in turn.
+            request.signal,
+          );
+          return json({ ...detail, elapsedMs: Date.now() - startedAt });
+        } catch (error) {
+          /*
+           * Stopped, not failed. The signal is checked rather than the error text: Playwright words an
+           * abort differently per call, and the caller's own request going away is the fact that
+           * matters either way.
+           *
+           * Logged because the response is not observed after the caller aborts. The log distinguishes
+           * "stopped in time" from "ran to completion after cancellation".
+           */
+          if (
+            error instanceof ControlError ||
+            error instanceof SnapshotRequiredError
+          )
+            throw error;
+          if (request.signal.aborted) {
+            console.info(
+              JSON.stringify({
+                type: "action-stopped",
+                action: url.pathname,
+                ref: typeof body.ref === "string" ? body.ref : undefined,
+                elapsedMs: Date.now() - startedAt,
+              }),
+            );
+            // 499, the convention for a client that closed the request: this is not the computer
+            // failing, and a 502 here would be counted as one.
+            return json({ error: "Stopped.", stopped: true }, 499);
+          }
+          // A stale ref is the caller's mistake and is fixable by taking a new snapshot, so it is a 409
+          // rather than a 502: the computer is fine and retrying the same call unchanged will not help.
+          if (error instanceof StaleSnapshotError) {
+            return json({ error: error.message, stale: true }, 409);
+          }
+          return json({ error: describe(error, "The action failed.") }, 502);
+        }
+      }
+
+      return json({ error: "Not found." }, 404);
+    } catch (error) {
+      if (error instanceof ControlError) {
+        const state = session.control.get();
+        return json(
+          {
+            error: error.message,
+            humanHasControl: true,
+            requestId: state.request?.id,
+            handoff: state.request,
+          },
+          409,
+        );
+      }
+      if (error instanceof SnapshotRequiredError)
+        return json(
+          { error: error.message, stale: true, snapshotRequired: true },
+          409,
+        );
+      if (error instanceof ControlRequestError)
+        return json(
+          { error: error.message, controlRequestError: true },
+          error.status,
+        );
+      throw error;
+    } finally {
+      releaseAction?.();
+    }
   },
 });
 
