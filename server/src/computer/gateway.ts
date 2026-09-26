@@ -344,8 +344,23 @@ export function createComputerGateway(
    * on the store.
    */
   async function snapshot(botId: string): Promise<SnapshotResult> {
+    const base = await locate(botId);
+    /*
+     * Which run this is, asked before the page is drawn rather than after it.
+     *
+     * After `locate`, because on a supervisor that is the `/ensure` that reports it. But before
+     * `/snapshot`, because the two answers have to describe the same browser and asking afterwards
+     * does not guarantee it: a computer replaced while the snapshot was being taken would have its
+     * dead page stamped with the run of the browser that replaced it, so every ref on that page would
+     * resolve against the live run and the live run's own snapshots would be refused for being older.
+     *
+     * Asked first, a replacement in that window leaves a row carrying a run that is already gone.
+     * Nothing resolves against it and the next snapshot supersedes it, which is the direction this is
+     * allowed to fail in.
+     */
+    const run = await sessionOf(botId);
     const result = await transport.call<SnapshotResult>(
-      await locate(botId),
+      base,
       botId,
       "/snapshot",
       { method: "POST" },
@@ -356,8 +371,7 @@ export function createComputerGateway(
       elements: new Map(
         result.elements.map((element) => [element.ref, element]),
       ),
-      // Read after `locate`, which is the `/ensure` that reports it.
-      ...(await sessionOf(botId)),
+      ...run,
     });
     return result;
   }
@@ -403,8 +417,8 @@ export function createComputerGateway(
     /**
      * The run of the computer the action is reaching, when the provider can say.
      *
-     * Undefined means unknown, not mismatched: a provider with no sessions to report, or one that
-     * could not be asked, leaves the generation check exactly as it was.
+     * Undefined means unknown, not mismatched: a provider that could not be asked leaves the
+     * generation check exactly as it was, rather than refusing every ref it holds.
      */
     session?: string,
   ): SnapshotElement | undefined {
@@ -456,17 +470,19 @@ export function createComputerGateway(
     /*
      * LOCATE FIRST, THEN ASK WHICH RUN THAT WAS. The order is the check.
      *
-     * `sessionOf` answers with what the last `/ensure` reported, and until this action has made its
-     * own, the last one belongs to the action before it. Asking first compared the stored snapshot
-     * against the previous action's run, which is the same run on every action but the first one
-     * after a replacement — exactly the action the check exists to catch. The click after a replaced
-     * container was allowed and the one after that refused, which is a guarantee arriving one action
-     * too late.
+     * On the supervisor, `sessionOf` answers with what the last `/ensure` reported, and until this
+     * action has made its own, the last one belongs to the action before it. Asking first compared
+     * the stored snapshot against the previous action's run, which is the same run on every action
+     * but the first one after a replacement — exactly the action the check exists to catch. The
+     * click after a replaced container was allowed and the one after that refused, which is a
+     * guarantee arriving one action too late. The shared provider has no `/ensure` to read back, so
+     * there it is a live `/run` call of its own — one extra round trip per ref-citing action —
+     * which asks after `locate` for the same reason even though `locate` there is a string.
      *
      * Only for an action that cites a ref. Nothing else is resolved against a snapshot, so nothing
      * else needs the run, and a scroll or a file read should not have to reach the supervisor before
      * the policy has even seen it. The address that comes back is the one the attempt then uses, so
-     * this costs no extra call for the actions that do need it.
+     * on the supervisor this costs no extra call for the actions that do need it.
      */
     const address = ref ? await locateForAction(botId) : undefined;
     const { session } = ref ? await sessionOf(botId) : { session: undefined };
