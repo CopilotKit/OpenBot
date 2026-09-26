@@ -78,17 +78,20 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    cp .env.example .env
    ```
 
-2. Get CopilotKit Intelligence credentials:
+2. Connect a fresh managed Intelligence project:
 
    ```sh
    npx --yes copilotkit@latest login
    npx --yes copilotkit@latest project select
+   bun scripts/setup-learning.ts
    ```
 
-   Put the `cpk-...` runtime key from `project select` in `.env` as
-   `INTELLIGENCE_API_KEY`. That is the only Intelligence credential you need:
-   managed Intelligence derives entitlement from the project key, so there is
-   no separate licence token to fetch.
+   The helper provisions the selected project's runtime key, creates or reuses its
+   `openbot` Learning container, then writes both settings to `.env`. It preserves
+   custom container assignments and refuses to replace an existing OpenBot key.
+   Existing key-only and self-hosted setups can assign a container through
+   [Admin → Automatic Learning](docs/automatic-learning.md). Managed Intelligence
+   needs no separate licence token.
 
 3. Fill the remaining required values:
 

@@ -70,6 +70,8 @@ struct Shell {
         Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
     /// The credential that sign-in produced, held so a project can be chosen with it.
     intelligence_credential: Mutex<Option<String>>,
+    /// Proof that this runtime key's project has the default Learning container.
+    intelligence_learning: Mutex<Option<openbot_desktop_lib::intelligence::ProvisionedConnection>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
     /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
@@ -1004,6 +1006,51 @@ fn intelligence_key_for_start(
     Ok(key)
 }
 
+fn seed_learning_default(
+    root: &Path,
+    settings: &mut std::collections::BTreeMap<String, String>,
+    proof: Option<&openbot_desktop_lib::intelligence::ProvisionedConnection>,
+) -> Result<(), Problem> {
+    const TARGET: &str = "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID";
+    let Some(proof) = proof else {
+        return Ok(());
+    };
+    if settings.get("INTELLIGENCE_API_KEY") != Some(&proof.api_key)
+        || settings
+            .get("INTELLIGENCE_API_URL")
+            .map(|api| api.trim_end_matches('/'))
+            != Some(proof.api_url.trim_end_matches('/'))
+        || settings.contains_key(TARGET)
+    {
+        return Ok(());
+    }
+    let existing = match std::fs::read_to_string(root.join(".env")) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not read its Learning settings.",
+                error.to_string(),
+            ));
+        }
+    };
+    // Preserve both dotenv assignment forms, including an optional export prefix and spacing.
+    let configured = existing.lines().any(|line| {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let mut words = key.split_whitespace();
+        matches!(
+            (words.next(), words.next(), words.next()),
+            (Some(TARGET), None, None) | (Some("export"), Some(TARGET), None)
+        ) && !value.trim().is_empty()
+    });
+    if !configured {
+        settings.insert(TARGET.into(), proof.learning_container_id.clone());
+    }
+    Ok(())
+}
+
 fn require_existing_encryption_key(
     root: &Path,
     secrets: &std::collections::BTreeMap<String, String>,
@@ -1415,6 +1462,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         if let Some(authority) = organization_auth_url {
             settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
         }
+        seed_learning_default(
+            &root,
+            &mut settings,
+            shell.intelligence_learning.lock().unwrap().as_ref(),
+        )?;
         /*
          * The credentials come out here and never reach the file.
          *
@@ -3049,13 +3101,16 @@ async fn intelligence_key_for(
         .ok_or_else(|| {
             openbot_desktop_lib::problem::Problem::plain("Sign in to CopilotKit first.")
         })?;
-    tauri::async_runtime::spawn_blocking(move || {
-        openbot_desktop_lib::intelligence::provision_key(&credential, &project)
+    let provisioned = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::intelligence::provision_connection(&credential, &project)
     })
     .await
     .map_err(|error| {
         openbot_desktop_lib::problem::Problem::plain(format!("A key could not be created: {error}"))
-    })?
+    })??;
+    let key = provisioned.api_key.clone();
+    *app.state::<Shell>().intelligence_learning.lock().unwrap() = Some(provisioned);
+    Ok(key)
 }
 
 #[tauri::command]
@@ -3792,6 +3847,51 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+
+    #[test]
+    fn learning_default_is_written_only_for_the_provisioned_connection() {
+        use std::collections::BTreeMap;
+        let root = temp_root("learning-default-env");
+        std::fs::create_dir_all(&root).unwrap();
+        let proof = openbot_desktop_lib::intelligence::ProvisionedConnection {
+            api_key: "runtime-key".into(),
+            api_url: "https://api.intelligence.example".into(),
+            learning_container_id: "openbot".into(),
+        };
+        for (api, key, existing, verified, expected) in [
+            ("https://api.intelligence.example", "runtime-key", None, true, Some("openbot")),
+            ("https://api.intelligence.example", "runtime-key", Some(""), true, Some("openbot")),
+            ("https://api.intelligence.example/", "runtime-key", Some(""), true, Some("openbot")),
+            ("https://other.example", "runtime-key", Some(""), true, None),
+            ("https://api.intelligence.example", "other-key", Some(""), true, None),
+            ("https://api.intelligence.example", "runtime-key", Some(""), false, None),
+            ("https://api.intelligence.example", "runtime-key", Some("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=custom\nCPK_INTELLIGENCE_SKILLS_REVISION=7\n"), true, Some("custom")),
+            ("https://api.intelligence.example", "runtime-key", Some("export \tCPK_INTELLIGENCE_LEARNING_CONTAINER_ID = custom\n"), true, Some("custom")),
+        ] {
+            if let Some(existing) = existing {
+                std::fs::write(root.join(".env"), existing).unwrap();
+            }
+            let mut settings = BTreeMap::from([
+                ("INTELLIGENCE_API_URL".into(), api.into()),
+                ("INTELLIGENCE_API_KEY".into(), key.into()),
+            ]);
+            seed_learning_default(&root, &mut settings, verified.then_some(&proof)).unwrap();
+            openbot_env::write(&root.join(".env"), &settings, &BTreeMap::new()).unwrap();
+            let read = openbot_env::read_already_set(&root.join(".env"), &["CPK_INTELLIGENCE_LEARNING_CONTAINER_ID", "CPK_INTELLIGENCE_SKILLS_REVISION"]).unwrap();
+            if let Some(exported) = existing.filter(|text| text.starts_with("export")) {
+                // The shared setup reader does not parse export syntax; the file must keep the
+                // custom assignment with no bare assignment appended to override it.
+                assert!(!read.contains_key("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"));
+                assert!(std::fs::read_to_string(root.join(".env")).unwrap().contains(exported));
+                continue;
+            }
+            assert_eq!(read.get("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID").map(String::as_str), expected);
+            if expected == Some("custom") {
+                assert_eq!(read.get("CPK_INTELLIGENCE_SKILLS_REVISION").map(String::as_str), Some("7"));
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn quit_menu_uses_the_standard_quit_shortcut() {

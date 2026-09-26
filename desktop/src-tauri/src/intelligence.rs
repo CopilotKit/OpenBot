@@ -470,8 +470,16 @@ fn as_number(project_id: &str) -> serde_json::Value {
 }
 
 pub fn provision_key(product: &str, project_id: &str) -> Result<String, crate::problem::Problem> {
+    provision_key_at(PRODUCT_API, product, project_id)
+}
+
+fn provision_key_at(
+    api: &str,
+    product: &str,
+    project_id: &str,
+) -> Result<String, crate::problem::Problem> {
     let response = client()?
-        .post(format!("{PRODUCT_API}/api/keys"))
+        .post(format!("{api}/api/keys"))
         .bearer_auth(product)
         /*
          * `project_id` AS A NUMBER, which is what the endpoint's own schema requires.
@@ -503,6 +511,116 @@ pub fn provision_key(product: &str, project_id: &str) -> Result<String, crate::p
     key_in(&raw).ok_or_else(|| {
         crate::problem::Problem::with("That key came back without a value in it.", raw.to_string())
     })
+}
+
+/// Kept in the native shell: only this key and API may inherit the verified learning target.
+pub struct ProvisionedConnection {
+    pub api_key: String,
+    pub api_url: String,
+    pub learning_container_id: String,
+}
+
+pub fn provision_connection(
+    product: &str,
+    project_id: &str,
+) -> Result<ProvisionedConnection, crate::problem::Problem> {
+    provision_connection_at(PRODUCT_API, product, project_id)
+}
+
+fn provision_connection_at(
+    api: &str,
+    product: &str,
+    project_id: &str,
+) -> Result<ProvisionedConnection, crate::problem::Problem> {
+    let learning_container_id = ensure_learning_container_at(api, product, project_id)?;
+    let api_key = provision_key_at(api, product, project_id)?;
+    Ok(ProvisionedConnection {
+        api_key,
+        api_url: api.into(),
+        learning_container_id,
+    })
+}
+
+fn learning_response(
+    request: reqwest::blocking::RequestBuilder,
+) -> Result<(reqwest::StatusCode, serde_json::Value), crate::problem::Problem> {
+    let response = request.send().map_err(|error| {
+        crate::problem::Problem::with(
+            "Automatic Learning could not be prepared. Try connecting again.",
+            error.to_string(),
+        )
+    })?;
+    let status = response.status();
+    let raw = response.json().map_err(|error| {
+        crate::problem::Problem::with(
+            "CopilotKit returned an unreadable Learning response. Try connecting again.",
+            format!("HTTP {status}\n{error}"),
+        )
+    })?;
+    Ok((status, raw))
+}
+
+fn learning_status(status: reqwest::StatusCode) -> Result<(), crate::problem::Problem> {
+    if status.is_success() {
+        return Ok(());
+    }
+    Err(crate::problem::Problem::with(
+        "Automatic Learning could not be prepared for this project. Try connecting again.",
+        format!("HTTP {status}"),
+    ))
+}
+
+fn verified_learning_container(
+    raw: &serde_json::Value,
+    project_id: u64,
+) -> Result<String, crate::problem::Problem> {
+    let container = &raw["container"];
+    if container["id"].as_str() == Some("openbot")
+        && container["projectId"].as_u64() == Some(project_id)
+    {
+        return Ok("openbot".into());
+    }
+    Err(crate::problem::Problem::plain(
+        "CopilotKit did not confirm the Learning container for this project. Try connecting again.",
+    ))
+}
+
+fn ensure_learning_container_at(
+    api: &str,
+    product: &str,
+    project_id: &str,
+) -> Result<String, crate::problem::Problem> {
+    let project_id = project_id
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or_else(|| crate::problem::Problem::plain("Choose a valid CopilotKit project."))?;
+    let client = client()?;
+    let collection = format!("{api}/api/learning/projects/{project_id}/containers");
+    let item = format!("{collection}/openbot");
+    let (status, raw) = learning_response(client.get(&item).bearer_auth(product))?;
+    learning_status(status)?;
+    // The control API represents absence as 200 {container: null}; a generic 404 is not evidence.
+    if raw.get("container") != Some(&serde_json::Value::Null) {
+        return verified_learning_container(&raw, project_id);
+    }
+    let (status, raw) = learning_response(
+        client
+            .post(&collection)
+            .bearer_auth(product)
+            .json(&serde_json::json!({"id":"openbot","name":"OpenBot"})),
+    )?;
+    if status == reqwest::StatusCode::CONFLICT
+        && raw["error"]["code"].as_str() == Some("LEARNING_CONTAINER_ALREADY_EXISTS")
+    {
+        // Another setup won the create; read its container once and verify the project again.
+        let (status, raw) = learning_response(client.get(&item).bearer_auth(product))?;
+        learning_status(status)?;
+        return verified_learning_container(&raw, project_id);
+    }
+    learning_status(status)?;
+    verified_learning_container(&raw, project_id)
 }
 
 /**
@@ -575,6 +693,192 @@ pub fn projects_in(raw: &serde_json::Value) -> Vec<Project> {
 
 #[cfg(test)]
 mod tests {
+    const LEARNING_CONTAINER: &str =
+        r#"{"container":{"id":"openbot","projectId":42,"name":"OpenBot"}}"#;
+    const NO_LEARNING_CONTAINER: &str = r#"{"container":null}"#;
+
+    #[test]
+    fn learning_reuses_the_project_container_without_writing() {
+        let (url, requests) = response_server(vec![("200 OK", LEARNING_CONTAINER)]);
+        assert_eq!(
+            super::ensure_learning_container_at(&url, "product-session", "42").unwrap(),
+            "openbot"
+        );
+        let requests = requests.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]
+            .0
+            .starts_with("GET /api/learning/projects/42/containers/openbot HTTP/1.1\r\n"));
+        assert!(requests[0]
+            .0
+            .to_lowercase()
+            .contains("authorization: bearer product-session\r\n"));
+    }
+
+    #[test]
+    fn learning_creates_only_after_an_explicit_missing_container() {
+        let (url, requests) = response_server(vec![
+            ("200 OK", NO_LEARNING_CONTAINER),
+            ("201 Created", LEARNING_CONTAINER),
+        ]);
+        assert_eq!(
+            super::ensure_learning_container_at(&url, "product-session", "42").unwrap(),
+            "openbot"
+        );
+        let requests = requests.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1]
+            .0
+            .starts_with("POST /api/learning/projects/42/containers HTTP/1.1\r\n"));
+        assert!(requests[1]
+            .0
+            .to_lowercase()
+            .contains("authorization: bearer product-session\r\n"));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&requests[1].1).unwrap(),
+            serde_json::json!({"id":"openbot","name":"OpenBot"})
+        );
+    }
+
+    #[test]
+    fn learning_reads_the_winner_of_an_exact_already_exists_race() {
+        let (url, requests) = response_server(vec![
+            ("200 OK", NO_LEARNING_CONTAINER),
+            (
+                "409 Conflict",
+                r#"{"error":{"code":"LEARNING_CONTAINER_ALREADY_EXISTS"}}"#,
+            ),
+            ("200 OK", LEARNING_CONTAINER),
+        ]);
+        assert_eq!(
+            super::ensure_learning_container_at(&url, "product-session", "42").unwrap(),
+            "openbot"
+        );
+        let requests = requests.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2]
+            .0
+            .starts_with("GET /api/learning/projects/42/containers/openbot HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn learning_errors_and_malformed_reads_never_create_a_container() {
+        for (status, body) in [
+            ("403 Forbidden", r#"{"error":{"code":"FORBIDDEN"}}"#),
+            ("404 Not Found", r#"{"error":{"code":"NOT_FOUND"}}"#),
+            (
+                "500 Internal Server Error",
+                r#"{"error":{"code":"INTERNAL_ERROR"}}"#,
+            ),
+            ("200 OK", r#"{}"#),
+            ("200 OK", r#"{"container":{"id":"other","projectId":42}}"#),
+            ("200 OK", r#"{"container":{"id":"openbot","projectId":43}}"#),
+            ("200 OK", "not json"),
+        ] {
+            let (url, requests) = response_server(vec![(status, body)]);
+            let error = super::provision_connection_at(&url, "product-session", "42")
+                .err()
+                .expect("a failed Learning lookup must not mint a runtime key");
+            if !status.starts_with("200") {
+                assert!(error
+                    .detail
+                    .unwrap()
+                    .contains(&format!("HTTP {}", &status[..3])));
+            }
+            assert_eq!(requests.join().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn learning_create_failures_and_mismatched_responses_are_not_accepted() {
+        for (status, body) in [
+            ("409 Conflict", r#"{"error":{"code":"OTHER_CONFLICT"}}"#),
+            ("403 Forbidden", r#"{"error":{"code":"FORBIDDEN"}}"#),
+            ("201 Created", NO_LEARNING_CONTAINER),
+            (
+                "201 Created",
+                r#"{"container":{"id":"openbot","projectId":43}}"#,
+            ),
+        ] {
+            let (url, requests) =
+                response_server(vec![("200 OK", NO_LEARNING_CONTAINER), (status, body)]);
+            let error =
+                super::ensure_learning_container_at(&url, "product-session", "42").unwrap_err();
+            if !status.starts_with("201") {
+                assert!(error
+                    .detail
+                    .unwrap()
+                    .contains(&format!("HTTP {}", &status[..3])));
+            }
+            assert_eq!(requests.join().unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn learning_race_still_requires_a_verified_container() {
+        for (status, body) in [
+            ("200 OK", NO_LEARNING_CONTAINER),
+            (
+                "500 Internal Server Error",
+                r#"{"error":{"code":"INTERNAL_ERROR"}}"#,
+            ),
+        ] {
+            let (url, requests) = response_server(vec![
+                ("200 OK", NO_LEARNING_CONTAINER),
+                (
+                    "409 Conflict",
+                    r#"{"error":{"code":"LEARNING_CONTAINER_ALREADY_EXISTS"}}"#,
+                ),
+                (status, body),
+            ]);
+            assert!(super::ensure_learning_container_at(&url, "product-session", "42").is_err());
+            assert_eq!(requests.join().unwrap().len(), 3);
+        }
+    }
+
+    #[test]
+    fn learning_transport_failure_is_reported() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let error = super::ensure_learning_container_at(&url, "product-session", "42").unwrap_err();
+        assert!(error.said.contains("could not be prepared"));
+        assert!(!error.detail.unwrap().contains("product-session"));
+    }
+
+    #[test]
+    fn learning_provisioning_returns_proof_bound_to_the_minted_runtime_key_and_api() {
+        let (url, requests) = response_server(vec![
+            ("200 OK", LEARNING_CONTAINER),
+            ("201 Created", r#"{"key":"runtime-key"}"#),
+        ]);
+        let proof = super::provision_connection_at(&url, "product-session", "42").unwrap();
+        assert_eq!(proof.api_key, "runtime-key");
+        assert_eq!(proof.api_url, url);
+        assert_eq!(proof.learning_container_id, "openbot");
+        let requests = requests.join().unwrap();
+        assert!(requests[1].0.starts_with("POST /api/keys HTTP/1.1\r\n"));
+        assert!(requests.iter().all(|(headers, _)| headers
+            .to_lowercase()
+            .contains("authorization: bearer product-session\r\n")));
+    }
+
+    #[test]
+    #[ignore = "requires an authorized isolated Intelligence project and product credential"]
+    fn live_learning_container_create_and_reuse() {
+        let product = std::env::var("OPENBOT_LIVE_INTELLIGENCE_PRODUCT_CREDENTIAL")
+            .expect("provide a product credential through the environment");
+        let project = std::env::var("OPENBOT_LIVE_INTELLIGENCE_PROJECT_ID")
+            .expect("provide an isolated test project ID");
+        let first =
+            super::ensure_learning_container_at(super::PRODUCT_API, &product, &project).unwrap();
+        let second =
+            super::ensure_learning_container_at(super::PRODUCT_API, &product, &project).unwrap();
+        assert_eq!(first, "openbot");
+        assert_eq!(first, second);
+        println!("verified Learning container openbot in the isolated project; repeated provisioning reused it");
+    }
+
     #[test]
     fn project_creation_trims_names_and_rejects_empty_or_overlong_names() {
         assert_eq!(
@@ -588,8 +892,10 @@ mod tests {
 
     #[test]
     fn creates_project_using_the_signed_in_credential_and_parses_numeric_id() {
-        let (url, request) =
-            project_creation_server("201 Created", r#"{"id":42,"name":"Desktop validation"}"#);
+        let (url, request) = response_server(vec![(
+            "201 Created",
+            r#"{"id":42,"name":"Desktop validation"}"#,
+        )]);
         let project =
             super::create_project_at(&url, "synthetic-product-session", " Desktop validation ")
                 .unwrap();
@@ -600,7 +906,7 @@ mod tests {
                 name: "Desktop validation".into()
             }
         );
-        let (headers, body) = request.join().unwrap();
+        let (headers, body) = request.join().unwrap().pop().unwrap();
         assert!(headers.starts_with("POST /api/projects HTTP/1.1\r\n"));
         assert!(headers
             .to_lowercase()
@@ -617,7 +923,7 @@ mod tests {
             ("403 Forbidden", r#"{"error":"not allowed"}"#),
             ("201 Created", r#"{"name":"No ID"}"#),
         ] {
-            let (url, request) = project_creation_server(status, body);
+            let (url, request) = response_server(vec![(status, body)]);
             let error =
                 super::create_project_at(&url, "synthetic-product-session", "Desktop validation")
                     .unwrap_err();
@@ -630,40 +936,45 @@ mod tests {
         }
     }
 
-    fn project_creation_server(
-        status: &'static str,
-        body: &'static str,
-    ) -> (String, std::thread::JoinHandle<(String, Vec<u8>)>) {
+    type CapturedRequests = Vec<(String, Vec<u8>)>;
+
+    fn response_server(
+        responses: Vec<(&'static str, &'static str)>,
+    ) -> (String, std::thread::JoinHandle<CapturedRequests>) {
         use std::io::{BufRead, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let request = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            let mut reader = std::io::BufReader::new(stream);
-            let mut headers = String::new();
-            loop {
-                let mut line = String::new();
-                assert!(reader.read_line(&mut line).unwrap() > 0);
-                headers.push_str(&line);
-                if line == "\r\n" {
-                    break;
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(stream);
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    headers.push_str(&line);
+                    if line == "\r\n" {
+                        break;
+                    }
                 }
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse().unwrap())
+                    })
+                    .unwrap_or(0);
+                let mut request_body = vec![0; length];
+                reader.read_exact(&mut request_body).unwrap();
+                write!(reader.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                requests.push((headers, request_body));
             }
-            let length: usize = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse().unwrap())
-                })
-                .unwrap();
-            let mut request_body = vec![0; length];
-            reader.read_exact(&mut request_body).unwrap();
-            write!(reader.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-            (headers, request_body)
+            requests
         });
         (url, request)
     }

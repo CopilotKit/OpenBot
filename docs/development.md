@@ -16,10 +16,15 @@ Provision CopilotKit Intelligence after `.env` exists:
 ```sh
 npx --yes copilotkit@latest login
 npx --yes copilotkit@latest project select
+bun scripts/setup-learning.ts
 ```
 
-Put the `cpk-...` runtime key from `project select` in `.env` as
-`INTELLIGENCE_API_KEY`. There is no licence step. Then add `OPENAI_API_KEY`.
+For fresh managed setup, the helper provisions the selected project's key and creates or reuses
+its `openbot` Learning container. It writes `INTELLIGENCE_API_KEY` and
+`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` to `.env` only after verifying the container. Existing
+keys and custom targets are preserved; key-only and self-hosted deployments use their own
+authenticated Intelligence UI/API to create a container, then assign it in OpenBot Admin.
+There is no managed licence step. Then add `OPENAI_API_KEY`.
 
 Start the stack:
 

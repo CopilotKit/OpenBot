@@ -161,6 +161,7 @@ config:
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
+  # Key-only/self-hosted installs create it through authenticated Intelligence administration first.
   # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""

@@ -2,6 +2,18 @@
 
 Open **Admin → Automatic Learning** to choose which Bots contribute completed conversations to a CopilotKit Intelligence Learning container and receive its published skills. Learning defaults on for managed and self-hosted deployments; a saved off setting is preserved. Collection and delivery require an existing, assigned container. OpenBot still starts and chats without one.
 
+Managed desktop sign-in creates or reuses the selected project's `openbot` container. Start saves that assignment only while the provisioned key and API still match, and preserves an explicit custom container in `.env`. Saved Admin settings, including off or an empty default, remain authoritative.
+
+For a fresh managed clone, copy `.env.example` to `.env`, then run from the OpenBot root:
+
+```sh
+npx --yes copilotkit@latest login
+npx --yes copilotkit@latest project select
+bun scripts/setup-learning.ts
+```
+
+The helper provisions a key for the selected project, creates or reuses its `openbot` container, and verifies the response before writing `INTELLIGENCE_API_KEY` and `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`. It preserves custom targets and refuses to replace an existing OpenBot runtime key. A runtime key alone cannot create a container. Existing key-only and self-hosted deployments use their authenticated Intelligence UI/API and the manual steps below.
+
 1. In the same Intelligence project used by OpenBot, create a Learning container. Its stable ID contains 1–64 lowercase letters, digits, and single hyphens (for example, `support-learning`).
 2. In OpenBot, enter the default container ID and re-enable Learning if previously paused. Leave the default empty to opt in only particular Bots. Each Bot can inherit the default, use another container, or be excluded. Save the settings.
 3. Start **new threads** and complete relevant workflows. Chat, channels, scheduled routines, and handoffs use the same server-side settings. An existing thread keeps the first container assignment (including an unassigned first run); changing a Bot mapping does not move or backfill its earlier evidence.
@@ -14,7 +26,7 @@ Pausing OpenBot Learning preserves its mappings and thread assignments. It stops
 
 ## Credentials and permissions
 
-OpenBot reuses its **server-side** `INTELLIGENCE_API_KEY` and `INTELLIGENCE_API_URL`. Never put the project key in browser environment variables. The Learning settings and inspection endpoints require an OpenBot administrator; settings writes also require same-origin JSON requests (or an explicitly trusted app origin).
+OpenBot reuses its **server-side** `INTELLIGENCE_API_KEY` and `INTELLIGENCE_API_URL`. Setup creates containers using the authenticated account, not the runtime key. Never put the project key in browser environment variables. The Learning settings and inspection endpoints require an OpenBot administrator; settings writes also require same-origin JSON requests (or an explicitly trusted app origin).
 
 The project key supports runtime ingestion, skill delivery, and the read-only Inspector Learning projection. It is not a management credential. Review, run, schedule, and publish links open the existing Intelligence UI, where you sign in with an account authorized for that project. OpenBot does not proxy management writes using its project key.
 
