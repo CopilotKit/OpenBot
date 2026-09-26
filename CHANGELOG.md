@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Browser challenges can be handed to a person without losing the Bot's page
+
+Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
+handback. Requests survive viewer reconnects and distinguish completion from cancellation, expiry,
+or an interrupted browser session. Managed browsing now uses full Chromium in headless or headed
+mode. Local API deployments can opt into installed Chrome with dedicated per-Bot profiles, the same
+in-app viewer, a loopback-only computer endpoint, and host shell execution disabled.
+
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
 Snapshots are ordered on the run of the browser that took them as well as the generation, so a

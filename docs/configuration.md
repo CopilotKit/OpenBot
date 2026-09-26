@@ -372,7 +372,9 @@ then is a row nothing will read.
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
-| `COMPUTER_BROWSER_MODE`              | `headless` by default; set to `headed` to run full Chromium on a private virtual display for human takeover. |
+| `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
+| `COMPUTER_BROWSER_MODE`              | Managed defaults to `headless` (full Chromium's new headless mode). `headed` uses Xvfb on Linux and a native window on macOS/Windows. Local Chrome requires `headed`. |
+| `OPENBOT_LOCAL_COMPUTER_DIR`         | Local startup helper's absolute data root. Defaults to the platform's OpenBot user-data directory; contains `profiles/` and `workspace/`. |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. A deployment running with `NODE_ENV=production` refuses to start while it is set. Cloud metadata addresses are refused either way. |
@@ -397,6 +399,91 @@ docker ps -aq --filter "label=openbot.namespace=openbot" | xargs -r docker rm -f
 ```
 
 The supervisor recreates each computer with the same named volumes on its next request.
+
+### Headed managed Chromium in Docker or Helm
+
+The managed backend uses Playwright's full `chromium` channel in either mode. The Docker image
+already installs that browser and Xvfb; it does not require Google Chrome. For Compose, set
+`COMPUTER_BROWSER_MODE=headed` in the deployment environment and recreate the shared computer or
+supervisor as applicable:
+
+```sh
+docker compose up -d --force-recreate agent-computer supervisor
+```
+
+Existing supervisor-created computers retain their mode until recreated as described above. The
+same per-Bot profile volumes and streamed viewer continue to work. For Helm, add to your values:
+
+```yaml
+computers:
+  extraEnv:
+    - name: COMPUTER_BROWSER_MODE
+      value: headed
+```
+
+Apply the Helm upgrade. A newly created computer uses the new setting; recreate existing supervised
+computers through your deployment's lifecycle controls while keeping their persistent volumes.
+
+### Installed Chrome for a local API deployment
+
+This source/deployment-checkout option launches a separate installed Google Chrome window for each
+active Bot on macOS or Windows. The existing in-app viewer, browser tools, authentication, and Bot
+access policy still apply. Linux uses a private Xvfb display and the viewer. This is not a packaged
+desktop toggle or a bridge from a hosted API: the API must run on the same machine and reach the
+helper through loopback.
+
+Install [Bun](https://bun.com/docs/installation) and [Google Chrome](https://www.google.com/chrome/)
+in its standard location, then install dependencies from the checkout root:
+
+```sh
+bun install --frozen-lockfile
+bun install --cwd agent-computer --frozen-lockfile
+```
+
+Use the same existing `COMPUTER_TOKEN` for the API and helper. It can be set in the checkout's `.env`
+(Bun loads it) or supplied securely in each process environment; the helper never prints it. Set the
+following API configuration and clear both supervisor selectors, including any inherited process
+environment values, because either selector takes precedence over the shared URL:
+
+```dotenv
+AGENT_COMPUTER_URL=http://127.0.0.1:4101
+COMPUTER_SUPERVISOR_URL=
+COMPUTER_SANDBOX_NAMESPACE=
+```
+
+In the helper's environment, leave `COMPUTER_BROWSER_BACKEND` and `COMPUTER_BROWSER_MODE` unset, or
+set them to `local-chrome` and `headed`. An inherited `managed` or `headless` setting is an error.
+Leave `PORT` unset for 4101, or explicitly choose another port and update the API URL to match. Start:
+
+```sh
+bun scripts/start-local-chrome-computer.ts
+```
+
+Restart the API with the configuration above. Open a Bot's computer and navigate to a website; its
+dedicated Chrome window starts on first use. Use **Take control** in the app before interacting and
+**Hand back** when finished. Closing a viewer does not close the Bot's browser or erase its logins.
+The helper exits with an error for a missing token, missing Chrome, or occupied port instead of
+silently selecting another browser or port. Ctrl-C shuts down its computer process and browsers.
+
+The helper ignores inherited `PROFILES_DIR` and `WORKSPACE_DIR`. Its defaults are:
+
+- macOS: `~/Library/Application Support/OpenBot/local-computer`
+- Windows: `%LOCALAPPDATA%\OpenBot\local-computer`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/openbot/local-computer`
+
+Set `OPENBOT_LOCAL_COMPUTER_DIR` to an absolute, dedicated app-owned directory to change that root.
+Do not point it at your personal Chrome data. Each Bot uses a separate persistent subdirectory under
+`profiles/`; no existing Chrome session is attached, and no TCP debugging endpoint is exposed.
+Native Chrome retains its process sandbox and OS credential store. File tools remain confined to
+the helper's `workspace/`, and shell execution is refused: use OpenBot's separately approved host
+access tools for host commands. Native Chrome runs with your OS account's network access; this mode
+is not a container or an OS network sandbox. Keep the API's private-host browsing opt-in off unless
+you intentionally need it for your local deployment.
+
+To switch back, stop the helper, restore your prior `AGENT_COMPUTER_URL` and supervisor/sandbox
+selectors, and restart the API. Unset `COMPUTER_BROWSER_BACKEND` (or set `managed`) on the managed
+computer process; choose `headless` or `headed` as before. Local Chrome profiles remain in the local
+data root, separate from managed computer volumes.
 
 `agent-computer` also reads:
 
