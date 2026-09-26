@@ -6,43 +6,24 @@ import {
 import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
-import { DICTATION_HTTP_IDLE_SECONDS } from "../../shared/dictation";
-import { workOwner } from "../../shared/work-owner";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
 import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
 import { createHandoffDelivery } from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
-import { signHandoffDeliveryRun } from "./agents/handoff-signing";
 import { handoffTool } from "./agents/handoff-tool";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
-import { clearLearningRevisionFallback } from "./learning/runtime";
-import { createLearningSettingsStore } from "./learning/settings";
-import {
-  type AuditInitiator,
-  createAuditReader,
-  createAuditStore,
-  DEPLOYMENT_INITIATOR,
-  PERSON_INITIATOR,
-  recordAuditEvent,
-} from "./audit";
+import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
-import type { AuthService } from "./auth/guards";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
-import { createOrganizationAuth } from "./auth/organization";
-import { organizationUserStore } from "./auth/organization-store";
 import type { OpenBotRole } from "./auth/roles";
-import {
-  loadAttachmentForTurn,
-  markAttachmentsSent,
-} from "./channels/attachments";
 import {
   createChannelEventHub,
   startChannelActivityListener,
@@ -50,15 +31,7 @@ import {
 import { createChannelStore } from "./channels/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
-import {
-  forgetSettledSummaries,
-  offerChannelsAwaitingSummary,
-  summariseClaimedChannels,
-} from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
-import { createChannelTitler } from "./channels/titler";
-import { createVoiceSessionStore } from "./voice/sessions";
-import { createVoiceSummarizer } from "./voice/summary";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -78,9 +51,7 @@ import {
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
-  normalizeModelBaseUrls,
   resolveRuntimeAgents,
-  runtimeModelForEnvironment,
   type ToolSelection,
 } from "./copilot";
 import {
@@ -90,19 +61,13 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { intelligenceChannelMappings } from "./db/schema";
-import { createHostAccessBroker } from "./host-access/broker";
-import { hostAccessTools } from "./host-access/tools";
-import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
-import { createProviderOAuthProxy } from "./provider-oauth";
 import { useRoutineTools } from "./plugins/builtin-routines";
-import { useComposioClient } from "./plugins/composio";
-import { createComposioClient } from "./plugins/composio-adapter";
-import { backfillComposioLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
-import { grantedSkills, grantedTools, REFUSAL_MARKER } from "./plugins/tools";
+import { createCompanionStore } from "./companion/store";
+import { grantedSkills, grantedTools } from "./plugins/tools";
 import { createTurnRunner } from "./routines/run-turn";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
@@ -113,8 +78,6 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
-import { createUserInstructionsStore } from "./user-instructions";
-import { createUserPreferencesStore } from "./user-preferences";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
@@ -142,9 +105,7 @@ async function resolveRequestActor(request: Request): Promise<{
   if (!user) {
     throw new Error("A CopilotKit run requires a signed-in user.");
   }
-  const roles = user.role
-    ? [user.role]
-    : await roleRepository.rolesForUser(user.id);
+  const roles = await roleRepository.rolesForUser(user.id);
   if (!roles.includes("admin") && !roles.includes("user")) {
     throw new Error("A CopilotKit run requires an authorized user.");
   }
@@ -183,14 +144,10 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
-// The environment seeds local policy once. The SDK fallback must not reapply an old revision
-// after an administrator clears a pin to follow the latest published Skills.
-clearLearningRevisionFallback();
 // Read with the rest of the configuration, where an empty variable is an absent one. See
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
-const learningSettings = createLearningSettingsStore(database, config.learning);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
@@ -263,19 +220,14 @@ const identityProviderStore = createIdentityProviderStore(database);
  * store that receives those rows has to exist before anything can sign in.
  */
 const signInAuditStore = createAuditStore(database);
-const auth: AuthService | undefined = config.organizationAuthUrl
-  ? createOrganizationAuth({
-      authorityUrl: config.organizationAuthUrl,
-      materializeUser: organizationUserStore(database),
-    })
-  : config.auth
-    ? createAuth(
-        config,
-        database,
-        (email) => peopleStore.isRevoked(email),
-        signInAuditStore,
-      )
-    : undefined;
+const auth = config.auth
+  ? createAuth(
+      config,
+      database,
+      (email) => peopleStore.isRevoked(email),
+      signInAuditStore,
+    )
+  : undefined;
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
@@ -349,28 +301,6 @@ const computerGateway = computerProvider
  */
 const sandboxedStore = createSandboxedStore(database, bootAuditStore);
 
-/**
- * Composio, built ONCE: the client the transport calls through and the broker behind the app
- * directory are the same client, and the store below and the routes further down share it.
- *
- * ONE CLIENT, TWO SEAMS, INSTALLED TWO DIFFERENT WAYS, because the two are reached two different
- * ways. The transport is reached as a MODULE — `transportFor` maps a kind to one, exactly as the
- * builtin routines transport above is reached — so there is no constructor to hand a client to and
- * the registry is built at IMPORT TIME, long before there is configuration to read. That is why the
- * actions seam is installed globally, from here, the one place that has the key. The broker has no
- * such problem: it is an ordinary argument, passed to the store and to `createApp`.
- *
- * A DEPLOYMENT WITH NO KEY INSTALLS NEITHER, which is the state the transport is written for rather
- * than an edge of it. The seam stays null and every Composio listing and call refuses saying the
- * connector is not configured here; the store gets no broker and the app directory says the same.
- * Installing a client built from an absent key would turn all of that into a vendor error at first
- * use, which sends an operator looking for a broken Composio instead of at their own configuration.
- */
-const composio = config.composioApiKey
-  ? createComposioClient(config.composioApiKey)
-  : null;
-if (composio) useComposioClient(composio.actions);
-
 const pluginStore = createPluginStore({
   database,
   auditStore: bootAuditStore,
@@ -386,24 +316,7 @@ const pluginStore = createPluginStore({
    * registering.
    */
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
-  /*
-   * The same client the transport seam above was installed with, never a second one. Enabling an
-   * app writes the row here and creates the auth config at the vendor, and a store holding a
-   * different client from the one the call goes out through is two deployments' worth of state
-   * behind one screen. Undefined without a key, which leaves enabling an app refused rather than
-   * attempted.
-   */
-  broker: composio?.broker,
 });
-
-// Logo metadata is optional; a vendor outage must not prevent the API from starting.
-if (composio) {
-  void backfillComposioLogos(database, composio.broker).catch(() => {
-    console.warn(
-      "Composio app logos could not be updated. Existing icons remain available; missing logos will be retried on the next restart.",
-    );
-  });
-}
 
 /**
  * Routines, and the one moment its tools are told what to act on.
@@ -455,7 +368,6 @@ const handoffDesk = createHandoffDesk({
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.policy_loaded",
   targetType: "policy",
-  initiator: DEPLOYMENT_INITIATOR,
   payload: {
     ...policyStore.get(),
     source:
@@ -482,7 +394,6 @@ const isolation = describeComputerIsolation(computerProvider);
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
-  initiator: DEPLOYMENT_INITIATOR,
   payload: {
     isolation: isolation.isolation,
     note: isolation.note,
@@ -539,17 +450,14 @@ const stallGuard = createStallGuard({
   auditStore: bootAuditStore,
 });
 
-normalizeModelBaseUrls();
-const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
-
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
-    model: runtimeModel,
+    model: tenantPackage.model,
     resolveApiKey: () =>
       resolveModelApiKey({
         encryptionKey: config.keyEncryptionKey,
         reader: credentialStore,
-        provider: runtimeModel.provider,
+        provider: tenantPackage.model.provider,
         keyId: tenantPackage.model.credentialSecretRef,
         environment: process.env,
       }),
@@ -563,12 +471,12 @@ const intentRouter = createIntentRouter({
  * on every call, so a credential rotated a moment ago is used by the next run.
  */
 const chooseSkills = createModelCompleter({
-  model: runtimeModel,
+  model: tenantPackage.model,
   resolveApiKey: () =>
     resolveModelApiKey({
       encryptionKey: config.keyEncryptionKey,
       reader: credentialStore,
-      provider: runtimeModel.provider,
+      provider: tenantPackage.model.provider,
       keyId: tenantPackage.model.credentialSecretRef,
       environment: process.env,
     }),
@@ -590,99 +498,15 @@ const resolveRuntimeModelApiKey = () =>
   resolveModelApiKey({
     encryptionKey: config.keyEncryptionKey,
     reader: credentialStore,
-    provider: runtimeModel.provider,
+    provider: tenantPackage.model.provider,
     keyId: tenantPackage.model.credentialSecretRef,
     environment: process.env,
   });
 
-const hostAccessBroker = createHostAccessBroker();
-
-// Tools run here, not in the browser. Each connector still executes through the plugin store, so the
-// grant, the policy and the audit row are exactly where they were. Host-folder tools are also
-// server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
-// receives only opaque grant ids and relative paths.
-const loadToolsForActor =
-  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
-  async (botId: string) => [
-    ...(await grantedTools({ store: pluginStore, botId, actorId, initiator })),
-    ...hostAccessTools({
-      broker: hostAccessBroker,
-      botId,
-      actorId,
-      auditStore: bootAuditStore,
-      initiator,
-    }),
-  ];
-
-/** One person's standing instructions, for both the /api/settings routes and every run they start. */
-const userInstructionsStore = createUserInstructionsStore(database);
-
-/*
- * What this person has told every built-in coworker they run.
- *
- * Per actor and read per build, for the reason every other per-person fact here is: somebody who
- * edits their instructions and sends a message expects the message to land on the new ones, and a
- * value captured at boot would serve the whole deployment whatever the first person to sign in had
- * written.
- */
-const loadInstructionsForActor = (actorId: string) => () =>
-  userInstructionsStore.read(actorId);
-
-/*
- * The file behind an attachment reference, read when a turn turns out to name one.
- *
- * Read per turn rather than held, for the reason the bytes are in the database at all: a message
- * carries a `/api/attachments/<id>` URL, and a model provider is not going to go and fetch it. The
- * row is fetched here and the bytes go up inline, so the Bot sees the file the person attached
- * instead of a link it cannot follow.
- *
- * Built per actor and passed to both turn paths — the request path through `mountCopilotRuntime` and
- * a routine's turn through `buildAgentFor` — so a routine firing at three in the morning inlines
- * exactly as a person's chat turn does, on exactly the same footing.
- *
- * NARROWED BY ACTOR AND BY CONVERSATION, and not silent. The reference reaches the loader out of
- * browser-supplied message content, so a turn can name an attachment in a channel the asker was
- * never in — or in one they ARE in but which is not the channel this turn is running in.
- * `loadAttachmentForTurn` answers both with the same membership join the fetch route uses plus the
- * run's own thread, and null when there is no row this person may see here.
- * `resolveAttachmentParts` fails the turn on that null rather than letting a Bot read a file back
- * to somebody who cannot open it.
- *
- * The thread is the CLOSURE'S ARGUMENT rather than something baked in beside the actor, because one
- * of these is built per actor per request and then used for however many runs that request makes;
- * a thread captured here would be the first run's, silently, for all of them.
- *
- * A PURE READ. `attachedAt` is written by the send rather than by anything here; see
- * `markAttachmentsSentForActor` below.
- */
-const loadAttachmentForActor =
-  (actorId: string) => (id: string, threadId: string) =>
-    loadAttachmentForTurn(database, { actorId, threadId }, id);
-
-/**
- * That the files on a message went out in it, recorded when a turn turns out to be a send.
- *
- * Bound per actor and handed to the same two turn paths as the reader above, so a routine's send at
- * three in the morning is recorded exactly as a person's chat turn is. `inlineAttachments`
- * (copilot.ts) calls it with the ids on the message being asked about and no others: history is
- * replayed on every turn and by whoever is running it, so nothing behind that message is evidence
- * of a send.
- *
- * NARROWED BY ACTOR, and more strictly than the reader is. Reading is scoped to channel
- * membership, because members are meant to see each other's sent files; recording a send is scoped
- * to the UPLOADER, because `attachedAt` is what the sweeper, the upload cap and the withdrawal
- * route all read as "this file rode in a message somebody sent" — and a member who could write it
- * on a colleague's staged row would freeze that colleague's own withdrawal at 409 and leave the row
- * unsweepable. See `markAttachmentsSent` in channels/attachments.ts.
- *
- * AND NARROWED BY CONVERSATION, taking the thread as an argument for the reason the reader does.
- * A stamp written against a channel that never saw the file freezes the row the same way, and is
- * reached without any colleague being involved: one person, two channels of their own, a file
- * named from the wrong one.
- */
-const markAttachmentsSentForActor =
-  (actorId: string) => (ids: readonly string[], threadId: string) =>
-    markAttachmentsSent(database, { actorId, threadId }, ids);
+// Tools run here, not in the browser. Each one still executes through the plugin store, so the
+// grant, the policy and the audit row are exactly where they were.
+const loadToolsForActor = (actorId: string) => (botId: string) =>
+  grantedTools({ store: pluginStore, botId, actorId });
 
 /*
  * What the deployment tells a remote Bot about the run it is starting.
@@ -693,10 +517,9 @@ const markAttachmentsSentForActor =
  * neither is read out of the request body any more.
  */
 const signRunForActor =
-  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
-  (botId: string, runId: string, threadId?: string) =>
+  (actorId: string) => (botId: string, runId: string, threadId?: string) =>
     mintRunAssertion(
-      { botId, actorId, runId, threadId, initiator },
+      { botId, actorId, runId, threadId },
       config.keyEncryptionKey,
     );
 
@@ -708,11 +531,16 @@ const signRunForActor =
  * Google's sign-in page and asked a person to sign in to an account the deployment had already
  * connected. Naming them lets it say which one it has not been granted instead.
  *
- * Read per request rather than held, because a connector added a minute ago has to count.
- * Let failures reach buildAgents, which reports the missing guidance once and keeps the run usable.
+ * Read per request rather than held, because a connector added a minute ago has to count, and
+ * failing is the same as having none: a Bot that cannot be told loses a sentence, not a run.
  */
-const loadVendors = async () =>
-  (await pluginStore.listServers()).map((server) => server.id);
+const loadVendors = async () => {
+  try {
+    return (await pluginStore.listServers()).map((server) => server.id);
+  } catch {
+    return [];
+  }
+};
 
 /*
  * How a run's tools are narrowed to the ones it is about.
@@ -813,20 +641,18 @@ const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
 const buildAgentFor = async ({
   ownerUserId,
   agentId,
-  initiator,
 }: {
   ownerUserId: string;
   agentId: string;
-  initiator: AuditInitiator;
 }) => {
   const actor = await actorFor(ownerUserId);
   const agents = await resolveRuntimeAgents(
     () => loadAgentsForActor(actor),
-    runtimeModel,
+    tenantPackage.model,
     resolveRuntimeModelApiKey,
     stallGuard,
-    loadToolsForActor(actor.id, initiator),
-    signRunForActor(actor.id, initiator),
+    loadToolsForActor(actor.id),
+    signRunForActor(actor.id),
     config.computer ? COMPUTER_GUIDANCE : undefined,
     loadVendors,
     selectionForActor(actor.id),
@@ -836,18 +662,6 @@ const buildAgentFor = async ({
     // full so a Bot this owner cannot see is still absent, but the other Bots are neither built nor
     // asked what they hold.
     agentId,
-    // The owner's own standing instructions. A routine is their work done while they are asleep, so
-    // it is written the way they asked for it to be written, exactly as their chat turn would be.
-    loadInstructionsForActor(actor.id),
-    initiator,
-    // The same reader the request path gets, bound to the owner the routine runs as, so a file
-    // attached in a channel reads the same way on a routine's turn as it does on the person's own —
-    // and is refused the same way when the owner is not in that channel.
-    loadAttachmentForActor(actor.id),
-    // And the same recorder, so the files on a routine's own message stop counting as staged the
-    // moment it sends them, exactly as a person's do.
-    markAttachmentsSentForActor(actor.id),
-    copilotRuntime.learning?.acquire,
   );
   const agent = agents[agentId];
   if (!agent) {
@@ -882,13 +696,11 @@ const buildAgentFor = async ({
  * connection, but its `threads` map is per instance, and a runner per turn would fragment the
  * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
  */
-const routineIntelligence = observeIntelligenceAuthentication(
-  new CopilotKitIntelligence({
-    apiUrl: config.runtime.intelligence.apiUrl,
-    wsUrl: config.runtime.intelligence.gatewayWsUrl,
-    apiKey: config.runtime.intelligence.apiKey,
-  }),
-);
+const routineIntelligence = new CopilotKitIntelligence({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  wsUrl: config.runtime.intelligence.gatewayWsUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
 const routineAgentRunner = new IntelligenceAgentRunner({
   url: routineIntelligence.ɵgetRunnerWsUrl(),
   authToken: routineIntelligence.ɵgetRunnerAuthToken(),
@@ -901,9 +713,6 @@ const routineRunner = createRoutineRunner({
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     buildAgentFor,
-    learningContainerForThread: (input) =>
-      copilotRuntime.learning?.containerForThread(input) ??
-      Promise.resolve(undefined),
   }),
 });
 
@@ -918,7 +727,7 @@ const routineRunner = createRoutineRunner({
  */
 const copilotRuntime = mountCopilotRuntime(
   config,
-  runtimeModel,
+  tenantPackage.model,
   loadAgentsForActor,
   resolveRuntimeModelApiKey,
   identifyUser,
@@ -951,9 +760,6 @@ const copilotRuntime = mountCopilotRuntime(
       runId: input.runId,
       threadId: input.threadId,
       depth: from?.depth ?? 0,
-      // Read from the assertion for the reason `depth` is: the run is rebuilt from parts here, and
-      // a field left out of this object is a field the desk and the escalation never see.
-      initiator: from?.initiator ?? PERSON_INITIATOR,
     };
     /*
      * The caps are checked BEFORE the grants query, not inside the tool that would discard it.
@@ -1013,15 +819,6 @@ const copilotRuntime = mountCopilotRuntime(
   (input) => {
     void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
   },
-  // What this person has told every coworker of theirs, in every channel. See user-instructions.ts.
-  loadInstructionsForActor,
-  // The files on a message, put in front of the model rather than left as links it cannot follow —
-  // and only the ones the person whose run this is could open themselves.
-  loadAttachmentForActor,
-  // And that those files went out in a send, written by the person who sent them and only for rows
-  // they uploaded. See markAttachmentsSentForActor.
-  markAttachmentsSentForActor,
-  learningSettings,
 );
 
 /**
@@ -1053,31 +850,37 @@ let workOfferedListener: WorkOfferedListener | undefined;
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
-    owner: workOwner("handoff"),
+    owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
     auditStore: bootAuditStore,
     /*
      * The signed statement of the run the addressed Bot is about to start, carrying how deep the
      * chain has gone. Minted here, where the key lives, and one deeper than the run that asked.
      */
-    sign: (work) => signHandoffDeliveryRun(work, config.keyEncryptionKey),
+    sign: (work) =>
+      mintRunAssertion(
+        {
+          botId: work.toBotId,
+          actorId: work.actorId,
+          runId: randomUUID(),
+          threadId: work.threadId,
+          depth: work.depth,
+        },
+        config.keyEncryptionKey,
+      ),
     delivery: createHandoffDelivery({
       /*
        * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a
        * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
        * agreed to, and the person was told it never answered.
        */
-      agentFor: async ({ actorId, botId, fromBotId }) => {
+      agentFor: async ({ actorId, botId }) => {
         const actor = await actorFor(actorId).catch(() => null);
         if (!actor) {
           throw new Error(
             "who this is for could not be confirmed, so the Bot was not run",
           );
         }
-        return copilotRuntime.agentFor({
-          actor,
-          botId,
-          initiator: { kind: "handoff", id: fromBotId },
-        });
+        return copilotRuntime.agentFor({ actor, botId });
       },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
@@ -1194,7 +997,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
  */
 const reaper = createHandoffRunner({
   queue: createWorkQueue(database),
-  owner: workOwner("reaper"),
+  owner: `reaper/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
   sign: () => "",
   auditStore: bootAuditStore,
   // Never called: `reap` deletes rows by age and claims nothing.
@@ -1220,41 +1023,6 @@ repeatAfterEach(
   },
   60 * 60 * 1_000,
 );
-
-/*
- * Naming conversations, in the API process rather than `worker/`, which the single-image container
- * does not run. Its own loop, so a slow model never delays a hop.
- */
-const channelSummaries = {
-  database,
-  queue: createWorkQueue(database),
-  transcript: routineIntelligence,
-  title: createChannelTitler({
-    model: runtimeModel.defaultModel,
-    resolveApiKey: resolveRuntimeModelApiKey,
-  }),
-  owner: workOwner("summariser"),
-};
-repeatAfterEach(async () => {
-  try {
-    await offerChannelsAwaitingSummary(channelSummaries);
-    const report = await summariseClaimedChannels(channelSummaries);
-    if (report.written.length > 0) {
-      console.info(
-        JSON.stringify({ type: "channel-summaries", written: report.written }),
-      );
-    }
-    // Same pass: one statement, deletes by age, and two replicas running it changes nothing.
-    await forgetSettledSummaries(channelSummaries);
-  } catch (error) {
-    // Never fatal, and never loud enough to drown the log: a deployment with no model configured
-    // reaches this on every pass, and it has not gone wrong, it simply has no titles.
-    console.warn(
-      "[channels] conversations could not be named:",
-      error instanceof Error ? error.message : error,
-    );
-  }
-}, 10_000);
 
 const app = createApp(
   config,
@@ -1283,6 +1051,8 @@ const app = createApp(
   // MCP servers and packaged skills. Judged by the same policy the computer actions are, read
   // fresh on every call for the same reason: a rule added a moment ago applies to the next call.
   pluginStore,
+  // Phone-companion pairing and bindings, so a paired phone can read a Bot's activity.
+  createCompanionStore(database),
   // Components authored in the browser. Their governance is the component store's; this owns only
   // the source, which is the part a rebuild would otherwise have owned.
   sandboxedStore,
@@ -1303,55 +1073,6 @@ const app = createApp(
   routineStore,
   // Where each person is in first-run onboarding, read by /api/me and written by the wizard.
   createOnboardingStore(database),
-  // The same store every run reads through `loadInstructionsForActor`, so the screen a person edits
-  // and the prompt their coworker is built from can never be two different pieces of text.
-  userInstructionsStore,
-  // The same database every other store here is built from, so a channel's staged and sent files
-  // live behind the same connection as the messages that reference them.
-  database,
-  // Native host-folder sessions are session-only: grants disappear with this server process and the
-  // desktop worker must authenticate with a fresh token for this run.
-  hostAccessBroker,
-  process.env.OPENBOT_DESKTOP_HOST_TOKEN,
-  async ({ name, args, botId, actorId, initiator }) => {
-    if (!name.startsWith("host_")) return null;
-    const tool = hostAccessTools({
-      broker: hostAccessBroker,
-      botId,
-      actorId,
-      auditStore: bootAuditStore,
-      ...(initiator ? { initiator } : {}),
-    }).find((candidate) => candidate.name === name);
-    if (!tool) {
-      return {
-        text: `${REFUSAL_MARKER} That host tool is not available for this Bot right now.`,
-        isError: true,
-      };
-    }
-    const text = await tool.execute(args);
-    return { text, isError: text.startsWith(REFUSAL_MARKER) };
-  },
-  // The app directory, behind the same client the plugin store and the transport already share.
-  // Absent without a key, which leaves the routes reporting no broker rather than listing apps
-  // nobody could connect.
-  composio ? { broker: composio.broker } : undefined,
-  process.env.OPENBOT_MODEL_OAUTH_FILE?.trim()
-    ? createProviderOAuthProxy(process.env.OPENBOT_MODEL_OAUTH_FILE.trim())
-    : undefined,
-  createUserPreferencesStore(database),
-  {
-    store: createVoiceSessionStore(database, channelStore),
-    summarize: createVoiceSummarizer({
-      model: runtimeModel,
-      resolveApiKey: resolveRuntimeModelApiKey,
-    }),
-    channels: channelStore,
-  },
-  {
-    store: learningSettings,
-    status: copilotRuntime.learning?.status,
-    inspect: copilotRuntime.learning?.inspect,
-  },
 );
 
 /**
@@ -1404,11 +1125,6 @@ serve<SocketData>({
   port,
   async fetch(request, server) {
     const url = new URL(request.url);
-    if (url.pathname === "/api/audio/transcriptions") {
-      server.timeout(request, DICTATION_HTTP_IDLE_SECONDS);
-    }
-    if (url.pathname === "/api/voice/calls") server.timeout(request, 30);
-    if (url.pathname === "/api/voice/sessions") server.timeout(request, 30);
     const streamBotId = streamPathBotId(url.pathname);
     if (
       streamBotId !== null &&
@@ -1528,4 +1244,4 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-console.info(`OpenBot server listening on http://127.0.0.1:${port}`);
+console.info(`OpenBot server listening on http://localhost:${port}`);
