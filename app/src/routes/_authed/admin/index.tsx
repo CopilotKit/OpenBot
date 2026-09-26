@@ -94,6 +94,13 @@ const SECTIONS: {
         linkOptions: { to: "/admin/skills" },
       },
       {
+        title: "Automatic Learning",
+        description:
+          "Learn from completed conversations and review proposed skills.",
+        icon: IconFileText,
+        linkOptions: { to: "/admin/learning" },
+      },
+      {
         title: "UI Components",
         description: "Custom pieces a Bot can draw in a conversation.",
         icon: IconLayoutGrid,

@@ -107,6 +107,7 @@ function harness(options: {
   abortGraceMs?: number;
   heartbeatMs?: number;
   lockTtlSeconds?: number;
+  learningContainerId?: string;
 }) {
   const order: string[] = [];
   const calls = {
@@ -202,6 +203,23 @@ function harness(options: {
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     runner: runner as any,
+    ...(options.learningContainerId
+      ? {
+          learningContainerForThread: async (input: {
+            threadId: string;
+            agentId: string;
+            userId: string;
+          }) => {
+            expect(input).toEqual({
+              threadId: THREAD_ID,
+              agentId: AGENT_ID,
+              userId: OWNER,
+            });
+            order.push("learning-assignment");
+            return options.learningContainerId;
+          },
+        }
+      : {}),
     buildAgentFor: async (input) => {
       builtFor.push(input);
       return agent;
@@ -898,5 +916,19 @@ describe("what the trail is told started the turn", () => {
       kind: "routine",
       id: ROUTINE_ID,
     });
+  });
+});
+
+test("a routine binds its Learning container before creating and locking the Thread", async () => {
+  const { run, order, calls } = harness({
+    learningContainerId: "routine-learning",
+  });
+  await run();
+  expect(order[0]).toBe("learning-assignment");
+  expect(calls.threads[0]).toMatchObject({
+    learningContainerId: "routine-learning",
+  });
+  expect(calls.acquired[0]).toMatchObject({
+    learningContainerId: "routine-learning",
   });
 });

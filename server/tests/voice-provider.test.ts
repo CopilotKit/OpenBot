@@ -219,3 +219,23 @@ test("Grok rejects malformed, expired, or reflected permanent credentials", asyn
     await expect(provider.connect(input)).rejects.toThrow("voice service");
   }
 });
+
+test("Learning-enabled voice sends substantive work through the selected channel agent", async () => {
+  const provider = createVoiceProvider(config, async (_url, init) => {
+    if (!(init.body instanceof FormData)) throw new Error("Expected multipart");
+    const value = init.body.get("session");
+    if (typeof value !== "string") throw new Error("Expected session JSON");
+    const session = JSON.parse(value);
+    expect(session.instructions).toContain("Delegate every substantive");
+    expect(session.instructions).toContain("published Skills");
+    expect(session.instructions).not.toContain("brainstorm directly");
+    expect(session.instructions).toContain("acknowledgments");
+    expect(session.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "ask_agent",
+    ]);
+    return new Response(offer, {
+      headers: { "content-type": "application/sdp" },
+    });
+  });
+  await provider.connect({ ...input, learningEnabled: true });
+});

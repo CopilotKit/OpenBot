@@ -119,6 +119,15 @@ The clone commands are:
   npx --yes copilotkit@latest login           # opens a browser
   npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
 
+Automatic Learning is optional. Do not require it during setup. Administrators can enable it at
+Admin → Automatic Learning, choose a default container, override or exclude individual Bots, and
+open Intelligence to review and publish proposed skills. Containers belong to the same project;
+changing a mapping applies to new threads and does not move or backfill old evidence. For an
+operator-provided initial default, set CPK_INTELLIGENCE_LEARNING_CONTAINER_ID on the API server;
+CPK_INTELLIGENCE_SKILLS_REVISION optionally pins a published revision. Saved Admin settings take
+precedence, including off. Keep the project key server-side and use the existing Intelligence UI
+for management (a runtime project key cannot authorize those writes). See docs/automatic-learning.md.
+
 There is no licence step. `copilotkit license` still exists for self-hosted Intelligence, and
 COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
