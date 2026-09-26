@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  cancelControl,
   type ControlState,
   readControl,
   releaseControl,
@@ -224,6 +225,10 @@ export function ComputerView({
   const [shot, setShot] = useState<Screenshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [streamProblem, setStreamProblem] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [controlProblem, setControlProblem] = useState<string | null>(null);
+  const [changingControl, setChangingControl] = useState(false);
   const [control, setControl] = useState<ControlState | null>(null);
   /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
   const [secret, setSecret] = useState("");
@@ -231,16 +236,51 @@ export function ComputerView({
   const [sendingSecret, setSendingSecret] = useState(false);
   const pageVisible = usePageVisible();
   const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
-  const driving = control?.holder === "human";
+  const driving = control?.holder === "human" && !control.transitioning;
   /** Read by the polling loop without restarting it on control changes. */
   const drivingRef = useRef(false);
   drivingRef.current = driving;
 
-  /** Release control; the Bot's waiting tool call resumes from this state change. */
-  const handBack = async () => {
-    const state = await releaseControl(computerId);
-    if (state) setControl(state);
+  const changeControl = async (action: "take" | "release" | "cancel") => {
+    if (changingControl) return;
+    const requestId = control?.request?.id;
+    if (action !== "take" && !requestId) {
+      setControlProblem(
+        "The handoff request could not be identified. Retry the connection.",
+      );
+      return;
+    }
+    setChangingControl(true);
+    setControlProblem(null);
+    try {
+      const state =
+        action === "take"
+          ? await takeControl(
+              computerId,
+              control?.requested ? requestId : undefined,
+            )
+          : requestId
+            ? action === "release"
+              ? await releaseControl(computerId, requestId)
+              : await cancelControl(computerId, requestId)
+            : null;
+      if (!state)
+        setControlProblem(
+          "Control could not be changed. Check the connection and retry.",
+        );
+      else {
+        setControl(state);
+        if (action === "take") setExpanded(true);
+      }
+    } catch {
+      setControlProblem(
+        "The computer could not be reached. Retry when it reconnects.",
+      );
+    } finally {
+      setChangingControl(false);
+    }
   };
+  const handBack = () => changeControl("release");
   /** Secret prompts keep the screen live even though the human does not hold the wheel. */
   const secretPending = Boolean(control?.secretWanted);
   const secretPendingRef = useRef(false);
@@ -377,9 +417,17 @@ export function ComputerView({
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
-      const state = await readControl(computerId);
+      const state = await readControl(computerId).catch(() => null);
       if (!live) return;
-      if (state) setControl(state);
+      setControl(state);
+      if (state)
+        setControlProblem((previous) =>
+          previous?.startsWith("Reconnecting:") ? null : previous,
+        );
+      if (!state)
+        setControlProblem(
+          "Reconnecting: browser ownership could not be checked. Input is paused.",
+        );
       timer = setTimeout(tick, 1000);
     };
     void tick();
@@ -520,11 +568,8 @@ export function ComputerView({
             </span>
             <button
               type="button"
-              onClick={async () => {
-                const state = await takeControl(computerId);
-                if (state) setControl(state);
-                setExpanded(true);
-              }}
+              disabled={changingControl || control.transitioning}
+              onClick={() => void changeControl("take")}
               className="shrink-0 rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground text-xs"
             >
               Take control
@@ -532,6 +577,34 @@ export function ComputerView({
           </div>
         ) : null}
 
+        {!settled && control?.requested ? (
+          <div className="px-3 pb-2 text-sm">
+            <button
+              type="button"
+              className="underline"
+              disabled={changingControl}
+              onClick={() => void changeControl("cancel")}
+            >
+              Cancel request
+            </button>
+          </div>
+        ) : null}
+        {!settled && control?.transitioning ? (
+          <p className="px-3 py-2 text-sm">
+            Finishing the assistant's current action before giving you control…
+          </p>
+        ) : null}
+        {!settled && control?.request?.status === "interrupted" ? (
+          <p className="px-3 py-2 text-sm">
+            The browser was interrupted. {control.request.interruption} Open the
+            screen and take control again to check it.
+          </p>
+        ) : null}
+        {!settled && controlProblem ? (
+          <p role="alert" className="px-3 py-2 text-sm text-destructive">
+            {controlProblem}
+          </p>
+        ) : null}
         {/*
           Secret values go directly to the page path and are never included in the conversation.
           Audit records that a secret was supplied, not the value.
@@ -649,7 +722,8 @@ export function ComputerView({
                       <LiveScreen
                         computerId={computerId}
                         driving={driving}
-                        onProblem={setProblem}
+                        onProblem={setStreamProblem}
+                        retryKey={retryKey}
                       />
                       {/*
                         A live screen that ends reports why through `onProblem`, and this is the
@@ -657,9 +731,19 @@ export function ComputerView({
                         landed in `problem`, which only the sibling `NothingToSee` reads, so the
                         screen ended with the stale last frame frozen on the canvas and nothing said.
                       */}
-                      {problem ? (
-                        <div className="absolute inset-0 flex items-center justify-center bg-background/85 p-4 text-center text-sm text-muted-foreground">
-                          <span>{problem}</span>
+                      {streamProblem ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-sm text-muted-foreground">
+                          <span>{streamProblem}</span>
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => {
+                              setStreamProblem(null);
+                              setRetryKey((value) => value + 1);
+                            }}
+                          >
+                            Retry
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -680,6 +764,19 @@ export function ComputerView({
                   offering control of whatever the Bot has open now. Those sentences are about the
                   present and this view is a record; a record does not get a steering wheel.
                 */}
+                {controlProblem ? (
+                  <p
+                    role="alert"
+                    className="mt-3 text-center text-sm text-destructive"
+                  >
+                    {controlProblem}
+                  </p>
+                ) : null}
+                {control?.transitioning ? (
+                  <p className="mt-3 text-center text-sm">
+                    Finishing the current action before giving you control…
+                  </p>
+                ) : null}
                 {settled ? null : (
                   <div className="mt-4 flex items-center justify-center gap-4">
                     <span className="flex min-w-0 items-center gap-2 text-sm">
@@ -709,6 +806,7 @@ export function ComputerView({
                     {driving ? (
                       <button
                         type="button"
+                        disabled={changingControl}
                         onClick={() => void handBack()}
                         className="shrink-0 rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground text-sm"
                       >
@@ -717,10 +815,10 @@ export function ComputerView({
                     ) : (
                       <button
                         type="button"
-                        onClick={async () => {
-                          const state = await takeControl(computerId);
-                          if (state) setControl(state);
-                        }}
+                        disabled={
+                          changingControl || !control || control.transitioning
+                        }
+                        onClick={() => void changeControl("take")}
                         className="shrink-0 rounded-md border px-3 py-1.5 font-medium text-sm"
                       >
                         Take control

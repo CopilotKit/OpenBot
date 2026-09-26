@@ -7,29 +7,35 @@ import { tryClient } from "@/lib/client";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { type ControlState, readControl } from "@/lib/computers/control";
 import { useActiveBotHolder } from "./active-bot";
-import { reportComputerActivity } from "./computer-activity";
+import { callComputer, type ToolOutcome } from "@/lib/computers/call";
+import {
+  runBrowserRead,
+  runHelpRequest,
+  runNavigation,
+} from "@/lib/computers/handoff";
 
 /**
  * Frontend registrations for computer tools, including inline rendering and policy-refusal display.
  */
 
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
-export type ToolOutcome = Record<string, unknown> & { ok: boolean };
+export { callComputer } from "@/lib/computers/call";
+export type { ToolOutcome } from "@/lib/computers/call";
 
 /**
- * Human-assistance wait window. Long enough for a user to return, finite so the run can unblock.
+ * Secret-entry wait window. Browser takeovers use server-authoritative request state instead.
  */
-const WAIT_FOR_PERSON_MS = 10 * 60_000;
+const WAIT_FOR_SECRET_MS = 10 * 60_000;
 
 /** How often the waiting handler asks whether the person has answered yet. */
 const WAIT_POLL_MS = 1_000;
 
-/** Hold the tool call open until the human control/secret prompt is answered, cancelled, or expires. */
-async function waitForPerson(
+/** Hold the secret-entry call open until its masked prompt is answered, cancelled, or expires. */
+async function waitForSecret(
   botId: string,
   done: (state: ControlState) => boolean,
   signal: AbortSignal | undefined,
-  giveUpAfterMs = WAIT_FOR_PERSON_MS,
+  giveUpAfterMs = WAIT_FOR_SECRET_MS,
 ): Promise<"answered" | "gave up" | "cancelled"> {
   const deadline = Date.now() + giveUpAfterMs;
   while (Date.now() < deadline) {
@@ -40,68 +46,6 @@ async function waitForPerson(
     await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
   }
   return "gave up";
-}
-
-/**
- * Exported for the test that covers what a Bot is told when a call is refused.
- *
- * The distinctions this draws from a status and a body decide the model's next step, and they are
- * drawn nowhere else, so they are worth pinning without standing up the tool registrations and the
- * runtime around them.
- */
-export async function callComputer(
-  botId: string,
-  path: string,
-  /*
-   * A body, not a `RequestInit`. The client serialises it, so a caller that stringified first would
-   * send a JSON string of a JSON string — which is what happened, briefly, when this moved over.
-   */
-  init?: { method?: string; body?: unknown },
-  signal?: AbortSignal,
-): Promise<ToolOutcome> {
-  // Announce before the call so the screen can open while the action is running.
-  reportComputerActivity(botId);
-  let response: Response;
-  try {
-    response = await tryClient(`/api/computers/${botId}${path}`, {
-      method: init?.method,
-      body: init?.body,
-      // Abort cancels the request and prevents later actions, but cannot undo browser work already executing.
-      signal,
-    });
-  } catch (error) {
-    // An abort is a stopped run, not a computer failure.
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return { ok: false, reason: "Stopped.", stopped: true };
-    }
-    return {
-      ok: false,
-      reason: "The assistant's computer could not be reached.",
-    };
-  }
-
-  const body = (await response.json().catch(() => null)) as Record<
-    string,
-    unknown
-  > | null;
-
-  if (!response.ok) {
-    return {
-      ok: false,
-      reason: (body?.error as string) ?? "That did not work.",
-      // Preserve refusal/stale-ref/control distinctions for the model's next step.
-      ...(response.status === 403
-        ? { refused: true, rule: body?.rule ?? null }
-        : {}),
-      ...(response.status === 409
-        ? body?.humanHasControl === true
-          ? { humanHasControl: true }
-          : { staleRefs: true }
-        : {}),
-    };
-  }
-
-  return { ok: true, ...(body ?? {}) };
 }
 
 /** What a computer tool's render can read back out of its own result. */
@@ -258,40 +202,9 @@ export function ComputerTools() {
       }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
     ) => {
       const computerId = bot.current;
-      const result = await callComputer(
-        computerId,
-        "/navigate",
-        {
-          method: "POST",
-          /*
-           * Which turn is asking, so the server can file the picture under it.
-           *
-           * The handler's context carries the tool call, which is worth saying because assuming it
-           * did not is how the frame ended up keyed on the page instead: two visits to one address
-           * then collided, and resolving that by letting the newer win made a past turn's picture
-           * change under the person reading it.
-           */
-          body: { url, ...(toolCall?.id ? { toolCallId: toolCall.id } : {}) },
-        },
-        signal,
-      );
-      /*
-       * This Bot has a page of its own now, so the pane may default to the screen.
-       *
-       * Until it does, the screen shows whatever the shared computer had open last, which may be
-       * another Bot's page from an hour ago. Captioning that as this Bot's screen is confidently
-       * wrong, and worse than showing nothing.
-       */
+      const result = await runNavigation(computerId, url, toolCall?.id, signal);
       if (result.ok) noteBrowsed(computerId);
-      return result.ok
-        ? {
-            ok: true,
-            title: result.title,
-            url: result.url,
-            text: result.text,
-            truncated: result.truncated,
-          }
-        : result;
+      return result;
     },
     render: ({ result, status, toolCallId }) => {
       /*
@@ -345,7 +258,13 @@ export function ComputerTools() {
       "Read the page currently open on your computer, without opening anything. Use this after you " +
       "click something that changes the page, such as submitting a form, to find out what it now says.",
     parameters: z.object({}),
-    handler: async () => callComputer(bot.current, "/read"),
+    handler: async (
+      _input: Record<string, never>,
+      {
+        signal,
+        toolCall,
+      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+    ) => runBrowserRead(bot.current, "/read", toolCall?.id, signal),
     render: () => null,
   });
 
@@ -357,8 +276,13 @@ export function ComputerTools() {
       "use the refs it returns. Always send back the snapshotId it gives you. If an action reports " +
       "that your refs are stale, the page changed: call this again and use the new refs.",
     parameters: z.object({}),
-    handler: async () =>
-      callComputer(bot.current, "/snapshot", { method: "POST" }),
+    handler: async (
+      _input: Record<string, never>,
+      {
+        signal,
+        toolCall,
+      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+    ) => runBrowserRead(bot.current, "/snapshot", toolCall?.id, signal),
     // Snapshot renders a count only; navigate owns the screen view.
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -553,7 +477,7 @@ export function ComputerTools() {
       if (!asked.ok) return asked;
 
       // Completion is `secretWanted` clearing; the value never returns to the model.
-      const outcome = await waitForPerson(
+      const outcome = await waitForSecret(
         botId,
         (state) => state.secretWanted === undefined,
         signal,
@@ -629,36 +553,11 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
-      const botId = bot.current;
-      const asked = await callComputer(
-        botId,
-        "/control/request",
-        {
-          method: "POST",
-          body: input,
-        },
+      {
         signal,
-      );
-      if (!asked.ok) return asked;
-
-      // Resolved when the wheel is back with the Bot and no help request remains outstanding.
-      const outcome = await waitForPerson(
-        botId,
-        (state) => state.holder === "bot" && !state.requested,
-        signal,
-      );
-      return {
-        ok: true,
-        result:
-          outcome === "answered"
-            ? "The person has finished and handed control back. Take a fresh snapshot: the page may have changed while they were driving."
-            : outcome === "cancelled"
-              ? "The request was cancelled."
-              : "Nobody took control. Say what you still need rather than trying to do it yourself.",
-      };
-    },
+        toolCall,
+      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
+    ) => runHelpRequest(bot.current, input.reason, toolCall?.id, signal),
     // Rendered by ComputerView as the take-the-wheel prompt.
     render: () => null,
   });
