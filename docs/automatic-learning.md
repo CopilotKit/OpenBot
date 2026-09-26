@@ -1,9 +1,9 @@
 # Automatic Learning
 
-Open **Admin → Automatic Learning** to choose which Bots contribute completed conversations to a CopilotKit Intelligence Learning container and receive its published skills. Learning is off until an administrator enables it or an operator supplies a default container. OpenBot still starts and chats without Learning configuration.
+Open **Admin → Automatic Learning** to choose which Bots contribute completed conversations to a CopilotKit Intelligence Learning container and receive its published skills. Learning defaults on for managed and self-hosted deployments; a saved off setting is preserved. Collection and delivery require an existing, assigned container. OpenBot still starts and chats without one.
 
 1. In the same Intelligence project used by OpenBot, create a Learning container. Its stable ID contains 1–64 lowercase letters, digits, and single hyphens (for example, `support-learning`).
-2. In OpenBot, enable Learning and enter the default container ID. Leave the default empty to opt in only particular Bots. Each Bot can inherit the default, use another container, or be excluded. Save the settings.
+2. In OpenBot, enter the default container ID and re-enable Learning if previously paused. Leave the default empty to opt in only particular Bots. Each Bot can inherit the default, use another container, or be excluded. Save the settings.
 3. Start **new threads** and complete relevant workflows. Chat, channels, scheduled routines, and handoffs use the same server-side settings. An existing thread keeps the first container assignment (including an unassigned first run); changing a Bot mapping does not move or backfill its earlier evidence.
 4. Use **Manage Learning in Intelligence**, **View analysis runs**, and **Review skill candidates** on the Learning page. Intelligence collects evidence, runs analysis, and proposes skills. Review the source evidence and publish approved revisions in Intelligence. Neither a scheduled analysis nor enabling Learning automatically approves a skill.
 5. Enable skill delivery for that container in Intelligence and start another Bot invocation. Published guidance is loaded into the Bot's governed run. An exact revision pin keeps a specific published revision; leaving it empty follows new publications after the refresh window. A loaded snapshot alone does not prove the model used a skill: inspect its skill tool calls too.
@@ -22,7 +22,7 @@ The admin page reports evidence and published-skill counts, analysis status, and
 
 ## Managed and self-hosted deployments
 
-For managed Intelligence, keep the existing managed API and gateway configuration. Configure the container in its associated project. For an Enterprise self-hosted Intelligence deployment, use its API and gateway endpoints and the same project's key. Install the Intelligence release and migrations that support Automatic Learning, the Inspector Learning endpoint (`GET /api/inspector/learning`), and published skill delivery before enabling the feature. Links come from that server's configured web-app origin, so self-hosted administration opens the correct UI.
+For managed Intelligence, keep the existing managed API and gateway configuration. Configure the container in its associated project. For an Enterprise self-hosted Intelligence deployment, use its API and gateway endpoints and the same project's key. Install the Intelligence release and migrations that support Automatic Learning, the Inspector Learning endpoint (`GET /api/inspector/learning`), and published skill delivery before assigning a container in OpenBot. Links come from that server's configured web-app origin, so self-hosted administration opens the correct UI.
 
 OpenBot's database migration adds `learning_settings` and `learning_thread_bindings`; run the normal deployment migrations. The settings are read from the database across replicas, and thread assignment is atomic.
 

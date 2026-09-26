@@ -1306,7 +1306,7 @@ export function loadConfig(
   };
 }
 
-/** No container means Learning is off, with no additional startup dependency. */
+/** Optional container default; the enabled preference alone does not collect or deliver. */
 function learningDefault(environment: Environment): LearningTarget | undefined {
   const containerId = optional(
     environment,

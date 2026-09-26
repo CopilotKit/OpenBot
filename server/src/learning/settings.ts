@@ -84,7 +84,7 @@ export function createLearningSettingsStore(
   configured?: LearningTarget,
 ): LearningSettingsStore {
   const fallback: LearningSettings = {
-    enabled: Boolean(configured),
+    enabled: true,
     defaultTarget: configured ?? null,
     agents: {},
   };

@@ -34,8 +34,18 @@ test("only administrators can read or write learning settings", async () => {
   expect((await app.request("/settings", { method: "PUT" })).status).toBe(403);
 });
 
+test("administrators see learning enabled before selecting a container", async () => {
+  const { app } = routes();
+  const response = await app.request("/settings");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    settings: { enabled: true, defaultTarget: null, agents: {} },
+  });
+});
+
 test("rejects cross-origin and non-JSON writes before changing settings", async () => {
   const { app, store } = routes();
+  const before = await store.read();
   for (const headers of [
     { "content-type": "application/json", origin: "https://evil.example" },
     { "content-type": "text/plain" },
@@ -54,7 +64,7 @@ test("rejects cross-origin and non-JSON writes before changing settings", async 
       ).status,
     ).toBe(403);
   }
-  expect((await store.read()).enabled).toBe(false);
+  expect(await store.read()).toEqual(before);
 });
 
 test("validates and persists a same-origin admin save", async () => {

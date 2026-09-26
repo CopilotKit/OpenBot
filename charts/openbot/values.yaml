@@ -160,7 +160,8 @@ config:
     apiUrl: ""
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
-  # Optional initial defaults; saved Admin → Automatic Learning settings take precedence.
+  # Learning defaults on; collection and delivery require an existing, assigned container.
+  # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""
     revision: ""

@@ -23,21 +23,49 @@ afterAll(async () => {
 });
 
 describe("durable Learning settings", () => {
-  test("saved settings override environment defaults across independent stores", async () => {
-    const first = createLearningSettingsStore(database, {
-      containerId: "environment-default",
+  test("a fresh database enables learning without a default container", async () => {
+    const store = createLearningSettingsStore(database);
+    expect(await store.read()).toEqual({
+      enabled: true,
+      defaultTarget: null,
+      agents: {},
     });
-    const second = createLearningSettingsStore(database, {
-      containerId: "other-environment",
-    });
-    const settings = {
-      enabled: false,
-      defaultTarget: { containerId: "support" },
-      agents: { excluded: null },
-    };
-    await first.write(settings);
-    expect(await second.read()).toEqual(settings);
   });
+
+  test.each([
+    [false, null],
+    [true, null],
+    [false, { containerId: "saved-default", revision: "saved-revision" }],
+  ] as const)(
+    "saved enabled=%j and target=%j override defaults across independent stores and restart",
+    async (enabled, defaultTarget) => {
+      const first = createLearningSettingsStore(database, {
+        containerId: "environment-default",
+      });
+      const second = createLearningSettingsStore(database, {
+        containerId: "other-environment",
+      });
+      const settings = {
+        enabled,
+        defaultTarget,
+        agents: {
+          bot: { containerId: "support", revision: "7" },
+          excluded: null,
+        },
+      };
+      await first.write(settings);
+      expect(await second.read()).toEqual(settings);
+      const restartedDatabase = createDatabase(testDatabaseUrl(), TEST_POOL);
+      try {
+        const restarted = createLearningSettingsStore(restartedDatabase, {
+          containerId: "restart-default",
+        });
+        expect(await restarted.read()).toEqual(settings);
+      } finally {
+        await restartedDatabase.$client.close();
+      }
+    },
+  );
 
   test("concurrent servers agree on one first assignment including exclusions", async () => {
     const first = createLearningSettingsStore(database);
