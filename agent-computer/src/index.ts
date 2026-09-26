@@ -25,6 +25,11 @@ import {
   TAKE_CONTROL_FIRST,
 } from "./control";
 import { identity } from "./identity";
+import {
+  assertPageAccess,
+  navigateWebPage,
+  type PagePurpose,
+} from "./navigation";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import {
   parseExecTimeout,
@@ -267,19 +272,14 @@ const DEFAULT_BOT_ID = (() => {
   return configured;
 })();
 
-async function currentPage(botId: string): Promise<Page> {
+async function currentPage(
+  botId: string,
+  purpose: PagePurpose = "read",
+): Promise<Page> {
   const session = sessions.for(botId);
   const page = await profiles.page(botId);
   sessions.observeBrowser(botId, page.context());
-  if (
-    RUNTIME.backend === "local-chrome" &&
-    page.url() !== "about:blank" &&
-    !/^https?:\/\//i.test(page.url())
-  ) {
-    throw new Error(
-      "Local Chrome computer tools can access only web pages. Use the approved host-access tools for local files.",
-    );
-  }
+  assertPageAccess(RUNTIME.backend, page.url(), purpose);
   // A ref names an element on the page it was taken from, so moving to a window the site opened has
   // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
@@ -930,12 +930,14 @@ serve<StreamData>({
 
         const startedAt = Date.now();
         try {
-          const target = await currentPage(botId);
+          const target = await currentPage(botId, "navigate");
           session.control.assertBotMayAct(true);
-          const response = await target.goto(parsed.url, {
-            waitUntil: "domcontentloaded",
-            timeout: NAVIGATION_TIMEOUT_MS,
-          });
+          const response = await navigateWebPage(
+            target,
+            parsed.url,
+            RUNTIME.backend,
+            NAVIGATION_TIMEOUT_MS,
+          );
           // A new document wipes every stamp, so every ref handed out before now is meaningless.
           // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
           // than fall through to a selector that matches nothing and read as a missing element.
