@@ -25,6 +25,7 @@ export function createVoiceRoutes(
   channels: Pick<ChannelStore, "get"> | undefined,
   profiles?: Pick<AgentProfileStore, "get">,
   sessions?: VoiceSessionServices,
+  learningForAgent?: (agentId: string) => Promise<boolean>,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   const active = new Set<string>();
@@ -164,6 +165,7 @@ export function createVoiceRoutes(
           agentName: profile.name,
           agentTitle: profile.title,
           agentRole: profile.roleDescription,
+          learningEnabled: (await learningForAgent?.(agentId)) ?? false,
           userId: context.var.actor.id,
           signal,
         });

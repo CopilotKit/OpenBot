@@ -3,16 +3,20 @@
  * for durable threads and memory. Configuration the product cannot function without belongs at the
  * boot boundary.
  */
+import {
+  isLearningContainerId,
+  type LearningTarget,
+} from "../../shared/learning";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 import {
-  transcriptionConfig,
   type TranscriptionConfig,
+  transcriptionConfig,
 } from "./dictation/config";
-import { voiceConfig, type VoiceConfig } from "./voice/config";
+import { type VoiceConfig, voiceConfig } from "./voice/config";
 
 export type RuntimeCapabilities = {
   mode: "intelligence";
@@ -160,6 +164,8 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /** Optional environment default. A saved Admin setting takes precedence. */
+  learning?: LearningTarget;
   /** Audio configuration is independent of agent model providers. */
   transcription?: TranscriptionConfig;
   voice?: VoiceConfig;
@@ -1272,6 +1278,7 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    learning: learningDefault(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
@@ -1297,4 +1304,19 @@ export function loadConfig(
       : {}),
     ...(workerSharedSecret ? { workerSharedSecret } : {}),
   };
+}
+
+/** No container means Learning is off, with no additional startup dependency. */
+function learningDefault(environment: Environment): LearningTarget | undefined {
+  const containerId = optional(
+    environment,
+    "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID",
+  );
+  if (!containerId) return undefined;
+  if (!isLearningContainerId(containerId))
+    throw new TypeError(
+      "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must use 1–64 lowercase letters, numbers, and single hyphens.",
+    );
+  const revision = optional(environment, "CPK_INTELLIGENCE_SKILLS_REVISION");
+  return { containerId, ...(revision ? { revision } : {}) };
 }

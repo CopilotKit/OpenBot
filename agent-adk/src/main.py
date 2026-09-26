@@ -15,6 +15,33 @@ from google.adk.models.lite_llm import LiteLlm
 TOKEN_HEADER = "x-openbot-agent-token"
 
 
+class CompleteToolCallsLiteLlm(LiteLlm):
+    """Keep tool args together at AG-UI's long-running tool boundary.
+
+    ADK 2.10 streams partial FunctionCalls before their args exist. AG-UI 0.7
+    treats the first long-running FunctionCall as complete and deduplicates the
+    final one, losing its arguments. Wait for the complete call, while allowing
+    ordinary text deltas to stream normally. No tool is executed here.
+    """
+
+    async def generate_content_async(self, llm_request, stream=False):
+        async for response in super().generate_content_async(llm_request, stream):
+            if response.partial and response.content and any(
+                part.function_call for part in response.content.parts or []
+            ):
+                remaining = [
+                    part for part in response.content.parts or []
+                    if not part.function_call
+                ]
+                if not remaining:
+                    continue
+                response = response.model_copy(update={
+                    "content": response.content.model_copy(update={"parts": remaining})
+                })
+            yield response
+
+
+
 def _model_id() -> str:
     """`provider/model`, which is how litellm addresses one.
 
@@ -55,7 +82,7 @@ add_adk_fastapi_endpoint(
         adk_agent=Agent(
             name="openbot",
             tools=[AGUIToolset()],
-            model=LiteLlm(model=_model_id()),
+            model=CompleteToolCallsLiteLlm(model=_model_id()),
             instruction="Answer the question you are asked, briefly and correctly.",
         ),
         app_name="openbot",

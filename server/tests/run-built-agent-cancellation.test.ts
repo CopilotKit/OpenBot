@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
-import { EventType, HttpAgent } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, RunAgentInput } from "@ag-ui/client";
+import { EventType, HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { z } from "zod";
@@ -323,14 +323,19 @@ test("Stop after the build still aborts the inner agent and its model HTTP conne
 test("an aborted pending run does not cancel its clone or the next run on the same wrapper", async () => {
   await using f = await fixture();
   const gate = deferred<string | null>();
+  const entered = deferred<void>();
   let selections = 0;
   const agent = await f.agent(async () => {
     selections++;
+    entered.resolve();
     return selections === 1 ? gate.promise : '{"skills":["read"]}';
   });
   const first = observe(agent);
   const clone = agent.clone();
   try {
+    // Learning acquisition may precede selection. Abort the build held by this fixture,
+    // rather than racing to stop before its first selector call has even begun.
+    await bounded(entered.promise, "selector entry");
     agent.abortRun();
     await bounded(first.settled);
     // Finish the next run before the cancelled build resolves.
@@ -349,6 +354,8 @@ test("an aborted pending run does not cancel its clone or the next run on the sa
     expect(first.completions()).toBe(1);
     expect(selections).toBe(3);
   } finally {
+    agent.abortRun();
+    clone.abortRun();
     gate.resolve(null);
     first.subscription.unsubscribe();
   }

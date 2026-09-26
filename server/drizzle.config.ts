@@ -25,6 +25,7 @@ export default defineConfig({
     "./src/db/schema/plugins.ts",
     "./src/db/schema/work.ts",
     "./src/db/schema/voice.ts",
+    "./src/db/schema/learning.ts",
   ],
   out: "./drizzle",
   dbCredentials: {
