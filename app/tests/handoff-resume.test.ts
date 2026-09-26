@@ -1,12 +1,22 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  type Mock,
+  spyOn,
+  test,
+} from "bun:test";
 import type { Message } from "@ag-ui/core";
 import {
   findPendingTool,
   resumeHandoffTask,
 } from "../src/lib/copilot/handoff-resume";
 
-const fetchSpy = spyOn(globalThis, "fetch");
-afterEach(() => fetchSpy.mockReset());
+let fetchSpy: Mock<typeof fetch>;
+beforeEach(() => {
+  fetchSpy = spyOn(globalThis, "fetch");
+});
+afterEach(() => fetchSpy.mockRestore());
 const pending = { requestId: "request-1", toolCallId: "tool-1" };
 const messages: Message[] = [
   {

@@ -1,4 +1,11 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  type Mock,
+  spyOn,
+  test,
+} from "bun:test";
 import type {
   ComputerControlState,
   HandoffStatus,
@@ -10,7 +17,10 @@ import {
 } from "../src/lib/computers/handoff";
 import { releaseControl, takeControl } from "../src/lib/computers/control";
 
-const fetchSpy = spyOn(globalThis, "fetch");
+let fetchSpy: Mock<typeof fetch>;
+beforeEach(() => {
+  fetchSpy = spyOn(globalThis, "fetch");
+});
 const requests: { path: string; body: unknown }[] = [];
 function state(status: HandoffStatus, id = "request-1"): ComputerControlState {
   return {
@@ -49,7 +59,7 @@ function serve(answer: (path: string, body: unknown) => unknown) {
 }
 afterEach(() => {
   requests.length = 0;
-  fetchSpy.mockReset();
+  fetchSpy.mockRestore();
 });
 
 test("exact request completion takes a fresh snapshot before returning", async () => {
