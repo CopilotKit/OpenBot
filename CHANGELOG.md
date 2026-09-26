@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Browser controls are visible in chat and the Computer sidebar
+
+Channel chats and standalone Bot chats now have a labeled Computer button and always-visible
+Take control or Hand back controls. The same ownership state is shown in the chat, live Computer
+sidebar, and full-size viewer. Standalone Bot chats can open the current live browser alongside
+the conversation without losing the selected Bot or chat history.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
