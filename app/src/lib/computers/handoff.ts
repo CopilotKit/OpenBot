@@ -244,7 +244,9 @@ export async function runNavigation(
   if (!challenge?.requestId) return result;
   rememberHandoff(botId, challenge.requestId, toolCallId);
   const resumed = await awaitHandoff(botId, challenge.requestId, signal);
-  return { ...result, ...resumed, challenge };
+  // Only the resumed snapshot describes the current page. The initial response belongs to
+  // the challenge page and may carry text/truncation fields absent from a snapshot.
+  return { ...resumed, challenge, challengeResolved: resumed.ok };
 }
 
 function challengeFrom(result: ToolOutcome): BrowserChallenge | undefined {
@@ -281,9 +283,6 @@ export async function runBrowserRead(
   const challenge = challengeFrom(result);
   if (!challenge) return result;
   rememberHandoff(botId, challenge.requestId, toolCallId);
-  return {
-    ...result,
-    ...(await awaitHandoff(botId, challenge.requestId, signal)),
-    challenge,
-  };
+  const resumed = await awaitHandoff(botId, challenge.requestId, signal);
+  return { ...resumed, challenge, challengeResolved: resumed.ok };
 }

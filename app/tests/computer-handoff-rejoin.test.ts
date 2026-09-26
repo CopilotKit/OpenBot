@@ -4,6 +4,7 @@ import {
   awaitHandoff,
   pendingHandoff,
   rememberHandoff,
+  runBrowserRead,
   runHelpRequest,
   runNavigation,
 } from "../src/lib/computers/handoff";
@@ -146,3 +147,53 @@ test("snapshot-required and request identity survive tool refusal shaping", asyn
     handoff: { id: "request-1" },
   });
 });
+
+test.each(["navigate", "read"] as const)(
+  "%s resumes with only current page data after the human changes the page",
+  async (operation) => {
+    const challenge = {
+      kind: "cloudflare",
+      reason: "Verify you are human",
+      requestId: "request-1",
+    };
+    serve((path) => {
+      if (path.endsWith(`/${operation}`))
+        return Response.json({
+          url: "https://site.test/challenge",
+          title: "Verification required",
+          text: "Verify you are human BEFORE clearance",
+          truncated: true,
+          challenge,
+        });
+      if (path.endsWith("/snapshot"))
+        return Response.json({
+          url: "https://site.test/account",
+          title: "Account",
+          snapshotId: 8,
+          elements: [
+            { ref: "e1", role: "heading", name: "Welcome AFTER clearance" },
+          ],
+        });
+      return state("request-1", "completed");
+    });
+    const result =
+      operation === "navigate"
+        ? await runNavigation("bot-1", "https://site.test/account", "tool-1")
+        : await runBrowserRead("bot-1", "/read", "tool-1");
+    expect(result).toMatchObject({
+      ok: true,
+      url: "https://site.test/account",
+      title: "Account",
+      snapshotId: 8,
+      elements: [
+        { ref: "e1", role: "heading", name: "Welcome AFTER clearance" },
+      ],
+      handoffStatus: "completed",
+      challenge,
+      challengeResolved: true,
+    });
+    expect(result.text).toBeUndefined();
+    expect(result.truncated).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("BEFORE clearance");
+  },
+);
