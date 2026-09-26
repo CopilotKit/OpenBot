@@ -129,15 +129,19 @@ export function readChosenSkills(
   skills: readonly SelectableSkill[],
 ): string[] | null {
   /*
-   * The first complete object with a skills list, not the answer as a whole.
+   * Every complete object with a skills list, not the answer as a whole.
    *
    * `response_format` asks for bare JSON and does not guarantee it: Anthropic's OpenAI-compatible
    * endpoint ignores the field, and a model left to itself often fences its object or leads with a
    * sentence. Parsed whole, every such answer read as a selector that could not say, and a Bot on
    * that model was offered its entire catalogue on every run. A greedy brace match also swallows
-   * two adjacent objects into invalid JSON. An answer with no usable object is still null.
+   * two adjacent objects into invalid JSON. Unioning their lists avoids dropping a skill when the
+   * model revises its selection. The router at `server/src/routing/classify.ts` still uses the
+   * greedy match; this scanner is local to skill selection. An answer with no usable object is null.
    */
   const known = new Set(skills.map((skill) => skill.slug));
+  const selected = new Set<string>();
+  let foundSkillsList = false;
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -167,20 +171,16 @@ export function readChosenSkills(
         if (typeof parsed !== "object" || parsed === null) continue;
         const chosen = (parsed as { skills?: unknown }).skills;
         if (!Array.isArray(chosen)) continue;
-        return [
-          ...new Set(
-            chosen.filter(
-              (slug): slug is string =>
-                typeof slug === "string" && known.has(slug),
-            ),
-          ),
-        ];
+        foundSkillsList = true;
+        for (const slug of chosen) {
+          if (typeof slug === "string" && known.has(slug)) selected.add(slug);
+        }
       } catch {
         // A brace pair in the surrounding prose is not necessarily JSON.
       }
     }
   }
-  return null;
+  return foundSkillsList ? [...selected] : null;
 }
 
 /**

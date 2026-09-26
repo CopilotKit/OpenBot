@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Skill selection keeps capabilities named across multiple JSON replies
+
+When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each
+complete `skills` list and offers the union of the named skills' granted tools. This also works with
+Anthropic's OpenAI-compatible endpoint, which may ignore the request for bare JSON. Previously a
+reply containing multiple objects fell back to offering every tool; replies with no valid `skills`
+list still do.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer
