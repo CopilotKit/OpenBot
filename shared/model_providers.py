@@ -17,6 +17,12 @@ The lookup here mirrors `botSettings` in `shared/model-providers.ts` line for li
 same blank-is-unset reading, same refusal for a Bot with no row — because the two loaders answering
 differently would put the languages of one box on different models, which is the drift this file
 exists to end.
+
+`PROVIDER_IDS` below is this module's copy of the list `shared/model-providers.ts` keeps for
+itself, and each loader checks the file against its own list in both directions at import: a row
+this module has never heard of, or a provider this module names that the file has no row for,
+stops these Bots at startup rather than at their first model call. Adding a provider is one row in
+the JSON file and one entry in each loader.
 """
 
 from __future__ import annotations
@@ -28,6 +34,13 @@ from pathlib import Path
 from typing import Any, Mapping
 
 _WHERE = "shared/model_providers.py"
+
+# The providers this deployment knows the names of. The same list `shared/model-providers.ts`
+# keeps for itself, written out here rather than read from the file: each loader checking the file
+# against its own list is what makes a provider added to the JSON alone stop these Bots too, where
+# before this list existed only the TypeScript Bots were stopped by it. Adding a provider is one
+# entry here, one in that module, and one row to the JSON file.
+PROVIDER_IDS: tuple[str, ...] = ("openai", "anthropic", "google")
 
 
 def _spec_path() -> Path:
@@ -60,17 +73,26 @@ def _load() -> dict[str, Any]:
         raise RuntimeError(f"shared/model-providers.json at {path} must hold an object.")
 
     providers = spec.get("providers")
-    if not isinstance(providers, dict) or not providers:
-        raise RuntimeError("shared/model-providers.json: providers must be a non-empty object.")
-    for provider_id, row in providers.items():
+    if not isinstance(providers, dict):
+        raise RuntimeError("shared/model-providers.json: providers must be an object.")
+    # The list's order rather than the file's, so the row an error names first is the row the list
+    # named first — the same read the TypeScript loader makes.
+    for provider_id in PROVIDER_IDS:
+        row = providers.get(provider_id)
+        if row is None:
+            raise RuntimeError(
+                f"shared/model-providers.json: providers is missing its {provider_id} row."
+            )
         _require_text(row, "label", f"providers.{provider_id}.label")
         _require_text(row, "key_variable", f"providers.{provider_id}.key_variable")
         _require_text(row, "base_url_variable", f"providers.{provider_id}.base_url_variable")
         _require_text(row, "default_model", f"providers.{provider_id}.default_model")
-    if "openai" not in providers:
-        # The same fallback the TypeScript loader makes: an unknown provider runs the OpenAI
-        # default while the Bot that owns the refusal names what went wrong.
-        raise RuntimeError("shared/model-providers.json: providers needs its openai row.")
+    for provider_id in providers:
+        if provider_id not in PROVIDER_IDS:
+            raise RuntimeError(
+                f"shared/model-providers.json: providers has a {provider_id} row this module "
+                "has never heard of."
+            )
 
     bots = spec.get("bots")
     if not isinstance(bots, dict):
@@ -79,10 +101,10 @@ def _load() -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise RuntimeError(f"shared/model-providers.json: bots.{bot_id} must be an object.")
         provider = _require_text(entry, "provider", f"bots.{bot_id}.provider")
-        if provider not in providers:
+        if provider not in PROVIDER_IDS:
             raise RuntimeError(
-                f"shared/model-providers.json: bots.{bot_id}.provider is {provider!r}, "
-                f"not one of {', '.join(sorted(providers))}."
+                f"shared/model-providers.json: bots.{bot_id}.provider is {json.dumps(provider)}, "
+                f"not one of {', '.join(PROVIDER_IDS)}."
             )
         _require_text(entry, "model", f"bots.{bot_id}.model")
 

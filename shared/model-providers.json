@@ -1,5 +1,5 @@
 {
-  "_readme": "One file every language reads. providers = facts per provider (key variable, endpoint variable, default model). bots = which provider and model each Bot runs when its environment names none; API keys never live here. Environment beats this file: BOT_PROVIDER and BOT_MODEL still win. See docs/configuration.md, 'The provider spec file'.",
+  "_readme": "One file every language reads. providers = facts per provider (key variable, endpoint variable, default model). bots = which provider and model each Bot runs when its environment names none; API keys never live here. Environment beats this file: BOT_PROVIDER and BOT_MODEL still win. Adding a provider is one row here plus one entry to PROVIDER_IDS in each of shared/model-providers.ts and shared/model_providers.py: each loader checks this file against its own list in both directions, so a Bot never starts against a provider row its own loader has not heard of. See docs/configuration.md, 'The provider spec file'.",
   "providers": {
     "openai": {
       "label": "OpenAI",

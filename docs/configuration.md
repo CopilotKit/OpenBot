@@ -169,6 +169,14 @@ way everything else does. A row that names a provider no `providers` entry exist
 field empty, stops every Bot at startup with the path of the key that is wrong, rather than at the
 first model call.
 
+Adding a **provider** is three places rather than one: a row under `providers` here, one entry to
+`PROVIDER_IDS` in `shared/model-providers.ts`, and one entry to `PROVIDER_IDS` in
+`shared/model_providers.py`. Each loader checks this file against its own list in both
+directions, so neither the Python Bots nor the TypeScript ones start against a provider row their
+own loader has never heard of, nor against a provider their own loader names when the file has no
+row for it. Either refusal names the key that is wrong, at startup rather than at the first model
+call, in either language.
+
 `agent-bot` is the one Bot that pins its provider: it speaks `/v1/chat/completions` directly and
 has never read `BOT_PROVIDER`, and `bots.agent-bot` supplies only its model.
 

@@ -9,9 +9,10 @@
  * THE VALUES LIVE IN `model-providers.json`, beside this file. That file is the contract every
  * language in the box reads — TypeScript and Python through the loaders beside it, any other
  * language straight as JSON — so a developer adding a Bot in Java adds one entry there and never
- * reads this module. What this module adds to the file is types and validation: a row missing a
- * field, or a `bots` entry naming a provider nobody has heard of, stops the process at startup
- * with the path of the offending key rather than at the first model call.
+ * reads this module. What the two loaders add to the file is types and validation: in either
+ * loader, a row missing a field, a provider row the file lacks, a provider row that loader's list
+ * has never heard of, or a `bots` entry naming a provider outside that list, stops the process at
+ * startup with the path of the offending key rather than at the first model call.
  *
  * ENVIRONMENT BEATS FILE. `BOT_PROVIDER` and `BOT_MODEL` still win, exactly as
  * `docs/configuration.md` has always described; the file supplies what they leave unset. API keys
@@ -33,8 +34,10 @@ import specJson from "./model-providers.json";
 /**
  * The providers this deployment knows the names of.
  *
- * Adding one is adding one entry to `PROVIDER_IDS` and one row to the JSON file; the loader below
- * refuses to start if the two disagree in either direction.
+ * Adding one is one entry here, one in `PROVIDER_IDS` in `shared/model_providers.py`, and one row
+ * to the JSON file. Each loader checks the file against its own list in both directions, so a
+ * provider row this list names and the file lacks, or a row in the file this list has never heard
+ * of, stops this Bot at startup rather than at its first model call.
  */
 export const PROVIDER_IDS = ["openai", "anthropic", "google"] as const;
 
