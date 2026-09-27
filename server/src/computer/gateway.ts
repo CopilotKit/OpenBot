@@ -30,6 +30,7 @@ export {
   ComputerUnavailableError,
   ElementNotFoundError,
   HumanHasControlError,
+  HandoffRequestError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
@@ -135,6 +136,7 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult>;
   click(
     botId: string,
@@ -180,14 +182,28 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: WriteFileInput,
   ): Promise<WriteFileResult>;
-  control(botId: string): Promise<ControlState>;
+  control(botId: string, requestId?: string): Promise<ControlState>;
   requestHelp(
     botId: string,
     actor: ActionActor,
     reason: string,
+    toolCallId?: string,
   ): Promise<ControlState>;
-  takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
-  releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  takeControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  releaseControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  cancelControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
   requestSecret(
     botId: string,
     actor: ActionActor,
@@ -344,8 +360,23 @@ export function createComputerGateway(
    * on the store.
    */
   async function snapshot(botId: string): Promise<SnapshotResult> {
+    const base = await locate(botId);
+    /*
+     * Which run this is, asked before the page is drawn rather than after it.
+     *
+     * After `locate`, because on a supervisor that is the `/ensure` that reports it. But before
+     * `/snapshot`, because the two answers have to describe the same browser and asking afterwards
+     * does not guarantee it: a computer replaced while the snapshot was being taken would have its
+     * dead page stamped with the run of the browser that replaced it, so every ref on that page would
+     * resolve against the live run and the live run's own snapshots would be refused for being older.
+     *
+     * Asked first, a replacement in that window leaves a row carrying a run that is already gone.
+     * Nothing resolves against it and the next snapshot supersedes it, which is the direction this is
+     * allowed to fail in.
+     */
+    const run = await sessionOf(botId);
     const result = await transport.call<SnapshotResult>(
-      await locate(botId),
+      base,
       botId,
       "/snapshot",
       { method: "POST" },
@@ -356,8 +387,7 @@ export function createComputerGateway(
       elements: new Map(
         result.elements.map((element) => [element.ref, element]),
       ),
-      // Read after `locate`, which is the `/ensure` that reports it.
-      ...(await sessionOf(botId)),
+      ...run,
     });
     return result;
   }
@@ -403,8 +433,8 @@ export function createComputerGateway(
     /**
      * The run of the computer the action is reaching, when the provider can say.
      *
-     * Undefined means unknown, not mismatched: a provider with no sessions to report, or one that
-     * could not be asked, leaves the generation check exactly as it was.
+     * Undefined means unknown, not mismatched: a provider that could not be asked leaves the
+     * generation check exactly as it was, rather than refusing every ref it holds.
      */
     session?: string,
   ): SnapshotElement | undefined {
@@ -456,17 +486,19 @@ export function createComputerGateway(
     /*
      * LOCATE FIRST, THEN ASK WHICH RUN THAT WAS. The order is the check.
      *
-     * `sessionOf` answers with what the last `/ensure` reported, and until this action has made its
-     * own, the last one belongs to the action before it. Asking first compared the stored snapshot
-     * against the previous action's run, which is the same run on every action but the first one
-     * after a replacement — exactly the action the check exists to catch. The click after a replaced
-     * container was allowed and the one after that refused, which is a guarantee arriving one action
-     * too late.
+     * On the supervisor, `sessionOf` answers with what the last `/ensure` reported, and until this
+     * action has made its own, the last one belongs to the action before it. Asking first compared
+     * the stored snapshot against the previous action's run, which is the same run on every action
+     * but the first one after a replacement — exactly the action the check exists to catch. The
+     * click after a replaced container was allowed and the one after that refused, which is a
+     * guarantee arriving one action too late. The shared provider has no `/ensure` to read back, so
+     * there it is a live `/run` call of its own — one extra round trip per ref-citing action —
+     * which asks after `locate` for the same reason even though `locate` there is a string.
      *
      * Only for an action that cites a ref. Nothing else is resolved against a snapshot, so nothing
      * else needs the run, and a scroll or a file read should not have to reach the supervisor before
      * the policy has even seen it. The address that comes back is the one the attempt then uses, so
-     * this costs no extra call for the actions that do need it.
+     * on the supervisor this costs no extra call for the actions that do need it.
      */
     const address = ref ? await locateForAction(botId) : undefined;
     const { session } = ref ? await sessionOf(botId) : { session: undefined };
@@ -647,9 +679,15 @@ export function createComputerGateway(
      * row and do not ask. What IS recorded is the period: who, when, and why the Bot asked, the fact
      * an investigator wants is that a human drove this browser between two times.
      */
-    async requestHelp(botId: string, actor: ActionActor, reason: string) {
+    async requestHelp(
+      botId: string,
+      actor: ActionActor,
+      reason: string,
+      toolCallId?: string,
+    ) {
       const state = await post<ControlState>(botId, "/control/request", {
         reason,
+        ...(toolCallId ? { toolCallId } : {}),
       });
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
@@ -659,8 +697,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async takeControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/take", {});
+    async takeControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/take", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
@@ -671,8 +711,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async releaseControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/release", {});
+    async releaseControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/release", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
@@ -680,8 +722,22 @@ export function createComputerGateway(
       return state;
     },
 
-    control(botId: string): Promise<ControlState> {
-      return get<ControlState>(botId, "/control");
+    async cancelControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/cancel", {
+        requestId,
+      });
+      await writeControlEvent(auditStore, "computer.help_cancelled", {
+        botId,
+        actor,
+      });
+      return state;
+    },
+
+    control(botId: string, requestId?: string): Promise<ControlState> {
+      return get<ControlState>(
+        botId,
+        `/control${requestId ? `?requestId=${encodeURIComponent(requestId)}` : ""}`,
+      );
     },
 
     /** Return every computer that the configured provider owns. */
@@ -819,13 +875,19 @@ export function createComputerGateway(
      * The transport applies its target guard before it sends a request. This is
      * the minimum rule that applies even when the action policy permits the URL.
      */
-    navigate(botId: string, actor: ActionActor, url: string) {
+    navigate(
+      botId: string,
+      actor: ActionActor,
+      url: string,
+      toolCallId?: string,
+    ) {
       return govern(
         "computer_navigate",
         botId,
         actor,
         { targetUrl: url },
-        async () => transport.navigate(await locate(botId), botId, url),
+        async () =>
+          transport.navigate(await locate(botId), botId, url, toolCallId),
       );
     },
 
@@ -1187,6 +1249,7 @@ async function writeControlEvent(
   auditStore: AuditStore,
   eventType:
     | "computer.help_requested"
+    | "computer.help_cancelled"
     | "computer.control_taken"
     | "computer.control_released"
     | "computer.secret_requested"

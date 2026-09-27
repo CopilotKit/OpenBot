@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readControl } from "@/lib/computers/control";
+import {
+  connectScreen,
+  type ScreenSocket,
+} from "@/lib/computers/screen-connection";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
 import { socketUrl } from "@/lib/socket-url";
 import { currentPageVisible } from "./preview-visibility";
@@ -53,6 +58,7 @@ type Props = {
   driving: boolean;
   /** Called with a human-readable reason when the stream cannot be established. */
   onProblem?: (problem: string | null) => void;
+  retryKey?: number;
 };
 
 type FrameMessage = {
@@ -61,7 +67,12 @@ type FrameMessage = {
   height: number;
 };
 
-export function LiveScreen({ computerId, driving, onProblem }: Props) {
+export function LiveScreen({
+  computerId,
+  driving,
+  onProblem,
+  retryKey = 0,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   /** Keydowns handled locally whose matching keyup must not leak to the remote browser. */
@@ -73,15 +84,17 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
   /** Monotonic guard so a slow older decode cannot replace a newer frame. */
   const latestFrameId = useRef(0);
   const [connected, setConnected] = useState(false);
+  const inputReady = useRef(false);
+  const previouslyDriving = useRef(driving);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: explicit Retry restarts this connection.
   useEffect(() => {
-    // The server's own address, so no proxy has to carry the upgrade. The scheme still follows
-    // the page: wss when the app is served over https.
-    const socket = new WebSocket(
-      socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
-    );
-    socketRef.current = socket;
     let closed = false;
+    setConnected(false);
+    inputReady.current = false;
+    frameSize.current = null;
+    latestFrame.current = null;
+    latestFrameId.current++;
 
     const drawFrame = async (frame: FrameMessage, frameId: number) => {
       /**
@@ -127,12 +140,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       void drawFrame(frame, latestFrameId.current);
     };
 
-    socket.onopen = () => {
-      setConnected(true);
-      onProblem?.(null);
-    };
-
-    socket.onmessage = async (event) => {
+    const onMessage = (event: { data: unknown }) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(String(event.data));
@@ -201,23 +209,95 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       void drawFrame(frame, frameId);
     };
 
+    const connection = connectScreen({
+      open: () => {
+        const socket = new WebSocket(
+          socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
+        );
+        socketRef.current = socket;
+        // Event handlers use only data, so adapt the native event surface without changing the protocol.
+        return {
+          set onopen(callback: ScreenSocket["onopen"]) {
+            socket.onopen = callback
+              ? () => {
+                  void callback();
+                }
+              : null;
+          },
+          set onclose(callback: ScreenSocket["onclose"]) {
+            socket.onclose = callback;
+          },
+          set onerror(callback: ScreenSocket["onerror"]) {
+            socket.onerror = callback;
+          },
+          set onmessage(callback: ScreenSocket["onmessage"]) {
+            socket.onmessage = callback;
+          },
+          close: () => socket.close(),
+        };
+      },
+      verifyOwnership: async () => {
+        const state = await readControl(computerId);
+        return state?.holder === "human" && !state.transitioning;
+      },
+      onReady: (ready) => {
+        inputReady.current = ready;
+        setConnected(ready);
+      },
+      onProblem: (problem) => onProblem?.(problem),
+      onDisconnect: () => {
+        frameSize.current = null;
+        latestFrame.current = null;
+        latestFrameId.current++;
+        const canvas = canvasRef.current;
+        if (canvas)
+          canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      },
+      onMessage,
+    });
     document.addEventListener("visibilitychange", drawLatestFrame);
-    socket.onerror = () => onProblem?.("The live screen could not be reached.");
-    socket.onclose = () => setConnected(false);
-
     return () => {
       closed = true;
+      connection.stop();
       document.removeEventListener("visibilitychange", drawLatestFrame);
-      socket.close();
       socketRef.current = null;
     };
-    // The socket is per Bot; switching Bot must close this stream and open the next one.
-  }, [computerId, onProblem]);
+  }, [computerId, onProblem, retryKey]);
+
+  useEffect(() => {
+    const wasDriving = previouslyDriving.current;
+    previouslyDriving.current = driving;
+    if (
+      wasDriving ||
+      !driving ||
+      inputReady.current ||
+      socketRef.current?.readyState !== WebSocket.OPEN
+    )
+      return;
+    let live = true;
+    void readControl(computerId)
+      .then((state) => {
+        if (!live || socketRef.current?.readyState !== WebSocket.OPEN) return;
+        inputReady.current = state?.holder === "human" && !state.transitioning;
+        setConnected(inputReady.current);
+      })
+      .catch(() => {
+        inputReady.current = false;
+      });
+    return () => {
+      live = false;
+    };
+  }, [computerId, driving]);
 
   const send = useCallback(
     (message: Record<string, unknown>) => {
       const socket = socketRef.current;
-      if (!driving || socket?.readyState !== WebSocket.OPEN) return;
+      if (
+        !driving ||
+        !inputReady.current ||
+        socket?.readyState !== WebSocket.OPEN
+      )
+        return;
       socket.send(JSON.stringify(message));
     },
     [driving],
@@ -288,7 +368,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
    * page.
    */
   useEffect(() => {
-    if (!driving) return;
+    if (!driving || !connected) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") return; // Escape still closes the view.
       if (isPasteShortcut(event)) {
@@ -341,7 +421,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       window.removeEventListener("paste", onPaste);
       localKeyUps.current.clear();
     };
-  }, [driving, send]);
+  }, [driving, connected, send]);
 
   /**
    * The wheel, forwarded while driving, from a listener that is allowed to stop it here.
@@ -353,7 +433,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!driving || !canvas) return;
+    if (!driving || !connected || !canvas) return;
     const onWheel = (event: WheelEvent) => {
       const point = at(event);
       if (!point) return;
@@ -368,7 +448,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
-  }, [driving, at, send]);
+  }, [driving, connected, at, send]);
 
   return (
     <canvas

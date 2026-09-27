@@ -1,367 +1,174 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createControl,
   ControlError,
   ControlRequestError,
-  createControl,
+  HELP_REQUEST_TTL_MS,
+  SnapshotRequiredError,
 } from "../src/control";
 
-/**
- * The wheel, tested on both paths.
- *
- * This is the piece standing between two drivers and one page, and until now it had no tests at all, * it lived as a `let` inside the file that imports playwright, so a test could not reach it without
- * launching Chrome. What is checked here is mostly the refusal path, because that is where this
- * component earns its keep: a Bot clicking while a person types, a secret typed when nothing asked for
- * one, a request answered twice, a handover that leaves a password box open behind it.
- *
- * A fake clock is injected so `since` can be asserted rather than shrugged at.
- */
 function fixture() {
-  let tick = 0;
-  const at = () => `2026-08-14T00:00:0${tick}.000Z`;
-  const control = createControl(() => {
-    tick += 1;
-    return at();
-  });
-  return { control };
+  let tick = Date.parse("2026-09-26T00:00:00Z");
+  const control = createControl(() => new Date(tick).toISOString());
+  const advance = (ms: number) => {
+    tick += ms;
+  };
+  const request = (toolCallId = "call-1") =>
+    control.requestHelp("Sign in to continue.", toolCallId).request!;
+  return { control, advance, request };
 }
 
-describe("the happy path: ask, hand over, hand back", () => {
-  test("starts with the Bot driving and nothing pending", () => {
-    const { control } = fixture();
-    const state = control.get();
-    expect(state.holder).toBe("bot");
-    expect(state.requested).toBe(false);
-    expect(state.reason).toBeUndefined();
-    expect(control.pendingSecret()).toBeNull();
-    // Nothing to refuse yet.
-    expect(() => control.assertBotMayAct()).not.toThrow();
-  });
-
-  test("the Bot asking for help does NOT hand itself the human's authority", () => {
-    const { control } = fixture();
-    const state = control.requestHelp("There is a login wall.");
-    // The flag is raised and a person decides. A Bot that could take control on its own behalf could
-    // also hand a person a page they never asked to see.
-    expect(state.requested).toBe(true);
-    expect(state.reason).toBe("There is a login wall.");
-    expect(state.holder).toBe("bot");
-    // And it may still act while it waits: asking is not being blocked.
-    expect(() => control.assertBotMayAct()).not.toThrow();
-  });
-
-  test("taking the wheel keeps the reason and lowers the flag", () => {
-    const { control } = fixture();
-    control.requestHelp("Sign in to continue.");
-    const state = control.take();
-    expect(state.holder).toBe("human");
-    // The reason survives, because it is the thing the person was just asked to do.
-    expect(state.reason).toBe("Sign in to continue.");
-    // The request is answered, so the surface stops asking.
-    expect(state.requested).toBe(false);
-    expect(control.humanMayDrive()).toBe(true);
-  });
-
-  test("handing back returns the wheel and clears the old request", () => {
-    const { control } = fixture();
-    control.requestHelp("Sign in to continue.");
-    control.take();
-    const state = control.release();
-    expect(state.holder).toBe("bot");
-    // Dropped on purpose: leaving it set has the surface still showing a request that was dealt with.
-    expect(state.reason).toBeUndefined();
-    expect(state.requested).toBe(false);
-    expect(control.humanMayDrive()).toBe(false);
-    expect(() => control.assertBotMayAct()).not.toThrow();
-  });
-
-  test("`since` moves on a handover and not on a request", () => {
-    const { control } = fixture();
-    const created = control.get().since;
-    control.requestHelp("Stuck.");
-    // Asking for help is not a change of driver, so the clock does not restart.
-    expect(control.get().since).toBe(created);
-    expect(control.take().since).not.toBe(created);
-  });
-});
-
-describe("the crappy paths: two drivers, one page", () => {
-  test("the Bot is refused while a person holds the wheel", () => {
-    const { control } = fixture();
-    control.take();
-    expect(() => control.assertBotMayAct()).toThrow(ControlError);
-    // Refused with a reason the Bot can act on, wait, rather than a bare failure.
-    expect(() => control.assertBotMayAct()).toThrow(/hand it back/);
-  });
-
-  test("the refusal lifts the moment the person hands back", () => {
-    const { control } = fixture();
-    control.take();
-    control.release();
-    expect(() => control.assertBotMayAct()).not.toThrow();
-  });
-
-  test("a person's input is not applied merely because they asked", () => {
-    const { control } = fixture();
-    control.requestHelp("Sign in.");
-    // The Bot asked for help and no person has taken the wheel. An open socket is not permission: this is
-    // what stops anything that can reach the port from driving the browser mid-task.
-    expect(control.humanMayDrive()).toBe(false);
-  });
-
-  test("taking the wheel twice is not a way to lose the reason", () => {
-    const { control } = fixture();
-    control.requestHelp("Sign in.");
-    control.take();
-    const state = control.take();
-    expect(state.holder).toBe("human");
-    expect(state.reason).toBe("Sign in.");
-  });
-
-  test("handing back when the Bot already has it is harmless", () => {
-    const { control } = fixture();
-    const state = control.release();
-    expect(state.holder).toBe("bot");
-    expect(() => control.assertBotMayAct()).not.toThrow();
-  });
-
-  test("the caller cannot reach in and change the state it was handed", () => {
-    const { control } = fixture();
-    const state = control.get();
-    state.holder = "human";
-    // A copy, so reading the state is not a way to take the wheel.
-    expect(control.get().holder).toBe("bot");
-  });
-
-  test("junk reasons fall back to something a person can read", () => {
-    const { control } = fixture();
-    // The wire carries whatever the caller sent. An empty or non-string reason must not leave the
-    // person staring at a blank explanation of why they have just been handed a browser.
-    for (const junk of ["", "   ", null, undefined, 42, {}]) {
-      const { control: fresh } = fixture();
-      expect(fresh.requestHelp(junk).reason).toBe(
-        "The assistant needs a person to continue.",
-      );
-    }
-    expect(control.requestHelp("  Trimmed.  ").reason).toBe("Trimmed.");
-  });
-});
-
-describe("the crappy paths: secrets", () => {
-  test("a secret request must name the field it goes in", () => {
-    const { control } = fixture();
-    // The version without this typed the value into whatever happened to have focus, and reported
-    // success when that was nothing at all.
-    for (const bad of [{}, { ref: "" }, { ref: "   " }, { ref: 7 }]) {
-      expect(() => control.requestSecret(bad)).toThrow(ControlRequestError);
-    }
-    // A request error, not a control refusal: the caller asked wrongly and no driver changed.
-    expect(() => control.requestSecret({})).toThrow(/which field/);
-    expect(control.pendingSecret()).toBeNull();
-  });
-
-  test("a secret request records the label and the field, and nothing else", () => {
-    const { control } = fixture();
-    const state = control.requestSecret({
-      label: "  the six-digit code  ",
-      ref: "e12",
-      snapshotId: 3,
+describe("request-aware handoff", () => {
+  test("asking closes admission without granting human input", () => {
+    const { control, request } = fixture();
+    expect(control.get()).toMatchObject({
+      holder: "bot",
+      requested: false,
+      transitioning: false,
+      resumeSnapshotRequired: false,
     });
-    expect(state.secretWanted).toBe("the six-digit code");
-    expect(state.secretRef).toBe("e12");
-    expect(state.secretSnapshotId).toBe(3);
-    expect(control.pendingSecret()).toEqual({ ref: "e12", snapshotId: 3 });
+    const help = request();
+    expect(help.status).toBe("waiting");
+    expect(control.get().requested).toBe(true);
+    expect(control.humanMayDrive()).toBe(false);
+    expect(() => control.admitBotAction()).toThrow(ControlError);
   });
 
-  test("an unlabelled request still says something honest", () => {
+  test("take drains an old action; detector can request help inside its own lease", async () => {
+    const { control, request } = fixture();
+    const finish = control.admitBotAction(true);
+    const help = request();
+    expect(control.get().transitioning).toBe(true);
+    const taking = control.take(help.id);
+    await Promise.resolve();
+    expect(control.humanMayDrive()).toBe(false);
+    expect(() => control.admitBotAction()).toThrow(ControlError);
+    finish();
+    expect((await taking).holder).toBe("human");
+    expect(control.get().transitioning).toBe(false);
+  });
+
+  test("only waiting expires; taken control has no ten-minute limit", async () => {
+    const waiting = fixture();
+    const help = waiting.request();
+    waiting.advance(HELP_REQUEST_TTL_MS + 1);
+    expect(waiting.control.get(help.id).request?.status).toBe("expired");
+    expect(waiting.control.get().requested).toBe(false);
+    expect(() => waiting.control.admitBotAction()()).not.toThrow();
+    await expect(waiting.control.take(help.id)).rejects.toThrow(/no longer/);
+    const taken = fixture();
+    const held = taken.request();
+    await taken.control.take(held.id);
+    taken.advance(HELP_REQUEST_TTL_MS * 10);
+    expect(taken.control.get(held.id).request?.status).toBe("taken");
+    expect(taken.control.get().request?.expiresAt).toBeUndefined();
+    expect(taken.control.humanMayDrive()).toBe(true);
+  });
+
+  test("completion requires fresh snapshot even on the same page; files need only ownership", async () => {
+    const { control, request } = fixture();
+    const help = request();
+    await control.take(help.id);
+    control.snapshotTaken();
+    control.release(help.id);
+    expect(control.get().request?.status).toBe("completed");
+    expect(() => control.admitBotAction(true)).toThrow(SnapshotRequiredError);
+    control.admitBotAction(false)();
+    control.snapshotTaken();
+    control.admitBotAction(true)();
+    expect(control.release(help.id).request?.status).toBe("completed");
+  });
+
+  test("idempotency and exact historical lookup survive later requests", async () => {
+    const { control, request } = fixture();
+    const first = request();
+    expect(request().id).toBe(first.id);
+    expect(request("parallel-call").id).toBe(first.id);
+    await control.take(first.id);
+    await control.take(first.id);
+    control.release(first.id);
+    const next = request("call-2");
+    expect(next.id).not.toBe(first.id);
+    expect(control.get(first.id).request?.status).toBe("completed");
+    expect(request().id).toBe(first.id);
+    expect(request("parallel-call").id).toBe(first.id);
+    expect(control.get().request?.id).toBe(next.id);
+    expect(() => control.release(first.id)).toThrow(/no longer/);
+    await expect(control.take(first.id)).rejects.toThrow(/no longer/);
+    expect(() => control.get("unknown")).toThrow(/not found/);
+  });
+
+  test("cancel while taken preserves ownership and cannot later become completion", async () => {
+    const { control, request } = fixture();
+    const help = request();
+    await control.take(help.id);
+    expect(control.cancel(help.id).request?.status).toBe("cancelled");
+    expect(control.humanMayDrive()).toBe(true);
+    expect(control.release(help.id).request?.status).toBe("cancelled");
+    expect(control.humanMayDrive()).toBe(false);
+    expect(control.get().resumeSnapshotRequired).toBe(true);
+  });
+
+  test("cancel waiting and reset report terminal outcomes, never success", async () => {
+    const { control, request } = fixture();
+    const cancelled = request();
+    control.cancel(cancelled.id);
+    expect(() => control.release(cancelled.id)).toThrow();
+    const interrupted = request("call-2");
+    await control.take(interrupted.id);
+    control.interrupt("The browser restarted.");
+    expect(control.get(interrupted.id).request).toMatchObject({
+      status: "interrupted",
+      interruption: "The browser restarted.",
+    });
+    expect(control.humanMayDrive()).toBe(false);
+    expect(() => control.admitBotAction(true)).toThrow(ControlError);
+    expect(() => control.release(interrupted.id)).toThrow();
+  });
+
+  test("reads are copies and reasons are bounded", () => {
     const { control } = fixture();
-    expect(control.requestSecret({ ref: "e1" }).secretWanted).toBe(
-      "the value this page is asking for",
+    const state = control.requestHelp("x".repeat(900));
+    expect(state.reason).toHaveLength(500);
+    state.request!.status = "completed";
+    expect(control.get().request?.status).toBe("waiting");
+    expect(createControl().requestHelp(null).reason).toBe(
+      "The assistant needs a person to continue.",
     );
   });
+});
 
-  test("a non-numeric snapshotId is dropped rather than carried as junk", () => {
+describe("secret entry remains scoped and ephemeral", () => {
+  test("requires a field, records only label/ref/snapshot, and clears after delivery", () => {
     const { control } = fixture();
-    const state = control.requestSecret({ ref: "e1", snapshotId: "3" });
-    // Carried through to `locateRef`, where a string would prevent the numeric staleness check from
-    // matching and could let a stale field accept the secret.
-    expect(state.secretSnapshotId).toBeUndefined();
-  });
-
-  test("nothing is pending until the Bot asks", () => {
-    const { control } = fixture();
-    // What makes the masked box scoped rather than a general-purpose way to type into the page.
-    expect(control.pendingSecret()).toBeNull();
-  });
-
-  test("a supplied secret closes the request, so it cannot be answered twice", () => {
-    const { control } = fixture();
-    control.requestSecret({ ref: "e12", label: "code" });
+    for (const ref of [undefined, "", " ", 7])
+      expect(() => control.requestSecret({ ref })).toThrow(ControlRequestError);
+    control.requestSecret({ label: " code ", ref: "e12", snapshotId: 3 });
+    expect(control.pendingSecret()).toEqual({ ref: "e12", snapshotId: 3 });
+    expect(control.get().secretWanted).toBe("code");
     control.secretSupplied();
     expect(control.pendingSecret()).toBeNull();
-    expect(control.get().secretWanted).toBeUndefined();
+  });
+  test("expires unanswered secrets and admits a fresh request afterward", () => {
+    const { control, advance } = fixture();
+    control.requestSecret({ ref: "e1" });
+    advance(HELP_REQUEST_TTL_MS + 1);
+    expect(control.pendingSecret()).toBeNull();
     expect(control.get().secretRef).toBeUndefined();
-  });
-
-  test("a FAILED attempt leaves the request open", () => {
-    const { control } = fixture();
-    control.requestSecret({ ref: "e12", label: "code" });
-    // `secretSupplied` is called only after the value reached the field, so a field that could not be
-    // found leaves this pending and the person can try again instead of starting over.
-    expect(control.pendingSecret()).not.toBeNull();
-  });
-
-  test("handing the wheel over or back closes any pending secret", () => {
-    for (const handover of ["take", "release"] as const) {
-      const { control } = fixture();
-      control.requestSecret({ ref: "e12", label: "password" });
-      control[handover]();
-      // A person who drove the browser themselves has dealt with the login. A masked box still asking
-      // for a password afterwards is asking for a secret nothing is waiting for.
-      expect(control.pendingSecret()).toBeNull();
-      expect(control.get().secretWanted).toBeUndefined();
-    }
-  });
-
-  test("the secret VALUE is never anywhere in the state", () => {
-    const { control } = fixture();
-    control.requestSecret({ ref: "e12", label: "one-time code" });
-    // The machine has no field that could hold it, and this test exists to fail if one is ever added.
-    // The value passes through a single request, into the page, and is not kept.
-    const serialised = JSON.stringify(control.get());
-    expect(serialised).not.toContain("value:");
-    expect(
-      Object.keys(control.get())
-        .filter((k) => /secret/i.test(k))
-        .sort(),
-    ).toEqual(["secretRef", "secretSnapshotId", "secretWanted"]);
-  });
-});
-
-/**
- * A request nobody answered does not outlive the run that made it.
- *
- * Control belongs to the computer, not to a conversation, and an unanswered request used to sit on
- * it forever. The run that asked had ended, but every later conversation with that Bot showed a live
- * "Take control" for work it was not doing — and showed the reason the Bot gave, which is written
- * for whoever asked and was being rendered to whoever looked.
- *
- * Seen in the product: a brand new channel, on an unrelated question, displaying "Google Docs is
- * asking for sign-in before I can read the PRD document" from a conversation minutes earlier.
- */
-describe("an unanswered request to take the wheel", () => {
-  test("is still shown inside the window", () => {
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestHelp("sign in to Drive");
-
-    clock = "2026-08-22T03:05:00.000Z";
-    const state = control.get();
-    expect(state.requested).toBe(true);
-    expect(state.reason).toBe("sign in to Drive");
-  });
-
-  test("stops being shown once it is stale, and takes its reason with it", () => {
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestHelp("sign in to Drive");
-
-    clock = "2026-08-22T03:20:00.000Z";
-    const state = control.get();
-    expect(state.requested).toBe(false);
-    // The reason is the part that leaked between conversations, so it goes too.
-    expect(state.reason).toBeUndefined();
-  });
-
-  test("never takes the wheel back off a person who holds it", () => {
-    /*
-     * The one case that must not expire. Somebody may be halfway through typing a code, and pulling
-     * the browser back mid-sign-in is worse than any stale prompt. Only the ASK times out.
-     */
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestHelp("sign in to Drive");
-    control.take();
-
-    clock = "2026-08-22T04:00:00.000Z";
-    expect(control.get().holder).toBe("human");
-  });
-});
-
-/**
- * The other half of the same request, which did not expire at all.
- *
- * A request for a secret is an ask like the one above and outlived its run the same way: the label
- * the Bot wrote is rendered to whoever looks next, and the surface makes no distinction between the
- * two — `useNeedsYou` lights the same "needs you" on `requested` and on `secretWanted` — so timing
- * one out and not the other left the Bot flagged for a conversation that ended anyway, now asking
- * for a password rather than for a hand.
- *
- * It is also the prompt where being stale matters more. Answering it types a value into a field
- * named by a ref from a snapshot the browser has long since moved past, so the person is being asked
- * for their password by a request nothing is waiting for.
- */
-describe("an unanswered request for a secret", () => {
-  test("is still shown, and still answerable, inside the window", () => {
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestSecret({ ref: "e12", label: "the six-digit code" });
-
-    clock = "2026-08-22T03:05:00.000Z";
-    expect(control.get().secretWanted).toBe("the six-digit code");
+    control.requestSecret({ ref: "e2", snapshotId: "junk" });
     expect(control.pendingSecret()).toEqual({
-      ref: "e12",
+      ref: "e2",
       snapshotId: undefined,
     });
   });
-
-  test("stops being shown once it is stale, and takes the field it named with it", () => {
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestSecret({
-      ref: "e12",
-      label: "the six-digit code",
-      snapshotId: 4,
-    });
-
-    clock = "2026-08-22T03:20:00.000Z";
-    const state = control.get();
-    // The label is the part that was being rendered to whoever looked, so it goes, and the field it
-    // named goes with it: half a request is not a thing anything downstream knows how to read.
-    expect(state.secretWanted).toBeUndefined();
-    expect(state.secretRef).toBeUndefined();
-    expect(state.secretSnapshotId).toBeUndefined();
-  });
-
-  test("stops being answerable at the same moment it stops being shown", () => {
-    /*
-     * Asked through `pendingSecret` alone, without a `get` first. That is the call `/human/secret`
-     * makes before it types, and it is the one that decides whether a value supplied now reaches the
-     * page: expiring only on the path the surface polls would leave a prompt that is no longer
-     * displayed still able to accept a password.
-     */
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestSecret({ ref: "e12", label: "the six-digit code" });
-
-    clock = "2026-08-22T03:20:00.000Z";
+  test("take and release clear outstanding secret fields", async () => {
+    const { control, request } = fixture();
+    const help = request();
+    control.requestSecret({ ref: "e1" });
+    await control.take(help.id);
     expect(control.pendingSecret()).toBeNull();
-  });
-
-  test("a fresh request after a stale one is shown, not swallowed by it", () => {
-    // The expiry must clear its own bookkeeping, or the next request inherits the old timestamp and
-    // is stale on arrival: a Bot that asked twice would be answerable neither time.
-    let clock = "2026-08-22T03:00:00.000Z";
-    const control = createControl(() => clock);
-    control.requestSecret({ ref: "e12", label: "the six-digit code" });
-
-    clock = "2026-08-22T03:20:00.000Z";
+    control.requestSecret({ ref: "e2" });
+    control.release(help.id);
     expect(control.pendingSecret()).toBeNull();
-
-    control.requestSecret({ ref: "e40", label: "the code, again" });
-    expect(control.get().secretWanted).toBe("the code, again");
-    expect(control.pendingSecret()).toEqual({
-      ref: "e40",
-      snapshotId: undefined,
-    });
   });
 });

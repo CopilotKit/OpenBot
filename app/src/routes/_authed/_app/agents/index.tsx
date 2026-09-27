@@ -1,4 +1,4 @@
-import { IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
@@ -48,6 +48,13 @@ function AgentsScreen() {
   } = useQuery(agentListQueryOptions());
   const mine = agents?.filter((a) => a.mine);
   const explore = agents?.filter(isSharedWithYou);
+  /*
+   * Hiding takes a coworker off both lists above, and Unhide lives in its dialog, which only a card
+   * opens. Without this section a hidden coworker had no way back onto the screen short of typing
+   * its id into the address bar. Nothing while loading, failed or empty: it is a way back for
+   * somebody who hid something, not a third roster everybody has to read past.
+   */
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
 
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = isCreating === true;
@@ -167,6 +174,27 @@ function AgentsScreen() {
             </Empty>
           )}
         </div>
+        {hiddenAgents?.length ? (
+          <details className="group mt-8 mb-12 w-full max-w-2xl">
+            <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+              <h2 className="font-bold text-lg">Hidden</h2>
+              <span className="text-sm text-muted-foreground">
+                {hiddenAgents.length}
+              </span>
+              <IconChevronDown
+                aria-hidden="true"
+                className="size-4 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none"
+              />
+            </summary>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              {hiddenAgents.map((agent) => (
+                <div className="min-w-0" key={agent.id}>
+                  <AgentCard agent={agent} />
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
       <CreateAgentDialog
         onClose={close}

@@ -34,7 +34,11 @@ Tell them to open the OpenBot desktop app and follow the screens:
 
 Do not tell desktop users to install Bun or run `bun install`. The desktop installer acquires the
 pinned Bun runtime itself when it is missing. Do not tell them to install Node or run
-`npx copilotkit`: the desktop flow signs in to CopilotKit and provisions the project key itself.
+`npx copilotkit`: the desktop flow signs in to CopilotKit, provisions the project key, and creates
+or reuses its openbot Learning container. Start saves the assignment only for the matching key/API;
+custom container assignments and saved Admin choices remain authoritative.
+Self-hosted desktop setup uses that deployment's normal sign-in in an isolated Chrome or Edge
+window and provisions the selected project's key and container. Either browser must be installed.
 Do not tell them to clone the repository: the desktop app fetches the released deployment tree and
 uses the release's digest-pinned container images.
 
@@ -102,10 +106,8 @@ Requirements for the clone path:
   Bots and the LangGraph framework Bot. Use the provider-specific key and model variables below.
   Google is supported by the LangGraph framework Bot, not by the example built-in package model.
 
-The default OpenAI clone setup needs only two values from the person:
-
-  1. INTELLIGENCE_API_KEY        the `cpk-...` runtime key
-  2. OPENAI_API_KEY              the model credential
+Fresh managed OpenAI clone setup needs a CopilotKit sign-in and an OPENAI_API_KEY model credential.
+The setup helper writes the project runtime key and Learning container assignment.
 
 `scripts/start.sh` fills the local secrets it owns: COMPUTER_TOKEN and WORKER_SHARED_SECRET have dev
 defaults, and MANAGED_AGENT_TOKEN plus AGENT_TOOL_TOKEN are generated and written back into `.env`.
@@ -115,15 +117,33 @@ person through every blank line.
 The clone commands are:
 
   cp .env.example .env
+  bun install
 
   npx --yes copilotkit@latest login           # opens a browser
-  npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
+  npx --yes copilotkit@latest project select  # selects the managed project
+  bun scripts/setup-learning.ts             # provisions its key and openbot Learning container
+
+The helper preserves custom targets and refuses to replace an existing INTELLIGENCE_API_KEY.
+For fresh self-hosted setup, set INTELLIGENCE_API_URL to its HTTPS API origin and run only
+bun scripts/setup-learning.ts after bun install; skip the managed npx commands. Chrome or Edge
+must be installed. Sign in through the isolated browser window and choose an accessible project;
+the helper creates or reuses openbot and writes that project's new runtime key and assignment.
+Existing key-only setups use authenticated Intelligence administration to create a container and
+assign it in OpenBot Admin. Automatic Learning defaults on;
+collection and delivery require an assigned container. OpenBot starts and chats without one. Administrators
+can assign a default container, override or exclude individual Bots, or pause Learning at
+Admin → Automatic Learning. Open Intelligence to review and publish proposed skills. Containers
+belong to the same project; changing a mapping applies to new threads and does not move or backfill
+old evidence. Operators may seed a default with CPK_INTELLIGENCE_LEARNING_CONTAINER_ID on the API server;
+CPK_INTELLIGENCE_SKILLS_REVISION optionally pins a published revision. Saved Admin settings take
+precedence, including off. Keep the project key server-side and use the existing Intelligence UI
+for management (a runtime project key cannot authorize those writes). See docs/automatic-learning.md.
 
 There is no licence step. `copilotkit license` still exists for self-hosted Intelligence, and
 COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
-Put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. For the default OpenAI path, put the
-OpenAI model key in OPENAI_API_KEY. For Anthropic, set all three lines together:
+For manual key-only setup, put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. For the default
+OpenAI path, put the model key in OPENAI_API_KEY. For Anthropic, set all three lines together:
 
   ANTHROPIC_API_KEY=...
   BOT_PROVIDER=anthropic
@@ -136,7 +156,6 @@ browser-session tokens into `.env`.
 
 Then:
 
-  bun install
   bash scripts/start.sh
 
 It starts Docker services, applies migrations, starts the API on 3001, starts the app on 3010,

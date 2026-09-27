@@ -31,6 +31,65 @@ now passes the unset value through, so the Bot's row — or the moved provider's
 what answers. An OpenAI deployment keeps the same `gpt-5.5` either way; a Google or Anthropic one
 stops being handed a model its vendor has never heard of.
 
+### A hidden coworker can be found again on the Agents screen
+
+Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
+which only its card opens, so a hidden coworker had no way back short of typing its id into the
+address bar. The screen now ends with a collapsed **Hidden** section listing them, each card opening
+the dialog as before. It appears only when something is hidden. Hiding still changes nothing for
+anyone else, and nothing on the server changed: the screen reads the `GET /api/agents?hidden=true`
+list the server already served.
+
+### Browser controls are visible in chat and the Computer sidebar
+
+Channel chats and standalone Bot chats now have a labeled Computer button and always-visible
+Take control or Hand back controls. The same ownership state is shown in the chat, live Computer
+sidebar, and full-size viewer. Standalone Bot chats can open the current live browser alongside
+the conversation without losing the selected Bot or chat history.
+
+### Browser challenges can be handed to a person without losing the Bot's page
+
+Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
+handback. Requests survive viewer reconnects and distinguish completion from cancellation, expiry,
+or an interrupted browser session. Managed browsing now uses full Chromium in headless or headed
+mode. Local API deployments can opt into installed Chrome with dedicated per-Bot profiles, the same
+in-app viewer, a loopback-only computer endpoint, and host shell execution disabled.
+
+### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
+
+Snapshots are ordered on the run of the browser that took them as well as the generation, so a
+computer that is replaced cannot have its old page mistaken for its new one. That ordering was
+reaching only the deployments that give each Bot its own container or sandbox, because the run was
+read off the infrastructure and the deployment with one shared computer has none to read.
+
+Two failures followed there, and both are fixed. A snapshot still in flight when somebody pressed
+Reset brought the wiped page back, and the boundary went on deciding about its elements: a rule about
+"Confirm transfer" firing on a click nowhere near one, or failing to fire on one that is. And a
+computer that restarted counted generations from one again, so its first snapshots were dropped as
+stale and refs kept resolving against a page nobody was on until the counter climbed back past it.
+
+The computer now mints a run for each Bot's browser session, mints a new one when the Bot is reset,
+and answers which run it is on. Nothing changes for a deployment that already reports one, and a
+computer too old to answer leaves the ordering exactly where it was rather than refusing anything.
+
+### An MCP tool that answers with a resource link is no longer read as an empty name
+
+A tool that points at a file or a page often returns a `resource_link`: a URI, a name, and a
+sentence of what it is, rather than the contents themselves. That part was named `[resource_link]`
+and the URI was dropped, so the model was told a link arrived and never shown where it went. A
+search that answered with pages produced no page it could open. The URI, name and description are
+now read, each on its own labelled line. The URI leads and the name and description are bounded, so
+a long name cannot push the pointer past the result cap; a server's `title` is shown over its `name`
+when it gives one. A part that already carried text is unchanged.
+
+### Skill selection keeps capabilities named across multiple JSON replies
+
+When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each
+complete `skills` list and offers the union of the named skills' granted tools. This also works with
+Anthropic's OpenAI-compatible endpoint, which may ignore the request for bare JSON. Previously a
+reply containing multiple objects fell back to offering every tool; replies with no valid `skills`
+list still do.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer

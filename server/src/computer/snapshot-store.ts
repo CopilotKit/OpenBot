@@ -47,8 +47,9 @@ export type StoredSnapshot = {
    *
    * The generation only orders snapshots within one session. This is what tells two sessions apart,
    * so a ref from a computer that has since been replaced resolves to nothing instead of to whatever
-   * now holds that ref. Undefined where there is no supervisor to ask, which leaves the behaviour as
-   * it was.
+   * now holds that ref. Undefined only where the provider could not be asked at all, which leaves the
+   * behaviour as it was: a null on either side skips the comparison, so a row written during an
+   * outage stays unordered against the runs around it.
    */
   session?: string;
 };

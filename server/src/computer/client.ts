@@ -1,3 +1,4 @@
+import type { HandoffRequest } from "../../../shared/computer-control";
 import type { NavigateResult } from "./schema";
 import { checkNavigationTarget } from "./target";
 
@@ -59,7 +60,10 @@ export class WorkspaceRequestError extends Error {
 
 /** The page changed after the caller received its element references. */
 export class StaleSnapshotError extends Error {
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly snapshotRequired = false,
+  ) {
     super(reason);
     this.name = "StaleSnapshotError";
   }
@@ -74,9 +78,24 @@ export class StaleSnapshotError extends Error {
  * puts on the body, which is the only thing in the response that distinguishes them.
  */
 export class HumanHasControlError extends Error {
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly requestId?: string,
+    readonly handoff?: HandoffRequest,
+  ) {
     super(reason);
     this.name = "HumanHasControlError";
+  }
+}
+
+/** Invalid, unknown, or superseded handoff identity is distinct from page freshness. */
+export class HandoffRequestError extends Error {
+  constructor(
+    reason: string,
+    readonly status: 400 | 404 | 409,
+  ) {
+    super(reason);
+    this.name = "HandoffRequestError";
   }
 }
 
@@ -117,6 +136,7 @@ export interface ComputerTransport {
     baseUrl: string,
     botId: string,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult>;
 }
 
@@ -226,6 +246,7 @@ export function createComputerTransport(
     baseUrl: string,
     botId: string,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult> {
     const verdict = checkNavigationTarget(url, {
       allowPrivateHosts: options.allowPrivateHosts,
@@ -235,6 +256,7 @@ export function createComputerTransport(
     }
     return post<NavigateResult>(baseUrl, botId, "/navigate", {
       url: verdict.url,
+      ...(toolCallId ? { toolCallId } : {}),
     });
   }
 
@@ -248,12 +270,23 @@ function throwMappedError(
 ): never {
   const detail =
     typeof body?.error === "string" ? body.error : `HTTP ${status}`;
+  if (
+    body?.controlRequestError === true &&
+    (status === 400 || status === 404 || status === 409)
+  )
+    throw new HandoffRequestError(detail, status);
   if (status === 409) {
     // The computer says which kind of 409 this is. Absent, it is the ordinary one.
     if (body?.humanHasControl === true) {
-      throw new HumanHasControlError(detail);
+      throw new HumanHasControlError(
+        detail,
+        typeof body.requestId === "string" ? body.requestId : undefined,
+        body.handoff && typeof body.handoff === "object"
+          ? (body.handoff as HandoffRequest)
+          : undefined,
+      );
     }
-    throw new StaleSnapshotError(detail);
+    throw new StaleSnapshotError(detail, body?.snapshotRequired === true);
   }
   if (status === 403) {
     throw new WorkspaceRefusedError(detail);

@@ -343,3 +343,26 @@ test("voice identity comes from the authorized profile and unavailable profiles 
   expect(await response.text()).not.toContain("database-secret");
   expect(calls).toBe(1);
 });
+
+test("voice resolves Learning for its authorized selected Bot before creating the session", async () => {
+  const selected: string[] = [];
+  const app = voiceRoutes(
+    user,
+    {
+      transport: "webrtc",
+      connect: async (input) => {
+        expect(input.learningEnabled).toBe(true);
+        return connection;
+      },
+    },
+    channels,
+    { get: async () => profile },
+    undefined,
+    async (agentId) => {
+      selected.push(agentId);
+      return true;
+    },
+  );
+  expect((await app.request("/calls", request())).status).toBe(200);
+  expect(selected).toEqual(["agent-1"]);
+});

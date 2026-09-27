@@ -3,7 +3,7 @@ name: openbot
 description: Run OpenBot on any Kubernetes cluster, managed or your own
 type: application
 # The chart's own version, bumped when templates or defaults change.
-version: 0.1.2
+version: 0.1.3
 # The OpenBot release this chart's default image tag points at. Kept equal to package.json's version
 # (the last version published) by the release workflow, and CI refuses a tree where they have drifted.
 appVersion: "0.0.15"

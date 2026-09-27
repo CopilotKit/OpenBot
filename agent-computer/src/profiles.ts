@@ -37,7 +37,7 @@ import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
-import { browserModeFromEnv } from "./browser-mode";
+import { browserRuntimeFromEnv } from "./browser-runtime";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
@@ -91,21 +91,21 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * Said out loud at start-up either way. An operator should not have to read this file to find out
  * whether the browser rendering the open internet is sandboxed.
  */
-const SANDBOX_ENABLED = process.env.COMPUTER_SANDBOX === "on";
-const BROWSER_MODE = browserModeFromEnv(process.env.COMPUTER_BROWSER_MODE);
+const BROWSER_RUNTIME = browserRuntimeFromEnv(process.env);
+const LOCAL_CHROME = BROWSER_RUNTIME.backend === "local-chrome";
+// Native Chrome has no container boundary. Always retain its own process sandbox and OS keychain.
+const SANDBOX_ENABLED = LOCAL_CHROME || process.env.COMPUTER_SANDBOX === "on";
 
 const LAUNCH_ARGS = [
   ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
-  "--password-store=basic",
+  ...(LOCAL_CHROME ? [] : ["--password-store=basic"]),
   // Drop the automation signals Chromium sets for itself, so a real person who takes the wheel can
   // sign in to a site that refuses obvious automation (Google among them). This is the flag, not a
   // JS patch of `navigator.webdriver`: the flag turns the property off at the source, where spoofing
   // it from a script leaves the other tells a detector cross-checks. It does not change what the Bot
-  // may do; the governed path is unchanged. The larger tell — a headless build reporting
-  // `HeadlessChrome` in its user agent — is only removed by running headed under a virtual display,
-  // which is a heavier image change tracked separately; this reduces the signals it can reduce
-  // without one.
+  // may do; the governed path is unchanged. Full Chromium is selected explicitly in both modes;
+  // headed mode also provides a window a person can use on the native desktop or virtual display.
   "--disable-blink-features=AutomationControlled",
 ];
 
@@ -409,10 +409,13 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
 
       const launch = (async () => {
         const dir = directoryFor(botId);
-        await sweepLocks(dir);
+        // A second native helper can target the same data root on another port. Do not remove an
+        // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
+        if (!LOCAL_CHROME) await sweepLocks(dir);
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
-          headless: BROWSER_MODE === "headless",
+          channel: BROWSER_RUNTIME.channel,
+          headless: BROWSER_RUNTIME.mode === "headless",
           args: LAUNCH_ARGS,
           // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
           // "controlled by automated software" banner. Dropped for the same reason as the flag above:

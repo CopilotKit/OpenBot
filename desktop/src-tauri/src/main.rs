@@ -70,6 +70,11 @@ struct Shell {
         Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
     /// The credential that sign-in produced, held so a project can be chosen with it.
     intelligence_credential: Mutex<Option<String>>,
+    /// Proof that this runtime key's project has the default Learning container.
+    intelligence_learning: Mutex<Option<openbot_desktop_lib::intelligence::ProvisionedConnection>>,
+    self_hosted_intelligence:
+        Mutex<Option<std::sync::Arc<openbot_desktop_lib::self_hosted_intelligence::SigningIn>>>,
+    self_hosted_sign_in_generation: std::sync::atomic::AtomicU64,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
     /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
@@ -341,7 +346,21 @@ fn report_running<R: tauri::Runtime>(
     );
 }
 
+fn cancel_self_hosted_sign_in(shell: &Shell) {
+    shell
+        .self_hosted_sign_in_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let signing = shell.self_hosted_intelligence.lock().unwrap().take();
+    if let Some(signing) = signing {
+        signing.cancel();
+    }
+}
+
 fn remember_selected_root(shell: &Shell, root: &Path) {
+    let changed = shell.selected_root.lock().unwrap().as_deref() != Some(root);
+    if changed {
+        cancel_self_hosted_sign_in(shell);
+    }
     *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
 }
 
@@ -1004,6 +1023,51 @@ fn intelligence_key_for_start(
     Ok(key)
 }
 
+fn seed_learning_default(
+    root: &Path,
+    settings: &mut std::collections::BTreeMap<String, String>,
+    proof: Option<&openbot_desktop_lib::intelligence::ProvisionedConnection>,
+) -> Result<(), Problem> {
+    const TARGET: &str = "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID";
+    let Some(proof) = proof else {
+        return Ok(());
+    };
+    if settings.get("INTELLIGENCE_API_KEY") != Some(&proof.api_key)
+        || settings
+            .get("INTELLIGENCE_API_URL")
+            .map(|api| api.trim_end_matches('/'))
+            != Some(proof.api_url.trim_end_matches('/'))
+        || settings.contains_key(TARGET)
+    {
+        return Ok(());
+    }
+    let existing = match std::fs::read_to_string(root.join(".env")) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not read its Learning settings.",
+                error.to_string(),
+            ));
+        }
+    };
+    // Preserve both dotenv assignment forms, including an optional export prefix and spacing.
+    let configured = existing.lines().any(|line| {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let mut words = key.split_whitespace();
+        matches!(
+            (words.next(), words.next(), words.next()),
+            (Some(TARGET), None, None) | (Some("export"), Some(TARGET), None)
+        ) && !value.trim().is_empty()
+    });
+    if !configured {
+        settings.insert(TARGET.into(), proof.learning_container_id.clone());
+    }
+    Ok(())
+}
+
 fn require_existing_encryption_key(
     root: &Path,
     secrets: &std::collections::BTreeMap<String, String>,
@@ -1415,6 +1479,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
         if let Some(authority) = organization_auth_url {
             settings.insert("OPENBOT_ORGANIZATION_AUTH_URL".into(), authority);
         }
+        seed_learning_default(
+            &root,
+            &mut settings,
+            shell.intelligence_learning.lock().unwrap().as_ref(),
+        )?;
         /*
          * The credentials come out here and never reach the file.
          *
@@ -1634,6 +1703,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    cancel_self_hosted_sign_in(shell);
     shell
         .stopped_in_session
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2971,6 +3041,106 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
+/// A self-hosted server authenticates in its own browser session. Only the selected project's
+/// runtime key crosses into the window; the helper owns and then closes the temporary browser.
+#[tauri::command]
+async fn begin_self_hosted_intelligence_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+    api_url: String,
+) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, Problem> {
+    let root = stack::root_from(&root);
+    let shell = app.state::<Shell>();
+    remember_selected_root(&shell, &root);
+    cancel_self_hosted_sign_in(&shell);
+    let generation = shell
+        .self_hosted_sign_in_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    tauri::async_runtime::spawn_blocking(move || {
+        let bun = preparation::dependencies_ready(&root)?;
+        let shell = app.state::<Shell>();
+        let signing = {
+            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+            if generation
+                != shell
+                    .self_hosted_sign_in_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(Problem::plain("That Intelligence sign-in was cancelled."));
+            }
+            let signing = openbot_desktop_lib::self_hosted_intelligence::SigningIn::begin(
+                &root, &bun, &api_url,
+            )?;
+            *slot = Some(signing.clone());
+            signing
+        };
+        let result = signing.projects();
+        if result.is_err() {
+            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
+            {
+                slot.take();
+            }
+            drop(slot);
+            signing.cancel();
+        }
+        result
+    })
+    .await
+    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
+}
+
+#[tauri::command]
+async fn finish_self_hosted_intelligence_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+    project: String,
+) -> Result<String, Problem> {
+    let root = stack::root_from(&root);
+    let signing = app
+        .state::<Shell>()
+        .self_hosted_intelligence
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|signing| signing.root == root)
+        .ok_or_else(|| Problem::plain("Sign in to this Intelligence server first."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = signing.connect(&project);
+        let shell = app.state::<Shell>();
+        let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+        if !slot
+            .as_ref()
+            .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
+        {
+            return Err(Problem::plain("That Intelligence sign-in was cancelled."));
+        }
+        slot.take();
+        let provisioned = match result {
+            Ok(provisioned) => provisioned,
+            Err(problem) => {
+                drop(slot);
+                signing.cancel();
+                return Err(problem);
+            }
+        };
+        let key = provisioned.api_key.clone();
+        *shell.intelligence_learning.lock().unwrap() = Some(provisioned);
+        Ok(key)
+    })
+    .await
+    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
+}
+
+#[tauri::command]
+async fn cancel_self_hosted_intelligence_sign_in(app: tauri::AppHandle) -> Result<(), Problem> {
+    tauri::async_runtime::spawn_blocking(move || cancel_self_hosted_sign_in(&app.state::<Shell>()))
+        .await
+        .map_err(|_| Problem::plain("The Intelligence sign-in could not be closed."))
+}
+
 /// Start signing in to Intelligence and return the address a browser has to open.
 #[tauri::command]
 async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
@@ -3049,13 +3219,16 @@ async fn intelligence_key_for(
         .ok_or_else(|| {
             openbot_desktop_lib::problem::Problem::plain("Sign in to CopilotKit first.")
         })?;
-    tauri::async_runtime::spawn_blocking(move || {
-        openbot_desktop_lib::intelligence::provision_key(&credential, &project)
+    let provisioned = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::intelligence::provision_connection(&credential, &project)
     })
     .await
     .map_err(|error| {
         openbot_desktop_lib::problem::Problem::plain(format!("A key could not be created: {error}"))
-    })?
+    })??;
+    let key = provisioned.api_key.clone();
+    *app.state::<Shell>().intelligence_learning.lock().unwrap() = Some(provisioned);
+    Ok(key)
 }
 
 #[tauri::command]
@@ -3606,6 +3779,9 @@ fn main() {
             finish_model_oauth,
             cancel_model_oauth,
             finish_chatgpt_sign_in,
+            begin_self_hosted_intelligence_sign_in,
+            finish_self_hosted_intelligence_sign_in,
+            cancel_self_hosted_intelligence_sign_in,
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,
@@ -3792,6 +3968,51 @@ mod tests {
     use std::io::{Read, Write};
 
     include!("stop_ipc_tests.rs");
+
+    #[test]
+    fn learning_default_is_written_only_for_the_provisioned_connection() {
+        use std::collections::BTreeMap;
+        let root = temp_root("learning-default-env");
+        std::fs::create_dir_all(&root).unwrap();
+        let proof = openbot_desktop_lib::intelligence::ProvisionedConnection {
+            api_key: "runtime-key".into(),
+            api_url: "https://api.intelligence.example".into(),
+            learning_container_id: "openbot".into(),
+        };
+        for (api, key, existing, verified, expected) in [
+            ("https://api.intelligence.example", "runtime-key", None, true, Some("openbot")),
+            ("https://api.intelligence.example", "runtime-key", Some(""), true, Some("openbot")),
+            ("https://api.intelligence.example/", "runtime-key", Some(""), true, Some("openbot")),
+            ("https://other.example", "runtime-key", Some(""), true, None),
+            ("https://api.intelligence.example", "other-key", Some(""), true, None),
+            ("https://api.intelligence.example", "runtime-key", Some(""), false, None),
+            ("https://api.intelligence.example", "runtime-key", Some("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=custom\nCPK_INTELLIGENCE_SKILLS_REVISION=7\n"), true, Some("custom")),
+            ("https://api.intelligence.example", "runtime-key", Some("export \tCPK_INTELLIGENCE_LEARNING_CONTAINER_ID = custom\n"), true, Some("custom")),
+        ] {
+            if let Some(existing) = existing {
+                std::fs::write(root.join(".env"), existing).unwrap();
+            }
+            let mut settings = BTreeMap::from([
+                ("INTELLIGENCE_API_URL".into(), api.into()),
+                ("INTELLIGENCE_API_KEY".into(), key.into()),
+            ]);
+            seed_learning_default(&root, &mut settings, verified.then_some(&proof)).unwrap();
+            openbot_env::write(&root.join(".env"), &settings, &BTreeMap::new()).unwrap();
+            let read = openbot_env::read_already_set(&root.join(".env"), &["CPK_INTELLIGENCE_LEARNING_CONTAINER_ID", "CPK_INTELLIGENCE_SKILLS_REVISION"]).unwrap();
+            if let Some(exported) = existing.filter(|text| text.starts_with("export")) {
+                // The shared setup reader does not parse export syntax; the file must keep the
+                // custom assignment with no bare assignment appended to override it.
+                assert!(!read.contains_key("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"));
+                assert!(std::fs::read_to_string(root.join(".env")).unwrap().contains(exported));
+                continue;
+            }
+            assert_eq!(read.get("CPK_INTELLIGENCE_LEARNING_CONTAINER_ID").map(String::as_str), expected);
+            if expected == Some("custom") {
+                assert_eq!(read.get("CPK_INTELLIGENCE_SKILLS_REVISION").map(String::as_str), Some("7"));
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn quit_menu_uses_the_standard_quit_shortcut() {

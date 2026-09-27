@@ -446,6 +446,56 @@ test("a failed REFETCH on /agents with the other slice empty also shows it as em
   expect(view.queryByText("Your agents couldn't be loaded.")).toBeNull();
 });
 
+/*
+ * Hiding a coworker takes it off both rosters, and Unhide is only in its dialog, which only a card
+ * opens. These serve the two list requests from their real URLs so the hidden roster arrives the
+ * way the server sends it: `GET /api/agents?hidden=true`.
+ */
+function servingRosters(visible: AgentProfile[], hidden: AgentProfile[]) {
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const agents = url.includes("hidden=true") ? hidden : visible;
+    return Response.json({ agents });
+  }) as unknown as typeof fetch;
+}
+
+test("a hidden coworker is on /agents under Hidden, collapsed, with a card that opens it", async () => {
+  const mine = agent({ id: "mine-1", name: "Mine Agent" });
+  const tucked = agent({ id: "hidden-1", name: "Tucked Agent", hidden: true });
+  servingRosters([mine], [tucked]);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Hidden")).toBeTruthy();
+  const section = view.container.querySelector("details");
+  expect(section).not.toBeNull();
+  // Collapsed until asked for, so it does not push the two rosters apart.
+  expect(section?.open).toBe(false);
+  // Inside the section rather than in either roster above it.
+  expect(section?.textContent).toContain("Tucked Agent");
+  expect(section?.textContent).not.toContain("Mine Agent");
+  // The card's own Details link is the way to the dialog that holds Unhide.
+  const link = view.getByLabelText("View details for Tucked Agent");
+  expect(link.getAttribute("href")).toBe("/agents?agent=hidden-1");
+});
+
+test("with nothing hidden, /agents has no Hidden section at all", async () => {
+  servingRosters([agent({ id: "mine-1", name: "Mine Agent" })], []);
+  const queryClient = failingQueryClient();
+
+  const view = renderAgents(queryClient);
+
+  expect(await view.findByText("Mine Agent")).toBeTruthy();
+  // Absent because the hidden roster came back empty, not because it has not come back yet.
+  await waitFor(() => {
+    expect(queryClient.getQueryState(agentKeys.list(true))?.status).toBe(
+      "success",
+    );
+  });
+  expect(view.queryByText("Hidden")).toBeNull();
+  expect(view.container.querySelector("details")).toBeNull();
+});
+
 test("a failed REFETCH on / with explore empty shows it as empty, not broken", async () => {
   const mine = agent({ id: "mine-1", name: "Mine Agent", mine: true });
   const queryClient = staleQueryClient([mine]);

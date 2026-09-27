@@ -20,6 +20,8 @@ import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
+import { clearLearningRevisionFallback } from "./learning/runtime";
+import { createLearningSettingsStore } from "./learning/settings";
 import {
   type AuditInitiator,
   createAuditReader,
@@ -181,10 +183,14 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
+// The environment seeds local policy once. The SDK fallback must not reapply an old revision
+// after an administrator clears a pin to follow the latest published Skills.
+clearLearningRevisionFallback();
 // Read with the rest of the configuration, where an empty variable is an absent one. See
 // `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
 const port = config.port;
 const database = createDatabase(config.databaseUrl);
+const learningSettings = createLearningSettingsStore(database, config.learning);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
@@ -841,6 +847,7 @@ const buildAgentFor = async ({
     // And the same recorder, so the files on a routine's own message stop counting as staged the
     // moment it sends them, exactly as a person's do.
     markAttachmentsSentForActor(actor.id),
+    copilotRuntime.learning?.acquire,
   );
   const agent = agents[agentId];
   if (!agent) {
@@ -894,6 +901,9 @@ const routineRunner = createRoutineRunner({
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     buildAgentFor,
+    learningContainerForThread: (input) =>
+      copilotRuntime.learning?.containerForThread(input) ??
+      Promise.resolve(undefined),
   }),
 });
 
@@ -1011,6 +1021,7 @@ const copilotRuntime = mountCopilotRuntime(
   // And that those files went out in a send, written by the person who sent them and only for rows
   // they uploaded. See markAttachmentsSentForActor.
   markAttachmentsSentForActor,
+  learningSettings,
 );
 
 /**
@@ -1335,6 +1346,11 @@ const app = createApp(
       resolveApiKey: resolveRuntimeModelApiKey,
     }),
     channels: channelStore,
+  },
+  {
+    store: learningSettings,
+    status: copilotRuntime.learning?.status,
+    inspect: copilotRuntime.learning?.inspect,
   },
 );
 

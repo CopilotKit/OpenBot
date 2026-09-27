@@ -97,6 +97,19 @@ function api(path: string, botId: string, init?: RequestInit) {
   });
 }
 
+async function takeControl(botId: string) {
+  const requested = await api("/control/request", botId, {
+    method: "POST",
+    body: JSON.stringify({ reason: "Manual control for the screen test" }),
+  });
+  const state: { request: { id: string } } = await requested.json();
+  const taken = await api("/control/take", botId, {
+    method: "POST",
+    body: JSON.stringify({ requestId: state.request.id }),
+  });
+  expect(taken.status).toBe(200);
+}
+
 type Frames = {
   socket: WebSocket;
   /** Every error the server sent this socket, in order. */
@@ -264,7 +277,7 @@ describe.skipIf(!asked)("a socket that another connection replaced", () => {
     const second = watch(botId);
     await second.casting;
 
-    await api("/control/take", botId, { method: "POST" });
+    await takeControl(botId);
     first.socket.send(JSON.stringify({ type: "key", key: "z" }));
 
     // The exact refusal, not merely some error. Dispatching through a cast the sender does not own
@@ -306,7 +319,7 @@ describe.skipIf(!asked)("a superseded socket closing later", () => {
 
     // The survivor still owns the screen, and the proof is that its typing arrives: a cast that was
     // stopped underneath it, or an ownership it quietly lost, would refuse this instead.
-    await api("/control/take", botId, { method: "POST" });
+    await takeControl(botId);
     second.socket.send(JSON.stringify({ type: "key", key: "k" }));
 
     let landed = "";
@@ -333,7 +346,7 @@ describe.skipIf(!asked)("printable punctuation from the live screen", () => {
     });
     const viewer = watch(botId);
     await viewer.casting;
-    await api("/control/take", botId, { method: "POST" });
+    await takeControl(botId);
 
     viewer.socket.send(
       JSON.stringify({
@@ -406,7 +419,7 @@ describe.skipIf(!asked)(
         method: "POST",
         body: JSON.stringify({ url: TYPING_PAGE }),
       });
-      await api("/control/release", botId, { method: "POST" });
+      // A fresh Bot starts with Bot ownership; no handoff exists to release.
 
       const viewer = watch(botId);
       await viewer.casting;
