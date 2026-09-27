@@ -72,6 +72,9 @@ struct Shell {
     intelligence_credential: Mutex<Option<String>>,
     /// Proof that this runtime key's project has the default Learning container.
     intelligence_learning: Mutex<Option<openbot_desktop_lib::intelligence::ProvisionedConnection>>,
+    self_hosted_intelligence:
+        Mutex<Option<std::sync::Arc<openbot_desktop_lib::self_hosted_intelligence::SigningIn>>>,
+    self_hosted_sign_in_generation: std::sync::atomic::AtomicU64,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
     /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
@@ -343,7 +346,21 @@ fn report_running<R: tauri::Runtime>(
     );
 }
 
+fn cancel_self_hosted_sign_in(shell: &Shell) {
+    shell
+        .self_hosted_sign_in_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let signing = shell.self_hosted_intelligence.lock().unwrap().take();
+    if let Some(signing) = signing {
+        signing.cancel();
+    }
+}
+
 fn remember_selected_root(shell: &Shell, root: &Path) {
+    let changed = shell.selected_root.lock().unwrap().as_deref() != Some(root);
+    if changed {
+        cancel_self_hosted_sign_in(shell);
+    }
     *shell.selected_root.lock().unwrap() = Some(root.to_path_buf());
 }
 
@@ -1686,6 +1703,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    cancel_self_hosted_sign_in(shell);
     shell
         .stopped_in_session
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -3023,6 +3041,106 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
+/// A self-hosted server authenticates in its own browser session. Only the selected project's
+/// runtime key crosses into the window; the helper owns and then closes the temporary browser.
+#[tauri::command]
+async fn begin_self_hosted_intelligence_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+    api_url: String,
+) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, Problem> {
+    let root = stack::root_from(&root);
+    let shell = app.state::<Shell>();
+    remember_selected_root(&shell, &root);
+    cancel_self_hosted_sign_in(&shell);
+    let generation = shell
+        .self_hosted_sign_in_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    tauri::async_runtime::spawn_blocking(move || {
+        let bun = preparation::dependencies_ready(&root)?;
+        let shell = app.state::<Shell>();
+        let signing = {
+            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+            if generation
+                != shell
+                    .self_hosted_sign_in_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(Problem::plain("That Intelligence sign-in was cancelled."));
+            }
+            let signing = openbot_desktop_lib::self_hosted_intelligence::SigningIn::begin(
+                &root, &bun, &api_url,
+            )?;
+            *slot = Some(signing.clone());
+            signing
+        };
+        let result = signing.projects();
+        if result.is_err() {
+            let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
+            {
+                slot.take();
+            }
+            drop(slot);
+            signing.cancel();
+        }
+        result
+    })
+    .await
+    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
+}
+
+#[tauri::command]
+async fn finish_self_hosted_intelligence_sign_in(
+    app: tauri::AppHandle,
+    root: String,
+    project: String,
+) -> Result<String, Problem> {
+    let root = stack::root_from(&root);
+    let signing = app
+        .state::<Shell>()
+        .self_hosted_intelligence
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|signing| signing.root == root)
+        .ok_or_else(|| Problem::plain("Sign in to this Intelligence server first."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = signing.connect(&project);
+        let shell = app.state::<Shell>();
+        let mut slot = shell.self_hosted_intelligence.lock().unwrap();
+        if !slot
+            .as_ref()
+            .is_some_and(|active| std::sync::Arc::ptr_eq(active, &signing))
+        {
+            return Err(Problem::plain("That Intelligence sign-in was cancelled."));
+        }
+        slot.take();
+        let provisioned = match result {
+            Ok(provisioned) => provisioned,
+            Err(problem) => {
+                drop(slot);
+                signing.cancel();
+                return Err(problem);
+            }
+        };
+        let key = provisioned.api_key.clone();
+        *shell.intelligence_learning.lock().unwrap() = Some(provisioned);
+        Ok(key)
+    })
+    .await
+    .map_err(|_| Problem::plain("Intelligence sign-in could not finish."))?
+}
+
+#[tauri::command]
+async fn cancel_self_hosted_intelligence_sign_in(app: tauri::AppHandle) -> Result<(), Problem> {
+    tauri::async_runtime::spawn_blocking(move || cancel_self_hosted_sign_in(&app.state::<Shell>()))
+        .await
+        .map_err(|_| Problem::plain("The Intelligence sign-in could not be closed."))
+}
+
 /// Start signing in to Intelligence and return the address a browser has to open.
 #[tauri::command]
 async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
@@ -3661,6 +3779,9 @@ fn main() {
             finish_model_oauth,
             cancel_model_oauth,
             finish_chatgpt_sign_in,
+            begin_self_hosted_intelligence_sign_in,
+            finish_self_hosted_intelligence_sign_in,
+            cancel_self_hosted_intelligence_sign_in,
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,

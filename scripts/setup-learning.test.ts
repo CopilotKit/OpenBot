@@ -157,12 +157,51 @@ test("exported runtime keys also prevent CLI project selection", async () => {
   expect(f.calls).toHaveLength(0);
 });
 
-test("self-hosted endpoints require their own authenticated container setup", async () => {
+test("fresh self-hosted endpoints use browser setup and save its verified connection", async () => {
   const f = await fixture("INTELLIGENCE_API_URL=https://customer.example\n");
-  await expect(
-    setupLearning({ ...f.options, runCli: f.runCli }),
-  ).rejects.toThrow("self-hosted");
+  expect(
+    await setupLearning({
+      ...f.options,
+      runCli: f.runCli,
+      setupSelfHosted: async (apiUrl) => ({
+        apiUrl,
+        apiKey: key,
+        learningContainerId: "openbot",
+      }),
+    }),
+  ).toBe("configured");
+  expect(parseEnv(await readFile(f.envPath, "utf8"))).toMatchObject({
+    INTELLIGENCE_API_URL: "https://customer.example",
+    INTELLIGENCE_API_KEY: key,
+    CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "openbot",
+  });
   expect(f.calls).toHaveLength(0);
+});
+
+test("self-hosted setup failure or concurrent env edits do not save credentials", async () => {
+  const f = await fixture("INTELLIGENCE_API_URL=https://customer.example\n");
+  const original = await readFile(f.envPath, "utf8");
+  await expect(
+    setupLearning({
+      ...f.options,
+      setupSelfHosted: async () => {
+        throw new Error("Sign-in cancelled");
+      },
+    }),
+  ).rejects.toThrow("cancelled");
+  expect(await readFile(f.envPath, "utf8")).toBe(original);
+  await expect(
+    setupLearning({
+      ...f.options,
+      setupSelfHosted: async (apiUrl) => {
+        await writeFile(f.envPath, `${original}\n# Operator edit\n`);
+        return { apiUrl, apiKey: key, learningContainerId: "openbot" };
+      },
+    }),
+  ).rejects.toThrow("configuration changed");
+  expect(parseEnv(await readFile(f.envPath, "utf8")).INTELLIGENCE_API_KEY).toBe(
+    "",
+  );
 });
 
 test("a partial key provision cannot reuse a stale CLI key or create a container", async () => {

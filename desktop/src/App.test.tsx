@@ -3168,3 +3168,117 @@ test("the Enter that finishes a composed character does not ask the Bot", async 
     [],
   );
 });
+
+async function enterSelfHostedIntelligence() {
+  const view = await enterProjectSelection();
+  await userEvent.click(
+    view.getByText("Point at your own Intelligence server"),
+  );
+  const user = userEvent.setup({ document: window.document });
+  await user.clear(view.getByLabelText("API URL"));
+  await user.type(
+    view.getByLabelText("API URL"),
+    "https://intelligence.example.test",
+  );
+  return view;
+}
+
+test("self-hosted Intelligence sign-in selects a project and receives its provisioned key", async () => {
+  const view = await enterSelfHostedIntelligence();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "begin_self_hosted_intelligence_sign_in")
+      return [{ id: "42", name: "Self-hosted team" }];
+    if (command === "finish_self_hosted_intelligence_sign_in")
+      return "self-hosted-project-key";
+    return previous(command, args);
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to Intelligence" }),
+  );
+  expect(invokeCalls).toContainEqual({
+    command: "begin_self_hosted_intelligence_sign_in",
+    args: {
+      root: "/tmp/create-project",
+      apiUrl: "https://intelligence.example.test",
+    },
+  });
+  expect(view.queryByRole("button", { name: "Create project" })).toBeNull();
+  await userEvent.click(
+    await view.findByRole("button", { name: "Self-hosted team" }),
+  );
+  expect(invokeCalls).toContainEqual({
+    command: "finish_self_hosted_intelligence_sign_in",
+    args: { root: "/tmp/create-project", project: "42" },
+  });
+  expect(await view.findByText("Connected to Intelligence.")).toBeTruthy();
+  expect(view.getByLabelText("Project key")).toHaveProperty(
+    "value",
+    "self-hosted-project-key",
+  );
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
+test("cancelling self-hosted login ignores a late project response and keeps manual setup available", async () => {
+  const view = await enterSelfHostedIntelligence();
+  const projects = deferred<{ id: string; name: string }[]>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "begin_self_hosted_intelligence_sign_in")
+      return projects.promise;
+    if (command === "cancel_self_hosted_intelligence_sign_in") return;
+    return previous(command, args);
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to Intelligence" }),
+  );
+  expect(view.getByRole("status").textContent).toContain(
+    "Intelligence browser window",
+  );
+  expect(view.getByLabelText("API URL")).toHaveProperty("disabled", true);
+  await userEvent.click(
+    view.getByRole("button", { name: "Cancel Intelligence sign-in" }),
+  );
+  expect(
+    invokeCalls.some(
+      (call) => call.command === "cancel_self_hosted_intelligence_sign_in",
+    ),
+  ).toBe(true);
+  await act(async () =>
+    projects.resolve([{ id: "42", name: "Cancelled team" }]),
+  );
+  expect(view.queryByRole("button", { name: "Cancelled team" })).toBeNull();
+  expect(view.getByLabelText("API URL")).toHaveProperty("disabled", false);
+  await userEvent.type(view.getByLabelText("Project key"), "manual-key");
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
+test("self-hosted provisioning failure offers a fresh sign-in without retaining a stale picker", async () => {
+  const view = await enterSelfHostedIntelligence();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "begin_self_hosted_intelligence_sign_in")
+      return [{ id: "42", name: "Team" }];
+    if (command === "finish_self_hosted_intelligence_sign_in")
+      throw { said: "Your account cannot create the Learning container." };
+    return previous(command, args);
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in to Intelligence" }),
+  );
+  await userEvent.click(await view.findByRole("button", { name: "Team" }));
+  expect(view.getByRole("alert").textContent).toContain(
+    "cannot create the Learning container",
+  );
+  expect(view.queryByRole("button", { name: "Team" })).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Sign in to Intelligence" }),
+  ).toHaveProperty("disabled", false);
+  expect(view.getByLabelText("Project key")).toHaveProperty("value", "");
+});

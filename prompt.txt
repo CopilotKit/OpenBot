@@ -37,6 +37,8 @@ pinned Bun runtime itself when it is missing. Do not tell them to install Node o
 `npx copilotkit`: the desktop flow signs in to CopilotKit, provisions the project key, and creates
 or reuses its openbot Learning container. Start saves the assignment only for the matching key/API;
 custom container assignments and saved Admin choices remain authoritative.
+Self-hosted desktop setup uses that deployment's normal sign-in in an isolated Chrome or Edge
+window and provisions the selected project's key and container. Either browser must be installed.
 Do not tell them to clone the repository: the desktop app fetches the released deployment tree and
 uses the release's digest-pinned container images.
 
@@ -115,14 +117,19 @@ person through every blank line.
 The clone commands are:
 
   cp .env.example .env
+  bun install
 
   npx --yes copilotkit@latest login           # opens a browser
   npx --yes copilotkit@latest project select  # selects the managed project
   bun scripts/setup-learning.ts             # provisions its key and openbot Learning container
 
-The helper is for fresh managed setup: it preserves custom targets and refuses to replace an
-existing INTELLIGENCE_API_KEY. Key-only or self-hosted setups must create a container through their
-authenticated Intelligence UI/API and assign it in OpenBot Admin. Automatic Learning defaults on;
+The helper preserves custom targets and refuses to replace an existing INTELLIGENCE_API_KEY.
+For fresh self-hosted setup, set INTELLIGENCE_API_URL to its HTTPS API origin and run only
+bun scripts/setup-learning.ts after bun install; skip the managed npx commands. Chrome or Edge
+must be installed. Sign in through the isolated browser window and choose an accessible project;
+the helper creates or reuses openbot and writes that project's new runtime key and assignment.
+Existing key-only setups use authenticated Intelligence administration to create a container and
+assign it in OpenBot Admin. Automatic Learning defaults on;
 collection and delivery require an assigned container. OpenBot starts and chats without one. Administrators
 can assign a default container, override or exclude individual Bots, or pause Learning at
 Admin → Automatic Learning. Open Intelligence to review and publish proposed skills. Containers
@@ -149,7 +156,6 @@ browser-session tokens into `.env`.
 
 Then:
 
-  bun install
   bash scripts/start.sh
 
 It starts Docker services, applies migrations, starts the API on 3001, starts the app on 3010,

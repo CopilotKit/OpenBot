@@ -101,19 +101,60 @@ export function App() {
   const [model, setModel] = useState<ModelChoice | null>(null);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
   const [alreadyHeld, setAlreadyHeld] = useState<HeldConfiguration>({});
-  /*
-   * Signing in to CopilotKit, which is how a managed deployment gets its key.
-   *
-   * The key field stays, behind the self-hosted disclosure, because somebody running their own
-   * Intelligence has a key this sign-in knows nothing about. David's call: sign in on the main
-   * path, paste on the developer one, which is the same shape as the model screen.
-   */
   const [projects, setProjects] = useState<
     { id: string; name: string }[] | null
   >(null);
   const [projectName, setProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [intelligenceSignInKind, setIntelligenceSignInKind] = useState<
+    "managed" | "self-hosted"
+  >("managed");
+  const [selfHostedActive, setSelfHostedActive] = useState(false);
+  const selfHostedAttempt = useRef(0);
+  const selfHostedActiveRef = useRef(false);
+  const cancelSelfHostedSignIn = useCallback(async () => {
+    if (!selfHostedActiveRef.current) return;
+    selfHostedActiveRef.current = false;
+    selfHostedAttempt.current += 1;
+    setSelfHostedActive(false);
+    setSigningIn(false);
+    setProjects(null);
+    try {
+      await invoke("cancel_self_hosted_intelligence_sign_in");
+    } catch (error) {
+      setFailure(asProblem(error));
+    }
+  }, []);
+
+  async function signInToSelfHostedIntelligence() {
+    await cancelSelfHostedSignIn();
+    const attempt = ++selfHostedAttempt.current;
+    selfHostedActiveRef.current = true;
+    setSelfHostedActive(true);
+    setIntelligenceSignInKind("self-hosted");
+    setSigningIn(true);
+    setFailure(null);
+    setProjects(null);
+    setApiKey("");
+    setReuseIntelligence(false);
+    try {
+      const available = await invoke<{ id: string; name: string }[]>(
+        "begin_self_hosted_intelligence_sign_in",
+        { root, apiUrl },
+      );
+      if (selfHostedAttempt.current === attempt) setProjects(available);
+    } catch (error) {
+      if (selfHostedAttempt.current === attempt) {
+        setFailure(asProblem(error));
+        selfHostedActiveRef.current = false;
+        setSelfHostedActive(false);
+      }
+    } finally {
+      if (selfHostedAttempt.current === attempt) setSigningIn(false);
+    }
+  }
+
   /*
    * The address the browser was sent to, kept so the screen can show it.
    *
@@ -125,6 +166,8 @@ export function App() {
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
 
   async function signInToCopilotKit() {
+    await cancelSelfHostedSignIn();
+    setIntelligenceSignInKind("managed");
     setSigningIn(true);
     setFailure(null);
     setSignInUrl(null);
@@ -146,15 +189,31 @@ export function App() {
   async function pickProject(id: string) {
     setSigningIn(true);
     setFailure(null);
+    const selfHosted = intelligenceSignInKind === "self-hosted";
+    const attempt = selfHostedAttempt.current;
     try {
-      // The key never passes through the window until it exists: it is created for the project
-      // chosen here and put straight into the field this screen already had.
-      setApiKey(await invoke<string>("intelligence_key_for", { project: id }));
+      const key = await invoke<string>(
+        selfHosted
+          ? "finish_self_hosted_intelligence_sign_in"
+          : "intelligence_key_for",
+        selfHosted ? { root, project: id } : { project: id },
+      );
+      if (selfHosted && selfHostedAttempt.current !== attempt) return;
+      setApiKey(key);
       setProjects(null);
     } catch (error) {
-      setFailure(asProblem(error));
+      if (!selfHosted || selfHostedAttempt.current === attempt) {
+        setFailure(asProblem(error));
+        if (selfHosted) setProjects(null);
+      }
     } finally {
-      setSigningIn(false);
+      if (!selfHosted || selfHostedAttempt.current === attempt) {
+        setSigningIn(false);
+        if (selfHosted) {
+          selfHostedActiveRef.current = false;
+          setSelfHostedActive(false);
+        }
+      }
     }
   }
   async function createProject() {
@@ -267,6 +326,8 @@ export function App() {
   }, [root, model, apiKey, apiUrl, wsUrl, harness, step, reuseIntelligence]);
 
   const clearRootScopedSavedState = useCallback(() => {
+    void cancelSelfHostedSignIn();
+    setIntelligenceSignInKind("managed");
     savedLaunch.current = null;
     setRefreshIntelligence(false);
     setRefreshOrganization(false);
@@ -276,7 +337,7 @@ export function App() {
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
     setWsUrl(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
     setAlreadyHeld({});
-  }, []);
+  }, [cancelSelfHostedSignIn]);
 
   const loadConfiguredRoot = useCallback(
     async (nextRoot: string) => {
@@ -961,7 +1022,11 @@ export function App() {
           */}
             {apiKey && !signingIn && !projects ? (
               <>
-                <p className="lede">Connected to CopilotKit.</p>
+                <p className="lede">
+                  {intelligenceSignInKind === "self-hosted"
+                    ? "Connected to Intelligence."
+                    : "Connected to CopilotKit."}
+                </p>
                 {returningToInstallation && (
                   <button
                     type="button"
@@ -1020,14 +1085,19 @@ export function App() {
                 {projects.length === 0 && (
                   <>
                     <p className="footnote">
-                      That account has no projects yet. Create one below, or
-                      sign in with a different account.
+                      {intelligenceSignInKind === "self-hosted"
+                        ? "That account has no available projects. Ask your Intelligence administrator for access, or sign in with a different account."
+                        : "That account has no projects yet. Create one below, or sign in with a different account."}
                     </p>
                     <button
                       type="button"
                       className="quiet"
                       disabled={signingIn}
-                      onClick={signInToCopilotKit}
+                      onClick={
+                        intelligenceSignInKind === "self-hosted"
+                          ? signInToSelfHostedIntelligence
+                          : signInToCopilotKit
+                      }
                     >
                       {signingIn
                         ? "Waiting for your browser…"
@@ -1035,31 +1105,33 @@ export function App() {
                     </button>
                   </>
                 )}
-                <form
-                  className="new-project-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void createProject();
-                  }}
-                >
-                  <div className="field">
-                    <label htmlFor="new-project-name">New project name</label>
-                    <input
-                      id="new-project-name"
-                      value={projectName}
-                      onChange={(event) => setProjectName(event.target.value)}
-                      disabled={signingIn}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className={projects.length > 0 ? "quiet" : undefined}
-                    disabled={signingIn || !projectName.trim()}
+                {intelligenceSignInKind === "managed" && (
+                  <form
+                    className="new-project-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void createProject();
+                    }}
                   >
-                    {creatingProject ? "Creating project…" : "Create project"}
-                  </button>
-                </form>
+                    <div className="field">
+                      <label htmlFor="new-project-name">New project name</label>
+                      <input
+                        id="new-project-name"
+                        value={projectName}
+                        onChange={(event) => setProjectName(event.target.value)}
+                        disabled={signingIn}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className={projects.length > 0 ? "quiet" : undefined}
+                      disabled={signingIn || !projectName.trim()}
+                    >
+                      {creatingProject ? "Creating project…" : "Create project"}
+                    </button>
+                  </form>
+                )}
               </>
             ) : (
               <>
@@ -1101,14 +1173,16 @@ export function App() {
             <details>
               <summary>Point at your own Intelligence server</summary>
               <p className="footnote" style={{ margin: "0.6rem 0 0.75rem" }}>
-                These default to CopilotKit's managed service. Change them only
-                if you run Intelligence yourself, and paste that server's key
-                below.
+                Enter your Intelligence server’s addresses, then sign in to
+                choose a project. OpenBot creates its Learning container for
+                you. Sign-in requires Chrome or Microsoft Edge. You can also use
+                an existing project key.
               </p>
               <div className="field">
                 <label htmlFor="key">Project key</label>
                 <input
                   id="key"
+                  disabled={selfHostedActive}
                   type="password"
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
@@ -1121,6 +1195,7 @@ export function App() {
                 <label htmlFor="api">API URL</label>
                 <input
                   id="api"
+                  disabled={selfHostedActive}
                   value={apiUrl}
                   onChange={(event) => setApiUrl(event.target.value)}
                   spellCheck={false}
@@ -1135,6 +1210,29 @@ export function App() {
                   spellCheck={false}
                 />
               </div>
+              <div className="row connection-actions">
+                <button
+                  type="button"
+                  disabled={signingIn || selfHostedActive || !apiUrl.trim()}
+                  onClick={signInToSelfHostedIntelligence}
+                >
+                  Sign in to Intelligence
+                </button>
+                {selfHostedActive && (
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={cancelSelfHostedSignIn}
+                  >
+                    Cancel Intelligence sign-in
+                  </button>
+                )}
+              </div>
+              {selfHostedActive && signingIn && !projects && (
+                <p className="footnote" role="status">
+                  Finish signing in in the Intelligence browser window…
+                </p>
+              )}
             </details>
             <details>
               <summary>Sign in through your organization</summary>

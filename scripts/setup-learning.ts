@@ -1,6 +1,12 @@
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
+import {
+  intelligenceApiOrigin,
+  type LearningConnection,
+  setupSelfHostedLearning,
+} from "./self-hosted-learning";
 
 const CONTAINER = "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID";
 const MANAGED_API = "https://api.intelligence.copilotkit.ai";
@@ -74,12 +80,61 @@ function upsert(content: string, name: string, value: string) {
   return `${without.replace(/\n*$/, "\n")}${name}=${JSON.stringify(value)}\n`;
 }
 
-/** Fresh managed setup only: this invocation owns key provisioning and proves its project. */
+async function saveEnvironment(envPath: string, content: string) {
+  const temporary = `${envPath}.learning-${crypto.randomUUID()}`;
+  try {
+    await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+    await rename(temporary, envPath);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function interactiveSelfHosted(apiUrl: string) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  console.log("Sign in to Intelligence in the temporary browser window.");
+  try {
+    return await setupSelfHostedLearning({
+      apiUrl,
+      signal: controller.signal,
+      selectProject: async (projects, signal) => {
+        if (projects.length === 1) return projects[0].id;
+        const input = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        try {
+          for (const [index, project] of projects.entries()) {
+            console.log(`${index + 1}. ${project.name} (${project.id})`);
+          }
+          const answer = await input.question("Choose a project number: ", {
+            signal,
+          });
+          const selected = projects[Number(answer.trim()) - 1];
+          if (!selected)
+            throw new Error("Select a project number from the list.");
+          return selected.id;
+        } finally {
+          input.close();
+        }
+      },
+    });
+  } finally {
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
+  }
+}
+
+/** Fresh setup owns key provisioning, so its container and key share a verified project. */
 export async function setupLearning(
   options: {
     directory?: string;
     environment?: Record<string, string | undefined>;
     runCli?: RunCli;
+    setupSelfHosted?: (apiUrl: string) => Promise<LearningConnection>;
   } = {},
 ): Promise<"configured" | "preserved"> {
   const directory = resolve(options.directory ?? process.cwd());
@@ -100,10 +155,39 @@ export async function setupLearning(
       "An OpenBot runtime key is already configured. It was preserved. Create a container in that key's Intelligence project and assign it in Admin → Automatic Learning; this helper cannot prove which project a manually supplied key belongs to.",
     );
   }
-  if (effective("INTELLIGENCE_API_URL").replace(/\/$/, "") !== MANAGED_API) {
-    throw new Error(
-      "This helper provisions managed Intelligence only. For self-hosted or custom endpoints, create a container in that deployment and assign it in Admin → Automatic Learning.",
+  const apiUrl = intelligenceApiOrigin(effective("INTELLIGENCE_API_URL"));
+  if (apiUrl !== MANAGED_API) {
+    const connection = await (options.setupSelfHosted ?? interactiveSelfHosted)(
+      apiUrl,
     );
+    if (
+      connection.apiUrl !== apiUrl ||
+      connection.learningContainerId !== "openbot" ||
+      !connection.apiKey.startsWith("cpk-")
+    ) {
+      throw new Error(
+        "Intelligence returned an invalid setup connection. Nothing was saved.",
+      );
+    }
+    const current = await readFile(envPath, "utf8");
+    if (current !== original) {
+      throw new Error(
+        "Setup configuration changed while signing in. It was preserved; inspect .env and run this helper again.",
+      );
+    }
+    await saveEnvironment(
+      envPath,
+      upsert(
+        upsert(
+          upsert(current, "INTELLIGENCE_API_URL", apiUrl),
+          "INTELLIGENCE_API_KEY",
+          connection.apiKey,
+        ),
+        CONTAINER,
+        connection.learningContainerId,
+      ),
+    );
+    return "configured";
   }
   const projectPath = resolve(directory, ".copilotkit/project.json");
   const selected = json(
@@ -190,13 +274,7 @@ export async function setupLearning(
     CONTAINER,
     "openbot",
   );
-  const temporary = `${envPath}.learning-${crypto.randomUUID()}`;
-  try {
-    await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
-    await rename(temporary, envPath);
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  await saveEnvironment(envPath, content);
   return "configured";
 }
 

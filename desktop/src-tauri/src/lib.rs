@@ -18,6 +18,7 @@ pub mod provider_oauth;
 pub mod pull_metrics;
 pub mod quiet;
 pub mod saved_intent;
+pub mod self_hosted_intelligence;
 pub mod stack;
 pub mod supervise;
 pub mod telemetry;
