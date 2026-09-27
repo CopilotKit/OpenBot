@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A hidden coworker can be found again on the Agents screen
+
+Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
+which only its card opens, so a hidden coworker had no way back short of typing its id into the
+address bar. The screen now ends with a collapsed **Hidden** section listing them, each card opening
+the dialog as before. It appears only when something is hidden. Hiding still changes nothing for
+anyone else, and nothing on the server changed: the screen reads the `GET /api/agents?hidden=true`
+list the server already served.
+
 ### Browser controls are visible in chat and the Computer sidebar
 
 Channel chats and standalone Bot chats now have a labeled Computer button and always-visible
