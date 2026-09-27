@@ -10,26 +10,36 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### The Bots agree on one set of provider defaults
 
+**The Mastra Bot's default on OpenAI moved from `gpt-4o-mini` to `gpt-5.5`.** A deployment running
+it with `BOT_MODEL` unset moves model and cost on upgrade; set `BOT_MODEL` to keep what it had.
+
 The three TypeScript Bots now read a single shared list of provider facts instead of keeping their
-own copies. On OpenAI they all default to `gpt-5.5` — the Mastra Bot previously defaulted to
-`gpt-4o-mini` — and the Mastra Bot refuses a `BOT_PROVIDER` it does not recognize (such as
-`google`) instead of quietly answering through OpenAI with a different model. The picked harness
-in Compose now receives `GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness
-picked on `BOT_PROVIDER=google` has the key it needs.
+own copies, which is what makes a default changeable in one place rather than in three. The Mastra
+Bot also refuses a `BOT_PROVIDER` it does not recognize (such as `google`) instead of quietly
+answering through OpenAI with a different model. The picked harness in Compose now receives
+`GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness picked on
+`BOT_PROVIDER=google` has the key it needs.
 
 ### One spec file, in every language
 
 `shared/model-providers.json` now holds the provider facts and every Bot's default provider and
 model. The TypeScript Bots read it through `shared/model-providers.ts` and the ten Python Bots
 through `shared/model_providers.py`, with `BOT_PROVIDER` and `BOT_MODEL` still winning over both
-as they always have — the defaults themselves are unchanged. Moving a Bot to a different model, or
+as they always have. Reading the file moved no default on its own; the one default that did move,
+the Mastra Bot's, is at the top of the previous entry. Moving a Bot to a different model, or
 giving a Bot written in any other language its first one, is editing one row in one file instead
-of one line per language. A row naming a provider the file does not know stops the Bot at startup
-with the key that is wrong, rather than at its first model call. Compose used to substitute
-`gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever `BOT_PROVIDER` named; it
-now passes the unset value through, so the Bot's row — or the moved provider's default row — is
-what answers. An OpenAI deployment keeps the same `gpt-5.5` either way; a Google or Anthropic one
-stops being handed a model its vendor has never heard of.
+of one line per language.
+
+Both loaders check the file against their own list of providers, in both directions, and refuse in
+the same words. A wrong row in the file used to stop the three TypeScript Bots while the ten
+Python Bots started clean and met it at their first model call instead; all thirteen stop at
+startup now, naming the key that is wrong. Adding a provider is one row in the file and one entry
+to `PROVIDER_IDS` in each loader.
+
+Compose used to substitute `gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever
+`BOT_PROVIDER` named; it now passes the unset value through, so the Bot's row — or the moved
+provider's default row — is what answers. An OpenAI deployment keeps the same `gpt-5.5` either way;
+a Google or Anthropic one stops being handed a model its vendor has never heard of.
 
 ### A hidden coworker can be found again on the Agents screen
 
