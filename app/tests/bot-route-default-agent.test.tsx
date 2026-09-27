@@ -332,9 +332,10 @@ test("/bot opens a live Computer sidebar with ownership controls and preserves t
     target: { value: "Keep this conversation" },
   });
   fireEvent.click(toggle);
-  const sidebar = within(
-    await view.findByRole("region", { name: "Computer sidebar" }),
-  );
+  const sidebarElement = await view.findByRole("region", {
+    name: "Computer sidebar",
+  });
+  const sidebar = within(sidebarElement);
   expect(
     sidebar
       .getByRole("button", { name: "Take control" })
@@ -347,9 +348,9 @@ test("/bot opens a live Computer sidebar with ownership controls and preserves t
   ).toBeTruthy();
   expect(sidebar.getByRole("heading", { name: "Activity" })).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Close Computer" }));
-  await waitFor(() =>
-    expect(view.queryByRole("region", { name: "Computer sidebar" })).toBeNull(),
-  );
+  // Poll a boolean: Bun serializes the entire Happy DOM tree when a pending
+  // element is compared with null, starving the navigation this wait observes.
+  await waitFor(() => expect(sidebarElement.isConnected).toBe(false));
   expect(view.getByTestId("copilot-chat")).toBe(chat);
   expect(chat.dataset.agentId).toBe("general-assistant");
   expect(view.getByDisplayValue("Keep this conversation")).toBeTruthy();
