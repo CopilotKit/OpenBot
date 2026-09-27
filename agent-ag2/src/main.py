@@ -1,6 +1,13 @@
 """AG2 as a Bot. AG-UI is an extra in AG2's own package, so `ag2[ag-ui]` is the dependency."""
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from ag2 import Agent
 from ag2.ag_ui import AGUIStream
@@ -17,8 +24,9 @@ def _config() -> AnthropicConfig | OpenAIConfig:
     `BOT_PROVIDER` is `anthropic` for an Anthropic key and `openai` otherwise, an OpenAI-compatible
     endpoint included. Each SDK reads its own key from the environment.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    settings = bot_settings("agent-ag2")
+    provider = settings.provider
+    model = settings.model
     if provider == "anthropic":
         # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
         base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"

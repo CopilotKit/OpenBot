@@ -16,7 +16,7 @@ import { listenPort } from "../../shared/listen-port";
 import {
   apiKeyOrPlaceholder,
   baseUrlVariableFor,
-  configuredModel,
+  botSettings,
   keyIsRequired,
   keyVariableFor,
   requiresResponsesApi,
@@ -72,20 +72,20 @@ if (!MANAGED_AGENT_TOKEN) {
  * Each provider reads its own key. A deployment that only runs Anthropic never needs an OpenAI key,
  * which is the point of making this configurable rather than assuming one vendor.
  *
- * The default is unchanged so the two shipped Bots stay comparable out of the box. Which default
- * that is, and which variable each provider's key and endpoint arrive in, are read from the shared
- * provider registry rather than repeated here.
+ * The default comes from `shared/model-providers.json` — this Bot's `bots.agent-langgraph` row —
+ * so the two shipped Bots stay comparable out of the box and every language in the box reads the
+ * same decision. Which variable each provider's key and endpoint arrive in is read from the same
+ * file's provider rows rather than repeated here.
  *
  * Blank is OpenAI, the reading every other consumer of `BOT_PROVIDER` gives it: the desktop writes
- * an empty provider when switching back to OpenAI, and the server reads empty as OpenAI. Padded and
- * differently-cased names are the same provider, because a value typed into a setup window arrives
- * with a space on it more often than not. A name nobody has heard of is kept, so the check below
- * can put it in its message.
+ * an empty provider when switching back to OpenAI, and the server reads empty as OpenAI. An unset
+ * environment falls through to the spec row, and when that says openai — as it does today — the
+ * two readings are the same. Padded and differently-cased names are the same provider, because a
+ * value typed into a setup window arrives with a space on it more often than not. A name nobody
+ * has heard of is kept, so the check below can put it in its message. The lookup order is
+ * environment over spec file over provider default; see `botSettings`.
  */
-const PROVIDER =
-  (process.env.BOT_PROVIDER ?? "").trim().toLowerCase() || "openai";
-// An unset model and an empty one are the same thing; see `configuredModel`.
-const MODEL = configuredModel(PROVIDER, process.env.BOT_MODEL);
+const { provider: PROVIDER, model: MODEL } = botSettings("agent-langgraph");
 /**
  * OpenAI only. Its newer models require the Responses API, which the integration handles.
  *

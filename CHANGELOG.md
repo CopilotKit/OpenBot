@@ -17,6 +17,20 @@ own copies. On OpenAI they all default to `gpt-5.5` — the Mastra Bot previousl
 in Compose now receives `GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness
 picked on `BOT_PROVIDER=google` has the key it needs.
 
+### One spec file, in every language
+
+`shared/model-providers.json` now holds the provider facts and every Bot's default provider and
+model. The TypeScript Bots read it through `shared/model-providers.ts` and the ten Python Bots
+through `shared/model_providers.py`, with `BOT_PROVIDER` and `BOT_MODEL` still winning over both
+as they always have — the defaults themselves are unchanged. Moving a Bot to a different model, or
+giving a Bot written in any other language its first one, is editing one row in one file instead
+of one line per language. A row naming a provider the file does not know stops the Bot at startup
+with the key that is wrong, rather than at its first model call. Compose used to substitute
+`gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever `BOT_PROVIDER` named; it
+now passes the unset value through, so the Bot's row — or the moved provider's default row — is
+what answers. An OpenAI deployment keeps the same `gpt-5.5` either way; a Google or Anthropic one
+stops being handed a model its vendor has never heard of.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer

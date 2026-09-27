@@ -5,6 +5,13 @@ carries its own ASGI app and there is nothing to bridge.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -21,8 +28,9 @@ def _model_id() -> str:
     other colon is part of the model's name: Ollama tags every model with one, as in `llama3.1:8b`,
     and Pydantic AI read the part before it as a provider, refused an unknown one and started no Bot.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    settings = bot_settings("agent-pydantic-ai")
+    provider = settings.provider
+    model = settings.model
     return model if model.startswith(f"{provider}:") else f"{provider}:{model}"
 
 

@@ -9,6 +9,7 @@ COPY agent-pydantic-ai/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-pydantic-ai/src ./src
+COPY shared/model_providers.py shared/model-providers.json /shared/
 
 ENV PORT=4205
 EXPOSE 4205

@@ -53,7 +53,7 @@ at `agent-langgraph` on a laptop.
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
-| `BOT_MODEL`          | provider default from Bot code/env | Model for the framework Bot (`agent-langgraph`). Provider defaults are `gpt-5.5`, `claude-sonnet-4-5`, and `gemini-2.5-flash`. |
+| `BOT_MODEL`          | the Bot's row in the spec file   | Model for whichever Bot is starting. Unset, it comes from that Bot's row in [the provider spec file](#the-provider-spec-file); the provider fallbacks are `gpt-5.5`, `claude-sonnet-4-5`, and `gemini-2.5-flash`. |
 | `AGENT_BOT_MODEL`    | `gpt-5.5`                          | Model for the proof-of-concept Bot (`agent-bot`), kept separate because it speaks `/v1/chat/completions` directly and refuses a model it cannot use. |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
 | `BOT_REASONING_EFFORT` | unset (provider default)         | OpenAI and the Responses API only: one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. `agent-langgraph` refuses to start on any other value, on a non-`openai` provider, or without the Responses API. |
@@ -127,6 +127,50 @@ above: it says where the worker's own process can reach this deployment's API, w
 where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
 it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
 in-cluster Service address.
+
+## The provider spec file
+
+`shared/model-providers.json` is one file, and every language in the box reads it: the TypeScript
+Bots through `shared/model-providers.ts`, the Python Bots through `shared/model_providers.py`, and
+any other implementation straight as JSON. It has two sections — the facts per provider, and the
+provider and model each Bot runs:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "key_variable": "OPENAI_API_KEY",
+      "base_url_variable": "OPENAI_BASE_URL",
+      "default_model": "gpt-5.5"
+    }
+  },
+  "bots": {
+    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" }
+  }
+}
+```
+
+The lookup order for `BOT_PROVIDER` and `BOT_MODEL` is unchanged, and the file sits in the middle
+of it:
+
+1. the environment — how a deployment overrides what the repository decided;
+2. the Bot's row in this file — what the repository decided;
+3. the provider's `default_model` — what is left when neither says.
+
+A blank value is read as unset, which is what a compose file passing `${BOT_MODEL:-}` hands a Bot
+when nobody chose a model. API keys never appear in the file: they arrive in the environment
+under the `key_variable` the provider row names.
+
+Adding a Bot in any language is adding one `bots` entry — `"agent-java": { "provider":
+"anthropic", "model": "claude-sonnet-4-5" }` — after which that Bot resolves its model the same
+way everything else does. A row that names a provider no `providers` entry exists for, or leaves a
+field empty, stops every Bot at startup with the path of the key that is wrong, rather than at the
+first model call.
+
+`agent-bot` is the one Bot that pins its provider: it speaks `/v1/chat/completions` directly and
+has never read `BOT_PROVIDER`, and `bots.agent-bot` supplies only its model.
 
 ## OpenAI-compatible endpoints
 

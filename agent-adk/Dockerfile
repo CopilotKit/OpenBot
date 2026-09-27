@@ -9,6 +9,7 @@ COPY agent-adk/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-adk/src ./src
+COPY shared/model_providers.py shared/model-providers.json /shared/
 
 ENV PORT=4208
 EXPOSE 4208

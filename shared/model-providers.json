@@ -1,0 +1,38 @@
+{
+  "_readme": "One file every language reads. providers = facts per provider (key variable, endpoint variable, default model). bots = which provider and model each Bot runs when its environment names none; API keys never live here. Environment beats this file: BOT_PROVIDER and BOT_MODEL still win. See docs/configuration.md, 'The provider spec file'.",
+  "providers": {
+    "openai": {
+      "label": "OpenAI",
+      "key_variable": "OPENAI_API_KEY",
+      "base_url_variable": "OPENAI_BASE_URL",
+      "default_model": "gpt-5.5"
+    },
+    "anthropic": {
+      "label": "Anthropic",
+      "key_variable": "ANTHROPIC_API_KEY",
+      "base_url_variable": "ANTHROPIC_BASE_URL",
+      "default_model": "claude-sonnet-4-5"
+    },
+    "google": {
+      "label": "Google",
+      "key_variable": "GOOGLE_API_KEY",
+      "base_url_variable": "GOOGLE_GENERATIVE_AI_BASE_URL",
+      "default_model": "gemini-2.5-flash"
+    }
+  },
+  "bots": {
+    "agent-bot": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-langgraph": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-mastra": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-ag2": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-agno": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-crewai": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-langgraph-agui": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-langroid": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-llamaindex": { "provider": "openai", "model": "gpt-5.5" },
+    "agent-microsoft": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-pydantic-ai": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-strands": { "provider": "openai", "model": "gpt-4o-mini" }
+  }
+}

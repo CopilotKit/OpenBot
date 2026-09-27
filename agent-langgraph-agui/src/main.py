@@ -6,7 +6,13 @@ package the AG-UI project maintains, so the protocol stops being ours to keep wo
 """
 
 import os
+import sys
 from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -116,7 +122,13 @@ def _model():
     and the selected provider is passed separately, including when that ID contains a colon.
     """
     configured_model = os.environ.get("BOT_MODEL")
-    model = (configured_model or "gpt-4o-mini").strip()
+    # Two readings of one file: `settings` is the environment over the file, for the provider
+    # below; `file_row` is the file alone, because the signed-in ChatGPT branch above returns
+    # before any provider is consulted and runs whatever this Bot's row says whatever the
+    # environment claims the provider to be.
+    settings = bot_settings("agent-langgraph-agui")
+    file_row = bot_settings("agent-langgraph-agui", {})
+    model = (configured_model or "").strip() or file_row.model
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
     if store:
         store_path = _chatgpt_auth_file(store)
@@ -138,7 +150,7 @@ def _model():
         )
 
     _normalize_openai_base_url()
-    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
+    provider = settings.provider
     provider = _resolve_provider(provider)
     if not configured_model:
         model = {

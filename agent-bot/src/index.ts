@@ -6,7 +6,7 @@ import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import {
   apiKeyOrPlaceholder,
-  configuredModel,
+  botSettings,
   keyIsRequired,
   requiresResponsesApi,
 } from "../../shared/model-providers";
@@ -40,14 +40,18 @@ if (!MANAGED_AGENT_TOKEN) {
  * Which model drives the Bot.
  *
  * This Bot speaks one provider's API by hand, so the provider is this file's and only the model is
- * configurable; the default is that provider's row in the shared registry.
+ * configurable. What the default is, and which file every language in the box reads it from, is
+ * `shared/model-providers.json`: this Bot's `bots.agent-bot` row, under `BOT_MODEL` when a
+ * deployment sets one. The provider is pinned to `openai` rather than read from the environment —
+ * this file has never read `BOT_PROVIDER`, and a Bot that answers on chat completions by hand
+ * cannot start answering somewhere else because a variable changed.
  *
  * `gpt-5.5` works through `/v1/chat/completions`, which is the API this file uses.
  *
  * `gpt-5.6-*` models require the Responses API for tool use and cannot be used by this
  * chat-completions streaming loop.
  */
-const MODEL = configuredModel("openai", process.env.BOT_MODEL);
+const MODEL = botSettings("agent-bot", process.env, "openai").model;
 /*
  * Refuse a model this file cannot use, rather than discover it one tool call at a time — the
  * failure `requiresResponsesApi` names, asked as a question about this Bot rather than about the

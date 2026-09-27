@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   MODEL_PROVIDERS,
+  PROVIDER_IDS,
   apiKeyOrPlaceholder,
   baseUrlVariableFor,
+  botSettings,
   configuredModel,
   defaultModelFor,
   keyIsRequired,
@@ -190,5 +192,130 @@ describe("whether a model has to be driven through the Responses API", () => {
   test("other providers' models are not OpenAI's problem", () => {
     expect(requiresResponsesApi("claude-sonnet-4-5")).toBe(false);
     expect(requiresResponsesApi("gemini-2.5-flash")).toBe(false);
+  });
+});
+
+/**
+ * The spec file, and the one lookup order it sits in.
+ *
+ * `shared/model-providers.json` is the file every language in the box reads; this module is its
+ * TypeScript loader. These tests pin the order the loader applies — environment, then file, then
+ * provider default — because that order is what `docs/configuration.md` promises and what a
+ * developer in any other language is entitled to expect from their own loader too.
+ */
+describe("what a Bot runs from the spec file", () => {
+  /** The shipped Bots, each at the row the file holds for it. */
+  test("a Bot with an environment that names nothing runs its file row", () => {
+    expect(botSettings("agent-bot", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+    expect(botSettings("agent-langgraph", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+    expect(botSettings("agent-mastra", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+    // A Bot the file pairs with a different model than the provider's own default:
+    expect(botSettings("agent-adk", {})).toEqual({
+      provider: "openai",
+      model: "gpt-4o-mini",
+    });
+    expect(botSettings("agent-crewai", {})).toEqual({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+  });
+
+  /** The environment is how a deployment overrides the repository; it wins over the file. */
+  test("the environment beats the file", () => {
+    expect(botSettings("agent-adk", { BOT_MODEL: "gpt-4.1" })).toEqual({
+      provider: "openai",
+      model: "gpt-4.1",
+    });
+    expect(
+      botSettings("agent-adk", {
+        BOT_PROVIDER: "anthropic",
+        BOT_MODEL: "claude-haiku",
+      }),
+    ).toEqual({ provider: "anthropic", model: "claude-haiku" });
+    expect(
+      botSettings("agent-langgraph", { BOT_PROVIDER: "  Google " }),
+    ).toEqual({ provider: "google", model: "gemini-2.5-flash" });
+  });
+
+  /**
+   * A blank variable is not a choice. Compose hands `BOT_MODEL: ${BOT_MODEL:-}` an empty string
+   * when nobody picked a model, and the desktop writes an empty provider when switching back to
+   * OpenAI; both mean "no opinion", and the file answers.
+   */
+  test("a blank environment value falls through to the file", () => {
+    expect(
+      botSettings("agent-adk", { BOT_PROVIDER: "", BOT_MODEL: "" }),
+    ).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+    expect(botSettings("agent-adk", { BOT_MODEL: "   " })).toEqual({
+      provider: "openai",
+      model: "gpt-4o-mini",
+    });
+  });
+
+  /**
+   * The file's model belongs to the file's provider.
+   *
+   * A deployment that moved this Bot to Anthropic gets Anthropic's default rather than the
+   * OpenAI model the file pairs with the provider it left — sending `gpt-4o-mini` to Anthropic
+   * would be a model name neither side chose.
+   */
+  test("a provider from the environment takes that provider's default", () => {
+    expect(botSettings("agent-adk", { BOT_PROVIDER: "anthropic" })).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+  });
+
+  /**
+   * A pinned provider is a Bot answering to one name only.
+   *
+   * `agent-bot` speaks chat completions by hand and has never read `BOT_PROVIDER`; pinning keeps
+   * that true while the model still comes from the file.
+   */
+  test("a pinned Bot ignores the provider environment it never read", () => {
+    expect(
+      botSettings("agent-bot", { BOT_PROVIDER: "anthropic" }, "openai"),
+    ).toEqual({ provider: "openai", model: "gpt-5.5" });
+    expect(
+      botSettings("agent-bot", { BOT_MODEL: " gpt-4.1 " }, "openai"),
+    ).toEqual({ provider: "openai", model: "gpt-4.1" });
+  });
+
+  /** A name nobody has heard of is kept, so the Bot's own refusal can put it in the message. */
+  test("an unknown provider stays unknown, with a model to be refused with", () => {
+    expect(
+      botSettings("agent-langgraph", { BOT_PROVIDER: " Mistral " }),
+    ).toEqual({ provider: "mistral", model: "gpt-5.5" });
+  });
+
+  /** A Bot wired to the file without a row in it is a mistake made in this repository. */
+  test("a Bot with no row in the file is refused at startup", () => {
+    expect(() => botSettings("agent-java")).toThrow(
+      /bots has no agent-java entry/,
+    );
+  });
+
+  /**
+   * The type and the file cannot drift apart.
+   *
+   * `PROVIDER_IDS` is what TypeScript believes; the file is what every other language reads.
+   * Either missing the other stops the process here rather than in a language with no opinion.
+   */
+  test("the file carries a row for every provider the type names", () => {
+    for (const id of PROVIDER_IDS) {
+      expect(MODEL_PROVIDERS[id].id).toBe(id);
+    }
+    expect(Object.keys(MODEL_PROVIDERS).sort()).toEqual(
+      [...PROVIDER_IDS].sort(),
+    );
   });
 });

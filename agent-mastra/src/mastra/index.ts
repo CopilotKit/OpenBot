@@ -18,7 +18,7 @@ import { registerApiRoute } from "@mastra/core/server";
 import { listenPort } from "../../../shared/listen-port";
 import {
   apiKeyOrPlaceholder,
-  configuredModel,
+  botSettings,
   providerSpec,
 } from "../../../shared/model-providers";
 
@@ -26,16 +26,18 @@ import {
 const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
 
 /**
- * The model this Bot answers with, read from the shared provider registry rather than remembered
- * in this file.
+ * The model this Bot answers with, read from the spec file rather than remembered in this file.
  *
- * The registry says which providers exist; this file still decides which of them it can drive,
- * because only two SDK modules are loaded here. Both halves refuse at startup: a provider the
- * registry has not heard of, and one it has that this harness has no module for, used to fall
- * through to the OpenAI branch below and answer with a model the deployment never chose.
+ * `shared/model-providers.json` holds this Bot's `bots.agent-mastra` row and the provider facts
+ * around it; `BOT_PROVIDER` and `BOT_MODEL` still win over both, as they always have. The file
+ * says which providers exist; this file still decides which of them it can drive, because only two
+ * SDK modules are loaded here. Both halves refuse at startup: a provider the file has not heard of,
+ * and one it has that this harness has no module for, used to fall through to the OpenAI branch
+ * below and answer with a model the deployment never chose.
  */
 async function buildModel() {
-  const providerName = process.env.BOT_PROVIDER?.trim() || "openai";
+  const settings = botSettings("agent-mastra");
+  const providerName = settings.provider;
   const spec = providerSpec(providerName);
   if (!spec) {
     // What to use is what this harness answers on, which is narrower than the registry.
@@ -48,7 +50,7 @@ async function buildModel() {
       `BOT_PROVIDER=${providerName} names ${spec.label}, and this Bot loads no ${spec.label} module. It answers on OpenAI and Anthropic only.`,
     );
   }
-  const model = configuredModel(spec.id, process.env.BOT_MODEL);
+  const model = settings.model;
   const baseVariable = spec.baseUrlVariable;
   const baseURL = process.env[baseVariable]?.trim();
   // Provider modules create default clients at import, which reject Compose's empty overrides.
