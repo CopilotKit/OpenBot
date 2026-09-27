@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Bots agree on one set of provider defaults
+
+The three TypeScript Bots now read a single shared list of provider facts instead of keeping their
+own copies. On OpenAI they all default to `gpt-5.5` — the Mastra Bot previously defaulted to
+`gpt-4o-mini` — and the Mastra Bot refuses a `BOT_PROVIDER` it does not recognize (such as
+`google`) instead of quietly answering through OpenAI with a different model. The picked harness
+in Compose now receives `GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness
+picked on `BOT_PROVIDER=google` has the key it needs.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer

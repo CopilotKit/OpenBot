@@ -104,6 +104,41 @@ async function configuredPort(port: string | undefined) {
   };
 }
 
+/**
+ * How this Bot answers a provider it has no module for: refused at startup, before a model exists.
+ *
+ * The message is the result rather than an error to be thrown past the assertion, so the exit
+ * status is returned the way the port probe returns it.
+ */
+async function providerStartup(botProvider: string) {
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
+    MASTRA_TELEMETRY_DISABLED: "true",
+    DO_NOT_TRACK: "1",
+    NODE_ENV: "test",
+    BOT_PROVIDER: botProvider,
+  };
+
+  const child = Bun.spawn(
+    [
+      Bun.argv[0],
+      "-e",
+      [
+        'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+        'const model = mastra.getAgent("openbot").model;',
+        "console.log(JSON.stringify({ modelId: model.modelId }));",
+      ].join("\n"),
+    ],
+    { env, stdout: "pipe", stderr: "pipe" },
+  );
+
+  const [stderr, exitCode] = await Promise.all([
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { exitCode, stderr };
+}
+
 describe("OpenBot Mastra receiver instructions", () => {
   test("adds model-visible OpenBot role context in receiver order", () => {
     const instructions = buildOpenBotInstructions({
@@ -144,9 +179,9 @@ describe("OpenBot Mastra receiver instructions", () => {
 
 describe("OpenBot Mastra model configuration", () => {
   const modelCases: ModelCase[] = [
-    { name: "absent", expected: "gpt-4o-mini" },
-    { name: "empty", value: "", expected: "gpt-4o-mini" },
-    { name: "whitespace", value: "  ", expected: "gpt-4o-mini" },
+    { name: "absent", expected: "gpt-5.5" },
+    { name: "empty", value: "", expected: "gpt-5.5" },
+    { name: "whitespace", value: "  ", expected: "gpt-5.5" },
     {
       name: "custom",
       value: " fixture/custom:model ",
@@ -159,6 +194,26 @@ describe("OpenBot Mastra model configuration", () => {
       expect(await configuredModelId(modelCase.value)).toBe(modelCase.expected);
     });
   }
+});
+
+/**
+ * A provider this Bot cannot answer for is refused before it can fall into the OpenAI branch and
+ * quietly answer with somebody else's model.
+ */
+describe("OpenBot Mastra provider configuration", () => {
+  test("refuses a provider it loads no module for", async () => {
+    const { exitCode, stderr } = await providerStartup("google");
+
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("loads no Google module");
+  });
+
+  test("refuses a provider the registry has not heard of", async () => {
+    const { exitCode, stderr } = await providerStartup("mistral");
+
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("is not one this Bot knows");
+  });
 });
 
 describe("OpenBot Mastra listen port configuration", () => {

@@ -7,6 +7,7 @@ COPY agent-mastra/package.json ./
 RUN bun install
 
 COPY shared/listen-port.ts /shared/listen-port.ts
+COPY shared/model-providers.ts /shared/model-providers.ts
 COPY agent-mastra/src ./src
 
 # Built at image time, not at start: `mastra start` runs a bundle, and building on every container

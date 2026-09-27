@@ -4,13 +4,13 @@ import { serve } from "bun";
 import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
-import { toProviderMessages } from "./history";
 import {
   apiKeyOrPlaceholder,
+  configuredModel,
   keyIsRequired,
-  modelIsUnusable,
-  modelName,
-} from "./model-key";
+  requiresResponsesApi,
+} from "../../shared/model-providers";
+import { toProviderMessages } from "./history";
 
 /**
  * The built-in Bot is an AG-UI HTTP service registered the same way as any customer-provided Bot.
@@ -39,24 +39,25 @@ if (!MANAGED_AGENT_TOKEN) {
 /**
  * Which model drives the Bot.
  *
+ * This Bot speaks one provider's API by hand, so the provider is this file's and only the model is
+ * configurable; the default is that provider's row in the shared registry.
+ *
  * `gpt-5.5` works through `/v1/chat/completions`, which is the API this file uses.
  *
  * `gpt-5.6-*` models require the Responses API for tool use and cannot be used by this
  * chat-completions streaming loop.
  */
-const MODEL = modelName(process.env.BOT_MODEL);
+const MODEL = configuredModel("openai", process.env.BOT_MODEL);
 /*
- * Refuse a model this file cannot use, rather than discover it one tool call at a time.
- *
- * `gpt-5.6-*` rejects function tools on `/v1/chat/completions`: "To use function tools, use
- * /v1/responses or set reasoning_effort to 'none'." The provider answers with an error, this Bot
- * ends the run, and the person sees no reply and no reason. Silence is the worst failure available
- * here, and it is what a single mistaken `BOT_MODEL` produced: every tool-using turn stopped dead
- * while the Bot looked healthy.
+ * Refuse a model this file cannot use, rather than discover it one tool call at a time — the
+ * failure `requiresResponsesApi` names, asked as a question about this Bot rather than about the
+ * model. The provider answers with an error, this Bot ends the run, and the person sees no reply
+ * and no reason. Silence is the worst failure available here, and it is what a single mistaken
+ * `BOT_MODEL` produced: every tool-using turn stopped dead while the Bot looked healthy.
  *
  * Startup is where a deployment can act on it, which is the same posture as the token check above.
  */
-if (modelIsUnusable(MODEL)) {
+if (requiresResponsesApi(MODEL)) {
   console.error(
     `BOT_MODEL=${MODEL} cannot be used by this Bot. It speaks /v1/chat/completions directly, and ` +
       "that endpoint refuses function tools for this model, so every tool call would fail with no " +
@@ -97,7 +98,7 @@ const API_KEY = process.env.OPENAI_API_KEY?.trim();
  *
  * The check still holds for plain OpenAI, which is the case it was written for.
  */
-if (!API_KEY && keyIsRequired(BASE_URL)) {
+if (!API_KEY && keyIsRequired("openai", BASE_URL)) {
   console.error(
     "OPENAI_API_KEY is not set, and no OPENAI_BASE_URL names an endpoint that needs no key. This Bot cannot answer without a model.",
   );

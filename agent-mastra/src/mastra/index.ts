@@ -16,19 +16,45 @@ import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
 import { listenPort } from "../../../shared/listen-port";
+import {
+  apiKeyOrPlaceholder,
+  configuredModel,
+  providerSpec,
+} from "../../../shared/model-providers";
 
-async function configuredModel() {
-  const provider = process.env.BOT_PROVIDER?.trim() || "openai";
-  const model =
-    process.env.BOT_MODEL?.trim() ||
-    (provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4o-mini");
-  const baseVariable =
-    provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
+/** The providers this Bot can drive: the ones whose SDK modules it loads below. */
+const SUPPORTED_PROVIDERS = new Set(["openai", "anthropic"]);
+
+/**
+ * The model this Bot answers with, read from the shared provider registry rather than remembered
+ * in this file.
+ *
+ * The registry says which providers exist; this file still decides which of them it can drive,
+ * because only two SDK modules are loaded here. Both halves refuse at startup: a provider the
+ * registry has not heard of, and one it has that this harness has no module for, used to fall
+ * through to the OpenAI branch below and answer with a model the deployment never chose.
+ */
+async function buildModel() {
+  const providerName = process.env.BOT_PROVIDER?.trim() || "openai";
+  const spec = providerSpec(providerName);
+  if (!spec) {
+    // What to use is what this harness answers on, which is narrower than the registry.
+    throw new Error(
+      `BOT_PROVIDER=${providerName} is not one this Bot knows. Use ${[...SUPPORTED_PROVIDERS].join(" or ")}.`,
+    );
+  }
+  if (!SUPPORTED_PROVIDERS.has(spec.id)) {
+    throw new Error(
+      `BOT_PROVIDER=${providerName} names ${spec.label}, and this Bot loads no ${spec.label} module. It answers on OpenAI and Anthropic only.`,
+    );
+  }
+  const model = configuredModel(spec.id, process.env.BOT_MODEL);
+  const baseVariable = spec.baseUrlVariable;
   const baseURL = process.env[baseVariable]?.trim();
   // Provider modules create default clients at import, which reject Compose's empty overrides.
   if (!baseURL) delete process.env[baseVariable];
 
-  if (provider === "anthropic") {
+  if (spec.id === "anthropic") {
     const { createAnthropic } = await import("@ai-sdk/anthropic");
     // Other harnesses accept an Anthropic origin; AI SDK expects the /v1 API prefix.
     const origin = (baseURL || "https://api.anthropic.com").replace(/\/+$/, "");
@@ -43,7 +69,7 @@ async function configuredModel() {
   const openai = createOpenAI({
     baseURL: baseURL || "https://api.openai.com/v1",
     apiKey: compatible
-      ? process.env.OPENAI_API_KEY?.trim() || "no-key-needed"
+      ? apiKeyOrPlaceholder(process.env[spec.keyVariable])
       : undefined,
   });
   // Compatible endpoints commonly expose Chat Completions; OpenAI keeps its Responses default.
@@ -109,7 +135,7 @@ const openbot = new Agent({
   id: "openbot",
   name: "openbot",
   instructions: buildOpenBotInstructions,
-  model: await configuredModel(),
+  model: await buildModel(),
 });
 
 /** The one header OpenBot's server sends, compared without leaking length through timing. */

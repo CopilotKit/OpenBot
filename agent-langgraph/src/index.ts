@@ -13,9 +13,16 @@ import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
+import {
+  apiKeyOrPlaceholder,
+  baseUrlVariableFor,
+  configuredModel,
+  keyIsRequired,
+  keyVariableFor,
+  requiresResponsesApi,
+} from "../../shared/model-providers";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
-import { apiKeyOrPlaceholder, KEY_VARIABLE, keyIsRequired } from "./model-key";
 import { streamRun } from "./stream";
 import { toolAnswer } from "./tool-answer";
 
@@ -65,47 +72,48 @@ if (!MANAGED_AGENT_TOKEN) {
  * Each provider reads its own key. A deployment that only runs Anthropic never needs an OpenAI key,
  * which is the point of making this configurable rather than assuming one vendor.
  *
- * The default is unchanged so the two shipped Bots stay comparable out of the box.
- */
-const PROVIDER = (process.env.BOT_PROVIDER ?? "openai").toLowerCase();
-/*
- * An unset model and an empty one are the same thing.
+ * The default is unchanged so the two shipped Bots stay comparable out of the box. Which default
+ * that is, and which variable each provider's key and endpoint arrive in, are read from the shared
+ * provider registry rather than repeated here.
  *
- * `??` only catches undefined, and a compose file passing `BOT_MODEL: ${BOT_MODEL:-}` hands this an
- * empty string, which is a value. The agent then asked its provider for a model named "" and the
- * run died with "you must provide a model parameter", which reads as a broken Bot rather than as
- * missing configuration.
+ * Blank is OpenAI, the reading every other consumer of `BOT_PROVIDER` gives it: the desktop writes
+ * an empty provider when switching back to OpenAI, and the server reads empty as OpenAI. Padded and
+ * differently-cased names are the same provider, because a value typed into a setup window arrives
+ * with a space on it more often than not. A name nobody has heard of is kept, so the check below
+ * can put it in its message.
  */
-const MODEL = process.env.BOT_MODEL?.trim() || defaultModelFor(PROVIDER);
+const PROVIDER =
+  (process.env.BOT_PROVIDER ?? "").trim().toLowerCase() || "openai";
+// An unset model and an empty one are the same thing; see `configuredModel`.
+const MODEL = configuredModel(PROVIDER, process.env.BOT_MODEL);
 /**
  * OpenAI only. Its newer models require the Responses API, which the integration handles.
  *
  * Inferred from the model rather than left to a separate switch. `gpt-5.6-*` rejects function tools
  * on `/v1/chat/completions`, so a deployment that set `BOT_MODEL` to one and did not also know about
  * this flag got a Bot that started, looked healthy, and failed on its first tool call. The switch is
- * still honoured, so a model this list has not heard of can be told to use it.
+ * still honoured, so a model the registry has not heard of can be told to use it.
  */
-const NEEDS_RESPONSES_API = /^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL);
+const NEEDS_RESPONSES_API = requiresResponsesApi(MODEL);
 const USE_RESPONSES_API =
   process.env.BOT_RESPONSES_API === "true" || NEEDS_RESPONSES_API;
 /**
- * OpenAI only, and the same variable the API server reads for its built-in agents.
+ * Read from the provider registry rather than spelled out here three times, under the names the
+ * API server already reads. Sharing the names is the point: one line moves the built-in agents and
+ * this Bot together, and a deployment cannot end up with half of itself pointed somewhere else.
  *
- * Unset, `openai` means OpenAI. Set, it means any endpoint speaking that API: a gateway in front of
- * several providers, a proxy, or a model on hardware you control. The integration owns the HTTP, so
- * this is a base URL rather than another provider branch, and `BOT_MODEL` is sent verbatim because
- * an endpoint names its own catalogue.
- */
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
-/**
- * The same idea for the other two providers, under the names the API server already reads.
+ * Unset, this is that provider's own public endpoint. Set, it means any endpoint speaking that API:
+ * a gateway in front of several providers, a proxy, or a model on hardware you control. The
+ * integration owns the HTTP, so this is a base URL rather than another provider branch, and
+ * `BOT_MODEL` is sent verbatim because an endpoint names its own catalogue.
  *
- * Sharing the variable names is the point: one line moves the built-in agents and this Bot
- * together, and a deployment cannot end up with half of itself pointed somewhere else.
+ * Only the provider this Bot was configured for is read, and each branch of `buildModel` below
+ * ever took its own and no other, so nothing that used to be visible has changed.
  */
-const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
-const GOOGLE_BASE_URL =
-  process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
+const baseUrlVariable = baseUrlVariableFor(PROVIDER);
+const BASE_URL = baseUrlVariable
+  ? process.env[baseUrlVariable]?.trim() || undefined
+  : undefined;
 
 /**
  * OpenAI only, and Responses API only: how hard this Bot is allowed to think.
@@ -141,12 +149,6 @@ if (REASONING_EFFORT && !USE_RESPONSES_API) {
   process.exit(1);
 }
 
-function defaultModelFor(provider: string): string {
-  if (provider === "anthropic") return "claude-sonnet-4-5";
-  if (provider === "google") return "gemini-2.5-flash";
-  return "gpt-5.5";
-}
-
 /**
  * The key this provider needs, checked at startup rather than on the first run.
  *
@@ -154,7 +156,7 @@ function defaultModelFor(provider: string): string {
  * a missing key should fail in front of whoever is deploying, not as a conversation that errors in
  * front of somebody trying to use it.
  */
-const keyVariable = KEY_VARIABLE[PROVIDER];
+const keyVariable = keyVariableFor(PROVIDER);
 if (!keyVariable) {
   console.error(
     `BOT_PROVIDER=${PROVIDER} is not one this Bot knows. Use openai, anthropic or google.`,
@@ -163,7 +165,7 @@ if (!keyVariable) {
 }
 const API_KEY = process.env[keyVariable]?.trim();
 // Unless an endpoint was named to answer instead: see `keyIsRequired`.
-if (!API_KEY && keyIsRequired(PROVIDER, OPENAI_BASE_URL)) {
+if (!API_KEY && keyIsRequired(PROVIDER, BASE_URL)) {
   console.error(
     `${keyVariable} is not set, and BOT_PROVIDER=${PROVIDER} needs it. This Bot cannot answer without a model.`,
   );
@@ -199,7 +201,7 @@ function buildModel() {
       model: MODEL,
       apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
-      ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
+      ...(BASE_URL ? { anthropicApiUrl: BASE_URL } : {}),
     });
   }
   if (PROVIDER === "google") {
@@ -207,14 +209,14 @@ function buildModel() {
       model: MODEL,
       apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
-      ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
+      ...(BASE_URL ? { baseUrl: BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
     apiKey: apiKeyOrPlaceholder(API_KEY),
     streaming: true,
-    ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
+    ...(BASE_URL ? { configuration: { baseURL: BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
     /*
      * `reasoning.effort`, not the `reasoningEffort` convenience field: the integration deprecated
