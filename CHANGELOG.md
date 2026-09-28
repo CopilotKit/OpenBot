@@ -8,13 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A voice call no longer cuts an emoji in half
-
-A voice call caps what it carries: the chat context it joins with, the live captions, and the answer
-a delegated request comes back with. Each cap cut on UTF-16 code units, and an emoji is two of them,
-so a cap landing inside one left half of it: a box at the edge of a caption, and a broken character
-in what the voice model was given. The caps now cut between characters, as the chat's own do.
-
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
@@ -118,6 +111,13 @@ still uses the compatibility endpoint.
 
 **A provider 403 no longer reads as an expired sign-in.** It usually means a missing project or
 resource permission, which signing in again cannot fix, so only a 401 now raises "sign in again".
+
+### A voice call no longer cuts an emoji in half
+
+A voice call caps what it carries: the chat context it joins with, the live captions, and the answer
+a delegated request comes back with. Each cap cut on UTF-16 code units, and an emoji is two of them,
+so a cap landing inside one left half of it: a box at the edge of a caption, and a broken character
+in what the voice model was given. The caps now cut between characters, as the chat's own do.
 
 ### Desktop setup shows progress, chooses its own local ports, and can sign in to a provider
 
