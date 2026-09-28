@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The skills pages say when the skills could not be read
+
+When `GET /api/plugins` failed, **Agent Skills** said "You don't have any skills yet.", **Admin →
+Skills** said "No skills yet.", and opening a skill to edit said "That skill no longer exists, or it
+is not yours to edit.", to people who may have written a dozen. They now say the skills could not
+be loaded. A list that arrived empty still reads as before, and a failed refetch over a list already
+on screen keeps that list.
+
 ### A coworker can be pinned to the top of the Agents screen
 
 A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a
