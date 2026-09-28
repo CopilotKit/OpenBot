@@ -26,6 +26,26 @@ def _model_id() -> str:
     return model if model.startswith(f"{provider}:") else f"{provider}:{model}"
 
 
+def _drop_blank_base_urls() -> None:
+    """Compose exports missing overrides as ""; the SDKs only default an absent URL.
+
+    The model screen writes the endpoint it did not need as empty: `OPENAI_BASE_URL` for a plain
+    OpenAI key, `ANTHROPIC_BASE_URL` for an Anthropic key. Pydantic AI builds each provider's client
+    from the environment, so the empty value reached the SDK as the address and every run failed to
+    connect. Taking it out lets the SDK use its own endpoint; a real one is left as it is. The same
+    rule as `_normalize_openai_base_url` in `agent-langgraph-agui`.
+    """
+    for name in ("OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        if value.strip():
+            os.environ[name] = value.strip()
+        else:
+            os.environ.pop(name, None)
+
+
+_drop_blank_base_urls()
 agent = Agent(_model_id())
 app = FastAPI()
 

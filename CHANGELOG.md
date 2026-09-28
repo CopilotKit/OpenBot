@@ -81,6 +81,14 @@ plan sign-in. Retrying a failed summary refreshes its sidebar preview without re
 activity. The macOS app includes the microphone permission description and audio-input entitlement
 needed for dictation and voice calls.
 
+### The Pydantic AI Bot answers on a plain OpenAI key or an Anthropic key
+
+Picked with either key, the Pydantic AI Bot failed every run. Compose writes the endpoint the choice
+did not need as empty (`OPENAI_BASE_URL` for a plain OpenAI key, `ANTHROPIC_BASE_URL` for an
+Anthropic key), and Pydantic AI builds each provider's client from the environment, so the SDK was
+given "" as the address. The Bot now removes an empty value before building the model, as
+`agent-langgraph-agui` already does, so the SDK uses its own endpoint. A real endpoint is unchanged.
+
 ### Find older conversations and keep chat preferences across devices
 
 The sidebar loads older conversations as the person scrolls. Settings save the choice to emphasize
