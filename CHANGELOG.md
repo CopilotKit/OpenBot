@@ -24,6 +24,14 @@ Take control or Hand back controls. The same ownership state is shown in the cha
 sidebar, and full-size viewer. Standalone Bot chats can open the current live browser alongside
 the conversation without losing the selected Bot or chat history.
 
+### An administrator cannot grant a skill nobody has written
+
+`POST /api/plugins/grants` checked that a skill existed for everybody except an administrator, whose
+grant was stored whatever it named. A Bot's skills are read by slug alone, so the row waited for
+whoever wrote a skill under that name next, and on a Bot the deployment shares that was one person's
+instructions answering everybody. It is now refused with "There is no skill called …", as a grant
+naming no app already was. Revoking one by hand still works.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit

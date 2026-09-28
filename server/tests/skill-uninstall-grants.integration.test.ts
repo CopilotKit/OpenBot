@@ -35,6 +35,7 @@ const sharedBot = `agent_shared_${suite}`;
 const personalSlug = `standup-${suite}`;
 const keptSlug = `kept-${suite}`;
 const deploymentSlug = `triage-${suite}`;
+const unwrittenSlug = `unwritten-${suite}`;
 
 beforeAll(async () => {
   for (const id of [alice, bob]) {
@@ -68,7 +69,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await database
     .delete(skills)
-    .where(inArray(skills.slug, [personalSlug, keptSlug, deploymentSlug]));
+    .where(
+      inArray(skills.slug, [
+        personalSlug,
+        keptSlug,
+        deploymentSlug,
+        unwrittenSlug,
+      ]),
+    );
   await database
     .delete(agents)
     .where(inArray(agents.id, [aliceBot, sharedBot]));
@@ -171,6 +179,25 @@ describe("a skill name written again after the skill was uninstalled", () => {
     expect((await grant(asAlice(), deploymentSlug, sharedBot)).status).toBe(
       403,
     );
+
+    expect(await offered(asAdmin(), sharedBot)).toEqual([]);
+  });
+
+  /*
+   * The same room, entered before any skill exists rather than after one is uninstalled. An
+   * administrator's grant skipped the existence check every other caller gets, and a Bot's skills are
+   * read by slug alone, so the grant waited for whoever wrote a skill under that name next.
+   */
+  test("a shared Bot cannot be granted a skill nobody has written yet", async () => {
+    const refused = await grant(asAdmin(), unwrittenSlug, sharedBot);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({
+      error: `There is no skill called ${unwrittenSlug}.`,
+    });
+
+    expect(
+      (await writeSkill(asAlice(), unwrittenSlug, "Alice's words.")).status,
+    ).toBe(200);
 
     expect(await offered(asAdmin(), sharedBot)).toEqual([]);
   });
