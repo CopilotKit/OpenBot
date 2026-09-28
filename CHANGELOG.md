@@ -8,14 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### The live screen keeps reconnecting after it has recovered
-
-A dropped live screen retries five times, waiting half a second, then one, two, four and eight, and
-then asks for Retry. The count of retries never went back to zero after a retry worked, so a screen
-left open through five short drops over an afternoon gave up on the sixth, although each had
-recovered within a second. The count now starts over once a reconnected screen shows a frame again,
-so only five failures in a row end in Retry.
-
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
@@ -97,6 +89,14 @@ connected accounts use individual entries with stored app logos, and browser ste
 expandable group instead of filling the conversation with screenshots.
 
 ## 0.0.15
+
+### The live screen keeps reconnecting after it has recovered
+
+A dropped live screen retries five times, waiting half a second, then one, two, four and eight, and
+then asks for Retry. The count of retries never went back to zero after a retry worked, so a screen
+left open through five short drops over an afternoon gave up on the sixth, although each had
+recovered within a second. The count now starts over once a reconnected screen shows a frame again,
+so only five failures in a row end in Retry.
 
 ### A model provider's own sign-in can stand in for an API key
 
