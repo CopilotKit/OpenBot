@@ -7,6 +7,7 @@ import {
   isVoiceSdp,
   MAX_VOICE_SDP_BYTES,
   type VoiceConnection,
+  VoiceError,
   type VoiceProvider,
 } from "./provider";
 import {
@@ -170,7 +171,7 @@ export function createVoiceRoutes(
           signal,
         });
         return context.json(connection);
-      } catch {
+      } catch (error) {
         return signal.aborted
           ? context.json(
               {
@@ -181,8 +182,12 @@ export function createVoiceRoutes(
             )
           : context.json(
               {
+                // VoiceError carries only fixed text written for the caller, such as the service
+                // being busy; anything else may hold an upstream body and stays generic.
                 error:
-                  "The voice service could not start a call. Please retry.",
+                  error instanceof VoiceError
+                    ? error.message
+                    : "The voice service could not start a call. Please retry.",
               },
               502,
             );

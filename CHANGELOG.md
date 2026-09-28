@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A voice call that cannot start says why
+
+When the voice service turned a call down, the provider wrote a message for the caller, such as
+"The voice service is busy. Please retry shortly." when it answered 429, and the call route replaced
+every one with "The voice service could not start a call. Please retry." The route now passes those
+fixed messages on, as the dictation route already does. Any other failure still reads the generic
+line, so nothing from an upstream response reaches the browser.
+
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
