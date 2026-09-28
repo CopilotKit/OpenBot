@@ -10,9 +10,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### The Bots agree on one set of provider defaults
 
-**The Mastra Bot's default on OpenAI moved from `gpt-4o-mini` to `gpt-5.5`.** A deployment running
-it with `BOT_MODEL` unset moves model and cost on upgrade; set `BOT_MODEL` to keep what it had.
-
 The three TypeScript Bots now read a single shared list of provider facts instead of keeping their
 own copies, which is what makes a default changeable in one place rather than in three. The Mastra
 Bot also refuses a `BOT_PROVIDER` it does not recognize (such as `google`) instead of quietly
@@ -25,10 +22,9 @@ answering through OpenAI with a different model. The picked harness in Compose n
 `shared/model-providers.json` now holds the provider facts and every Bot's default provider and
 model. The TypeScript Bots read it through `shared/model-providers.ts` and the ten Python Bots
 through `shared/model_providers.py`, with `BOT_PROVIDER` and `BOT_MODEL` still winning over both
-as they always have. Reading the file moved no default on its own; the one default that did move,
-the Mastra Bot's, is at the top of the previous entry. Moving a Bot to a different model, or
-giving a Bot written in any other language its first one, is editing one row in one file instead
-of one line per language.
+as they always have. Each Bot keeps its existing default, including Mastra's `gpt-4o-mini`.
+Moving a Bot to a different model, or giving a Bot written in any other language its first one,
+is editing one row in one file instead of one line per language.
 
 Both loaders check the file against their own list of providers, in both directions, and refuse in
 the same words. A wrong row in the file used to stop the three TypeScript Bots while the ten

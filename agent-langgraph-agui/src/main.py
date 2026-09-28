@@ -122,15 +122,12 @@ def _model():
     and the selected provider is passed separately, including when that ID contains a colon.
     """
     configured_model = os.environ.get("BOT_MODEL")
-    # Two readings of one file: `settings` is the environment over the file, for the provider
-    # below; `file_row` is the file alone, because the signed-in ChatGPT branch above returns
-    # before any provider is consulted and runs whatever this Bot's row says whatever the
-    # environment claims the provider to be.
-    settings = bot_settings("agent-langgraph-agui")
-    file_row = bot_settings("agent-langgraph-agui", {})
-    model = (configured_model or "").strip() or file_row.model
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
     if store:
+        # A signed-in ChatGPT plan ignores BOT_PROVIDER, retaining this Bot's file model unless
+        # BOT_MODEL overrides it. Other providers use the fully resolved settings below.
+        file_row = bot_settings("agent-langgraph-agui", {})
+        model = (configured_model or "").strip() or file_row.model
         store_path = _chatgpt_auth_file(store)
         # Private and experimental, both deliberately. `langchain-openai` exports no public Codex
         # model and warns in the module that this one is unofficial. That is a maintenance cost we
@@ -150,13 +147,15 @@ def _model():
         )
 
     _normalize_openai_base_url()
-    provider = settings.provider
-    provider = _resolve_provider(provider)
-    if not configured_model:
-        model = {
-            "anthropic": "claude-sonnet-4-5",
-            "google_genai": "gemini-2.5-flash",
-        }.get(provider, model)
+    settings = bot_settings("agent-langgraph-agui")
+    if settings.provider == "google_genai":
+        # LangChain's provider spelling is also an existing BOT_PROVIDER choice. Resolve its
+        # defaults through the spec's Google row before mapping back to the SDK spelling.
+        settings = bot_settings(
+            "agent-langgraph-agui", {**os.environ, "BOT_PROVIDER": "google"}
+        )
+    provider = _resolve_provider(settings.provider)
+    model = settings.model
     prefix, separator, _ = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
         return init_chat_model(model, **_google_genai_kwargs(prefix))

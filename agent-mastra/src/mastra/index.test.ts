@@ -207,9 +207,9 @@ describe("OpenBot Mastra receiver instructions", () => {
 
 describe("OpenBot Mastra model configuration", () => {
   const modelCases: ModelCase[] = [
-    { name: "absent", expected: "gpt-5.5" },
-    { name: "empty", value: "", expected: "gpt-5.5" },
-    { name: "whitespace", value: "  ", expected: "gpt-5.5" },
+    { name: "absent", expected: "gpt-4o-mini" },
+    { name: "empty", value: "", expected: "gpt-4o-mini" },
+    { name: "whitespace", value: "  ", expected: "gpt-4o-mini" },
     {
       name: "custom",
       value: " fixture/custom:model ",
