@@ -154,7 +154,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | Route                       | Purpose                                                            |
 | --------------------------- | ------------------------------------------------------------------ |
 | `/`                         | Start and browse channels.                                         |
-| `/agents`                   | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/agents`                   | Create, edit, duplicate, pin, hide, delete, and launch coworkers.  |
 | `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`                   | Create and enable personal skills.                                 |

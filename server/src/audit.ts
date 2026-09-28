@@ -384,6 +384,8 @@ export const auditEventTypes = [
   "bot.duplicated",
   "bot.hidden",
   "bot.unhidden",
+  "bot.pinned",
+  "bot.unpinned",
   "bot.deleted",
   "bot.callback_token_issued",
   "bot.callback_token_revoked",

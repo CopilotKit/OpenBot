@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A coworker can be pinned to the top of the Agents screen
+
+A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a
+**Pinned** section at the top of `/agents`. Like hiding, pinning is personal: it changes nothing for
+anyone else. It is stored next to `hidden_at` in `agent_preferences` as a new `pinned_at` column
+(migration `0047_agent_pinning`), and each write sets only its own column, so pinning a hidden
+coworker keeps it hidden and it comes back pinned when unhidden. `POST /api/agents/:id/pin` and
+`/unpin` record `bot.pinned` and `bot.unpinned` on the trail, as hiding does.
+
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,

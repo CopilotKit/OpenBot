@@ -76,6 +76,18 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   });
 }
 
+export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
+      await client(
+        `${agentApiPath(variables.agentId)}/${variables.pinned ? "pin" : "unpin"}`,
+        { method: "POST", fallback: FALLBACK },
+      );
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {

@@ -32,6 +32,7 @@ function app(overrides: Record<string, unknown> = {}) {
     update: async () => ({ id: "bot-1", name: "Sales" }),
     duplicate: async () => ({ id: "bot-2", name: "Sales copy" }),
     setHidden: async () => undefined,
+    setPinned: async () => undefined,
     softDelete: async () => undefined,
     issueCallbackToken: async () => "the-token-nobody-records",
     revokeCallbackToken: async () => undefined,
@@ -167,6 +168,8 @@ describe("what a Bot is, on the trail", () => {
   test.each([
     ["/api/agents/bot-1/hide", "POST", "bot.hidden"],
     ["/api/agents/bot-1/unhide", "POST", "bot.unhidden"],
+    ["/api/agents/bot-1/pin", "POST", "bot.pinned"],
+    ["/api/agents/bot-1/unpin", "POST", "bot.unpinned"],
     [
       "/api/agents/bot-1/callback-token",
       "DELETE",

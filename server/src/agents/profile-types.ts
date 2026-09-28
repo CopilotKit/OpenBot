@@ -15,6 +15,7 @@ export type AgentProfile = {
   ownerUserId: string | null;
   systemOwned: boolean;
   hidden: boolean;
+  pinned: boolean;
   deletedAt: Date | null;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;

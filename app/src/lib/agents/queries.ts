@@ -37,6 +37,8 @@ export type AgentProfile = {
    */
   hasCallbackToken: boolean;
   hidden: boolean;
+  /** Whether the signed-in person pinned it to the top of their agents list. Nobody else's. */
+  pinned: boolean;
   systemOwned: boolean;
   canManage: boolean;
   /**

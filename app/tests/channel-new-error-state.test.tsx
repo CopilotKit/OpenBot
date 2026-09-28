@@ -32,6 +32,7 @@ function agent(
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     mine: true,
     name: "Agent",
     roleDescription: "Role",

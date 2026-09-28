@@ -71,6 +71,7 @@ export type AgentProfileStore = {
   ): Promise<AgentProfile>;
   duplicate(actor: AgentActor, id: string): Promise<AgentProfile>;
   setHidden(actor: AgentActor, id: string, hidden: boolean): Promise<void>;
+  setPinned(actor: AgentActor, id: string, pinned: boolean): Promise<void>;
   softDelete(actor: AgentActor, id: string): Promise<void>;
   /**
    * Issue this agent a credential for calling tools back, and return it once.
@@ -131,6 +132,7 @@ const joinedProjection = {
   ownerUserId: agentProfiles.ownerUserId,
   packageId: deploymentPackages.id,
   hiddenAt: agentPreferences.hiddenAt,
+  pinnedAt: agentPreferences.pinnedAt,
   deletedAt: agentProfiles.deletedAt,
   /* The hash, only so a surface can say whether one exists. It never leaves this module. */
   callbackTokenHash: agentProfiles.callbackTokenHash,
@@ -177,6 +179,7 @@ function mapProfile(
     systemOwned: row.packageId !== null,
     hasCallbackToken: row.callbackTokenHash !== null,
     hidden: row.hiddenAt !== null,
+    pinned: row.pinnedAt !== null,
     deletedAt: row.deletedAt,
     endpoint: endpointOf(row.configuration),
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
@@ -659,6 +662,31 @@ export function createAgentProfileStore(
           .onConflictDoUpdate({
             target: [agentPreferences.userId, agentPreferences.agentId],
             set: { hiddenAt: hidden ? new Date() : null },
+          });
+      });
+    },
+
+    /*
+     * The same row as hiding, one column over, and the upsert sets only its own column: pinning a
+     * hidden coworker keeps it hidden, and it comes back pinned when it is unhidden. Two people, or
+     * two tabs, pinning at once meet on the (user, agent) primary key, so the second write updates
+     * the row the first one made instead of failing.
+     */
+    setPinned(actor, id, pinned) {
+      return database.transaction(async (transaction) => {
+        const profile = await findAccessibleProfile(transaction, actor, id);
+        if (!profile) throw new AgentNotFoundError(id);
+
+        await transaction
+          .insert(agentPreferences)
+          .values({
+            userId: actor.id,
+            agentId: id,
+            pinnedAt: pinned ? new Date() : null,
+          })
+          .onConflictDoUpdate({
+            target: [agentPreferences.userId, agentPreferences.agentId],
+            set: { pinnedAt: pinned ? new Date() : null },
           });
       });
     },

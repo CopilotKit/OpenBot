@@ -12,6 +12,7 @@ import {
   issueCallbackTokenMutationOptions,
   revokeCallbackTokenMutationOptions,
   setAgentHiddenMutationOptions,
+  setAgentPinnedMutationOptions,
   updateAgentMutationOptions,
 } from "../src/lib/agents/mutations";
 import {
@@ -47,6 +48,7 @@ function boundary(id: string, refusal?: "unauthenticated" | "forbidden") {
     ownerUserId: actor.id,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
     endpoint: null,
     hasAuth: false,
@@ -85,6 +87,9 @@ function boundary(id: string, refusal?: "unauthenticated" | "forbidden") {
     },
     async setHidden(_actor, receivedId, value) {
       record("setHidden", receivedId, value);
+    },
+    async setPinned(_actor, receivedId, value) {
+      record("setPinned", receivedId, value);
     },
     async softDelete(_actor, receivedId) {
       record("softDelete", receivedId);
@@ -181,6 +186,26 @@ function operations(client: QueryClient, id: string) {
         ).mutate({ agentId: id, hidden: false }),
     },
     {
+      method: "POST",
+      suffix: "/pin",
+      body: null,
+      run: () =>
+        new MutationObserver(
+          client,
+          setAgentPinnedMutationOptions(client),
+        ).mutate({ agentId: id, pinned: true }),
+    },
+    {
+      method: "POST",
+      suffix: "/unpin",
+      body: null,
+      run: () =>
+        new MutationObserver(
+          client,
+          setAgentPinnedMutationOptions(client),
+        ).mutate({ agentId: id, pinned: false }),
+    },
+    {
       method: "DELETE",
       suffix: "",
       body: null,
@@ -241,7 +266,7 @@ for (const id of [
           body: operation.body,
         });
       }
-      expect(calls.map((call) => call.id)).toEqual(Array(9).fill(id));
+      expect(calls.map((call) => call.id)).toEqual(Array(11).fill(id));
       expect(calls.find((call) => call.operation === "update")?.value).toEqual(
         input,
       );
@@ -268,10 +293,10 @@ for (const refusal of ["unauthenticated", "forbidden"] as const) {
       ).rejects.toThrow();
       for (const operation of operations(client, id))
         await expect(operation.run()).rejects.toThrow();
-      expect(requests).toHaveLength(9);
+      expect(requests).toHaveLength(11);
       expect(calls).toHaveLength(0);
       expect(statuses).toEqual(
-        Array(9).fill(refusal === "unauthenticated" ? 401 : 403),
+        Array(11).fill(refusal === "unauthenticated" ? 401 : 403),
       );
       expect(
         requests.every((request) =>

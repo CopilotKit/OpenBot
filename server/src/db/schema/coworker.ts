@@ -74,6 +74,7 @@ export const agentPreferences = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     hiddenAt: timestamp("hidden_at", { withTimezone: true }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
   },
   (table) => [primaryKey({ columns: [table.userId, table.agentId] })],
 );

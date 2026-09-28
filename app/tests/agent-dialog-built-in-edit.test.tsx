@@ -74,6 +74,7 @@ function serve(endpoint: string) {
     ownerUserId: actor.id,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
     endpoint,
     hasAuth: false,

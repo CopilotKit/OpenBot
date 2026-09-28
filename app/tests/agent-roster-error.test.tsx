@@ -98,6 +98,7 @@ function agent(
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     systemOwned: false,
     canManage: true,
     mine: true,
@@ -494,6 +495,48 @@ test("with nothing hidden, /agents has no Hidden section at all", async () => {
   });
   expect(view.queryByText("Hidden")).toBeNull();
   expect(view.container.querySelector("details")).toBeNull();
+});
+
+test("a pinned coworker moves into Pinned at the top, out of its roster", async () => {
+  const kept = agent({ id: "mine-1", name: "Kept Agent" });
+  const favourite = agent({ id: "mine-2", name: "Favourite", pinned: true });
+  servingRosters([kept, favourite], []);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Pinned")).toBeTruthy();
+  const headings = [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+  expect(headings).toEqual(["Pinned", "Your agents", "Explore agents"]);
+  // Once, in Pinned, rather than twice.
+  expect(view.getAllByText("Favourite")).toHaveLength(1);
+  const pinnedSection = view.getByText("Pinned").parentElement;
+  expect(pinnedSection?.textContent).toContain("Favourite");
+  expect(pinnedSection?.textContent).not.toContain("Kept Agent");
+});
+
+test("with every coworker of yours pinned, Your agents says so instead of claiming none", async () => {
+  servingRosters(
+    [agent({ id: "mine-1", name: "Favourite", pinned: true })],
+    [],
+  );
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(
+    await view.findByText("Your agents are all pinned above."),
+  ).toBeTruthy();
+  expect(view.queryByText("You don't have any agents created.")).toBeNull();
+});
+
+test("with nothing pinned, /agents has no Pinned section", async () => {
+  servingRosters([agent({ id: "mine-1", name: "Mine Agent" })], []);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Mine Agent")).toBeTruthy();
+  expect(view.queryByText("Pinned")).toBeNull();
 });
 
 test("a failed REFETCH on / with explore empty shows it as empty, not broken", async () => {

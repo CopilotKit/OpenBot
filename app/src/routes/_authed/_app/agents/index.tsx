@@ -46,8 +46,15 @@ function AgentsScreen() {
     isPending: loading,
     isError: failed,
   } = useQuery(agentListQueryOptions());
-  const mine = agents?.filter((a) => a.mine);
-  const explore = agents?.filter(isSharedWithYou);
+  /*
+   * A pinned coworker moves up into its own section rather than appearing twice. The two rosters
+   * below then say so when pinning emptied them, instead of claiming there is nothing at all.
+   */
+  const pinned = agents?.filter((a) => a.pinned);
+  const mine = agents?.filter((a) => a.mine && !a.pinned);
+  const explore = agents?.filter((a) => isSharedWithYou(a) && !a.pinned);
+  const minePinned = agents?.some((a) => a.mine && a.pinned);
+  const explorePinned = agents?.some((a) => isSharedWithYou(a) && a.pinned);
   /*
    * Hiding takes a coworker off both lists above, and Unhide lives in its dialog, which only a card
    * opens. Without this section a hidden coworker had no way back onto the screen short of typing
@@ -65,7 +72,21 @@ function AgentsScreen() {
     <>
       <SidebarToggleBar />
       <div className="max-w-2xl px-4 w-full mx-auto">
-        <div className="mt-12 w-full max-w-2xl">
+        {pinned?.length ? (
+          <div className="mt-12 w-full max-w-2xl">
+            <h2 className="font-bold text-lg">Pinned</h2>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              {pinned.map((agent, index) => (
+                <StaggerItem className="min-w-0" index={index} key={agent.id}>
+                  <AgentCard agent={agent} />
+                </StaggerItem>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div
+          className={`${pinned?.length ? "mt-8" : "mt-12"} w-full max-w-2xl`}
+        >
           <div className="flex flex-row w-full items-center justify-between">
             <h2 className="font-bold text-lg">Your agents</h2>
             <Button
@@ -97,6 +118,14 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : minePinned ? (
+            <Empty className="mt-4 h-[180px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  Your agents are all pinned above.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
@@ -144,6 +173,14 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : explorePinned ? (
+            <Empty className="mt-4 h-[180px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  The agents shared with you are all pinned above.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
