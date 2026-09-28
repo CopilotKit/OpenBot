@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A remote Bot keeps answering when it asks for a learned skill that is not there
+
+With Automatic Learning delivering skills, a Bot reached at an AG-UI endpoint (every shipped Bot
+except a built-in one) ended the whole turn with "Skill is unavailable." in place of an answer when
+its model asked for a skill by a name the snapshot does not hold, for a file the skill does not
+list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
+call's result and carries on. A remote Bot's model now gets the same result and carries on too.
+
 ### A coworker can be pinned to the top of the Agents screen
 
 A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a

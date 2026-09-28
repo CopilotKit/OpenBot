@@ -181,6 +181,69 @@ describe("remote Automatic Learning delivery", () => {
     expect(remote.inputs).toHaveLength(1);
   });
 
+  /*
+   * A built-in Bot's loop (the AI SDK) hands a throwing tool's message back to the model as that
+   * call's result and runs the next step, so a model that asks for a skill by a name the snapshot
+   * lacks reads "Skill is unavailable." and carries on. A remote Bot has to meet the same answer,
+   * not a failed turn.
+   */
+  test.each([
+    ["a skill the snapshot lacks", '{"skill_name":"refunds"}'],
+    ["arguments that are not JSON", '{"skill_name":'],
+  ])(
+    "a read the snapshot cannot answer goes back to the model: %s",
+    async (_case, args) => {
+      const remote = new Remote((_request, index) =>
+        of(
+          start,
+          ...(index === 0
+            ? [
+                {
+                  type: EventType.TOOL_CALL_START,
+                  toolCallId: "call",
+                  toolCallName: load.name,
+                  parentMessageId: "assistant",
+                },
+                {
+                  type: EventType.TOOL_CALL_ARGS,
+                  toolCallId: "call",
+                  delta: args,
+                },
+                { type: EventType.TOOL_CALL_END, toolCallId: "call" },
+              ]
+            : []),
+          finish,
+        ),
+      );
+      const invocation: LearnedSkillInvocation = {
+        ...snapshot(),
+        execute: async (_name, parsed) => {
+          if ((parsed as { skill_name?: unknown }).skill_name !== "refund")
+            throw new Error("Skill is unavailable.");
+          return "refund steps";
+        },
+      };
+      const output = await events(
+        new RemoteLearnedSkillsMiddleware("bot", async () => invocation),
+        remote,
+      );
+      expect(output.some((event) => event.type === EventType.RUN_ERROR)).toBe(
+        false,
+      );
+      expect(output.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+      // The model is asked again, with the reason on the call it made.
+      expect(remote.inputs).toHaveLength(2);
+      const answer = remote.inputs[1]?.messages.find(
+        (message) => message.role === "tool" && message.toolCallId === "call",
+      );
+      expect(answer?.content).toBeString();
+      expect(answer?.content).not.toBe("");
+      expect(
+        output.filter((event) => event.type === EventType.TOOL_CALL_RESULT),
+      ).toMatchObject([{ toolCallId: "call", content: answer?.content }]);
+    },
+  );
+
   test("rejects reserved tool collisions before contacting the remote", async () => {
     const remote = new Remote(() => of(start, finish));
     const output = await events(
