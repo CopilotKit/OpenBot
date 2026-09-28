@@ -32,6 +32,15 @@ or an interrupted browser session. Managed browsing now uses full Chromium in he
 mode. Local API deployments can opt into installed Chrome with dedicated per-Bot profiles, the same
 in-app viewer, a loopback-only computer endpoint, and host shell execution disabled.
 
+### A hidden Bot's app grants stay on the Plugins screens
+
+Hiding a Bot from your own roster took it off the Plugins screens too: its row went from By Bot and
+from each tool's switches, the counts could read "3 of 2 Bots", and its own page said there was no
+such Bot. Its grants stayed in force, and nothing on any screen could take them away. The Plugins
+screens now follow the rule the Handoff panel already does: a hidden Bot is shown when it holds one
+of the grants the screen is about, marked "Hidden from your roster", and its own page draws its
+grants. Nothing on the server changed.
+
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
 Snapshots are ordered on the run of the browser that took them as well as the generation, so a

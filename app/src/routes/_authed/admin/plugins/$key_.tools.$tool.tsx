@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useBotNames } from "@/lib/agents/bot-names";
+import { grantRoster } from "@/lib/agents/grant-roster";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
@@ -44,6 +44,8 @@ function RouteComponent() {
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
+  /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   /*
    * Whether a call from this Bot could be authenticated at all.
    *
@@ -55,8 +57,9 @@ function RouteComponent() {
   const sharedCallback = plugins.data?.botsMayCallBack === true;
   const canCallBack = (bot: { id: string }) =>
     sharedCallback ||
-    agents?.find((one) => one.id === bot.id)?.hasCallbackToken === true;
-  const nameFor = useBotNames();
+    [...(agents ?? []), ...(hiddenAgents ?? [])].find(
+      (one) => one.id === bot.id,
+    )?.hasCallbackToken === true;
   const [error, setError] = useState<string | null>(null);
 
   const setGrant = useMutation({
@@ -100,9 +103,19 @@ function RouteComponent() {
     );
   }
 
-  const bots = (agents ?? []).map((agent: { id: string }) => ({
+  /*
+   * Everybody on the roster, and anybody hidden from it who holds this tool: see `grantRoster`.
+   * Named from the roster rows themselves, because the id-to-name lookup other admin screens use is
+   * built from the visible roster alone.
+   */
+  const bots = grantRoster({
+    roster: agents ?? [],
+    hidden: hiddenAgents ?? [],
+    holders: tool.grantedTo,
+  }).map((agent) => ({
     id: agent.id,
-    name: nameFor(agent.id),
+    name: agent.name,
+    hidden: agent.hidden,
   }));
 
   return (
@@ -173,6 +186,7 @@ function RouteComponent() {
                     <ItemContent>
                       <ItemTitle>{bot.name}</ItemTitle>
                       <ItemDescription>
+                        {bot.hidden ? "Hidden from your roster. " : ""}
                         {held
                           ? canCallBack(bot)
                             ? "May call this tool. Every call is still checked against the boundaries and written to the audit trail."
