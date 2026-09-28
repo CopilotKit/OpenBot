@@ -100,6 +100,35 @@ test("a busy summary response retains the server's durable transcript instead of
   expect(records[0]?.saveError).toBe("Summary service busy");
 });
 
+test("a save answered by a page that is not JSON reads as a failed save, not a parser error", async () => {
+  for (const [id, response] of [
+    [
+      "proxy",
+      () =>
+        new Response("<html><body>502 Bad Gateway</body></html>", {
+          status: 502,
+          headers: { "content-type": "text/html" },
+        }),
+    ],
+    ["empty", () => new Response(null, { status: 204 })],
+  ] as const) {
+    mockFetch(async (_input, init) =>
+      init?.method
+        ? response()
+        : Response.json({ sessions: [], nextCursor: null }),
+    );
+    saveVoiceSession(voiceSessionInput(call(id)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const record = (await loadVoiceArchive("channel-1")).find(
+      (entry) => entry.id === id,
+    );
+    expect(record?.saveState).toBe("unsaved");
+    expect(record?.saveError).toStartWith("Could not save this voice chat.");
+    mock.restore();
+    queryClient.clear();
+  }
+});
+
 test("save failure remains retryable with the same session id and original transcript", async () => {
   const sent: unknown[] = [];
   let fail = true;
