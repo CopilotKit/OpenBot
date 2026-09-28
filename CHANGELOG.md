@@ -17,6 +17,12 @@ the dialog as before. It appears only when something is hidden. Hiding still cha
 anyone else, and nothing on the server changed: the screen reads the `GET /api/agents?hidden=true`
 list the server already served.
 
+### Boundaries says when the policy could not be read
+
+When `GET /api/computers/policy` failed, the Boundaries screen showed its title over nothing, for as
+long as it was open. It now says "The boundary could not be read.", or the server's own reason, as
+it did before the screen's read moved into a query.
+
 ### Browser controls are visible in chat and the Computer sidebar
 
 Channel chats and standalone Bot chats now have a labeled Computer button and always-visible
