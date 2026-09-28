@@ -46,6 +46,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { apiFetch } from "@/lib/client";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -816,7 +817,7 @@ function probeDocument(url: string): Promise<boolean> {
   const existing = probesInFlight.get(url);
   if (existing) return existing;
 
-  const probe = fetch(url, { method: "HEAD", credentials: "include" })
+  const probe = apiFetch(url, { method: "HEAD", credentials: "include" })
     .then((response) => response.status === 404)
     .finally(() => {
       // Cleared however it settled, so the next mount asks again rather than inheriting an answer

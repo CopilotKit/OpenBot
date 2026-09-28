@@ -12,6 +12,8 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+import { applyBrowserIdentityHeaders } from "./browser-identity";
+
 export type ClientOptions = {
   /** Absent means GET. */
   method?: string;
@@ -28,9 +30,28 @@ export type ClientOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * The one fetch the app uses against its own API.
+ *
+ * Always carries the browser id, so a no-auth deployment can tell two laptops apart. Callers that
+ * cannot go through `client()` — multipart uploads, HEAD probes, WebSocket upgrades — still have
+ * to identify themselves: uploads and probes use this helper, sockets use `withBrowserIdentityQuery`.
+ */
+export function apiFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = applyBrowserIdentityHeaders(new Headers(init.headers));
+  return fetch(path, {
+    ...init,
+    credentials: init.credentials ?? "include",
+    headers,
+  });
+}
+
 /** Every request in this app is authenticated, and every one of them is JSON or nothing. */
 async function send(path: string, options: ClientOptions): Promise<Response> {
-  return fetch(path, {
+  return apiFetch(path, {
     method: options.method,
     credentials: "include",
     headers:

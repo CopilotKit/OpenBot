@@ -1,4 +1,9 @@
 import type { MiddlewareHandler } from "hono";
+import {
+  browserIdFromRequest,
+  browserUserEmail,
+  browserUserId,
+} from "../../../shared/browser-identity";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
 import type { AppVariables, AuthenticatedActor } from "./guards";
@@ -17,8 +22,10 @@ import type { AppVariables, AuthenticatedActor } from "./guards";
  * internet as an administrator, and said nothing, because it looked like it was working. Now the
  * deployment refuses to start unless somebody wrote down that they meant it.
  *
- * The actor is an administrator so admin surfaces can be reached too, and its id is fixed so
- * Intelligence threads and memory stay attached to the same person across restarts.
+ * The actor is an administrator so admin surfaces can be reached too. When the browser sends a
+ * remembered id, that browser is its own person: otherwise every visitor would share one roster.
+ * Scripts and tests that send no id still land on this fixed actor, so Intelligence threads that
+ * predate the header stay attached.
  */
 
 export const DEV_ACTOR: AuthenticatedActor = {
@@ -28,6 +35,8 @@ export const DEV_ACTOR: AuthenticatedActor = {
 };
 
 type UserWriter = Pick<Database, "insert">;
+
+const ensuredUserIds = new Set<string>([DEV_ACTOR.id]);
 
 export async function initializeDevActorUser(
   database: UserWriter,
@@ -54,6 +63,55 @@ export async function initializeDevActorUser(
     });
 
   return true;
+}
+
+export function actorForBrowserId(browserId: string): AuthenticatedActor {
+  return {
+    id: browserUserId(browserId),
+    email: browserUserEmail(browserId),
+    name: "Guest",
+    role: "admin",
+  };
+}
+
+/**
+ * Who this request is, in single-user mode.
+ *
+ * A valid browser id is that browser. Anything else is the shared administrator, which is what a
+ * curl, a test, and a tab that has not minted an id yet all are.
+ */
+export function singleUserActorFromRequest(request: {
+  headers: { get(name: string): string | null };
+  url: string;
+}): AuthenticatedActor {
+  const browserId = browserIdFromRequest(request);
+  return browserId ? actorForBrowserId(browserId) : DEV_ACTOR;
+}
+
+/**
+ * Channel memberships point at `users.id`, so a browser that has never been seen still needs a row.
+ *
+ * Remembered in-process so a busy tab is not an insert on every request. A restart upserts on the
+ * next call; `onConflictDoNothing` keeps that quiet.
+ */
+export async function ensureSingleUserActorUser(
+  database: UserWriter,
+  actor: AuthenticatedActor,
+): Promise<void> {
+  if (ensuredUserIds.has(actor.id)) return;
+
+  const name = actor.name ?? actor.email;
+  await database
+    .insert(users)
+    .values({
+      id: actor.id,
+      email: actor.email,
+      name,
+      emailVerified: false,
+    })
+    .onConflictDoNothing({ target: users.id });
+
+  ensuredUserIds.add(actor.id);
 }
 
 /**
@@ -84,12 +142,20 @@ export function singleUserEnabled(
   );
 }
 
-/** A guard that admits everybody as {@link DEV_ACTOR}. Only ever mounted when singleUserEnabled(). */
-export function createDevRequireUser(): MiddlewareHandler<{
+/**
+ * A guard that admits every visitor. Only ever mounted when singleUserEnabled().
+ *
+ * Each browser that sends its remembered id is its own person. Without one, this is {@link DEV_ACTOR}.
+ */
+export function createDevRequireUser(database?: UserWriter): MiddlewareHandler<{
   Variables: AppVariables;
 }> {
   return async (context, next) => {
-    context.set("actor", DEV_ACTOR);
+    const actor = singleUserActorFromRequest(context.req.raw);
+    if (database) {
+      await ensureSingleUserActorUser(database, actor);
+    }
+    context.set("actor", actor);
     await next();
   };
 }

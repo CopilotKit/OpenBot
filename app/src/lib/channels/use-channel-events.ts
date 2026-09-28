@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
+import { withBrowserIdentityQuery } from "@/lib/browser-identity";
 import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 
 /**
@@ -198,7 +199,7 @@ const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
 function socketUrl() {
-  return buildSocketUrl("/api/channels/events");
+  return withBrowserIdentityQuery(buildSocketUrl("/api/channels/events"));
 }
 
 export function useChannelEvents() {

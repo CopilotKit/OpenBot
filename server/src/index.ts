@@ -29,7 +29,12 @@ import {
 } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
-import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
+import {
+  DEV_ACTOR,
+  ensureSingleUserActorUser,
+  initializeDevActorUser,
+  singleUserActorFromRequest,
+} from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import type { OpenBotRole } from "./auth/roles";
@@ -127,7 +132,13 @@ async function resolveRequestActor(request: Request): Promise<{
   role: OpenBotRole;
 }> {
   if (config.singleUser) {
-    return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
+    const actor = singleUserActorFromRequest(request);
+    await ensureSingleUserActorUser(database, actor);
+    return {
+      id: actor.id,
+      name: actor.name ?? actor.email,
+      role: actor.role,
+    };
   }
   const session = await auth?.api.getSession({ headers: request.headers });
   const user = session?.user;

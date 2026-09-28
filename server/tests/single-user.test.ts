@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { singleUserEnabled } from "../src/auth/dev-actor";
+import { Hono } from "hono";
+import {
+  BROWSER_ID_HEADER,
+  BROWSER_ID_QUERY,
+} from "../../shared/browser-identity";
+import {
+  actorForBrowserId,
+  createDevRequireUser,
+  DEV_ACTOR,
+  singleUserActorFromRequest,
+  singleUserEnabled,
+} from "../src/auth/dev-actor";
 
 /**
  * Whether this deployment lets every visitor in as one administrator.
@@ -66,5 +77,65 @@ describe("running with no sign-in", () => {
         singleUserEnabled({ OPENBOT_SINGLE_USER: value }, false),
       ).toThrow();
     }
+  });
+});
+
+const BROWSER_A = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const BROWSER_B = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+
+describe("who a no-sign-in request is", () => {
+  test("a request with no browser id is the shared administrator", () => {
+    expect(
+      singleUserActorFromRequest(new Request("http://openbot.test/")),
+    ).toEqual(DEV_ACTOR);
+  });
+
+  test("a remembered browser is its own person, so two laptops do not share a roster", () => {
+    const left = singleUserActorFromRequest(
+      new Request("http://openbot.test/", {
+        headers: { [BROWSER_ID_HEADER]: BROWSER_A },
+      }),
+    );
+    const right = singleUserActorFromRequest(
+      new Request("http://openbot.test/", {
+        headers: { [BROWSER_ID_HEADER]: BROWSER_B },
+      }),
+    );
+    expect(left.id).not.toBe(right.id);
+    expect(left.id).toBe(actorForBrowserId(BROWSER_A).id);
+    expect(right.id).toBe(actorForBrowserId(BROWSER_B).id);
+  });
+
+  test("a WebSocket identifies itself on the query, because it cannot set headers", () => {
+    const actor = singleUserActorFromRequest(
+      new Request(
+        `http://openbot.test/api/channels/events?${BROWSER_ID_QUERY}=${BROWSER_A}`,
+      ),
+    );
+    expect(actor.id).toBe(actorForBrowserId(BROWSER_A).id);
+  });
+});
+
+describe("the no-sign-in guard", () => {
+  function app() {
+    const routes = new Hono();
+    routes.use("*", createDevRequireUser());
+    routes.get("/", (context) => context.json(context.var.actor));
+    return routes;
+  }
+
+  test("admits a visitor with no header as the shared administrator", async () => {
+    const response = await app().request("/");
+    expect(await response.json()).toEqual(DEV_ACTOR);
+  });
+
+  test("admits each browser as itself", async () => {
+    const response = await app().request("/", {
+      headers: { [BROWSER_ID_HEADER]: BROWSER_A },
+    });
+    expect(await response.json()).toMatchObject({
+      id: actorForBrowserId(BROWSER_A).id,
+      role: "admin",
+    });
   });
 });

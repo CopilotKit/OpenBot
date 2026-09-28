@@ -33,6 +33,7 @@ import {
   mediaTypeOf,
   shouldClaimPaste,
 } from "@/lib/channels/attachments";
+import { apiFetch } from "@/lib/client";
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
 import { Button } from "../../ui/button";
@@ -53,7 +54,11 @@ import { screenPickedFiles } from "./picked-files";
 import { AttachmentStrip } from "./attachment-strip";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
 import { PLACEHOLDER_COMMANDS } from "./sources";
-import { type AgentOption, buildTriggers, type DocumentOption } from "./triggers";
+import {
+  type AgentOption,
+  buildTriggers,
+  type DocumentOption,
+} from "./triggers";
 
 /**
  * The SDK's upload failure, derived rather than imported for the reason `attachments.ts` records
@@ -1587,7 +1592,7 @@ export function Composer({
  * actionable. `cull-staged-attachments.ts` is the backstop for whatever this misses.
  */
 function discardStagedAttachment(attachmentId: string): void {
-  void fetch(attachmentUrl(attachmentId), {
+  void apiFetch(attachmentUrl(attachmentId), {
     method: "DELETE",
     credentials: "include",
   }).catch(() => undefined);

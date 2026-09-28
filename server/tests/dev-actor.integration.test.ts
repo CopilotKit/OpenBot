@@ -1,7 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
+import {
+  actorForBrowserId,
+  DEV_ACTOR,
+  ensureSingleUserActorUser,
+  initializeDevActorUser,
+} from "../src/auth/dev-actor";
 import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -104,5 +109,35 @@ describe("development actor persistence", () => {
         .from(users)
         .where(eq(users.id, conflictingUserId)),
     ).toEqual([]);
+  });
+
+  test("writes a row for a browser the first time it is seen", async () => {
+    const rollback = new Error("rollback browser actor test");
+    const actor = actorForBrowserId(randomUUID());
+
+    await expect(
+      database.transaction(async (transaction) => {
+        expect(await ensureSingleUserActorUser(transaction, actor)).toBe(
+          undefined,
+        );
+        const rows = await transaction
+          .select()
+          .from(users)
+          .where(eq(users.id, actor.id));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          id: actor.id,
+          email: actor.email,
+          name: actor.name ?? actor.email,
+        });
+
+        await ensureSingleUserActorUser(transaction, actor);
+        expect(
+          await transaction.select().from(users).where(eq(users.id, actor.id)),
+        ).toHaveLength(1);
+
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
   });
 });

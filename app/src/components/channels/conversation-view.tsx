@@ -20,6 +20,7 @@ import {
   reduceQueue,
 } from "@/components/channels/composer";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { apiFetch } from "@/lib/client";
 import { newId } from "../../lib/new-id";
 
 export function ConversationView({
@@ -496,7 +497,7 @@ function releaseStagedAttachment(attachment: Attachment): void {
   if (typeof metadata?.attachmentId !== "string") {
     return;
   }
-  void fetch(attachmentUrl(metadata.attachmentId), {
+  void apiFetch(attachmentUrl(metadata.attachmentId), {
     method: "DELETE",
     credentials: "include",
   }).catch(() => undefined);

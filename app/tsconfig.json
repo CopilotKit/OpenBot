@@ -13,6 +13,7 @@
     "tests",
     "vite.config.ts",
     "../shared/handoff-markers.ts",
-    "../shared/listen-port.ts"
+    "../shared/listen-port.ts",
+    "../shared/browser-identity.ts"
   ]
 }

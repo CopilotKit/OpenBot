@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { withBrowserIdentityQuery } from "@/lib/browser-identity";
 import { socketUrl } from "@/lib/socket-url";
 import { pageCoordinates } from "./take-the-wheel";
 
@@ -61,7 +62,9 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     // The server's own address, so no proxy has to carry the upgrade. The scheme still follows
     // the page: wss when the app is served over https.
     const socket = new WebSocket(
-      socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
+      withBrowserIdentityQuery(
+        socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
+      ),
     );
     socketRef.current = socket;
     let closed = false;

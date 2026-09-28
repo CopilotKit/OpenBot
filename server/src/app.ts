@@ -451,10 +451,11 @@ export function createApp(
     Variables: AppVariables;
   }> = async (context) =>
     context.json({ error: "No identity provider is configured." }, 503);
-  // One administrator, when nothing is configured to sign anybody in. Checked first, and only ever
-  // true when there is no provider, so a configured deployment cannot fall back to it.
+  // Each browser is its own administrator when nothing is configured to sign anybody in.
+  // Checked first, and only ever true when there is no provider, so a configured deployment
+  // cannot fall back to it.
   const requireUser = config.singleUser
-    ? createDevRequireUser()
+    ? createDevRequireUser(attachmentDatabase)
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
@@ -1460,11 +1461,7 @@ export function createApp(
     useProductEngineerTools({ runner, store: productEngineerStore });
     app.route(
       "/api/product-engineer",
-      createProductEngineerRoutes(
-        productEngineerStore,
-        runner,
-        requireUser,
-      ),
+      createProductEngineerRoutes(productEngineerStore, runner, requireUser),
     );
   } else {
     useProductEngineerTools(null);

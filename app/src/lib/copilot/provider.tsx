@@ -1,6 +1,7 @@
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { browserIdentityHeaders } from "@/lib/browser-identity";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { a2uiProviderOptions } from "./a2ui";
 import "./a2ui.css";
@@ -21,6 +22,10 @@ import { SkillTools } from "./skill-tools";
  * session cookie, and the runtime endpoint sits behind the same guard as every other API route, so
  * without it every run is rejected as anonymous while the rest of the app looks signed in.
  *
+ * `headers` carries the browser id used in no-sign-in mode, so a CopilotKit run belongs to the
+ * same person as `/api/channels`. Without it, chats would be created as one browser and spoken
+ * in as another.
+ *
  * The URL is relative, like every other call in the app, so the Vite dev proxy and a single-origin
  * deployment both work without a build-time base URL to get wrong.
  *
@@ -35,6 +40,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
       credentials="include"
+      headers={browserIdentityHeaders()}
       {...a2uiProviderOptions(capabilities?.generativeUi)}
       /*
        * Passed only when this deployment actually has the capability, and this is the load-bearing
