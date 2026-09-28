@@ -1,13 +1,14 @@
 import type { ActivityMessage, Message } from "@ag-ui/core";
 import { queryOptions, useQuery } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
+import { client } from "@/lib/client";
+import { queryClient } from "@/query-client";
 import type {
   SaveVoiceSessionInput,
   VoiceSessionPage,
   VoiceSessionRecord,
 } from "../../../../shared/voice-session";
-import { client } from "@/lib/client";
-import { channelKeys } from "@/lib/channels/queries";
-import { queryClient } from "@/query-client";
+import { closingOf } from "./cut";
 import {
   forgetVoiceCall,
   recoverVoiceCalls,
@@ -220,14 +221,16 @@ export function withVoiceChats(
 }
 
 export function voiceArchiveContext(calls: readonly VoiceChatEntry[]): string {
-  return calls
-    .slice(-6)
-    .map(
-      (call) =>
-        `Voice chat (${call.startedAt}):\n${call.summary ?? call.transcript.map((entry) => `${entry.role}: ${entry.text}`).join("\n")}`,
-    )
-    .join("\n\n")
-    .slice(-12000);
+  return closingOf(
+    calls
+      .slice(-6)
+      .map(
+        (call) =>
+          `Voice chat (${call.startedAt}):\n${call.summary ?? call.transcript.map((entry) => `${entry.role}: ${entry.text}`).join("\n")}`,
+      )
+      .join("\n\n"),
+    12000,
+  );
 }
 
 export function voiceSessionInput(

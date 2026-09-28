@@ -14,6 +14,7 @@ function setup(
     request: string,
     signal: AbortSignal,
   ) => Promise<string> = async () => "Agent result",
+  context: () => string = () => "user: Old request",
 ) {
   let receive: (event: VoiceEvent) => void = () => {};
   let closed = 0;
@@ -39,7 +40,7 @@ function setup(
     channelId: "channel-1",
     connect,
     askAgent,
-    context: () => "user: Old request",
+    context,
   });
   return {
     session,
@@ -276,6 +277,74 @@ test("voice bridge returns only the new agent answer and respects shared thread 
   busy = false;
   expect(await askChannelAgent("Hello", signal, channel)).toBe("New answer");
   expect(requests).toEqual(["Hello"]);
+});
+
+// An emoji is two UTF-16 units; each text below is one unit over its limit, so a plain slice
+// would keep half of the emoji at the cut.
+const emoji = "\u{1F600}";
+
+test("the call's opening context is cut between characters", async () => {
+  const fixture = setup(undefined, () => `${emoji.repeat(6000)}.`);
+  try {
+    await fixture.session.start();
+    const item = fixture.sent.find(
+      (event) => event.type === "conversation.item.create",
+    )?.item as { content: { text: string }[] } | undefined;
+    const text = item?.content[0]?.text ?? "";
+    expect(text.isWellFormed()).toBe(true);
+    expect(text.endsWith(`${emoji.repeat(5999)}.`)).toBe(true);
+  } finally {
+    fixture.session.end();
+  }
+});
+
+test("live captions are cut between characters", async () => {
+  const fixture = setup();
+  try {
+    await fixture.session.start();
+    fixture.emit({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "user-1",
+      transcript: `.${emoji.repeat(2000)}`,
+    });
+    expect(fixture.session.getSnapshot().transcript.isWellFormed()).toBe(true);
+    fixture.emit({ type: "response.created" });
+    fixture.emit({
+      type: "response.output_audio_transcript.delta",
+      item_id: "assistant-1",
+      delta: `${emoji.repeat(2000)}.`,
+    });
+    expect(fixture.session.getSnapshot().reply.isWellFormed()).toBe(true);
+    expect(fixture.session.getSnapshot().reply).toBe(`${emoji.repeat(1999)}.`);
+  } finally {
+    fixture.session.end();
+  }
+});
+
+test("a long delegated answer is cut between characters", async () => {
+  const fixture = setup(async () => `.${emoji.repeat(8000)}`);
+  try {
+    await fixture.session.start();
+    fixture.emit(tool());
+    await tick();
+    await tick();
+    const output = fixture.sent
+      .map((event) => event.item as { type?: string; output?: string })
+      .find((item) => item?.type === "function_call_output")?.output;
+    const answer = (JSON.parse(output ?? "{}") as { answer?: string }).answer;
+    expect(answer?.isWellFormed()).toBe(true);
+    expect(answer).toBe(`.${emoji.repeat(7999)}`);
+  } finally {
+    fixture.session.end();
+  }
+});
+
+test("chat context for a call is cut between characters", () => {
+  const context = voiceContext([
+    { id: "user", role: "user", content: `${emoji.repeat(6000)}.` },
+  ]);
+  expect(context.isWellFormed()).toBe(true);
+  expect(context).toBe(`${emoji.repeat(5999)}.`);
 });
 
 test("voice context excludes system instructions and tool payloads", () => {

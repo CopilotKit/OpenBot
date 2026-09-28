@@ -120,3 +120,12 @@ test("save failure remains retryable with the same session id and original trans
   expect((await loadVoiceArchive("channel-1"))[0]?.saveState).toBeUndefined();
   expect(sent).toEqual([input, input]);
 });
+
+test("earlier calls' context is cut between characters", () => {
+  const emoji = "\u{1F600}";
+  const context = voiceArchiveContext([
+    { ...call("long"), summary: `${emoji.repeat(6000)}.` },
+  ]);
+  expect(context.isWellFormed()).toBe(true);
+  expect(context).toBe(`${emoji.repeat(5999)}.`);
+});

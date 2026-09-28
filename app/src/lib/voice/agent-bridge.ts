@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import { closingOf } from "./cut";
 
 export function messageText(message: Message): string {
   if (typeof message.content === "string") return message.content;
@@ -18,14 +19,16 @@ export function messageText(message: Message): string {
 }
 
 export function voiceContext(messages: readonly Message[]): string {
-  return messages
-    .filter(
-      (message) => message.role === "user" || message.role === "assistant",
-    )
-    .slice(-12)
-    .map((message) => `${message.role}: ${messageText(message)}`)
-    .join("\n")
-    .slice(-12000);
+  return closingOf(
+    messages
+      .filter(
+        (message) => message.role === "user" || message.role === "assistant",
+      )
+      .slice(-12)
+      .map((message) => `${message.role}: ${messageText(message)}`)
+      .join("\n"),
+    12000,
+  );
 }
 
 /** Uses the actual AG-UI send path; does not invent messages or run a second agent engine. */
