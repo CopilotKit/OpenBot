@@ -49,6 +49,14 @@ The computer now mints a run for each Bot's browser session, mints a new one whe
 and answers which run it is on. Nothing changes for a deployment that already reports one, and a
 computer too old to answer leaves the ordering exactly where it was rather than refusing anything.
 
+### `scripts/start.sh` no longer needs python3
+
+The runtime health check in step 3 was a `python3` heredoc. On a machine without Python, and on
+Windows, where `python3` is usually the Microsoft Store alias that exits 49, the run stopped there
+with the server and worker up and the app never started. The check now runs in Bun, which the
+script already requires, with the same output and exit status, and `python3` is gone from the
+prerequisites in `docs/development.md`.
+
 ### An MCP tool that answers with a resource link is no longer read as an empty name
 
 A tool that points at a file or a page often returns a `resource_link`: a URI, a name, and a

@@ -147,7 +147,7 @@ holder() {
 #
 # When that happened here the cost was not a wrong answer, it was a wrong answer three stages later.
 # `require_free_or_ours` reported "already up", the server was therefore never started, `wait_for`
-# printed a green "server ready", and the run died at stage 3 in `json.loads` on a mouthful of HTML —
+# printed a green "server ready", and the run died at stage 3 parsing a mouthful of HTML as JSON —
 # a JSON parse error standing in for "that port belongs to something else".
 #
 # So each surface is asked for something only it can produce.
@@ -381,20 +381,26 @@ fi
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
-python3 - "$INFO" <<'PY'
-import json, sys
-info = json.loads(sys.argv[1])
-status, agents = info.get("licenseStatus"), list(info.get("agents", {}))
-if status != "valid":
-    print(f"\033[31m  licence is '{status}', not 'valid'.\033[0m")
-    print("\033[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\033[0m")
-    print("\033[31m  See README.md for Intelligence setup.\033[0m")
-    raise SystemExit(1)
-if not agents:
-    print("\033[31m  No Bots registered.\033[0m")
-    raise SystemExit(1)
-print(f"\033[32m  licence valid · mode {info.get('mode')} · Bots: {', '.join(agents)}\033[0m")
-PY
+# Read with Bun, which every run of this script already needs, rather than python3, which not every
+# machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
+# found" and exits 49, so the run stopped here with the server and worker up and the app never
+# started.
+bun run - "$INFO" <<'JS'
+const info = JSON.parse(process.argv[2]);
+const status = info.licenseStatus;
+const agents = Object.keys(info.agents ?? {});
+if (status !== "valid") {
+  console.log(`\x1b[31m  licence is '${status}', not 'valid'.\x1b[0m`);
+  console.log("\x1b[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\x1b[0m");
+  console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
+  process.exit(1);
+}
+if (agents.length === 0) {
+  console.log("\x1b[31m  No Bots registered.\x1b[0m");
+  process.exit(1);
+}
+console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${agents.join(", ")}\x1b[0m`);
+JS
 
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app

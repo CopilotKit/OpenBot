@@ -2,7 +2,7 @@
 
 ## Setup
 
-Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, `openssl`, and `curl`. The
+Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `openssl`, and `curl`. The
 Intelligence provisioning below also needs `npx` (Node); `scripts/start.sh` uses `openssl` to mint
 the generated secrets on a first run.
 
