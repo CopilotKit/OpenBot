@@ -67,6 +67,13 @@ Anthropic's OpenAI-compatible endpoint, which may ignore the request for bare JS
 reply containing multiple objects fell back to offering every tool; replies with no valid `skills`
 list still do.
 
+### The AG2 Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the AG2 Bot failed every run. Compose writes `OPENAI_BASE_URL` empty when
+the choice is a plain OpenAI key, and the OpenAI SDK only defaults an absent URL, so it was given ""
+as the address. The Bot now falls back to `https://api.openai.com/v1` for an empty value, as its
+Anthropic branch already did for `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer
