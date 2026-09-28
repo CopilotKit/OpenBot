@@ -171,6 +171,23 @@ function RouteComponent() {
   }
 
   /*
+   * The same for the plugin list. Every branch below decides what this connector is from it, and
+   * without it they concluded there is none: "This is not a service you connect for yourself",
+   * about a connector this person may hold right now.
+   */
+  if (!plugins.data) {
+    return (
+      <PageShell backButton={back} title={key}>
+        <p className="mt-12 text-destructive text-sm" role="alert">
+          This connector could not be loaded, so nothing about it is shown here
+          rather than something that may be wrong. Reload the page, and tell an
+          administrator if it persists.
+        </p>
+      </PageShell>
+    );
+  }
+
+  /*
    * A brokered app, before the catalogue is consulted at all.
    *
    * It has no catalogue entry, so the branch below would find no `entry`, decide the deployment has

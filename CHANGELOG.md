@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A connector's own pages say when the plugin list could not be read
+
+When `GET /api/plugins` failed, a connector's admin page said "Not a plugin", a tool's page said
+"This deployment has not enabled that connector.", and a person's connected-account page said "This
+is not a service you connect for yourself.", each about a connector that may be added and granted
+right now. They now say the list could not be loaded, as the per-Bot grant page beside them already
+did. A list that arrived without the connector still reads as before.
+
 ### A coworker can be pinned to the top of the Agents screen
 
 A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a

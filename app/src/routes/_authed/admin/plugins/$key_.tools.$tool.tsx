@@ -83,6 +83,22 @@ function RouteComponent() {
     return <PageShell title="Tool">{null}</PageShell>;
   }
 
+  /*
+   * A plugin list that could not be read is said as that, not as a connector that is not enabled:
+   * `isPending` goes false on a failed fetch too, and the sentence below is a claim about this
+   * deployment that a request that never came back is no evidence for. The per-Bot grant screen
+   * keeps the same guard.
+   */
+  if (!plugins.data) {
+    return (
+      <PageShell backButton={back} title={toolName}>
+        <p className="mt-12 text-destructive text-sm" role="alert">
+          Plugins could not be loaded.
+        </p>
+      </PageShell>
+    );
+  }
+
   if (!tool) {
     return (
       <PageShell

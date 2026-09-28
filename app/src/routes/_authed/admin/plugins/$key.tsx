@@ -415,6 +415,26 @@ function RouteComponent() {
   if (plugins.isPending || connections.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
   }
+  /*
+   * Gated on the plugin list having ARRIVED, the guard the per-Bot grant screen already keeps
+   * (`plugins.data && !server`). `isPending` goes false on a failed fetch exactly as it does on a
+   * successful one, so `!(entry || server)` alone cannot tell "this deployment has no plugin by
+   * that name" apart from "the plugin list could not be read", and a request that never came back
+   * is no evidence for the first. Nothing on this page survives the failure: the title, the tools
+   * and the grants are all that one response.
+   */
+  if (!plugins.data) {
+    return (
+      <PageShell
+        backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
+        title="Plugins"
+      >
+        <p className="mt-12 text-destructive text-sm" role="alert">
+          Plugins could not be loaded.
+        </p>
+      </PageShell>
+    );
+  }
   if (!(entry || server)) {
     return (
       <PageShell
