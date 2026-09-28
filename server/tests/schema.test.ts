@@ -333,6 +333,13 @@ describe("OpenBot database schema", () => {
         hasDefault: false,
         primary: false,
       },
+      {
+        name: "pinned_at",
+        sqlType: "timestamp with time zone",
+        notNull: false,
+        hasDefault: false,
+        primary: false,
+      },
     ]);
 
     expect(
