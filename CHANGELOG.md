@@ -59,6 +59,14 @@ now read, each on its own labelled line. The URI leads and the name and descript
 a long name cannot push the pointer past the result cap; a server's `title` is shown over its `name`
 when it gives one. A part that already carried text is unchanged.
 
+### The Microsoft Agent Framework Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the Microsoft Agent Framework Bot failed every run with "Connection
+error.". Compose writes `OPENAI_BASE_URL` empty when the choice is a plain OpenAI key, and the
+OpenAI SDK only defaults an absent URL, so it was given "" as the address. The Bot now falls back to
+`https://api.openai.com/v1` for an empty value, as its Anthropic branch already did for
+`ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
+
 ### Skill selection keeps capabilities named across multiple JSON replies
 
 When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each

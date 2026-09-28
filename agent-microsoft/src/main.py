@@ -23,7 +23,10 @@ def _client() -> AnthropicClient | OpenAIChatClient:
         # Compose exports missing overrides as ""; the SDK only defaults an absent URL.
         base_url = (os.environ.get("ANTHROPIC_BASE_URL") or "").strip() or "https://api.anthropic.com"
         return AnthropicClient(model=model, base_url=base_url)
-    return OpenAIChatClient(model)
+    # The same "" for OPENAI_BASE_URL, which Compose writes whenever the model screen chose a plain
+    # OpenAI key. The SDK only defaults an absent URL; given "", every request fails to connect.
+    base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+    return OpenAIChatClient(model, base_url=base_url)
 
 
 agent = _client().as_agent(
