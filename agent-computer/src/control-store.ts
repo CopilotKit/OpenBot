@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -131,14 +132,19 @@ export function createControlStore(
       validate(state);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-      const fd = openSync(temporary, "wx", 0o600);
       try {
-        writeFileSync(fd, JSON.stringify(state));
-        fsyncSync(fd);
+        const fd = openSync(temporary, "wx", 0o600);
+        try {
+          writeFileSync(fd, JSON.stringify(state));
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+        renameSync(temporary, path);
       } finally {
-        closeSync(fd);
+        // A write or rename that fails must not leave the copy behind; after a rename it is gone.
+        rmSync(temporary, { force: true });
       }
-      renameSync(temporary, path);
     },
   };
 }

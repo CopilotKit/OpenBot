@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -10,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createControl } from "../src/control";
 import { createControlStore } from "../src/control-store";
+
 const directories: string[] = [];
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "control-store-"));
@@ -38,6 +40,23 @@ test("atomic persisted completion remains exact across reload and later request"
   expect(
     readFileSync(join(directory, ".control", "bot-1.json"), "utf8"),
   ).not.toContain("private label");
+  expect(readdirSync(join(directory, ".control"))).toEqual(["bot-1.json"]);
+});
+test("a save that cannot replace the state leaves no temporary copy behind", () => {
+  const { directory, store } = fixture();
+  // A directory where the state file goes makes the final rename fail.
+  mkdirSync(join(directory, ".control", "bot-1.json"), { recursive: true });
+  expect(() =>
+    store.save({
+      version: 1,
+      holder: "bot",
+      since: new Date().toISOString(),
+      resumeSnapshotRequired: false,
+      recoveryRequired: false,
+      requests: [],
+      aliases: {},
+    }),
+  ).toThrow();
   expect(readdirSync(join(directory, ".control"))).toEqual(["bot-1.json"]);
 });
 test("reload interrupts active requests and retains idempotent identity", async () => {

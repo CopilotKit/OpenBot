@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A failed save of a Bot's browser control leaves no copy behind
+
+The computer keeps who holds a Bot's browser, and its handoff requests, in one file per Bot under
+the profiles volume, written to a temporary file first and renamed over it. When the write or the
+rename failed, the temporary file stayed, a readable copy of that state beside the real one, and
+every later failure added another. It is now removed whether or not the save succeeds, as the
+learning setup and the model sign-in file already do.
+
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
