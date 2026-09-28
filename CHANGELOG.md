@@ -8,14 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A voice chat that could not be saved says so in a sentence
-
-Saving a finished voice call read the server's answer as JSON without a fallback. When something in
-front of OpenBot answered instead, such as a proxy's 502 page, the call's card gave the JSON
-parser's error as the reason (in Chrome, "Unexpected token '<' ... is not valid JSON"); an answer
-without a saved session failed on a property read the same way. Both now read "Could not save this voice chat.", the
-message the card already uses, and the call stays on the card to retry.
-
 ### A hidden coworker can be found again on the Agents screen
 
 Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
@@ -156,6 +148,14 @@ PATH is now kept rather than replaced, which it was not before.
 An installed or cached Bun that is not the pinned version is no longer accepted, on install and on
 every start, and OpenBot acquires its own copy instead. The version already on the machine is left
 exactly as it is and simply not used.
+
+### A voice chat that could not be saved says so in a sentence
+
+Saving a finished voice call read the server's answer as JSON without a fallback. When something in
+front of OpenBot answered instead, such as a proxy's 502 page, the call's card gave the JSON
+parser's error as the reason (in Chrome, "Unexpected token '<' ... is not valid JSON"); an answer
+without a saved session failed on a property read the same way. Both now read "Could not save this voice chat.", the
+message the card already uses, and the call stays on the card to retry.
 
 ### Organization sign-in survives a callback that arrives in pieces
 
