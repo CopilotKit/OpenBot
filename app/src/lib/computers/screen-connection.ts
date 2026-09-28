@@ -83,6 +83,9 @@ export function connectScreen(options: Options) {
           return;
         }
       }
+      // A frame means this socket recovered, so the next drop starts the backoff over. Without
+      // this, drops a viewer had already recovered from used up the retries for good.
+      if (message?.type === "frame") attempts = 0;
       options.onMessage(event);
     };
     current.onerror = () => {

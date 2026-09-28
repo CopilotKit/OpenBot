@@ -66,6 +66,23 @@ test("connection loss disables input, retries boundedly, then asks for Retry", a
   r.control.stop();
 });
 
+test("a reconnect that shows the screen again restores the whole retry budget", async () => {
+  const r = rig();
+  const frame = { data: JSON.stringify({ type: "frame", data: "AA==" }) };
+  await r.sockets[0]?.onopen?.();
+  for (let i = 0; i < 6; i++) {
+    r.sockets[i]?.onmessage?.(frame);
+    r.sockets[i]?.onclose?.();
+    r.timers[i]?.run();
+    await r.sockets[i + 1]?.onopen?.();
+  }
+  expect(r.timers.map((t) => t.delay)).toEqual([500, 500, 500, 500, 500, 500]);
+  expect(r.statuses.some((status) => status.includes("Retry"))).toBe(false);
+  // A reconnect still asks who holds the computer before input is ready.
+  expect(r.statuses.at(-1)).toBe("blocked");
+  r.control.stop();
+});
+
 test("reconnect reacquires ownership before input becomes ready", async () => {
   const r = rig();
   r.sockets[0]?.onclose?.();
