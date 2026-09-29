@@ -250,7 +250,12 @@ SERVICES+=(agent-langgraph)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
-docker compose up -d --build "${SERVICES[@]}" >/dev/null
+# Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
+# terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
+# stdout, and stops with "failed to get console: provided file is not a console". An environment
+# variable rather than `--progress`, because a Compose too old to know the flag refuses it, and one
+# too old to know the variable ignores it.
+COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   red "  Migrations did not apply. The database is not the schema this server expects."
   red "  Log: $LOGS/migrate.log"
