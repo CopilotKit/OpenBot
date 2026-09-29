@@ -8,13 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A remote Bot keeps answering when it asks for a learned skill that is not there
+### `start.sh` names the port to change on macOS
 
-With Automatic Learning delivering skills, a Bot reached at an AG-UI endpoint (every shipped Bot
-except a built-in one) ended the whole turn with "Skill is unavailable." in place of an answer when
-its model asked for a skill by a name the snapshot does not hold, for a file the skill does not
-list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
-call's result and carries on. A remote Bot's model now gets the same result and carries on too.
+When the API server's or the app's port was held by another process, `start.sh` was meant to say
+which setting to change, such as `Re-run with SERVER_PORT=<free port>`. On macOS, whose bash is
+3.2, the run ended on `bad substitution` before printing it, because the hint upper-cased the
+name with a bash 4 expansion. It is upper-cased with `tr` now, so the hint prints on either bash.
+
+### `start.sh` starts the Docker services on Compose v5
+
+On Docker Compose v5, `bash scripts/start.sh` stopped at
+**1/4 Docker services** with `failed to get console: provided file is not a console`. The script
+sends compose's output to `/dev/null` while its errors still reach the terminal. Compose saw that
+terminal, chose its interactive build display, and could not draw it. The script now asks compose
+for quiet progress through `COMPOSE_PROGRESS`, which older Compose versions ignore, so nothing
+changes where it already worked.
 
 ### A coworker can be pinned to the top of the Agents screen
 
@@ -54,6 +62,14 @@ grant was stored whatever it named. A Bot's skills are read by slug alone, so th
 whoever wrote a skill under that name next, and on a Bot the deployment shares that was one person's
 instructions answering everybody. It is now refused with "There is no skill called …", as a grant
 naming no app already was. Revoking one by hand still works.
+
+### A remote Bot keeps answering when it asks for a learned skill that is not there
+
+With Automatic Learning delivering skills, a Bot reached at an AG-UI endpoint (every shipped Bot
+except a built-in one) ended the whole turn with "Skill is unavailable." in place of an answer when
+its model asked for a skill by a name the snapshot does not hold, for a file the skill does not
+list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
+call's result and carries on. A remote Bot's model now gets the same result and carries on too.
 
 ### Browser challenges can be handed to a person without losing the Bot's page
 
