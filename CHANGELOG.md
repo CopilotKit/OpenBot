@@ -8,13 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A connector's own pages say when the plugin list could not be read
+### `start.sh` names the port to change on macOS
 
-When `GET /api/plugins` failed, a connector's admin page said "Not a plugin", a tool's page said
-"This deployment has not enabled that connector.", and a person's connected-account page said "This
-is not a service you connect for yourself.", each about a connector that may be added and granted
-right now. They now say the list could not be loaded, as the per-Bot grant page beside them already
-did. A list that arrived without the connector still reads as before.
+When the API server's or the app's port was held by another process, `start.sh` was meant to say
+which setting to change, such as `Re-run with SERVER_PORT=<free port>`. On macOS, whose bash is
+3.2, the run ended on `bad substitution` before printing it, because the hint upper-cased the
+name with a bash 4 expansion. It is upper-cased with `tr` now, so the hint prints on either bash.
+
+### `start.sh` starts the Docker services on Compose v5
+
+On Docker Compose v5, `bash scripts/start.sh` stopped at
+**1/4 Docker services** with `failed to get console: provided file is not a console`. The script
+sends compose's output to `/dev/null` while its errors still reach the terminal. Compose saw that
+terminal, chose its interactive build display, and could not draw it. The script now asks compose
+for quiet progress through `COMPOSE_PROGRESS`, which older Compose versions ignore, so nothing
+changes where it already worked.
 
 ### A coworker can be pinned to the top of the Agents screen
 
@@ -33,6 +41,14 @@ address bar. The screen now ends with a collapsed **Hidden** section listing the
 the dialog as before. It appears only when something is hidden. Hiding still changes nothing for
 anyone else, and nothing on the server changed: the screen reads the `GET /api/agents?hidden=true`
 list the server already served.
+
+### A connector's own pages say when the plugin list could not be read
+
+When `GET /api/plugins` failed, a connector's admin page said "Not a plugin", a tool's page said
+"This deployment has not enabled that connector.", and a person's connected-account page said "This
+is not a service you connect for yourself.", each about a connector that may be added and granted
+right now. They now say the list could not be loaded, as the per-Bot grant page beside them already
+did. A list that arrived without the connector still reads as before.
 
 ### Boundaries says when the policy could not be read
 
