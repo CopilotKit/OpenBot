@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `start.sh` names the port to change on macOS
+
+When the API server's or the app's port was held by another process, `start.sh` was meant to say
+which setting to change, such as `Re-run with SERVER_PORT=<free port>`. On macOS, whose bash is
+3.2, the run ended on `bad substitution` before printing it, because the hint upper-cased the
+name with a bash 4 expansion. It is upper-cased with `tr` now, so the hint prints on either bash.
+
+### `start.sh` starts the Docker services on Compose v5
+
+On Docker Compose v5, `bash scripts/start.sh` stopped at
+**1/4 Docker services** with `failed to get console: provided file is not a console`. The script
+sends compose's output to `/dev/null` while its errors still reach the terminal. Compose saw that
+terminal, chose its interactive build display, and could not draw it. The script now asks compose
+for quiet progress through `COMPOSE_PROGRESS`, which older Compose versions ignore, so nothing
+changes where it already worked.
+
 ### The skills pages say when the skills could not be read
 
 When `GET /api/plugins` failed, **Agent Skills** said "You don't have any skills yet.", **Admin →
