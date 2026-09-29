@@ -321,6 +321,8 @@ services:
       OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
@@ -362,9 +364,13 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      # gpt-5.5, to stay comparable with agent-bot above rather than because 5.6 does not work:
-      # set BOT_MODEL to one and the Responses API is switched on for it automatically.
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+      # Unset, this Bot takes the spec file's row for its model rather than this line
+      # substituting gpt-5.5 whatever BOT_PROVIDER named — a provider other than OpenAI was
+      # handed that substitute and then failed at its own vendor on it. The file's OpenAI row is
+      # the same gpt-5.5 as before, so an OpenAI deployment answers on the model it always did;
+      # BOT_MODEL still wins when it is set, and a 5.6 tier named there switches the Responses
+      # API on by itself below.
+      BOT_MODEL: ${BOT_MODEL:-}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
       # How hard it thinks, on a model that reasons. Empty leaves the provider's own default.
       BOT_REASONING_EFFORT: ${BOT_REASONING_EFFORT:-}

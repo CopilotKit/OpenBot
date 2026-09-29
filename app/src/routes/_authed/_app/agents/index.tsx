@@ -1,4 +1,4 @@
-import { IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
@@ -46,8 +46,22 @@ function AgentsScreen() {
     isPending: loading,
     isError: failed,
   } = useQuery(agentListQueryOptions());
-  const mine = agents?.filter((a) => a.mine);
-  const explore = agents?.filter(isSharedWithYou);
+  /*
+   * A pinned coworker moves up into its own section rather than appearing twice. The two rosters
+   * below then say so when pinning emptied them, instead of claiming there is nothing at all.
+   */
+  const pinned = agents?.filter((a) => a.pinned);
+  const mine = agents?.filter((a) => a.mine && !a.pinned);
+  const explore = agents?.filter((a) => isSharedWithYou(a) && !a.pinned);
+  const minePinned = agents?.some((a) => a.mine && a.pinned);
+  const explorePinned = agents?.some((a) => isSharedWithYou(a) && a.pinned);
+  /*
+   * Hiding takes a coworker off both lists above, and Unhide lives in its dialog, which only a card
+   * opens. Without this section a hidden coworker had no way back onto the screen short of typing
+   * its id into the address bar. Nothing while loading, failed or empty: it is a way back for
+   * somebody who hid something, not a third roster everybody has to read past.
+   */
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
 
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = isCreating === true;
@@ -58,7 +72,21 @@ function AgentsScreen() {
     <>
       <SidebarToggleBar />
       <div className="max-w-2xl px-4 w-full mx-auto">
-        <div className="mt-12 w-full max-w-2xl">
+        {pinned?.length ? (
+          <div className="mt-12 w-full max-w-2xl">
+            <h2 className="font-bold text-lg">Pinned</h2>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              {pinned.map((agent, index) => (
+                <StaggerItem className="min-w-0" index={index} key={agent.id}>
+                  <AgentCard agent={agent} />
+                </StaggerItem>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div
+          className={`${pinned?.length ? "mt-8" : "mt-12"} w-full max-w-2xl`}
+        >
           <div className="flex flex-row w-full items-center justify-between">
             <h2 className="font-bold text-lg">Your agents</h2>
             <Button
@@ -90,6 +118,14 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : minePinned ? (
+            <Empty className="mt-4 h-[180px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  Your agents are all pinned above.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
@@ -137,6 +173,14 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : explorePinned ? (
+            <Empty className="mt-4 h-[180px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  The agents shared with you are all pinned above.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
             // successfully" — not merely "the last request errored". `?.length` alone can't
@@ -167,6 +211,27 @@ function AgentsScreen() {
             </Empty>
           )}
         </div>
+        {hiddenAgents?.length ? (
+          <details className="group mt-8 mb-12 w-full max-w-2xl">
+            <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+              <h2 className="font-bold text-lg">Hidden</h2>
+              <span className="text-sm text-muted-foreground">
+                {hiddenAgents.length}
+              </span>
+              <IconChevronDown
+                aria-hidden="true"
+                className="size-4 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none"
+              />
+            </summary>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              {hiddenAgents.map((agent) => (
+                <div className="min-w-0" key={agent.id}>
+                  <AgentCard agent={agent} />
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
       <CreateAgentDialog
         onClose={close}

@@ -2352,7 +2352,22 @@ export function createPluginRoutes(
       return null;
     }
 
-    if (actor.isAdmin) return null;
+    if (actor.isAdmin) {
+      // Taking something away is always allowed: see the note on `intent`.
+      if (intent === "revoke") return null;
+      /*
+       * A grant naming no skill is refused for an administrator too, as the `mcp` branch refuses a
+       * grant naming no app. `store.grant` is a bare upsert and a Bot's skills are read by slug
+       * alone, so the row sat there granting nothing until somebody wrote a skill under that name,
+       * and then that skill was on this Bot with nobody having put it there. On a Bot the
+       * deployment shares, that is one person's instructions answering everybody:
+       * `skill-uninstall-grants.integration.test.ts` guards the same room from the uninstall side.
+       */
+      if ((await store.skillOwner(ref)) === undefined) {
+        return `There is no skill called ${ref}.`;
+      }
+      return null;
+    }
 
     const owner = await store.skillOwner(ref);
     if (owner === undefined) return `There is no skill called ${ref}.`;

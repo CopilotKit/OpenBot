@@ -10,7 +10,7 @@ import {
   type ToolCall,
 } from "@ag-ui/client";
 import { map, Observable, type Subscription } from "rxjs";
-import type { AcquireLearnedSkills } from "./runtime";
+import type { AcquireLearnedSkills, LearnedSkillInvocation } from "./runtime";
 
 const CATALOG_ID = "openbot:learned-skills";
 const CATALOG_CONTEXT = "OpenBot learned skills";
@@ -189,10 +189,7 @@ export class RemoteLearnedSkillsMiddleware extends Middleware {
           const results = new Map<string, string>();
           for (const call of reads) {
             if (subscriber.closed) return;
-            const content = await invocation.execute(
-              call.function.name,
-              JSON.parse(call.function.arguments || "{}"),
-            );
+            const content = await answerRead(invocation, call);
             if (subscriber.closed) return;
             const message: Message = {
               id: crypto.randomUUID(),
@@ -273,6 +270,32 @@ export class RemoteLearnedSkillsMiddleware extends Middleware {
         subscription?.unsubscribe();
       };
     });
+  }
+}
+
+/**
+ * One skill read's result, including a read the snapshot cannot answer.
+ *
+ * A model asks for a skill by a name the catalog does not hold, or for a file the skill does not
+ * list, or sends arguments that are not JSON. A built-in Bot's loop (the AI SDK) hands the thrown
+ * message back to the model as that call's result and runs the next step, so the model reads
+ * "Skill is unavailable." and carries on. The reason goes back the same way here, rather than
+ * ending a remote Bot's whole turn. The snapshot is already in memory, so nothing but the call's
+ * own input can make a read fail.
+ */
+async function answerRead(
+  invocation: LearnedSkillInvocation,
+  call: ToolCall,
+): Promise<string> {
+  try {
+    return await invocation.execute(
+      call.function.name,
+      JSON.parse(call.function.arguments || "{}"),
+    );
+  } catch (error) {
+    return error instanceof Error && error.message
+      ? error.message
+      : "That learned Skill could not be read.";
   }
 }
 

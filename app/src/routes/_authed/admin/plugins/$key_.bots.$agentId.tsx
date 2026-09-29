@@ -77,6 +77,12 @@ function RouteComponent() {
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const agents = useQuery(agentListQueryOptions());
+  /*
+   * The ones this person has hidden. A hidden Bot is still a Bot, and still holds whatever it was
+   * granted; the connector page links here for it (see `grantRoster`), and this page must not then
+   * say there is no such Bot.
+   */
+  const hiddenAgents = useQuery(agentListQueryOptions(true));
   const nameFor = useBotNames();
   const [error, setError] = useState<string | null>(null);
   /** What the list is narrowed to, over action names. Never over what is switched on. */
@@ -103,7 +109,9 @@ function RouteComponent() {
     plugins.data?.catalogue.find((item) => item.key === key)?.title ??
     server?.title ??
     key;
-  const bot = agents.data?.find((one) => one.id === agentId);
+  const bot =
+    agents.data?.find((one) => one.id === agentId) ??
+    hiddenAgents.data?.find((one) => one.id === agentId);
 
   const back = {
     label: appTitle,
@@ -140,7 +148,7 @@ function RouteComponent() {
   };
 
   /* Nothing rather than a placeholder, so no sentence asserts anything while a fetch is open. */
-  if (plugins.isPending || agents.isPending) {
+  if (plugins.isPending || agents.isPending || hiddenAgents.isPending) {
     return <PageShell title="Bot">{null}</PageShell>;
   }
 
@@ -195,7 +203,8 @@ function RouteComponent() {
    * exists for the same mistake on the two screens that shipped it. With no roster the grants
    * below are still the plugins query's own answer and still true; the name falls back to the id.
    */
-  if (agents.data && !bot) {
+  // Both rosters, because a Bot absent from the visible one may simply be hidden.
+  if (agents.data && hiddenAgents.data && !bot) {
     return (
       <PageShell
         backButton={back}
@@ -209,7 +218,8 @@ function RouteComponent() {
     );
   }
 
-  const botName = nameFor(agentId);
+  // From the row itself where there is one: the id-to-name lookup is built from the visible roster.
+  const botName = bot?.name ?? nameFor(agentId);
   const held = (tool: PluginTool) => tool.grantedTo.includes(agentId);
 
   /*

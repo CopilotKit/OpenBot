@@ -1,6 +1,13 @@
 """AWS Strands as a Bot, through `ag_ui_strands`, which AG-UI maintains."""
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from ag_ui_strands import StrandsAgent, add_strands_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -20,8 +27,9 @@ def _model_id() -> str:
     and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
     or sent only the second half to the endpoint.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    settings = bot_settings("agent-strands")
+    provider = settings.provider
+    model = settings.model
     return f"{provider}/{model}"
 
 

@@ -61,6 +61,7 @@ const PROFILE: AgentProfile = {
   hasAuth: false,
   hasCallbackToken: false,
   hidden: false,
+  pinned: false,
   systemOwned: false,
   canManage: true,
   mine: true,

@@ -5,6 +5,13 @@ carries its own ASGI app and there is nothing to bridge.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -21,11 +28,32 @@ def _model_id() -> str:
     other colon is part of the model's name: Ollama tags every model with one, as in `llama3.1:8b`,
     and Pydantic AI read the part before it as a provider, refused an unknown one and started no Bot.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    settings = bot_settings("agent-pydantic-ai")
+    provider = settings.provider
+    model = settings.model
     return model if model.startswith(f"{provider}:") else f"{provider}:{model}"
 
 
+def _drop_blank_base_urls() -> None:
+    """Compose exports missing overrides as ""; the SDKs only default an absent URL.
+
+    The model screen writes the endpoint it did not need as empty: `OPENAI_BASE_URL` for a plain
+    OpenAI key, `ANTHROPIC_BASE_URL` for an Anthropic key. Pydantic AI builds each provider's client
+    from the environment, so the empty value reached the SDK as the address and every run failed to
+    connect. Taking it out lets the SDK use its own endpoint; a real one is left as it is. The same
+    rule as `_normalize_openai_base_url` in `agent-langgraph-agui`.
+    """
+    for name in ("OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        if value.strip():
+            os.environ[name] = value.strip()
+        else:
+            os.environ.pop(name, None)
+
+
+_drop_blank_base_urls()
 agent = Agent(_model_id())
 app = FastAPI()
 

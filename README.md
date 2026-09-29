@@ -154,7 +154,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | Route                       | Purpose                                                            |
 | --------------------------- | ------------------------------------------------------------------ |
 | `/`                         | Start and browse channels.                                         |
-| `/agents`                   | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/agents`                   | Create, edit, duplicate, pin, hide, delete, and launch coworkers.  |
 | `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`                   | Create and enable personal skills.                                 |
@@ -215,7 +215,7 @@ A host on its own covers any port on that host; a host with a port pins that por
 
 The list covers agent endpoints only. Browsing is unaffected, the addresses holding a deployment's own cloud credentials are refused whatever is listed, and listing an address permits registering an agent there rather than granting that agent anything.
 
-Tenant package agents are declared in `agents.yaml` as either:
+Tenant package agents are declared in the package's own `agents.yaml`, in the directory `TENANT_PACKAGE_DIR` names (`examples/fintech` by default), or each in a file of its own under that package's `agents/` directory, as either:
 
 - `built-in`, with a system prompt; or
 - `remote-ag-ui`, with an endpoint.

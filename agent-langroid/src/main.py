@@ -1,6 +1,13 @@
 """Langroid as a Bot, through `ag-ui-langroid`, which AG-UI maintains."""
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from ag_ui_langroid import create_langroid_app
 from fastapi import Request
@@ -19,8 +26,9 @@ def _model_id() -> str:
     `openai/gpt-4o-mini` is rejected by its OpenAI client as an invalid model id, so the prefix goes
     on only when the provider is somebody else.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    settings = bot_settings("agent-langroid")
+    provider = settings.provider
+    model = settings.model
     if "/" in model or provider == "openai":
         return model
     return f"litellm/{provider}/{model}"

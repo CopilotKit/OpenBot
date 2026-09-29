@@ -851,8 +851,8 @@ describe("the computer gateway", () => {
     await gateway.listFiles("bot-1", ACTOR, { path: "notes" });
     await gateway.control("bot-1");
     await gateway.requestHelp("bot-1", ACTOR, "Sign in");
-    await gateway.takeControl("bot-1", ACTOR);
-    await gateway.releaseControl("bot-1", ACTOR);
+    await gateway.takeControl("bot-1", ACTOR, "request-1");
+    await gateway.releaseControl("bot-1", ACTOR, "request-1");
     await gateway.requestSecret("bot-1", ACTOR, {
       label: "Password",
       ref: "e1",

@@ -78,3 +78,8 @@ const ACTING_PATHS = new Set([
 export function actsOnTheComputer(pathname: string): boolean {
   return ACTING_PATHS.has(pathname);
 }
+
+/** Only page mutations need a fresh browser snapshot after handback. */
+export function mutatesBrowser(pathname: string): boolean {
+  return ["/navigate", "/click", "/type", "/key", "/scroll"].includes(pathname);
+}

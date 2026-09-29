@@ -395,6 +395,57 @@ describe("agent profile store integration", () => {
     expect(preference?.hiddenAt).toBeNull();
   });
 
+  test("stores pinning per user, independently of hiding", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const source = await createProfileFixture({ owner, visibility: "public" });
+    const pinnedFor = async (actor: AgentActor) =>
+      (await profileById(actor, source.agentId)).pinned;
+
+    expect(await pinnedFor(owner)).toBe(false);
+
+    await store.setPinned(owner, source.agentId, true);
+    expect(await pinnedFor(owner)).toBe(true);
+    expect(await pinnedFor(other)).toBe(false);
+
+    // The same preference row as hiding: each write must leave the other column alone.
+    await store.setHidden(owner, source.agentId, true);
+    const [hiddenWhilePinned] = await store.list(owner, true);
+    expect(hiddenWhilePinned?.pinned).toBe(true);
+    await store.setPinned(owner, source.agentId, false);
+    await store.setPinned(owner, source.agentId, true);
+    expectListed(await store.list(owner, true), source.agentId, true);
+
+    await store.setHidden(owner, source.agentId, false);
+    expect(await pinnedFor(owner)).toBe(true);
+    await store.setPinned(owner, source.agentId, false);
+    expect(await pinnedFor(owner)).toBe(false);
+    const [preference] = await database
+      .select()
+      .from(agentPreferences)
+      .where(
+        and(
+          eq(agentPreferences.userId, owner.id),
+          eq(agentPreferences.agentId, source.agentId),
+        ),
+      );
+    expect(preference?.pinnedAt).toBeNull();
+    expect(preference?.hiddenAt).toBeNull();
+  });
+
+  test("refuses to pin a coworker the caller cannot see", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const privateSource = await createProfileFixture({
+      owner,
+      visibility: "private",
+    });
+
+    await expect(
+      store.setPinned(other, privateSource.agentId, true),
+    ).rejects.toBeInstanceOf(AgentNotFoundError);
+  });
+
   test("takes the endpoint and ignores every field a caller must not set", async () => {
     const owner = await createUser();
     const deploymentPackage = await createPackage();

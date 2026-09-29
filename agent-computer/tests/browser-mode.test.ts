@@ -7,7 +7,7 @@ describe("choosing the browser people take over", () => {
     expect(browserModeFromEnv("")).toBe("headless");
   });
 
-  test("runs the full browser only when headed is requested", () => {
+  test("preserves an explicit headed or headless mode", () => {
     expect(browserModeFromEnv("headed")).toBe("headed");
     expect(browserModeFromEnv("headless")).toBe("headless");
   });

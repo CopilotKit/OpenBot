@@ -330,6 +330,13 @@
       "when": 1790447917102,
       "tag": "0046_automatic_learning",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790572443740,
+      "tag": "0047_agent_pinning",
+      "breakpoints": true
     }
   ]
 }

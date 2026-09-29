@@ -30,6 +30,20 @@ export function EditSkill({ slug }: { slug: string }) {
   /* Nothing while it loads. "Missing" and "not yet arrived" must not read the same. */
   if (isPending) return null;
 
+  /*
+   * No list is not a missing skill. `isPending` goes false on a failed read too, and the sentence
+   * below tells somebody their skill is gone, or was never theirs, on no evidence at all.
+   */
+  if (!data) {
+    return (
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+        <p className="text-destructive text-sm" role="alert">
+          This skill could not be loaded.
+        </p>
+      </div>
+    );
+  }
+
   if (!skill) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">

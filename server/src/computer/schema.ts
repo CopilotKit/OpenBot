@@ -1,3 +1,7 @@
+import type {
+  BrowserChallenge,
+  ComputerControlState,
+} from "../../../shared/computer-control";
 /**
  * The computer-use contract.
  *
@@ -65,8 +69,9 @@ export function isActingTool(name: string): name is ComputerActingToolName {
 
 export type ComputerToolName = (typeof COMPUTER_TOOLS)[number];
 
-export type NavigateInput = { url: string };
+export type NavigateInput = { url: string; toolCallId?: string };
 export type NavigateResult = {
+  challenge?: BrowserChallenge;
   url: string;
   title: string;
   /**
@@ -127,6 +132,7 @@ export type SnapshotElement = {
 };
 
 export type SnapshotResult = {
+  challenge?: BrowserChallenge;
   /**
    * Which snapshot these refs belong to. Must be sent back with every action.
    *
@@ -266,15 +272,7 @@ export type WriteFileResult = {
  */
 export type ControlHolder = "bot" | "human";
 
-export type ControlState = {
-  holder: ControlHolder;
-  /** ISO timestamp of the last handover, so the surface can say how long this has been going on. */
-  since: string;
-  /** Why the Bot asked for help, in its own words. Shown to the person being handed the wheel. */
-  reason?: string;
-  /** The Bot has asked and nobody has taken over yet. */
-  requested: boolean;
-};
+export type ControlState = ComputerControlState;
 
 /**
  * A value the Bot needs and must not be told: a password, a one-time code.

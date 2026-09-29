@@ -42,6 +42,7 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     ownerUserId: actor.id,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
     ...overrides,
   };
@@ -80,6 +81,9 @@ function fakeStore(
     },
     async setHidden(receivedActor, id, hidden) {
       calls.push(["setHidden", receivedActor, id, hidden]);
+    },
+    async setPinned(receivedActor, id, pinned) {
+      calls.push(["setPinned", receivedActor, id, pinned]);
     },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
@@ -289,6 +293,12 @@ describe("agent lifecycle routes", () => {
     const unhidden = await app.request("http://openbot.test/agent-1/unhide", {
       method: "POST",
     });
+    const pinned = await app.request("http://openbot.test/agent-1/pin", {
+      method: "POST",
+    });
+    const unpinned = await app.request("http://openbot.test/agent-1/unpin", {
+      method: "POST",
+    });
     const deleted = await app.request("http://openbot.test/agent-1", {
       method: "DELETE",
     });
@@ -300,6 +310,8 @@ describe("agent lifecycle routes", () => {
     expect(duplicated.status).toBe(201);
     expect(hidden.status).toBe(204);
     expect(unhidden.status).toBe(204);
+    expect(pinned.status).toBe(204);
+    expect(unpinned.status).toBe(204);
     expect(deleted.status).toBe(204);
     expect(store.calls).toEqual([
       ["list", actor, false],
@@ -322,6 +334,8 @@ describe("agent lifecycle routes", () => {
       ["duplicate", actor, "agent-1"],
       ["setHidden", actor, "agent-1", true],
       ["setHidden", actor, "agent-1", false],
+      ["setPinned", actor, "agent-1", true],
+      ["setPinned", actor, "agent-1", false],
       ["softDelete", actor, "agent-1"],
     ]);
   });
@@ -354,6 +368,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "private",
           hidden: false,
+          pinned: false,
           systemOwned: false,
           canManage: true,
           mine: true,
@@ -367,6 +382,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "private",
           hidden: false,
+          pinned: false,
           systemOwned: false,
           canManage: false,
           mine: false,
@@ -380,6 +396,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "public",
           hidden: false,
+          pinned: false,
           systemOwned: true,
           canManage: false,
           mine: false,

@@ -11,17 +11,28 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
-beforeAll(() => GlobalRegistrator.register());
+let originalRect: typeof HTMLElement.prototype.getBoundingClientRect;
+beforeAll(() => {
+  GlobalRegistrator.register();
+  originalRect = HTMLElement.prototype.getBoundingClientRect;
+});
 
 const originalFetch = global.fetch;
 
 afterEach(() => {
-  global.fetch = originalFetch;
   cleanup();
+  global.fetch = originalFetch;
+  HTMLElement.prototype.getBoundingClientRect = originalRect;
 });
 
 afterAll(() => GlobalRegistrator.unregister());
@@ -37,6 +48,7 @@ function agent(
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     mine: true,
     name: "Agent",
     roleDescription: "Role",
@@ -281,6 +293,108 @@ test("/bot still falls back to the first agent when no picked harness exists", a
   expect(
     await view.findByRole("heading", { name: "General Assistant" }),
   ).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
+    "general-assistant",
+  );
+});
+
+test("/bot opens a live Computer sidebar with ownership controls and preserves the chat", async () => {
+  HTMLElement.prototype.getBoundingClientRect = () =>
+    new DOMRect(0, 0, 1200, 800);
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/control"))
+        return Response.json({
+          holder: "bot",
+          since: "2026-09-26",
+          requested: false,
+          transitioning: false,
+          resumeSnapshotRequired: false,
+        });
+      return Response.json({ error: "No frame yet" }, { status: 404 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = renderBot(
+    queryClientWithAgents([GENERAL_ASSISTANT, PICKED_HARNESS]),
+    "/bot?agent=general-assistant",
+  );
+  const toggle = await view.findByRole("button", { name: "Open Computer" });
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("button", { name: "Take control" })
+        .hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  const chat = view.getByTestId("copilot-chat");
+  fireEvent.change(view.getByRole("textbox", { name: "Chat draft" }), {
+    target: { value: "Keep this conversation" },
+  });
+  fireEvent.click(toggle);
+  const sidebarElement = await view.findByRole("region", {
+    name: "Computer sidebar",
+  });
+  const sidebar = within(sidebarElement);
+  expect(
+    sidebar
+      .getByRole("button", { name: "Take control" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  expect(
+    sidebar.getByRole("button", {
+      name: "Open the assistant's screen full size",
+    }),
+  ).toBeTruthy();
+  expect(sidebar.getByRole("heading", { name: "Activity" })).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "Close Computer" }));
+  // Poll a boolean: Bun serializes the entire Happy DOM tree when a pending
+  // element is compared with null, starving the navigation this wait observes.
+  await waitFor(() => expect(sidebarElement.isConnected).toBe(false));
+  expect(view.getByTestId("copilot-chat")).toBe(chat);
+  expect(chat.dataset.agentId).toBe("general-assistant");
+  expect(view.getByDisplayValue("Keep this conversation")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Open Computer" })).toBeTruthy();
+  fireEvent.click(view.getByRole("button", { name: "New chat" }));
+  await waitFor(() =>
+    expect(view.getByTestId("copilot-chat").dataset.threadId).not.toBe(
+      chat.dataset.threadId,
+    ),
+  );
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
+    "general-assistant",
+  );
+});
+
+test("/bot?watch=true restores the live Computer panel on reload", async () => {
+  HTMLElement.prototype.getBoundingClientRect = () =>
+    new DOMRect(0, 0, 1200, 800);
+  global.fetch = Object.assign(
+    async () =>
+      Response.json({
+        holder: "bot",
+        since: "2026-09-26",
+        requested: false,
+        transitioning: false,
+        resumeSnapshotRequired: false,
+      }),
+    { preconnect: originalFetch.preconnect },
+  );
+  const view = renderBot(
+    queryClientWithAgents([GENERAL_ASSISTANT]),
+    "/bot?agent=general-assistant&watch=true",
+  );
+  const sidebar = within(
+    await view.findByRole("region", { name: "Computer sidebar" }),
+  );
+  await waitFor(() =>
+    expect(
+      sidebar
+        .getByRole("button", { name: "Take control" })
+        .hasAttribute("disabled"),
+    ).toBe(false),
+  );
   expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
     "general-assistant",
   );

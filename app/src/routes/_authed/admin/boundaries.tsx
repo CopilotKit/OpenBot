@@ -79,11 +79,17 @@ function BoundariesPage() {
     });
   };
 
-  if (problem && !policy) {
+  /*
+   * A read that failed says so. This screen used to set "The boundary could not be read." itself;
+   * since the read became a query, that sentence (or the server's own) is the query's error, and
+   * without this the page sat on its title with nothing under it for as long as it was open.
+   */
+  const unreadable = problem ?? stored.error?.message ?? null;
+  if (unreadable && !policy) {
     return (
       <PageShell title="Boundaries">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {problem}
+          {unreadable}
         </p>
       </PageShell>
     );

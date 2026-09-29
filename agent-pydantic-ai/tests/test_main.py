@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
+import httpx2
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
@@ -201,3 +203,61 @@ def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, c
     assert '"RUN_ERROR"' not in response.text
     assert "hello" in response.text
     assert seen == [expected]
+
+
+# What Compose passes for the two plain keys: the key, and the endpoint it did not need as "".
+BLANK_URLS = {
+    "an OpenAI key": (
+        {"BOT_PROVIDER": "openai", "BOT_MODEL": "gpt-5.5", "OPENAI_API_KEY": "test-key", "ANTHROPIC_API_KEY": ""},
+        ("https", "api.openai.com", "/v1/responses"),
+        ("openai", "gpt-5.5"),
+    ),
+    "an Anthropic key": (
+        {"BOT_PROVIDER": "anthropic", "BOT_MODEL": "claude-sonnet-4-5", "ANTHROPIC_API_KEY": "test-key", "OPENAI_API_KEY": ""},
+        ("https", "api.anthropic.com", "/v1/messages"),
+        ("anthropic", "claude-sonnet-4-5"),
+    ),
+}
+
+
+@pytest.mark.parametrize("choice", list(BLANK_URLS))
+def test_a_key_reaches_the_official_endpoint_when_compose_leaves_the_url_blank(monkeypatch, choice):
+    environment, destination, expected = BLANK_URLS[choice]
+    seen = []
+    provider_seen = []
+    provider_app = _provider_app(provider_seen)
+
+    def respond_with(module):
+        async def respond(transport, request):
+            seen.append((request.url.scheme, request.url.host, request.url.path))
+            async with module.ASGITransport(app=provider_app) as local_provider:
+                return await local_provider.handle_async_request(request)
+
+        return respond
+
+    # Keep the real Pydantic AI and SDK clients; replace only the network transport, on both HTTP
+    # stacks, because the OpenAI SDK sends through httpx2 rather than httpx.
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", respond_with(httpx))
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", respond_with(httpx2))
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    monkeypatch.setenv("PYDANTIC_AI_NO_BANNER", "1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "")
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    from src import main
+
+    main = importlib.reload(main)
+    response = TestClient(main.app).post(
+        "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
+    )
+
+    assert seen == [destination]
+    assert provider_seen == [expected]
+    assert response.status_code == 200
+    assert '"RUN_FINISHED"' in response.text
+    assert '"RUN_ERROR"' not in response.text
+    assert "hello" in response.text

@@ -245,6 +245,7 @@ export const auditEventTypes = [
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.
   "computer.help_requested",
+  "computer.help_cancelled",
   "computer.control_taken",
   "computer.control_released",
   // A credential a person entered by hand. The row records that it happened, what it was called and
@@ -383,6 +384,8 @@ export const auditEventTypes = [
   "bot.duplicated",
   "bot.hidden",
   "bot.unhidden",
+  "bot.pinned",
+  "bot.unpinned",
   "bot.deleted",
   "bot.callback_token_issued",
   "bot.callback_token_revoked",

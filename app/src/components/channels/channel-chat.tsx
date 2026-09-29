@@ -8,6 +8,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
@@ -950,6 +951,19 @@ export function ChannelChat({
                * it — and they are independent, so neither is an `else` for the other.
                */
               <>
+                <HandoffResumeNotice
+                  botId={runtimeAgentId}
+                  agent={agent}
+                  ready={isReady && !restoring && channel.active}
+                  run={async () => {
+                    setRunsInFlight((count) => count + 1);
+                    try {
+                      await copilotkit.runAgent({ agent });
+                    } finally {
+                      setRunsInFlight((count) => count - 1);
+                    }
+                  }}
+                />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
                     Voice chats couldn’t be loaded. Refresh to try again.

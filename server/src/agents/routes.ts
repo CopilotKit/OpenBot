@@ -604,6 +604,34 @@ export function createAgentRoutes(
     }
   });
 
+  routes.post("/:agentId/pin", requireUser, async (context) => {
+    try {
+      await store.setPinned(
+        context.var.actor,
+        context.req.param("agentId"),
+        true,
+      );
+      await record(context, "bot.pinned", context.req.param("agentId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:agentId/unpin", requireUser, async (context) => {
+    try {
+      await store.setPinned(
+        context.var.actor,
+        context.req.param("agentId"),
+        false,
+      );
+      await record(context, "bot.unpinned", context.req.param("agentId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   /*
    * Issue this agent its callback credential, and show it once.
    *
@@ -725,6 +753,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     avatarSeed: agent.avatarSeed,
     visibility: agent.visibility,
     hidden: agent.hidden,
+    pinned: agent.pinned,
     systemOwned: agent.systemOwned,
     // Published so the edit form can show it. Safe to expose: it is an address the person supplied,
     // and any credential for it lives in the vault, never in this row.

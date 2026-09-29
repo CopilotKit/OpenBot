@@ -12,6 +12,7 @@ import {
   ComputerUnavailableError,
   ElementNotFoundError,
   HumanHasControlError,
+  HandoffRequestError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
@@ -253,6 +254,7 @@ export function createComputerRoutes(
             : { userId: context.var.actor.id }),
         },
         body.url.trim(),
+        toolCallId || undefined,
       );
       await keepFrameOf(botId, toolCallId, result.url, result.title);
       return context.json(result);
@@ -345,7 +347,12 @@ export function createComputerRoutes(
    */
   routes.get("/:botId/control", async (context) => {
     try {
-      return context.json(await gateway.control(context.req.param("botId")));
+      return context.json(
+        await gateway.control(
+          context.req.param("botId"),
+          context.req.query("requestId"),
+        ),
+      );
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -359,6 +366,7 @@ export function createComputerRoutes(
         typeof body?.reason === "string" && body.reason.trim()
           ? body.reason.trim()
           : "The assistant needs a person to continue.",
+        typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
       ),
     ),
   );
@@ -415,11 +423,21 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/control/take", (context) =>
-    act(context, (botId, actor) => gateway.takeControl(botId, actor)),
+    act(context, (botId, actor, body) =>
+      gateway.takeControl(botId, actor, handoffId(body)),
+    ),
   );
 
   routes.post("/:botId/control/release", (context) =>
-    act(context, (botId, actor) => gateway.releaseControl(botId, actor)),
+    act(context, (botId, actor, body) =>
+      gateway.releaseControl(botId, actor, handoffId(body)),
+    ),
+  );
+
+  routes.post("/:botId/control/cancel", (context) =>
+    act(context, (botId, actor, body) =>
+      gateway.cancelControl(botId, actor, handoffId(body)),
+    ),
   );
 
   /** The Bot asking for a value it must not be told. */
@@ -918,11 +936,37 @@ function errorBody(error: unknown): Record<string, unknown> {
   return {
     error: describe(error),
     // Not "the refs are stale, take another snapshot", which is what the surface says without it.
-    ...(error instanceof HumanHasControlError ? { humanHasControl: true } : {}),
+    ...(error instanceof HumanHasControlError
+      ? {
+          humanHasControl: true,
+          requestId: error.requestId,
+          handoff: error.handoff,
+        }
+      : {}),
+    ...(error instanceof StaleSnapshotError
+      ? {
+          stale: true,
+          ...(error.snapshotRequired ? { snapshotRequired: true } : {}),
+        }
+      : {}),
+    ...(error instanceof HandoffRequestError
+      ? { controlRequestError: true }
+      : {}),
   };
 }
 
-function statusFor(error: unknown): 409 | 500 | 503 {
+function handoffId(body: Record<string, unknown> | null): string {
+  if (
+    typeof body?.requestId !== "string" ||
+    !body.requestId.trim() ||
+    body.requestId.length > 200
+  )
+    throw new HandoffRequestError("A requestId is required.", 400);
+  return body.requestId;
+}
+
+function statusFor(error: unknown): 400 | 404 | 409 | 500 | 503 {
+  if (error instanceof HandoffRequestError) return error.status;
   if (error instanceof StaleSnapshotError) return 409;
   // Same status as a stale snapshot and for the same reason: nothing is broken, the caller has to do
   // something else first. What differs is what that something is, which the body carries.

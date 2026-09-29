@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import httpx
+import httpx2
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
@@ -213,6 +214,46 @@ def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_u
 
     assert seen == [("https", "api.anthropic.com", "/v1/messages", "test-key")]
     assert provider_seen == [("anthropic", "claude-sonnet-4-5")]
+    assert response.status_code == 200
+    assert '"RUN_FINISHED"' in response.text
+    assert '"RUN_ERROR"' not in response.text
+    assert "hello" in response.text
+
+
+def test_an_openai_key_uses_the_official_endpoint_when_compose_sets_a_blank_url(monkeypatch):
+    # The same "" Compose writes for ANTHROPIC_BASE_URL above, on the other provider: the model screen
+    # sets only the key for a plain OpenAI key, and the SDK treats "" as an address, not as absent.
+    seen = []
+    provider_seen = []
+    provider_app = _provider_app(provider_seen)
+
+    async def respond(transport, request):
+        seen.append(
+            (request.url.scheme, request.url.host, request.url.path, request.headers.get("authorization"))
+        )
+        async with httpx2.ASGITransport(app=provider_app) as local_provider:
+            return await local_provider.handle_async_request(request)
+
+    # Keep the real framework and OpenAI clients; replace only the network transport. The OpenAI SDK
+    # sends through httpx2, not httpx, so patching httpx's transport here would let the request out.
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", respond)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    monkeypatch.setenv("BOT_PROVIDER", "openai")
+    monkeypatch.setenv("BOT_MODEL", "gpt-5.5")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "")
+
+    from src import main
+
+    main = importlib.reload(main)
+    response = TestClient(main.app).post(
+        "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
+    )
+
+    assert seen == [("https", "api.openai.com", "/v1/responses", "Bearer test-key")]
+    assert provider_seen == [("openai", "gpt-5.5")]
     assert response.status_code == 200
     assert '"RUN_FINISHED"' in response.text
     assert '"RUN_ERROR"' not in response.text

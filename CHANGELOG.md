@@ -8,6 +8,102 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `start.sh` names the port to change on macOS
+
+When the API server's or the app's port was held by another process, `start.sh` was meant to say
+which setting to change, such as `Re-run with SERVER_PORT=<free port>`. On macOS, whose bash is
+3.2, the run ended on `bad substitution` before printing it, because the hint upper-cased the
+name with a bash 4 expansion. It is upper-cased with `tr` now, so the hint prints on either bash.
+
+### `start.sh` starts the Docker services on Compose v5
+
+On Docker Compose v5, `bash scripts/start.sh` stopped at
+**1/4 Docker services** with `failed to get console: provided file is not a console`. The script
+sends compose's output to `/dev/null` while its errors still reach the terminal. Compose saw that
+terminal, chose its interactive build display, and could not draw it. The script now asks compose
+for quiet progress through `COMPOSE_PROGRESS`, which older Compose versions ignore, so nothing
+changes where it already worked.
+
+### The skills pages say when the skills could not be read
+
+When `GET /api/plugins` failed, **Agent Skills** said "You don't have any skills yet.", **Admin →
+Skills** said "No skills yet.", and opening a skill to edit said "That skill no longer exists, or it
+is not yours to edit.", to people who may have written a dozen. They now say the skills could not
+be loaded. A list that arrived empty still reads as before, and a failed refetch over a list already
+on screen keeps that list.
+
+### A coworker can be pinned to the top of the Agents screen
+
+A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a
+**Pinned** section at the top of `/agents`. Like hiding, pinning is personal: it changes nothing for
+anyone else. It is stored next to `hidden_at` in `agent_preferences` as a new `pinned_at` column
+(migration `0047_agent_pinning`), and each write sets only its own column, so pinning a hidden
+coworker keeps it hidden and it comes back pinned when unhidden. `POST /api/agents/:id/pin` and
+`/unpin` record `bot.pinned` and `bot.unpinned` on the trail, as hiding does.
+
+### A hidden coworker can be found again on the Agents screen
+
+Hiding a coworker took it off both lists on `/agents`, and Unhide is only in the coworker's dialog,
+which only its card opens, so a hidden coworker had no way back short of typing its id into the
+address bar. The screen now ends with a collapsed **Hidden** section listing them, each card opening
+the dialog as before. It appears only when something is hidden. Hiding still changes nothing for
+anyone else, and nothing on the server changed: the screen reads the `GET /api/agents?hidden=true`
+list the server already served.
+
+### A connector's own pages say when the plugin list could not be read
+
+When `GET /api/plugins` failed, a connector's admin page said "Not a plugin", a tool's page said
+"This deployment has not enabled that connector.", and a person's connected-account page said "This
+is not a service you connect for yourself.", each about a connector that may be added and granted
+right now. They now say the list could not be loaded, as the per-Bot grant page beside them already
+did. A list that arrived without the connector still reads as before.
+
+### Boundaries says when the policy could not be read
+
+When `GET /api/computers/policy` failed, the Boundaries screen showed its title over nothing, for as
+long as it was open. It now says "The boundary could not be read.", or the server's own reason, as
+it did before the screen's read moved into a query.
+
+### Browser controls are visible in chat and the Computer sidebar
+
+Channel chats and standalone Bot chats now have a labeled Computer button and always-visible
+Take control or Hand back controls. The same ownership state is shown in the chat, live Computer
+sidebar, and full-size viewer. Standalone Bot chats can open the current live browser alongside
+the conversation without losing the selected Bot or chat history.
+
+### An administrator cannot grant a skill nobody has written
+
+`POST /api/plugins/grants` checked that a skill existed for everybody except an administrator, whose
+grant was stored whatever it named. A Bot's skills are read by slug alone, so the row waited for
+whoever wrote a skill under that name next, and on a Bot the deployment shares that was one person's
+instructions answering everybody. It is now refused with "There is no skill called …", as a grant
+naming no app already was. Revoking one by hand still works.
+
+### A remote Bot keeps answering when it asks for a learned skill that is not there
+
+With Automatic Learning delivering skills, a Bot reached at an AG-UI endpoint (every shipped Bot
+except a built-in one) ended the whole turn with "Skill is unavailable." in place of an answer when
+its model asked for a skill by a name the snapshot does not hold, for a file the skill does not
+list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
+call's result and carries on. A remote Bot's model now gets the same result and carries on too.
+
+### Browser challenges can be handed to a person without losing the Bot's page
+
+Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
+handback. Requests survive viewer reconnects and distinguish completion from cancellation, expiry,
+or an interrupted browser session. Managed browsing now uses full Chromium in headless or headed
+mode. Local API deployments can opt into installed Chrome with dedicated per-Bot profiles, the same
+in-app viewer, a loopback-only computer endpoint, and host shell execution disabled.
+
+### A hidden Bot's app grants stay on the Plugins screens
+
+Hiding a Bot from your own roster took it off the Plugins screens too: its row went from By Bot and
+from each tool's switches, the counts could read "3 of 2 Bots", and its own page said there was no
+such Bot. Its grants stayed in force, and nothing on any screen could take them away. The Plugins
+screens now follow the rule the Handoff panel already does: a hidden Bot is shown when it holds one
+of the grants the screen is about, marked "Hidden from your roster", and its own page draws its
+grants. Nothing on the server changed.
+
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
 Snapshots are ordered on the run of the browser that took them as well as the generation, so a
@@ -25,6 +121,14 @@ The computer now mints a run for each Bot's browser session, mints a new one whe
 and answers which run it is on. Nothing changes for a deployment that already reports one, and a
 computer too old to answer leaves the ordering exactly where it was rather than refusing anything.
 
+### `scripts/start.sh` no longer needs python3
+
+The runtime health check in step 3 was a `python3` heredoc. On a machine without Python, and on
+Windows, where `python3` is usually the Microsoft Store alias that exits 49, the run stopped there
+with the server and worker up and the app never started. The check now runs in Bun, which the
+script already requires, with the same output and exit status, and `python3` is gone from the
+prerequisites in `docs/development.md`.
+
 ### An MCP tool that answers with a resource link is no longer read as an empty name
 
 A tool that points at a file or a page often returns a `resource_link`: a URI, a name, and a
@@ -35,6 +139,14 @@ now read, each on its own labelled line. The URI leads and the name and descript
 a long name cannot push the pointer past the result cap; a server's `title` is shown over its `name`
 when it gives one. A part that already carried text is unchanged.
 
+### The Microsoft Agent Framework Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the Microsoft Agent Framework Bot failed every run with "Connection
+error.". Compose writes `OPENAI_BASE_URL` empty when the choice is a plain OpenAI key, and the
+OpenAI SDK only defaults an absent URL, so it was given "" as the address. The Bot now falls back to
+`https://api.openai.com/v1` for an empty value, as its Anthropic branch already did for
+`ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
+
 ### Skill selection keeps capabilities named across multiple JSON replies
 
 When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each
@@ -42,6 +154,13 @@ complete `skills` list and offers the union of the named skills' granted tools. 
 Anthropic's OpenAI-compatible endpoint, which may ignore the request for bare JSON. Previously a
 reply containing multiple objects fell back to offering every tool; replies with no valid `skills`
 list still do.
+
+### The AG2 Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the AG2 Bot failed every run. Compose writes `OPENAI_BASE_URL` empty when
+the choice is a plain OpenAI key, and the OpenAI SDK only defaults an absent URL, so it was given ""
+as the address. The Bot now falls back to `https://api.openai.com/v1` for an empty value, as its
+Anthropic branch already did for `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
 
 ### Dictate messages and talk to a coworker in a live voice call
 
@@ -57,6 +176,14 @@ plan sign-in. Retrying a failed summary refreshes its sidebar preview without re
 activity. The macOS app includes the microphone permission description and audio-input entitlement
 needed for dictation and voice calls.
 
+### The Pydantic AI Bot answers on a plain OpenAI key or an Anthropic key
+
+Picked with either key, the Pydantic AI Bot failed every run. Compose writes the endpoint the choice
+did not need as empty (`OPENAI_BASE_URL` for a plain OpenAI key, `ANTHROPIC_BASE_URL` for an
+Anthropic key), and Pydantic AI builds each provider's client from the environment, so the SDK was
+given "" as the address. The Bot now removes an empty value before building the model, as
+`agent-langgraph-agui` already does, so the SDK uses its own endpoint. A real endpoint is unchanged.
+
 ### Find older conversations and keep chat preferences across devices
 
 The sidebar loads older conversations as the person scrolls. Settings save the choice to emphasize
@@ -65,6 +192,14 @@ connected accounts use individual entries with stored app logos, and browser ste
 expandable group instead of filling the conversation with screenshots.
 
 ## 0.0.15
+
+### The live screen keeps reconnecting after it has recovered
+
+A dropped live screen retries five times, waiting half a second, then one, two, four and eight, and
+then asks for Retry. The count of retries never went back to zero after a retry worked, so a screen
+left open through five short drops over an afternoon gave up on the sixth, although each had
+recovered within a second. The count now starts over once a reconnected screen shows a frame again,
+so only five failures in a row end in Retry.
 
 ### A model provider's own sign-in can stand in for an API key
 
@@ -87,6 +222,13 @@ still uses the compatibility endpoint.
 
 **A provider 403 no longer reads as an expired sign-in.** It usually means a missing project or
 resource permission, which signing in again cannot fix, so only a 401 now raises "sign in again".
+
+### A voice call no longer cuts an emoji in half
+
+A voice call caps what it carries: the chat context it joins with, the live captions, and the answer
+a delegated request comes back with. Each cap cut on UTF-16 code units, and an emoji is two of them,
+so a cap landing inside one left half of it: a box at the edge of a caption, and a broken character
+in what the voice model was given. The caps now cut between characters, as the chat's own do.
 
 ### Desktop setup shows progress, chooses its own local ports, and can sign in to a provider
 
@@ -111,6 +253,14 @@ removes that deployment's database volume and nothing else.
 Startup failures keep enough of the log to name the cause, with every secret value redacted, and
 carry a support link a whitelabel build can point elsewhere.
 
+### A failed save of a Bot's browser control leaves no copy behind
+
+The computer keeps who holds a Bot's browser, and its handoff requests, in one file per Bot under
+the profiles volume, written to a temporary file first and renamed over it. When the write or the
+rename failed, the temporary file stayed, a readable copy of that state beside the real one, and
+every later failure added another. It is now removed whether or not the save succeeds, as the
+learning setup and the model sign-in file already do.
+
 ### A Bot's image pull finds the Docker credential helper beside Docker
 
 A Docker install whose credential helper sits next to the `docker` binary rather than on the desktop
@@ -119,11 +269,27 @@ resolved `docker`, and the directory holding what it points at when it is a syml
 to the PATH the engine is invoked with. Appended, so an existing helper still wins, and the inherited
 PATH is now kept rather than replaced, which it was not before.
 
+### A voice call that cannot start says why
+
+When the voice service turned a call down, the provider wrote a message for the caller, such as
+"The voice service is busy. Please retry shortly." when it answered 429, and the call route replaced
+every one with "The voice service could not start a call. Please retry." The route now passes those
+fixed messages on, as the dictation route already does. Any other failure still reads the generic
+line, so nothing from an upstream response reaches the browser.
+
 ### OpenBot starts only on the Bun it pins
 
 An installed or cached Bun that is not the pinned version is no longer accepted, on install and on
 every start, and OpenBot acquires its own copy instead. The version already on the machine is left
 exactly as it is and simply not used.
+
+### A voice chat that could not be saved says so in a sentence
+
+Saving a finished voice call read the server's answer as JSON without a fallback. When something in
+front of OpenBot answered instead, such as a proxy's 502 page, the call's card gave the JSON
+parser's error as the reason (in Chrome, "Unexpected token '<' ... is not valid JSON"); an answer
+without a saved session failed on a property read the same way. Both now read "Could not save this voice chat.", the
+message the card already uses, and the call stays on the card to retry.
 
 ### Organization sign-in survives a callback that arrives in pieces
 
@@ -132,6 +298,15 @@ gave up if the whole request had not arrived, and on Windows the accepted socket
 listener's non-blocking mode, so a timeout did not apply. A good sign-in could be answered "Sign-in
 did not match". Both paths now read until the request line is complete, with a real timeout.
 
+### The Bots agree on one set of provider defaults
+
+The three TypeScript Bots now read a single shared list of provider facts instead of keeping their
+own copies, which is what makes a default changeable in one place rather than in three. The Mastra
+Bot also refuses a `BOT_PROVIDER` it does not recognize (such as `google`) instead of quietly
+answering through OpenAI with a different model. The picked harness in Compose now receives
+`GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness picked on
+`BOT_PROVIDER=google` has the key it needs.
+
 ### Compose file lists separate correctly on Windows
 
 The separator between Compose files fell back to `:` everywhere, which is right on macOS and Linux
@@ -139,6 +314,26 @@ and wrong on Windows, where a drive letter contains one. It now follows the plat
 reachable on every platform now that a port overlay is passed, where before it was macOS only.
 
 ## 0.0.14
+
+### One spec file, in every language
+
+`shared/model-providers.json` now holds the provider facts and every Bot's default provider and
+model. The TypeScript Bots read it through `shared/model-providers.ts` and the ten Python Bots
+through `shared/model_providers.py`, with `BOT_PROVIDER` and `BOT_MODEL` still winning over both
+as they always have. Each Bot keeps its existing default, including Mastra's `gpt-4o-mini`.
+Moving a Bot to a different model, or giving a Bot written in any other language its first one,
+is editing one row in one file instead of one line per language.
+
+Both loaders check the file against their own list of providers, in both directions, and refuse in
+the same words. A wrong row in the file used to stop the three TypeScript Bots while the ten
+Python Bots started clean and met it at their first model call instead; all thirteen stop at
+startup now, naming the key that is wrong. Adding a provider is one row in the file and one entry
+to `PROVIDER_IDS` in each loader.
+
+Compose used to substitute `gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever
+`BOT_PROVIDER` named; it now passes the unset value through, so the Bot's row — or the moved
+provider's default row — is what answers. An OpenAI deployment keeps the same `gpt-5.5` either way;
+a Google or Anthropic one stops being handed a model its vendor has never heard of.
 
 ### A tool cannot be granted for an app this deployment has not added
 

@@ -334,13 +334,24 @@ for (const { name, environment, expected } of compatibleEndpointCases) {
   });
 }
 
-test("preserves the framework Bot's other provider endpoints", () => {
-  const compose = composeFile();
-  for (const variable of [
-    "ANTHROPIC_BASE_URL",
-    "GOOGLE_GENERATIVE_AI_BASE_URL",
-  ]) {
-    expect(compose).toContain(`${variable}: \${${variable}:-}`);
+test("passes every other provider's key and endpoint into the framework Bot and the picked harness", () => {
+  const config = runComposeConfig({
+    ANTHROPIC_API_KEY: "sk-ant-synthetic",
+    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
+    GOOGLE_API_KEY: "synthetic-google",
+    GOOGLE_GENERATIVE_AI_BASE_URL: "https://generativelanguage.example/v1beta",
+  });
+
+  // A service either receives the variable or it does not; reading the file's text cannot tell
+  // the difference, because any one service declaring it would satisfy a raw `toContain`.
+  for (const service of ["agent-langgraph", "agent-harness"]) {
+    expect(config.services[service].environment).toMatchObject({
+      ANTHROPIC_API_KEY: "sk-ant-synthetic",
+      ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
+      GOOGLE_API_KEY: "synthetic-google",
+      GOOGLE_GENERATIVE_AI_BASE_URL:
+        "https://generativelanguage.example/v1beta",
+    });
   }
 });
 

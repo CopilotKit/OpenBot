@@ -9,6 +9,7 @@ COPY agent-microsoft/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent-microsoft/src ./src
+COPY shared/model_providers.py shared/model-providers.json /shared/
 
 ENV PORT=4211
 EXPOSE 4211

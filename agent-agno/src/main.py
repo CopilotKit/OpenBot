@@ -6,6 +6,13 @@ here, which is the rule.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from agno.agent import Agent
 from agno.db.in_memory import InMemoryDb
@@ -29,8 +36,9 @@ def _model_id() -> str:
     and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
     or sent only the second half to the endpoint.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-5.5").strip()
+    settings = bot_settings("agent-agno")
+    provider = settings.provider
+    model = settings.model
     return f"{provider}/{model}"
 
 

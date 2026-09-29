@@ -67,6 +67,7 @@ import {
   deleteAgentMutationOptions,
   duplicateAgentMutationOptions,
   setAgentHiddenMutationOptions,
+  setAgentPinnedMutationOptions,
   updateAgentMutationOptions,
 } from "@/lib/agents/mutations";
 import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
@@ -694,17 +695,48 @@ function ManageSection({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const setPinned = useMutation(setAgentPinnedMutationOptions(queryClient));
   const setHidden = useMutation(setAgentHiddenMutationOptions(queryClient));
   const duplicateAgent = useMutation(
     duplicateAgentMutationOptions(queryClient),
   );
   const deleteAgent = useMutation(deleteAgentMutationOptions(queryClient));
-  const actionError = setHidden.error ?? duplicateAgent.error;
+  const actionError =
+    setPinned.error ?? setHidden.error ?? duplicateAgent.error;
 
   return (
     <>
       {/* The same gap the General items keep, so the two screens read as one list style. */}
       <div className="flex flex-col gap-2">
+        <Item variant="muted">
+          <ItemContent>
+            <ItemTitle>{profile.pinned ? "Pinned" : "Pin"}</ItemTitle>
+            <ItemDescription>
+              {profile.pinned
+                ? "At the top of your agents list. This changes nothing for anyone else."
+                : "Keep it at the top of your agents list. This changes nothing for anyone else."}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              disabled={setPinned.isPending}
+              onClick={() =>
+                setPinned.mutate({ agentId, pinned: !profile.pinned })
+              }
+              size="sm"
+              variant="outline"
+            >
+              {setPinned.isPending
+                ? profile.pinned
+                  ? "Unpinning…"
+                  : "Pinning…"
+                : profile.pinned
+                  ? "Unpin"
+                  : "Pin"}
+            </Button>
+          </ItemActions>
+        </Item>
+
         <Item variant="muted">
           <ItemContent>
             <ItemTitle>{profile.hidden ? "Hidden" : "Hide"}</ItemTitle>

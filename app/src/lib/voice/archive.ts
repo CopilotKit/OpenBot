@@ -1,13 +1,14 @@
 import type { ActivityMessage, Message } from "@ag-ui/core";
 import { queryOptions, useQuery } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
+import { client } from "@/lib/client";
+import { queryClient } from "@/query-client";
 import type {
   SaveVoiceSessionInput,
   VoiceSessionPage,
   VoiceSessionRecord,
 } from "../../../../shared/voice-session";
-import { client } from "@/lib/client";
-import { channelKeys } from "@/lib/channels/queries";
-import { queryClient } from "@/query-client";
+import { closingOf } from "./cut";
 import {
   forgetVoiceCall,
   recoverVoiceCalls,
@@ -97,10 +98,13 @@ export function saveVoiceSession(
         headers: { "content-type": "application/json", "x-openbot-voice": "1" },
         body: payload,
       });
-      const body = await response.json();
-      if (!response.ok && !body.session)
+      // A proxy's error page is not JSON, and its parser message is no sentence for a person.
+      // Without a session there is nothing saved to show, whatever the status, as `client` holds.
+      const body: { session?: VoiceSessionRecord; error?: string } =
+        await response.json().catch(() => ({}));
+      if (!body.session)
         throw new Error(body.error ?? "Could not save this voice chat.");
-      const session: VoiceSessionRecord = body.session;
+      const session = body.session;
       forgetVoiceCall(session, ownerId);
       queryClient.setQueryData<VoiceSessionRecord[]>(
         keys.saved(input.channelId),
@@ -220,14 +224,16 @@ export function withVoiceChats(
 }
 
 export function voiceArchiveContext(calls: readonly VoiceChatEntry[]): string {
-  return calls
-    .slice(-6)
-    .map(
-      (call) =>
-        `Voice chat (${call.startedAt}):\n${call.summary ?? call.transcript.map((entry) => `${entry.role}: ${entry.text}`).join("\n")}`,
-    )
-    .join("\n\n")
-    .slice(-12000);
+  return closingOf(
+    calls
+      .slice(-6)
+      .map(
+        (call) =>
+          `Voice chat (${call.startedAt}):\n${call.summary ?? call.transcript.map((entry) => `${entry.role}: ${entry.text}`).join("\n")}`,
+      )
+      .join("\n\n"),
+    12000,
+  );
 }
 
 export function voiceSessionInput(

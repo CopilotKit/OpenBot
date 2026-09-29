@@ -107,7 +107,12 @@ function RouteComponent() {
         description="Written for the whole deployment. People write their own on their Skills page."
         title="Installed"
       >
-        {plugins.isPending ? null : skills.length === 0 ? (
+        {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
+        {plugins.isPending ? null : !plugins.data ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            Skills could not be loaded.
+          </p>
+        ) : skills.length === 0 ? (
           <PageEmpty>No skills yet.</PageEmpty>
         ) : (
           <PageRows>

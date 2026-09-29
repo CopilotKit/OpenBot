@@ -11,14 +11,21 @@ function appWith(
     toolCalls: unknown[];
     revokes?: unknown[];
     serverLookups?: unknown[];
+    skillLookups?: unknown[];
   },
   /** The apps this deployment has added, for the grant path's existence check. */
   servers: string[] = ["tool"],
+  /** The skills that exist, all of them the deployment's own. */
+  skills: string[] = [],
 ) {
   const store = {
     serverExists: async (serverId: string) => {
       calls.serverLookups?.push(serverId);
       return servers.includes(serverId);
+    },
+    skillOwner: async (slug: string) => {
+      calls.skillLookups?.push(slug);
+      return skills.includes(slug) ? null : undefined;
     },
     grant: async (kind: unknown, ref: unknown, agentId: unknown) => {
       calls.grants.push({ kind, ref, agentId });
@@ -203,6 +210,72 @@ describe("POST /api/plugins/grants, for an app this deployment does not have", (
     ]);
     // Not even asked: a revoke has nothing to check.
     expect(calls.serverLookups).toEqual([]);
+  });
+});
+
+/**
+ * A GRANT NAMING NO SKILL, from an administrator.
+ *
+ * Every other caller's skill grant is checked against the skill; an administrator's returned before
+ * the lookup. A Bot's skills are read by slug alone, so the stored row waited for whoever wrote a
+ * skill under that name next — on a shared Bot, one person's instructions answering everybody.
+ */
+describe("POST /api/plugins/grants, for a skill nobody has written", () => {
+  const grantSkill = (ref: string) => ({
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "skill", ref, agentId: "bot-1" }),
+  });
+
+  test("refuses an administrator's grant and never reaches the store", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      skillLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, [], ["triage"]).request(
+      "http://openbot.test/grants",
+      grantSkill("standup"),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "There is no skill called standup.",
+    });
+    expect(calls.grants).toEqual([]);
+    expect(calls.skillLookups).toEqual(["standup"]);
+  });
+
+  test("a skill that is here is granted as before", async () => {
+    const calls = { grants: [] as unknown[], toolCalls: [] as unknown[] };
+    const response = await appWith(calls, [], ["triage"]).request(
+      "http://openbot.test/grants",
+      grantSkill("triage"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.grants).toEqual([
+      { kind: "skill", ref: "triage", agentId: "bot-1" },
+    ]);
+  });
+
+  test("a grant naming no skill can still be revoked by hand", async () => {
+    const calls = {
+      grants: [] as unknown[],
+      toolCalls: [] as unknown[],
+      revokes: [] as unknown[],
+      skillLookups: [] as unknown[],
+    };
+    const response = await appWith(calls, [], []).request(
+      "http://openbot.test/grants?kind=skill&ref=standup&agentId=bot-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.revokes).toEqual([
+      { kind: "skill", ref: "standup", agentId: "bot-1" },
+    ]);
+    expect(calls.skillLookups).toEqual([]);
   });
 });
 

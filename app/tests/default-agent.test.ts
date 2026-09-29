@@ -15,6 +15,7 @@ function agent(id: string, name = id): AgentProfile {
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     id,
     mine: true,
     name,

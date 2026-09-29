@@ -3,7 +3,11 @@ import type { MiddlewareHandler } from "hono";
 import type { AgentProfile } from "../src/agents/profile-types";
 import type { AppVariables } from "../src/auth/guards";
 import type { AgentChannel, ChannelStore } from "../src/channels/routes";
-import type { VoiceConnection, VoiceProvider } from "../src/voice/provider";
+import {
+  type VoiceConnection,
+  VoiceError,
+  type VoiceProvider,
+} from "../src/voice/provider";
 import { createVoiceRoutes as voiceRoutes } from "../src/voice/routes";
 
 const profile: AgentProfile = {
@@ -265,6 +269,26 @@ test("provider errors do not leak secrets; attempts are bounded", async () => {
     expect(await response.text()).not.toContain("secret-key");
   }
   expect((await app.request("/calls", request())).status).toBe(429);
+});
+
+test("a caller is told what the voice service said when it gave a safe reason", async () => {
+  const app = createVoiceRoutes(
+    user,
+    {
+      transport: "webrtc",
+      connect: async () => {
+        throw new VoiceError(
+          "The voice service is busy. Please retry shortly.",
+        );
+      },
+    },
+    channels,
+  );
+  const response = await app.request("/calls", request());
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({
+    error: "The voice service is busy. Please retry shortly.",
+  });
 });
 
 test("allows one handshake per user, propagates cancellation, and releases its slot", async () => {

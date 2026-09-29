@@ -133,7 +133,18 @@ exit 0
     join(fakeBin, "sleep"),
     "#!/usr/bin/env bash\nexit 0\n",
   );
-  await writeExecutable(join(fakeBin, "bun"), "#!/usr/bin/env bash\nexit 0\n");
+  // The runtime health check is a script piped into `bun run -`, so that one invocation is the real
+  // Bun: it is what decides whether the run carries on. Everything else Bun would start is faked.
+  await writeExecutable(
+    join(fakeBin, "bun"),
+    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then exec "$REAL_BUN" "$@"; fi\nexit 0\n',
+  );
+  // What `python3` is on a stock Windows machine: the Microsoft Store alias, which runs nothing. A
+  // script that still needed it would stop at the health check in every test in this file.
+  await writeExecutable(
+    join(fakeBin, "python3"),
+    '#!/usr/bin/env bash\necho "Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases." >&2\nexit 49\n',
+  );
 
   try {
     const child = Bun.spawn({
@@ -141,6 +152,7 @@ exit 0
       cwd: directory,
       env: {
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        REAL_BUN: process.execPath,
         PKILL_LOG: logPath,
         DOCKER_LOG: dockerLogPath,
         CURL_LOG: curlLogPath,
@@ -187,6 +199,28 @@ describe("start.sh server restart guard", () => {
       expect(result.pkillLog).toContain("bun --env-file=../.env src/index.ts");
     },
   );
+});
+
+describe("start.sh runtime health", () => {
+  /**
+   * THE LICENCE IS CHECKED WITHOUT PYTHON.
+   *
+   * The check used to be a `python3` heredoc. On Windows `python3` is usually the Microsoft Store
+   * alias, which exits 49, so `set -e` ended the run at "3/4 Runtime health" with the server and
+   * worker already up and the app never started. The fake `python3` beside this file's other fakes
+   * is that alias; the line below is only printed if the check ran, in Bun, and passed.
+   */
+  test("checks the licence and names the Bots without python3", async () => {
+    const result = await runStartWithStaleServerProbe(401);
+
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(result.stdout).toContain(
+      "licence valid · mode test · Bots: analyst",
+    );
+  });
 });
 
 describe("start.sh under the wrong shell", () => {

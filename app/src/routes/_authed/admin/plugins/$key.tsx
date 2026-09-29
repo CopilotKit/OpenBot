@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useBotNames } from "@/lib/agents/bot-names";
+import { grantRoster } from "@/lib/agents/grant-roster";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import {
@@ -180,6 +180,8 @@ function RouteComponent() {
    */
   const connections = useQuery(connectionsQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
+  /* The ones this person has hidden, so a grant one of them holds is still on this page. */
+  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   /*
    * The row itself rather than whether there is one, because the brokered row below wants what the
    * last re-check found and that is written on this same row. Asking a second time for it would be
@@ -209,7 +211,6 @@ function RouteComponent() {
    * `false` the brokered row was getting.
    */
   const connectionsUnreadable = connections.error !== null;
-  const nameFor = useBotNames();
 
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
@@ -280,9 +281,22 @@ function RouteComponent() {
   });
   const entry = plugins.data?.catalogue.find((item) => item.key === key);
   const server = plugins.data?.servers.find((item) => item.id === key);
-  const bots = (agents ?? []).map((agent: { id: string }) => ({
+  /*
+   * Everybody on the roster, and anybody hidden from it who holds one of this app's grants,
+   * withdrawn ones included: see `grantRoster`. Named from the roster rows themselves, because the
+   * id-to-name lookup other admin screens use is built from the visible roster alone.
+   */
+  const bots = grantRoster({
+    roster: agents ?? [],
+    hidden: hiddenAgents ?? [],
+    holders: [
+      ...(server?.tools ?? []).flatMap((tool) => tool.grantedTo),
+      ...(server?.withdrawn ?? []).flatMap((held) => held.grantedTo),
+    ],
+  }).map((agent) => ({
     id: agent.id,
-    name: nameFor(agent.id),
+    name: agent.name,
+    hidden: agent.hidden,
   }));
 
   const auth = connectionKindFor(server, entry?.auth);
@@ -400,6 +414,26 @@ function RouteComponent() {
    */
   if (plugins.isPending || connections.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
+  }
+  /*
+   * Gated on the plugin list having ARRIVED, the guard the per-Bot grant screen already keeps
+   * (`plugins.data && !server`). `isPending` goes false on a failed fetch exactly as it does on a
+   * successful one, so `!(entry || server)` alone cannot tell "this deployment has no plugin by
+   * that name" apart from "the plugin list could not be read", and a request that never came back
+   * is no evidence for the first. Nothing on this page survives the failure: the title, the tools
+   * and the grants are all that one response.
+   */
+  if (!plugins.data) {
+    return (
+      <PageShell
+        backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
+        title="Plugins"
+      >
+        <p className="mt-12 text-destructive text-sm" role="alert">
+          Plugins could not be loaded.
+        </p>
+      </PageShell>
+    );
   }
   if (!(entry || server)) {
     return (
@@ -946,7 +980,9 @@ function RouteComponent() {
                       <ItemContent>
                         <ItemTitle>{bot.name}</ItemTitle>
                         <ItemDescription>
-                          Every action this app offers, switched one at a time.
+                          {bot.hidden
+                            ? "Hidden from your roster. Every action this app offers, switched one at a time."
+                            : "Every action this app offers, switched one at a time."}
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>

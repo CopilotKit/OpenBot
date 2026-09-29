@@ -21,6 +21,7 @@ function agent(overrides: Partial<AgentProfile>): AgentProfile {
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     systemOwned: false,
     canManage: false,
     mine: false,

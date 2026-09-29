@@ -98,6 +98,7 @@ function agent(
     hasAuth: false,
     hasCallbackToken: false,
     hidden: false,
+    pinned: false,
     systemOwned: false,
     canManage: true,
     mine: true,
@@ -444,6 +445,98 @@ test("a failed REFETCH on /agents with the other slice empty also shows it as em
     await view.findByText("You don't have any agents created."),
   ).toBeTruthy();
   expect(view.queryByText("Your agents couldn't be loaded.")).toBeNull();
+});
+
+/*
+ * Hiding a coworker takes it off both rosters, and Unhide is only in its dialog, which only a card
+ * opens. These serve the two list requests from their real URLs so the hidden roster arrives the
+ * way the server sends it: `GET /api/agents?hidden=true`.
+ */
+function servingRosters(visible: AgentProfile[], hidden: AgentProfile[]) {
+  global.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const agents = url.includes("hidden=true") ? hidden : visible;
+    return Response.json({ agents });
+  }) as unknown as typeof fetch;
+}
+
+test("a hidden coworker is on /agents under Hidden, collapsed, with a card that opens it", async () => {
+  const mine = agent({ id: "mine-1", name: "Mine Agent" });
+  const tucked = agent({ id: "hidden-1", name: "Tucked Agent", hidden: true });
+  servingRosters([mine], [tucked]);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Hidden")).toBeTruthy();
+  const section = view.container.querySelector("details");
+  expect(section).not.toBeNull();
+  // Collapsed until asked for, so it does not push the two rosters apart.
+  expect(section?.open).toBe(false);
+  // Inside the section rather than in either roster above it.
+  expect(section?.textContent).toContain("Tucked Agent");
+  expect(section?.textContent).not.toContain("Mine Agent");
+  // The card's own Details link is the way to the dialog that holds Unhide.
+  const link = view.getByLabelText("View details for Tucked Agent");
+  expect(link.getAttribute("href")).toBe("/agents?agent=hidden-1");
+});
+
+test("with nothing hidden, /agents has no Hidden section at all", async () => {
+  servingRosters([agent({ id: "mine-1", name: "Mine Agent" })], []);
+  const queryClient = failingQueryClient();
+
+  const view = renderAgents(queryClient);
+
+  expect(await view.findByText("Mine Agent")).toBeTruthy();
+  // Absent because the hidden roster came back empty, not because it has not come back yet.
+  await waitFor(() => {
+    expect(queryClient.getQueryState(agentKeys.list(true))?.status).toBe(
+      "success",
+    );
+  });
+  expect(view.queryByText("Hidden")).toBeNull();
+  expect(view.container.querySelector("details")).toBeNull();
+});
+
+test("a pinned coworker moves into Pinned at the top, out of its roster", async () => {
+  const kept = agent({ id: "mine-1", name: "Kept Agent" });
+  const favourite = agent({ id: "mine-2", name: "Favourite", pinned: true });
+  servingRosters([kept, favourite], []);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Pinned")).toBeTruthy();
+  const headings = [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+  expect(headings).toEqual(["Pinned", "Your agents", "Explore agents"]);
+  // Once, in Pinned, rather than twice.
+  expect(view.getAllByText("Favourite")).toHaveLength(1);
+  const pinnedSection = view.getByText("Pinned").parentElement;
+  expect(pinnedSection?.textContent).toContain("Favourite");
+  expect(pinnedSection?.textContent).not.toContain("Kept Agent");
+});
+
+test("with every coworker of yours pinned, Your agents says so instead of claiming none", async () => {
+  servingRosters(
+    [agent({ id: "mine-1", name: "Favourite", pinned: true })],
+    [],
+  );
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(
+    await view.findByText("Your agents are all pinned above."),
+  ).toBeTruthy();
+  expect(view.queryByText("You don't have any agents created.")).toBeNull();
+});
+
+test("with nothing pinned, /agents has no Pinned section", async () => {
+  servingRosters([agent({ id: "mine-1", name: "Mine Agent" })], []);
+
+  const view = renderAgents(failingQueryClient());
+
+  expect(await view.findByText("Mine Agent")).toBeTruthy();
+  expect(view.queryByText("Pinned")).toBeNull();
 });
 
 test("a failed REFETCH on / with explore empty shows it as empty, not broken", async () => {

@@ -147,7 +147,7 @@ holder() {
 #
 # When that happened here the cost was not a wrong answer, it was a wrong answer three stages later.
 # `require_free_or_ours` reported "already up", the server was therefore never started, `wait_for`
-# printed a green "server ready", and the run died at stage 3 in `json.loads` on a mouthful of HTML —
+# printed a green "server ready", and the run died at stage 3 parsing a mouthful of HTML as JSON —
 # a JSON parse error standing in for "that port belongs to something else".
 #
 # So each surface is asked for something only it can produce.
@@ -180,7 +180,9 @@ require_free_or_ours() {
     return 0
   fi
   red "  $name: port $port is held by something that is not OpenBot: $who"
-  red "  Re-run with ${name^^}_PORT=<free port>, or stop that process yourself."
+  # `tr`, not `${name^^}`, which is bash 4. macOS ships bash 3.2, where that expansion is a "bad
+  # substitution" and the run ended on it instead of on this hint.
+  red "  Re-run with $(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_PORT=<free port>, or stop that process yourself."
   exit 1
 }
 
@@ -250,7 +252,12 @@ SERVICES+=(agent-langgraph)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
-docker compose up -d --build "${SERVICES[@]}" >/dev/null
+# Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
+# terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
+# stdout, and stops with "failed to get console: provided file is not a console". An environment
+# variable rather than `--progress`, because a Compose too old to know the flag refuses it, and one
+# too old to know the variable ignores it.
+COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   red "  Migrations did not apply. The database is not the schema this server expects."
   red "  Log: $LOGS/migrate.log"
@@ -381,20 +388,26 @@ fi
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
-python3 - "$INFO" <<'PY'
-import json, sys
-info = json.loads(sys.argv[1])
-status, agents = info.get("licenseStatus"), list(info.get("agents", {}))
-if status != "valid":
-    print(f"\033[31m  licence is '{status}', not 'valid'.\033[0m")
-    print("\033[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\033[0m")
-    print("\033[31m  See README.md for Intelligence setup.\033[0m")
-    raise SystemExit(1)
-if not agents:
-    print("\033[31m  No Bots registered.\033[0m")
-    raise SystemExit(1)
-print(f"\033[32m  licence valid · mode {info.get('mode')} · Bots: {', '.join(agents)}\033[0m")
-PY
+# Read with Bun, which every run of this script already needs, rather than python3, which not every
+# machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
+# found" and exits 49, so the run stopped here with the server and worker up and the app never
+# started.
+bun run - "$INFO" <<'JS'
+const info = JSON.parse(process.argv[2]);
+const status = info.licenseStatus;
+const agents = Object.keys(info.agents ?? {});
+if (status !== "valid") {
+  console.log(`\x1b[31m  licence is '${status}', not 'valid'.\x1b[0m`);
+  console.log("\x1b[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\x1b[0m");
+  console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
+  process.exit(1);
+}
+if (agents.length === 0) {
+  console.log("\x1b[31m  No Bots registered.\x1b[0m");
+  process.exit(1);
+}
+console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${agents.join(", ")}\x1b[0m`);
+JS
 
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app

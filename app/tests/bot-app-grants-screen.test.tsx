@@ -318,6 +318,49 @@ test("a failed REFETCH keeps the grant list it already had, not the error", asyn
   ).toBeNull();
 });
 
+/*
+ * Hidden is a per-person roster preference, and a grant is a deployment-wide fact. The connector
+ * page now links a hidden Bot that holds grants here, so this page has to find it in the hidden
+ * roster rather than say there is no such Bot, which is what it said while the grants stayed on.
+ */
+test("a hidden Bot's own page draws its grants instead of saying there is no such Bot", async () => {
+  global.fetch = Object.assign(
+    async (path: Parameters<typeof fetch>[0]) => {
+      const url = String(path);
+      if (url.startsWith("/api/agents")) {
+        const hiddenBot = {
+          id: BOT_ID,
+          name: "Tucked Bot",
+          hidden: true,
+          hasCallbackToken: false,
+        };
+        return Response.json({
+          agents: url.includes("hidden=true") ? [hiddenBot] : [],
+        });
+      }
+      return new Response(null, { status: 500 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const queryClient = stalePluginsClient(
+    pluginsPage({
+      servers: [
+        server({
+          id: APP_KEY,
+          tools: [tool({ name: "list_channels", grantedTo: [BOT_ID] })],
+        }),
+      ],
+    }),
+  );
+
+  const view = renderScreen(queryClient);
+  await waitForFailedRefetch(queryClient);
+
+  const held = await view.findByLabelText("Let Tucked Bot call list_channels");
+  expect(held.getAttribute("aria-checked")).toBe("true");
+  expect(view.queryByText("Not a Bot")).toBeNull();
+});
+
 /**
  * The actions end of one action's row: its switch, and whatever is drawn beside it.
  *

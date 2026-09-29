@@ -6,7 +6,13 @@ package the AG-UI project maintains, so the protocol stops being ours to keep wo
 """
 
 import os
+import sys
 from pathlib import Path
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -116,9 +122,12 @@ def _model():
     and the selected provider is passed separately, including when that ID contains a colon.
     """
     configured_model = os.environ.get("BOT_MODEL")
-    model = (configured_model or "gpt-4o-mini").strip()
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
     if store:
+        # A signed-in ChatGPT plan ignores BOT_PROVIDER, retaining this Bot's file model unless
+        # BOT_MODEL overrides it. Other providers use the fully resolved settings below.
+        file_row = bot_settings("agent-langgraph-agui", {})
+        model = (configured_model or "").strip() or file_row.model
         store_path = _chatgpt_auth_file(store)
         # Private and experimental, both deliberately. `langchain-openai` exports no public Codex
         # model and warns in the module that this one is unofficial. That is a maintenance cost we
@@ -138,13 +147,15 @@ def _model():
         )
 
     _normalize_openai_base_url()
-    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
-    provider = _resolve_provider(provider)
-    if not configured_model:
-        model = {
-            "anthropic": "claude-sonnet-4-5",
-            "google_genai": "gemini-2.5-flash",
-        }.get(provider, model)
+    settings = bot_settings("agent-langgraph-agui")
+    if settings.provider == "google_genai":
+        # LangChain's provider spelling is also an existing BOT_PROVIDER choice. Resolve its
+        # defaults through the spec's Google row before mapping back to the SDK spelling.
+        settings = bot_settings(
+            "agent-langgraph-agui", {**os.environ, "BOT_PROVIDER": "google"}
+        )
+    provider = _resolve_provider(settings.provider)
+    model = settings.model
     prefix, separator, _ = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
         return init_chat_model(model, **_google_genai_kwargs(prefix))

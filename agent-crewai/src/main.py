@@ -10,9 +10,16 @@ serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry t
 """
 
 import os
+import sys
 from collections.abc import Mapping
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
+
+# The spec file every language in the box reads: one level above this Bot in the repository, and
+# one level above /app/src in the image the Dockerfile builds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from model_providers import bot_settings
 
 import ag_ui_crewai.endpoint as crewai_endpoint
 from ag_ui.core import Message, Tool
@@ -46,8 +53,9 @@ def _model() -> str:
     and litellm then either routed to a provider nobody configured (`LLM Provider NOT provided`)
     or sent only the second half to the endpoint.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
-    model = (os.environ.get("BOT_MODEL") or "").strip() or "gpt-5.5"
+    settings = bot_settings("agent-crewai")
+    provider = settings.provider
+    model = settings.model
     return f"{provider}/{model}"
 
 
