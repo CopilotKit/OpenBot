@@ -180,7 +180,9 @@ require_free_or_ours() {
     return 0
   fi
   red "  $name: port $port is held by something that is not OpenBot: $who"
-  red "  Re-run with ${name^^}_PORT=<free port>, or stop that process yourself."
+  # `tr`, not `${name^^}`, which is bash 4. macOS ships bash 3.2, where that expansion is a "bad
+  # substitution" and the run ended on it instead of on this hint.
+  red "  Re-run with $(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_PORT=<free port>, or stop that process yourself."
   exit 1
 }
 

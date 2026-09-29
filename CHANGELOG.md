@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `start.sh` names the port to change on macOS
+
+When the API server's or the app's port was held by another process, `start.sh` was meant to say
+which setting to change, such as `Re-run with SERVER_PORT=<free port>`. On macOS, whose bash is
+3.2, the run ended on `bad substitution` before printing it, because the hint upper-cased the
+name with a bash 4 expansion. It is upper-cased with `tr` now, so the hint prints on either bash.
+
 ### A coworker can be pinned to the top of the Agents screen
 
 A coworker's Manage tab has a **Pin** switch beside Hide, and pinned coworkers move into a
