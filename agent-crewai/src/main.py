@@ -9,6 +9,7 @@ The contract with the rest of OpenBot is the same one the other Bots meet, and i
 serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry the server's token.
 """
 
+import hmac
 import os
 import sys
 from collections.abc import Mapping
@@ -191,7 +192,7 @@ async def refuse_without_the_server_token(request: Request, call_next):
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
         # An unset token means unconfigured, not open. A Bot that answers anybody because nobody
         # set a secret is the failure this check exists for.
-        if not expected or offered != expected:
+        if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
 
