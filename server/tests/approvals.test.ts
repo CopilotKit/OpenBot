@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { z } from "zod";
 import { createApprovalRoutes } from "../src/approvals/routes";
 import * as serviceModule from "../src/approvals/service";
 import {
@@ -11,7 +12,9 @@ import {
   withApprovalContext,
 } from "../src/approvals/types";
 import { createComputerGateway } from "../src/computer/gateway";
+import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createHostAccessBroker } from "../src/host-access/broker";
+import { CatalogueEntryUnknownError } from "../src/plugins/store";
 
 const context = {
   runId: "run",
@@ -594,4 +597,122 @@ test("an approved action interrupted before its result was saved continues the c
   expect(continued).toHaveLength(1);
   expect(continued[0]?.result.error).toContain("outcome is unknown");
   expect((await store.get("owner", row.id)).status).toBe("completed");
+});
+
+test("an approved action the deployment no longer allows is not carried out, and is final", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  let effects = 0;
+  const continued: unknown[] = [];
+  await service.resume("owner", row.id, {
+    refusal: async () => "Use Bots is turned off for you.",
+    validate: async (action: ApprovalAction) => action,
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input: unknown) => {
+      continued.push(input);
+    },
+  });
+  // Checked before the action: with Use Bots off nothing runs, and the Bot cannot answer either.
+  expect(effects).toBe(0);
+  expect(continued).toEqual([]);
+  const stored = await store.get("owner", row.id);
+  expect(stored.status).toBe("completed");
+  expect(stored.result?.error).toContain("Use Bots is turned off");
+});
+
+test("a permanent failure during the re-check is an answer for the Bot, not a retry", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  const continued: { result: { error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    // A saved argument that no longer parses: the same on every try.
+    validate: async () => {
+      z.object({ url: z.string() }).parse({ url: 7 });
+      throw new Error("unreachable");
+    },
+    execute: async () => undefined,
+    continue: async (input: { result: { error?: string } }) => {
+      continued.push(input);
+    },
+  });
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toContain("Not done");
+});
+
+test("an approved action that ran out of tries tells the Bot once, across replicas", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  const continued: { result: { error?: string } }[] = [];
+  const dependencies = {
+    validate: async (action: ApprovalAction) => action,
+    execute: async () => undefined,
+    continue: async (input: { result: { error?: string } }) => {
+      continued.push(input);
+    },
+  };
+  await Promise.all([
+    service.abandon(
+      "owner",
+      row.id,
+      "the platform was unreachable",
+      dependencies,
+    ),
+    service.abandon(
+      "owner",
+      row.id,
+      "the platform was unreachable",
+      dependencies,
+    ),
+  ]);
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toContain("could not be carried out");
+  expect((await store.get("owner", row.id)).status).toBe("completed");
+});
+
+test.each([
+  [
+    "a connector removed after approval",
+    () => new CatalogueEntryUnknownError("gmail"),
+  ],
+  [
+    "a private-share check waiting again",
+    () =>
+      new HeadlessToolSuspension("Waiting for your decision.", {
+        kind: "approval",
+        approvalId: "share-1",
+      }),
+  ],
+])("%s is an answer for the Bot, not a retry", async (_name, failure) => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  const continued: { result: { error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    validate: async () => {
+      throw failure();
+    },
+    execute: async () => undefined,
+    continue: async (input: { result: { error?: string } }) => {
+      continued.push(input);
+    },
+  });
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toContain("Not done");
 });

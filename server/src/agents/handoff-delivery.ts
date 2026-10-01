@@ -13,6 +13,7 @@
  */
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import type { Observable } from "rxjs";
+import { headlessTurnRefusal } from "../admin/controls";
 import type { HandoffDelivery } from "./handoff-runner";
 import { guardBotTurn } from "./lifecycle";
 import { textOf } from "./message-text";
@@ -355,6 +356,19 @@ export function createHandoffDelivery(options: {
             ownerUserId: work.actorId,
             agentId: work.toBotId,
           });
+          // "Use Bots" and the model allowlist, as every other headless turn meets them in the turn
+          // runner. A hop builds its agent and runs it here, so without this one a chain that began on
+          // a remote Bot reached a built-in Bot on a model off the allowlist, or ran for a person with
+          // Use Bots off.
+          const refused = await headlessTurnRefusal({
+            ownerUserId: work.actorId,
+            agentId: work.toBotId,
+          });
+          if (refused) {
+            const error = new Error(refused);
+            error.name = "CapabilityRefusedError";
+            throw error;
+          }
           await settled(
             runner.run({
               threadId: where.threadId,

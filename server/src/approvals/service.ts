@@ -103,6 +103,12 @@ class ApprovalValidated extends HeadlessToolSuspension {
   }
 }
 export type ApprovalResumeDependencies = {
+  /**
+   * Whether the deployment still lets this Bot run for this person (Use Bots, the model allowlist).
+   * Asked before anything else, so a refused action is never carried out, and final: the Bot cannot
+   * answer the result either, so the request ends with the refusal saved and no continuation.
+   */
+  refusal?(action: ApprovalAction): Promise<string | null>;
   /** Resolve the target again and recheck current policy/grants; never trust approval as authority. */
   validate(action: ApprovalAction): Promise<ApprovalAction>;
   execute(action: ApprovalAction): Promise<unknown>;
@@ -510,6 +516,22 @@ export function createApprovalService(
           "The interrupted conversation is unavailable.",
         );
       let result = request.result;
+      const refused =
+        !result && dependencies.refusal
+          ? await dependencies.refusal(request.action)
+          : null;
+      if (refused) {
+        // Only the process that saves the refusal ends the request.
+        if (
+          !(await store.saveResult(ownerUserId, id, {
+            content: refused,
+            error: refused,
+          }))
+        )
+          return;
+        await store.finish(ownerUserId, id);
+        return;
+      }
       if (!result && request.status === "consumed") {
         /*
          * Started, and the process running it stopped before saving what happened. Repeating it
@@ -559,8 +581,13 @@ export function createApprovalService(
               );
             }
           } catch (error) {
-            if (!(error instanceof ApprovalRefusedError)) throw error;
-            refusal = `Not done: ${error.message} Ask the person again if it is still needed.`;
+            if (!(error instanceof ApprovalRefusedError) && !isPermanent(error))
+              throw error;
+            refusal = `Not done: ${
+              error instanceof ApprovalRefusedError
+                ? error.message
+                : permanentReason(error)
+            } Ask the person again if it is still needed.`;
           }
           if (refusal !== undefined || !current) {
             const reason = refusal ?? "Not done.";
@@ -601,7 +628,65 @@ export function createApprovalService(
       });
       await store.finish(ownerUserId, id);
     },
+    /**
+     * The work item carrying this resume ran out of tries. Left alone, the request stayed approved
+     * and the conversation waited forever, so the Bot is told the action could not be carried out
+     * and the conversation continues. Only the process that saves that answer continues it.
+     */
+    async abandon(
+      ownerUserId: string,
+      id: string,
+      reason: string,
+      dependencies: Pick<ApprovalResumeDependencies, "continue">,
+    ): Promise<void> {
+      const request = await store.get(ownerUserId, id);
+      if (request.status === "completed" || request.status === "pending")
+        return;
+      const continuation = request.action.continuation;
+      let result = request.result;
+      if (!result) {
+        const text = `Not done: this action could not be carried out (${reason.slice(0, 300)}). Check whether it happened before asking the person again.`;
+        if (
+          !(await store.saveResult(ownerUserId, id, {
+            content: text,
+            error: text,
+          }))
+        )
+          return;
+        result = { content: text, error: text };
+      }
+      if (continuation)
+        await dependencies.continue({
+          approvalId: id,
+          messageId: `approval:${id}`,
+          continuation,
+          result,
+        });
+      await store.finish(ownerUserId, id);
+    },
   };
+}
+
+/**
+ * Failures the re-check will meet again on every try: the connector was removed, a saved argument no
+ * longer parses, or a private-share check is waiting again. Retried, they only delayed the moment the
+ * work item died and the conversation hung.
+ */
+function isPermanent(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "ZodError" || error.name === "CatalogueEntryUnknownError")
+    return true;
+  return (
+    error instanceof HeadlessToolSuspension &&
+    !(error instanceof ApprovalValidated)
+  );
+}
+function permanentReason(error: unknown): string {
+  if (error instanceof HeadlessToolSuspension)
+    return "it is waiting for another decision first.";
+  if (error instanceof Error && error.name === "ZodError")
+    return "the saved request no longer has a valid shape.";
+  return "the app it needs is no longer available.";
 }
 function publicApproval(request: ApprovalRecord) {
   const { action, ...record } = request;

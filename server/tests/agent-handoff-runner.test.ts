@@ -374,6 +374,32 @@ describe("a hop that failed for good", () => {
     expect(offered[0]?.task).toContain("did not finish within 300s");
   });
 
+  test("a hop the deployment's controls refuse ends on its first try, and the person is told", async () => {
+    const {
+      runner: sweeper,
+      offered,
+      calls,
+    } = runner({
+      deliver: async () => {
+        const error = new Error("Use Bots is turned off for you.");
+        error.name = "CapabilityRefusedError";
+        throw error;
+      },
+    });
+
+    await sweeper.sweep();
+
+    // Retrying cannot change the answer, so the work ends now rather than five minutes from now.
+    expect(calls.filter((call) => call.verb === "release")).toEqual([]);
+    expect(calls).toContainEqual({
+      verb: "finish",
+      key: "run-1:abc",
+      owner: "replica-a",
+    });
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.task).toContain("Use Bots is turned off");
+  });
+
   /*
    * The fan-out cap counts every row whose key starts with the run's own prefix. A notice is not one
    * of the Bots this run asked for, and a run long enough to see a hop fail for good is exactly the

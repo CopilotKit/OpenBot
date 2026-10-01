@@ -5,6 +5,7 @@ import {
   looksLikeCallbackToken,
   mintCallbackToken,
   mintRunAssertion,
+  readApprovedRunAssertion,
   readRunAssertion,
   sameToken,
 } from "../src/agents/callback-token";
@@ -677,5 +678,15 @@ describe("the tool-call route a callback token guards", () => {
       isError: false,
     });
     expect(callback.text).toBe(inProcess);
+  });
+});
+
+describe("an approved action's stored run", () => {
+  test("is read after the live expiry, and still refused with the wrong key", () => {
+    const signed = mintRunAssertion({ ...RUN, depth: 2 }, KEY, 0);
+    expect(readRunAssertion(signed, KEY)).toBeNull();
+    expect(readApprovedRunAssertion(signed, KEY)?.depth).toBe(2);
+    expect(readApprovedRunAssertion(signed, "another-key")).toBeNull();
+    expect(readApprovedRunAssertion(`${signed}x`, KEY)).toBeNull();
   });
 });

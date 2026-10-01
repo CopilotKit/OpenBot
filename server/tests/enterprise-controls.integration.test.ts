@@ -11,6 +11,7 @@ import {
 } from "../src/admin/controls";
 import { createEnterpriseGate } from "../src/admin/gate";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
+import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
@@ -495,6 +496,71 @@ describe("headless turns obey the same switches", () => {
     }
     const allowed = headlessTurn(bot);
     await expect(allowed.run()).resolves.toMatchObject({ replyText: "Done." });
+  });
+
+  test("a Bot-to-Bot hand-off meets the same switches", async () => {
+    let ran = 0;
+    const hop = createHandoffDelivery({
+      deadlineMs: 5_000,
+      agentFor: async () =>
+        ({
+          threadId: "",
+          messages: [],
+          setMessages() {},
+        }) as unknown as AbstractAgent,
+      history: async () => [],
+      newRunId: () => `hop-${randomUUID()}`,
+      mintThreadId: () => `hop-thread-${randomUUID()}`,
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: async () => {},
+        release: async () => {},
+      },
+      runner: {
+        run: () => {
+          ran += 1;
+          return EMPTY;
+        },
+      },
+    });
+    const work = {
+      fromBotId: "remote-bot",
+      toBotId: bot,
+      actorId: member.id,
+      threadId: "thread",
+      runId: "run",
+      depth: 1,
+      task: "check the numbers",
+    };
+    await put(asAdmin, "/api/admin/enterprise/capabilities", {
+      scopeKind: "organization",
+      capability: "useBots",
+      allowed: false,
+    });
+    try {
+      await expect(
+        hop.deliver({ work, message: "m", shown: "s", assertion: "a" }),
+      ).rejects.toThrow(/Bots/);
+    } finally {
+      await put(asAdmin, "/api/admin/enterprise/capabilities", {
+        scopeKind: "organization",
+        capability: "useBots",
+        allowed: true,
+      });
+    }
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["anthropic/claude-test"] },
+    });
+    try {
+      await expect(
+        hop.deliver({ work, message: "m", shown: "s", assertion: "a" }),
+      ).rejects.toThrow(/allowlist/);
+    } finally {
+      await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+        value: { enabled: false, models: [] },
+      });
+    }
+    expect(ran).toBe(0);
   });
 });
 

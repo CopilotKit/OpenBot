@@ -17,11 +17,13 @@ import {
   enterpriseControls,
   guardDeliveryStore,
   guardHostAccess,
+  headlessTurnRefusal,
   installEnterpriseControls,
 } from "./admin/controls";
 import {
   mintRunAssertion,
   type RunAssertion,
+  readApprovedRunAssertion,
   readRunAssertion,
 } from "./agents/callback-token";
 import { canUseComputer, computerAccessCheck } from "./agents/computer-access";
@@ -60,7 +62,10 @@ import {
   personQuestionSchema,
   questionConversationBot,
 } from "./approvals/questions";
-import { createApprovalService } from "./approvals/service";
+import {
+  type ApprovalResumeDependencies,
+  createApprovalService,
+} from "./approvals/service";
 import { createApprovalStore } from "./approvals/store";
 import {
   ApprovalRefusedError,
@@ -244,6 +249,7 @@ import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
+  DEFAULT_MAX_ATTEMPTS,
   startWorkOfferedListener,
   type WorkOfferedListener,
 } from "./work/queue";
@@ -1967,7 +1973,7 @@ const executeApprovedAction = createApprovedActionExecutor({
   credentialActorFor: (actorId, botId, ref) =>
     teamBots.credentialActorFor(actorId, botId)(ref),
   coordinationCall: (input) => coordination.call(input),
-  readRun: (value) => readRunAssertion(value, config.keyEncryptionKey),
+  readRun: (value) => readApprovedRunAssertion(value, config.keyEncryptionKey),
   answer: vendorAnswer,
   privateShareToolRef: PRIVATE_SHARE_TOOL_REF,
   refusalMarker: REFUSAL_MARKER,
@@ -1993,6 +1999,8 @@ const approvalSweep = repeatAfterEach(async () => {
       limit: 1,
     });
     if (!item) return;
+    // Set once the item is understood, so its last failed try can still tell the Bot.
+    let abandon: ((reason: string) => Promise<void>) | undefined;
     try {
       const input = z
         .object({
@@ -2000,7 +2008,14 @@ const approvalSweep = repeatAfterEach(async () => {
           approvalId: z.string().min(1),
         })
         .parse(item.payload);
-      await approvalService.resume(input.ownerUserId, input.approvalId, {
+      const resumeDependencies: ApprovalResumeDependencies = {
+        // Asked before the action runs: with Use Bots off, or the Bot's model off the allowlist,
+        // nothing is carried out and the refusal is final rather than retried.
+        refusal: (action) =>
+          headlessTurnRefusal({
+            ownerUserId: action.actorId,
+            agentId: action.botId,
+          }),
         validate: (action) =>
           approvalService.validateReentry(action, () =>
             executeApprovedAction(action),
@@ -2095,7 +2110,19 @@ const approvalSweep = repeatAfterEach(async () => {
               ),
             );
         },
-      });
+      };
+      abandon = (reason) =>
+        approvalService.abandon(
+          input.ownerUserId,
+          input.approvalId,
+          reason,
+          resumeDependencies,
+        );
+      await approvalService.resume(
+        input.ownerUserId,
+        input.approvalId,
+        resumeDependencies,
+      );
       if (
         !(await approvalQueue.finish({
           kind: item.kind,
@@ -2106,6 +2133,27 @@ const approvalSweep = repeatAfterEach(async () => {
         throw new Error("The approval work lease was lost before completion.");
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      // The queue will not hand this item out again, so the conversation hears now or never.
+      if (abandon && item.attempts >= DEFAULT_MAX_ATTEMPTS) {
+        try {
+          await abandon(reason);
+          await approvalQueue.finish({
+            kind: item.kind,
+            key: item.key,
+            owner: approvalOwner,
+          });
+          return;
+        } catch (failure) {
+          console.error(
+            JSON.stringify({
+              type: "approval-abandon-error",
+              error:
+                failure instanceof Error ? failure.message : String(failure),
+              timestamp: new Date().toISOString(),
+            }),
+          );
+        }
+      }
       await approvalQueue.release({
         kind: item.kind,
         key: item.key,

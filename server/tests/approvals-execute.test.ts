@@ -1,10 +1,18 @@
 import { expect, test } from "bun:test";
 import {
+  mintRunAssertion,
+  readApprovedRunAssertion,
+} from "../src/agents/callback-token";
+import {
   type ApprovedActionDependencies,
   createApprovedActionExecutor,
 } from "../src/approvals/execute";
 import { createApprovalService } from "../src/approvals/service";
 import { approvalAction } from "../src/approvals/types";
+
+// How index.ts reads a stored run for an approved action.
+const APPROVED_RUN_READER = (key: string) => (value: unknown) =>
+  readApprovedRunAssertion(value, key);
 
 const PERSON = { kind: "person" as const, id: "" };
 
@@ -165,4 +173,48 @@ test("re-checking an approved Team Bot call does not spend the teammate's one-ti
     expect.objectContaining({ ref: "gmail/send_email", actorId: "teammate" }),
   ]);
   expect(consents).toBe(0);
+});
+
+test("a hand-off approved after its run's assertion expired keeps the run's depth and hand-off", async () => {
+  const KEY = "k".repeat(32);
+  const minted = Date.now() - 11 * 60 * 1000;
+  const signed = mintRunAssertion(
+    {
+      actorId: "person",
+      botId: "general",
+      runId: "run",
+      threadId: "thread",
+      depth: 2,
+      initiator: PERSON,
+      handoff: { key: "handoff:1", owner: "replica-a" },
+    },
+    KEY,
+    minted,
+  );
+  const args = { bot: "research-desk", task: "Define AG-UI" };
+  const action = approvalAction({
+    actorId: "person",
+    botId: "general",
+    toolRef: "bot/message_bot",
+    effect: "delegate",
+    scope: "research-desk",
+    args,
+    target: { bot: "research-desk" },
+    continuation: {
+      ...continuation("message_bot", args),
+      forwardedProps: { openbotRun: signed },
+    },
+  });
+  const { execute, coordination } = harness({
+    readRun: APPROVED_RUN_READER(KEY),
+  });
+  await execute(action);
+  expect(coordination).toEqual([
+    expect.objectContaining({
+      run: expect.objectContaining({
+        depth: 2,
+        handoff: { key: "handoff:1", owner: "replica-a" },
+      }),
+    }),
+  ]);
 });

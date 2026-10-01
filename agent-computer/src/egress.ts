@@ -488,7 +488,7 @@ async function decide(
   host: string,
   port: number,
   direct: boolean,
-): Promise<EgressDecision & { address?: string }> {
+): Promise<EgressDecision & { addresses?: string[] }> {
   const judging = policiesFor(botId);
   if (judging === "refuse") {
     return {
@@ -522,11 +522,39 @@ async function decide(
     const decision = egressDecision(policy, host, port, resolved);
     if (!decision.allowed) return decision;
   }
-  // Connect to the address that was checked, so a second lookup cannot answer differently.
+  // Connect only to the addresses that were checked, so a second lookup cannot answer differently.
   return {
     allowed: true,
     reason: "Allowed.",
-    ...(resolved[0] ? { address: resolved[0] } : {}),
+    ...(resolved.length > 0 ? { addresses: resolved } : {}),
+  };
+}
+
+/**
+ * Connection options that reach a name through the addresses already checked, and nothing else.
+ *
+ * Every address the name resolved to passed the deny check, so any of them may be tried. Node's own
+ * Happy Eyeballs (`autoSelectFamily`, RFC 8305) then tries them in turn, so an AAAA answer on a
+ * computer with no IPv6 route falls back to the A record instead of failing. The `lookup` answers
+ * from the checked list without asking DNS, which is what keeps the pin: the name is never resolved
+ * a second time. A literal address needs neither.
+ */
+function pinnedTo(addresses: readonly string[] | undefined) {
+  if (!addresses?.length) return {};
+  const entries = addresses.map((address) => ({
+    address,
+    family: isIP(address) === 6 ? 6 : 4,
+  }));
+  return {
+    autoSelectFamily: true,
+    lookup: (
+      _host: string,
+      options: { all?: boolean } | number | undefined,
+      callback: (...args: unknown[]) => void,
+    ) => {
+      if (typeof options === "object" && options?.all) callback(null, entries);
+      else callback(null, entries[0]?.address, entries[0]?.family);
+    },
   };
 }
 
@@ -571,13 +599,20 @@ function refuse(socket: Socket, reason: string) {
 
 /** Open a tunnel to host:port, through the upstream proxy when there is one. */
 function tunnel(
-  target: { host: string; port: number },
+  target: { host: string; port: number; addresses?: readonly string[] },
   upstream: Egress | null,
   onReady: (socket: Socket) => void,
   onError: (error: Error) => void,
 ) {
   if (!upstream) {
-    const socket = connect(target.port, target.host, () => onReady(socket));
+    const socket = connect(
+      {
+        host: target.host,
+        port: target.port,
+        ...(pinnedTo(target.addresses) as object),
+      },
+      () => onReady(socket),
+    );
     socket.once("error", onError);
     return;
   }
@@ -687,7 +722,7 @@ export async function startEgressFilter(
         .end(decision.reason);
       return;
     }
-    forwardPlain(request, response, target, upstream, decision.address);
+    forwardPlain(request, response, target, upstream, decision.addresses);
   });
 
   server.on(
@@ -711,7 +746,11 @@ export async function startEgressFilter(
         return;
       }
       tunnel(
-        { host: upstream ? host : (decision.address ?? host), port },
+        {
+          host,
+          port,
+          ...(upstream ? {} : { addresses: decision.addresses }),
+        },
         upstream,
         (remote) => {
           client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -766,7 +805,7 @@ function forwardPlain(
   response: import("node:http").ServerResponse,
   target: URL,
   upstream: Egress | null,
-  address?: string,
+  addresses?: readonly string[],
 ) {
   const headers = { ...request.headers };
   delete headers["proxy-authorization"];
@@ -777,10 +816,11 @@ function forwardPlain(
     : undefined;
   const outbound = httpRequest(
     {
-      // The checked address, not the name: a second lookup could answer something else. The Host
-      // header still names the site.
-      host: via ? via.host : (address ?? target.hostname),
+      // Reached through the checked addresses only (see `pinnedTo`): a second lookup could answer
+      // something else. The Host header still names the site.
+      host: via ? via.host : target.hostname,
       port: via ? via.port : Number(target.port || 80),
+      ...(via ? {} : (pinnedTo(addresses) as object)),
       method: request.method,
       path: via ? target.toString() : `${target.pathname}${target.search}`,
       headers: { ...headers, ...(auth ? { "proxy-authorization": auth } : {}) },

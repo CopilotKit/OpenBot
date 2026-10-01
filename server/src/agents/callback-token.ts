@@ -152,6 +152,7 @@ export function readRunAssertion(
   signed: unknown,
   encryptionKey: string,
   now: number = Date.now(),
+  options: { ignoreExpiry?: boolean } = {},
 ): RunAssertion | null {
   if (typeof signed !== "string" || !signed) return null;
 
@@ -170,7 +171,7 @@ export function readRunAssertion(
     ) {
       return null;
     }
-    if (payload.exp <= now) return null;
+    if (!options.ignoreExpiry && payload.exp <= now) return null;
     if (
       payload.handoff !== undefined &&
       (!payload.handoff ||
@@ -370,4 +371,21 @@ export async function authoriseAgentCall(options: {
     initiator: assertion.initiator,
     run: assertion,
   };
+}
+
+/**
+ * The assertion stored with an approved action, read for carrying that action out.
+ *
+ * The signature is checked; the expiry is not. The expiry bounds how long a live run may call back,
+ * but an approval is answered when the person gets to it, usually long after ten minutes, and the
+ * approval is what authorises the action now. Read with the live expiry, a hand-off approved late
+ * lost its depth and hand-off claim and restarted the Bot-to-Bot chain at depth zero.
+ */
+export function readApprovedRunAssertion(
+  signed: unknown,
+  encryptionKey: string,
+): RunAssertion | null {
+  return readRunAssertion(signed, encryptionKey, Date.now(), {
+    ignoreExpiry: true,
+  });
 }

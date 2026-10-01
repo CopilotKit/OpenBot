@@ -319,6 +319,56 @@ describe("the filter proxy", () => {
     await target.close();
   });
 
+  // A name with an address the computer cannot reach first (here ::1, where nothing listens) and a
+  // reachable one second: the connection has to fall back to the next checked address, as Node's
+  // own connect does, instead of failing on the first.
+  async function dualStack() {
+    const target = await origin();
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password ?? "";
+    setEgressPolicy("sales", {
+      mode: "allowlist_only",
+      rules: [{ type: "domain", value: "dual.example.test" }],
+    });
+    setEgressResolver(async (host) =>
+      host === "dual.example.test" ? ["::1", "127.0.0.1"] : [],
+    );
+    return { target, filter, secret };
+  }
+
+  test("a plain HTTP request falls back to the next checked address", async () => {
+    const { target, filter, secret } = await dualStack();
+    const answer = await new Promise<string>((resolve, reject) => {
+      const socket = connect(filter.port, "127.0.0.1", () => {
+        socket.write(
+          `GET http://dual.example.test:${target.port}/ HTTP/1.1\r\nHost: dual.example.test:${target.port}\r\nProxy-Authorization: Basic ${Buffer.from(`sales:${secret}`).toString("base64")}\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      let seen = "";
+      socket.on("data", (chunk) => {
+        seen += chunk.toString();
+      });
+      socket.on("end", () => resolve(seen));
+      socket.on("error", reject);
+    });
+    expect(answer.split("\r\n")[0]).toContain("200");
+    expect(answer).toContain("reached");
+    await target.close();
+  });
+
+  test("a CONNECT tunnel falls back to the next checked address", async () => {
+    const { target, filter, secret } = await dualStack();
+    expect(
+      await connectThrough(
+        filter.port,
+        `dual.example.test:${target.port}`,
+        "sales",
+        secret,
+      ),
+    ).toContain("200");
+    await target.close();
+  });
+
   test("a forwarded plain-HTTP request leaves once, not back into the filter", async () => {
     let reached = 0;
     const server = createServer((_request, response) => {
