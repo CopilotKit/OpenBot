@@ -404,3 +404,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 ## License
 
 [MIT](./LICENSE) © CopilotKit
+
+### Public-web research with Parallel
+
+[Configure Parallel Search](docs/parallel-research.md) through Plugins to give Bots public-web search and source extraction. Standard built-in Bot guidance and the Research Desk example use Parallel by default when its two tools are granted. Administrator grants, policy decisions, audit records and revocation remain required; adding a catalogue entry does not grant access automatically.
