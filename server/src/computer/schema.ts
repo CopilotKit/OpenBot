@@ -30,6 +30,7 @@ export const COMPUTER_TOOLS = [
   "computer_key",
   "computer_scroll",
   "computer_read_file",
+  "computer_download_file",
   "computer_write_file",
   "computer_list_files",
 ] as const;
@@ -40,11 +41,11 @@ export const COMPUTER_TOOLS = [
  * These are the calls the gateway must decide on. Reading a PAGE a Bot has already been allowed to
  * open is not a new decision; clicking "Confirm payment" on it is.
  *
- * Both file tools are here, including the read. That differs from `computer_read`, which
- * is ungoverned, and it is deliberate: a page was already permitted when it was opened, whereas the
- * workspace accumulates whatever a Bot has put in it across every task it has ever run, so "which
- * files may this Bot read" is a question a deployment genuinely needs to be able to answer. The build
- * doc says both file tools go through the gateway, and this is why that is right.
+ * Every workspace file tool is here, including the read and the download. That differs from
+ * `computer_read`, which is ungoverned, and it is deliberate: a page was already permitted when it
+ * was opened, whereas the workspace accumulates whatever a Bot has put in it across every task it
+ * has ever run, so "which files may this Bot read, list, download or write" is a question a
+ * deployment genuinely needs to be able to answer.
  */
 export const COMPUTER_ACTING_TOOLS = [
   // Navigation is governed too, and not only guarded. The client's target guard refuses a forbidden
@@ -57,6 +58,7 @@ export const COMPUTER_ACTING_TOOLS = [
   "computer_key",
   "computer_scroll",
   "computer_read_file",
+  "computer_download_file",
   "computer_write_file",
   "computer_list_files",
 ] as const;
@@ -206,6 +208,7 @@ export type ListFilesResult = {
 };
 
 export type ReadFileInput = { path: string };
+export type DownloadFileInput = { path: string };
 export type ReadFileResult = {
   path: string;
   text: string;

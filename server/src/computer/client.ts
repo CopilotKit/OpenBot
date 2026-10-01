@@ -58,6 +58,28 @@ export class WorkspaceRequestError extends Error {
   }
 }
 
+/** The workspace has no file at the requested path. */
+export class WorkspaceNotFoundError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "WorkspaceNotFoundError";
+  }
+}
+
+/** The requested workspace file is larger than the download limit. */
+export class WorkspaceTooLargeError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "WorkspaceTooLargeError";
+  }
+}
+
+/** Raw bytes and their size, kept as a stream until the caller sends them onward. */
+export type ComputerDownload = {
+  body: ReadableStream<Uint8Array>;
+  bytes: number;
+};
+
 /** The page changed after the caller received its element references. */
 export class StaleSnapshotError extends Error {
   constructor(
@@ -138,6 +160,13 @@ export interface ComputerTransport {
     url: string,
     toolCallId?: string,
   ): Promise<NavigateResult>;
+  download(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    caller?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ComputerDownload>;
 }
 
 /**
@@ -152,14 +181,14 @@ export function createComputerTransport(
   const doFetch = options.fetchImpl ?? fetch;
   const defaultTimeoutMs = options.timeoutMs ?? 45_000;
 
-  async function call<T>(
+  async function request(
     baseUrl: string,
     botId: string,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
     timeoutMsOverride?: number,
-  ): Promise<T> {
+  ): Promise<Response> {
     if (caller?.aborted) {
       throw new ComputerStoppedError("The action was stopped.");
     }
@@ -173,7 +202,6 @@ export function createComputerTransport(
      * this becomes the backstop rather than the limit.
      */
     const timeoutMs = timeoutMsOverride ?? defaultTimeoutMs;
-
     const target = baseUrl.replace(/\/$/, "");
     let response: Response;
     try {
@@ -209,7 +237,25 @@ export function createComputerTransport(
           : "The assistant's computer is not running.",
       );
     }
+    return response;
+  }
 
+  async function call<T>(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    init?: RequestInit,
+    caller?: AbortSignal,
+    timeoutMsOverride?: number,
+  ): Promise<T> {
+    const response = await request(
+      baseUrl,
+      botId,
+      path,
+      init,
+      caller,
+      timeoutMsOverride,
+    );
     const body = (await response.json().catch(() => null)) as Record<
       string,
       unknown
@@ -218,6 +264,40 @@ export function createComputerTransport(
       throwMappedError(response.status, body);
     }
     return body as T;
+  }
+
+  async function download(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    caller?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ComputerDownload> {
+    const response = await request(
+      baseUrl,
+      botId,
+      path,
+      { method: "GET" },
+      caller,
+      timeoutMs,
+    );
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as Record<
+        string,
+        unknown
+      > | null;
+      throwMappedError(response.status, body);
+    }
+
+    const length = response.headers.get("content-length");
+    const bytes =
+      length !== null && /^\d+$/.test(length) ? Number(length) : Number.NaN;
+    if (!response.body || !Number.isSafeInteger(bytes) || bytes < 0) {
+      throw new ComputerUnavailableError(
+        "The assistant's computer returned an invalid file download.",
+      );
+    }
+    return { body: response.body, bytes };
   }
 
   function post<T>(
@@ -260,7 +340,7 @@ export function createComputerTransport(
     });
   }
 
-  return { call, post, navigate };
+  return { call, post, navigate, download };
 }
 
 /** Map agent-computer responses to errors that a caller can act on. */
@@ -293,6 +373,12 @@ function throwMappedError(
   }
   if (status === 400) {
     throw new WorkspaceRequestError(detail);
+  }
+  if (status === 404) {
+    throw new WorkspaceNotFoundError(detail);
+  }
+  if (status === 413) {
+    throw new WorkspaceTooLargeError(detail);
   }
   if (/waiting for locator|Timeout .* exceeded/i.test(detail)) {
     const ref = detail.match(/aria-ref=([A-Za-z0-9_-]+)/)?.[1];

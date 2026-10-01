@@ -80,6 +80,7 @@ describe("reading and writing inside the workspace", () => {
       readBytes: 10,
       writeBytes: 1000,
       listEntries: 500,
+      downloadBytes: 1000,
     });
     await ws.write("long.txt", "0123456789ABCDEF");
     const read = await ws.read("long.txt");
@@ -95,6 +96,7 @@ describe("reading and writing inside the workspace", () => {
       readBytes: 1000,
       writeBytes: 8,
       listEntries: 500,
+      downloadBytes: 1000,
     });
     await expect(ws.write("big.txt", "far too long")).rejects.toThrow(
       WorkspaceFileError,
