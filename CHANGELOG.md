@@ -184,6 +184,14 @@ Anthropic key), and Pydantic AI builds each provider's client from the environme
 given "" as the address. The Bot now removes an empty value before building the model, as
 `agent-langgraph-agui` already does, so the SDK uses its own endpoint. A real endpoint is unchanged.
 
+### The Langroid Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the Langroid Bot failed every run with "Connection error.". Compose
+writes `OPENAI_BASE_URL` empty when the choice is a plain OpenAI key, and the OpenAI SDK only
+defaults an absent URL, so it was given "" as the address. The Bot now drops an empty
+`OPENAI_BASE_URL` before it builds its client, as it already does for an empty `OPENAI_API_KEY`.
+An OpenAI-compatible endpoint is unchanged.
+
 ### Find older conversations and keep chat preferences across devices
 
 The sidebar loads older conversations as the person scrolls. Settings save the choice to emphasize
