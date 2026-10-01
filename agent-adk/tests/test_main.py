@@ -180,8 +180,10 @@ def test_a_namespaced_model_name_is_sent_to_the_endpoint(monkeypatch, provider, 
 
     async def roundtrip():
         body = {
-            "threadId": "namespaced-model",
-            "runId": "first-run",
+            # One thread and run per case: the adapter keeps a thread's state for the life of the
+            # process, so reusing them made the second case answer from the first one's thread.
+            "threadId": f"namespaced-model-{model}",
+            "runId": f"first-run-{model}",
             "state": {},
             "context": [],
             "forwardedProps": {},
