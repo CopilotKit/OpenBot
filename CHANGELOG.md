@@ -39,6 +39,12 @@ refused in every mode, including `allow_all`, and the browser's WebRTC traffic n
 filter instead of around it. A computer run without an API server can set
 `EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
 
+### Provider and Bot lookups ignore inherited object properties
+
+Unknown names such as `constructor` and `__proto__` no longer return an inherited
+JavaScript object as a provider or Bot entry. Unknown providers return no spec, and
+missing Bots raise the existing startup error. Configured providers and Bots are unchanged.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
