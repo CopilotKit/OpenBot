@@ -8,7 +8,8 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "../src/plugins/catalogue";
-import { grantedToolGuidance, type GrantedTool } from "../src/plugins/tools";
+import { type GrantedTool, grantedToolGuidance } from "../src/plugins/tools";
+
 const tool = (server: string, name: string): GrantedTool => ({
   name: `mcp__${server}__${name}`,
   ref: `${server}/${name}`,
@@ -40,18 +41,17 @@ describe("Parallel public-web research", () => {
       serverCredentialKind(catalogueEntry("parallel-authenticated")!),
     ).toBe("mcp");
   });
-  test("uses Parallel by default only while both research tools are actually offered", () => {
+  test("describes Parallel only while both research tools are actually offered", () => {
     expect(grantedToolGuidance(pair())).toContain(
-      "Parallel provides public-web search and extraction.",
+      "Parallel provides public-web search and extraction",
     );
-    expect(grantedToolGuidance(pair())).toContain(
-      "unless the user explicitly chooses another authorized provider",
-    );
+    // Described, not preferred: a Bot holding another search tool is not told to pass it over.
+    expect(grantedToolGuidance(pair())).not.toContain("by default");
     expect(grantedToolGuidance([tool("parallel", "web_search")])).not.toContain(
-      "Parallel provides public-web search and extraction.",
+      "Parallel provides public-web search and extraction",
     );
     expect(grantedToolGuidance([], ["parallel"])).not.toContain(
-      "Parallel provides public-web search and extraction.",
+      "Parallel provides public-web search and extraction",
     );
     expect(grantedToolGuidance([])).toBe("");
   });
@@ -61,7 +61,7 @@ describe("Parallel public-web research", () => {
       ...pair("parallel-authenticated"),
     ]);
     expect(guidance).toContain(
-      "Use mcp__parallel-authenticated__web_search and mcp__parallel-authenticated__web_fetch by default",
+      "mcp__parallel-authenticated__web_search and mcp__parallel-authenticated__web_fetch discover sources",
     );
     expect(guidance).toContain(
       "it does not connect a person's private account",

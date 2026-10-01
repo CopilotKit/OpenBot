@@ -1,6 +1,6 @@
 # Public-web research with Parallel
 
-Parallel provides public-web search and extraction for OpenBot. The standard built-in Bot guidance selects it for public-web research when both its `web_search` and `web_fetch` tools are granted, unless the user explicitly chooses another authorized provider. The shipped Research Desk example also includes a public-web research skill. This configuration is conditional on ordinary authorization: no existing Bot receives new access automatically.
+Parallel provides public-web search and extraction for OpenBot. When both its `web_search` and `web_fetch` tools are granted to a Bot, the built-in Bot guidance describes them to it for public-web research, alongside whatever other tools it holds. The shipped Research Desk example also includes a public-web research skill. This configuration is conditional on ordinary authorization: no existing Bot receives new access automatically.
 
 ## Enable research
 

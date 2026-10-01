@@ -150,7 +150,7 @@ export function grantedToolGuidance(
   return [
     ...(tools.length > 0
       ? [
-          "You can reach these systems directly through the granted connectors. Account access follows each connector’s authentication:",
+          "You can reach these systems directly, as the person asking, with their own access:",
         ]
       : []),
     ...[...bySystem.entries()].map(
@@ -170,7 +170,7 @@ export function grantedToolGuidance(
       : []),
     ...(researchConnector
       ? [
-          `Parallel provides public-web search and extraction. Use ${researchTools.map((tool) => tool.name).join(" and ")} by default to discover sources and read selected pages, unless the user explicitly chooses another authorized provider.`,
+          `Parallel provides public-web search and extraction: ${researchTools.map((tool) => tool.name).join(" and ")} discover sources and read selected pages.`,
           "Parallel searches the public web; it does not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents. Generate one session_id for the conversation and reuse it on related search/fetch calls. Omit model_name unless the exact configured model identifier is known.",
           "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
         ]
