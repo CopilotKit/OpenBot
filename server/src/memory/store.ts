@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { memorySources, personalMemories } from "../db/schema/memory";
 import {
@@ -115,9 +115,29 @@ export function createMemoryStore(database: Database) {
           observedAt,
           importDigest: digest,
         })
+        .onConflictDoNothing({
+          target: [personalMemories.ownerUserId, personalMemories.importDigest],
+          where: sql`${personalMemories.formedBy} = 'bot'`,
+        })
         .returning({ id: personalMemories.id });
-      if (!row) throw new Error("Memory insert returned no row.");
-      return { id: row.id, duplicate: false, forgotten: false };
+      if (row) return { id: row.id, duplicate: false, forgotten: false };
+      // Formed by a concurrent run between the check above and this insert.
+      const [raced] = await database
+        .select({
+          id: personalMemories.id,
+          deletedAt: personalMemories.deletedAt,
+        })
+        .from(personalMemories)
+        .where(
+          and(
+            eq(personalMemories.ownerUserId, ownerUserId),
+            eq(personalMemories.formedBy, "bot"),
+            eq(personalMemories.importDigest, digest),
+          ),
+        )
+        .limit(1);
+      if (!raced) throw new Error("Memory insert returned no row.");
+      return { id: raced.id, duplicate: true, forgotten: !!raced.deletedAt };
     },
     async update(ownerUserId: string, id: string, input: unknown) {
       const patch = parseMemoryPatch(input);
@@ -324,7 +344,38 @@ export function createMemoryStore(database: Database) {
        */
       formed?: { botId: string; heldServerIds: ReadonlySet<string> },
     ) {
-      const rows = await database
+      /*
+       * Every filter in the query, not after it. Taking the person's newest rows across all their
+       * Bots and filtering here meant a person with busy sources on other Bots lost this Bot's older
+       * memories altogether, and a search could never reach them.
+       */
+      const held = [...(formed?.heldServerIds ?? [])];
+      const term = search.trim();
+      const formedByThisBot = formed
+        ? and(
+            eq(personalMemories.formedBy, "bot"),
+            eq(personalMemories.formedByAgentId, formed.botId),
+            or(
+              isNull(personalMemories.sourceRef),
+              held.length > 0
+                ? inArray(
+                    sql<string>`split_part(${personalMemories.sourceRef}, '/', 1)`,
+                    held,
+                  )
+                : sql`false`,
+            ),
+          )
+        : undefined;
+      const personOrSource = and(
+        sql`${personalMemories.formedBy} <> 'bot'`,
+        or(
+          isNull(personalMemories.sourceId),
+          eligibleSourceIds.length > 0
+            ? inArray(personalMemories.sourceId, eligibleSourceIds)
+            : sql`false`,
+        ),
+      );
+      return database
         .select()
         .from(personalMemories)
         .where(
@@ -332,26 +383,16 @@ export function createMemoryStore(database: Database) {
             eq(personalMemories.ownerUserId, ownerUserId),
             eq(personalMemories.enabled, true),
             isNull(personalMemories.deletedAt),
+            formedByThisBot
+              ? or(formedByThisBot, personOrSource)
+              : personOrSource,
+            term
+              ? sql`strpos(lower(${personalMemories.content}), lower(${term})) > 0`
+              : undefined,
           ),
         )
         .orderBy(desc(personalMemories.updatedAt))
-        .limit(500);
-      const allowed = new Set(eligibleSourceIds);
-      return rows
-        .filter(
-          (row) =>
-            (row.formedBy === "bot"
-              ? !!formed &&
-                row.formedByAgentId === formed.botId &&
-                (!row.sourceRef ||
-                  formed.heldServerIds.has(row.sourceRef.split("/")[0] ?? ""))
-              : !row.sourceId || allowed.has(row.sourceId)) &&
-            (!search ||
-              row.content
-                .toLocaleLowerCase()
-                .includes(search.toLocaleLowerCase())),
-        )
-        .slice(0, 40);
+        .limit(40);
     },
   };
 }

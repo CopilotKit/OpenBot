@@ -6,7 +6,7 @@ import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { agents, users } from "../src/db/schema/core";
 import { agentProfiles } from "../src/db/schema/coworker";
-import { personalMemories } from "../src/db/schema/memory";
+import { memorySources, personalMemories } from "../src/db/schema/memory";
 import { mcpServers, mcpTools } from "../src/db/schema/plugins";
 import { createMemoryIngestion } from "../src/memory/ingestion";
 import { createMemoryStore } from "../src/memory/store";
@@ -272,4 +272,87 @@ test("removing a source deletes its imported records", async () => {
         ),
       ),
   ).toHaveLength(0);
+});
+test("a resync of a healthy source keeps its facts in recall while it runs", async () => {
+  const value = await source();
+  expect(await store.claimSync(owner, value.id)).not.toBeNull();
+  expect(
+    (await ingestion.recall(owner, bot)).some(
+      (row) => row.sourceId === value.id,
+    ),
+  ).toBe(true);
+  // A source whose last sync failed stays hidden while it retries, as above.
+  await store.failSync(owner, value.id, "Vendor unavailable");
+  await database
+    .update(memorySources)
+    .set({ nextSyncAt: new Date(0) })
+    .where(eq(memorySources.id, value.id));
+  expect(await store.claimSync(owner, value.id)).not.toBeNull();
+  expect(
+    (await ingestion.recall(owner, bot)).some(
+      (row) => row.sourceId === value.id,
+    ),
+  ).toBe(false);
+  await store.failSync(owner, value.id, "Test lease released");
+});
+test("recall reaches this Bot's memories however many other Bots' are newer", async () => {
+  const mine = randomUUID();
+  await database.insert(personalMemories).values({
+    id: mine,
+    ownerUserId: owner,
+    content: "The quarterly review is in the Lisbon office",
+    provenance: "Read from Docs",
+    formedBy: "bot",
+    formedByAgentId: bot,
+  });
+  // Six hundred newer memories formed by another Bot for the same person.
+  await database.insert(personalMemories).values(
+    Array.from({ length: 600 }, (_, index) => ({
+      id: randomUUID(),
+      ownerUserId: owner,
+      content: `Other Bot fact ${index}`,
+      provenance: "Read elsewhere",
+      formedBy: "bot" as const,
+      formedByAgentId: otherBot,
+      updatedAt: new Date(Date.now() + 60_000 + index),
+    })),
+  );
+  try {
+    const found = await ingestion.recall(owner, bot, "lisbon");
+    expect(found.map((row) => row.id)).toEqual([mine]);
+  } finally {
+    await database
+      .delete(personalMemories)
+      .where(
+        and(
+          eq(personalMemories.ownerUserId, owner),
+          inArray(personalMemories.formedByAgentId, [bot, otherBot]),
+        ),
+      );
+  }
+});
+test("the same fact formed at once by two runs is stored once", async () => {
+  const content = `Concurrent fact ${randomUUID()}`;
+  const results = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      store.formMemory(owner, {
+        agentId: bot,
+        content,
+        sourceApp: "Docs",
+        sourceRef: ref,
+      }),
+    ),
+  );
+  const rows = await database
+    .select({ id: personalMemories.id })
+    .from(personalMemories)
+    .where(
+      and(
+        eq(personalMemories.ownerUserId, owner),
+        eq(personalMemories.content, content),
+      ),
+    );
+  expect(rows).toHaveLength(1);
+  expect(new Set(results.map((result) => result.id)).size).toBe(1);
+  expect(results.filter((result) => !result.duplicate)).toHaveLength(1);
 });

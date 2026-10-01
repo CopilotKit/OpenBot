@@ -57,6 +57,7 @@ import type {
 import { EventType } from "@ag-ui/client";
 import { NOT_SHOWN } from "../../../shared/component-markers";
 import { frameFiring } from "../../../shared/routine-firing";
+import { headlessTurnRefusal } from "../admin/controls";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { guardBotTurn } from "../agents/lifecycle";
 import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
@@ -339,6 +340,14 @@ export function createTurnRunner(options: {
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
     // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
     signal = await guardBotTurn({ ownerUserId, agentId, signal });
+    // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
+    // crosses that gate, so every one of them meets the same check here instead.
+    const refused = await headlessTurnRefusal({ ownerUserId, agentId });
+    if (refused) {
+      const error = new Error(refused);
+      error.name = "CapabilityRefusedError";
+      throw error;
+    }
     if (continuation && continuation.snapshot.threadId !== threadId)
       throw new Error(
         "The interrupted conversation does not match this thread.",

@@ -90,6 +90,9 @@ function resetLines(plan: ResetPlan): string[] {
     [plan.routines, "routine", "routines"],
     [plan.responsibilities, "responsibility", "responsibilities"],
     [plan.followUps, "scheduled follow-up", "scheduled follow-ups"],
+    [plan.formedMemories, "memory it formed", "memories it formed"],
+    [plan.backgroundResearch, "background research", "background research"],
+    [plan.standingApprovals, "standing permission", "standing permissions"],
   ];
   return lines
     .filter(([count]) => count > 0)

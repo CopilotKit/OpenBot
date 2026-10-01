@@ -33,12 +33,12 @@
  * Kubernetes or ECS, where the orchestrator's own restart policy brings a process back.
  */
 
-import { readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
-import { browserRuntimeFromEnv } from "./browser-runtime";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
+import { browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
@@ -112,6 +112,39 @@ const LAUNCH_ARGS = [
   // headed mode also provides a window a person can use on the native desktop or virtual display.
   "--disable-blink-features=AutomationControlled",
 ];
+
+/**
+ * WebRTC kept inside the proxy, written into the profile before Chromium reads it.
+ *
+ * Chromium sends WebRTC over UDP straight past an HTTP proxy unless told not to, so a page in a Bot's
+ * browser could reach the network around the egress filter. `disable_non_proxied_udp` allows only
+ * UDP through a proxy, and an HTTP proxy carries none, so WebRTC goes over the proxy or not at all.
+ * A preference rather than the `--force-webrtc-ip-handling-policy` switch, which current Chromium
+ * no longer reads (measured: the switch on the command line, packets still sent). Merged into
+ * whatever Preferences the profile already has, so nothing else the profile remembers is lost.
+ */
+export async function keepWebRtcInsideProxy(profileDir: string) {
+  const file = join(profileDir, "Default", "Preferences");
+  let preferences: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      preferences = parsed;
+  } catch {
+    // No Preferences yet (a new profile), or one Chromium never finished writing: start clean.
+  }
+  const webrtc =
+    preferences.webrtc && typeof preferences.webrtc === "object"
+      ? (preferences.webrtc as Record<string, unknown>)
+      : {};
+  if (webrtc.ip_handling_policy === "disable_non_proxied_udp") return;
+  preferences.webrtc = {
+    ...webrtc,
+    ip_handling_policy: "disable_non_proxied_udp",
+  };
+  await mkdir(join(profileDir, "Default"), { recursive: true });
+  await writeFile(file, JSON.stringify(preferences));
+}
 
 console.info(
   JSON.stringify({
@@ -434,7 +467,10 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         const dir = directoryFor(botId);
         // A second native helper can target the same data root on another port. Do not remove an
         // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
-        if (!LOCAL_CHROME) await sweepLocks(dir);
+        if (!LOCAL_CHROME) {
+          await sweepLocks(dir);
+          await keepWebRtcInsideProxy(dir);
+        }
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
           channel: BROWSER_RUNTIME.channel,

@@ -10,6 +10,8 @@ const recordingId = "11111111-1111-1111-1111-111111111111";
 let root = "";
 let base = "";
 let child: ReturnType<typeof Bun.spawn> | undefined;
+// The computer opens only http(s) pages, so the fixture page is served rather than a data: URL.
+let site: ReturnType<typeof Bun.serve> | undefined;
 async function api(path: string, input?: unknown) {
   const response = await fetch(`${base}${path}`, {
     method: input === undefined ? "GET" : "POST",
@@ -43,6 +45,8 @@ beforeAll(async () => {
       PORT: String(port),
       COMPUTER_BROWSER_BACKEND: "managed",
       COMPUTER_BROWSER_MODE: "headless",
+      // No API server pushes this computer a network policy, so it browses before one arrives.
+      EGRESS_POLICY_REQUIRED: "0",
       PROFILES_DIR: join(root, "profiles"),
       WORKSPACE_DIR: join(root, "workspace"),
     },
@@ -75,16 +79,20 @@ afterAll(async () => {
       await child.exited;
     }
   }
+  site?.stop(true);
   if (root) await rm(root, { recursive: true, force: true });
 }, 15000);
 describe.skipIf(!asked)("real human live-screen demonstration", () => {
   test("successful browser input emits accessible steps without the secret value", async () => {
-    const page =
-      "data:text/html," +
-      encodeURIComponent(
-        '<label>Password<input type="password" autofocus></label><output>empty</output><script>document.querySelector("input").addEventListener("input",e=>document.querySelector("output").textContent="characters:"+e.target.value.length)</script>',
-      );
-    await api("/navigate", { url: page });
+    const html =
+      '<label>Password<input type="password" autofocus></label><output>empty</output><script>document.querySelector("input").addEventListener("input",e=>document.querySelector("output").textContent="characters:"+e.target.value.length)</script>';
+    site = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    });
+    await api("/navigate", { url: `http://127.0.0.1:${site.port}/` });
     const requested = await api("/control/request", {
       reason: "Record a browser demonstration",
     });

@@ -80,6 +80,8 @@ export const signInRequests = pgTable(
       .defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** While `filling`: past this, the attempt is treated as abandoned and the request reopens. */
+    fillingUntil: timestamp("filling_until", { withTimezone: true }),
   },
   (t) => [
     index("sign_in_requests_owner_idx").on(t.ownerUserId, t.status),

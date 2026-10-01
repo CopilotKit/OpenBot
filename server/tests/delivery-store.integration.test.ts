@@ -232,3 +232,50 @@ test("SMS STOP keeps the binding connected but marked; START clears it", async (
       ?.optedOutAt,
   ).toBeNull();
 });
+test("a push token registered by one person cannot be moved to another person's account", async () => {
+  const token = `ExponentPushToken[${prefix.replace(/[^A-Za-z0-9]/g, "")}]`;
+  const projectId = randomUUID();
+  const ownersDevice = randomUUID();
+  await store.registerDevice({
+    id: ownersDevice,
+    ownerUserId: owner,
+    token,
+    projectId,
+    platform: "ios",
+  });
+  await expect(
+    store.registerDevice({
+      id: randomUUID(),
+      ownerUserId: stranger,
+      token,
+      projectId,
+      platform: "ios",
+    }),
+  ).rejects.toThrow("already registered to another account");
+  expect(await store.devices(owner)).toEqual([
+    expect.objectContaining({ id: ownersDevice, token }),
+  ]);
+  expect(await store.devices(stranger)).toEqual([]);
+  // The same person registering the same phone again keeps it.
+  await store.registerDevice({
+    id: ownersDevice,
+    ownerUserId: owner,
+    token,
+    projectId,
+    platform: "ios",
+  });
+  // After the owner signs out on the phone, the next person to sign in there takes the token.
+  await store.removeDevice(owner, ownersDevice);
+  const next = randomUUID();
+  await store.registerDevice({
+    id: next,
+    ownerUserId: stranger,
+    token,
+    projectId,
+    platform: "ios",
+  });
+  expect(await store.devices(stranger)).toEqual([
+    expect.objectContaining({ id: next, token }),
+  ]);
+  expect(await store.devices(owner)).toEqual([]);
+});

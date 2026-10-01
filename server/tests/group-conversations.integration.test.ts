@@ -15,6 +15,7 @@ import {
 } from "../src/channels/group";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
+import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -24,9 +25,8 @@ import {
   users,
   workItems,
 } from "../src/db/schema";
-import type { TurnRunner } from "../src/routines/runner";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
+import type { TurnRunner } from "../src/routines/runner";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -512,6 +512,166 @@ describe("group conversations in PostgreSQL", () => {
       text: "From your notes: the launch slipped.",
     });
   });
+  test("while a reply waits on the owner's permission, other members do not see it stream in", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    const privateShare = createPrivateShareCheck({
+      approvals: {
+        open: async () =>
+          ({ id: `${prefix}-stream-share`, status: "pending" }) as never,
+        list: async () => [],
+        rules: async () => [],
+      },
+    });
+    let channelId = "";
+    let teammateMidRun = "";
+    let ownerMidRun = "";
+    const { conversations } = service({
+      replies: {
+        [ada]: async (input) => {
+          input.onText?.("From your notes: the launch slipped.");
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          teammateMidRun = JSON.stringify(
+            await conversations.list(teammate.id, channelId),
+          );
+          ownerMidRun = JSON.stringify(
+            await conversations.list(owner.id, channelId),
+          );
+          return "From your notes: the launch slipped.";
+        },
+      },
+      privateShare,
+    });
+    const channel = await conversations.create(owner.id, {
+      agentIds: [ada, grace],
+    });
+    channelId = channel.id;
+    const [row] = await database
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, teammate.id));
+    await conversations.addMember(owner.id, channel.id, { email: row?.email });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-stream-private`,
+      text: "status?",
+      agentId: ada,
+    });
+    await drain(conversations);
+    expect(teammateMidRun).not.toContain("launch slipped");
+    // The owner, whose Bot it is, still watches the reply arrive.
+    expect(ownerMidRun).toContain("launch slipped");
+  });
+
+  test("a reply still waiting on its owner's permission is not handed to another person's Bot", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    // Bots the teammate may use too, so the teammate can address them in the group.
+    await database
+      .update(agentProfiles)
+      .set({ visibility: "public" })
+      .where(inArray(agentProfiles.agentId, [ada, grace]));
+    const privateShare = createPrivateShareCheck({
+      approvals: {
+        open: async () =>
+          ({ id: `${prefix}-handed-share`, status: "pending" }) as never,
+        list: async () => [],
+        rules: async () => [],
+      },
+    });
+    let channelId = "";
+    let graceSaw = "";
+    const { conversations } = service({
+      replies: {
+        [ada]: async (input) => {
+          input.onText?.("From your notes: the launch slipped.");
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          // Meanwhile the teammate asks Grace, and another replica runs that turn.
+          await conversations.send(teammate.id, channelId, {
+            id: `${prefix}-handed-teammate`,
+            text: "what is the status?",
+            agentId: grace,
+          });
+          await conversations.sweep();
+          return "From your notes: the launch slipped.";
+        },
+        [grace]: (input) => {
+          graceSaw = JSON.stringify(input.userMessage?.content ?? "");
+          return "I do not know yet.";
+        },
+      },
+      privateShare,
+    });
+    const channel = await conversations.create(owner.id, {
+      agentIds: [ada, grace],
+    });
+    channelId = channel.id;
+    const [row] = await database
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, teammate.id));
+    await conversations.addMember(owner.id, channel.id, { email: row?.email });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-handed-private`,
+      text: "status?",
+      agentId: ada,
+    });
+    await drain(conversations);
+    expect(graceSaw).toContain("what is the status?");
+    expect(graceSaw).not.toContain("launch slipped");
+  });
+
+  test("a peer turn resumed after an approval keeps its depth in the Bot-to-Bot chain", async () => {
+    const owner = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    const { conversations, audit } = service({
+      replies: {
+        [ada]: () => "Over to you, @Grace.",
+        [grace]: () => {
+          throw new HeadlessToolSuspension("Waiting for your approval.", {
+            kind: "approval",
+            approvalId: `${prefix}-peer-approval`,
+          });
+        },
+      },
+      maxDepth: 1,
+    });
+    const channel = await conversations.create(owner.id, {
+      agentIds: [ada, grace],
+    });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-chain`,
+      text: "start",
+      agentId: ada,
+    });
+    await drain(conversations);
+    // Grace's turn is one hop deep, and paused.
+    expect(
+      audit.filter((event) => event.eventType === "agent.handoff_offered"),
+    ).toHaveLength(1);
+
+    await conversations.continueWaiting(
+      `${prefix}-peer-approval`,
+      async () => ({
+        replyText: "Done. Back to you, @Ada.",
+      }),
+    );
+    // Answering Ada would be a second hop, past the cap of one: refused, not offered.
+    const toAda = audit.filter(
+      (event) =>
+        (event.payload as { to?: string; target?: string }).to === ada ||
+        (event.payload as { target?: string }).target === ada,
+    );
+    expect(toAda.map((event) => event.eventType)).toEqual([
+      "agent.handoff_refused",
+    ]);
+    expect(toAda[0]?.payload).toMatchObject({ reason: "depth_cap", depth: 1 });
+  });
+
   test("a Team Bot's consent card in a group turn is a line in the shared transcript", async () => {
     const owner = await person();
     const teammate = await person();

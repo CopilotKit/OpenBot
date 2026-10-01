@@ -34,8 +34,8 @@ describe("capability resolution", () => {
       allowed: true,
       decidedBy: "default",
     });
-    expect(resolveCapability([], user, "publicTemplateSharing").allowed).toBe(
-      DEFAULT_CAPABILITIES.publicTemplateSharing,
+    expect(resolveCapability([], user, "teamBots").allowed).toBe(
+      DEFAULT_CAPABILITIES.teamBots,
     );
   });
 

@@ -16,6 +16,7 @@ import { readSignIn, requestSignIn } from "@/lib/passwords/mutations";
 import { FINAL_SIGN_IN } from "@/lib/passwords/queries";
 import { useActiveBotHolder } from "./active-bot";
 import { useFrontendTool } from "./approval-tools";
+import { useComputerAvailable } from "./computer-available";
 
 /** How long the open chat waits for the person to answer. The server's request lasts as long. */
 const WAIT_MS = 15 * 60_000;
@@ -56,7 +57,10 @@ export function SignInTool() {
   const bot = useActiveBotHolder();
   // The request the handler opened, so the render can show its form before the call finishes.
   const [pending, setPending] = useState<Record<string, string>>({});
+  // A sign-in is typed into the Bot's computer; see useComputerAvailable.
+  const available = useComputerAvailable();
   useFrontendTool({
+    available,
     name: "computer_request_sign_in",
     description: DESCRIPTION,
     parameters: z.object({

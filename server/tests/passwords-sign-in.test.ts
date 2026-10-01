@@ -164,10 +164,11 @@ describe("a sign-in request answered with a typed login", () => {
     );
     // And no username in the audit trail or the Bot's answer either.
     expect(everything(trail.rows, toolResult)).not.toContain(USERNAME);
+    // Saved after the sign-in is recorded, so a failed save cannot leave the request half done.
     expect(trail.rows.map((row) => row.eventType)).toEqual([
       "computer.sign_in_requested",
-      "password.saved",
       "computer.sign_in_completed",
+      "password.saved",
     ]);
   });
 
@@ -606,5 +607,80 @@ describe("an unattended turn that needs a sign-in", () => {
         ...context.store.requests.values(),
       ]),
     );
+  });
+});
+
+/**
+ * A request claimed for typing leaves `filling` on every path. Left there, every later attempt is
+ * answered "already being entered" and the waiting turn never resumes.
+ */
+describe("a sign-in that is being entered", () => {
+  test("is refused before anything is typed when saving is off and the person asked to save", async () => {
+    const context = setup({ manager: false });
+    const request = await context.service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    await expect(
+      context.service.submit("owner", request.id, actor, {
+        username: USERNAME,
+        password: PASSWORD,
+        save: true,
+      }),
+    ).rejects.toThrow(/turned off/);
+    expect(context.computer.fills).toHaveLength(0);
+    expect((await context.service.get("owner", request.id)).status).toBe(
+      "pending",
+    );
+  });
+
+  test("ends signed in, and the Bot is told, when saving the login fails after the site accepted it", async () => {
+    const context = setup();
+    context.store.saveLogin = async () => {
+      throw new Error("the vault is unavailable");
+    };
+    const request = await context.service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    await expect(
+      context.service.submit("owner", request.id, actor, {
+        username: USERNAME,
+        password: PASSWORD,
+        save: true,
+      }),
+    ).rejects.toThrow(/could not be saved/);
+    expect((await context.service.get("owner", request.id)).status).toBe(
+      "signed_in",
+    );
+    expect(context.resolved.map((row) => row.status)).toEqual(["signed_in"]);
+    expectNoCredential(everything(context.trail.rows, context.resolved));
+  });
+
+  test("an attempt that never finished opens again once its lease has passed", async () => {
+    const context = setup();
+    const request = await context.service.request({
+      ownerUserId: "owner",
+      botId: "bot",
+      site: "example.com",
+      actor,
+    });
+    // What a server that died mid-fill leaves behind.
+    await context.store.transition("owner", request.id, ["pending"], {
+      status: "filling",
+      fillingUntil: new Date(Date.now() - 1_000),
+    });
+    expect((await context.service.get("owner", request.id)).status).toBe(
+      "pending",
+    );
+    const done = await context.service.submit("owner", request.id, actor, {
+      username: USERNAME,
+      password: PASSWORD,
+    });
+    expect(done.status).toBe("signed_in");
   });
 });

@@ -58,6 +58,12 @@ export type SignInServiceDependencies = {
 
 const DEFAULT_TTL_MS = 15 * 60_000;
 const OPEN: readonly SignInStatus[] = ["pending", "taken_over"];
+/**
+ * How long one attempt may hold a request in `filling`. Past the computer's own sign-in backstop
+ * (75s), so a live attempt is never reopened under itself; a server that died mid-fill leaves the
+ * request this long and no longer.
+ */
+const FILLING_LEASE_MS = 120_000;
 const FINAL: readonly SignInStatus[] = [
   "signed_in",
   "failed",
@@ -143,6 +149,19 @@ export function createSignInService(deps: SignInServiceDependencies) {
     const request = await store.request(owner, id);
     if (!request)
       throw new SignInRefusedError("There is no such sign-in request.", 404);
+    if (
+      request.status === "filling" &&
+      request.fillingUntil !== null &&
+      request.fillingUntil <= new Date()
+    ) {
+      const reopened = await store.transition(owner, id, ["filling"], {
+        status: "pending",
+        fillingUntil: null,
+        outcome: "The last sign-in attempt did not finish. Try again.",
+      });
+      if (reopened) return load(owner, id);
+      return (await store.request(owner, id)) ?? request;
+    }
     if (OPEN.includes(request.status) && request.expiresAt <= new Date()) {
       const expired = await store.transition(owner, id, OPEN, {
         status: "expired",
@@ -218,8 +237,18 @@ export function createSignInService(deps: SignInServiceDependencies) {
           : "This sign-in request is no longer open.",
         409,
       );
+    // Refused before anything is typed: discovering this after the site accepted the login left the
+    // request in `filling` for good.
+    const saving =
+      method === "typed" && extra.save === true && !!credential.username;
+    if (saving && !(await managerOn(owner)))
+      throw new SignInRefusedError(
+        "Saving passwords is turned off for this workspace.",
+        403,
+      );
     const claimed = await store.transition(owner, id, ["pending"], {
       status: "filling",
+      fillingUntil: new Date(Date.now() + FILLING_LEASE_MS),
     });
     if (!claimed)
       throw new SignInRefusedError(
@@ -255,6 +284,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
       // Back to pending, so the person can correct a mistyped password. The Bot keeps waiting.
       const reopened = await store.transition(owner, id, ["filling"], {
         status: "pending",
+        fillingUntil: null,
         outcome: failure,
       });
       await audit("computer.sign_in_failed", actor, "computer", claimed.botId, {
@@ -267,33 +297,17 @@ export function createSignInService(deps: SignInServiceDependencies) {
       });
       throw new SignInRefusedError(failure, reopened ? 409 : 400);
     }
-    let savedLoginId: string | undefined;
-    if (method === "typed" && extra.save && credential.username) {
-      if (!(await managerOn(owner)))
-        throw new SignInRefusedError(
-          "Saving passwords is turned off for this workspace.",
-          403,
-        );
-      const saved = await store.saveLogin({
-        ownerUserId: owner,
-        origin: claimed.origin,
-        username: credential.username,
-        encryptedPassword: await encryptSecret(
-          deps.encryptionKey,
-          credential.password,
-        ),
-      });
-      savedLoginId = saved.id;
-      await audit("password.saved", actor, "password", saved.id, {
-        site: claimed.origin,
-        login: saved.id,
-      });
-    }
     if (method === "saved" && extra.loginId)
       await store.touchLogin(owner, extra.loginId);
+    /*
+     * Signed in is recorded, and the Bot told, BEFORE the optional save. The site accepted the login
+     * either way; a save that fails afterwards must not leave the request stuck in `filling` with the
+     * turn waiting on it.
+     */
     const done = await store.transition(owner, id, ["filling"], {
       status: "signed_in",
       method,
+      fillingUntil: null,
       outcome: `Signed in to ${claimed.origin}${page ? `; the page is now ${page}` : ""}.`,
       resolvedAt: new Date(),
     });
@@ -307,9 +321,38 @@ export function createSignInService(deps: SignInServiceDependencies) {
       site: done.origin,
       method,
       ...(extra.loginId ? { savedLogin: extra.loginId } : {}),
-      ...(savedLoginId ? { savedAs: savedLoginId } : {}),
     });
     await resolved(done);
+    if (saving && credential.username) {
+      try {
+        const saved = await store.saveLogin({
+          ownerUserId: owner,
+          origin: claimed.origin,
+          username: credential.username,
+          encryptedPassword: await encryptSecret(
+            deps.encryptionKey,
+            credential.password,
+          ),
+        });
+        await audit("password.saved", actor, "password", saved.id, {
+          site: claimed.origin,
+          login: saved.id,
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "password-save-failed",
+            request: id,
+            error: error instanceof Error ? error.name : "UnknownError",
+          }),
+        );
+        throw new SignInRefusedError(
+          "You are signed in, but the login could not be saved. Save it again from Passwords.",
+          // The request has moved on (it is signed in); only the optional save did not happen.
+          409,
+        );
+      }
+    }
     return done;
   }
 

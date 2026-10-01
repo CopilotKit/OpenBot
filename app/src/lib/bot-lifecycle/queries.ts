@@ -64,6 +64,9 @@ export type ResetPlan = {
   routines: number;
   responsibilities: number;
   followUps: number;
+  formedMemories: number;
+  backgroundResearch: number;
+  standingApprovals: number;
 };
 
 export type UpdateRouting = Record<UpdateKind, UpdateTransport[] | "all">;

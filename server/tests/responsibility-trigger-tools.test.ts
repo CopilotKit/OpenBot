@@ -211,7 +211,6 @@ test("each Slack event is re-checked against the owner's channel membership (fai
     slackAccess: () => access("U1", (channel) => channel === "C1"),
   });
   const event = {
-    agentId: "bot-1",
     teamId: "T1",
     eventId: "Ev1",
     eventTime: now,

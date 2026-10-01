@@ -50,7 +50,7 @@ test("signed GitHub event binds actor from owned repository registration", async
   expect(response.status).toBe(202);
   expect(events[0]?.ownerUserId).toBe("owner-1");
   expect(events[0]?.type).toBe("issues.opened");
-  expect(events[0]?.externalId).toBe("delivery-1");
+  expect(events[0]?.externalId).toMatch(/^body-[0-9a-f]{64}$/);
 });
 test("wrong signature cannot enqueue GitHub work", async () => {
   const { routes, events } = fixture();
@@ -76,4 +76,18 @@ test("valid signature for another repository cannot route to bound owner", async
     ).status,
   ).toBe(403);
   expect(events).toHaveLength(0);
+});
+test("the same signed event replayed with a fresh X-GitHub-Delivery dedupes", async () => {
+  const { routes, events } = fixture();
+  const body = JSON.stringify({
+    action: "opened",
+    repository: { full_name: "openbot/demo" },
+  });
+  for (const delivery of ["delivery-1", "delivery-2"]) {
+    const replay = request(body);
+    replay.headers.set("x-github-delivery", delivery);
+    expect((await routes.fetch(replay)).status).toBe(202);
+  }
+  expect(events).toHaveLength(2);
+  expect(events[0]?.externalId).toBe(events[1]?.externalId as string);
 });

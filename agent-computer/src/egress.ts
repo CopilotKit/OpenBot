@@ -331,6 +331,36 @@ function addressMatches(rule: EgressRule, address: string, port: number) {
 export type EgressDecision = { allowed: boolean; reason: string };
 
 /**
+ * Addresses no Bot may reach, whatever its policy says, allow_all included.
+ *
+ * Link-local is where every cloud keeps the endpoint that hands a machine its credentials:
+ * 169.254.169.254 on AWS, Azure, GCP and Oracle, with AWS and GCP also answering on the IPv6
+ * addresses below, and Alibaba on 100.100.100.200. The chart's NetworkPolicy cuts out 169.254/16
+ * too, but it is off by default and says nothing about IPv6, so this is the guard a default install
+ * actually has. It covers the browser and every command that honours the proxy variables.
+ */
+const ALWAYS_DENIED: readonly [string, number, "ipv4" | "ipv6"][] = [
+  ["169.254.0.0", 16, "ipv4"],
+  ["100.100.100.200", 32, "ipv4"],
+  ["fe80::", 10, "ipv6"],
+  ["fd00:ec2::254", 128, "ipv6"],
+  ["fd20:ce::254", 128, "ipv6"],
+];
+const alwaysDenied = new BlockList();
+for (const [address, prefix, family] of ALWAYS_DENIED)
+  alwaysDenied.addSubnet(address, prefix, family);
+
+/** True for a metadata or link-local address, including one written as IPv4-mapped IPv6. */
+export function isAlwaysDenied(addressInput: string): boolean {
+  const address = normalizeHost(addressInput);
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
+  const candidate = mapped ?? address;
+  const version = isIP(candidate);
+  if (version === 0) return false;
+  return alwaysDenied.check(candidate, version === 4 ? "ipv4" : "ipv6");
+}
+
+/**
  * May this connection go out?
  *
  * `resolved` is what the host name resolved to, when the caller resolved it. A domain rule matches a
@@ -345,6 +375,13 @@ export function egressDecision(
   resolved: readonly string[] = [],
 ): EgressDecision {
   const host = normalizeHost(hostInput);
+  const denied = [host, ...resolved].find(isAlwaysDenied);
+  if (denied !== undefined) {
+    return {
+      allowed: false,
+      reason: `${host} is a cloud metadata or link-local address, which no Bot may reach.`,
+    };
+  }
   if (policy.mode === "allow_all") {
     return {
       allowed: true,
@@ -404,7 +441,17 @@ export function needsResolution(policy: EgressPolicy, host: string): boolean {
 type RunningFilter = { port: number; secret: string; server: Server };
 let filter: RunningFilter | null = null;
 const policies = new Map<string, EgressPolicy>();
-let policyRequired = false;
+let policyRequired = true;
+
+type Resolver = (host: string) => Promise<string[]>;
+const systemResolver: Resolver = async (host) =>
+  (await lookup(host, { all: true })).map((entry) => entry.address);
+let resolver: Resolver = systemResolver;
+
+/** For tests: answer name lookups without DNS. Null puts the system resolver back. */
+export function setEgressResolver(next: Resolver | null) {
+  resolver = next ?? systemResolver;
+}
 
 /** Install (or with null, remove) the policy one Bot's connections are judged by. */
 export function setEgressPolicy(botId: string, policy: EgressPolicy | null) {
@@ -422,8 +469,9 @@ export function egressPolicyFor(botId: string): EgressPolicy | undefined {
  * A connection carrying a Bot in its proxy credentials is judged by that Bot's policy. One without
  * (a shell command, whose proxy variable has no credentials in it) is judged by the only policy on
  * this computer when there is one, and otherwise by every policy at once, so the most restrictive
- * wins. Nothing pushed yet allows, unless EGRESS_POLICY_REQUIRED says to refuse until a policy
- * arrives.
+ * wins. Nothing pushed yet refuses: the API server pushes a computer its policy before it acts and
+ * whenever the computer wakes, so a refusal here is only ever the gap before that push.
+ * EGRESS_POLICY_REQUIRED=0 lets a computer run with no API server pushing to it at all.
  */
 function policiesFor(botId: string | undefined): EgressPolicy[] | "refuse" {
   if (botId) {
@@ -439,6 +487,7 @@ async function decide(
   botId: string | undefined,
   host: string,
   port: number,
+  direct: boolean,
 ): Promise<EgressDecision & { address?: string }> {
   const judging = policiesFor(botId);
   if (judging === "refuse") {
@@ -449,16 +498,27 @@ async function decide(
     };
   }
   let resolved: string[] = [];
-  if (judging.some((policy) => needsResolution(policy, host))) {
+  /*
+   * Resolved whenever this filter makes the connection itself, so the address checked is the
+   * address connected to and a name cannot reach a metadata endpoint by resolving to one. Through an
+   * upstream proxy, that proxy resolves on its own network, which may be the only one with DNS, so a
+   * name is resolved here only when a range rule needs it.
+   */
+  const named = isIP(normalizeHost(host)) === 0;
+  if (
+    named &&
+    (direct || judging.some((policy) => needsResolution(policy, host)))
+  ) {
     try {
-      resolved = (await lookup(normalizeHost(host), { all: true })).map(
-        (entry) => entry.address,
-      );
+      resolved = await resolver(normalizeHost(host));
     } catch {
       return { allowed: false, reason: `${host} could not be resolved.` };
     }
   }
-  for (const policy of judging) {
+  // Checked even with no policy to judge by, which EGRESS_POLICY_REQUIRED=0 allows.
+  for (const policy of judging.length > 0
+    ? judging
+    : [{ mode: "allow_all" as const, rules: [] }]) {
     const decision = egressDecision(policy, host, port, resolved);
     if (!decision.allowed) return decision;
   }
@@ -551,9 +611,32 @@ export type EgressFilterOptions = {
   env?: Record<string, string | undefined>;
   /** 0 picks a free port. */
   port?: number;
-  /** Also point this process's HTTP(S)_PROXY at the filter, so shell commands go through it. */
-  exportToProcessEnv?: boolean;
+  /** Point the shell's commands at the filter (see `egressShellEnvironment`). */
+  forShell?: boolean;
 };
+
+/*
+ * NOT THIS PROCESS'S ENVIRONMENT. Bun's `http.request` follows HTTP_PROXY and ignores every option
+ * that should stop it (measured: `agent: false`, a fresh Agent and `createConnection` all still went
+ * to the proxy). With the filter's own address in this process's HTTP_PROXY, every plain-HTTP request
+ * the filter forwarded came straight back into the filter, without end, and a page waiting behind
+ * one never loaded. So the shell gets the address from here, and nothing else in this process does.
+ */
+let shellProxy: string | null = null;
+
+/** The proxy variables a shell command runs with while the filter is up: the filter, and no other. */
+export function egressShellEnvironment(): Record<string, string> {
+  if (!shellProxy) return {};
+  return {
+    HTTP_PROXY: shellProxy,
+    HTTPS_PROXY: shellProxy,
+    http_proxy: shellProxy,
+    https_proxy: shellProxy,
+    // The computer's own loopback services are not the network.
+    NO_PROXY: "127.0.0.1,localhost,::1",
+    no_proxy: "127.0.0.1,localhost,::1",
+  };
+}
 
 /**
  * Start the filter on 127.0.0.1.
@@ -565,8 +648,9 @@ export async function startEgressFilter(
   options: EgressFilterOptions = {},
 ): Promise<{ port: number; url: string; stop: () => Promise<void> }> {
   const env = options.env ?? process.env;
-  policyRequired =
-    env.EGRESS_POLICY_REQUIRED === "1" || env.EGRESS_POLICY_REQUIRED === "true";
+  policyRequired = !(
+    env.EGRESS_POLICY_REQUIRED === "0" || env.EGRESS_POLICY_REQUIRED === "false"
+  );
   if (filter) {
     return {
       port: filter.port,
@@ -592,7 +676,8 @@ export async function startEgressFilter(
     const port = Number(
       target.port || (target.protocol === "https:" ? 443 : 80),
     );
-    const decision = await decide(botId, target.hostname, port);
+    const upstream = upstreamFor(botId ?? "", env);
+    const decision = await decide(botId, target.hostname, port, !upstream);
     if (!decision.allowed) {
       response
         .writeHead(403, {
@@ -602,12 +687,7 @@ export async function startEgressFilter(
         .end(decision.reason);
       return;
     }
-    forwardPlain(
-      request,
-      response,
-      target,
-      botId ? upstreamFor(botId, env) : upstreamFor("", env),
-    );
+    forwardPlain(request, response, target, upstream, decision.address);
   });
 
   server.on(
@@ -624,12 +704,12 @@ export async function startEgressFilter(
         refuse(client, "A CONNECT names host:port.");
         return;
       }
-      const decision = await decide(botId, host, port);
+      const upstream = upstreamFor(botId ?? "", env);
+      const decision = await decide(botId, host, port, !upstream);
       if (!decision.allowed) {
         refuse(client, decision.reason);
         return;
       }
-      const upstream = upstreamFor(botId ?? "", env);
       tunnel(
         { host: upstream ? host : (decision.address ?? host), port },
         upstream,
@@ -656,24 +736,14 @@ export async function startEgressFilter(
   filter = { port, secret, server };
 
   const url = `http://127.0.0.1:${port}`;
-  if (options.exportToProcessEnv) {
-    for (const name of [
-      "HTTP_PROXY",
-      "HTTPS_PROXY",
-      "http_proxy",
-      "https_proxy",
-    ]) {
-      process.env[name] = url;
-    }
-    // The computer's own loopback services are not the network.
-    process.env.NO_PROXY = process.env.no_proxy = "127.0.0.1,localhost,::1";
-  }
+  if (options.forShell) shellProxy = url;
   return { port, url, stop: stopEgressFilter };
 }
 
 export async function stopEgressFilter(): Promise<void> {
   const running = filter;
   filter = null;
+  shellProxy = null;
   policies.clear();
   if (running) {
     await new Promise<void>((resolve) => running.server.close(() => resolve()));
@@ -696,6 +766,7 @@ function forwardPlain(
   response: import("node:http").ServerResponse,
   target: URL,
   upstream: Egress | null,
+  address?: string,
 ) {
   const headers = { ...request.headers };
   delete headers["proxy-authorization"];
@@ -706,7 +777,9 @@ function forwardPlain(
     : undefined;
   const outbound = httpRequest(
     {
-      host: via ? via.host : target.hostname,
+      // The checked address, not the name: a second lookup could answer something else. The Host
+      // header still names the site.
+      host: via ? via.host : (address ?? target.hostname),
       port: via ? via.port : Number(target.port || 80),
       method: request.method,
       path: via ? target.toString() : `${target.pathname}${target.search}`,

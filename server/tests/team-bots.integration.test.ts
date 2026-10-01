@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
+import { computerAccessCheck } from "../src/agents/computer-access";
 import {
   AgentAssignedError,
   createAgentProfileStore,
@@ -92,6 +93,29 @@ async function privateBot(owner: AgentActor, roleDescription = "Answers.") {
 const profileStore = () => profiles;
 
 describe("Team Bots in PostgreSQL", () => {
+  test("a teammate chats with a Team Bot but cannot watch or drive its owner's computer", async () => {
+    const owner = await person();
+    const teammate = await person();
+    const admin = await person("admin");
+    const bot = await privateBot(owner);
+    await teamBots.publish(owner, bot, {
+      audience: "team",
+      emails: [],
+      groups: [],
+    });
+    // The teammate can see and use the Bot...
+    expect(await profiles.get(teammate, bot)).not.toBeNull();
+    // ...but the computer, which carries the owner's signed-in browser, stays with the owner.
+    const mayUseComputer = computerAccessCheck(profiles);
+    expect(await mayUseComputer(teammate, bot)).toBe(false);
+    expect(await mayUseComputer(owner, bot)).toBe(true);
+    expect(await mayUseComputer(admin, bot)).toBe(true);
+    // The check the computer routes were given before: seeing the Bot was enough.
+    const canUseBot = async (actor: AgentActor, botId: string) =>
+      (await profiles.get(actor, botId)) !== null;
+    expect(await canUseBot(teammate, bot)).toBe(true);
+  });
+
   test("publishing reaches the team, named people or groups, and unpublishing takes it away", async () => {
     const owner = await person();
     const teammate = await person();

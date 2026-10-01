@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { AbstractAgent } from "@ag-ui/client";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { Hono } from "hono";
-import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
+import { EMPTY } from "rxjs";
 import {
   type EnterpriseControls,
   guardDeliveryStore,
@@ -10,6 +11,7 @@ import {
 } from "../src/admin/controls";
 import { createEnterpriseGate } from "../src/admin/gate";
 import { createEnterpriseAdminRoutes } from "../src/admin/routes";
+import { addAuditTap, createAuditStore, recordAuditEvent } from "../src/audit";
 import { createAuth } from "../src/auth";
 import type { AppVariables } from "../src/auth/guards";
 import type { ComputerProvider } from "../src/computer/provider";
@@ -26,8 +28,13 @@ import {
   networkPolicies,
   revokedAccess,
   scimGroups,
+  sessions,
+  ssoProviders,
+  teamBotPublications,
   users,
 } from "../src/db/schema";
+import { createTurnRunner } from "../src/routines/run-turn";
+import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -140,8 +147,15 @@ function appFor(actor: { id: string; email: string; role: "admin" | "user" }) {
   app.post("/api/delivery/slack/start", (context) =>
     context.json({ ok: true }),
   );
-  app.post("/api/copilotkit/agent/:agentId/run", (context) =>
-    context.json({ ran: true }),
+  app.patch("/api/agents/:id", (context) => context.json({ saved: true }));
+  // Mounted the way app.ts mounts the CopilotKit runtime: a basePath sub-app that takes every path
+  // under it. The runtime then matches a run by its TRAILING segments (fetch-router `matchSegments`:
+  // `.../agent/<id>/run` anywhere under the base), so this stub answers whatever path reaches it.
+  app.route(
+    "/",
+    new Hono()
+      .basePath("/api/copilotkit")
+      .all("*", (context) => context.json({ ran: true })),
   );
   return app;
 }
@@ -308,6 +322,280 @@ describe("models", () => {
         (row: { model: string }) => row.model === "openai/gpt-test",
       ),
     ).toBe(true);
+  });
+});
+
+describe("the gate cannot be stepped around", () => {
+  const setCapability = (capability: string, allowed: boolean) =>
+    put(asAdmin, "/api/admin/enterprise/capabilities", {
+      scopeKind: "organization",
+      capability,
+      allowed,
+    });
+
+  test("a percent-encoded path is checked as the path the router serves", async () => {
+    await setCapability("teamBots", false);
+    try {
+      const plain = await asMember.request(`/api/agents/${bot}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: "public" }),
+      });
+      expect(plain.status).toBe(403);
+      const encoded = await asMember.request(`/api/%61gents/${bot}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ visibility: "public" }),
+      });
+      expect(encoded.status).toBe(403);
+    } finally {
+      await setCapability("teamBots", true);
+    }
+  });
+
+  test("a run reached through extra leading segments is still a run", async () => {
+    await setCapability("useBots", false);
+    try {
+      for (const path of [
+        `/api/copilotkit/agent/${bot}/run`,
+        `/api/copilotkit/x/agent/${bot}/run`,
+        `/api/copilotkit/x/agent/${bot}/connect`,
+        // Suggestions run the Bot's model too, with whatever messages the caller sends.
+        `/api/copilotkit/agent/${bot}/suggest`,
+        `/api/copilotkit/x/agent/${bot}/suggest`,
+      ]) {
+        const response = await asMember.request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId: "t", runId: `r-${path.length}` }),
+        });
+        expect([path, response.status]).toEqual([path, 403]);
+      }
+    } finally {
+      await setCapability("useBots", true);
+    }
+  });
+
+  test("the model allowlist also governs a run reached through extra segments", async () => {
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["anthropic/claude-test"] },
+    });
+    try {
+      for (const action of ["run", "suggest"]) {
+        const response = await asMember.request(
+          `/api/copilotkit/x/agent/${bot}/${action}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ threadId: "t", runId: `r-extra-${action}` }),
+          },
+        );
+        expect([action, response.status]).toEqual([action, 403]);
+      }
+    } finally {
+      await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+        value: { enabled: false, models: [] },
+      });
+    }
+  });
+});
+
+class AnsweringAgent extends AbstractAgent {
+  run() {
+    return EMPTY;
+  }
+}
+
+/**
+ * The shared headless turn runner behind routines, Run now, responsibilities, follow-ups, group
+ * turns, delivery conversations and Slack/Teams/SMS inbound. None of those cross the HTTP gate.
+ */
+function headlessTurn(agentId: string) {
+  const ran: string[] = [];
+  const intelligence = {
+    getOrCreateThread: async () => ({ thread: { id: "t" }, created: false }),
+    getThreadMessages: async () => ({ messages: [] }),
+    ɵacquireThreadLock: async (params: {
+      threadId: string;
+      runId: string;
+    }) => ({
+      threadId: params.threadId,
+      runId: params.runId,
+      joinToken: "j",
+    }),
+    ɵrenewThreadLock: async () => ({ ttlSeconds: 20 }),
+    ɵcleanupThreadLock: async () => undefined,
+  };
+  const runner = {
+    run: (request: { agent: AbstractAgent }) => ({
+      subscribe(observer: { complete: () => void }) {
+        ran.push(agentId);
+        request.agent.messages = [
+          ...request.agent.messages,
+          { id: "a1", role: "assistant", content: "Done." },
+        ] as typeof request.agent.messages;
+        observer.complete();
+        return { unsubscribe: () => undefined };
+      },
+    }),
+    stop: async () => true,
+  };
+  const runTurn = createTurnRunner({
+    // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
+    intelligence: intelligence as any,
+    // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
+    runner: runner as any,
+    buildAgentFor: async () => new AnsweringAgent({ agentId }),
+  });
+  return {
+    ran,
+    run: () =>
+      runTurn({
+        ownerUserId: member.id,
+        routineId: "routine-1",
+        agentId,
+        threadId: `thread-${suite}`,
+        instruction: "Say done.",
+      }),
+  };
+}
+
+describe("headless turns obey the same switches", () => {
+  test("a member without Use Bots gets no unattended turn", async () => {
+    await put(asAdmin, "/api/admin/enterprise/capabilities", {
+      scopeKind: "organization",
+      capability: "useBots",
+      allowed: false,
+    });
+    try {
+      const turn = headlessTurn(bot);
+      await expect(turn.run()).rejects.toThrow(/Use Bots|use Bots|Bots/);
+      expect(turn.ran).toEqual([]);
+    } finally {
+      await put(asAdmin, "/api/admin/enterprise/capabilities", {
+        scopeKind: "organization",
+        capability: "useBots",
+        allowed: true,
+      });
+    }
+  });
+
+  test("a built-in Bot on a model off the allowlist gets no unattended turn", async () => {
+    await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+      value: { enabled: true, models: ["anthropic/claude-test"] },
+    });
+    try {
+      const turn = headlessTurn(bot);
+      await expect(turn.run()).rejects.toThrow(/allowlist/);
+      expect(turn.ran).toEqual([]);
+    } finally {
+      await put(asAdmin, "/api/admin/enterprise/settings/modelAllowlist", {
+        value: { enabled: false, models: [] },
+      });
+    }
+    const allowed = headlessTurn(bot);
+    await expect(allowed.run()).resolves.toMatchObject({ replyText: "Done." });
+  });
+});
+
+describe("Team Bots switch", () => {
+  test("publishing to the team is refused while Team Bots is off", async () => {
+    const teamBots = createTeamBots({
+      database,
+      connectedServers: async () => new Set<string>(),
+    });
+    await put(asAdmin, "/api/admin/enterprise/capabilities", {
+      scopeKind: "organization",
+      capability: "teamBots",
+      allowed: false,
+    });
+    try {
+      await expect(
+        teamBots.publish({ id: member.id, role: "user" }, bot, {
+          audience: "team",
+          emails: [],
+          groups: [],
+        }),
+      ).rejects.toThrow(/Team Bots/);
+      const rows = await database
+        .select()
+        .from(teamBotPublications)
+        .where(eq(teamBotPublications.agentId, bot));
+      expect(rows).toEqual([]);
+    } finally {
+      await database
+        .delete(teamBotPublications)
+        .where(eq(teamBotPublications.agentId, bot));
+      await put(asAdmin, "/api/admin/enterprise/capabilities", {
+        scopeKind: "organization",
+        capability: "teamBots",
+        allowed: true,
+      });
+    }
+  });
+});
+
+describe("SSO required", () => {
+  test("turning it on through the admin route ends sessions made before it", async () => {
+    const signedIn = {
+      id: randomUUID(),
+      userId: member.id,
+      token: randomUUID(),
+      expiresAt: new Date(Date.now() + 86_400_000),
+    };
+    await database.insert(sessions).values(signedIn);
+    const providerId = `ent-idp-${suite}`;
+    try {
+      // With nothing to sign in through, requiring SSO is refused rather than locking people out.
+      const refused = await put(
+        asAdmin,
+        "/api/admin/enterprise/settings/ssoRequired",
+        { value: true },
+      );
+      expect(refused.status).toBe(409);
+      expect(
+        await database
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, signedIn.id)),
+      ).toHaveLength(1);
+      await database.insert(ssoProviders).values({
+        id: providerId,
+        issuer: "https://idp.acme.test",
+        providerId,
+        domain: "acme.test",
+      });
+      const response = await put(
+        asAdmin,
+        "/api/admin/enterprise/settings/ssoRequired",
+        { value: true },
+      );
+      expect(response.status).toBe(200);
+      expect(
+        await database
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, signedIn.id)),
+      ).toEqual([]);
+      const [revoked] = await database
+        .select({ payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "auth.sessions_revoked"),
+            eq(auditEvents.actorUserId, admin.id),
+          ),
+        );
+      expect(revoked?.payload).toMatchObject({ reason: "sso_required" });
+    } finally {
+      await database.delete(sessions).where(eq(sessions.id, signedIn.id));
+      await put(asAdmin, "/api/admin/enterprise/settings/ssoRequired", {
+        value: false,
+      });
+      await database
+        .delete(ssoProviders)
+        .where(eq(ssoProviders.id, providerId));
+    }
   });
 });
 

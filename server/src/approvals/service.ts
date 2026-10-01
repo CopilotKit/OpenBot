@@ -68,7 +68,10 @@ export function equivalenceOf(candidate: ApprovalCandidate): string {
         candidate.toolRef,
         candidate.effect,
         candidate.scope,
-        stable(candidate.target ?? candidate.args),
+        // Both: a connector, host or hand-off target names the tool, not the call, so the target
+        // alone made every later call to that tool "the same" as one the person declined.
+        stable(candidate.target),
+        stable(candidate.args),
       ]),
     )
     .digest("hex");
@@ -87,6 +90,11 @@ const executionAuthority = new AsyncLocalStorage<{
   owner: string;
 }>();
 const validationProbe = new AsyncLocalStorage<{ action?: ApprovalAction }>();
+/**
+ * Whether this call is an approved action's re-check, which only asks the gate what it would decide.
+ * Anything with a side effect of its own (spending a one-time consent) must wait for the real run.
+ */
+export const isApprovalRecheck = () => validationProbe.getStore() !== undefined;
 class ApprovalValidated extends HeadlessToolSuspension {
   constructor() {
     super("The action was checked before execution.", {
@@ -502,49 +510,88 @@ export function createApprovalService(
           "The interrupted conversation is unavailable.",
         );
       let result = request.result;
-      if (!result && request.status === "consumed")
-        throw new ApprovalRefusedError(
-          "This action was started but its outcome is unknown. It was not repeated.",
-        );
-      if (!result) {
+      if (!result && request.status === "consumed") {
+        /*
+         * Started, and the process running it stopped before saving what happened. Repeating it
+         * could do it twice, and refusing to answer left the conversation waiting forever, so the
+         * Bot is told. Only the process that saves this answer continues the conversation.
+         */
+        const reason =
+          "This action was started but its outcome is unknown. It was not repeated. Check whether it happened before asking the person again.";
+        if (
+          !(await store.saveResult(ownerUserId, id, {
+            content: reason,
+            error: reason,
+          }))
+        )
+          return;
+        result = { content: reason, error: reason };
+      } else if (!result) {
         if (request.status === "denied")
           result = { content: DECLINED_BY_PERSON, error: DECLINED_BY_PERSON };
         else if (request.decision === "handled")
           result = { content: HANDLED_BY_PERSON };
         else {
-          const current = await dependencies.validate(request.action);
-          if (
-            current.actorId !== ownerUserId ||
-            current.actionDigest !== request.action.actionDigest
-          )
-            throw new ApprovalRefusedError(
-              "The approved action or resolved target has changed.",
-            );
-          if (!(await store.consume(ownerUserId, id, current.actionDigest)))
-            return;
+          /*
+           * A re-check that refuses is an answer, not a failure to retry. Thrown, the sweep retried
+           * it until its attempts ran out, nothing was saved, and the conversation hung with the
+           * request stuck in `approved`. Told to the Bot, the run continues. Anything else (a
+           * database or network failure) still throws, so the sweep retries it.
+           */
+          let current: ApprovalAction | undefined;
+          let refusal: string | undefined;
           try {
-            const output = await withApprovalContext(continuation, () =>
-              executionAuthority.run(
-                {
-                  approvalId: id,
-                  digest: current.actionDigest,
-                  owner: ownerUserId,
-                },
-                () => dependencies.execute(current),
-              ),
-            );
-            const content =
-              typeof output === "string" ? output : JSON.stringify(output);
-            if (content === undefined)
-              throw new Error("The approved action returned no result.");
-            result = { content };
+            current = await dependencies.validate(request.action);
+            if (
+              current.actorId !== ownerUserId ||
+              current.actionDigest !== request.action.actionDigest
+            )
+              throw new ApprovalRefusedError(
+                "The approved action or resolved target has changed.",
+              );
+            if (!(await store.consume(ownerUserId, id, current.actionDigest))) {
+              // Still `approved`: an "Always allow" whose rule was revoked before it ran. Anything
+              // else means another replica took the request, and it continues the conversation.
+              if ((await store.get(ownerUserId, id)).status !== "approved")
+                return;
+              throw new ApprovalRefusedError(
+                "The rule that allowed this was removed before it ran.",
+              );
+            }
           } catch (error) {
-            const reason =
-              error instanceof Error ? error.message : String(error);
+            if (!(error instanceof ApprovalRefusedError)) throw error;
+            refusal = `Not done: ${error.message} Ask the person again if it is still needed.`;
+          }
+          if (refusal !== undefined || !current) {
+            const reason = refusal ?? "Not done.";
             result = { content: reason, error: reason };
+          } else {
+            const approved = current;
+            try {
+              const output = await withApprovalContext(continuation, () =>
+                executionAuthority.run(
+                  {
+                    approvalId: id,
+                    digest: approved.actionDigest,
+                    owner: ownerUserId,
+                  },
+                  () => dependencies.execute(approved),
+                ),
+              );
+              const content =
+                typeof output === "string" ? output : JSON.stringify(output);
+              if (content === undefined)
+                throw new Error("The approved action returned no result.");
+              result = { content };
+            } catch (error) {
+              const reason =
+                error instanceof Error ? error.message : String(error);
+              result = { content: reason, error: reason };
+            }
           }
         }
-        await store.saveResult(ownerUserId, id, result);
+        // Saved by one process only: whichever saves the answer is the one that continues.
+        if (!(await store.saveResult(ownerUserId, id, result))) return;
       }
       await dependencies.continue({
         approvalId: id,

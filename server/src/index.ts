@@ -24,6 +24,7 @@ import {
   type RunAssertion,
   readRunAssertion,
 } from "./agents/callback-token";
+import { canUseComputer, computerAccessCheck } from "./agents/computer-access";
 import { createAgentFetch } from "./agents/endpoint";
 import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
 import { createHandoffDelivery } from "./agents/handoff-delivery";
@@ -48,6 +49,7 @@ import {
   wakeUpTools,
 } from "./agents/wake-up";
 import { createApp } from "./app";
+import { createApprovedActionExecutor } from "./approvals/execute";
 import {
   PERSON_QUESTION_WAITING,
   resumePersonQuestion,
@@ -61,7 +63,6 @@ import {
 import { createApprovalService } from "./approvals/service";
 import { createApprovalStore } from "./approvals/store";
 import {
-  type ApprovalAction,
   ApprovalRefusedError,
   currentApprovalContext,
   parseApprovalContinuation,
@@ -116,6 +117,7 @@ import {
 } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
+import { withPolicyPushOnWake } from "./computer/policy-network";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -402,8 +404,13 @@ const auth: AuthService | undefined = config.organizationAuthUrl
         signInAuditStore,
       )
     : undefined;
+// Each computer is pushed its network policy on the way to the action that woke it, because a
+// computer refuses every connection until one arrives (see `withPolicyPushOnWake`).
 const computerProvider = config.computer
-  ? createComputerProvider(config.computer)
+  ? withPolicyPushOnWake(createComputerProvider(config.computer), {
+      policyForBot: (botId) => enterpriseControls()?.policyForBot(botId),
+      ...(config.computer.token ? { token: config.computer.token } : {}),
+    })
   : undefined;
 
 if (computerProvider?.warm) {
@@ -1671,8 +1678,10 @@ const routineRunner = createRoutineRunner({
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
       const actor = await actorFor(ownerUserId);
-      if (!(await agentProfileStore.get(actor, agentId)))
-        throw new Error("That Bot is not available to this owner.");
+      const profile = await agentProfileStore.get(actor, agentId);
+      if (!profile) throw new Error("That Bot is not available to this owner.");
+      // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+      if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
         botId: agentId,
@@ -1761,15 +1770,23 @@ const responsibilityEngine: ResponsibilityEngine = createResponsibilityEngine({
       buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
       toolsForTurn: async () => {
         const actor = await actorFor(context.ownerUserId);
-        const computer = computerGateway
-          ? createHeadlessComputerTools({
-              gateway: computerGateway,
-              botId: context.agentId,
-              actor: { id: actor.id, userId: actor.id, initiator },
-              auditStore: bootAuditStore,
-              ...(signInService ? { signIn: signInService } : {}),
-            })
-          : [];
+        // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+        const computer =
+          computerGateway &&
+          canUseComputer(
+            await agentProfileStore
+              .get(actor, context.agentId)
+              .catch(() => null),
+            actor,
+          )
+            ? createHeadlessComputerTools({
+                gateway: computerGateway,
+                botId: context.agentId,
+                actor: { id: actor.id, userId: actor.id, initiator },
+                auditStore: bootAuditStore,
+                ...(signInService ? { signIn: signInService } : {}),
+              })
+            : [];
         return [
           ...computer,
           ...tools.map((tool) => ({
@@ -1920,9 +1937,11 @@ const approvalComputerTools = async (
   initiator: AuditInitiator,
 ) => {
   const actor = await actorFor(ownerUserId);
-  if (!(await agentProfileStore.get(actor, agentId)))
+  const profile = await agentProfileStore.get(actor, agentId);
+  if (!profile)
     throw new ApprovalRefusedError("That Bot is no longer available to you.");
-  return computerGateway
+  // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+  return computerGateway && canUseComputer(profile, actor)
     ? createHeadlessComputerTools({
         gateway: computerGateway,
         botId: agentId,
@@ -1932,82 +1951,28 @@ const approvalComputerTools = async (
       })
     : [];
 };
-const executeApprovedAction = async (
-  action: ApprovalAction,
-): Promise<unknown> => {
-  const snapshot = parseApprovalContinuation(action.continuation);
-  const initiator = snapshot.initiator ?? PERSON_INITIATOR;
-  const source = await sourceForCoordinationRun({
-    actorId: action.actorId,
-    botId: action.botId,
-    threadId: action.threadId,
-    runId: action.runId,
-    depth: 0,
-    initiator,
-  });
-  if (!source)
-    throw new ApprovalRefusedError(
-      "That conversation is no longer available to this Bot and person.",
-    );
-  // A private-information share the person allowed: the approval is the whole action, and the Bot
-  // is told to send again, which the share check then passes. Gated so re-entry validation sees it.
-  if (action.toolRef === PRIVATE_SHARE_TOOL_REF) {
-    await approvalService.gate({
-      actorId: action.actorId,
-      botId: action.botId,
-      toolRef: action.toolRef,
-      effect: action.effect,
-      scope: action.scope,
-      args: action.args,
-      target: action.target,
-      continuation: snapshot,
-    });
-    return "The person allowed this share. Send it again now, unchanged.";
-  }
-  const computer = await approvalComputerTools(
-    action.actorId,
-    action.botId,
-    initiator,
-  );
-  if (snapshot.toolName.startsWith("computer_")) {
-    const tool = computer.find(
-      (tool) => tool.definition.name === snapshot.toolName,
-    );
-    if (!tool)
-      throw new ApprovalRefusedError(
-        "That computer tool is no longer available.",
-      );
-    return tool.execute(snapshot.args, {
-      toolCallId: snapshot.toolCallId,
-      signal: new AbortController().signal,
-    });
-  }
-  if (snapshot.toolName.startsWith("host_")) {
-    const tool = hostAccessTools({
+const executeApprovedAction = createApprovedActionExecutor({
+  sourceFor: sourceForCoordinationRun,
+  gate: approvalService.gate,
+  computerTools: approvalComputerTools,
+  hostTools: ({ actorId, botId, initiator }) =>
+    hostAccessTools({
       broker: hostAccessBroker,
-      botId: action.botId,
-      actorId: action.actorId,
+      botId,
+      actorId,
       initiator,
       auditStore: bootAuditStore,
-    }).find((tool) => tool.name === snapshot.toolName);
-    if (!tool)
-      throw new ApprovalRefusedError("That host tool is no longer available.");
-    const result = await tool.execute(snapshot.args);
-    if (result.startsWith(REFUSAL_MARKER))
-      throw new ApprovalRefusedError(result);
-    return result;
-  }
-  const args = z.record(z.string(), z.unknown()).parse(snapshot.args);
-  const result = await pluginStore.callTool({
-    ref: action.toolRef,
-    args,
-    botId: action.botId,
-    actorId: action.actorId,
-    initiator,
-  });
-  if (result.isError) throw new Error(result.text);
-  return vendorAnswer(result);
-};
+    }),
+  callTool: (input) => pluginStore.callTool(input),
+  credentialActorFor: (actorId, botId, ref) =>
+    teamBots.credentialActorFor(actorId, botId)(ref),
+  coordinationCall: (input) => coordination.call(input),
+  readRun: (value) => readRunAssertion(value, config.keyEncryptionKey),
+  answer: vendorAnswer,
+  privateShareToolRef: PRIVATE_SHARE_TOOL_REF,
+  refusalMarker: REFUSAL_MARKER,
+  personInitiator: PERSON_INITIATOR,
+});
 const approvalContinuationRunner = createTurnRunner({
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
@@ -2348,8 +2313,10 @@ const wakeUpRunner = createWakeUpRunner({
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
       const actor = await actorFor(ownerUserId);
-      if (!(await agentProfileStore.get(actor, agentId)))
-        throw new Error("That Bot is not available to this owner.");
+      const profile = await agentProfileStore.get(actor, agentId);
+      if (!profile) throw new Error("That Bot is not available to this owner.");
+      // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+      if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
         botId: agentId,
@@ -2427,8 +2394,10 @@ const groupConversations = createGroupConversations({
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
       const actor = await actorFor(ownerUserId);
-      if (!(await agentProfileStore.get(actor, agentId)))
-        throw new Error("That Bot is not available to this owner.");
+      const profile = await agentProfileStore.get(actor, agentId);
+      if (!profile) throw new Error("That Bot is not available to this owner.");
+      // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+      if (!canUseComputer(profile, actor)) return [];
       return createHeadlessComputerTools({
         gateway: computerGateway,
         botId: agentId,
@@ -3098,11 +3067,13 @@ serve<SocketData>({
         return new Response("Sign in first.", { status: 401 });
       }
       // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
-      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
+      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work. And
+      // seeing a Team Bot is not enough either: its screen is its owner's signed-in browser.
       if (
-        !(await agentProfileStore
-          .get({ id: actor.id, role: actor.role }, streamBotId)
-          .catch(() => null))
+        !(await computerAccessCheck(agentProfileStore)(
+          { id: actor.id, role: actor.role },
+          streamBotId,
+        ))
       ) {
         return new Response("There is no such Bot.", { status: 404 });
       }

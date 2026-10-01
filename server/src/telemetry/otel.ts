@@ -26,6 +26,7 @@ import {
   BatchLogRecordProcessor,
   LoggerProvider,
 } from "@opentelemetry/sdk-logs";
+import { scrubCommand } from "./scrub";
 
 export type ExportedEvent = {
   eventType: string;
@@ -76,6 +77,25 @@ function severityOf(eventType: string): SeverityNumber {
     return SeverityNumber.WARN;
   }
   return SeverityNumber.INFO;
+}
+
+/**
+ * Every `command` in a payload, at any depth, scrubbed the way Action Recording scrubs it.
+ *
+ * The audit trail keeps the command a Bot ran in full, because a command is the action; a copy that
+ * leaves the deployment for a collector must not take the credentials typed into it with it.
+ */
+function scrubCommands(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(scrubCommands);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nested]) => [
+      key,
+      key === "command" && typeof nested === "string"
+        ? scrubCommand(nested)
+        : scrubCommands(nested),
+    ]),
+  );
 }
 
 /** OTLP attributes are flat primitives; nested values go in as JSON. */
@@ -169,7 +189,7 @@ export function createOtelEventExporter(
             ...(event.initiatorId
               ? { "openbot.initiator_id": event.initiatorId }
               : {}),
-            ...flatten(event.payload),
+            ...flatten(scrubCommands(event.payload) as Record<string, unknown>),
           },
         });
       } catch (error) {

@@ -17,29 +17,30 @@
  * current by LISTEN/NOTIFY on {@link ENTERPRISE_TOPIC} plus a one-minute re-read. A snapshot that
  * never loaded refuses everything it is asked about. Every async check reads the database fresh.
  */
-import postgres from "postgres";
+
 import { and, eq, inArray, like, sql } from "drizzle-orm";
+import postgres from "postgres";
 import {
-  addAuditTap,
   type AuditStore,
+  addAuditTap,
   DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "../audit";
 import { isConfiguredAdmin } from "../auth/roles";
 import {
-  effectiveNetworkPolicy,
-  egressDecision,
-  pushEgressPolicies,
-  type EgressPolicy,
-} from "../computer/policy-network";
-import {
   type PolicyContext,
   type PolicyDecision,
   setPolicyOverlay,
 } from "../computer/policy";
+import {
+  type EgressPolicy,
+  effectiveNetworkPolicy,
+  egressDecision,
+  pushEgressPolicies,
+} from "../computer/policy-network";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
-import { agentProfiles, auditEvents } from "../db/schema";
+import { agentProfiles, agents, auditEvents } from "../db/schema";
 import { createOtelEventExporter, type EventExporter } from "../telemetry/otel";
 import { scrubCommand } from "../telemetry/scrub";
 import {
@@ -863,4 +864,66 @@ export function auditRoutineStore<T extends RoutineLike>(
     });
   }) as T["setEnabled"];
   return store;
+}
+
+/* ------------------------------ headless turns ------------------------------ */
+
+/**
+ * Whether a turn nobody started from the browser may run, and the sentence to refuse it with.
+ *
+ * The HTTP gate (`gate.ts`) applies "Use Bots" and the model allowlist to a browser run. Routines,
+ * Run now, responsibilities, follow-ups, group turns, delivery conversations and Slack, Teams and
+ * SMS messages never cross it: they run through the shared headless turn runner, which asks here.
+ * The allowlist is decided the way the gate decides it before a run: a built-in Bot runs on the
+ * deployment's configured model, so that model is known; a remote Bot chooses its own and is
+ * checked only by what it streams. Fails closed when the controls cannot be read.
+ */
+export async function headlessTurnRefusal(input: {
+  ownerUserId: string;
+  agentId: string;
+}): Promise<string | null> {
+  const controls = installed;
+  if (!controls) return null;
+  try {
+    if (!(await controls.capabilityFor(input.ownerUserId, "useBots")))
+      return capabilityRefusal("useBots");
+    const allowlist = controls.snapshot()?.settings.modelAllowlist;
+    if (!allowlist?.enabled) return null;
+    const [row] = await controls.deps.database
+      .select({ type: agents.type })
+      .from(agents)
+      .where(eq(agents.id, input.agentId))
+      .limit(1);
+    const model =
+      row?.type === "built_in" ? controls.deps.builtInModel : undefined;
+    if (!model || allowlist.models.includes(model)) return null;
+    await controls.store
+      .recordModelUsage({
+        userId: input.ownerUserId,
+        agentId: input.agentId,
+        threadId: null,
+        runId: null,
+        model,
+        source: "configured",
+        allowed: false,
+      })
+      .catch(() => undefined);
+    await recordAuditEvent(controls.deps.auditStore, {
+      eventType: "model.refused",
+      targetType: "agent",
+      targetId: input.agentId,
+      actorUserId: input.ownerUserId,
+      payload: { model, source: "configured", headless: true },
+    }).catch(() => undefined);
+    return `This Bot runs on ${model}, which is not on this deployment's model allowlist. An administrator can add it.`;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "headless-capability-check-failed",
+        agentId: input.agentId,
+        error: String(error),
+      }),
+    );
+    return "This deployment's enterprise controls could not be checked, so the Bot did not run.";
+  }
 }

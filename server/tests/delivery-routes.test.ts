@@ -304,7 +304,7 @@ test("in a conversation others may read, the answer goes to the owner privately"
     expect(sent[0]?.text).toBe("Your salary review is attached.");
   }
 });
-test("verified Slack events feed the linked owner's triggers once, and observe-only runs stay quiet", async () => {
+test("verified Slack events feed the owners' triggers once, and observe-only runs stay quiet", async () => {
   const f = fixture();
   await run(f, {
     context: [sender()],
@@ -347,7 +347,6 @@ test("verified Slack events feed the linked owner's triggers once, and observe-o
     "reaction_added",
   ]);
   expect(triggers[0]).toMatchObject({
-    agentId: "bot",
     teamId: "T1",
     eventId: "Ev9",
     channelId: "D0123456789",
@@ -571,4 +570,36 @@ test("a chart the Bot drew is drawn natively by the Channel, and its follow-up r
   expect(
     f.calls.filter((c) => (c as { converse?: unknown }).converse),
   ).toHaveLength(turns);
+});
+test("a channel message from a colleague who never linked still reaches the owners' Slack triggers", async () => {
+  // Whose triggers fire is decided by each owner's channel membership in the ingest, never by the
+  // author's own link: the author here has no OpenBot binding at all.
+  const f = fixture({ bound: false });
+  const observed = await run(f, {
+    context: [
+      {
+        description: "openbot.sender",
+        value: JSON.stringify({
+          user: "slack:T1:U9COLLEAGUE",
+          event: "Ev42",
+          conversation: { id: "C0123456789", kind: "channel" },
+          observe: "message",
+        }),
+      },
+    ],
+    messages: [{ id: "m1", role: "user", content: "deploy is broken" }],
+  });
+  expect(said(observed.events)).toBe("");
+  const triggers = f.calls
+    .map((c) => (c as { trigger?: Record<string, unknown> }).trigger)
+    .filter(Boolean);
+  expect(triggers).toEqual([
+    expect.objectContaining({
+      teamId: "T1",
+      eventId: "Ev42",
+      channelId: "C0123456789",
+      userId: "U9COLLEAGUE",
+      text: "deploy is broken",
+    }),
+  ]);
 });

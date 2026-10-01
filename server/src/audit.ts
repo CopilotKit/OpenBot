@@ -491,6 +491,8 @@ export const auditEventTypes = [
    */
   "capability.changed",
   "enterprise.setting_changed",
+  // Turning SSO-required on ended the sessions made before it.
+  "auth.sessions_revoked",
   "network_policy.changed",
   "network_policy.removed",
   /*

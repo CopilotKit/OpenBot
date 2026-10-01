@@ -368,6 +368,29 @@ describe("auto-review", () => {
     expect(calls).toEqual([]);
   });
 
+  test("a vendor tool named for settings is still reviewed", async () => {
+    const calls: string[] = [];
+    const decided = await decideAction({
+      ...base,
+      candidate: candidate({
+        toolRef: "composio/GITHUB_UPDATE_REPOSITORY_SETTINGS",
+        scope: "github",
+        args: { repo: "openbot", private: false },
+      }),
+      autoReview: true,
+      model: model(
+        {
+          verdict: "needs_approval",
+          preApproved: false,
+          reason: "makes the repository public",
+        },
+        calls,
+      ),
+    });
+    expect(calls).toHaveLength(1);
+    expect(decided.behaviour).not.toBe("allow");
+  });
+
   test("the reviewer sees the person's request and the action, as data", async () => {
     const calls: string[] = [];
     await decideAction({
@@ -439,7 +462,7 @@ function memoryStore(options: {
       return row;
     },
     consume: async () => true,
-    saveResult: async () => undefined,
+    saveResult: async () => true,
     finish: async () => undefined,
     rules: async () => options.rules ?? [],
     revoke: async () => undefined,
@@ -624,6 +647,72 @@ describe("delegation is gated", () => {
     ).catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(HeadlessToolSuspension);
     expect(desk.sent).toBe(0);
+  });
+
+  test("an approved hand-off is re-checked, sent once, and its answer continues the conversation", async () => {
+    const { createApprovedActionExecutor } = await import(
+      "../src/approvals/execute"
+    );
+    const { store } = memoryStore({
+      rules: [rule("ask", { toolRef: "bot/message_bot" })],
+    });
+    const service = createApprovalService(store);
+    desk.sent = 0;
+    const coordination = createCoordinationTools({
+      desk: desk as never,
+      caps: { maxDepth: 2, maxPerRun: 3 } as never,
+      approvalGate: service.gate,
+      botsReachableFrom: async () => ["research"],
+      auditStore: { insert: async () => undefined },
+      authoriseRun: async () => true,
+      route: async () => ({ reached: "nobody" }),
+    } as never);
+    const args = { bot: "Research", task: "Look it up" };
+    const handoff = { ...context, toolName: "message_bot", args };
+    const asked = await withApprovalContext(handoff, () =>
+      coordination.call({
+        name: "message_bot",
+        args,
+        run: {
+          actorId: "owner",
+          botId: "bot",
+          runId: "run",
+          threadId: "thread",
+          depth: 0,
+        } as never,
+      }),
+    ).catch((failure: unknown) => failure);
+    expect(asked).toBeInstanceOf(HeadlessToolSuspension);
+    expect(desk.sent).toBe(0);
+    const [request] = await store.list("owner");
+    await service.decide("owner", request?.id as string, "allow_once");
+    const execute = createApprovedActionExecutor({
+      sourceFor: async () => ({ channelId: "channel" }),
+      gate: service.gate,
+      computerTools: async () => [],
+      hostTools: () => [],
+      callTool: async () => {
+        throw new Error("a hand-off is not a connector call");
+      },
+      credentialActorFor: async (actorId) => actorId,
+      coordinationCall: (input) => coordination.call(input),
+      answer: (result) => result.text,
+      privateShareToolRef: "openbot/private_share",
+      refusalMarker: "REFUSED:",
+      personInitiator: { kind: "person", id: "" },
+    });
+    const continued: { content: string; error?: string }[] = [];
+    await service.resume("owner", request?.id as string, {
+      validate: (action) =>
+        service.validateReentry(action, () => execute(action)),
+      execute,
+      continue: async (input) => {
+        continued.push(input.result);
+      },
+    });
+    expect(desk.sent).toBe(1);
+    expect(continued).toHaveLength(1);
+    expect(continued[0]?.error).toBeUndefined();
   });
 
   test("a refused delegation is a sentence, not a hop", async () => {

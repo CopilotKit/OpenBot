@@ -35,6 +35,8 @@ export type SignInRequestRecord = {
   createdAt: Date;
   expiresAt: Date;
   resolvedAt: Date | null;
+  /** While `filling`: when the attempt is given up on as abandoned (a server that died mid-fill). */
+  fillingUntil: Date | null;
 };
 
 /** What a route may return about a request. No continuation, which carries the conversation. */
@@ -74,6 +76,7 @@ export type PasswordStore = {
       | "controlRequestId"
       | "createdAt"
       | "resolvedAt"
+      | "fillingUntil"
     >,
   ): Promise<SignInRequestRecord>;
   request(ownerUserId: string, id: string): Promise<SignInRequestRecord | null>;
@@ -89,7 +92,12 @@ export type PasswordStore = {
     to: Partial<
       Pick<
         SignInRequestRecord,
-        "status" | "method" | "outcome" | "controlRequestId" | "resolvedAt"
+        | "status"
+        | "method"
+        | "outcome"
+        | "controlRequestId"
+        | "resolvedAt"
+        | "fillingUntil"
       >
     >,
   ): Promise<SignInRequestRecord | null>;

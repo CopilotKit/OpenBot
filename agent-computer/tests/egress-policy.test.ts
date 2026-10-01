@@ -8,6 +8,7 @@ import {
   parseEgressPolicy,
   parseEgressRules,
   setEgressPolicy,
+  setEgressResolver,
   startEgressFilter,
   stopEgressFilter,
 } from "../src/egress";
@@ -123,6 +124,7 @@ describe("the network policy rules", () => {
 describe("the filter proxy", () => {
   afterEach(async () => {
     await stopEgressFilter();
+    setEgressResolver(null);
   });
 
   async function origin() {
@@ -181,7 +183,7 @@ describe("the filter proxy", () => {
     const filter = await startEgressFilter({ env: {} });
     const secret = egressFor("sales", {})?.password;
 
-    // Nothing pushed: previous behaviour, allowed.
+    // Nothing pushed yet: refused, so a computer that just started or woke is not unfiltered.
     expect(
       await connectThrough(
         filter.port,
@@ -189,7 +191,7 @@ describe("the filter proxy", () => {
         "sales",
         secret,
       ),
-    ).toContain("200");
+    ).toContain("403");
 
     const pushed = await handleEgressPolicyRequest(
       "sales",
@@ -225,6 +227,146 @@ describe("the filter proxy", () => {
     await target.close();
   });
 
+  test("with nothing pushed, every connection is refused, a shell's included", async () => {
+    const target = await origin();
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password;
+    expect(
+      await connectThrough(
+        filter.port,
+        `127.0.0.1:${target.port}`,
+        "sales",
+        secret,
+      ),
+    ).toContain("403");
+    expect(
+      await connectThrough(filter.port, `127.0.0.1:${target.port}`),
+    ).toContain("403");
+    await target.close();
+  });
+
+  test("EGRESS_POLICY_REQUIRED=0 lets a computer with no server browse before a push", async () => {
+    const target = await origin();
+    const filter = await startEgressFilter({
+      env: { EGRESS_POLICY_REQUIRED: "0" },
+    });
+    expect(
+      await connectThrough(filter.port, `127.0.0.1:${target.port}`),
+    ).toContain("200");
+    await target.close();
+  });
+
+  test("cloud metadata and link-local addresses are refused under every policy, allow_all included", async () => {
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password;
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    for (const target of [
+      "169.254.169.254:80",
+      "[fd00:ec2::254]:80",
+      "[fd20:ce::254]:80",
+      "100.100.100.200:80",
+      "[::ffff:169.254.169.254]:80",
+      "[fe80::1]:80",
+    ]) {
+      expect(
+        await connectThrough(filter.port, target, "sales", secret),
+      ).toContain("403");
+    }
+    // A name is judged by what it resolves to.
+    setEgressResolver(async (host) =>
+      host === "metadata.example.test" ? ["169.254.169.254"] : [],
+    );
+    expect(
+      await connectThrough(
+        filter.port,
+        "metadata.example.test:80",
+        "sales",
+        secret,
+      ),
+    ).toContain("403");
+  });
+
+  test("a plain HTTP request goes to the address that was checked, not a second lookup", async () => {
+    const target = await origin();
+    const filter = await startEgressFilter({ env: {} });
+    const secret = egressFor("sales", {})?.password;
+    setEgressPolicy("sales", {
+      mode: "allowlist_only",
+      rules: [
+        { type: "cidr", value: "127.0.0.1/32", ports: String(target.port) },
+      ],
+    });
+    // Only this stub knows the name: a connection made by name would ask the system resolver
+    // again, which cannot answer, and fail.
+    setEgressResolver(async (host) =>
+      host === "rebind.example.test" ? ["127.0.0.1"] : [],
+    );
+    const answer = await new Promise<string>((resolve, reject) => {
+      const socket = connect(filter.port, "127.0.0.1", () => {
+        socket.write(
+          `GET http://rebind.example.test:${target.port}/ HTTP/1.1\r\nHost: rebind.example.test:${target.port}\r\nProxy-Authorization: Basic ${Buffer.from(`sales:${secret}`).toString("base64")}\r\nConnection: close\r\n\r\n`,
+        );
+      });
+      let seen = "";
+      socket.on("data", (chunk) => {
+        seen += chunk.toString();
+      });
+      socket.on("end", () => resolve(seen));
+      socket.on("error", reject);
+    });
+    expect(answer.split("\r\n")[0]).toContain("200");
+    expect(answer).toContain("reached");
+    await target.close();
+  });
+
+  test("a forwarded plain-HTTP request leaves once, not back into the filter", async () => {
+    let reached = 0;
+    const server = createServer((_request, response) => {
+      reached += 1;
+      response.end("reached");
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    // As the computer starts it: the shell pointed at the filter.
+    const filter = await startEgressFilter({ env: {}, forShell: true });
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    const secret = egressFor("sales", {})?.password;
+    try {
+      const answer = await new Promise<string>((resolve, reject) => {
+        const socket = connect(filter.port, "127.0.0.1", () => {
+          socket.write(
+            `GET http://127.0.0.1:${port}/ HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nProxy-Authorization: Basic ${Buffer.from(`sales:${secret}`).toString("base64")}\r\nConnection: close\r\n\r\n`,
+          );
+        });
+        let seen = "";
+        socket.setTimeout(5_000, () => socket.destroy(new Error("timed out")));
+        socket.on("data", (chunk) => {
+          seen += chunk.toString();
+        });
+        socket.on("end", () => resolve(seen));
+        socket.on("error", reject);
+      });
+      expect(answer).toContain("reached");
+      expect(reached).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("the shell is pointed at the filter, and this process is not", async () => {
+    const { egressShellEnvironment } = await import("../src/egress");
+    const before = process.env.HTTP_PROXY;
+    const filter = await startEgressFilter({ env: {}, forShell: true });
+    expect(egressShellEnvironment().HTTP_PROXY).toBe(filter.url);
+    expect(egressShellEnvironment().NO_PROXY).toContain("127.0.0.1");
+    expect(process.env.HTTP_PROXY).toBe(before);
+    await stopEgressFilter();
+    expect(egressShellEnvironment()).toEqual({});
+  });
+
   test("an anonymous connection is judged by every policy on the computer", async () => {
     const target = await origin();
     const filter = await startEgressFilter({ env: {} });
@@ -236,7 +378,7 @@ describe("the filter proxy", () => {
     await target.close();
   });
 
-  test("EGRESS_POLICY_REQUIRED refuses until a policy arrives", async () => {
+  test("EGRESS_POLICY_REQUIRED=1 still refuses until a policy arrives", async () => {
     const target = await origin();
     const filter = await startEgressFilter({
       env: { EGRESS_POLICY_REQUIRED: "1" },

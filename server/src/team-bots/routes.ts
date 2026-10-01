@@ -2,6 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "../auth/guards";
 import {
+  TeamBotForbiddenError,
   TeamBotNotFoundError,
   TeamBotRefusedError,
   type TeamBots,
@@ -16,11 +17,13 @@ export function createTeamBotRoutes(
   routes.onError((error, context) =>
     context.json(
       { error: error.message },
-      error instanceof TeamBotNotFoundError
-        ? 404
-        : error instanceof TeamBotRefusedError || error instanceof z.ZodError
-          ? 400
-          : 500,
+      error instanceof TeamBotForbiddenError
+        ? 403
+        : error instanceof TeamBotNotFoundError
+          ? 404
+          : error instanceof TeamBotRefusedError || error instanceof z.ZodError
+            ? 400
+            : 500,
     ),
   );
   routes.get("/", async (context) =>

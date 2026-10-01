@@ -27,7 +27,17 @@ turned into a skill. Administrators get capability toggles, SSO-required sign-in
 egress policy, action recording, OpenTelemetry export, and **Passwords** with private sign-in
 requests.
 
-Upgrading runs migrations `0048_coworker_parity` and `0049_coworker_parity_lanes`.
+Upgrading runs migrations `0048_coworker_parity`, `0049_coworker_parity_lanes` and
+`0050_review_fixes`.
+
+### A Bot's computer refuses the network until its policy arrives
+
+A computer used to allow every connection until the server had pushed its Bot's network policy,
+which left up to 30 seconds of unfiltered access after every wake. It now refuses until the policy
+arrives, and the server pushes it as the computer wakes. Cloud metadata and link-local addresses are
+refused in every mode, including `allow_all`, and the browser's WebRTC traffic now goes through the
+filter instead of around it. A computer run without an API server can set
+`EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
 
 ### `start.sh` names the port to change on macOS
 

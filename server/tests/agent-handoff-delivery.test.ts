@@ -805,3 +805,76 @@ describe("what the trail is told started the hop", () => {
     ]);
   });
 });
+
+/**
+ * A pause reaches a hop that is already running, as it reaches every other turn: on this replica at
+ * once and from any other through the watcher. Checked only before the hop started, a Bot paused
+ * mid-hop would keep working until its answer was in.
+ */
+describe("a hop to a Bot that is paused while it works", () => {
+  test("stops, gives the lock back and says the Bot is paused", async () => {
+    const {
+      BotPausedError,
+      checkRunningTurnsForTests,
+      configureBotLifecycle,
+      resetBotLifecycleForTests,
+    } = await import("../src/agents/lifecycle");
+    const pause = { at: null as Date | null };
+    const query = {
+      from: () => query,
+      where: () => query,
+      limit: async () => [{ pausedAt: pause.at }],
+    };
+    configureBotLifecycle({
+      database: { select: () => query } as unknown as Parameters<
+        typeof configureBotLifecycle
+      >[0]["database"],
+    });
+    const released: string[] = [];
+    const stopped: string[] = [];
+    let started: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const hop = createHandoffDelivery({
+      deadlineMs: 5_000,
+      agentFor: async () => stubAgent(),
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: async () => {},
+        release: async (input) => {
+          released.push(input.threadId);
+        },
+      },
+      runner: {
+        run: () =>
+          new Observable<BaseEvent>(() => {
+            started();
+          }),
+        stop: async (input) => {
+          stopped.push(input.runId);
+          return true;
+        },
+      },
+    });
+    try {
+      const delivered = hop.deliver({
+        work: WORK,
+        message: "m",
+        shown: "s",
+        assertion: "s",
+      });
+      await running;
+      pause.at = new Date();
+      await checkRunningTurnsForTests();
+      await expect(delivered).rejects.toBeInstanceOf(BotPausedError);
+      expect(stopped).toEqual(["platform-run"]);
+      expect(released).toEqual(["scratch-thread"]);
+    } finally {
+      resetBotLifecycleForTests();
+    }
+  });
+});

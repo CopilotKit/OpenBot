@@ -11,6 +11,10 @@ import { recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
 import { scimStatus } from "../auth/scim";
 import {
+  hasIdentityProvider,
+  revokeSessionsWithoutSso,
+} from "../auth/sso-required";
+import {
   DEFAULT_EGRESS_DESTINATIONS,
   parseEgressRules,
 } from "../computer/policy-network";
@@ -197,6 +201,19 @@ export function createEnterpriseAdminRoutes(
         400,
       );
     }
+    // Requiring SSO with nothing to sign in through leaves only the break-glass addresses able to.
+    if (
+      key === "ssoRequired" &&
+      parsed.data === true &&
+      !(await hasIdentityProvider(controls.deps.database))
+    )
+      return context.json(
+        {
+          error:
+            "Register an identity provider before requiring SSO, or nobody but the break-glass administrators can sign in.",
+        },
+        409,
+      );
     const before = (await controls.store.settings())[key];
     await controls.store.setSetting(
       key,
@@ -216,6 +233,23 @@ export function createEnterpriseAdminRoutes(
         by: context.var.actor.email,
       },
     });
+    // Sign-in is checked only when a session is made, so turning SSO-required on must end the
+    // sessions made before it, or everyone already signed in another way stays in. Every time it is
+    // saved on, not only on the change: a failed attempt is then put right by saving again.
+    if (key === "ssoRequired" && parsed.data === true) {
+      const ended = await revokeSessionsWithoutSso(
+        controls.deps.database,
+        controls.deps.initialAdminEmails ?? [],
+        context.var.actor.id,
+      );
+      await recordAuditEvent(controls.deps.auditStore, {
+        eventType: "auth.sessions_revoked",
+        targetType: "enterprise_setting",
+        targetId: key,
+        actorUserId: context.var.actor.id,
+        payload: { reason: "sso_required", ended },
+      });
+    }
     return context.json({ key, value: parsed.data });
   });
 

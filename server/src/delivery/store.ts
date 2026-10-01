@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { agents } from "../db/schema/core";
 import { agentProfiles } from "../db/schema/coworker";
@@ -204,6 +204,9 @@ export function createDeliveryStore(database: Database) {
       return rows.length === 1;
     },
     async registerDevice(input: Omit<PushDevice, "enabled">) {
+      // A token already held by someone else moves only once its owner has signed out on that phone
+      // (which disables the row). Otherwise anyone who learned a token could take over its
+      // notifications, approval and sign-in links included.
       const [device] = await database
         .insert(pushDevices)
         .values({ ...input, enabled: true })
@@ -216,8 +219,16 @@ export function createDeliveryStore(database: Database) {
             platform: input.platform,
             enabled: true,
           },
+          setWhere: or(
+            eq(pushDevices.ownerUserId, input.ownerUserId),
+            eq(pushDevices.enabled, false),
+          ),
         })
         .returning();
+      if (!device)
+        throw new DeliveryRefusedError(
+          "This device is already registered to another account. Sign out of OpenBot on it first.",
+        );
       return device;
     },
     async devices(owner: string) {

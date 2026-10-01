@@ -224,7 +224,7 @@ export type ApprovalStore = {
     ownerUserId: string,
     id: string,
     result: { content: string; error?: string },
-  ): Promise<void>;
+  ): Promise<boolean>;
   finish(ownerUserId: string, id: string): Promise<void>;
   rules(ownerUserId: string): Promise<ApprovalRule[]>;
   revoke(ownerUserId: string, id: string): Promise<void>;
@@ -363,16 +363,16 @@ export function approvalPreview(args: unknown, depth = 0): unknown {
         .slice(0, 20)
         .map(([key, value]) => [
           key,
-          /pass|secret|token|authorization|cookie|credential|contents|content|^text$/i.test(
-            key,
-          )
+          // Secrets by name. Not `text` or `content`: what is typed, written or sent is exactly
+          // what the person is approving, and hiding it let a Bot get "Allow once" on a payload
+          // nobody could see. Secret-looking values inside it are still masked below.
+          /pass|secret|token|authorization|cookie|credential/i.test(key)
             ? "[private value]"
             : approvalPreview(value, depth + 1),
         ]),
     );
   if (typeof args === "string")
-    return args
-      .slice(0, 2000)
+    return (args.length > 2000 ? `${args.slice(0, 1999)}…` : args)
       .replace(
         /((?:password|token|secret|api[_-]?key)\s*[=:]\s*)[^\s;]+/gi,
         "$1[private value]",

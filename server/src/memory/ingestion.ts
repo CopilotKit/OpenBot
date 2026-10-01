@@ -210,7 +210,13 @@ export function createMemoryIngestion(options: {
       (source) =>
         source.enabled &&
         source.agentId === botId &&
-        source.syncStatus === "succeeded",
+        // A scheduled resync of a healthy source keeps what its last good sync read: the facts
+        // would otherwise vanish for as long as the vendor takes to answer. A source whose last
+        // sync failed stays hidden while it retries (`syncError` is cleared only by a success).
+        (source.syncStatus === "succeeded" ||
+          (source.syncStatus === "running" &&
+            source.lastSyncAt !== null &&
+            !source.syncError)),
     );
     const eligible: string[] = [];
     for (const source of sources) {

@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -85,7 +85,9 @@ export function createGithubResponsibilityRoutes(options: {
     const result = await options.ingest({
       ownerUserId: binding.ownerUserId,
       source: "github",
-      externalId: deliveryId,
+      // GitHub signs only the body; X-GitHub-Delivery is unsigned, so a captured request replayed
+      // with a fresh one would run again. A redelivery resends the same body and still dedupes.
+      externalId: `body-${createHash("sha256").update(raw).digest("hex")}`,
       type: payload.data.action
         ? `${eventType}.${payload.data.action}`
         : eventType,

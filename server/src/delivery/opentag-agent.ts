@@ -214,15 +214,13 @@ async function answer(
     };
   // Something to watch, not to answer: feed the owner's Slack triggers and stay quiet.
   if (sender.observe) {
-    const watcher = await ownedBinding(deps, sender);
-    if (watcher)
-      await feedSlackTriggers(deps, sender, watcher, {
-        type: sender.observe,
-        text:
-          sender.observe === "message"
-            ? latestUserMessage(input)?.text
-            : undefined,
-      });
+    await feedSlackTriggers(deps, sender, {
+      type: sender.observe,
+      text:
+        sender.observe === "message"
+          ? latestUserMessage(input)?.text
+          : undefined,
+    });
     return { text: "" };
   }
   const message = latestUserMessage(input);
@@ -232,13 +230,14 @@ async function answer(
   const code = LINK.exec(message.text)?.[1];
   if (code) return link(deps, sender, code.toLowerCase());
 
-  const bound = await ownedBinding(deps, sender);
-  if (!bound) return { text: linkInstructions(sender.transport) };
-  // One event per Slack message: a mention is `app_mention` only, never also a `message`.
-  await feedSlackTriggers(deps, sender, bound, {
+  // One event per Slack message: a mention is `app_mention` only, never also a `message`. Fed
+  // whether or not the author linked OpenBot: owners' triggers are decided by their own access.
+  await feedSlackTriggers(deps, sender, {
     type: sender.mentioned ? "app_mention" : "message",
     text: message.text,
   });
+  const bound = await ownedBinding(deps, sender);
+  if (!bound) return { text: linkInstructions(sender.transport) };
   const answered = await answerOpenQuestion(deps, bound, message.text);
   if (answered) {
     const bot = await deps.store.botIdentity(bound.agentId);
@@ -488,7 +487,6 @@ async function decideFromCard(
 async function feedSlackTriggers(
   deps: OpenTagAgentDeps,
   sender: NonNullable<ReturnType<typeof senderFromContext>>,
-  binding: DeliveryBinding,
   event: { type: SlackTriggerEvent["type"]; text?: string },
 ) {
   if (
@@ -502,7 +500,6 @@ async function feedSlackTriggers(
   const now = Math.floor(Date.now() / 1000);
   try {
     await (deps.ingestSlack ?? ingestSlackEvent)({
-      agentId: binding.agentId,
       teamId: sender.realm,
       eventId: sender.event,
       eventTime: now,

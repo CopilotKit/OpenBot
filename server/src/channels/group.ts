@@ -24,13 +24,14 @@ import { and, asc, desc, eq, isNull, min, sql } from "drizzle-orm";
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { HandoffCaps } from "../agents/handoff";
-import type { AppVariables } from "../auth/guards";
+import type { ApprovalContinuation } from "../approvals/types";
 import {
   type AuditInitiator,
   type AuditStore,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "../audit";
+import type { AppVariables } from "../auth/guards";
 import { HeadlessToolSuspension } from "../computer/headless-tools";
 import type { Database } from "../db/client";
 import {
@@ -41,7 +42,6 @@ import {
 } from "../db/schema/core";
 import { groupBotThreads, groupMessages } from "../db/schema/group";
 import { workItems } from "../db/schema/work";
-import type { ApprovalContinuation } from "../approvals/types";
 import type { CheckPrivateShare } from "../proactive/private-share";
 import type { TurnRunner } from "../routines/runner";
 import type { WorkQueue } from "../work/queue";
@@ -478,6 +478,29 @@ export function mentionedPeers(
     .map(({ bot }) => bot);
 }
 
+/**
+ * Where a turn sits in a Bot-to-Bot chain, kept on its row while it waits. Without it, a peer turn
+ * resumed after an approval would relay from depth zero and the depth cap would never stop the chain.
+ */
+function chainOf(turn: GroupTurn): Pick<GroupTurn, "depth" | "fromAgentId"> {
+  return {
+    ...(turn.depth ? { depth: turn.depth } : {}),
+    ...(turn.fromAgentId ? { fromAgentId: turn.fromAgentId } : {}),
+  };
+}
+function chainFrom(
+  details: Record<string, unknown>,
+): Pick<GroupTurn, "depth" | "fromAgentId"> {
+  return {
+    ...(Number.isInteger(details.depth) && (details.depth as number) > 0
+      ? { depth: details.depth as number }
+      : {}),
+    ...(typeof details.fromAgentId === "string" && details.fromAgentId
+      ? { fromAgentId: details.fromAgentId }
+      : {}),
+  };
+}
+
 /** A run id the platform lock accepts, derived from the durable row so a retry reuses it. */
 function runIdFor(rowId: string): string {
   const hex = createHash("sha256").update(rowId).digest("hex");
@@ -787,7 +810,17 @@ export function createGroupConversations(deps: {
         userMessage: groupTurnMessage(
           `group-user:${id}`,
           instruction,
-          await deps.store.list(turn.channelId),
+          // Another person's reply in progress has not been through its owner's share check, so this
+          // Bot is not handed it, as that person's teammates do not see it either.
+          (await deps.store.list(turn.channelId)).filter(
+            (message) =>
+              !(
+                deps.privateShare &&
+                message.agentId &&
+                message.status === "running" &&
+                message.ownerUserId !== turn.ownerUserId
+              ),
+          ),
           names,
           exclude,
         ),
@@ -806,7 +839,10 @@ export function createGroupConversations(deps: {
         text: result.replyText,
       });
       if (gate.status === "pending") {
-        await deps.store.finish(id, "", "waiting", gate.details);
+        await deps.store.finish(id, "", "waiting", {
+          ...gate.details,
+          ...chainOf(turn),
+        });
         return;
       }
       if (gate.status === "denied") {
@@ -824,6 +860,7 @@ export function createGroupConversations(deps: {
         await deps.store.finish(id, "", "waiting", {
           ...error.waiting,
           message: error.message,
+          ...chainOf(turn),
         });
       else
         await deps.store.finish(
@@ -928,6 +965,7 @@ export function createGroupConversations(deps: {
           messageId: row.id.slice(0, row.id.lastIndexOf(":")),
           agentIds: [row.agentId],
           text: outcome.replyText,
+          ...chainFrom(row.details),
         };
         await deps.activity?.(
           turn,
@@ -952,6 +990,7 @@ export function createGroupConversations(deps: {
           await deps.store.finish(row.id, "", "waiting", {
             ...error.waiting,
             message: error.message,
+            ...chainFrom(row.details),
           });
         else
           await deps.store.finish(
@@ -1045,6 +1084,14 @@ export function createGroupConversations(deps: {
         })),
         messages: messages.map(({ details, ...message }) => ({
           ...message,
+          // A reply in progress has not been through the owner's share check yet (that runs once the
+          // turn ends), so only the person whose Bot it is reads it as it arrives.
+          ...(deps.privateShare &&
+          message.agentId &&
+          message.status === "running" &&
+          message.ownerUserId !== owner
+            ? { text: "" }
+            : {}),
           ...(typeof details.answeredBy === "string"
             ? { answeredBy: details.answeredBy }
             : {}),

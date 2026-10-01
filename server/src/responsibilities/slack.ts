@@ -3,15 +3,16 @@
  * Events API delivery with the app's signing secret.
  *
  *   import { ingestSlackEvent } from "../responsibilities/slack";
- *   await ingestSlackEvent({ agentId, teamId, eventId, eventTime, type, channelId, userId, ts, ... });
+ *   await ingestSlackEvent({ teamId, eventId, eventTime, type, channelId, userId, ts, ... });
  *
  * The pairing owns Slack authentication, the workspace install and which OpenBot Bot a Slack app
  * speaks for; this module owns deciding which responsibilities a verified event fires. It never
  * throws for an event nobody listens to: it returns what it did.
  *
  * Matching (all must hold):
- *  - trigger kind `slack`, its `teamId` equals the event's, and the responsibility's Bot is the
- *    event's `agentId` (the Bot the pairing delivered it to);
+ *  - trigger kind `slack` and its `teamId` equals the event's. Who wrote the message does not
+ *    matter: the ingest then requires the trigger's owner to have linked Slack and to be in the
+ *    channel, so an owner hears colleagues in their channels and nobody else's;
  *  - the event is not from a bot and happened at or after the trigger was created (pre-existing
  *    messages, backfills and edits of old messages are ignored);
  *  - the channel is in the trigger's `channels`, or that list is empty (every channel the Bot is in);
@@ -35,8 +36,6 @@ import {
 
 export const slackTriggerEventSchema = z
   .object({
-    /** The OpenBot Bot (agent id) whose Slack pairing received the event. */
-    agentId: z.string().min(1).max(128),
     /** Envelope `team_id`. */
     teamId: z.string().regex(/^[A-Z0-9]{2,32}$/),
     /** Envelope `event_id` (Ev…): the dedup key. */
@@ -78,12 +77,13 @@ export type SlackIngestResult = {
 
 /** Whether one trigger listens for this event; pure, so it is tested without a database. */
 export function slackTriggerMatches(
-  trigger: ResolvedTrigger & { agentId: string },
+  trigger: ResolvedTrigger,
   event: SlackTriggerEvent,
 ): boolean {
+  // The author's identity never decides whose trigger fires. The ingest checks each owner's own
+  // access to the channel, so a colleague who never linked OpenBot still fires the owner's trigger.
   const config = trigger.config;
   if (config.kind !== "slack" || config.teamId !== event.teamId) return false;
-  if (trigger.agentId !== event.agentId) return false;
   if (event.isBot || event.subtype) return false;
   // Pre-existing messages never fire: both the delivery and the message itself must be new.
   const created = Math.floor(trigger.createdAt.getTime() / 1000);
@@ -145,7 +145,7 @@ export function createSlackTriggerIngest(
         });
         continue;
       }
-      const { agentId: _agentId, ...payload } = event;
+      const payload = event;
       deliveries.push({
         triggerId: trigger.id,
         responsibilityId: trigger.responsibilityId,

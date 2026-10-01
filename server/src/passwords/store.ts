@@ -152,6 +152,7 @@ export function createMemoryPasswordStore(): PasswordStore & {
         controlRequestId: null,
         createdAt: new Date(),
         resolvedAt: null,
+        fillingUntil: null,
       };
       requests.set(record.id, record);
       return { ...record };

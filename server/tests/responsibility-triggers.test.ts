@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { createHmac, createSign } from "node:crypto";
+import { createHash, createHmac, createSign } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -295,7 +295,7 @@ describe("generic webhook ingress", () => {
 });
 
 describe("provider ingress", () => {
-  test("Linear: signature over raw body, fresh webhookTimestamp, Linear-Delivery dedup, Entity.action type", async () => {
+  test("Linear: signature over raw body, fresh webhookTimestamp, signed-body dedup, Entity.action type", async () => {
     const secret = "lin_wh_fixture";
     const { events, post } = ingress(
       trigger(parseTriggerConfig({ kind: "linear" }), { secret }),
@@ -316,7 +316,7 @@ describe("provider ingress", () => {
     expect(response.status).toBe(200);
     expect(events[0]).toMatchObject({
       type: "Issue.create",
-      externalId: `${TRIGGER_ID}:d-1`,
+      externalId: `${TRIGGER_ID}:body-${createHash("sha256").update(body).digest("hex")}`,
       source: "linear",
     });
     const stale = JSON.stringify({
@@ -436,7 +436,6 @@ describe("provider ingress", () => {
 
 describe("Slack triggers", () => {
   const base: SlackTriggerEvent = {
-    agentId: "bot-1",
     teamId: "T0001",
     eventId: "Ev1",
     eventTime: NOW / 1000,
@@ -513,12 +512,14 @@ describe("Slack triggers", () => {
         teamId: "T0002",
       }),
     ).toBe(false);
+    // Which Bot the author linked, if any, does not decide whose trigger fires: the owner's
+    // channel membership does, checked in the ingest. A trigger on another Bot still matches.
     expect(
-      slackTriggerMatches(slack({ mode: "message" }), {
-        ...base,
-        agentId: "bot-2",
-      }),
-    ).toBe(false);
+      slackTriggerMatches(
+        { ...slack({ mode: "message" }), agentId: "bot-2" },
+        base,
+      ),
+    ).toBe(true);
     expect(
       slackTriggerMatches(slack({ mode: "message" }), { ...base, isBot: true }),
     ).toBe(false);
@@ -760,5 +761,73 @@ describe("inbound email via SES -> SNS", () => {
     );
     expect(response.status).toBe(200);
     expect(confirmed).toEqual([url]);
+  });
+});
+
+describe("a captured signed delivery replayed with a fresh unsigned id", () => {
+  // The dedupe identity must come from what the sender signed. Each pair below is the same signed
+  // request with only an unsigned id header changed, so both must name the same event.
+  test("Standard Webhooks dedupes on the signed webhook-id, not Idempotency-Key", async () => {
+    const { events, post } = ingress(trigger(webhook));
+    const body = "{}";
+    const timestamp = String(NOW / 1000);
+    const key = Buffer.from("c2VjcmV0LWZpeHR1cmUtb25seQ==", "base64");
+    const signature = createHmac("sha256", key)
+      .update(`msg_1.${timestamp}.${body}`)
+      .digest("base64");
+    const headers = {
+      "webhook-id": "msg_1",
+      "webhook-timestamp": timestamp,
+      "webhook-signature": `v1,${signature}`,
+    };
+    await post(body, { ...headers, "idempotency-key": "first" });
+    await post(body, { ...headers, "idempotency-key": "second" });
+    expect(events.map((event) => event.externalId)).toEqual([
+      `${TRIGGER_ID}:msg_1`,
+      `${TRIGGER_ID}:msg_1`,
+    ]);
+  });
+  test("GitHub, Sentry and Linear dedupe on the signed body, not their delivery headers", async () => {
+    const github = ingress(
+      trigger(parseTriggerConfig({ kind: "github" }), { secret: "gh" }),
+    );
+    const ghBody = JSON.stringify({ action: "opened", issue: { id: 1 } });
+    for (const delivery of ["g-1", "g-2"])
+      await github.post(ghBody, {
+        "x-hub-signature-256": `sha256=${createHmac("sha256", "gh").update(ghBody).digest("hex")}`,
+        "x-github-event": "issues",
+        "x-github-delivery": delivery,
+      });
+    const sentry = ingress(
+      trigger(parseTriggerConfig({ kind: "sentry" }), { secret: "se" }),
+    );
+    const seBody = JSON.stringify({ action: "created", data: { id: "1" } });
+    for (const request of ["r-1", "r-2"])
+      await sentry.post(seBody, {
+        "sentry-hook-signature": createHmac("sha256", "se")
+          .update(seBody)
+          .digest("hex"),
+        "sentry-hook-resource": "issue",
+        "request-id": request,
+      });
+    const linear = ingress(
+      trigger(parseTriggerConfig({ kind: "linear" }), { secret: "li" }),
+    );
+    const liBody = JSON.stringify({
+      action: "create",
+      type: "Issue",
+      webhookTimestamp: NOW - 5_000,
+    });
+    for (const delivery of ["d-1", "d-2"])
+      await linear.post(liBody, {
+        "linear-signature": createHmac("sha256", "li")
+          .update(liBody)
+          .digest("hex"),
+        "linear-delivery": delivery,
+      });
+    for (const { events } of [github, sentry, linear]) {
+      expect(events).toHaveLength(2);
+      expect(events[0]?.externalId).toBe(events[1]?.externalId as string);
+    }
   });
 });

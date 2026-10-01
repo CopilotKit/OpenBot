@@ -14,19 +14,29 @@
  * every open tab is told and the thread survives on the platform as it would for a manual delete.
  * Routines, responsibilities and memory sources are deleted, and their runs and imported memories
  * with them through the foreign keys that already cascade.
+ *
+ * "STARTS FRESH" ALSO MEANS what the Bot learned and was allowed on its own: memories it formed for
+ * this person, the background research it runs for them (its suggestions go with it, and any run
+ * already queued is cancelled), and the standing permissions they gave it ("Always allow" and
+ * "pre-approved" rules, which include always sharing private information). Rules that make the Bot
+ * ask first or hand work back protect the person, so a reset keeps those.
  */
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
+  approvalRules,
   channelAgents,
   channelMemberships,
   channels,
   memorySources,
   personalMemories,
+  proactiveSettings,
+  proactiveSuggestions,
   responsibilities,
   routines,
   workItems,
 } from "../db/schema";
+import { PROACTIVE_RUN_KIND } from "../proactive/engine";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
 
@@ -39,6 +49,12 @@ export type ResetPlan = {
   routines: number;
   responsibilities: number;
   followUps: number;
+  /** Memories the Bot formed itself from what it read for this person. */
+  formedMemories: number;
+  /** This person's background research by the Bot, with its suggestions. */
+  backgroundResearch: number;
+  /** "Always allow" and pre-approved rules this person gave the Bot. */
+  standingApprovals: number;
 };
 
 export type BotReset = ReturnType<typeof createBotReset>;
@@ -90,6 +106,29 @@ export function createBotReset(options: {
       isNull(workItems.finishedAt),
       sql`${workItems.payload}->>'ownerUserId' = ${ownerUserId}`,
       sql`${workItems.payload}->>'agentId' = ${agentId}`,
+    );
+
+  const formedMemories = (ownerUserId: string, agentId: string) =>
+    and(
+      eq(personalMemories.ownerUserId, ownerUserId),
+      eq(personalMemories.formedByAgentId, agentId),
+      isNull(personalMemories.sourceId),
+      isNull(personalMemories.deletedAt),
+    );
+
+  const research = (ownerUserId: string, agentId: string) =>
+    and(
+      eq(proactiveSettings.ownerUserId, ownerUserId),
+      eq(proactiveSettings.agentId, agentId),
+    );
+
+  /** Grants only: a rule that makes the Bot ask first or hand back is the person's protection. */
+  const standingApprovals = (ownerUserId: string, agentId: string) =>
+    and(
+      eq(approvalRules.ownerUserId, ownerUserId),
+      eq(approvalRules.botId, agentId),
+      inArray(approvalRules.behaviour, ["allow", "pre_approved"]),
+      isNull(approvalRules.revokedAt),
     );
 
   async function count(query: Promise<{ total: number }[]>): Promise<number> {
@@ -161,6 +200,24 @@ export function createBotReset(options: {
           .select({ total })
           .from(workItems)
           .where(pendingFollowUps(ownerUserId, agentId)),
+      ),
+      formedMemories: await count(
+        database
+          .select({ total })
+          .from(personalMemories)
+          .where(formedMemories(ownerUserId, agentId)),
+      ),
+      backgroundResearch: await count(
+        database
+          .select({ total })
+          .from(proactiveSettings)
+          .where(research(ownerUserId, agentId)),
+      ),
+      standingApprovals: await count(
+        database
+          .select({ total })
+          .from(approvalRules)
+          .where(standingApprovals(ownerUserId, agentId)),
       ),
     };
   }
@@ -239,6 +296,46 @@ export function createBotReset(options: {
           })
           .where(pendingFollowUps(ownerUserId, agentId))
           .returning({ key: workItems.key });
+        const formed = await transaction
+          .delete(personalMemories)
+          .where(formedMemories(ownerUserId, agentId))
+          .returning({ id: personalMemories.id });
+        const settings = await transaction
+          .select({ id: proactiveSettings.id })
+          .from(proactiveSettings)
+          .where(research(ownerUserId, agentId));
+        if (settings.length > 0) {
+          const ids = settings.map((setting) => setting.id);
+          // A run already queued for the setting would find it gone; cancel it rather than fail it.
+          await transaction
+            .update(workItems)
+            .set({
+              finishedAt: sql`now()`,
+              claimedBy: null,
+              leaseUntil: null,
+              lastError: "Cancelled by reset",
+              updatedAt: sql`now()`,
+            })
+            .where(
+              and(
+                eq(workItems.kind, PROACTIVE_RUN_KIND),
+                isNull(workItems.finishedAt),
+                inArray(sql<string>`${workItems.payload}->>'settingId'`, ids),
+              ),
+            );
+          // Suggestions go with their setting through the foreign key.
+          await transaction
+            .delete(proactiveSuggestions)
+            .where(inArray(proactiveSuggestions.settingId, ids));
+          await transaction
+            .delete(proactiveSettings)
+            .where(inArray(proactiveSettings.id, ids));
+        }
+        const revoked = await transaction
+          .update(approvalRules)
+          .set({ revokedAt: sql`now()` })
+          .where(standingApprovals(ownerUserId, agentId))
+          .returning({ id: approvalRules.id });
         return {
           conversations: found.mine.length,
           sharedConversationsKept: found.kept,
@@ -247,6 +344,9 @@ export function createBotReset(options: {
           routines: deletedRoutines.length,
           responsibilities: deletedGoals.length,
           followUps: followUps.length,
+          formedMemories: formed.length,
+          backgroundResearch: settings.length,
+          standingApprovals: revoked.length,
         };
       });
     },

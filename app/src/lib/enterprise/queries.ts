@@ -10,8 +10,7 @@ export type CapabilityKey =
   | "customRules"
   | "passwordManager"
   | "slackTeams"
-  | "teamBots"
-  | "publicTemplateSharing";
+  | "teamBots";
 
 /** One switch as the server stored it at each scope. `null` means no row: the scope inherits. */
 export type CapabilitySetting = {

@@ -401,6 +401,24 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 
 A [Composio](plugins/composio.md) app needs `OPENBOT_APP_URL` and nothing else of the two: the consent lives at the broker, so no redirect URI of ours is registered anywhere, but the address Composio returns somebody to has to be absolute and this is where it comes from. Connecting a brokered account refuses where it resolves to nothing, rather than sending somebody to a consent screen with no way back.
 
+### SCIM provisioning
+
+A directory such as Okta or Entra ID can create, update and remove people through SCIM 2.0 at
+`<BETTER_AUTH_URL>/api/auth/scim/v2`. It is off while `SCIM_BEARER_TOKEN` is unset.
+
+| Variable                 | Meaning                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `SCIM_BEARER_TOKEN`      | The token the directory sends as a bearer token. Setting it switches SCIM on.                              |
+| `SCIM_BEARER_TOKEN_NEXT` | Optional second token accepted beside the first, so the directory can move to a new one before the old one is removed. |
+| `SCIM_CONNECTION_ID`     | The name of the directory connection. Defaults to `directory`.                                             |
+
+A person the directory creates gets the `user` role, or `admin` when their address is in
+`INITIAL_ADMIN_EMAILS`, and still signs in through the company's identity provider: SCIM creates no
+password. Their directory groups become their OpenBot groups, which per-group capability switches
+and network policies read. Deactivating or deleting someone in the directory ends their sessions,
+deny-lists the address, retires the connector credentials they granted and stops their Bots'
+computers. Reactivating them lifts a deny-list entry SCIM wrote, never one an administrator wrote.
+
 ## One Bot handing work to another
 
 | Variable                   | Meaning                                                                                     |
@@ -447,6 +465,66 @@ The former direct Slack settings (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLA
 SMS through Twilio honours Advanced Opt-Out: `STOP` (and Twilio's other opt-out keywords) marks the
 number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
 `START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
+
+## Text messages and push notifications
+
+A provider is switched on by setting its variables and is off while none of them are set. Setting
+some of a provider's variables and not all of them stops the server at start-up with
+`Delivery configuration is incomplete:` and the names that are missing.
+
+| Variable                    | Meaning                                                                                                                                                                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DELIVERY_PUBLIC_URL`       | The public origin providers call back on, such as a tunnel or an ingress. Twilio signs each request over the URL it was given, so this has to be the address Twilio was configured with. Unset, OpenBot uses `OPENBOT_PUBLIC_URL`, then `BETTER_AUTH_URL`. It must be an `http(s)` URL or the server does not start. |
+| `TWILIO_ACCOUNT_SID`        | Twilio account SID. One of the four SMS settings, which are set together.                                                                                                                                                                          |
+| `TWILIO_AUTH_TOKEN`         | Twilio auth token. Used to send and to check the signature on every request Twilio makes.                                                                                                                                                         |
+| `TWILIO_VERIFY_SERVICE_SID` | The Twilio Verify service that texts the code a person enters on **Reachability** to confirm their number.                                                                                                                                       |
+| `TWILIO_FROM_NUMBER`        | The Twilio number OpenBot sends from.                                                                                                                                                                                                              |
+| `EXPO_PROJECT_ID`           | The native app's EAS project id, a UUID. Switches on push notifications and sign-in from the native app (without it, the server does not trust the app's `openbotmobile://` sign-in redirect). A device registers only when the app reports this same project id; any other value is refused. A value that is not a UUID stops the server at start-up.                  |
+| `EXPO_ACCESS_TOKEN`         | Optional. Sent as `Authorization: Bearer` on every request to Expo's push service; without it those requests carry no token.                                                                                                                       |
+
+With SMS on, point the Twilio number's incoming-message webhook at
+`<DELIVERY_PUBLIC_URL>/api/delivery/webhooks/sms`. OpenBot passes
+`<DELIVERY_PUBLIC_URL>/api/delivery/webhooks/sms/status` to Twilio as the status callback on each
+message it sends.
+
+The native app in `mobile/` reads two variables of its own when it is built, from `mobile/.env`:
+`EXPO_PUBLIC_SERVER_URL`, the deployment's public URL (required, `https` outside development, no
+credentials or query string), and `EXPO_PUBLIC_EAS_PROJECT_ID`, the same project id as
+`EXPO_PROJECT_ID` above.
+
+## Inbound email triggers
+
+An email trigger gets its own address, `trigger-<triggerId>@<OPENBOT_INBOUND_EMAIL_DOMAIN>`. Mail
+reaches OpenBot through Amazon SES receiving: a receipt rule for the whole domain publishes to an
+SNS topic, and that topic has an HTTPS subscription to `<public URL>/api/events/email/sns`. OpenBot
+checks each SNS message's AWS signature and refuses any topic not listed, because a valid signature
+proves AWS sent the message, not that the topic is yours. It confirms the subscription itself when
+SNS asks.
+
+| Variable                               | Meaning                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `OPENBOT_INBOUND_EMAIL_DOMAIN`         | The domain the receipt rule covers, such as `in.example.com`.                                 |
+| `OPENBOT_INBOUND_EMAIL_SNS_TOPIC_ARNS` | Comma-separated ARNs of the SNS topics allowed to deliver mail.                               |
+
+Both are needed. With either missing, the email route is not mounted, and an email trigger has no
+address: its page and the Bot both say inbound email is not configured on this deployment.
+
+## OpenTelemetry export
+
+Every audit row is also sent as an OTLP log record over HTTP, so a SIEM or an OpenTelemetry
+Collector receives the same events the **Audit** page shows, as they happen. Each record carries
+`openbot.surface`: `bot`, `identity` or `control_plane`. Export never stops a request: when the
+collector cannot be reached, records are dropped after the SDK's retries, and the row in PostgreSQL
+is still the record.
+
+| Variable                           | Meaning                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | Where log records go, used exactly as written. Takes precedence over the next one.                    |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`      | Collector base URL; OpenBot appends `/v1/logs`. Setting either endpoint switches export on.           |
+| `OTEL_EXPORTER_OTLP_LOGS_HEADERS`  | Headers for the logs endpoint, as `key=value` pairs separated by commas (for a collector's API key).  |
+| `OTEL_EXPORTER_OTLP_HEADERS`       | The same, used when `OTEL_EXPORTER_OTLP_LOGS_HEADERS` is unset.                                        |
+| `OTEL_SERVICE_NAME`                | The `service.name` on every record. Defaults to `openbot`.                                             |
+| `OPENBOT_OTEL_EXPORT`              | `off` turns export off while an endpoint is still set.                                                 |
 
 ## Computer and supervisor
 
@@ -602,6 +680,20 @@ EGRESS_PROXY_SALES_BOT=http://sales.proxy.internal:8080
 The file is optional and gitignored. Without it every Bot's browser goes out directly, which is the
 default. Both the shared computer and the supervisor are given it: the computer resolves its own
 proxy from these names, and the supervisor forwards them into each computer it creates.
+
+Every computer runs its own filtering proxy on `127.0.0.1`, which applies the network policy an
+administrator sets under **Admin > Enterprise controls**, and it sets `HTTP_PROXY`, `HTTPS_PROXY` and
+`NO_PROXY` for itself and its shell to point at that filter. Do not set those three to reach an
+upstream proxy; use `EGRESS_PROXY_<BOT_ID>` or `EGRESS_PROXY_DEFAULT`, which the filter chains to.
+
+The server pushes each Bot's policy to its computer when the computer wakes and every 30 seconds
+after. Until a policy has arrived, the filter refuses every connection. Metadata and link-local
+addresses (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and the like) are refused in every mode,
+including `allow_all`. `EGRESS_POLICY_REQUIRED=0` (or `false`) lets the filter allow everything
+until a policy arrives instead, which only a computer run with no API server should need. It is read
+by the computer: in Compose put it in `egress.env`, which reaches the shared computer, and on
+Kubernetes put it in `computers.extraEnv`. The supervisor forwards only the `EGRESS_PROXY` names, so
+a computer it creates does not receive it.
 
 The supervisor also reads:
 

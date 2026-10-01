@@ -12,6 +12,7 @@ import {
   type RunAssertion,
   sameToken,
 } from "./agents/callback-token";
+import { computerAccessCheck } from "./agents/computer-access";
 import {
   type BotLifecycleServices,
   createBotLifecycleRoutes,
@@ -1234,7 +1235,8 @@ export function createApp(
         computerGateway,
         computerPolicy,
         requireUser,
-        canUseBot,
+        // Not `canUseBot`: a Team Bot's teammates use the Bot, not its owner's signed-in computer.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
         pageFrames,
         auditReader,
       ),
@@ -1451,7 +1453,12 @@ export function createApp(
   if (coworker?.passwords) {
     app.route(
       "/api/sign-in-requests",
-      createSignInRoutes(coworker.passwords, requireUser, canUseBot),
+      createSignInRoutes(
+        coworker.passwords,
+        requireUser,
+        // A sign-in is typed into the Bot's computer, so it answers to the same rule.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
+      ),
     );
     app.route(
       "/api/passwords",

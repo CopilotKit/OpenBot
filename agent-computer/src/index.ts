@@ -256,9 +256,9 @@ const workspace = createWorkspace(
  */
 // Every browser and shell launched below goes through the policy filter, which still chains to the
 // per-Bot upstream proxy. Started before any browser exists so nothing escapes it.
-// Only the running computer exports it: a test that imports this module shares its process with
-// every later test, and a proxy left in that environment would reach their subprocesses too.
-await startEgressFilter({ exportToProcessEnv: import.meta.main });
+// Only the running computer points its shell at it: a test that imports this module shares its
+// process with every later test.
+await startEgressFilter({ forShell: import.meta.main });
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {

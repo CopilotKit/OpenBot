@@ -1,16 +1,16 @@
 import { expect, test } from "bun:test";
+import { createApprovalRoutes } from "../src/approvals/routes";
 import * as serviceModule from "../src/approvals/service";
 import {
-  approvalAction,
   type ApprovalAction,
-  type ApprovalRecord,
-  type ApprovalStore,
-  ApprovalRefusedError,
   ApprovalNotFoundError,
+  type ApprovalRecord,
+  ApprovalRefusedError,
+  type ApprovalStore,
+  approvalAction,
   withApprovalContext,
 } from "../src/approvals/types";
 import { createComputerGateway } from "../src/computer/gateway";
-import { createApprovalRoutes } from "../src/approvals/routes";
 import { createHostAccessBroker } from "../src/host-access/broker";
 
 const context = {
@@ -139,7 +139,10 @@ function storeFixture() {
       return true;
     },
     saveResult: async (owner, id, result) => {
-      require(owner, id).result = result;
+      const row = require(owner, id);
+      if (row.result) return false;
+      row.result = result;
+      return true;
     },
     finish: async (owner, id) => {
       require(owner, id).status = "completed";
@@ -213,19 +216,22 @@ test("current authority and a changed resolved target defeat an earlier approval
       continue: async () => undefined,
     }),
   ).rejects.toThrow("grant revoked");
-  await expect(
-    service.resume("owner", row.id, {
-      validate: async () =>
-        approvalAction({
-          ...candidate,
-          target: { ref: "e1", name: "Delete", snapshotId: 8 },
-        }),
-      execute: async () => {
-        effects += 1;
-      },
-      continue: async () => undefined,
-    }),
-  ).rejects.toThrow("changed");
+  // A changed target is not retried: the Bot is told, and nothing is done.
+  const continued: { result: { error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    validate: async () =>
+      approvalAction({
+        ...candidate,
+        target: { ref: "e1", name: "Delete", snapshotId: 8 },
+      }),
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input) => {
+      continued.push(input);
+    },
+  });
+  expect(continued[0]?.result.error).toContain("changed");
   expect(effects).toBe(0);
 });
 
@@ -418,7 +424,8 @@ test("owner inbox exposes sanitized context and rejects another owner's decision
   expect(response.status).toBe(200);
   const body = await response.text();
   expect(body).not.toContain("secret-value");
-  expect(body).not.toContain("private-body");
+  // The owner approves the body, so the owner's own inbox shows it; secrets stay hidden.
+  expect(body).toContain("private-body");
   expect(body).not.toContain("credential");
   expect(body).not.toContain("continuation");
   const [row] = await store.list("owner");
@@ -436,23 +443,155 @@ test("owner inbox exposes sanitized context and rejects another owner's decision
   });
 });
 
-test("a crash after consuming an approval never repeats an action with an unknown outcome", async () => {
+test("an approved action whose re-check refuses tells the Bot and continues the conversation", async () => {
   const store = storeFixture();
   const service = serviceModule.createApprovalService(store);
   await expect(service.gate(candidate)).rejects.toThrow();
   const [row] = await store.list("owner");
   if (!row) throw new Error("missing request");
   await service.decide("owner", row.id, "allow_once");
-  await store.consume("owner", row.id, row.action.actionDigest);
   let effects = 0;
-  await expect(
-    service.resume("owner", row.id, {
-      validate: async () => row.action,
-      execute: async () => {
-        effects += 1;
-      },
-      continue: async () => undefined,
-    }),
-  ).rejects.toThrow("outcome is unknown");
+  const continued: { result: { content: string; error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    validate: async () => {
+      throw new ApprovalRefusedError(
+        "That computer tool is no longer available.",
+      );
+    },
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input) => {
+      continued.push(input);
+    },
+  });
   expect(effects).toBe(0);
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toContain(
+    "That computer tool is no longer available.",
+  );
+  expect((await store.get("owner", row.id)).status).toBe("completed");
+});
+
+test("an approved action whose target changed tells the Bot and continues the conversation", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  let effects = 0;
+  const continued: { result: { content: string; error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    validate: async () =>
+      approvalAction({
+        ...candidate,
+        target: { ref: "e1", name: "Delete", snapshotId: 8 },
+      }),
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input) => {
+      continued.push(input);
+    },
+  });
+  expect(effects).toBe(0);
+  expect(continued[0]?.result.error).toContain("changed");
+  expect((await store.get("owner", row.id)).status).toBe("completed");
+});
+
+test("an always-allowed action whose rule was revoked before it ran tells the Bot and continues", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_always");
+  const [rule] = await store.rules("owner");
+  if (!rule) throw new Error("missing rule");
+  await service.revoke("owner", rule.id);
+  let effects = 0;
+  const continued: { result: { content: string; error?: string } }[] = [];
+  await service.resume("owner", row.id, {
+    validate: async (action) => action,
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input) => {
+      continued.push(input);
+    },
+  });
+  expect(effects).toBe(0);
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toBeDefined();
+  expect((await store.get("owner", row.id)).status).toBe("completed");
+});
+
+test("an approval preview shows what will be typed, written or sent, and still hides secrets", async () => {
+  const { approvalPreview } = await import("../src/approvals/types");
+  const { approvalFields } = await import("../src/delivery/opentag");
+  // computer_type, file writes, and a chat message: the payload is the thing being approved.
+  expect(
+    approvalPreview({ ref: "e4", text: "transfer $5,000 to acct 991" }),
+  ).toEqual({
+    ref: "e4",
+    text: "transfer $5,000 to acct 991",
+  });
+  expect(
+    approvalPreview({ path: "notes.md", content: "rm -rf ~" }),
+  ).toMatchObject({
+    content: "rm -rf ~",
+  });
+  expect(
+    approvalFields(
+      approvalPreview({ channel: "C1", text: "We are shipping today" }),
+    ),
+  ).toContainEqual({ label: "text", value: "We are shipping today" });
+  // Secrets stay hidden by key and inside values.
+  expect(
+    approvalPreview({
+      password: "hunter2",
+      apiToken: "abc",
+      note: "token=xyz1",
+    }),
+  ).toEqual({
+    password: "[private value]",
+    apiToken: "[private value]",
+    note: "token=[private value]",
+  });
+});
+
+test("an approved action interrupted before its result was saved continues the conversation once, without repeating", async () => {
+  const store = storeFixture();
+  const service = serviceModule.createApprovalService(store);
+  await expect(service.gate(candidate)).rejects.toThrow();
+  const [row] = await store.list("owner");
+  if (!row) throw new Error("missing request");
+  await service.decide("owner", row.id, "allow_once");
+  // The process that took it started the action and stopped before saving what happened.
+  expect(await store.consume("owner", row.id, row.action.actionDigest)).toBe(
+    true,
+  );
+  let effects = 0;
+  const continued: { result: { content: string; error?: string } }[] = [];
+  const dependencies = {
+    validate: async (action: ApprovalAction) => action,
+    execute: async () => {
+      effects += 1;
+    },
+    continue: async (input: {
+      result: { content: string; error?: string };
+    }) => {
+      continued.push(input);
+    },
+  };
+  // Two replicas pick it up: the Bot hears once that the outcome is unknown, and nothing reruns.
+  await Promise.all([
+    service.resume("owner", row.id, dependencies),
+    service.resume("owner", row.id, dependencies),
+  ]);
+  expect(effects).toBe(0);
+  expect(continued).toHaveLength(1);
+  expect(continued[0]?.result.error).toContain("outcome is unknown");
+  expect((await store.get("owner", row.id)).status).toBe("completed");
 });

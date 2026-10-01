@@ -55,12 +55,20 @@ type RunningTurn = { controller: AbortController; startedAt: number };
 const TURN_RETENTION_MS = 10 * 60_000;
 /** How often running turns are checked against pauses made on other replicas. */
 const CROSS_REPLICA_CHECK_MS = 5_000;
+/**
+ * How many checks in a row may fail before the watcher stops a pair's turns. A turn never STARTS
+ * on an unreadable pause, but one slow query must not stop every turn on the replica, for every
+ * person and Bot. Three checks is fifteen seconds of a database that stays unreadable.
+ */
+const UNREADABLE_CHECKS_BEFORE_STOP = 3;
 
 const state: {
   database?: Database;
   running: Map<string, Set<RunningTurn>>;
+  /** Consecutive failed pause reads per pair, reset by the next read that answers. */
+  unreadable: Map<string, number>;
   watcher?: ReturnType<typeof setInterval>;
-} = { running: new Map() };
+} = { running: new Map(), unreadable: new Map() };
 
 const keyOf = (ownerUserId: string, agentId: string) =>
   JSON.stringify([ownerUserId, agentId]);
@@ -70,25 +78,24 @@ export function configureBotLifecycle(options: { database: Database }) {
   state.database = options.database;
 }
 
+/** For tests: run the cross-replica check now instead of waiting for its interval. */
+export const checkRunningTurnsForTests = () => checkRunningTurns();
+
 /** For tests: forget the wiring and every tracked turn. */
 export function resetBotLifecycleForTests() {
   state.database = undefined;
   state.running.clear();
+  state.unreadable.clear();
   if (state.watcher) clearInterval(state.watcher);
   state.watcher = undefined;
 }
 
-/**
- * Whether this person has paused this Bot.
- *
- * Fails closed once wired: a read that throws answers `true` and says why in the log.
- */
-export async function isBotPaused(
+/** Whether this person has paused this Bot, or `undefined` when the read failed (and is logged). */
+async function readPause(
+  database: Database,
   ownerUserId: string,
   agentId: string,
-): Promise<boolean> {
-  const database = state.database;
-  if (!database) return false;
+): Promise<boolean | undefined> {
   try {
     const [row] = await database
       .select({ pausedAt: botLifecycle.pausedAt })
@@ -109,8 +116,22 @@ export async function isBotPaused(
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-    return true;
+    return undefined;
   }
+}
+
+/**
+ * Whether this person has paused this Bot.
+ *
+ * Fails closed once wired: a read that throws answers `true` and says why in the log.
+ */
+export async function isBotPaused(
+  ownerUserId: string,
+  agentId: string,
+): Promise<boolean> {
+  const database = state.database;
+  if (!database) return false;
+  return (await readPause(database, ownerUserId, agentId)) ?? true;
 }
 
 /**
@@ -148,6 +169,7 @@ function stopRunningTurns(key: string): number {
     turn.controller.abort(new BotPausedError());
   }
   state.running.delete(key);
+  state.unreadable.delete(key);
   return stopped;
 }
 
@@ -170,16 +192,29 @@ async function checkRunningTurns() {
   for (const [key, turns] of state.running) {
     for (const turn of turns)
       if (now - turn.startedAt > TURN_RETENTION_MS) turns.delete(turn);
-    if (turns.size === 0) state.running.delete(key);
+    if (turns.size === 0) {
+      state.running.delete(key);
+      state.unreadable.delete(key);
+    }
   }
   if (state.running.size === 0) {
     if (state.watcher) clearInterval(state.watcher);
     state.watcher = undefined;
     return;
   }
+  const database = state.database;
+  if (!database) return;
   for (const key of [...state.running.keys()]) {
     const [ownerUserId, agentId] = JSON.parse(key) as [string, string];
-    if (await isBotPaused(ownerUserId, agentId)) stopRunningTurns(key);
+    const paused = await readPause(database, ownerUserId, agentId);
+    if (paused === undefined) {
+      const failures = (state.unreadable.get(key) ?? 0) + 1;
+      state.unreadable.set(key, failures);
+      if (failures >= UNREADABLE_CHECKS_BEFORE_STOP) stopRunningTurns(key);
+      continue;
+    }
+    state.unreadable.delete(key);
+    if (paused) stopRunningTurns(key);
   }
 }
 

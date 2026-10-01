@@ -267,3 +267,44 @@ test("a saved rule is changed in place, only by its owner, and the change is on 
     ),
   ).toHaveLength(2);
 });
+
+test("declining one connector call does not decline a different call to the same tool", async () => {
+  await store.setEnabled(owner, true);
+  const thread = `${prefix}-thread-equivalence`;
+  const email = (to: string) => {
+    const base = candidate();
+    return candidate({
+      // A tool no other test here has a rule for.
+      toolRef: "mcp/mailer/send_email",
+      scope: "mailer",
+      args: { to, body: "hello" },
+      // The connector target, as `plugins/store.ts` builds it: it names the tool, not the call.
+      target: {
+        serverId: "mailer",
+        toolName: "send_email",
+        url: "https://mailer.example",
+        effect: "write",
+      },
+      continuation: {
+        ...(base.continuation as NonNullable<
+          ApprovalCandidate["continuation"]
+        >),
+        threadId: thread,
+        args: { to, body: "hello" },
+      },
+    });
+  };
+  const first = email("a@example.test");
+  expect(await suspends(service.gate(first))).toBeTrue();
+  const [request] = (await store.list(owner)).filter(
+    (row) => row.action.toolCallId === first.continuation?.toolCallId,
+  );
+  await service.decide(owner, request?.id as string, "deny");
+  // The same call again, in the same conversation, is still declined.
+  await expect(service.gate(email("a@example.test"))).rejects.toThrow(
+    "declined",
+  );
+  // A different recipient is a different action: it is asked about, not refused as declined.
+  expect(await suspends(service.gate(email("b@example.test")))).toBeTrue();
+  await store.setEnabled(owner, false);
+});

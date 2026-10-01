@@ -69,8 +69,20 @@ export type PrivateShareVerdict =
       suspension: HeadlessToolSuspension;
     };
 
+/**
+ * What a permission is for. A group or channel's people can change (any member can add someone), so
+ * its scope names who was in it when the owner answered: a person added later is not covered by an
+ * "always allow" given before they joined, and the owner is asked again.
+ */
 function audienceScope(audience: ShareAudience) {
-  return `${audience.kind}:${audience.id}`;
+  const where = `${audience.kind}:${audience.id}`;
+  if (audience.kind !== "group" && audience.kind !== "channel") return where;
+  const people = [...new Set(audience.recipientUserIds)].sort();
+  const members = createHash("sha256")
+    .update(people.join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+  return `${where}:members:${members}`;
 }
 
 export function sharesWithOthers(input: PrivateShareInput) {

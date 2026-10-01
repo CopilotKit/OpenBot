@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -98,5 +99,10 @@ export const personalMemories = pgTable(
       table.sourceId,
       table.externalId,
     ),
+    // One Bot-formed fact per person and content: two runs forming the same fact at once store it
+    // once, which a read-then-insert cannot promise.
+    uniqueIndex("personal_memories_formed_digest_idx")
+      .on(table.ownerUserId, table.importDigest)
+      .where(sql`${table.formedBy} = 'bot'`),
   ],
 );

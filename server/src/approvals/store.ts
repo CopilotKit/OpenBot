@@ -225,6 +225,7 @@ export function createApprovalStore(database: Database): ApprovalStore {
         .where(and(owned(owner, id), isNull(approvalRequests.result)))
         .returning({ id: approvalRequests.id });
       if (!rows.length) await get(owner, id);
+      return rows.length > 0;
     },
     async finish(owner, id) {
       const rows = await database

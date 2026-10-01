@@ -37,10 +37,42 @@ async function body(context: Ctx): Promise<Record<string, unknown>> {
   }
 }
 
-const RUN = /^\/api\/copilotkit\/agent\/([^/]+)\/(run|connect)$/;
+const COPILOT_BASE = "/api/copilotkit";
+
+/**
+ * A run or connect of a Bot through the CopilotKit runtime, matched the way the runtime matches it.
+ *
+ * The runtime does not anchor its routes: its router (`fetch-router` `matchSegments`) takes any path
+ * under its base whose LAST segments are `agent/<id>/run`, `agent/<id>/connect` or `agent/<id>/suggest`
+ * (a suggestion runs the Bot's model on whatever messages the caller sends). So
+ * `/api/copilotkit/x/agent/<id>/run` runs the Bot exactly as `/api/copilotkit/agent/<id>/run` does,
+ * and an anchored pattern here would let the first one through ungoverned.
+ */
+export function runtimeRun(
+  path: string,
+): { agentId: string; action: "run" | "connect" | "suggest" } | null {
+  if (path !== COPILOT_BASE && !path.startsWith(`${COPILOT_BASE}/`))
+    return null;
+  const segments = path.split("/").filter(Boolean);
+  const count = segments.length;
+  const action = segments[count - 1];
+  if (count < 3 || segments[count - 3] !== "agent") return null;
+  if (action !== "run" && action !== "connect" && action !== "suggest")
+    return null;
+  try {
+    return { agentId: decodeURIComponent(segments[count - 2] ?? ""), action };
+  } catch {
+    return null;
+  }
+}
+
+const RUNTIME_RUN: Rule = {
+  method: "POST",
+  path: /$^/,
+  needs: async () => ["useBots"],
+};
 
 export const GATED_ROUTES: Rule[] = [
-  { method: "POST", path: RUN, needs: async () => ["useBots"] },
   {
     method: ["POST", "PATCH"],
     path: /^\/api\/agents(\/[^/]+)?$/,
@@ -85,11 +117,6 @@ export const GATED_ROUTES: Rule[] = [
     path: /^\/api\/computers\/[^/]+\/(control|human)\/(secret|sign-in)$/,
     needs: async () => ["passwordManager"],
   },
-  {
-    method: ["POST", "PUT", "PATCH"],
-    path: /^\/api\/templates(\/.*)?\/(share|publish)$/,
-    needs: async () => ["publicTemplateSharing"],
-  },
 ];
 
 function matches(rule: Rule, method: string, path: string) {
@@ -105,10 +132,28 @@ export function createEnterpriseGate(
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (context, next) => {
     const controls = enterpriseControls();
-    const path = new URL(context.req.url).pathname;
+    /*
+     * Both spellings of the path. Hono routes on the DECODED path (`c.req.path`), so
+     * `/api/%61gents/<id>` reaches the agents route; a rule tested only against the raw URL would
+     * never see it. The runtime, behind its own sub-app, reads the raw URL. A rule that matches
+     * either one applies.
+     */
+    const raw = new URL(context.req.url).pathname;
+    const paths = [...new Set([context.req.path, raw])];
+    const path = paths[0] ?? raw;
     const method = context.req.method;
+    const run =
+      method === "POST"
+        ? paths.map(runtimeRun).find((found) => found !== null)
+        : undefined;
     const rule = controls
-      ? GATED_ROUTES.find((candidate) => matches(candidate, method, path))
+      ? run
+        ? RUNTIME_RUN
+        : GATED_ROUTES.find((candidate) =>
+            paths.some((candidatePath) =>
+              matches(candidate, method, candidatePath),
+            ),
+          )
       : undefined;
     if (!controls || !rule) return next();
 
@@ -149,9 +194,9 @@ export function createEnterpriseGate(
     if (authenticated instanceof Response) return authenticated;
     if (refused) return refused;
 
-    const run = RUN.exec(path);
-    if (run?.[2] === "run" && run[1])
-      return governRun(context, next, decodeURIComponent(run[1]));
+    // A suggestion runs the model as a run does, so the allowlist governs it the same way.
+    if ((run?.action === "run" || run?.action === "suggest") && run.agentId)
+      return governRun(context, next, run.agentId);
     return next();
   };
 }

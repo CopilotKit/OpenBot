@@ -11,7 +11,7 @@
  * trigger, 409 (generic webhook only) the responsibility is paused or completed, 413 body too large,
  * 503 the trigger is awaiting its provider secret.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AuditStore, recordAuditEvent } from "../audit";
@@ -131,6 +131,14 @@ function parseObject(raw: string): Record<string, unknown> | null {
 }
 const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 
+/**
+ * The event identity for GitHub, Linear and Sentry, which sign only the body: their delivery ids
+ * (`X-GitHub-Delivery`, `Linear-Delivery`, `Request-ID`) are unsigned headers, so a captured request
+ * replayed with a fresh one would run again. A redelivery resends the same body, so it still dedupes.
+ */
+const signedBodyId = (raw: string) =>
+  `body-${createHash("sha256").update(raw).digest("hex")}`;
+
 export function createTriggerIngressRoutes(deps: TriggerIngressDeps) {
   const now = deps.now ?? Date.now;
   const routes = new Hono();
@@ -221,8 +229,10 @@ export function createTriggerIngressRoutes(deps: TriggerIngressDeps) {
             { error: "Send a JSON object (or an empty body)." },
             400,
           );
+        // Signed, the event is the webhook-id the signature covers. An unsigned Idempotency-Key
+        // must not win, or a captured request replays with a fresh key and runs again.
         const idempotency = (
-          header("idempotency-key") ?? header("webhook-id")
+          signed ? header("webhook-id") : header("idempotency-key")
         )?.trim();
         if (idempotency && idempotency.length > 200)
           return context.json({ error: "Idempotency-Key is too long." }, 400);
@@ -281,7 +291,7 @@ export function createTriggerIngressRoutes(deps: TriggerIngressDeps) {
           );
         const action = str(payload.action);
         return deliver({
-          deliveryId,
+          deliveryId: signedBodyId(raw),
           type: action ? `${event}.${action}` : event,
           payload,
         });
@@ -312,7 +322,7 @@ export function createTriggerIngressRoutes(deps: TriggerIngressDeps) {
         const entity = str(payload.type) ?? header("linear-event") ?? "Event";
         const action = str(payload.action);
         return deliver({
-          deliveryId,
+          deliveryId: signedBodyId(raw),
           type: action ? `${entity}.${action}` : entity,
           payload,
         });
@@ -344,7 +354,7 @@ export function createTriggerIngressRoutes(deps: TriggerIngressDeps) {
           return context.json({ error: "Request-ID is required." }, 400);
         const action = str(payload.action);
         return deliver({
-          deliveryId,
+          deliveryId: signedBodyId(raw),
           type: action ? `${resource}.${action}` : resource,
           payload,
         });

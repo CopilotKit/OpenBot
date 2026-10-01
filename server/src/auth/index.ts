@@ -1,17 +1,17 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { electron } from "@better-auth/electron";
-import { scim } from "@better-auth/scim";
 import { expo } from "@better-auth/expo";
+import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
 import { eq, sql } from "drizzle-orm";
+import { createEnterpriseStore } from "../admin/settings-store";
 import type { AuditEventInput, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
-import { createEnterpriseStore } from "../admin/settings-store";
 import {
   accounts,
   scimConnectionBindings,
@@ -32,6 +32,9 @@ import { applyConfiguredAdmin, isConfiguredAdmin, seedRole } from "./roles";
 import { recordProvisioned, scimOptions } from "./scim";
 
 /** What a person sees when SSO is required and they tried another way in. */
+/** The native app's custom scheme (mobile/app.config.ts). */
+const NATIVE_APP_ORIGIN = "openbotmobile://";
+
 export const SSO_REQUIRED_MESSAGE =
   "This deployment requires signing in through your company's identity provider. Enter your work email to continue.";
 
@@ -205,8 +208,15 @@ export function createAuth(
   const scimPluginOptions = scimOptions(scimDeps);
   const enterpriseStore = createEnterpriseStore(database);
 
+  /*
+   * The native app signs in through its custom scheme, and the Expo plugin appends the session cookie
+   * to that redirect. Any Android app can register the same scheme, so the scheme is trusted only on
+   * a deployment that runs the native app (EXPO_PROJECT_ID, as for push). Elsewhere a sign-in can
+   * never be sent there.
+   */
+  const nativeApp = Boolean(process.env.EXPO_PROJECT_ID?.trim());
   const plugins = [
-    expo(),
+    ...(nativeApp ? [expo()] : []),
     /*
      * SCIM 2.0 at /api/auth/scim/v2, only when SCIM_BEARER_TOKEN is set. See scim.ts.
      */
@@ -309,7 +319,10 @@ export function createAuth(
     },
     baseURL: authConfig.baseUrl,
     secret: authConfig.secret,
-    trustedOrigins: [...authConfig.trustedOrigins, "openbotmobile://"],
+    trustedOrigins: [
+      ...authConfig.trustedOrigins,
+      ...(nativeApp ? [NATIVE_APP_ORIGIN] : []),
+    ],
     /*
      * Wrapped, so a company's client secret is ciphertext in the column.
      *
