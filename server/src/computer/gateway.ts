@@ -29,8 +29,8 @@ import { checkComputerAddress } from "./target";
 export {
   ComputerUnavailableError,
   ElementNotFoundError,
-  HumanHasControlError,
   HandoffRequestError,
+  HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
@@ -42,8 +42,9 @@ import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
-  policyInitiator,
+  type PolicyDecider,
   type PolicyDecision,
+  policyInitiator,
 } from "./policy";
 import type { ComputerProvider } from "./provider";
 import type {
@@ -102,6 +103,13 @@ export type ComputerGatewayOptions = {
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
+  /**
+   * Replace the built-in policy evaluator.
+   *
+   * When absent, `policy()` is evaluated by `evaluateActionPolicy` exactly as before. A decider that
+   * throws or rejects propagates that error; the action is not carried out.
+   */
+  decide?: PolicyDecider;
   /** True on a laptop, where browsing private network addresses is required. */
   allowPrivateHosts?: boolean;
   /** The secret that agent-computer requires on each request. */
@@ -238,6 +246,9 @@ export function createComputerGateway(
   options: ComputerGatewayOptions,
 ): ComputerGateway {
   const { provider, auditStore } = options;
+  const decide: PolicyDecider =
+    options.decide ??
+    ((policyContext) => evaluateActionPolicy(options.policy(), policyContext));
   const transport = createComputerTransport({
     ...(options.token ? { token: options.token } : {}),
     ...(options.allowPrivateHosts !== undefined
@@ -561,7 +572,7 @@ export function createComputerGateway(
       mcp: { server: "", tool: "", effect: "" },
     };
 
-    const decision = evaluateActionPolicy(options.policy(), context);
+    const decision = await decide(context);
     await write(auditStore, {
       toolName,
       botId,

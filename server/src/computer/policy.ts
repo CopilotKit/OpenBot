@@ -206,6 +206,17 @@ export type PolicyDecision = {
 };
 
 /**
+ * The decision point the gateway asks before an action runs.
+ *
+ * The built-in evaluator is the default. A deployment may replace it when the answer depends on a
+ * policy engine or state the gateway does not hold. Errors are not converted into an allow: they
+ * propagate to the caller and the action is not carried out.
+ */
+export type PolicyDecider = (
+  context: PolicyContext,
+) => PolicyDecision | Promise<PolicyDecision>;
+
+/**
  * String helpers, registered as CEL globals.
  *
  * cel-js 0.8.2 implements no string methods at all: `element.name.contains("Submit")` raises
