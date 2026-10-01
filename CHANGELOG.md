@@ -39,6 +39,10 @@ refused in every mode, including `allow_all`, and the browser's WebRTC traffic n
 filter instead of around it. A computer run without an API server can set
 `EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
 
+### A malformed `%` in a stream URL no longer returns a 500
+
+A request to `/api/computers/<id>/stream` whose id held a broken percent-escape, such as `%zz`, made the server throw and answer 500. It is now treated as not matching the stream route and goes through normal routing. Valid ids behave as before.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
