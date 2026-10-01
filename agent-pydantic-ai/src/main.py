@@ -4,6 +4,7 @@ AG-UI is built into Pydantic AI itself, as the `ag-ui` extra on `pydantic-ai-sli
 carries its own ASGI app and there is nothing to bridge.
 """
 
+import hmac
 import os
 import sys
 from pathlib import Path
@@ -63,7 +64,7 @@ async def refuse_without_the_server_token(request: Request, call_next):
     if request.url.path != "/health":
         expected = (os.environ.get("MANAGED_AGENT_TOKEN") or "").strip()
         offered = (request.headers.get(TOKEN_HEADER) or "").strip()
-        if not expected or offered != expected:
+        if not expected or not hmac.compare_digest(offered.encode("utf-8"), expected.encode("utf-8")):
             return JSONResponse({"error": "unauthorised"}, status_code=401)
     return await call_next(request)
 
