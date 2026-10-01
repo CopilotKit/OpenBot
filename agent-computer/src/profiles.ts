@@ -12,9 +12,9 @@
  *
  * Profile behavior in this image and Playwright version:
  *   - A cookie with an expiry survives close-and-reopen. So does localStorage.
- *   - A session cookie (no expiry) does not, and should not: Chromium drops those on restart, exactly
- *     as a desktop browser does. Any "stay signed in" worth the name sets an expiring cookie, but this
- *     is why a site that only ever issues session cookies will still ask a Bot to sign in again.
+ *   - A session cookie (no expiry) does not: Chromium drops those on restart, exactly as a desktop
+ *     browser does. Here a restart is a pod being deleted by an idle suspend or an image update, so
+ *     `session-cookies.ts` writes them to a file in the same profile and puts them back on launch.
  *   - Killing the browser process with SIGKILL leaves no stale singleton lock in the profile, and the
  *     profile reopens with its cookies intact. The widely-reported `SingletonLock` breakage does not
  *     reproduce here. The defensive sweep below stays anyway, because it is three lines and the
@@ -43,6 +43,10 @@ import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
 import { botIdsIn } from "./profile-listing";
+import {
+  type SessionCookieKeeper,
+  sessionCookieKeeper,
+} from "./session-cookies";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
 // from the playwright-free `./env` instead of pulling this module's browser driver in with it.
@@ -242,6 +246,23 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     usedAt: number;
     /** Point `page` at whatever is open now. Called on every page opening and closing. */
     retarget: () => void;
+    /** Keeps this browser's session cookies on the profile volume. Absent for a native Chrome. */
+    sessionCookies?: SessionCookieKeeper;
+  };
+
+  /**
+   * Write a browser's session cookies one last time and stop checking them.
+   *
+   * Before the close, because a closed context has no cookies to read. Bounded like the
+   * announcement, because a browser that will not answer must not hold a close open.
+   */
+  const keepSessionCookies = async (running: LiveBrowser): Promise<void> => {
+    const keeper = running.sessionCookies;
+    if (!keeper) return;
+    await settleWithin(
+      keeper.save().then(() => keeper.stop()),
+      ANNOUNCE_BUDGET_MS,
+    );
   };
 
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
@@ -294,6 +315,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     // on it. The close is the thing that must happen; being told about it is best effort.
     await whileClosing(botId, async () => {
       await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
+      await keepSessionCookies(running);
       await closeAndWait(running.context).catch(() => undefined);
     });
     return true;
@@ -403,6 +425,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         // next line and the live screen's follow loop re-attaches to it within the second, so this is
         // a browser being swapped rather than one going away. Telling the viewer here would end a
         // screen that is about to be fine, which is the opposite of what the announcement is for.
+        await existing.sessionCookies?.stop();
         await existing.context.close().catch(() => undefined);
         live.delete(botId);
       }
@@ -434,6 +457,27 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           handleSIGHUP: false,
           ...(proxy ? { proxy } : {}),
         });
+        /*
+         * Session cookies back before anything navigates, so the first request a site sees from this
+         * launch is already signed in. Not for a native Chrome: its cookies are protected by the OS
+         * keychain, and a plain file beside them would undo that. The container profile uses the
+         * basic password store, so the file adds no exposure the volume did not already have.
+         */
+        const sessionCookies = LOCAL_CHROME
+          ? undefined
+          : sessionCookieKeeper(botId, dir, context);
+        if (sessionCookies) {
+          await sessionCookies.restore().catch((error: unknown) => {
+            console.info(
+              JSON.stringify({
+                type: "computer-session-cookies-not-restored",
+                botId,
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          });
+          sessionCookies.start();
+        }
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
         const record: LiveBrowser = {
@@ -442,6 +486,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           startedAt: new Date().toISOString(),
           usedAt: Date.now(),
           retarget: () => {},
+          ...(sessionCookies ? { sessionCookies } : {}),
         };
         record.retarget = () => {
           const next = chooseLivePage(context.pages());
@@ -558,6 +603,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS),
         ),
       );
+      // Written before the close, so a pod deleted by a suspend or an image update keeps its sign-ins.
+      await Promise.all(entries.map(([, c]) => keepSessionCookies(c)));
       await Promise.all(entries.map(([, c]) => closeAndWait(c.context)));
     },
 

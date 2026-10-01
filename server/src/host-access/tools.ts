@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HeadlessToolSuspension } from "../computer/headless-tools";
 import {
   type AuditInitiator,
   type AuditStore,
@@ -95,6 +96,7 @@ async function answer(
     });
     return resultText(result);
   } catch (error) {
+    if (error instanceof HeadlessToolSuspension) throw error;
     const reason =
       error instanceof Error ? error.message : "That host operation failed.";
     await auditHostAccess(audit, {
@@ -251,5 +253,5 @@ export function hostAccessTools(options: {
     },
   );
 
-  return tools;
+  return tools.map((tool) => ({ ...tool, initiator: options.initiator }));
 }

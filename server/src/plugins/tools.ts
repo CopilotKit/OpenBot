@@ -1,5 +1,8 @@
 import { z } from "zod";
+import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
+import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { markUntrusted } from "../untrusted-content";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -51,9 +54,14 @@ export const REFUSAL_MARKER = "Refused.";
  * arrives at is a deployment topology decision, not a decision about what its model is told.
  */
 export function vendorAnswer(result: { text: string; isError: boolean }) {
+  /*
+   * Marked as outside content either way. A vendor's answer is somebody else's data: an issue title,
+   * an email body, a document, any of which can be written to read like an instruction. The error
+   * text is the vendor's too. See untrusted-content.ts; the transcript unwraps the envelope to draw it.
+   */
   return result.isError
-    ? `The vendor reported an error: ${result.text}`
-    : result.text;
+    ? `The vendor reported an error:\n${markUntrusted(result.text, "connector error")}`
+    : markUntrusted(result.text, "connector result");
 }
 
 export type GrantedTool = {
@@ -61,6 +69,7 @@ export type GrantedTool = {
   description: string;
   parameters: z.ZodType;
   execute: (args: unknown) => Promise<string>;
+  initiator?: AuditInitiator;
   /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *
@@ -188,13 +197,16 @@ export async function grantedTools(options: {
   botId: string;
   actorId: string;
   initiator?: AuditInitiator;
+  /** Whose account a call reaches, when not the asker's; see `callTool`'s `credentialActorId`. */
+  credentialActorFor?: (ref: string) => Promise<string>;
 }): Promise<GrantedTool[]> {
-  const { store, botId, actorId, initiator } = options;
+  const { store, botId, actorId, initiator, credentialActorFor } = options;
   const granted = await store.listForAgent(botId);
 
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
+    initiator,
     description: tool.description,
     parameters: parametersFor(tool.inputSchema),
     execute: async (args: unknown) => {
@@ -210,10 +222,17 @@ export async function grantedTools(options: {
           botId,
           actorId,
           ...(initiator ? { initiator } : {}),
+          ...(credentialActorFor
+            ? { credentialActorId: await credentialActorFor(tool.ref) }
+            : {}),
         });
         return vendorAnswer(result);
       } catch (error) {
-        if (error instanceof PluginRefusedError) {
+        if (error instanceof HeadlessToolSuspension) throw error;
+        if (
+          error instanceof PluginRefusedError ||
+          error instanceof ApprovalRefusedError
+        ) {
           return `${REFUSAL_MARKER} ${error.message}`;
         }
         /*

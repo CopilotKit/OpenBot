@@ -52,6 +52,7 @@ describe("runtime capabilities", () => {
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
       // sign-in page which companies use this deployment.
       ssoConfigured: false,
+      ssoRequired: false,
     });
   });
 
@@ -73,6 +74,7 @@ describe("runtime capabilities", () => {
       "voice",
       "authProviders",
       "ssoConfigured",
+      "ssoRequired",
     ]);
     // The provider list is names, never the clients and secrets behind them.
     expect(body).not.toContain("google-client-secret");

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supplySecret } from "@/lib/computers/control";
-import { useComputerControl } from "@/lib/computers/use-control";
-import { ComputerControlButton } from "./computer-controls";
 import {
   readPageFrame,
   readScreenshot,
   type Screenshot,
 } from "@/lib/computers/screen";
+import { useComputerControl } from "@/lib/computers/use-control";
 import { ChannelAvatar } from "../channels/avatar";
+import { ComputerControlButton } from "./computer-controls";
+import { DemonstrationRecorder } from "./demonstration-recorder";
 import { LiveScreen } from "./live-screen";
 import { useElementVisible, usePageVisible } from "./preview-visibility";
 
@@ -717,6 +718,13 @@ export function ComputerView({
                     </span>
                     <ComputerControlButton computerId={computerId} />
                   </div>
+                )}
+                {!settled && (
+                  <DemonstrationRecorder
+                    botId={computerId}
+                    driving={driving}
+                    onRecordingChange={() => setRetryKey((value) => value + 1)}
+                  />
                 )}
               </div>
             </div>,

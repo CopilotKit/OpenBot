@@ -201,6 +201,137 @@ pub struct CommandPrompt {
     pub working_directory: Option<String>,
     pub command: String,
     pub writable: bool,
+    /// The member's OpenBot setting after the team cap, as the server sent it.
+    pub command_policy: CommandPolicy,
+}
+
+/// Commands on this computer: ask every time, always allow, or never.
+///
+/// The server sends the member's setting after the admin cap (the stricter applies). It is parsed
+/// leniently and toward caution: a missing or unrecognised value is `Ask`, so a newer server can
+/// never loosen an older desktop by sending a word it does not know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandPolicy {
+    Ask,
+    Allow,
+    Never,
+}
+
+impl CommandPolicy {
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("allow") => CommandPolicy::Allow,
+            Some("never") => CommandPolicy::Never,
+            _ => CommandPolicy::Ask,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CommandPolicy::Ask => "ask every time",
+            CommandPolicy::Allow => "always allow",
+            CommandPolicy::Never => "never",
+        }
+    }
+}
+
+/// What the native layer does with one command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandApproval {
+    /// Refused on this machine too, whatever the server let through.
+    Refuse,
+    /// The person chose "always allow" for this Bot in this folder on this computer.
+    Proceed,
+    /// Show the dialog. `offer_always` adds "Always allow in this folder".
+    Ask { offer_always: bool },
+}
+
+/// The member's server setting gates the local one: a folder the person always allowed here is
+/// only honoured while their setting (after the team cap) is still "always allow".
+pub fn command_approval(policy: CommandPolicy, allowed_here: bool) -> CommandApproval {
+    match policy {
+        CommandPolicy::Never => CommandApproval::Refuse,
+        CommandPolicy::Allow if allowed_here => CommandApproval::Proceed,
+        CommandPolicy::Allow => CommandApproval::Ask { offer_always: true },
+        CommandPolicy::Ask => CommandApproval::Ask {
+            offer_always: false,
+        },
+    }
+}
+
+/// Folders where the person told this computer to stop asking about one Bot's commands.
+///
+/// Kept in the desktop app's own configuration directory, never on the server: approval on this
+/// computer is collected here. Keyed by Bot and folder path because grants are session-only and
+/// their ids do not survive a restart. A file that cannot be read counts as empty, so a damaged
+/// file asks again rather than allowing.
+#[derive(Clone, Debug)]
+pub struct LocalCommandAllowList {
+    path: PathBuf,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AllowListFile {
+    folders: Vec<AllowedFolder>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct AllowedFolder {
+    bot_id: String,
+    root: String,
+}
+
+impl LocalCommandAllowList {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    fn read(&self) -> AllowListFile {
+        fs::read(&self.path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn entry(bot_id: &str, root: &Path) -> AllowedFolder {
+        AllowedFolder {
+            bot_id: bot_id.into(),
+            root: root.to_string_lossy().into_owned(),
+        }
+    }
+
+    pub fn allows(&self, bot_id: &str, root: &Path) -> bool {
+        self.read().folders.contains(&Self::entry(bot_id, root))
+    }
+
+    fn write(&self, file: &AllowListFile) -> HostAccessResult<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|error| HostAccessError::Io(error.to_string()))?;
+        }
+        let bytes = serde_json::to_vec_pretty(file)
+            .map_err(|error| HostAccessError::Io(error.to_string()))?;
+        let temporary = self.path.with_extension("json.tmp");
+        fs::write(&temporary, bytes).map_err(|error| HostAccessError::Io(error.to_string()))?;
+        fs::rename(&temporary, &self.path).map_err(|error| HostAccessError::Io(error.to_string()))
+    }
+
+    pub fn remember(&self, bot_id: &str, root: &Path) -> HostAccessResult<()> {
+        let mut file = self.read();
+        let entry = Self::entry(bot_id, root);
+        if !file.folders.contains(&entry) {
+            file.folders.push(entry);
+        }
+        self.write(&file)
+    }
+
+    pub fn forget(&self, bot_id: &str, root: &Path) -> HostAccessResult<()> {
+        let mut file = self.read();
+        let entry = Self::entry(bot_id, root);
+        file.folders.retain(|folder| folder != &entry);
+        self.write(&file)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,6 +348,9 @@ struct DesktopOperation {
     content: Option<String>,
     command: Option<String>,
     writable: Option<bool>,
+    /// Kept as text and parsed by `CommandPolicy::from_wire`, so an unknown value is `Ask` rather
+    /// than a poll response this desktop cannot read.
+    command_policy: Option<String>,
     expires_at: Option<u64>,
     #[serde(skip, default = "now_millis")]
     received_at_ms: u128,
@@ -768,6 +902,13 @@ impl Inner {
             Some(value) if !value.trim().is_empty() => Some(resolve_relative(&grant.root, value)?),
             _ => None,
         };
+        let command_policy = CommandPolicy::from_wire(operation.command_policy.as_deref());
+        // The server refuses these first; refused here too, so a server that forgot still cannot.
+        if command_policy == CommandPolicy::Never {
+            return Err(HostAccessError::Denied(
+                "Commands on this computer are set to never run.".into(),
+            ));
+        }
         self.approval.confirm_command(&CommandPrompt {
             operation_id: operation.operation_id.clone(),
             bot_id: operation.bot_id.clone(),
@@ -776,6 +917,7 @@ impl Inner {
             working_directory: operation.relative_path.clone(),
             command: command.into(),
             writable,
+            command_policy,
         })?;
         self.ensure_operation_still_allowed(operation, &grant)?;
         let command_directory = if let Some(directory) = working_directory {
@@ -1600,6 +1742,83 @@ fn limit_output(bytes: &[u8], limit: usize) -> HostAccessResult<String> {
 }
 
 #[cfg(test)]
+mod command_policy_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_or_missing_policy_asks() {
+        assert_eq!(CommandPolicy::from_wire(None), CommandPolicy::Ask);
+        assert_eq!(
+            CommandPolicy::from_wire(Some("sometimes")),
+            CommandPolicy::Ask
+        );
+        assert_eq!(
+            CommandPolicy::from_wire(Some("allow")),
+            CommandPolicy::Allow
+        );
+        assert_eq!(
+            CommandPolicy::from_wire(Some("never")),
+            CommandPolicy::Never
+        );
+    }
+
+    #[test]
+    fn local_always_allow_only_counts_while_the_server_setting_allows() {
+        assert_eq!(
+            command_approval(CommandPolicy::Never, true),
+            CommandApproval::Refuse
+        );
+        assert_eq!(
+            command_approval(CommandPolicy::Allow, true),
+            CommandApproval::Proceed
+        );
+        assert_eq!(
+            command_approval(CommandPolicy::Allow, false),
+            CommandApproval::Ask { offer_always: true }
+        );
+        // An admin cap of "ask" pauses a folder the person always allowed.
+        assert_eq!(
+            command_approval(CommandPolicy::Ask, true),
+            CommandApproval::Ask {
+                offer_always: false
+            }
+        );
+    }
+
+    #[test]
+    fn the_local_allow_list_is_per_bot_and_folder_and_survives_reload() {
+        let dir = std::env::temp_dir().join(fresh_id("allow-list"));
+        let path = dir.join("host-command-approvals.json");
+        let list = LocalCommandAllowList::new(&path);
+        let root = Path::new("/Users/someone/project");
+        assert!(!list.allows("bot-a", root));
+        list.remember("bot-a", root).unwrap();
+        list.remember("bot-a", root).unwrap();
+        let reloaded = LocalCommandAllowList::new(&path);
+        assert!(reloaded.allows("bot-a", root));
+        assert!(!reloaded.allows("bot-b", root));
+        assert!(!reloaded.allows("bot-a", Path::new("/Users/someone/other")));
+        reloaded.forget("bot-a", root).unwrap();
+        assert!(!list.allows("bot-a", root));
+        fs::write(&path, b"not json").unwrap();
+        assert!(!list.allows("bot-a", root));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_never_policy_in_the_poll_response_parses() {
+        let operation: DesktopOperation = serde_json::from_str(
+            r#"{"operationId":"op","kind":"run_command","botId":"b","actorId":"a","command":"ls","commandPolicy":"never"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            CommandPolicy::from_wire(operation.command_policy.as_deref()),
+            CommandPolicy::Never
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::{Address, Engine};
@@ -2089,6 +2308,7 @@ mod tests {
                 content: None,
                 command: None,
                 writable: Some(false),
+                command_policy: None,
                 expires_at: None,
                 received_at_ms: now_millis(),
             }
@@ -2162,6 +2382,7 @@ mod tests {
             content: None,
             command: None,
             writable: None,
+            command_policy: None,
             expires_at: None,
             received_at_ms: now_millis(),
         };

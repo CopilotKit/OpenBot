@@ -114,6 +114,8 @@ export type RunAssertion = {
    * person, which is what those runs were.
    */
   initiator?: AuditInitiator;
+  /** The durable handoff claim under which a remote delivery may coordinate further work. */
+  handoff?: { key: string; owner: string };
 };
 
 type SignedRun = RunAssertion & { exp: number };
@@ -169,6 +171,15 @@ export function readRunAssertion(
       return null;
     }
     if (payload.exp <= now) return null;
+    if (
+      payload.handoff !== undefined &&
+      (!payload.handoff ||
+        typeof payload.handoff.key !== "string" ||
+        !payload.handoff.key ||
+        typeof payload.handoff.owner !== "string" ||
+        !payload.handoff.owner)
+    )
+      return null;
     return {
       botId: payload.botId,
       actorId: payload.actorId,
@@ -191,6 +202,7 @@ export function readRunAssertion(
       // Read as a person on anything unclear, for the reason depth reads as zero: an assertion
       // minted before this existed carries none, and a person is what those runs were.
       initiator: readInitiator(payload.initiator),
+      ...(payload.handoff ? { handoff: payload.handoff } : {}),
     };
   } catch {
     return null;
@@ -207,13 +219,25 @@ function readInitiator(value: unknown): AuditInitiator {
   if (!value || typeof value !== "object") return PERSON_INITIATOR;
   const kind = (value as { kind?: unknown }).kind;
   if (kind === "person" || kind === "deployment") return { kind };
-  if (kind !== "routine" && kind !== "handoff") return PERSON_INITIATOR;
+  if (
+    kind !== "routine" &&
+    kind !== "handoff" &&
+    kind !== "responsibility" &&
+    kind !== "memory"
+  )
+    return PERSON_INITIATOR;
   const id = (value as { id?: unknown }).id;
   return typeof id === "string" && id ? { kind, id } : PERSON_INITIATOR;
 }
 
 export type CallVerdict =
-  | { ok: true; botId: string; actorId: string; initiator?: AuditInitiator }
+  | {
+      ok: true;
+      botId: string;
+      actorId: string;
+      initiator?: AuditInitiator;
+      run: RunAssertion;
+    }
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
@@ -344,5 +368,6 @@ export async function authoriseAgentCall(options: {
     botId: assertion.botId,
     actorId: assertion.actorId,
     initiator: assertion.initiator,
+    run: assertion,
   };
 }

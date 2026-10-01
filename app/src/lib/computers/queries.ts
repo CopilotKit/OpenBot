@@ -8,6 +8,8 @@ export type ComputerProfile = {
   startedAt: string | null;
   /** Absent when the provider does not report egress at all, which is not the same as none. */
   egress?: string | null;
+  /** True when it runs an older image than a new computer would. Absent where that cannot be told. */
+  updateAvailable?: boolean;
 };
 
 /** Whether each Bot has a browser profile of its own, or they share one. */

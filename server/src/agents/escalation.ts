@@ -20,7 +20,11 @@
 
 import { z } from "zod";
 import { PUT_TO } from "../../../shared/handoff-markers";
-import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  type AuditInitiator,
+  type AuditStore,
+  recordAuditEvent,
+} from "../audit";
 import type { GrantedTool } from "../plugins/tools";
 import type { RunAssertion } from "./callback-token";
 
@@ -43,6 +47,8 @@ export type EscalationRoute = (input: {
   botId: string;
   threadId?: string;
   runId: string;
+  /** Preserved for a durable question routed from an unattended routine or delegated run. */
+  initiator?: AuditInitiator;
   question: string;
   why?: string;
 }) => Promise<{ reached: string } | { refusal: string }>;
@@ -151,6 +157,7 @@ export function escalationTool(options: {
           botId: from.botId,
           ...(from.threadId ? { threadId: from.threadId } : {}),
           runId: from.runId,
+          ...(from.initiator ? { initiator: from.initiator } : {}),
           question,
           ...(parsed.data.why ? { why: parsed.data.why } : {}),
         });

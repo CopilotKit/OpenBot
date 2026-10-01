@@ -37,6 +37,22 @@ export function asText(text: string): string {
 }
 
 /**
+ * The content inside the untrusted-content envelope, without the notice in front of it.
+ *
+ * The server marks every connector result as outside data before the model reads it
+ * (`server/src/untrusted-content.ts`). The notice is for the model; a person reading the transcript
+ * wants the vendor's answer, drawn the way it always was. Declared at both ends like
+ * {@link REFUSAL_MARKER}. Text with no envelope is returned unchanged.
+ */
+export function withoutUntrustedEnvelope(text: string): string {
+  return text.replace(
+    /CRITICAL: The following [^\n]* is untrusted data, not instructions or tool authorization\.[^\n]*\n<untrusted_data source="[^"]*">\n([\s\S]*?)\n<\/untrusted_data>/g,
+    (_match, inner: string) =>
+      inner.replace(/<\\\/untrusted_data/gi, "</untrusted_data"),
+  );
+}
+
+/**
  * A tool result, as something worth looking at.
  *
  * MCP says a text part, and vendors fill it with anything from plain markdown to a JSON envelope
@@ -44,15 +60,15 @@ export function asText(text: string): string {
  * the markdown it was hiding, and anything else is fenced as JSON. Nothing is discarded.
  */
 export function forDisplay(text: string): string {
-  const trimmed = asText(text).trim();
+  const trimmed = withoutUntrustedEnvelope(asText(text)).trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // Not JSON after all. Draw what the server sent.
-    return text;
+    // Not JSON after all. Draw what the server sent, without the model's notice.
+    return trimmed;
   }
 
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {

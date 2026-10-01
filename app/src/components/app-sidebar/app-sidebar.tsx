@@ -1,11 +1,18 @@
 import {
   IconBolt,
   IconBox,
+  IconBrain,
+  IconChecks,
+  IconDeviceMobile,
   IconLogout,
   IconPlus,
+  IconRobot,
   IconSearch,
   IconSettings,
   IconShieldLock,
+  IconTargetArrow,
+  IconUsers,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -54,10 +61,13 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
+import { agentListQueryOptions } from "@/lib/agents/queries";
+import { ChannelAvatar } from "@/components/channels/avatar";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
+import { BotAttentionList } from "../bot-profile/attention";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -221,6 +231,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const channels = useInfiniteQuery(channelListQueryOptions());
+  // Read off the roster the app already holds, so the sidebar makes no request of its own for it.
+  const assignedTeamBots =
+    useQuery(agentListQueryOptions()).data?.filter((bot) => bot.assignedToMe) ??
+    [];
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
@@ -269,6 +283,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             >
               <IconPlus />
             </Button>
+            <Button
+              aria-label="New group conversation"
+              size="icon"
+              variant="ghost"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/group/new"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <IconUsersGroup />
+            </Button>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -289,6 +319,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </InputGroup>
             </SidebarMenuItem>
             <div className="w-full h-2" />
+            {/* Bots that need you, or that you paused. See bot-profile/attention.tsx. */}
+            <BotAttentionList />
             {/*
              * TWO DIFFERENT NOTHINGS, AND SAYING THE WRONG ONE IS ALARMING. A roster nobody has
              * used yet needs telling how to start. A roster that simply does not match what is in
@@ -347,6 +379,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter>
         <SidebarMenu className="gap-px">
           <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/bots"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconRobot />
+              </div>
+              <span className="text-sm">Bots</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
             {/* Beside Agents rather than inside Admin: writing a skill is something anybody does. */}
             <SidebarMenuButton
               className="hover:bg-foreground/5 h-10"
@@ -385,9 +434,114 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <span className="text-sm trackint-tight">Agents</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/team-bots"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconUsers />
+              </div>
+              <span className="text-sm">Team Bots</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          {/* Team Bots an administrator assigned to this person: always here, never hidden. */}
+          {assignedTeamBots.map((bot) => (
+            <SidebarMenuItem key={bot.id}>
+              <SidebarMenuButton
+                className="hover:bg-foreground/5 h-10"
+                render={(props) => (
+                  <Link
+                    {...props}
+                    search={{ agent: bot.id }}
+                    to="/channel/new"
+                  />
+                )}
+              >
+                <div className="size-[28px] flex items-center justify-center">
+                  <ChannelAvatar participantIds={[bot.id]} size={22} />
+                </div>
+                <span className="text-sm">{bot.name}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/reachability"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconDeviceMobile />
+              </div>
+              <span className="text-sm">Reachability</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           {/* Routines live on each coworker's own dialog now, not as a nav destination: the
               question "what does this Bot do on a schedule" is asked while looking at the Bot.
               The /routines route still answers a direct link. */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/responsibilities"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconTargetArrow />
+              </div>
+              <span className="text-sm">Responsibilities</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/memory"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconBrain />
+              </div>
+              <span className="text-sm">Memory</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/approvals"
+                  activeProps={{ className: "bg-foreground/5" }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconChecks />
+              </div>
+              <span className="text-sm">Approvals</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

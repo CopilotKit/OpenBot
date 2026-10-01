@@ -17,6 +17,18 @@ import type { HandoffDelivery } from "./handoff-runner";
 import { textOf } from "./message-text";
 
 /** Whatever runs an agent against a thread and records what it did. */
+
+/**
+ * The conversation an answer belongs in has a run going. Usually the Bot that asked, still finishing
+ * the sentence that said it had asked, so the first retry comes quickly rather than a minute later.
+ */
+export class ThreadBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ThreadBusyError";
+  }
+}
+
 export type ThreadRunner = {
   run: (request: {
     threadId: string;
@@ -288,7 +300,7 @@ export function createHandoffDelivery(options: {
            * and is tried again: a person mid-question, or the Bot that asked still finishing its own
            * sentence, is a wait rather than a failure.
            */
-          throw new Error(
+          throw new ThreadBusyError(
             `${where.threadId} is busy with another run; the hop will be tried again`,
           );
         }

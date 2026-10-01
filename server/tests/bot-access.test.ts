@@ -47,6 +47,10 @@ describe("the computer surface", () => {
         reached.push(`reset:${botId}`);
         return { cleared: true };
       },
+      updateComputer: async (botId: string) => {
+        reached.push(`update:${botId}`);
+        return { updated: true, wasRunning: true };
+      },
       read: async (botId: string) => {
         reached.push(`read:${botId}`);
         return { text: "a page" };
@@ -82,6 +86,25 @@ describe("the computer surface", () => {
 
     expect(response.status).toBe(200);
     expect(reached).toEqual(["reset:sales"]);
+  });
+
+  test("lets the owner update their own Bot's computer, and nobody else", async () => {
+    const owner = app("owner");
+    const allowed = await owner.hono.request(
+      "http://t/api/computers/sales/computers/update",
+      { method: "POST" },
+    );
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toEqual({ updated: true, wasRunning: true });
+    expect(owner.reached).toEqual(["update:sales"]);
+
+    const stranger = app("stranger");
+    const refused = await stranger.hono.request(
+      "http://t/api/computers/sales/computers/update",
+      { method: "POST" },
+    );
+    expect(refused.status).toBe(404);
+    expect(stranger.reached).toEqual([]);
   });
 
   test("refuses somebody else's Bot, and does not act first", async () => {

@@ -15,6 +15,10 @@ import {
   type GalleryComponent,
   galleryManifest,
 } from "@/lib/copilot/gallery-registry";
+import {
+  NOT_SHOWN,
+  NOT_SHOWN_TAIL,
+} from "../../../../shared/component-markers";
 
 /**
  * Register compiled gallery components once per name, scoped to the active Bot with `available`.
@@ -89,12 +93,30 @@ function GrantedTool({
   const Component = spec.Component;
 
   const render = useCallback(
-    (props: { toolCallId?: string; args?: Record<string, unknown> }) => {
+    (props: {
+      toolCallId?: string;
+      args?: Record<string, unknown>;
+      result?: string;
+    }) => {
       const refusal = props.toolCallId
         ? refusals.get(props.toolCallId)
         : undefined;
       if (refusal) {
         return <RefusedCard reason={refusal} title={spec.title} />;
+      }
+      /*
+       * A stored refusal. The in-memory map above is gone once the page reloads, and a headless turn
+       * never had one: the server answered the call itself (`server/src/components/headless.ts`).
+       * The result is what survives, so a call that drew nothing is drawn as the refusal it was.
+       */
+      if (props.result?.startsWith(NOT_SHOWN)) {
+        const lead = `${NOT_SHOWN}${spec.title}. `;
+        const reason = (
+          props.result.startsWith(lead)
+            ? props.result.slice(lead.length)
+            : props.result.slice(NOT_SHOWN.length)
+        ).replace(NOT_SHOWN_TAIL, "");
+        return <RefusedCard reason={reason} title={spec.title} />;
       }
       // Render from the polled grant snapshot so revocations show before a new call starts.
       if (!isHeld) {
@@ -133,7 +155,7 @@ function GrantedTool({
           setRefusals((current) => new Map(current).set(id, reason));
         }
         // Led with the same words the card shows, so the transcript and the card agree.
-        return `Not shown: ${spec.title}. ${reason} Nothing was displayed, so tell the person that.`;
+        return `${NOT_SHOWN}${spec.title}. ${reason}${NOT_SHOWN_TAIL}`;
       }
       return spec.confirmation ?? "It is now on screen for the person.";
     },

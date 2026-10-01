@@ -88,6 +88,39 @@ function SignScreen() {
     }
   }
 
+  const providerButtons = (
+    <div className="flex flex-col gap-2">
+      {providers.map((provider) => (
+        /*
+         * Every provider gets the same button, and it is the light-themed outline one
+         * rather than the app's filled primary. Google's guidelines require their button be
+         * at least as prominent as any other sign-in option and specify its fill and
+         * stroke, so making one provider the loud one would break that for the others. The
+         * same size and weight throughout is also the honest presentation: a deployment
+         * that configured three has three, and none of them is the recommended one.
+         */
+        <Button
+          className="h-10 w-full justify-start gap-3 px-3 tracking-tight"
+          disabled={opening !== null}
+          key={provider}
+          onClick={() => handleSignIn(provider)}
+          size="lg"
+          variant="outline"
+        >
+          <ProviderLogo provider={provider} />
+          {/* Centred against the button, not against the space left of the mark. */}
+          <span className="flex-1 text-center">
+            {opening === provider
+              ? `Opening ${providerName(provider)}…`
+              : `Continue with ${providerName(provider)}`}
+          </span>
+          {/* Balances the mark so the label sits in the middle of the button. */}
+          <span aria-hidden="true" className="size-[18px]" />
+        </Button>
+      ))}
+    </div>
+  );
+
   const prefersReducedMotion = useReducedMotion();
   const hidden = {
     opacity: 0,
@@ -128,38 +161,14 @@ function SignScreen() {
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          {providers.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {providers.map((provider) => (
-                /*
-                 * Every provider gets the same button, and it is the light-themed outline one
-                 * rather than the app's filled primary. Google's guidelines require their button be
-                 * at least as prominent as any other sign-in option and specify its fill and
-                 * stroke, so making one provider the loud one would break that for the others. The
-                 * same size and weight throughout is also the honest presentation: a deployment
-                 * that configured three has three, and none of them is the recommended one.
-                 */
-                <Button
-                  className="h-10 w-full justify-start gap-3 px-3 tracking-tight"
-                  disabled={opening !== null}
-                  key={provider}
-                  onClick={() => handleSignIn(provider)}
-                  size="lg"
-                  variant="outline"
-                >
-                  <ProviderLogo provider={provider} />
-                  {/* Centred against the button, not against the space left of the mark. */}
-                  <span className="flex-1 text-center">
-                    {opening === provider
-                      ? `Opening ${providerName(provider)}…`
-                      : `Continue with ${providerName(provider)}`}
-                  </span>
-                  {/* Balances the mark so the label sits in the middle of the button. */}
-                  <span aria-hidden="true" className="size-[18px]" />
-                </Button>
-              ))}
-            </div>
-          ) : options?.sso ? null : (
+          {options?.ssoRequired ? (
+            <p className="mb-3 text-center text-sm text-muted-foreground">
+              Your organization requires single sign-on.
+            </p>
+          ) : null}
+          {providers.length > 0 && !options?.ssoRequired ? (
+            providerButtons
+          ) : options?.sso || options?.ssoRequired ? null : (
             <p className="text-center text-sm text-muted-foreground">
               No sign-in provider is configured for this deployment.
             </p>
@@ -199,6 +208,15 @@ function SignScreen() {
                   : "Continue with your company account"}
               </Button>
             </form>
+          ) : null}
+          {/* The administrators' audited break-glass while SSO is required; everybody else is refused. */}
+          {options?.ssoRequired && providers.length > 0 ? (
+            <details className="mt-4 text-sm">
+              <summary className="cursor-pointer text-center text-muted-foreground">
+                Administrator sign-in
+              </summary>
+              <div className="mt-3">{providerButtons}</div>
+            </details>
           ) : null}
           {error ? (
             <p className="mt-3 text-sm text-destructive" role="alert">

@@ -87,6 +87,23 @@ jobs:
       - run: bun run typecheck
         working-directory: ${{ matrix.package }}
 
+  mobile:
+    name: native types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # The native app is an isolated npm package; adding it to Bun workspaces would change the
+      # existing desktop/server installation contract. CI installs its own reviewed lockfile.
+      - run: npm ci --prefix mobile --ignore-scripts
+      - run: npm run --prefix mobile typecheck
+
   chart:
     name: chart (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -565,7 +582,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, mobile, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

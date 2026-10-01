@@ -422,6 +422,14 @@ export function createComputerRoutes(
     act(context, (botId, actor) => gateway.resetComputer(botId, actor)),
   );
 
+  /**
+   * Move the computer onto the image this deployment now runs. Files and sign-ins stay; a running
+   * computer restarts, so this is a person's button and never something a wake does to a busy one.
+   */
+  routes.post("/:botId/computers/update", (context) =>
+    act(context, (botId, actor) => gateway.updateComputer(botId, actor)),
+  );
+
   routes.post("/:botId/control/take", (context) =>
     act(context, (botId, actor, body) =>
       gateway.takeControl(botId, actor, handoffId(body)),

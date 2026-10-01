@@ -421,6 +421,33 @@ see the Bot can read it.
 With both caps above at zero the screen says the capability is switched off, because a grant made
 then is a row nothing will read.
 
+## Slack and Microsoft Teams (OpenTag pairing)
+
+OpenBot reaches people in Slack and Teams through [OpenTag](https://github.com/CopilotKit/OpenTag),
+the open-source Channels SDK front. OpenTag calls OpenBot as its AG-UI agent; OpenBot does not hold a
+Slack app of its own.
+
+| Variable                        | Meaning                                                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENTAG_SHARED_SECRET`         | Enables the pairing. At least 32 characters. OpenTag must send `Authorization: Bearer <secret>` (its `AGENT_AUTH_HEADER`), and OpenBot sends the same header on proactive posts. |
+| `OPENTAG_URL`                   | OpenTag's base URL, for messages sent when no Slack turn is open (replies after an approval, responsibility progress, questions). Without it those sends fail visibly in the outbox, and Slack triggers are refused because channel membership cannot be checked. |
+| `OPENTAG_BOT_ICON_URL_TEMPLATE` | Optional `https` PNG URL with `{seed}` (the Bot's avatar seed) or `{agentId}`, used as the Bot's Slack icon on proactive posts.                                                    |
+
+Point OpenTag's `AGENT_URL` at `<public URL>/api/delivery/webhooks/opentag/agent`. A person links
+their Slack or Teams identity from **Reachability**: OpenBot shows a one-time `link <code>` message,
+valid for ten minutes, which they send to the OpenTag app. After that, only that person's messages
+reach their chosen Bot, in their own OpenBot conversation, with learning, governance, approvals and
+audit on every turn. Anyone unlinked is told how to link and nothing runs. Approval requests appear
+as OpenTag approval cards (allow once, always allow, cancel) and are decided through the approvals
+service as the linked owner; a reply to a Bot's question answers that question.
+
+The former direct Slack settings (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_BOT_TOKEN`,
+`SLACK_TEAM_ID`, `SLACK_SIGNING_SECRET`) are refused at start-up; unset them.
+
+SMS through Twilio honours Advanced Opt-Out: `STOP` (and Twilio's other opt-out keywords) marks the
+number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
+`START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
+
 ## Computer and supervisor
 
 | Variable                             | Meaning                                                                                   |

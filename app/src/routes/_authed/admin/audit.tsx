@@ -55,8 +55,10 @@ const FILTERS = [
     label: "Did not happen",
     search: eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES),
   },
-  // Both unattended kinds: the question is whether anybody was watching, not which of the two.
-  { label: "Nobody watching", search: "?initiatorKind=routine,handoff" },
+  {
+    label: "Nobody watching",
+    search: "?initiatorKind=routine,handoff,responsibility,memory",
+  },
 ] as const;
 
 function AuditPage() {
@@ -157,6 +159,21 @@ function StartedBy({
         {event.initiatorId
           ? `Handed on by ${nameFor(event.initiatorId)}`
           : "Handed on"}
+      </span>
+    );
+  }
+  if (
+    event.initiatorKind === "responsibility" ||
+    event.initiatorKind === "memory"
+  ) {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        {event.initiatorKind === "memory"
+          ? "A memory source"
+          : "A responsibility"}
       </span>
     );
   }
@@ -431,6 +448,7 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_requested": "The Bot asked for a secret",
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
+  "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
 
   "component.granted": "Granted to this Bot",

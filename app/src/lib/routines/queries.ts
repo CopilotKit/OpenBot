@@ -51,7 +51,31 @@ export function nothingIsFiring(
 export const routineKeys = {
   all: ["routines"] as const,
   list: () => ["routines", "list"] as const,
+  runs: (id: string) => ["routines", id, "runs"] as const,
 };
+
+/** One firing of a routine, scheduled or Run now. */
+export type RoutineRunRecord = {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "skipped" | "waiting";
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  /** What started it: the schedule, a person's Run now, or an event trigger. */
+  source: "schedule" | "run_now" | "trigger";
+};
+
+export function routineRunsQueryOptions(id: string) {
+  return queryOptions({
+    queryKey: routineKeys.runs(id),
+    queryFn: (): Promise<RoutineRunRecord[]> =>
+      client(`/api/routines/${encodeURIComponent(id)}/runs`, "runs", {
+        fallback: "This routine's runs could not be loaded.",
+      }),
+    // A run in flight settles within minutes; poll so Running turns into its outcome.
+    refetchInterval: 5_000,
+  });
+}
 
 /**
  * The signed-in person's own routines.
