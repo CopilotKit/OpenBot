@@ -1205,8 +1205,8 @@ export function createApp(
         // Whether "built-in" is a kind of coworker this deployment can actually make: the create
         // path falls back to the managed Bot's endpoint, so without one it can only refuse.
         config.managedAgent?.endpoint !== undefined,
-        // The managed Bot's address, so a coworker created without an endpoint — which creation
-        // stores as running at this address — can be told apart from one a person hosts.
+        // The managed Bot's address, so a legacy coworker stored before endpoint-less creates became
+        // `built_in` can still be told apart from one a person hosts.
         config.managedAgent?.endpoint?.toString(),
       ),
     );

@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, or, sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffRunner,
@@ -15,6 +15,7 @@ import {
   agents,
   auditEvents,
   pluginGrants,
+  users,
   workItems,
 } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
@@ -42,7 +43,12 @@ const RUN = `e2e-run-${suite}`;
 
 const queue = createWorkQueue(database);
 const auditStore = createAuditStore(database);
-const profiles = createAgentProfileStore(database);
+const profiles = createAgentProfileStore(
+  database,
+  new URL("https://managed.example.test/ag-ui"),
+);
+const createdAgentIds = new Set<string>();
+const createdUserIds = new Set<string>();
 
 const desk = createHandoffDesk({
   queue,
@@ -67,12 +73,24 @@ const desk = createHandoffDesk({
 });
 
 async function clean() {
-  await database.delete(workItems).where(like(workItems.key, `${RUN}%`));
-  for (const id of [ASKER, TARGET]) {
+  await database
+    .delete(workItems)
+    .where(
+      or(
+        like(workItems.key, `${RUN}%`),
+        sql`${workItems.payload}->>'runId' = ${RUN}`,
+      ),
+    );
+  for (const id of [ASKER, TARGET, ...createdAgentIds]) {
     await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
     await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));
     await database.delete(agents).where(eq(agents.id, id));
   }
+  createdAgentIds.clear();
+  for (const id of createdUserIds) {
+    await database.delete(users).where(eq(users.id, id));
+  }
+  createdUserIds.clear();
 }
 
 beforeEach(async () => {
@@ -109,6 +127,80 @@ afterAll(async () => {
 });
 
 describe("a hop, from the tool call to the delivery", () => {
+  test("a coworker created as Built in can hand work on", async () => {
+    const ownerId = `e2e-built-in-owner-${suite}`;
+    await database.insert(users).values({
+      id: ownerId,
+      email: `${ownerId}@example.test`,
+      name: "Built In Owner",
+    });
+    createdUserIds.add(ownerId);
+
+    const source = await profiles.create(
+      { id: ownerId, role: "user" },
+      {
+        name: "Built In Coordinator",
+        title: "Coordinator",
+        roleDescription: "Coordinate work without inventing an endpoint.",
+        visibility: "private",
+        systemPrompt: "Coordinate work without inventing an endpoint.",
+      },
+    );
+    createdAgentIds.add(source.id);
+
+    const [stored] = await database
+      .select({ type: agents.type, configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, source.id));
+    expect(stored?.type).toBe("built_in");
+    expect(stored?.configuration).toEqual({
+      systemPrompt: "Coordinate work without inventing an endpoint.",
+    });
+
+    await database.insert(pluginGrants).values({
+      kind: "bot",
+      ref: TARGET,
+      agentId: source.id,
+      grantedBy: ownerId,
+    });
+
+    const tool = handoffTool({
+      desk,
+      from: {
+        botId: source.id,
+        actorId: ownerId,
+        runId: RUN,
+        threadId: `thread-${suite}`,
+        depth: 0,
+      },
+      hasSomebodyToAsk: true,
+      maxDepth: 2,
+    });
+    const said = await tool?.execute({
+      bot: "Target",
+      task: "confirm the handoff path",
+    });
+    expect(said).toContain("Target");
+
+    const [queued] = await database
+      .select({ kind: workItems.kind, payload: workItems.payload })
+      .from(workItems)
+      .where(
+        and(
+          eq(workItems.kind, "bot.message"),
+          sql`${workItems.payload}->>'fromBotId' = ${source.id}`,
+        ),
+      );
+    expect(queued).toMatchObject({
+      kind: "bot.message",
+      payload: {
+        fromBotId: source.id,
+        toBotId: TARGET,
+        actorId: ownerId,
+      },
+    });
+  });
+
   test("what one Bot asked for is what the other is shown", async () => {
     const tool = handoffTool({
       desk,

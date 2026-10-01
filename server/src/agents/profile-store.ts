@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -352,6 +352,43 @@ function newAgentId() {
 }
 
 /**
+ * Move coworkers that predate the endpoint-less create fix onto the local run loop.
+ *
+ * Before this repair, choosing "Built in" on a deployment with a managed Bot wrote a `remote_ag_ui`
+ * row whose configuration was only the managed endpoint. That row could answer, but the handoff tool
+ * is minted only inside this deployment's run loop, so it could never hand work on. The role
+ * description is the instruction the create route had passed to `systemPrompt`; it is therefore the
+ * text the repaired `built_in` row must run on.
+ *
+ * The managed URL is configuration rather than a database fact, so this is an idempotent startup
+ * repair instead of a static migration. Rows with auth are skipped: an address a person supplied is
+ * not the same thing even when it happens to equal this deployment's address.
+ */
+export async function repairBuiltInCoworkers(
+  database: Database,
+  managedAgentAgUiUrl: URL | undefined,
+): Promise<number> {
+  if (!managedAgentAgUiUrl) return 0;
+
+  const repaired = await database.execute(sql`
+    UPDATE "agents" AS a
+    SET
+      "type" = 'built_in',
+      "configuration" = jsonb_build_object('systemPrompt', p."role_description"),
+      "updated_at" = now()
+    FROM "agent_profiles" AS p
+    WHERE p."agent_id" = a."id"
+      AND p."deleted_at" IS NULL
+      AND a."type" = 'remote_ag_ui'
+      AND a."configuration"->>'endpoint' = ${managedAgentAgUiUrl.toString()}
+      AND a."configuration"->'auth' IS NULL
+    RETURNING a."id"
+  `);
+
+  return repaired.length;
+}
+
+/**
  * Which agent a token belongs to.
  *
  * Selected by hash and then compared in constant time. The lookup alone would be enough to identify
@@ -422,7 +459,7 @@ export function createAgentProfileStore(
         const id = newAgentId();
         const endpoint = input.endpoint
           ? { endpoint: input.endpoint }
-          : managedConfiguration;
+          : undefined;
         const systemPrompt = input.systemPrompt?.trim();
         if (endpoint) {
           await transaction.insert(agents).values({
@@ -466,6 +503,19 @@ export function createAgentProfileStore(
             name: input.name,
             type: "built_in",
             configuration: { systemPrompt },
+          });
+        } else if (managedConfiguration) {
+          /*
+           * Store calls that do not carry a prompt keep the old managed-endpoint shape. The create
+           * route always supplies the role description on the endpoint-less path, so a coworker a
+           * person makes as "Built in" never reaches here; direct callers that genuinely mean the
+           * managed Bot keep the address.
+           */
+          await transaction.insert(agents).values({
+            id,
+            name: input.name,
+            type: "remote_ag_ui",
+            configuration: managedConfiguration,
           });
         } else {
           /*

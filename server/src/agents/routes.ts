@@ -278,22 +278,23 @@ export function createAgentRoutes(
    */
   builtInAvailable = false,
   /**
-   * The managed Bot's own address, so a coworker created without an endpoint can be told apart.
+   * The managed Bot's own address, so legacy endpoint-based built-in coworkers can be told apart.
    *
-   * Creation bakes this address into the coworker's stored configuration, and afterwards nothing in
-   * the row says whether a person supplied it. The difference matters to exactly one screen: a
-   * coworker running here calls tools back with the deployment's own credential and needs no setup,
-   * while one a person hosts needs a callback token put into their process. Without this flag the
-   * dialog nagged built-in coworkers about a credential they never needed.
+   * New endpoint-less coworkers are stored as `built_in` and have no endpoint. Rows made before that
+   * fix still point at this address until the startup repair reaches them. The difference matters to
+   * exactly one screen: a coworker running here calls tools back with the deployment's own credential
+   * and needs no setup, while one a person hosts needs a callback token put into their process.
    */
   managedEndpoint?: string,
 ) {
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
   const dto = (actor: AgentActor, agent: AgentProfile) => ({
     ...agentDto(actor, agent),
-    // A string comparison on purpose: two absent values must not read as "runs on our Bot".
+    // `null` is the endpoint-less built-in shape; the comparison keeps legacy managed rows marked too.
     builtIn:
-      typeof agent.endpoint === "string" && agent.endpoint === managedEndpoint,
+      agent.endpoint === null ||
+      (typeof agent.endpoint === "string" &&
+        agent.endpoint === managedEndpoint),
   });
   const routes = new Hono<{ Variables: AppVariables }>();
 

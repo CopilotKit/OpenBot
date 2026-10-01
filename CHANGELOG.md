@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A coworker created as Built in can hand work on
+
+On a deployment with a managed Bot, choosing **Built in** used to store the coworker at that Bot's
+endpoint as `remote_ag_ui`. It could answer and be asked, but it could not hand work on, because the
+handoff tool is minted only inside this deployment's own run loop. An endpoint-less create now stays
+`built_in` and runs on its role description even when a managed Bot exists. On startup, coworkers
+already stored at the configured managed endpoint are repaired the same way; rows with their own
+authentication are left alone.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say

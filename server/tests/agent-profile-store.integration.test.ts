@@ -9,6 +9,7 @@ import {
   createAgentProfileStore,
   ManagedAgentUnavailableError,
   ProtectedAgentError,
+  repairBuiltInCoworkers,
 } from "../src/agents/profile-store";
 import type {
   AgentActor,
@@ -290,6 +291,67 @@ describe("agent profile store integration", () => {
     );
     // No address was given and none was invented; that is what makes it built_in rather than remote.
     expect(row.configuration.endpoint).toBeUndefined();
+  });
+
+  test("creates a built-in coworker on a deployment that also has a managed Bot", async () => {
+    const owner = await createUser();
+
+    const created = await store.create(owner, {
+      name: "Runs Here Too",
+      title: "Everyday Work",
+      roleDescription: "Use the deployment's own run loop.",
+      visibility: "private",
+      systemPrompt: "Use the deployment's own run loop.",
+    });
+    createdAgentIds.push(created.id);
+
+    const row = await agentRow(created.id);
+    expect(row.type).toBe("built_in");
+    expect(row.configuration.systemPrompt).toBe(
+      "Use the deployment's own run loop.",
+    );
+    // The managed endpoint belongs to the deployment, not to this coworker's identity.
+    expect(row.configuration.endpoint).toBeUndefined();
+  });
+
+  test("repairs existing managed-endpoint coworkers into built-in rows once", async () => {
+    const owner = await createUser();
+    const legacy = await createProfileFixture({
+      owner,
+      visibility: "private",
+      roleDescription: "Run on the role description that was already saved.",
+      configuration: { endpoint: managedAgentAgUiUrl.toString() },
+    });
+    const authenticated = await createProfileFixture({
+      owner,
+      visibility: "private",
+      configuration: {
+        endpoint: managedAgentAgUiUrl.toString(),
+        auth: { header: "Authorization", credentialId: "external-credential" },
+      },
+    });
+
+    expect(
+      await repairBuiltInCoworkers(database, managedAgentAgUiUrl),
+    ).toBeGreaterThanOrEqual(1);
+    const repaired = await agentRow(legacy.agentId);
+    expect(repaired).toEqual({
+      type: "built_in",
+      configuration: {
+        systemPrompt: "Run on the role description that was already saved.",
+      },
+    });
+    // A row carrying its own credential is a deployment's choice, not the old built-in shape.
+    expect(await agentRow(authenticated.agentId)).toEqual({
+      type: "remote_ag_ui",
+      configuration: {
+        endpoint: managedAgentAgUiUrl.toString(),
+        auth: { header: "Authorization", credentialId: "external-credential" },
+      },
+    });
+
+    await repairBuiltInCoworkers(database, managedAgentAgUiUrl);
+    expect(await agentRow(legacy.agentId)).toEqual(repaired);
   });
 
   test("an edit moves the instruction such a coworker actually runs on", async () => {

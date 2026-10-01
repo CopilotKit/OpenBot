@@ -16,7 +16,10 @@ import { createHandoffDelivery } from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
 import { signHandoffDeliveryRun } from "./agents/handoff-signing";
 import { handoffTool } from "./agents/handoff-tool";
-import { createAgentProfileStore } from "./agents/profile-store";
+import {
+  createAgentProfileStore,
+  repairBuiltInCoworkers,
+} from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
@@ -205,6 +208,7 @@ const agentProfileStore = createAgentProfileStore(
   config.managedAgent?.endpoint,
   agentVault,
 );
+await repairBuiltInCoworkers(database, config.managedAgent?.endpoint);
 // Read here rather than beside the synchronise below, because the package names the deployment and
 // the channel store needs that name before it can mint a thread id.
 const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
