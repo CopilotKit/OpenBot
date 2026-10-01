@@ -441,10 +441,20 @@ export function createPluginRoutes(
     if (forbidden) return forbidden;
 
     const body = (await context.req.json().catch(() => null)) as {
-      clientId?: string;
-      clientSecret?: string;
+      clientId?: unknown;
+      clientSecret?: unknown;
     } | null;
-    if (!body?.clientId?.trim() || !body.clientSecret?.trim()) {
+    /*
+     * `typeof` before `.trim()`, as `POST /servers` and `/servers/custom` do: the body is JSON, so
+     * `{"clientId": 12345}` or a secret of `{}` used to reach `.trim()` here, outside the try, and
+     * answer 500 for what is a person's malformed request.
+     */
+    if (
+      typeof body?.clientId !== "string" ||
+      typeof body.clientSecret !== "string" ||
+      !body.clientId.trim() ||
+      !body.clientSecret.trim()
+    ) {
       return context.json(
         { error: "A client id and a client secret are both required." },
         400,

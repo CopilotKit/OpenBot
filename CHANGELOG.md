@@ -87,6 +87,13 @@ its model asked for a skill by a name the snapshot does not hold, for a file the
 list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
 call's result and carries on. A remote Bot's model now gets the same result and carries on too.
 
+### A malformed OAuth client is refused with a 400, not a 500
+
+`POST /api/plugins/servers/:id/oauth-client` called `.trim()` on the client id and secret without
+checking they were strings, so `{"clientId": 12345, "clientSecret": "s"}`, or a secret of `{}`, threw
+outside the route's try and answered 500. It now answers the same 400 as an empty value, as the
+other plugin routes do for their own fields, before the store or the audit trail is touched.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
