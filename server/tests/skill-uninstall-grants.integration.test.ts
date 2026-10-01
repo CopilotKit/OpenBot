@@ -36,6 +36,8 @@ const personalSlug = `standup-${suite}`;
 const keptSlug = `kept-${suite}`;
 const deploymentSlug = `triage-${suite}`;
 const unwrittenSlug = `unwritten-${suite}`;
+const botlessSlug = `botless-${suite}`;
+const missingBot = `agent_missing_${suite}`;
 
 beforeAll(async () => {
   for (const id of [alice, bob]) {
@@ -75,6 +77,7 @@ afterAll(async () => {
         keptSlug,
         deploymentSlug,
         unwrittenSlug,
+        botlessSlug,
       ]),
     );
   await database
@@ -200,6 +203,30 @@ describe("a skill name written again after the skill was uninstalled", () => {
     ).toBe(200);
 
     expect(await offered(asAdmin(), sharedBot)).toEqual([]);
+  });
+
+  /*
+   * The other half of a grant that could never do anything: the skill is there and the Bot is not.
+   * `plugin_grants.agent_id` is a foreign key, so an administrator's grant for a mistyped Bot id used
+   * to fail at the insert and answer 500 with no body. It is a refusal with a sentence now, and
+   * nothing is stored.
+   */
+  test("a skill cannot be granted to a Bot nobody has", async () => {
+    expect(
+      (await writeSkill(asAdmin(), botlessSlug, "Triage by severity.", true))
+        .status,
+    ).toBe(200);
+
+    const refused = await grant(asAdmin(), botlessSlug, missingBot);
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "There is no such Bot." });
+    expect(
+      await database
+        .select({ ref: pluginGrants.ref })
+        .from(pluginGrants)
+        .where(eq(pluginGrants.agentId, missingBot)),
+    ).toEqual([]);
   });
 
   test("uninstalling removes that skill's grants and no other", async () => {

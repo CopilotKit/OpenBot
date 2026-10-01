@@ -2302,6 +2302,14 @@ export function createPluginRoutes(
       if (!(await store.serverExists(serverId ?? ""))) {
         return `${serverId} is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.`;
       }
+      /*
+       * The Bot has to exist as well, which the `bot` branch below already says in the same words.
+       * `plugin_grants.agent_id` is a foreign key, so a grant naming a Bot nobody has reached the
+       * insert and failed there, and a person's mistyped Bot id answered 500 with no body where
+       * every other refusal on this route is a 403 with a sentence.
+       */
+      if (!(await store.agentIsRegistered(agentId)))
+        return "There is no such Bot.";
       return null;
     }
 
@@ -2366,6 +2374,10 @@ export function createPluginRoutes(
       if ((await store.skillOwner(ref)) === undefined) {
         return `There is no skill called ${ref}.`;
       }
+      // And the Bot, for the reason the `mcp` branch gives: an administrator's grant naming one
+      // nobody has failed on the foreign key. Everybody else is asked below, through `agentOwner`.
+      if (!(await store.agentIsRegistered(agentId)))
+        return "There is no such Bot.";
       return null;
     }
 

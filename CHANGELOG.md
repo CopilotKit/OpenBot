@@ -87,6 +87,13 @@ its model asked for a skill by a name the snapshot does not hold, for a file the
 list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
 call's result and carries on. A remote Bot's model now gets the same result and carries on too.
 
+### An app or skill cannot be granted to a Bot that does not exist
+
+An administrator's `POST /api/plugins/grants` for an app or a skill checked that the app or skill
+existed but not the Bot, so a mistyped Bot id reached the insert, failed on the `plugin_grants`
+foreign key, and answered 500 with no body. It is now refused with "There is no such Bot.", the
+sentence the `bot` kind already used, and nothing is stored. Revoking still checks nothing.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
