@@ -104,6 +104,14 @@ screens now follow the rule the Handoff panel already does: a hidden Bot is show
 of the grants the screen is about, marked "Hidden from your roster", and its own page draws its
 grants. Nothing on the server changed.
 
+### Revoking a function from a component that does not exist answers 404
+
+`DELETE /api/components/:name/functions/:function` was the one grant write that did not check the
+component exists. Against a name nobody has, it deleted nothing, answered `revoked: true` and wrote a
+`component.function_revoked` row naming a component that was never there. It now answers 404 and
+writes nothing, as granting a function and withholding a component already do. A function grant
+cannot outlive its component, so there is no stored row this stops anybody removing.
+
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
 Snapshots are ordered on the run of the browser that took them as well as the generation, so a
