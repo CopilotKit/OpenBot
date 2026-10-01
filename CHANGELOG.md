@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A playground component's Published switch publishes its source too
+
+The Published switch on an admin component page called the generic publication endpoint for every
+kind. For a browser-authored component that endpoint promoted the description and marked it
+published without copying the playground draft, so Bots were offered a component the renderer could
+not draw. Playground components now publish and withdraw both rows in one transaction; a missing or
+empty description or HTML is refused instead of leaving a half-published component, and repeating
+an unchanged publish no longer advances the revision.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
