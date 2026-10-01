@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { type Browser, chromium, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { parseAriaSnapshot } from "../src/aria-snapshot";
 import {
   MASKED_VALUE,
@@ -13,7 +13,14 @@ import { fillSignIn, originOfUrl, parseSignInFill } from "../src/sign-in";
  * The computer's half of the private sign-in, against a real Chromium and a real login page served
  * on 127.0.0.1: the login is typed by this process, only on the origin it was meant for, and neither
  * the snapshot nor the answer ever shows the password back.
+ *
+ * The browser half is asked for by name, like `follows-popup.test.ts`: it launches a real Chromium,
+ * which the machine running `bun test` is not required to have, so Playwright is imported only then.
+ *
+ *   cd agent-computer && bunx playwright install chromium
+ *   OPENBOT_COMPUTER_BROWSER=1 bun test tests/sign-in.test.ts
  */
+const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
 const PASSWORD = "hunter2-not-for-the-model";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -55,6 +62,8 @@ beforeAll(async () => {
     },
   });
   origin = `http://127.0.0.1:${server.port}`;
+  if (!asked) return;
+  const { chromium } = await import("playwright");
   browser = await chromium.launch();
 });
 
@@ -87,7 +96,7 @@ describe("parsing what the server sends", () => {
   });
 });
 
-describe("typing a login", () => {
+describe.skipIf(!asked)("typing a login", () => {
   test("fills and submits a one-step form, and reports only the outcome", async () => {
     const tab = await open("/login");
     const result = await fillSignIn(tab, {
@@ -145,7 +154,7 @@ describe("typing a login", () => {
   });
 });
 
-describe("secrets typed into the page are not read back", () => {
+describe.skipIf(!asked)("secrets typed into the page are not read back", () => {
   test("the aria snapshot shows a password's value, and the masked snapshot does not", async () => {
     const tab = await browser.newPage();
     await tab.setContent(`<form>
