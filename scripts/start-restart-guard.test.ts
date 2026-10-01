@@ -293,6 +293,54 @@ describe("start.sh settings with no line in .env", () => {
   });
 });
 
+describe("start.sh one computer each", () => {
+  /**
+   * `OPENBOT_ONE_COMPUTER_EACH=false` IN `.env` TURNS THE SUPERVISOR OFF, AS THE DOCS SAY.
+   *
+   * The key was read from the environment alone, so a `.env` line was ignored: the supervisor was
+   * still started and the server still told to use it. docs/configuration.md says to set it "in
+   * `.env` or in the environment", and every other setting in this script is read that way.
+   *
+   * THE SUPERVISOR IS WHAT GIVES EACH BOT ITS OWN COMPUTER, so its absence from the services handed
+   * to `docker compose up` is the observable half; the shared computer stays.
+   */
+  test("false in .env starts no supervisor", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      settings: { OPENBOT_ONE_COMPUTER_EACH: "false" },
+    });
+
+    expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(result.dockerLog).toContain(
+      "compose up -d --build postgres agent-computer agent-bot agent-langgraph",
+    );
+    expect(result.dockerLog).not.toContain("supervisor");
+  });
+
+  test("false in the process environment starts no supervisor either", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      settings: { OPENBOT_ONE_COMPUTER_EACH: "true" },
+      processEnvironment: { OPENBOT_ONE_COMPUTER_EACH: "false" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.dockerLog).not.toContain("supervisor");
+  });
+
+  test("true, or absent, still starts it", async () => {
+    for (const omitFromEnv of [[], ["OPENBOT_ONE_COMPUTER_EACH"]] as const) {
+      const result = await runStartWithStaleServerProbe(401, { omitFromEnv });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.dockerLog).toContain(
+        "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
+      );
+    }
+  });
+});
+
 describe("start.sh selected provider services", () => {
   test.each([".env", "process environment"])(
     "an Anthropic-only %s selection starts the managed Bot without the OpenAI-only sample",

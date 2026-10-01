@@ -147,6 +147,13 @@ OpenAI SDK only defaults an absent URL, so it was given "" as the address. The B
 `https://api.openai.com/v1` for an empty value, as its Anthropic branch already did for
 `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
 
+### `OPENBOT_ONE_COMPUTER_EACH=false` in `.env` is honoured by `start.sh`
+
+`scripts/start.sh` read `OPENBOT_ONE_COMPUTER_EACH` from the environment alone, so the line that
+`docs/configuration.md` tells people to put in `.env` was ignored: the supervisor was still started
+and the server still told to give each Bot its own computer. It now reads the key as it reads every
+other setting, the environment first, then `.env`, then the default of `true`.
+
 ### Skill selection keeps capabilities named across multiple JSON replies
 
 When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each
