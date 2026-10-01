@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Generated workspace files can be downloaded intact
+
+`GET /api/computers/:botId/files/download?path=...` streams a generated file as an opaque
+attachment instead of returning the 64 KB UTF-8 text extract. Downloads use the separate
+`computer_download_file` / `download_file` permission, remain confined to the Bot workspace, are
+capped at 100 MiB with `413`, and are recorded on the computer audit trail. Existing read, list and
+write APIs are unchanged.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
