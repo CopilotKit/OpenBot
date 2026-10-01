@@ -49,6 +49,21 @@ export class ComponentNotFoundError extends Error {
   }
 }
 
+/**
+ * The generic publication path found a playground component.
+ *
+ * Its source is not in this table and a generic write would publish the governance half alone. The
+ * route catches this and delegates to the sandboxed store, which owns the two-row transaction.
+ */
+export class SandboxedPublicationRequiredError extends Error {
+  constructor(name: string) {
+    super(
+      `${name} is a playground component and must be published from its source.`,
+    );
+    this.name = "SandboxedPublicationRequiredError";
+  }
+}
+
 /** What a build says it can draw. The app announces this; the server keeps no copy of its own. */
 export type CatalogueEntry = {
   name: string;
@@ -307,6 +322,9 @@ export function createComponentStore(database: Database): ComponentStore {
 
     async publish(name, by) {
       const row = await requireComponent(name);
+      if (row.kind === "sandboxed") {
+        throw new SandboxedPublicationRequiredError(name);
+      }
       await database
         .update(components)
         .set({
@@ -321,7 +339,10 @@ export function createComponentStore(database: Database): ComponentStore {
     },
 
     async unpublish(name, by) {
-      await requireComponent(name);
+      const row = await requireComponent(name);
+      if (row.kind === "sandboxed") {
+        throw new SandboxedPublicationRequiredError(name);
+      }
       await database
         .update(components)
         .set({ published: false, updatedBy: by, updatedAt: new Date() })

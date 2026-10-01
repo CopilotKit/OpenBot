@@ -1321,7 +1321,13 @@ export function createApp(
   if (componentStore) {
     app.route(
       "/api/components",
-      createComponentRoutes(componentStore, requireUser, auditStore, canUseBot),
+      createComponentRoutes(
+        componentStore,
+        requireUser,
+        auditStore,
+        canUseBot,
+        sandboxedStore,
+      ),
     );
   }
 
