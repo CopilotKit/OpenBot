@@ -48,19 +48,19 @@ describe("a package that repeats itself is refused, not half-applied", () => {
   test("a skill named twice by one agent", () => {
     expect(() =>
       validate({
-        agents: `agents: [${agent("x", ", skills: [s, s]")}]`,
-        skills: `skills: [${skill("s")}]`,
+        agents: `agents: [${agent("x", ", skills: [triage, triage]")}]`,
+        skills: `skills: [${skill("triage")}]`,
       }),
-    ).toThrow('agent "x" names skill "s" twice');
+    ).toThrow('agent "x" names skill "triage" twice');
   });
 
   test("a skill slug repeated within skills.yaml", () => {
     expect(() =>
       validate({
         agents: `agents: [${agent("x")}]`,
-        skills: `skills: [${skill("s")}, ${skill("s")}]`,
+        skills: `skills: [${skill("triage")}, ${skill("triage")}]`,
       }),
-    ).toThrow('skill "s" is declared twice in skills.yaml');
+    ).toThrow('skill "triage" is declared twice in skills.yaml');
   });
 
   test("a channel id repeated within channels.yaml", () => {
