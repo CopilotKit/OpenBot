@@ -1308,7 +1308,7 @@ export function createApp(
               reachableFrom: (agentId) =>
                 pluginStore.botsReachableFrom(agentId),
               // The same answer the write path checks, read up front so the screen can say it once.
-              runsHere: (agentId) => pluginStore.agentRunsHere(agentId),
+              canHandOn: (agentId) => pluginStore.agentCanHandOn(agentId),
             }
           : undefined,
         // Whether "built-in" is a kind of coworker this deployment can actually make: the create

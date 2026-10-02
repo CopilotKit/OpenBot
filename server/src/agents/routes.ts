@@ -264,12 +264,11 @@ export function createAgentRoutes(
     /** The Bots this one may address today, read per call so a revoked grant stops showing. */
     reachableFrom: (agentId: string) => Promise<readonly string[]>;
     /**
-     * Whether this Bot can be a grantee at all — the handing-on tool executes inside this
-     * deployment's own run loop, so only a Bot that runs in it can be offered one. Exposed so the
-     * screen can say that once, instead of letting every switch fail with the same refusal.
-     * Optional so a caller without a plugin store answers "no" rather than crashing the read.
+     * Whether this Bot can be a grantee at all: any Bot that exists, built in or at its own
+     * endpoint, since both reach the same handoff desk. Optional so a caller without a plugin store
+     * answers "no" rather than crashing the read.
      */
-    runsHere?: (agentId: string) => Promise<boolean | undefined>;
+    canHandOn?: (agentId: string) => Promise<boolean | undefined>;
   },
   /**
    * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
@@ -720,8 +719,8 @@ export function createAgentRoutes(
           reachable: handoff ? await handoff.reachableFrom(agentId) : [],
           // Whether this Bot can hold such a grant at all; the write path refuses one that cannot,
           // and the screen should say so before a person flips switches that can only bounce.
-          grantable: handoff?.runsHere
-            ? ((await handoff.runsHere(agentId)) ?? false)
+          grantable: handoff?.canHandOn
+            ? ((await handoff.canHandOn(agentId)) ?? false)
             : false,
         },
       });

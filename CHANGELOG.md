@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A coworker at its own endpoint can hand work to another Bot
+
+A grant letting a remote Bot (a coworker at its own endpoint) hand work to another Bot was accepted and stored, but the grant read kept only built-in Bots, so the remote Bot was never
+offered `message_bot` and a call it made anyway was refused as not granted. The read now counts a
+grant whatever the Bot's type, so a remote Bot hands work on through the same signed callback, grant
+check, caps and audit rows as a built-in one, to a built-in Bot or to another remote Bot. The
+coworker's handoff panel now offers it the same switches.
+
 ### A channel cursor with a malformed time reads as the first page, not a 500
 
 `GET /api/channels` only checked that a cursor's time was a string before casting it with
