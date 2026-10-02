@@ -3,14 +3,25 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { MAX_IMAGE_BYTES } from "../../shared/attachments";
+import { enterpriseControls } from "./admin/controls";
+import { createEnterpriseGate } from "./admin/gate";
+import { createEnterpriseAdminRoutes } from "./admin/routes";
 import {
   authoriseAgentCall,
   parseAgentToolCallInput,
+  type RunAssertion,
   sameToken,
 } from "./agents/callback-token";
+import { computerAccessCheck } from "./agents/computer-access";
+import {
+  type BotLifecycleServices,
+  createBotLifecycleRoutes,
+} from "./agents/lifecycle-routes";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { createApprovalRoutes } from "./approvals/routes";
+import type { ApprovalService } from "./approvals/service";
 import {
   type AuditEventType,
   type AuditInitiator,
@@ -36,6 +47,7 @@ import {
   createChannelAttachmentRoutes,
 } from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
+import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
@@ -52,6 +64,13 @@ import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { Database } from "./db/client";
 import { withoutStatement } from "./db/query-failure";
+import {
+  createDeliveryRoutes,
+  createDeliveryWebhookRoutes,
+} from "./delivery/routes";
+import type { DemonstrationRecorder } from "./demonstrations/recording";
+import { createDemonstrationRoutes } from "./demonstrations/routes";
+import type { DemonstrationStore } from "./demonstrations/store";
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
@@ -62,7 +81,12 @@ import {
   createLearningRoutes,
   type LearningAdminDependencies,
 } from "./learning/routes";
+import type { MemoryIngestion } from "./memory/ingestion";
+import { createMemoryRoutes } from "./memory/routes";
+import type { MemoryStore } from "./memory/store";
 import { parsePageLimit } from "./paging";
+import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
+import type { SignInService } from "./passwords/service";
 import type { OnboardingStore } from "./people/onboarding";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
 import type { ComposioBroker } from "./plugins/broker";
@@ -73,14 +97,25 @@ import {
   type PluginStore,
 } from "./plugins/store";
 import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
+import type { ProactiveEngine } from "./proactive/engine";
+import { createProactiveRoutes } from "./proactive/routes";
+import type { ProactiveStore } from "./proactive/store";
 import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
 } from "./provider-oauth";
+import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
+import type { ResponsibilityEngine } from "./responsibilities/engine";
+import { createGithubResponsibilityRoutes } from "./responsibilities/github";
+import { createResponsibilityRoutes } from "./responsibilities/routes";
+import type { TriggerStore } from "./responsibilities/triggers";
+import type { ResponsibilityStore } from "./responsibilities/types";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
+import { createTeamBotRoutes } from "./team-bots/routes";
+import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
 import {
   INSTRUCTIONS_LIMIT,
@@ -132,13 +167,18 @@ export const UPLOAD_BODY_LIMIT_BYTES =
  * The address is on the row rather than only the user id, because the id means nothing to a person
  * reading the trail a year later and the user row may be gone by then.
  */
-export type DeploymentToolCaller = (input: {
+export type DeploymentToolCallInput = {
   name: string;
   args: Record<string, unknown>;
   botId: string;
   actorId: string;
   initiator?: AuditInitiator;
-}) => Promise<{ text: string; isError: boolean } | null>;
+  /** Full verified scope. A caller cannot choose a different source thread, depth or lease. */
+  run: RunAssertion;
+};
+export type DeploymentToolCaller = (
+  input: DeploymentToolCallInput,
+) => Promise<{ text: string; isError: boolean } | null>;
 
 async function recordPersonEvent(
   auditStore: AuditStore | undefined,
@@ -335,6 +375,40 @@ export function createApp(
   userPreferences?: UserPreferencesStore,
   voiceSessions?: VoiceSessionServices,
   learning?: LearningAdminDependencies,
+  coworker?: {
+    demonstrations?: {
+      store: DemonstrationStore;
+      recorder: DemonstrationRecorder;
+    };
+    approvals?: ApprovalService;
+    /** The private sign-in form and the Passwords vault. See passwords/service.ts. */
+    passwords?: SignInService;
+    delivery?: {
+      authenticated: Omit<
+        Parameters<typeof createDeliveryRoutes>[0],
+        "requireUser"
+      >;
+      webhooks: Parameters<typeof createDeliveryWebhookRoutes>[0];
+    };
+    memory?: { store: MemoryStore; ingestion: MemoryIngestion };
+    proactive?: { store: ProactiveStore; engine: ProactiveEngine };
+    responsibilities?: {
+      store: ResponsibilityStore;
+      engine: ResponsibilityEngine;
+      bindings: ResponsibilityBindingStore;
+      /** Event triggers: owner management, public signed ingress and optional SES/SNS email. */
+      triggers?: {
+        store: TriggerStore;
+        emailDomain: string | null;
+        ingressRoutes: Hono;
+        emailRoutes: Hono | null;
+      };
+    };
+    groups?: GroupConversations;
+    teamBots?: TeamBots;
+    /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
+    lifecycle?: BotLifecycleServices;
+  },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -379,6 +453,12 @@ export function createApp(
        * companies use this deployment, which is not theirs to have before they sign in.
        */
       ssoConfigured: ((await identityProviders?.list()) ?? []).length > 0,
+      /*
+       * Whether an administrator requires SSO. The screen then leads with SSO and keeps social
+       * sign-in only as the administrators' audited break-glass; the server refuses everybody else.
+       */
+      ssoRequired:
+        enterpriseControls()?.snapshot()?.settings.ssoRequired === true,
     }),
   );
   /*
@@ -485,6 +565,15 @@ export function createApp(
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
+  // Enterprise controls: capability switches and the model allowlist in front of the routes they
+  // govern, the admin screen's API, and the SCIM verbs the GET/POST auth handler above does not take.
+  app.use("/api/*", createEnterpriseGate(requireUser));
+  app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
+  app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
+    auth
+      ? auth.handler(context.req.raw)
+      : context.json({ error: "No identity provider is configured." }, 503),
+  );
 
   app.route(
     "/api/audio",
@@ -1146,7 +1235,8 @@ export function createApp(
         computerGateway,
         computerPolicy,
         requireUser,
-        canUseBot,
+        // Not `canUseBot`: a Team Bot's teammates use the Bot, not its owner's signed-in computer.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
         pageFrames,
         auditReader,
       ),
@@ -1315,7 +1405,114 @@ export function createApp(
   }
 
   if (routineStore) {
-    app.route("/api/routines", createRoutineRoutes(routineStore, requireUser));
+    app.route(
+      "/api/routines",
+      createRoutineRoutes(routineStore, requireUser, {
+        runner: routineRunner,
+        auditStore,
+      }),
+    );
+  }
+
+  if (coworker?.delivery) {
+    app.route(
+      "/api/delivery/webhooks",
+      createDeliveryWebhookRoutes(coworker.delivery.webhooks),
+    );
+    app.route(
+      "/api/delivery",
+      createDeliveryRoutes({ ...coworker.delivery.authenticated, requireUser }),
+    );
+  }
+  if (coworker?.demonstrations)
+    app.route(
+      "/api/demonstrations",
+      createDemonstrationRoutes(
+        coworker.demonstrations.store,
+        coworker.demonstrations.recorder,
+        requireUser,
+      ),
+    );
+  if (coworker?.lifecycle)
+    app.route(
+      "/api/bots",
+      createBotLifecycleRoutes(coworker.lifecycle, requireUser),
+    );
+  if (coworker?.groups)
+    app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
+  if (coworker?.teamBots)
+    app.route(
+      "/api/team-bots",
+      createTeamBotRoutes(coworker.teamBots, requireUser),
+    );
+  if (coworker?.approvals)
+    app.route(
+      "/api/approvals",
+      createApprovalRoutes(coworker.approvals, requireUser),
+    );
+  if (coworker?.passwords) {
+    app.route(
+      "/api/sign-in-requests",
+      createSignInRoutes(
+        coworker.passwords,
+        requireUser,
+        // A sign-in is typed into the Bot's computer, so it answers to the same rule.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
+      ),
+    );
+    app.route(
+      "/api/passwords",
+      createPasswordRoutes(coworker.passwords, requireUser),
+    );
+  }
+  if (coworker?.proactive)
+    app.route(
+      "/api/proactive",
+      createProactiveRoutes(
+        coworker.proactive.store,
+        coworker.proactive.engine,
+        requireUser,
+      ),
+    );
+  if (coworker?.memory)
+    app.route(
+      "/api/memory",
+      createMemoryRoutes(
+        coworker.memory.store,
+        coworker.memory.ingestion,
+        requireUser,
+      ),
+    );
+  if (coworker?.responsibilities) {
+    const { store, engine, bindings } = coworker.responsibilities;
+    app.route(
+      "/api/responsibilities",
+      createResponsibilityRoutes(
+        store,
+        engine,
+        requireUser,
+        bindings,
+        coworker.responsibilities.triggers,
+      ),
+    );
+    if (coworker.responsibilities.triggers) {
+      app.route(
+        "/api/events/triggers",
+        coworker.responsibilities.triggers.ingressRoutes,
+      );
+      if (coworker.responsibilities.triggers.emailRoutes)
+        app.route(
+          "/api/events/email",
+          coworker.responsibilities.triggers.emailRoutes,
+        );
+    }
+    app.route(
+      "/api/events/github",
+      createGithubResponsibilityRoutes({
+        bindingFor: bindings.githubBindingFor,
+        ingest: (event) => engine.ingest(event),
+      }),
+    );
   }
 
   if (componentStore) {
@@ -1457,6 +1654,7 @@ export function createApp(
           botId: verdict.botId,
           actorId: verdict.actorId,
           initiator: verdict.initiator,
+          run: verdict.run,
         });
         if (deploymentResult) return context.json(deploymentResult);
 

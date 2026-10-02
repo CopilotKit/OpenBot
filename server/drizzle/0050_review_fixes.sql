@@ -1,0 +1,2 @@
+ALTER TABLE "sign_in_requests" ADD COLUMN "filling_until" timestamp with time zone;--> statement-breakpoint
+CREATE UNIQUE INDEX "personal_memories_formed_digest_idx" ON "personal_memories" USING btree ("owner_user_id","import_digest") WHERE "personal_memories"."formed_by" = 'bot';

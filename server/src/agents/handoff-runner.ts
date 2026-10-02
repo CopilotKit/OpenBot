@@ -18,6 +18,8 @@ import {
 import { cutAtCodeUnits } from "../channels/text";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
+import { ThreadBusyError } from "./handoff-delivery";
+import { BOT_PAUSED_REASON, isBotPaused } from "./lifecycle";
 
 /** What a hop carries, as `handoff.ts` wrote it. */
 export type HandoffWork = {
@@ -110,7 +112,7 @@ export function createHandoffRunner(options: {
   /** Who this replica is, for the lease. */
   owner: string;
   /** How the deployment signs what the addressed Bot's run is. */
-  sign: (work: HandoffWork) => string;
+  sign: (work: HandoffWork, claim: { key: string; owner: string }) => string;
   auditStore: AuditStore;
   /** How long a claim lasts before anything may take it back. */
   leaseMs?: number;
@@ -294,6 +296,13 @@ export function createHandoffRunner(options: {
             report.skipped.push({ key: item.key, reason: "not a hop" });
             continue;
           }
+          // A hop to a Bot its person paused is dropped, not delivered. See agents/lifecycle.ts.
+          if (await isBotPaused(work.actorId, work.toBotId)) {
+            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            ours.delete(item.key);
+            report.skipped.push({ key: item.key, reason: BOT_PAUSED_REASON });
+            continue;
+          }
 
           /*
            * A hop that has already been tried is not a fresh one, and the difference matters here more
@@ -361,7 +370,7 @@ export function createHandoffRunner(options: {
               work,
               message: attribute(work),
               ...(shown ? { shown } : {}),
-              assertion: sign(work),
+              assertion: sign(work, { key: item.key, owner }),
             });
             const kept = await queue.finish({
               kind: HANDOFF_KIND,
@@ -444,7 +453,11 @@ export function createHandoffRunner(options: {
              * this hop. A person who was told their question had been handed on, and then hears
              * nothing for ever, has no way to tell a slow Bot from a broken one.
              */
-            if (item.attempts >= maxAttempts && !work.answerIn) {
+            // The deployment's controls refused it (Use Bots, the model allowlist). Trying again in a
+            // minute gets the same answer, so this is the last try, whatever the count says.
+            const refused =
+              error instanceof Error && error.name === "CapabilityRefusedError";
+            if ((refused || item.attempts >= maxAttempts) && !work.answerIn) {
               await tell(work, item.key, reason).catch((failure) => {
                 // A notice that cannot be queued must not take the release with it: leaving the row
                 // claimed would be worse than a hop nobody was told about.
@@ -456,15 +469,25 @@ export function createHandoffRunner(options: {
             }
             /*
              * Released and pushed out rather than dropped. The work still wants doing, and whatever
-             * refused it once will probably refuse it again in the next second.
+             * refused it once will probably refuse it again in the next second. A refusal by the
+             * controls is the exception: it is final, so the work ends here.
              */
-            await queue.release({
-              kind: HANDOFF_KIND,
-              key: item.key,
-              owner,
-              delayMs: 60_000,
-              reason,
-            });
+            if (refused)
+              await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            else
+              await queue.release({
+                kind: HANDOFF_KIND,
+                key: item.key,
+                owner,
+                // A busy conversation on the first try is almost always the asking Bot finishing its
+                // own reply, a second or two from free. Later tries keep the minute, so a person
+                // mid-conversation still gets the same few minutes of patience.
+                delayMs:
+                  error instanceof ThreadBusyError && item.attempts <= 1
+                    ? 5_000
+                    : 60_000,
+                reason,
+              });
             ours.delete(item.key);
             report.skipped.push({ key: item.key, reason });
             await recordAuditEvent(auditStore, {

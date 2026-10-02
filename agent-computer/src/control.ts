@@ -165,14 +165,12 @@ export function createControl(
   }
   function interrupt(reason: string): ControlState {
     const request = current();
+    // Recovery is for a page a person was driving: what they left it as is unknown until someone
+    // looks. A request nobody took left the page exactly as the Bot had it, and holding the Bot
+    // until a person "checks" a page no person touched stranded it asking for control it had.
+    const personHadIt = data.holder === "human" || request?.status === "taken";
     if (request && active(request)) finish(request, "interrupted", reason);
-    if (
-      request &&
-      (active(request) ||
-        request.status === "interrupted" ||
-        data.holder === "human")
-    )
-      data.recoveryRequired = true;
+    if (personHadIt) data.recoveryRequired = true;
     data.holder = "bot";
     data.since = now();
     data.resumeSnapshotRequired = true;

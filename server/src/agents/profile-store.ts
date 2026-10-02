@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -17,6 +17,12 @@ import {
   mintCallbackToken,
   sameToken,
 } from "./callback-token";
+import {
+  assignedCondition,
+  assignedToActor,
+  teamBotAccess,
+} from "../team-bots/access";
+import { teamBotPublications } from "../db/schema/team-bots";
 import { canManageAgent } from "./profile-policy";
 import type {
   AgentActor,
@@ -141,7 +147,11 @@ const joinedProjection = {
 
 function joinedProfiles(executor: DatabaseExecutor, actor: AgentActor) {
   return executor
-    .select(joinedProjection)
+    .select({
+      ...joinedProjection,
+      // A Team Bot an administrator put in this person's sidebar.
+      assignedToMe: sql<boolean>`${assignedToActor(actor.id, agents.id)}`,
+    })
     .from(agents)
     .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
     .leftJoin(
@@ -160,6 +170,8 @@ function accessFilter(actor: AgentActor) {
   return or(
     eq(agentProfiles.visibility, "public"),
     eq(agentProfiles.ownerUserId, actor.id),
+    // A private Bot its owner published to the team, to this person, or to a group they are in.
+    teamBotAccess(actor.id, agentProfiles.agentId),
   );
 }
 
@@ -180,6 +192,7 @@ function mapProfile(
     hasCallbackToken: row.callbackTokenHash !== null,
     hidden: row.hiddenAt !== null,
     pinned: row.pinnedAt !== null,
+    assignedToMe: Boolean(row.assignedToMe),
     deletedAt: row.deletedAt,
     endpoint: endpointOf(row.configuration),
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
@@ -379,6 +392,16 @@ async function findByTokenHash(
   const row = rows[0];
   if (!row?.hash) return null;
   return sameToken(row.hash, hash) ? { id: row.agentId } : null;
+}
+
+/** Hiding a Team Bot an administrator assigned to this person, which they cannot do. */
+export class AgentAssignedError extends Error {
+  constructor(id: string) {
+    super(
+      `Agent ${id} was assigned to you by an administrator and cannot be hidden.`,
+    );
+    this.name = "AgentAssignedError";
+  }
 }
 
 export function createAgentProfileStore(
@@ -651,6 +674,20 @@ export function createAgentProfileStore(
       return database.transaction(async (transaction) => {
         const profile = await findAccessibleProfile(transaction, actor, id);
         if (!profile) throw new AgentNotFoundError(id);
+        // An administrator put this Team Bot in this person's sidebar; it stays there.
+        if (hidden) {
+          const [assigned] = await transaction
+            .select({ agentId: teamBotPublications.agentId })
+            .from(teamBotPublications)
+            .where(
+              and(
+                eq(teamBotPublications.agentId, id),
+                sql`${assignedCondition(actor.id)}`,
+              ),
+            )
+            .limit(1);
+          if (assigned) throw new AgentAssignedError(id);
+        }
 
         await transaction
           .insert(agentPreferences)

@@ -290,10 +290,56 @@ function matches(
  * states its permissions explicitly rather than relying on a default, so that what a Bot may do is
  * always something somebody wrote down.
  */
+/**
+ * The enterprise controls, asked before the boundary's own rules.
+ *
+ * Installed by `admin/controls.ts` when the deployment runs with enterprise controls, and absent in
+ * a unit test or a script, where the boundary behaves exactly as it always did. Answering null means
+ * "nothing to say, carry on to the rules"; a decision is final, and is always a refusal that is
+ * enforced whatever this policy's mode, because a capability an administrator switched off is not a
+ * rule being trialled.
+ *
+ * Synchronous on purpose: every caller of `evaluateActionPolicy` is, and the controls answer from an
+ * in-memory snapshot kept current by LISTEN/NOTIFY. An overlay that throws refuses.
+ */
+export type PolicyOverlay = (context: PolicyContext) => PolicyDecision | null;
+
+let overlay: PolicyOverlay | null = null;
+
+export function setPolicyOverlay(next: PolicyOverlay | null): void {
+  overlay = next;
+}
+
+function enterpriseDecision(context: PolicyContext): PolicyDecision | null {
+  if (!overlay) return null;
+  try {
+    return overlay(context);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "enterprise-policy-overlay-error",
+        error: String(error),
+      }),
+    );
+    return {
+      allowed: false,
+      mode: "enforce",
+      matched: "enterprise:unavailable",
+      source: "deny",
+      forward: false,
+      reason:
+        "This deployment's enterprise controls could not be checked, so the action was refused.",
+    };
+  }
+}
+
 export function evaluateActionPolicy(
   policy: ActionPolicy | null | undefined,
   context: PolicyContext,
 ): PolicyDecision {
+  const enterprise = enterpriseDecision(context);
+  if (enterprise) return enterprise;
+
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
   const allow = policy?.allow ?? [];

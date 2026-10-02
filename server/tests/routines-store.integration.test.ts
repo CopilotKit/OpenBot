@@ -1168,6 +1168,8 @@ describe("the runner's read of one firing", () => {
       ownerUserId: owner.id,
       agentId,
       channelId: channel.id,
+      // Read at dispatch so a routine paused after it was queued still does not run.
+      enabled: true,
       instruction: "Post the standup summary.",
     });
   });

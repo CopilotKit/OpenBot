@@ -39,6 +39,8 @@ export type AgentProfile = {
   hidden: boolean;
   /** Whether the signed-in person pinned it to the top of their agents list. Nobody else's. */
   pinned: boolean;
+  /** A Team Bot an administrator assigned to this person; the sidebar always lists it. */
+  assignedToMe?: boolean;
   systemOwned: boolean;
   canManage: boolean;
   /**

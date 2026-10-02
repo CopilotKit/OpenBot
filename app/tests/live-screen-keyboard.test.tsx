@@ -225,6 +225,50 @@ test("Ctrl+A remains a remote keyboard shortcut", async () => {
   ]);
 });
 
+test("Command+A on a Mac reaches the Bot's Linux browser as Control+A", async () => {
+  const socket = await liveSocket();
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Meta",
+      code: "MetaLeft",
+      keyCode: 91,
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "a",
+      code: "KeyA",
+      keyCode: 65,
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+
+  expect(socket.sent).toEqual([
+    {
+      type: "key",
+      event: "down",
+      key: "Control",
+      code: "ControlLeft",
+      windowsVirtualKeyCode: 17,
+      modifiers: 2,
+    },
+    {
+      type: "key",
+      event: "down",
+      key: "a",
+      code: "KeyA",
+      text: "a",
+      windowsVirtualKeyCode: 65,
+      modifiers: 2,
+    },
+  ]);
+});
+
 test("the paste event sends clipboard text without forwarding it through a key event", async () => {
   const socket = await liveSocket();
   const paste = new Event("paste", { bubbles: true, cancelable: true });

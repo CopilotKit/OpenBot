@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
   type AuditInitiator,
   type AuditStore,
@@ -40,6 +41,7 @@ import {
   skills,
   skillTools,
 } from "../db/schema";
+import type { CheckPrivateShare } from "../proactive/private-share";
 import {
   accessFor,
   type ServerAccess,
@@ -73,6 +75,7 @@ import {
 import { inspectToolArguments } from "./content-governance";
 import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
+import { shareTargetOf } from "./share-target";
 import { transportFor } from "./transport";
 
 /**
@@ -1085,6 +1088,12 @@ export type AccessToken = {
 };
 
 export type PluginStoreOptions = {
+  approvalGate?: ApprovalGate;
+  /**
+   * The owner's permission before a connector call sends content to other people.
+   * See plugins/share-target.ts and proactive/private-share.ts. Absent asks nothing.
+   */
+  privateShareCheck?: CheckPrivateShare;
   database: Database;
   auditStore: AuditStore;
   /**
@@ -6866,6 +6875,11 @@ export function createPluginStore(options: PluginStoreOptions) {
       botId: string;
       actorId: string;
       initiator?: AuditInitiator;
+      /**
+       * Whose connected account the call goes out on, when that is not the asker's: a Team Bot
+       * reaching its owner's account (team-bots/team-bots.ts). Every gate is still the asker's.
+       */
+      credentialActorId?: string;
     }): Promise<{ text: string; isError: boolean }> {
       const [serverId, ...rest] = input.ref.split("/");
       const toolName = rest.join("/");
@@ -7018,7 +7032,10 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a per-person connector raises — two rows for the same tool and the same Bot can legitimately
          * have seen entirely different documents, and nothing else in the row says why.
          */
-        reachedAs: reachedAsFor(access, input.actorId),
+        reachedAs: reachedAsFor(
+          access,
+          input.credentialActorId ?? input.actorId,
+        ),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,
@@ -7108,6 +7125,58 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
 
       /*
+       * A write that sends content to other people asks the owner first, whatever their general
+       * approvals switch says. Pending throws the check's own wait, which a headless turn and the
+       * open chat both turn into a paused tool call; denied is a refusal like any other.
+       */
+      const share =
+        effect === "write" && options.privateShareCheck
+          ? shareTargetOf(serverId, toolName, vendorArgs)
+          : null;
+      if (share && options.privateShareCheck) {
+        const shareVerdict = await options.privateShareCheck({
+          ownerUserId: input.actorId,
+          botId: input.botId,
+          audience: share.audience,
+          content: share.content,
+          origin: { kind: "unknown" },
+        });
+        if (shareVerdict.status !== "allowed") {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.call_rejected",
+            targetType: "mcp_tool",
+            targetId: input.ref,
+            ...(input.initiator ? { initiator: input.initiator } : {}),
+            payload: {
+              ...decided,
+              decision: { ...decided.decision, carriedOut: false },
+              refusal:
+                shareVerdict.status === "pending"
+                  ? "private_share_pending"
+                  : "private_share_denied",
+            },
+          });
+          // A pending share outside any run that can wait says so and sends nothing.
+          if (shareVerdict.status === "pending" && currentApprovalContext())
+            throw shareVerdict.suspension;
+          throw new PluginRefusedError(shareVerdict.message, null);
+        }
+      }
+
+      const approval = await options.approvalGate?.({
+        actorId: input.actorId,
+        botId: input.botId,
+        toolRef: input.ref,
+        effect,
+        scope: serverId,
+        args: vendorArgs,
+        target: { serverId, toolName, url: row.url, effect },
+        continuation: currentApprovalContext(),
+      });
+      if (approval && "replay" in approval)
+        return approval.replay as { text: string; isError: boolean };
+
+      /*
        * Attempt first, record second.
        *
        * The row now says what HAPPENED rather than what was permitted. It used to be written here,
@@ -7125,7 +7194,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         const { token } = await connectionTokenFor(
           row,
           entry,
-          input.actorId,
+          input.credentialActorId ?? input.actorId,
           access,
         );
         const vendor =
@@ -7134,7 +7203,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           {
             url: effectiveUrl(row, entry),
             token,
-            actorId: input.actorId,
+            actorId: input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },
           toolName,
@@ -7165,7 +7234,9 @@ export function createPluginStore(options: PluginStoreOptions) {
               }
             : decided,
         });
-        return { text: result.text, isError: result.isError };
+        const answer = { text: result.text, isError: result.isError };
+        await approval?.complete(answer);
+        return answer;
       } catch (error) {
         /*
          * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is

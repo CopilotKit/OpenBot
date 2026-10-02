@@ -5,12 +5,14 @@ import {
   looksLikeCallbackToken,
   mintCallbackToken,
   mintRunAssertion,
+  readApprovedRunAssertion,
   readRunAssertion,
   sameToken,
 } from "../src/agents/callback-token";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
 import { PluginRefusedError, type PluginStore } from "../src/plugins/store";
+import { markUntrusted } from "../src/untrusted-content";
 import { testEnvironment } from "./support/environment";
 
 const KEY = "test-encryption-key-not-a-real-one";
@@ -125,6 +127,13 @@ describe("who may call a tool back, and as whom", () => {
       botId: AGENT_A,
       actorId: "visitor_9",
       initiator: { kind: "person" },
+      run: {
+        botId: AGENT_A,
+        actorId: "visitor_9",
+        runId: "r1",
+        depth: 0,
+        initiator: { kind: "person" },
+      },
     });
   });
 
@@ -178,6 +187,13 @@ describe("who may call a tool back, and as whom", () => {
       botId: AGENT_A,
       actorId: "visitor_9",
       initiator: { kind: "person" },
+      run: {
+        botId: AGENT_A,
+        actorId: "visitor_9",
+        runId: "r1",
+        depth: 0,
+        initiator: { kind: "person" },
+      },
     });
   });
 
@@ -309,6 +325,7 @@ describe("how deep a run is", () => {
       { kind: "person" } as const,
       { kind: "deployment" } as const,
       { kind: "routine", id: "routine_7" } as const,
+      { kind: "responsibility", id: "responsibility_7" } as const,
       { kind: "handoff", id: "research-assistant" } as const,
     ]) {
       const signed = mintRunAssertion({ ...RUN, initiator }, KEY);
@@ -644,8 +661,9 @@ describe("the tool-call route a callback token guards", () => {
     expect(callback.isError).toBe(true);
     // One store, one answer: which door a Bot comes through is topology, not what its model is told.
     expect(callback.text).toBe(inProcess);
+    // The vendor's words, inside the untrusted-content envelope the model reads outside data in.
     expect(callback.text).toBe(
-      "The vendor reported an error: The caller does not have permission.",
+      `The vendor reported an error:\n${markUntrusted("The caller does not have permission.", "connector error")}`,
     );
   });
 
@@ -654,7 +672,21 @@ describe("the tool-call route a callback token guards", () => {
       storeAnswering({ text: "Created LIN-42.", isError: false }),
     );
 
-    expect(callback).toEqual({ text: "Created LIN-42.", isError: false });
+    // As the vendor wrote it, marked as untrusted data rather than rewritten.
+    expect(callback).toEqual({
+      text: markUntrusted("Created LIN-42.", "connector result"),
+      isError: false,
+    });
     expect(callback.text).toBe(inProcess);
+  });
+});
+
+describe("an approved action's stored run", () => {
+  test("is read after the live expiry, and still refused with the wrong key", () => {
+    const signed = mintRunAssertion({ ...RUN, depth: 2 }, KEY, 0);
+    expect(readRunAssertion(signed, KEY)).toBeNull();
+    expect(readApprovedRunAssertion(signed, KEY)?.depth).toBe(2);
+    expect(readApprovedRunAssertion(signed, "another-key")).toBeNull();
+    expect(readApprovedRunAssertion(`${signed}x`, KEY)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { IconTrash } from "@tabler/icons-react";
+import { IconHistory, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -30,11 +30,14 @@ import { Switch } from "@/components/ui/switch";
 import { relativeTime } from "@/lib/relative-time";
 import {
   deleteRoutineMutationOptions,
+  runRoutineNowMutationOptions,
   setRoutineEnabledMutationOptions,
 } from "@/lib/routines/mutations";
 import {
   nothingIsFiring,
   type RoutineRecord,
+  type RoutineRunRecord,
+  routineRunsQueryOptions,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
 import { cn } from "@/lib/utils";
@@ -123,6 +126,89 @@ function Chip({
   );
 }
 
+const RUN_STATUS: Record<
+  RoutineRunRecord["status"],
+  { text: string; dot: string; className: string }
+> = {
+  running: {
+    text: "Running",
+    dot: "animate-pulse bg-muted-foreground",
+    className: "",
+  },
+  succeeded: { text: "Succeeded", dot: "bg-emerald-500", className: "" },
+  failed: {
+    text: "Failed",
+    dot: "bg-destructive",
+    className: "text-destructive",
+  },
+  skipped: {
+    text: "Skipped",
+    dot: "bg-amber-500",
+    className: "text-amber-600 dark:text-amber-500",
+  },
+  waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
+};
+
+/** Every firing of one routine, newest first, each linking to the thread it ran in. */
+function RoutineRuns({ routine }: { routine: RoutineRecord }) {
+  const runs = useQuery(routineRunsQueryOptions(routine.id));
+  if (runs.isPending)
+    return <p className="text-muted-foreground text-xs">Loading runs…</p>;
+  if (runs.error)
+    return (
+      <p className="text-destructive text-xs" role="alert">
+        {runs.error.message}
+      </p>
+    );
+  if (!runs.data?.length)
+    return <p className="text-muted-foreground text-xs">No runs yet.</p>;
+  return (
+    <ul className="flex w-full flex-col gap-1.5">
+      {runs.data.map((run) => {
+        const status = RUN_STATUS[run.status] ?? RUN_STATUS.skipped;
+        return (
+          <li
+            className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
+            key={run.id}
+          >
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5",
+                status.className,
+              )}
+            >
+              <span className={cn("size-1.5 rounded-full", status.dot)} />
+              {status.text}
+            </span>
+            <span className="text-muted-foreground">
+              {run.source === "run_now"
+                ? "Run now"
+                : run.source === "trigger"
+                  ? "Triggered"
+                  : "Scheduled"}{" "}
+              · {relativeTime(run.startedAt)}
+            </span>
+            {routine.channel.gone ? null : (
+              <Link
+                className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                params={{ channelId: routine.channel.id }}
+                to="/channel/$channelId"
+              >
+                Open thread
+              </Link>
+            )}
+            {run.error ? (
+              <span className="basis-full text-muted-foreground">
+                {run.error}
+              </span>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * The signed-in person's standing instructions: a switch to stop one taking effect, and a delete
  * that ends it for good.
@@ -142,6 +228,9 @@ export function RoutinesList({
   const routines = useQuery(routinesQueryOptions());
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
+  const runNow = useMutation(runRoutineNowMutationOptions(queryClient));
+  /** Which routine's run history is open. One at a time keeps the list scannable. */
+  const [historyId, setHistoryId] = useState<string | null>(null);
   /** The routine a delete is being confirmed for, or null. Its own dialog rather than one per row. */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const rows = (routines.data?.routines ?? []).filter(
@@ -153,9 +242,9 @@ export function RoutinesList({
 
   return (
     <PageSection className={embedded ? "mt-0" : undefined}>
-      {setEnabled.error ? (
+      {setEnabled.error || runNow.error ? (
         <p className="text-destructive text-sm" role="alert">
-          {setEnabled.error.message}
+          {setEnabled.error?.message ?? runNow.error?.message}
         </p>
       ) : null}
 
@@ -264,8 +353,53 @@ export function RoutinesList({
                       )}
                     </div>
                   </ItemFooter>
+                  {historyId === routine.id ? (
+                    <div className="mt-2 border-border border-t pt-2">
+                      <RoutineRuns routine={routine} />
+                    </div>
+                  ) : null}
                 </ItemContent>
                 <ItemActions>
+                  {/*
+                   * Run now is the Test button, and it does real work: the Bot carries out the
+                   * instruction in the channel right away. Offered only while the routine is on,
+                   * because a paused routine never runs.
+                   */}
+                  <Button
+                    aria-label={`Run the routine scheduled ${routine.schedule} now`}
+                    disabled={
+                      !routine.enabled ||
+                      (runNow.isPending && runNow.variables === routine.id)
+                    }
+                    onClick={() =>
+                      runNow.mutate(routine.id, {
+                        onSuccess: () => setHistoryId(routine.id),
+                      })
+                    }
+                    size="sm"
+                    title={
+                      routine.enabled
+                        ? "Runs it for real, now: the Bot does the work and posts in the channel."
+                        : "Paused routines never run. Switch it on first."
+                    }
+                    type="button"
+                    variant="outline"
+                  >
+                    <IconPlayerPlay />
+                    Run now
+                  </Button>
+                  <Button
+                    aria-expanded={historyId === routine.id}
+                    aria-label={`Run history for the routine scheduled ${routine.schedule}`}
+                    onClick={() =>
+                      setHistoryId(historyId === routine.id ? null : routine.id)
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <IconHistory />
+                  </Button>
                   {/*
                    * Binary and immediate: it takes effect when switched, there is no save.
                    * Disabled only while its own write is in flight, so switching one routine
