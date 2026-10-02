@@ -294,6 +294,7 @@ Settings worth knowing:
 | `AGENT_ENDPOINT_ALLOWED_HOSTS`       | Private addresses an agent may be registered at, comma separated. A host, optionally with a port. |
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |
 | `DEPLOYMENT_ID`                      | Names this deployment when two share one Intelligence project.            |
+| `OPENBOT_SELF_HOST_BANNER`           | Set `false` to hide the bar offering CopilotKit's help self-hosting OpenBot. It never shows on a paid Intelligence plan. |
 
 Full reference: [docs/configuration.md](docs/configuration.md).
 

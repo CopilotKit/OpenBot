@@ -83,8 +83,9 @@ audit trail for a deletion that did not happen.
 In a group conversation, a Bot's reply was saved, then handed on: to Activity, to any consent
 cards, and to the Bots it named. A fault in that hand-on, such as the audit trail being
 unreachable, wrote the error's text over the saved reply and marked it failed, and a retry did not
-bring the reply back. The reply now stays as saved, and the fault is logged as
-`group-turn-after-reply-error`.
+bring the reply back. The reply now stays as saved, the fault is logged as
+`group-turn-after-reply-error`, and any consent cards or handoff the fault interrupted are still
+posted.
 
 ### The egress filter reaches an IPv6 upstream proxy and asks it for IPv6 hosts correctly
 
@@ -206,18 +207,17 @@ A routine that fails ten times in a row is switched off, and someone has to swit
   first-failure message never appeared.
 - **Now:** failures are counted from when the routine was last switched on, recorded in a new
   `routines.enabled_at` column. The migration sets it to the time of the upgrade, so any failure
-  streak already under way starts again from zero at that point.
+  streak already under way starts again from zero at that point. Adds migration
+  `0051_routine_enabled_at`.
 
 ### Generated workspace files can be downloaded intact
 
 `GET /api/computers/:botId/files/download?path=...` streams a generated file as an opaque
 attachment instead of returning the 64 KB UTF-8 text extract. Downloads use the separate
 `computer_download_file` / `download_file` permission, remain confined to the Bot workspace, are
-capped at 100 MiB with `413`, and are recorded on the computer audit trail. Existing read, list and
-write APIs are unchanged.
-
-  streak already under way starts again from zero at that point. Adds migration
-  `0051_routine_enabled_at`.
+capped at 100 MiB with `413`, and are recorded on the computer audit trail. Switching off **Cloud
+computer use** under Admin → Enterprise refuses downloads as it refuses reads. Existing read, list
+and write APIs are unchanged.
 
 ### Bots work as coworkers
 
