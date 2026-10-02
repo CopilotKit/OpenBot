@@ -401,7 +401,14 @@ export function createComponentRoutes(
     if (!functionName.trim()) {
       return context.json({ error: "A function is required." }, 400);
     }
-    await store.revokeFunction(name, functionName);
+    try {
+      await store.revokeFunction(name, functionName);
+    } catch (error) {
+      if (error instanceof ComponentNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
     await audit(context, "component.function_revoked", name, {
       function: functionName,
     });

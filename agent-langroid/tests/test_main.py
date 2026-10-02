@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
+import httpx2
 import pytest
 import uvicorn
 from fastapi import FastAPI, Request
@@ -182,3 +184,62 @@ def test_a_run_reaches_the_model_the_setup_screen_chose(monkeypatch, provider, c
     assert '"RUN_FINISHED"' in response.text
     assert '"RUN_ERROR"' not in response.text
     assert seen == [expected]
+
+
+def test_an_openai_key_uses_the_official_endpoint_when_compose_sets_a_blank_url(monkeypatch, provider):
+    # The "an OpenAI key" choice above points OPENAI_BASE_URL at the fake provider, which is how the
+    # empty value Compose actually writes for a plain OpenAI key went untested: the OpenAI SDK only
+    # defaults an absent URL, so "" left every request without a host.
+    base, provider_seen = provider
+    port = int(base.rsplit(":", 1)[1])
+    destinations = []
+
+    def reroute(transport_class, method_name):
+        original = getattr(transport_class, method_name)
+
+        if method_name.startswith("handle_async"):
+
+            async def forward(transport, request):
+                destinations.append((request.url.scheme, request.url.host, request.url.path))
+                request.url = request.url.copy_with(scheme="http", host="127.0.0.1", port=port)
+                return await original(transport, request)
+
+        else:
+
+            def forward(transport, request):
+                destinations.append((request.url.scheme, request.url.host, request.url.path))
+                request.url = request.url.copy_with(scheme="http", host="127.0.0.1", port=port)
+                return original(transport, request)
+
+        monkeypatch.setattr(transport_class, method_name, forward)
+
+    # Keep the real Langroid and OpenAI clients and send what they build to the fake provider, noting
+    # where it was addressed. Both HTTP stacks and both client kinds, because the OpenAI SDK sends
+    # through httpx2 rather than httpx and Langroid may use either the sync or the async client.
+    for stack in (httpx, httpx2):
+        reroute(stack.HTTPTransport, "handle_request")
+        reroute(stack.AsyncHTTPTransport, "handle_async_request")
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+    monkeypatch.setenv("BOT_PROVIDER", "")
+    monkeypatch.setenv("BOT_MODEL", "gpt-5.5")
+    # A key no other test uses: Langroid caches the OpenAI client it builds by API key, so with the
+    # "test-key" above this test would be handed that test's client, already pointed at the fake.
+    monkeypatch.setenv("OPENAI_API_KEY", "blank-url-test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "")
+
+    from src import main
+
+    main = importlib.reload(main)
+    response = TestClient(main.app).post(
+        "/", json=RUN, headers={"x-openbot-agent-token": TOKEN}
+    )
+
+    assert destinations == [("https", "api.openai.com", "/v1/chat/completions")]
+    assert provider_seen == [("openai", "gpt-5.5")]
+    assert response.status_code == 200
+    assert '"RUN_FINISHED"' in response.text
+    assert '"RUN_ERROR"' not in response.text
+    assert "hello" in response.text
