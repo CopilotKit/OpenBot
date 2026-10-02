@@ -33,37 +33,42 @@ export function SelfHostBanner() {
   return (
     <aside
       aria-label="Self-host OpenBot"
-      className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
+      className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
     >
       {/*
        * Packed from the left rather than pushing Dismiss to the far right: on localhost CopilotKit's
        * dev inspector floats over the top-right corner, which is where somebody trying OpenBot first
        * sees this, and a Dismiss under it cannot be clicked.
+       *
+       * Wraps rather than truncates, so a phone reads the whole sentence. The link and Dismiss stay
+       * together and drop to the next line as one, which keeps Dismiss on the left there too.
        */}
-      <p className="min-w-0 truncate text-foreground">
+      <p className="text-foreground">
         Self-host OpenBot for your organization.
       </p>
-      {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
-      <a
-        // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
-        className={cn(
-          buttonVariants({ size: "sm", variant: "link" }),
-          "text-foreground underline",
-        )}
-        href={SELF_HOST_URL}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        Talk to an engineer
-      </a>
-      <Button
-        aria-label="Dismiss"
-        onClick={() => dismiss.mutate()}
-        size="icon-xs"
-        variant="ghost"
-      >
-        <IconX />
-      </Button>
+      <span className="flex items-center gap-2">
+        {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
+        <a
+          // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
+          className={cn(
+            buttonVariants({ size: "sm", variant: "link" }),
+            "px-0 text-foreground underline",
+          )}
+          href={SELF_HOST_URL}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          Talk to an engineer
+        </a>
+        <Button
+          aria-label="Dismiss"
+          onClick={() => dismiss.mutate()}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <IconX />
+        </Button>
+      </span>
     </aside>
   );
 }
