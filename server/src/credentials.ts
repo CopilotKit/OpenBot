@@ -222,6 +222,24 @@ export class CredentialUnusableError extends Error {
   }
 }
 
+/**
+ * An administrator asked to revoke or rotate a credential that cannot be revoked or rotated as asked.
+ *
+ * The id names no credential, or one already revoked, or one that is not what the input describes.
+ * It carries the status the route answers with. As a plain `Error` it left the route as a bare 500,
+ * so a second click on Revoke read as the deployment being broken rather than the credential being
+ * gone already.
+ */
+export class CredentialRefusedError extends Error {
+  readonly status: 404 | 409;
+
+  constructor(message: string, status: 404 | 409) {
+    super(message);
+    this.name = "CredentialRefusedError";
+    this.status = status;
+  }
+}
+
 export async function decryptCredentialForUse(
   encodedKey: string,
   reader: CredentialSecretReader,
@@ -317,18 +335,25 @@ export function createCredentialStore(
           .where(eq(credentials.id, input.previousCredentialId))
           .for("update");
         if (!previous) {
-          throw new Error("Previous credential was not found");
+          throw new CredentialRefusedError(
+            "Previous credential was not found",
+            404,
+          );
         }
         if (previous.revokedAt) {
-          throw new Error("Previous credential is already revoked");
+          throw new CredentialRefusedError(
+            "Previous credential is already revoked",
+            409,
+          );
         }
         if (
           previous.kind !== input.kind ||
           previous.provider !== input.provider ||
           previous.keyId !== input.keyId
         ) {
-          throw new Error(
+          throw new CredentialRefusedError(
             "Previous credential does not match the input's kind, provider or keyId",
+            409,
           );
         }
 
@@ -390,7 +415,10 @@ export function createCredentialStore(
         .returning({ revokedAt: credentials.revokedAt });
 
       if (!credential?.revokedAt) {
-        throw new Error("Credential was not found or already revoked");
+        throw new CredentialRefusedError(
+          "Credential was not found or already revoked",
+          404,
+        );
       }
       return credential.revokedAt;
     },

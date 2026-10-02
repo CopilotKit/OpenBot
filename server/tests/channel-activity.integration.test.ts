@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   AgentNotFoundError,
   createAgentProfileStore,
@@ -134,6 +134,35 @@ describe("reading a person's channels", () => {
     }
 
     expect(new Set(seen).size).toBe(seen.length);
+    expect(seen.sort()).toEqual(expected.sort());
+  });
+
+  test("channels made in the same millisecond are each on a page", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const expected: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      expected.push((await createChannel(owner, [agentId])).id);
+    }
+    // One transaction's worth of channels, as a package sync or an import makes them: the same
+    // instant, kept by PostgreSQL to the microsecond and by a JavaScript `Date` to the millisecond.
+    await database
+      .update(channels)
+      .set({ createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz` })
+      .where(inArray(channels.id, expected));
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const result = await store.list(owner, {
+        limit: 2,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...result.channels.map((channel) => channel.id));
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+
     expect(seen.sort()).toEqual(expected.sort());
   });
 

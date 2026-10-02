@@ -6,6 +6,8 @@
 # Before anything else, and before the `set` line below, which is itself bash-only: this file is
 # bash, and being read by `sh` used to end it with exit 1 and no output at all. See that file.
 . "$(dirname "$0")/require-bash.sh"
+# `holder`, `running` and `stop_matching`, which also work in Git Bash on Windows. See that file.
+. "$(dirname "$0")/processes.sh"
 
 set -euo pipefail
 
@@ -49,7 +51,10 @@ BOT_PORT="$(setting BOT_PORT 4200)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
 BOT_PROVIDER="$(setting BOT_PROVIDER openai | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
-ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
+# Through `setting`, like every other key here, so `.env` counts as the comment above says and as
+# docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
+# was ignored: the supervisor was still started and the server still told to use it.
+ONE_COMPUTER_EACH="$(setting OPENBOT_ONE_COMPUTER_EACH true)"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
@@ -134,10 +139,6 @@ green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }
 
-holder() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fcn 2>/dev/null | awk '/^c/{c=substr($0,2)} /^n/{print c" ("substr($0,2)")"; exit}' || true
-}
-
 # Does whatever holds this port answer as OpenBot, rather than merely answer?
 #
 # `curl -f` proves something is listening and returned 2xx. That is not the same claim, and the gap
@@ -211,8 +212,8 @@ wait_for() {
 }
 
 stop_server_processes_for_restart() {
-  pkill -f "bun --env-file=../.env src/production-entry.ts" >/dev/null 2>&1 || true
-  pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+  stop_matching "bun --env-file=../.env src/production-entry.ts"
+  stop_matching "bun --env-file=../.env src/index.ts"
 }
 
 echo
@@ -370,7 +371,7 @@ wait_for_openbot "$SERVER_PORT" server
 # The old pattern matched those containers, the guard false-positived, and the worker silently never
 # started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
 # relative imports resolve from the importing file, not from the process's cwd.
-if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+if ! running "bun worker/src/index.ts"; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
   (cd "$ROOT" && \
     DATABASE_URL="$WORKER_DATABASE_URL" \
@@ -379,7 +380,7 @@ if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
     bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
   info "  worker: started (routine sweep loop)"
   sleep 1
-  if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+  if ! running "bun worker/src/index.ts"; then
     red "  worker: did not stay up, check $LOGS/worker.log"
   fi
 else

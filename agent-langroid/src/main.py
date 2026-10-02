@@ -42,6 +42,13 @@ def _model_id() -> str:
 if not os.environ.get("OPENAI_API_KEY"):
     os.environ.pop("OPENAI_API_KEY", None)
 
+# And an empty `OPENAI_BASE_URL` is no address. Compose writes it empty when the model screen chose a
+# plain OpenAI key. Langroid builds its OpenAI client with no `base_url`, so the SDK reads this
+# variable itself, and it falls back to `https://api.openai.com/v1` only when the variable is absent:
+# given "", every request was built with no host and failed to connect. A real endpoint is left alone.
+if not os.environ.get("OPENAI_BASE_URL", "").strip():
+    os.environ.pop("OPENAI_BASE_URL", None)
+
 agent = ChatAgent(
     ChatAgentConfig(
         llm=OpenAIGPTConfig(chat_model=_model_id(), parallel_tool_calls=False),

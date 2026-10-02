@@ -17,6 +17,8 @@ function appWith(
   servers: string[] = ["tool"],
   /** The skills that exist, all of them the deployment's own. */
   skills: string[] = [],
+  /** The Bots that exist, for the grant path's check that the grantee is real. */
+  bots: string[] = ["bot-1"],
 ) {
   const store = {
     serverExists: async (serverId: string) => {
@@ -27,6 +29,7 @@ function appWith(
       calls.skillLookups?.push(slug);
       return skills.includes(slug) ? null : undefined;
     },
+    agentIsRegistered: async (agentId: string) => bots.includes(agentId),
     grant: async (kind: unknown, ref: unknown, agentId: unknown) => {
       calls.grants.push({ kind, ref, agentId });
       return { ok: true };
@@ -446,5 +449,52 @@ describe("POST /api/plugins/skills", () => {
 
     expect(response.status).toBe(200);
     expect(calls.installs).toHaveLength(1);
+  });
+});
+
+/**
+ * A GRANT NAMING A BOT NOBODY HAS.
+ *
+ * `plugin_grants.agent_id` is a foreign key, so a grant for a mistyped Bot id passed every check an
+ * administrator's `mcp` or `skill` grant makes, reached the insert and failed there: a 500 with no
+ * body, where each other refusal on this route is a 403 with a sentence. The `bot` kind already
+ * refuses it, as "There is no such Bot.".
+ */
+describe("POST /api/plugins/grants, for a Bot that does not exist", () => {
+  const grant = (body: unknown) => ({
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  test.each([
+    ["an app", { kind: "mcp", ref: "tool/SEND", agentId: "typo-bot" }],
+    ["a skill", { kind: "skill", ref: "triage", agentId: "typo-bot" }],
+  ])("refuses a grant of %s and never reaches the store", async (_n, body) => {
+    const calls = { grants: [] as unknown[], toolCalls: [] as unknown[] };
+    const response = await appWith(calls, ["tool"], ["triage"]).request(
+      "http://openbot.test/grants",
+      grant(body),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "There is no such Bot.",
+    });
+    expect(calls.grants).toEqual([]);
+  });
+
+  test.each([
+    ["an app", { kind: "mcp", ref: "tool/SEND", agentId: "bot-1" }],
+    ["a skill", { kind: "skill", ref: "triage", agentId: "bot-1" }],
+  ])("grants %s to a Bot that is there, as before", async (_n, body) => {
+    const calls = { grants: [] as unknown[], toolCalls: [] as unknown[] };
+    const response = await appWith(calls, ["tool"], ["triage"]).request(
+      "http://openbot.test/grants",
+      grant(body),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.grants).toEqual([body]);
   });
 });

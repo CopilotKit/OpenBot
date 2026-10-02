@@ -469,7 +469,15 @@ function collectAgents(
     "agents.yaml",
     omittedAgentIds,
   );
-  const declaredIn = new Map(agents.map((agent) => [agent.id, "agents.yaml"]));
+  // The same refusal within `agents.yaml` as across files. Sync upserts one row per entry, so a
+  // repeated id there was not refused but silently became whichever entry came last.
+  const declaredIn = new Map<string, string>();
+  for (const agent of agents) {
+    if (declaredIn.has(agent.id)) {
+      throw new Error(`agent "${agent.id}" is declared twice in agents.yaml`);
+    }
+    declaredIn.set(agent.id, "agents.yaml");
+  }
   for (const file of agentFiles) {
     const source = `agents/${file.filename}`;
     const document = yaml(file.contents, source);
@@ -515,10 +523,24 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     omittedAgentIds,
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
+  /*
+   * An id left blank in one place and declared properly in another is declared, not omitted.
+   * Otherwise it was seeded and then filtered out of every channel that names it, and disabled and
+   * re-enabled on each sync. A real declaration wins whichever file it is in, so the answer does not
+   * depend on the order a directory is read in.
+   */
+  for (const id of agentIds) omittedAgentIds.delete(id);
   const packageSkills = parseTenantSkills(skillsYaml.skills);
   const skillSlugs = new Set(packageSkills.map((skill) => skill.slug));
   for (const agent of agents) {
+    // Sync writes one grant row per entry in a single INSERT ... ON CONFLICT, which Postgres refuses
+    // when two of its rows collide, so a repeated slug stopped the server at boot with a SQL error.
+    const named = new Set<string>();
     for (const slug of agent.skills) {
+      if (named.has(slug)) {
+        throw new Error(`agent "${agent.id}" names skill "${slug}" twice`);
+      }
+      named.add(slug);
       /*
        * Checked against this package's own skills and nothing else, and refused rather than dropped.
        *
@@ -535,20 +557,32 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       }
     }
   }
+  const channelIds = new Set<string>();
   const channels = asList(channelsYaml.channels, "channels.yaml channels").map(
     (value) => {
       const channel = asRecord(value, "channel");
+      const id = requiredString(channel.id, "channel.id");
+      // Sync upserts one channel per entry, so a repeated id silently became the last one.
+      if (channelIds.has(id)) {
+        throw new Error(`channel "${id}" is declared twice in channels.yaml`);
+      }
+      channelIds.add(id);
       const permittedAgents = stringArray(
         channel.permitted_agents,
         "channel.permitted_agents",
       ).filter((agentId) => !omittedAgentIds.has(agentId));
+      // Each becomes a (channel, agent) row under a primary key, so a repeat stopped the server at
+      // boot with a duplicate-key error instead of a sentence naming the channel.
+      if (new Set(permittedAgents).size !== permittedAgents.length) {
+        throw new Error(`channel "${id}" lists the same agent twice`);
+      }
       for (const agentId of permittedAgents) {
         if (!agentIds.has(agentId)) {
           throw new Error(`channel references unknown agent "${agentId}"`);
         }
       }
       return {
-        id: requiredString(channel.id, "channel.id"),
+        id,
         name: requiredString(channel.name, "channel.name"),
         description: requiredString(channel.description, "channel.description"),
         permittedAgents,
@@ -610,12 +644,20 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
  */
 function parseTenantSkills(value: unknown): TenantSkill[] {
   if (value === undefined || value === null) return [];
+  // Sync upserts one skill per entry, so a repeated slug silently became the last one.
+  const slugs = new Set<string>();
   return asList(value, "skills.yaml skills").map((entry) => {
     const skill = asRecord(entry, "skill");
     const slug = requiredString(skill.slug, "skill.slug");
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    if (slugs.has(slug)) {
+      throw new Error(`skill "${slug}" is declared twice in skills.yaml`);
+    }
+    slugs.add(slug);
+    // The same pattern as the skills route, the store and the app's form. Looser, it seeded slugs
+    // such as `a`, `a-` or sixty characters that none of those would accept or let anybody edit.
+    if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(slug)) {
       throw new Error(
-        `skill.slug "${slug}" must be lowercase letters, digits and hyphens, and start with a letter or digit`,
+        `skill.slug "${slug}" must be lowercase letters, digits and hyphens, 2 to 40 characters, starting and ending with a letter or digit`,
       );
     }
     const tools =

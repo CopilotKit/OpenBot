@@ -17,6 +17,79 @@ not draw. Playground components now publish and withdraw both rows in one transa
 empty description or HTML is refused instead of leaving a half-published component, and repeating
 an unchanged publish no longer advances the revision.
 
+
+### A proxy password containing `%` no longer stops every shell command
+
+A proxy password with a `%` that does not start an escape, such as `p%zz`, made decoding it throw.
+- In the computer's shell, which strips proxy credentials before every command, every `/exec`
+  failed as a result.
+- Resolving a Bot's egress proxy failed the same way.
+
+Such a password is now taken as written, and it is still kept out of the shell's environment.
+
+### Revoking a credential twice says so, instead of answering a server error
+
+Revoking a credential that was already revoked, or that does not exist, now answers 404 with the
+reason. Rotating one that is gone answers 404, and rotating one that is revoked or does not match
+the key answers 409. Before, each answered a plain-text 500, as if the deployment were broken; a
+double click on Revoke was enough to cause it. The refused-rotation audit row is written as before.
+
+### The channel list no longer skips channels made in the same millisecond
+
+The channel list's page cursor kept the last channel's time to the millisecond, while PostgreSQL
+keeps it to the microsecond. Channels later in that same millisecond, as a package sync or an
+import makes them, sorted after the cursor and were on no page. The cursor now carries the time to
+the microsecond, as the audit trail's cursor already did.
+
+### A package skill's slug has the same shape as one made in the app
+
+The skills screen, the skills API and the store all accept a slug of 2 to 40 lowercase letters,
+digits and hyphens that starts and ends with a letter or digit. `skills.yaml` accepted any length
+and a trailing hyphen, so a package could seed `a`, `a-` or a sixty-character slug that nobody
+could then edit. A package with such a slug is now refused at load, with a sentence naming it.
+Every slug in `examples/fintech` already has the shape.
+
+### A tenant package that repeats itself is refused by name, instead of failing at boot
+
+Validation now refuses each of these, with a sentence naming the file and the repeated id:
+- A skill named twice by one agent, or an agent listed twice in one channel's `permitted_agents`.
+  Before, the server stopped at boot with a raw SQL error.
+- An agent id repeated within `agents.yaml`, a channel id within `channels.yaml`, or a skill slug
+  within `skills.yaml`. Before, the last entry silently won, though two files declaring the same
+  agent were already refused.
+- A remote agent left blank in `agents.yaml` but declared with an endpoint under `agents/` was
+  dropped from every channel that named it. It is now treated as declared.
+
+### `start.sh` and `stop.sh` see their own processes on Windows
+
+In Git Bash on Windows, which has no `lsof`, `pgrep` or `pkill`, every process and port lookup in
+the two scripts came back empty.
+- `bash scripts/stop.sh` reported the app, the routine worker and the API server as not running,
+  and left all three up.
+- `start.sh` could not see a port held by another process.
+- `start.sh` started another routine worker on every rerun, then reported that the one it had just
+  started "did not stay up".
+
+Where those tools are missing on Windows, the scripts now ask PowerShell, which ships with Windows.
+Everywhere the tools exist they are used exactly as before.
+
+### A clone on Windows builds an image that starts
+
+On Windows, where Git converts line endings by default, a clone checked every text file out with
+CRLF. `docker build` copied the s6 service files into the image that way, so a service's `type`
+read `longrun\r` and its scripts stopped on `set: -: invalid option`, and `bun run format:check`
+failed on every file. `.gitattributes` now checks text files out with LF on every system. An
+existing clone with nothing uncommitted picks this up after `git rm -r --cached . && git reset --hard`.
+
+### A routine switched back on gets a fresh count of failures
+
+A routine that fails ten times in a row is switched off, and someone has to switch it back on.
+- **Before:** the failure count ignored that, so the first failure after re-enabling counted as the
+  eleventh. The routine was switched straight off again with "failed ten times in a row", and the
+  first-failure message never appeared.
+- **Now:** failures are counted from when the routine was last switched on, recorded in a new
+  `routines.enabled_at` column. The migration sets it to the time of the upgrade, so any failure
+  streak already under way starts again from zero at that point.
 ### Bots work as coworkers
 
 A Bot can now carry on without anyone watching it. It runs standing **Responsibilities** fed by
@@ -47,6 +120,16 @@ arrives, and the server pushes it as the computer wakes. Cloud metadata and link
 refused in every mode, including `allow_all`, and the browser's WebRTC traffic now goes through the
 filter instead of around it. A computer run without an API server can set
 `EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
+
+### Provider and Bot lookups ignore inherited object properties
+
+Unknown names such as `constructor` and `__proto__` no longer return an inherited
+JavaScript object as a provider or Bot entry. Unknown providers return no spec, and
+missing Bots raise the existing startup error. Configured providers and Bots are unchanged.
+
+### A malformed `%` in a stream URL no longer returns a 500
+
+A request to `/api/computers/<id>/stream` whose id held a broken percent-escape, such as `%zz`, made the server throw and answer 500. It is now treated as not matching the stream route and goes through normal routing. Valid ids behave as before.
 
 ### `start.sh` names the port to change on macOS
 
@@ -127,6 +210,20 @@ its model asked for a skill by a name the snapshot does not hold, for a file the
 list, or sent arguments that were not JSON. A built-in Bot's model is handed that sentence as the
 call's result and carries on. A remote Bot's model now gets the same result and carries on too.
 
+### An app or skill cannot be granted to a Bot that does not exist
+
+An administrator's `POST /api/plugins/grants` for an app or a skill checked that the app or skill
+existed but not the Bot, so a mistyped Bot id reached the insert, failed on the `plugin_grants`
+foreign key, and answered 500 with no body. It is now refused with "There is no such Bot.", the
+sentence the `bot` kind already used, and nothing is stored. Revoking still checks nothing.
+
+### A malformed OAuth client is refused with a 400, not a 500
+
+`POST /api/plugins/servers/:id/oauth-client` called `.trim()` on the client id and secret without
+checking they were strings, so `{"clientId": 12345, "clientSecret": "s"}`, or a secret of `{}`, threw
+outside the route's try and answered 500. It now answers the same 400 as an empty value, as the
+other plugin routes do for their own fields, before the store or the audit trail is touched.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
@@ -143,6 +240,14 @@ such Bot. Its grants stayed in force, and nothing on any screen could take them 
 screens now follow the rule the Handoff panel already does: a hidden Bot is shown when it holds one
 of the grants the screen is about, marked "Hidden from your roster", and its own page draws its
 grants. Nothing on the server changed.
+
+### Revoking a function from a component that does not exist answers 404
+
+`DELETE /api/components/:name/functions/:function` was the one grant write that did not check the
+component exists. Against a name nobody has, it deleted nothing, answered `revoked: true` and wrote a
+`component.function_revoked` row naming a component that was never there. It now answers 404 and
+writes nothing, as granting a function and withholding a component already do. A function grant
+cannot outlive its component, so there is no stored row this stops anybody removing.
 
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
@@ -187,6 +292,13 @@ OpenAI SDK only defaults an absent URL, so it was given "" as the address. The B
 `https://api.openai.com/v1` for an empty value, as its Anthropic branch already did for
 `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
 
+### `OPENBOT_ONE_COMPUTER_EACH=false` in `.env` is honoured by `start.sh`
+
+`scripts/start.sh` read `OPENBOT_ONE_COMPUTER_EACH` from the environment alone, so the line that
+`docs/configuration.md` tells people to put in `.env` was ignored: the supervisor was still started
+and the server still told to give each Bot its own computer. It now reads the key as it reads every
+other setting, the environment first, then `.env`, then the default of `true`.
+
 ### Skill selection keeps capabilities named across multiple JSON replies
 
 When a model wraps its skill choice in prose or sends a revised JSON object, OpenBot reads each
@@ -223,6 +335,14 @@ did not need as empty (`OPENAI_BASE_URL` for a plain OpenAI key, `ANTHROPIC_BASE
 Anthropic key), and Pydantic AI builds each provider's client from the environment, so the SDK was
 given "" as the address. The Bot now removes an empty value before building the model, as
 `agent-langgraph-agui` already does, so the SDK uses its own endpoint. A real endpoint is unchanged.
+
+### The Langroid Bot answers on a plain OpenAI key
+
+Picked with an OpenAI key, the Langroid Bot failed every run with "Connection error.". Compose
+writes `OPENAI_BASE_URL` empty when the choice is a plain OpenAI key, and the OpenAI SDK only
+defaults an absent URL, so it was given "" as the address. The Bot now drops an empty
+`OPENAI_BASE_URL` before it builds its client, as it already does for an empty `OPENAI_API_KEY`.
+An OpenAI-compatible endpoint is unchanged.
 
 ### Find older conversations and keep chat preferences across devices
 

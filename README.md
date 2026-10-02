@@ -68,9 +68,10 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 ## Quick start
 
 > **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
-> same steps as below plus the things that are easy to get wrong: which of the ten blank keys in
-> `.env.example` are actually yours to fill (three), which the start script generates for you, and
-> what each start-up refusal means. Every claim in it is checked against this repository.
+> same steps as below plus the things that are easy to get wrong: which of the blank keys in
+> `.env.example` are actually yours to fill (the CopilotKit key and a model key), which the start
+> script fills for you, and what each start-up refusal means. Every claim in it is checked against
+> this repository.
 
 1. Create `.env`:
 
@@ -167,6 +168,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/admin/playground`         | Draft and publish sandboxed components in the browser.             |
 | `/admin/plugins`            | Configure MCP servers and grant their tools to Bots.               |
 | `/admin/skills`             | Write deployment skills and grant them to Bots.                    |
+| `/admin/learning`           | Assign Learning containers to Bots, or pause Automatic Learning.   |
 | `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
 | `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
 | `/admin/audit`              | Review permitted, refused, and failed actions.                     |
@@ -243,8 +245,8 @@ Settings worth knowing:
 | `OPENBOT_SINGLE_USER`                | Admits every request as one administrator. Required when no identity provider is configured; `.env.example` ships it on. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
-| `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` sets one.      |
-| `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` sets one.                      |
+| `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` falls back to a fixed dev value. |
+| `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` falls back to a fixed dev value. |
 | `AGENT_TOOL_TOKEN`                   | Secret a Bot presents to call a granted tool back. `start.sh` sets one. Without it no Bot may call tools. |
 | `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |

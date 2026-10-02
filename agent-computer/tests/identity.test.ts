@@ -3,8 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const identityModule = new URL("../src/identity.ts", import.meta.url).pathname;
+const identityModule = fileURLToPath(
+  new URL("../src/identity.ts", import.meta.url),
+);
 
 // A fresh process preserves the production once-only lookup and keeps the client trap local to
 // this test. The filesystem is real; the trap must never forward to a workload identity service.

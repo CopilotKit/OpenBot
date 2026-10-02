@@ -166,7 +166,9 @@ export function providerSpec(
   provider: string | undefined,
 ): ProviderSpec | undefined {
   const normalized = provider?.trim().toLowerCase() || "openai";
-  return MODEL_PROVIDERS[normalized as ModelProviderId];
+  return Object.hasOwn(MODEL_PROVIDERS, normalized)
+    ? MODEL_PROVIDERS[normalized as ModelProviderId]
+    : undefined;
 }
 
 /** The environment variable this provider's key arrives in, or nothing for a provider unknown. */
@@ -248,7 +250,9 @@ export function botSettings(
   env: Readonly<Record<string, string | undefined>> = process.env,
   pinnedProvider?: string,
 ): BotSettings {
-  const entry = BOT_ENTRIES[botId];
+  const entry = Object.hasOwn(BOT_ENTRIES, botId)
+    ? BOT_ENTRIES[botId]
+    : undefined;
   if (!entry) {
     fail(
       `bots has no ${botId} entry. Add one before this Bot reads the spec file.`,

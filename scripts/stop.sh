@@ -11,6 +11,9 @@
 # Before anything else, and before the `set` line below, which is itself bash-only: this file is
 # bash, and being read by `sh` used to end it with exit 1 and no output at all. See that file.
 . "$(dirname "$0")/require-bash.sh"
+# `holder`, `port_pids`, `kill_pids`, `running` and `stop_matching`, which also work in Git Bash on
+# Windows. See that file.
+. "$(dirname "$0")/processes.sh"
 
 set -euo pipefail
 
@@ -62,10 +65,6 @@ green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }
 
-holder() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fcn 2>/dev/null | awk '/^c/{c=substr($0,2)} /^n/{print c" ("substr($0,2)")"; exit}' || true
-}
-
 # Does whatever holds this port answer as OpenBot, rather than merely answer?
 #
 # The same question start.sh asks before starting, asked here for the opposite reason. Starting on
@@ -103,15 +102,15 @@ stop_port() {
     red "  Left it alone. Stop it yourself if it is in the way."
     return 0
   fi
-  pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  pids="$(port_pids "$port")"
   [ -z "$pids" ] && { info "  $name: not running on $port"; return 0; }
   # shellcheck disable=SC2086
-  kill $pids 2>/dev/null || true
+  kill_pids $pids
   sleep 2
-  pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  pids="$(port_pids "$port")"
   if [ -n "$pids" ]; then
     # shellcheck disable=SC2086
-    kill -9 $pids 2>/dev/null || true
+    kill_pids -9 $pids
   fi
   green "  $name: stopped ($who)"
 }
@@ -126,8 +125,8 @@ stop_port "$APP_PORT" app
 info "2/4  Routine worker"
 # The same pattern start.sh starts it with, and it has to stay that specific: a bare `bun
 # src/index.ts` matches the server, computer and supervisor containers on a Linux host too.
-if pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
-  pkill -f "bun worker/src/index.ts" || true
+if running "bun worker/src/index.ts"; then
+  stop_matching "bun worker/src/index.ts"
   green "  worker: stopped"
 else
   info "  worker: not running"

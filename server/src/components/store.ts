@@ -361,6 +361,13 @@ export function createComponentStore(database: Database): ComponentStore {
     },
 
     async revokeFunction(name, functionName) {
+      /*
+       * The only one of the four grant writes that did not ask whether the component exists. A grant
+       * cannot outlive its component (`component_functions.component_name` cascades), so a revoke
+       * against a name nobody has can only delete nothing, and the route then answered
+       * `revoked: true` and wrote `component.function_revoked` for a component that was never there.
+       */
+      await requireComponent(name);
       await database
         .delete(componentFunctions)
         .where(

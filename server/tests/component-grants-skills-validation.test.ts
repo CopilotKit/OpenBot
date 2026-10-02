@@ -6,6 +6,7 @@ import type { BotAccessCheck } from "../src/plugins/routes";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { PluginStore } from "../src/plugins/store";
 import { createComponentRoutes } from "../src/components/routes";
+import { ComponentNotFoundError } from "../src/components/store";
 
 const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
   context,
@@ -188,5 +189,72 @@ describe("component grants/functions", () => {
     );
     expect(response.status).toBe(400);
     expect(calls.revokes).toEqual([]);
+  });
+});
+
+/**
+ * `DELETE /:name/functions/:function` was the one grant write that never asked whether the component
+ * exists. Against a name nobody has, it deleted nothing, answered `revoked: true` and wrote
+ * `component.function_revoked` for a component that was never there. Its siblings answer 404.
+ */
+describe("DELETE /:name/functions/:function", () => {
+  function appWithComponents(known: string[]) {
+    const audited: { eventType: string; targetId: string }[] = [];
+    const revoked: unknown[] = [];
+    const store = {
+      revokeFunction: async (name: string, fn: string) => {
+        if (!known.includes(name)) throw new ComponentNotFoundError(name);
+        revoked.push({ name, fn });
+      },
+    };
+    const auditStore = {
+      insert: async (event: { eventType: string; targetId: string }) => {
+        audited.push({ eventType: event.eventType, targetId: event.targetId });
+      },
+    };
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.use(requireUser);
+    app.route(
+      "/",
+      createComponentRoutes(
+        store as never,
+        requireUser,
+        auditStore as never,
+        canUseBot,
+      ),
+    );
+    return { app, audited, revoked };
+  }
+
+  test("answers 404 for a component that does not exist, and records nothing", async () => {
+    const { app, audited, revoked } = appWithComponents(["widget"]);
+
+    const response = await app.request(
+      "http://openbot.test/nothing/functions/botActivity",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "No component is called nothing.",
+    });
+    expect(revoked).toEqual([]);
+    expect(audited).toEqual([]);
+  });
+
+  test("revokes and records for a component that does", async () => {
+    const { app, audited, revoked } = appWithComponents(["widget"]);
+
+    const response = await app.request(
+      "http://openbot.test/widget/functions/botActivity",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true });
+    expect(revoked).toEqual([{ name: "widget", fn: "botActivity" }]);
+    expect(audited).toEqual([
+      { eventType: "component.function_revoked", targetId: "widget" },
+    ]);
   });
 });

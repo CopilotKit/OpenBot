@@ -123,6 +123,14 @@ export const routines = pgTable(
      * value it compared against recorded somewhere a human can inspect when a clock looks wrong.
      */
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /**
+     * When this routine was last switched on, or created. The fatigue rule counts failures from
+     * here, so a routine switched off after ten failures and switched back on gets ten more chances
+     * rather than one. Not `updatedAt`, which every sweep that claims the routine moves.
+     */
+    enabledAt: timestamp("enabled_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

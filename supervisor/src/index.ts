@@ -1,5 +1,6 @@
 import { serve } from "bun";
 import { Hono } from "hono";
+import { authorised } from "./authorisation";
 import { environmentFor } from "./environment";
 import {
   ComputerNotAnsweringError,
@@ -77,7 +78,7 @@ const app = new Hono();
 app.use("*", async (context, next) => {
   // Health is open so an orchestrator can check it without holding the token.
   if (context.req.path === "/health") return next();
-  if (context.req.header("authorization") !== `Bearer ${token}`) {
+  if (!authorised(context.req.header("authorization"), token)) {
     return context.json({ error: "Unauthorized." }, 401);
   }
   return next();

@@ -319,3 +319,18 @@ describe("what a Bot runs from the spec file", () => {
     );
   });
 });
+
+describe("registry lookups ignore inherited object properties", () => {
+  test("prototype names are not providers", () => {
+    for (const name of ["constructor", "__proto__", "toString", "valueOf"]) {
+      expect(providerSpec(name)).toBeUndefined();
+      expect(keyVariableFor(name)).toBeUndefined();
+      expect(baseUrlVariableFor(name)).toBeUndefined();
+    }
+  });
+  test("prototype names are not Bot entries", () => {
+    for (const name of ["constructor", "__proto__", "toString", "valueOf"]) {
+      expect(() => botSettings(name, {})).toThrow(`bots has no ${name} entry`);
+    }
+  });
+});
