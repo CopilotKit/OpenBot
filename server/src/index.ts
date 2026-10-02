@@ -172,7 +172,11 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
-import { observeIntelligenceAuthentication } from "./intelligence-client";
+import {
+  createIntelligenceClient,
+  observeIntelligenceAuthentication,
+} from "./intelligence-client";
+import { createSelfHostBanner } from "./self-host-banner";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryIngestion } from "./memory/ingestion";
@@ -2859,6 +2863,12 @@ guardHostAccess(
 );
 auditRoutineStore(routineStore, bootAuditStore);
 
+// Asked only whether this deployment pays for Intelligence, for the self-host banner. Its own client
+// rather than the runtime's, the same as the thread reader: the constructor opens nothing.
+const selfHostBannerIntelligence = createIntelligenceClient(
+  config.runtime.intelligence,
+);
+
 const app = createApp(
   config,
   auth,
@@ -3038,6 +3048,10 @@ const app = createApp(
       auditStore: bootAuditStore,
     },
   },
+  createSelfHostBanner({
+    enabled: config.selfHostBanner,
+    entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
+  }),
 );
 
 /**

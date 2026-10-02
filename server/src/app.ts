@@ -81,6 +81,7 @@ import { createDictationRoutes } from "./dictation/routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
+import type { SelfHostBanner } from "./self-host-banner";
 import {
   createLearningRoutes,
   type LearningAdminDependencies,
@@ -413,6 +414,12 @@ export function createApp(
     /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
     lifecycle?: BotLifecycleServices;
   },
+  /**
+   * Whether to offer help self-hosting, which also hides it from a deployment that pays for
+   * Intelligence. Absent falls back to the operator's switch alone, so a test or a build without the
+   * resolver still answers from `config.selfHostBanner` rather than asking the network.
+   */
+  selfHostBanner?: SelfHostBanner,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -436,8 +443,11 @@ export function createApp(
        * both halves, so off means off.
        */
       generativeUi: config.generativeUi,
-      // Whether to offer help self-hosting OpenBot. A fork running it for its own people turns it off.
-      selfHostBanner: config.selfHostBanner,
+      // Whether to offer help self-hosting OpenBot. A fork running it for its own people turns it off,
+      // and a deployment that pays for Intelligence never sees it. See self-host-banner.ts.
+      selfHostBanner: selfHostBanner
+        ? await selfHostBanner.shown()
+        : config.selfHostBanner,
       transcription: Boolean(config.transcription),
       voice: Boolean(config.voice),
       /*

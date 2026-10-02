@@ -306,7 +306,8 @@ export type DeploymentConfig = {
    *
    * On by default, because a fresh clone is somebody evaluating the template. A fork that runs
    * OpenBot for its own organization turns it off with OPENBOT_SELF_HOST_BANNER=false or
-   * OPENBOT_SELF_HOST_BANNER=0, since its people have nothing to self-host.
+   * OPENBOT_SELF_HOST_BANNER=0, since its people have nothing to self-host. This is the operator's
+   * switch only; a deployment on a paid Intelligence plan hides the bar too (self-host-banner.ts).
    */
   selfHostBanner: boolean;
   /**

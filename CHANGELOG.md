@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Four things change for an existing deployment:
+**Before upgrading.** Six things change for an existing deployment:
 - Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
   container is assigned; see below.
 - A Bot's computer refuses the network until the server pushes its policy. A computer run without
@@ -19,12 +19,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `0051_routine_enabled_at`.
 - An existing Windows clone checks text files out with LF only after
   `git rm -r --cached . && git reset --hard` on a clean tree.
+- The signed-in app shows a bar offering CopilotKit's help self-hosting OpenBot, unless the
+  deployment is on a paid Intelligence plan. Set `OPENBOT_SELF_HOST_BANNER=false` to remove it for
+  everybody.
+- An egress rule with a malformed IP range, such as `10.0.0.5/`, used to be read as `/0` and allow
+  every IPv4 address. It is now refused, and a saved network policy that contains one is refused as
+  a whole: the Bots under it fall back to an allowlist with nothing on it, so they reach nothing
+  until the rule is corrected under Admin → Enterprise.
 
 ### The app offers help self-hosting OpenBot, until you close it
 
 A slim bar at the top of the signed-in app links to CopilotKit's engineers for help self-hosting
-OpenBot. Closing it is saved to your preferences, so it stays closed on every device. A fork running
-OpenBot for its own organization hides it for everybody with `OPENBOT_SELF_HOST_BANNER=false`.
+OpenBot. Closing it is saved to your preferences, so it stays closed on every device. A deployment
+on a paid Intelligence plan (`pro`, `team`, `team_self_hosted` or `enterprise`, or a licence bought
+through AWS Marketplace) never shows it; any other plan, or an entitlement that cannot be read,
+shows it. A fork running OpenBot for its own organization hides it for everybody with
+`OPENBOT_SELF_HOST_BANNER=false`.
 
 ### A request to the approvals API that is not JSON answers 400
 
