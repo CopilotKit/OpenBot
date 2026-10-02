@@ -116,9 +116,13 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | check | what it would catch |
 | --- | --- |
 | `format, lint, types` | the ordinary things, across every workspace including `agent-computer` and the supervisor |
+| `types (agent-computer)`, `types (supervisor)` | a type error in either deployable package, each checked on its own install |
+| `native types` | a type error in the `mobile` app, which installs from its own npm lockfile |
+| `computer (real browser)` | the agent-computer behaviour only a real Chromium shows, such as a password reaching the snapshot a model reads, a session cookie lost on restart, or WebRTC leaving around the egress filter |
 | `tests` | a decision made wrongly, in isolation |
-| `chart` | a Helm values file that renders a server which cannot start, across the EKS, GKE, AKS and self-hosted targets |
+| `chart` | a Helm values file that renders a server which cannot start, across the self-hosted, EKS, EKS sandbox, GKE and AKS targets |
 | `python harness regressions` | a provider-boundary regression in the Python Bot harnesses |
+| `startup (macos-latest)`, `startup (windows-latest)` | the app's serve-or-build cache deciding wrongly on macOS or Windows |
 | `build` | the app not compiling |
 | `migrations` | a schema change with no migration, or a snapshot that has drifted |
 | `image` | an image that builds but does not boot, or a supervised service that respawns |
@@ -133,7 +137,8 @@ These checks run again, against the release commit, when the release PR is merge
 publish rather than the proposal, which is why the release PR arriving without its own checks does
 not matter: a pull request opened by a workflow does not trigger them.
 
-**No secrets are required.** Every workflow here uses only the built-in `GITHUB_TOKEN`.
+**No secrets are required to release.** CI and both release workflows use only the built-in
+`GITHUB_TOKEN`. The desktop build workflows also read `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET`.
 
 ## The one thing CI cannot do
 

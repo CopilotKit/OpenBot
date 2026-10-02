@@ -23,7 +23,7 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, and components.                                           |
 | CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
 
-`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-bot`, `agent-langgraph`, and the supervisor through Docker Compose, then starts `server` and `app` on the host.
+`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-langgraph`, `agent-bot` (skipped when `BOT_PROVIDER=anthropic`, since that sample only takes OpenAI keys) and the supervisor (unless `OPENBOT_ONE_COMPUTER_EACH=false`) through Docker Compose, and runs `migrate`. It then starts `server`, the routines worker (`bun worker/src/index.ts`, the local stand-in for the routines CronJob) and `app` on the host.
 
 The compose file also defines optional SPIRE services. `start.sh` does not start them.
 
@@ -80,14 +80,16 @@ Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a
 
 With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
 
+Each computer also filters its own outbound connections. The browser and shell commands go through a filter proxy that applies the Bot's network policy (`allow_all`, `defaults_plus_allowlist`, `allowlist_only` or `deny_all`, which is what a Bot gets when its owner's Cloud network access is switched off). The server pushes the policy before the computer acts and whenever it wakes, and until one arrives nothing may leave. `EGRESS_POLICY_REQUIRED=0` is for a computer run with no API server. Cloud metadata addresses are refused in every mode. A process that ignores the proxy variables and opens a raw socket is not stopped by this; that is a Kubernetes NetworkPolicy's job.
+
 A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not the rest of the process environment. Userinfo is stripped from a proxy URL. `COMPUTER_SHELL_ENV` names anything else a deployment wants passed.
 
 The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network: Docker Compose binds it to `127.0.0.1:4500`, and a deployment running the server inside the compose network reaches it as `supervisor:4300` and needs no published port at all. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
 
 ## What started a run
 
-Every audit row records on whose authority an action was taken. A routine asserts its owner, and a
-hop between Bots asserts the person who began the conversation, so that column alone cannot say
+Every audit row records on whose authority an action was taken. A routine or a Responsibility asserts
+its owner, and a hop between Bots asserts the person who began the conversation, so that column alone cannot say
 whether anybody was there when it happened. An interactive run has somebody watching who will notice
 a wrong tool call; an unattended one does not, which is the case worth being able to find.
 
@@ -98,9 +100,12 @@ Each row therefore also names what caused it:
 | `person`         | none                   | Somebody was in the room. The default.                  |
 | `deployment`     | none                   | The deployment itself, at start-up or refusing a caller it could not identify. |
 | `routine`        | the routine's id       | A schedule fired it, as its owner, with nobody there.   |
+| `responsibility` | the Responsibility's id | One of a Bot's standing Responsibilities was triggered, as its owner, with nobody there. |
+| `memory`         | the memory source's id | Memory read a connected app to import facts, as the source's owner. |
 | `handoff`        | the Bot that handed on | Another Bot asked for this, on the person's behalf.     |
 
-The Audit screen filters on it, and **Nobody watching** is `routine` and `handoff` together, which is
+The Audit screen filters on it, and **Nobody watching** is `routine`, `handoff`, `responsibility` and
+`memory` together, which is
 the question of what ran on somebody's authority while they were away. `deployment` is deliberately
 outside that filter: a boundary held at start-up is not work done on anybody's behalf.
 
@@ -117,9 +122,9 @@ person, and a stream that stalls all say the same thing without each being told 
 cannot relabel its own run, because the assertion is signed by the deployment, and a kind this
 deployment does not write is read as a person rather than kept.
 
-Computer actions are the one family that carries no initiator, and correctly so: the computer tools
-are browser actions, executed by the person's own session, so a headless run has no way to drive the
-computer at all today. A row there is a person's because a person's browser wrote it.
+Computer actions carry the initiator too. A run with no browser attached (a routine, a Responsibility,
+a group turn) is given the computer tools server-side, with the Bot and the person bound before the
+model supplies any arguments, and the gateway writes that run's initiator on every decision.
 
 ## Human control and secrets
 
@@ -129,7 +134,7 @@ Handovers are audited as control events:
 - `computer.control_taken`
 - `computer.control_released`
 
-While a person controls the browser, Bot actions are refused rather than queued.
+While a person controls the browser, Bot actions are refused rather than queued. A run with no browser attached pauses instead, waiting on the handover.
 
 Secret entry is separate from chat content. The audit trail records that a secret was requested or supplied and the character count, not the secret value.
 
@@ -148,6 +153,8 @@ A coworker is a durable Bot profile:
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+A group conversation holds several Bots. An Intelligence thread admits exactly one agent, so each Bot gets a thread of its own in the group (`group_bot_threads`), and what the people in it read is a shared transcript (`group_messages`) with every reply attributed to its speaker. A Bot that names a peer as `@Name` hands the conversation to it under the same grant, caps and audit rows as any other hop.
 
 Who may reach one is decided by membership: every channel route resolves the caller in
 `channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
@@ -259,20 +266,18 @@ Reaching a second Bot spends a model call, may wake a computer and can fan out; 
 already in the conversation costs nothing and cannot be aimed anywhere they cannot see. A deployment
 able to switch off the safe exit and keep the expensive one would be backwards.
 
-Both tools are for Bots that run here. A Bot at its own endpoint runs its own loop and is handed
-descriptions of the tools it may call back for, and the callback path executes MCP refs only, so
-neither `message_bot` nor `ask_person` can reach it.
+A Bot at its own endpoint runs its own loop. A call it makes back to `message_bot` or `ask_person`
+through the signed callback route is dispatched the same way as one from a Bot running here. Being
+handed work is not the same as being able to hand it on, so the target of a grant may live at
+its own endpoint.
 
-It is the Bot **doing the asking** that has to run here. Being handed work is not the same as being
-able to hand it on, so the target of a grant may perfectly well live at its own endpoint. A grant
-whose *grantee* is remote is refused rather than stored, so an administrator finds out at the point
-of granting rather than from a Bot that never hands anything on.
+One limit remains on the asking side. The grant check a hop goes through (`botsReachableFrom`) counts
+only grants held by built-in Bots, so a Bot at its own endpoint can be granted another Bot and can ask
+its person, but every hop it attempts is refused as not granted.
 
-That is a real limit rather than a detail, and it is worth being plain about which Bots it leaves
-out: **a Bot created through the UI is a remote one**, because creating a coworker here means
-pointing it at an AG-UI endpoint. Only Bots a tenant package declares as built-in run in this
-process. So on a deployment with no package, nothing can be granted `message_bot` at all, and the
-screens say nothing about why.
+A coworker created through the UI with an endpoint is a remote one. Created without one, it runs at
+the managed Bot's endpoint when the deployment has one, and otherwise runs here as a built-in Bot on
+its role description.
 
 Who "a person" is, is a seam. This template answers the person in the conversation, which is the only
 answer a template can give honestly; a company has an on-call rota or a duty desk, and that is a
@@ -287,7 +292,7 @@ MCP servers and skills share the plugin grant table, but they have different own
 - MCP tools are admin-governed because they can reach external systems with stored credentials.
 - Skills are reusable instructions. A person can create personal skills and attach them only to Bots they own. Administrators create deployment skills.
 
-The curated MCP catalogue contains Google Drive and Notion. Custom MCP servers must pass URL checks; unknown tools and custom-server tools are treated as writes unless positively classified as reads.
+The curated MCP catalogue contains Parallel Search (anonymous, or with this deployment's API key; see [parallel-research.md](parallel-research.md)), Google Drive, Notion, and the built-in Routines server. Custom MCP servers must pass URL checks; unknown tools and custom-server tools are treated as writes unless positively classified as reads.
 
 A catalogue entry says whose credential a Bot reaches it with, which is a different question from whether it is reachable at all. A deployment-wide token answers the same for everybody; Google Drive and Notion are both `user-oauth`, so a Bot reaches them as the person asking and sees only what that person can see. An administrator enabling the connector and a person connecting their own account are two decisions, and neither can be made for the other. See [Google Drive](plugins/google-drive.md) and [Notion](plugins/notion.md).
 

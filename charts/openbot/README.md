@@ -297,9 +297,16 @@ installing on somebody's bare-metal cluster.
 ## Refused at install, not in a crash loop
 
 The chart fails the install, naming the value to change, when: there is no database or two of them;
-nobody would be an administrator; `singleUser` is combined with a public URL; both an Ingress and an
-HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; a Bot endpoint is
-named with no token to call it with; a browser is asked for inside more than one API replica; or
+nobody could sign in or nobody would be an administrator; an identity provider is configured without
+`secrets.betterAuthSecret` or `config.publicUrl`; `singleUser` is combined with a public URL or a
+public LoadBalancer; the Intelligence URLs or `secrets.intelligenceApiKey` are missing;
+`secrets.keyEncryptionKey` is not a base64 32-byte value, or is the public example key; there is no
+`secrets.computerToken`; `computers.mode` is `external` with no `computers.url`, or `sandbox` on a
+cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both `externalSecrets` and
+an existing Secret are named; a Bot endpoint is named with no token to call it with; a browser is
+asked for inside more than one API replica; `networkPolicy.enabled` is set with an external database
+and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
+`networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks; or
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
 `worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
 `secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
@@ -323,9 +330,29 @@ secrets:
 The token travels on every call and is required whenever a url is set. With an existing Secret or an
 external store, the key is `managed-agent-token`.
 
-Left empty, this deployment has the Bots its tenant package declares as built-in and no others. A
-package entry pointing at an endpoint that resolves to nothing is dropped rather than registered as a
-coworker nobody can talk to.
+Left empty, this deployment has the Bots its tenant package declares as built-in, and a coworker
+somebody creates in the app without an endpoint runs here on its role description. A package entry
+pointing at an endpoint that resolves to nothing is dropped rather than registered as a coworker
+nobody can talk to.
+
+## Automatic Learning
+
+Learning is on by default, and it needs a container in the Intelligence project before it collects or
+delivers anything. `config.learning.containerId` sets the initial default container
+(`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`) and `config.learning.revision` the skills revision
+(`CPK_INTELLIGENCE_SKILLS_REVISION`). Both are only starting values: settings saved in Admin →
+Automatic Learning take precedence, including switching it off. See
+[docs/automatic-learning.md](../../docs/automatic-learning.md).
+
+## Settings with no value of their own
+
+Several server settings have no dedicated chart value and are passed through `config.extraEnv` or
+`config.extraEnvFrom`: OpenTag delivery to Slack and Teams (`OPENTAG_URL`, `OPENTAG_SHARED_SECRET`),
+text messages (`TWILIO_*`), mobile push (`EXPO_ACCESS_TOKEN`, `EXPO_PROJECT_ID`), inbound email for
+Responsibilities (`OPENBOT_INBOUND_EMAIL_DOMAIN`, `OPENBOT_INBOUND_EMAIL_SNS_TOPIC_ARNS`), SCIM
+(`SCIM_*`), OpenTelemetry export (`OPENBOT_OTEL_EXPORT`, `OTEL_*`) and `DELIVERY_PUBLIC_URL`.
+`.env.example` describes each. Put the secret ones in a Secret and name it in `config.extraEnvFrom`
+rather than writing them into a values file.
 
 ## Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 

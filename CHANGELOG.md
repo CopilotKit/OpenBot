@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Four things change for an existing deployment:
+- Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
+  container is assigned; see below.
+- A Bot's computer refuses the network until the server pushes its policy. A computer run without
+  an API server can set `EGRESS_POLICY_REQUIRED=0` for the old behaviour.
+- The upgrade runs migrations `0042_user_preferences`, `0043_plugin_logos`, `0044_voice_sessions`,
+  `0045_channel_activity_source`, `0046_automatic_learning`, `0047_agent_pinning`,
+  `0048_coworker_parity`, `0049_coworker_parity_lanes`, `0050_review_fixes` and
+  `0051_routine_enabled_at`.
+- An existing Windows clone checks text files out with LF only after
+  `git rm -r --cached . && git reset --hard` on a clean tree.
+
 ### The Helm chart configures Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 
 These settings had no chart values and could only be passed through `config.extraEnv`. They now have
@@ -42,7 +54,6 @@ published without copying the playground draft, so Bots were offered a component
 not draw. Playground components now publish and withdraw both rows in one transaction; a missing or
 empty description or HTML is refused instead of leaving a half-published component, and repeating
 an unchanged publish no longer advances the revision.
-
 
 ### A proxy password containing `%` no longer stops every shell command
 
@@ -99,6 +110,13 @@ the two scripts came back empty.
 Where those tools are missing on Windows, the scripts now ask PowerShell, which ships with Windows.
 Everywhere the tools exist they are used exactly as before.
 
+### The supervisor and the Python Bots compare their tokens in constant time
+
+The supervisor compared its bearer token with a plain string comparison, and the eleven Python Bots
+compared the shared agent token as text, which answered 500 rather than 401 on a header carrying a
+non-ASCII character. Both now compare bytes in constant time, as the server and the computer already
+did. A wrong or missing token is refused exactly as before.
+
 ### A clone on Windows builds an image that starts
 
 On Windows, where Git converts line endings by default, a clone checked every text file out with
@@ -115,7 +133,9 @@ A routine that fails ten times in a row is switched off, and someone has to swit
   first-failure message never appeared.
 - **Now:** failures are counted from when the routine was last switched on, recorded in a new
   `routines.enabled_at` column. The migration sets it to the time of the upgrade, so any failure
-  streak already under way starts again from zero at that point.
+  streak already under way starts again from zero at that point. Adds migration
+  `0051_routine_enabled_at`.
+
 ### Bots work as coworkers
 
 A Bot can now carry on without anyone watching it. It runs standing **Responsibilities** fed by
@@ -147,6 +167,21 @@ refused in every mode, including `allow_all`, and the browser's WebRTC traffic n
 filter instead of around it. A computer run without an API server can set
 `EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
 
+### Parallel Search is in the plugin catalogue
+
+Two catalogue entries reach Parallel's public-web search and extraction at
+`https://search.parallel.ai/mcp`: **Parallel Search**, anonymous with provider-managed limits, and
+**Parallel Search (API key)**, which sends a deployment credential as a bearer token. Nothing is
+granted automatically. When a Bot holds both `web_search` and `web_fetch`, the built-in Bot guidance
+describes them for public-web research, and the fintech example's Research Desk ships a
+`research-public-web` skill that declares them. See
+[Public-web research with Parallel](docs/parallel-research.md).
+
+### `lodash-es` is pinned to the patched 4.18.0
+
+A root `overrides` entry pins the transitive `lodash-es` to 4.18.0, the patched release, wherever a
+dependency pulls it in.
+
 ### Provider and Bot lookups ignore inherited object properties
 
 Unknown names such as `constructor` and `__proto__` no longer return an inherited
@@ -155,7 +190,9 @@ missing Bots raise the existing startup error. Configured providers and Bots are
 
 ### A malformed `%` in a stream URL no longer returns a 500
 
-A request to `/api/computers/<id>/stream` whose id held a broken percent-escape, such as `%zz`, made the server throw and answer 500. It is now treated as not matching the stream route and goes through normal routing. Valid ids behave as before.
+A request to `/api/computers/<id>/stream` whose id held a broken percent-escape, such as `%zz`,
+made the server throw and answer 500. It is now treated as not matching the stream route and goes
+through normal routing. Valid ids behave as before.
 
 ### `start.sh` names the port to change on macOS
 
@@ -340,6 +377,56 @@ the choice is a plain OpenAI key, and the OpenAI SDK only defaults an absent URL
 as the address. The Bot now falls back to `https://api.openai.com/v1` for an empty value, as its
 Anthropic branch already did for `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
 
+### The live screen keeps reconnecting after it has recovered
+
+A dropped live screen retries five times, waiting half a second, then one, two, four and eight, and
+then asks for Retry. The count of retries never went back to zero after a retry worked, so a screen
+left open through five short drops over an afternoon gave up on the sixth, although each had
+recovered within a second. The count now starts over once a reconnected screen shows a frame again,
+so only five failures in a row end in Retry.
+
+### A failed save of a Bot's browser control leaves no copy behind
+
+The computer keeps who holds a Bot's browser, and its handoff requests, in one file per Bot under
+the profiles volume, written to a temporary file first and renamed over it. When the write or the
+rename failed, the temporary file stayed, a readable copy of that state beside the real one, and
+every later failure added another. It is now removed whether or not the save succeeds, as the
+learning setup and the model sign-in file already do.
+
+### Every Bot's provider defaults live in one spec file
+
+`shared/model-providers.json` now holds the provider facts and the default provider and model of
+the thirteen Bots that read it: the three TypeScript Bots through `shared/model-providers.ts` and the
+ten Python Bots through `shared/model_providers.py`. The Claude Agent SDK Bot does not read it.
+`BOT_PROVIDER` and `BOT_MODEL` still win over both, and each Bot keeps its existing default,
+including Mastra's `gpt-4o-mini`. Moving a Bot to a different model is one row in one file.
+
+Both loaders check the file against their own list of providers and refuse in the same words, so a
+wrong row now stops all thirteen at startup, naming the key, where the Python Bots used to start
+clean and meet it at their first model call. The Mastra Bot also refuses a `BOT_PROVIDER` it does
+not recognize (such as `google`) instead of quietly answering through OpenAI with a different model.
+
+Compose used to substitute `gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever
+`BOT_PROVIDER` named. It now passes the unset value through, so the Bot's own row answers: an OpenAI
+deployment keeps `gpt-5.5`, and a Google or Anthropic one stops being handed a model its vendor has
+never heard of. The picked harness in Compose now also receives `GOOGLE_API_KEY` and
+`GOOGLE_GENERATIVE_AI_BASE_URL`, so a harness picked on `BOT_PROVIDER=google` has its key.
+
+### Automatic Learning, on by default
+
+Every shipped Bot can now contribute completed conversations to a CopilotKit Intelligence Learning
+container and receive the skills published from it. **Admin → Automatic Learning** chooses a default
+container, overrides or excludes individual Bots, and pauses Learning. Chat, channels, routines and
+handoffs all follow the same settings.
+
+Learning is on unless an administrator has saved it off, and a saved off stays off. It collects and
+delivers nothing until a container exists in the Intelligence project and is assigned:
+`bun scripts/setup-learning.ts` creates or reuses one called `openbot` and writes it to `.env`, or
+set `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` (Helm: `config.learning.containerId`), or enter it on
+the Admin page. OpenBot starts and chats without one. Skills are reviewed and published in
+Intelligence; nothing is approved automatically. See
+[Automatic Learning](docs/automatic-learning.md). Adds migration `0046_automatic_learning`.
+
 ### Dictate messages and talk to a coworker in a live voice call
 
 Deployments can configure transcription separately from their Bots' models, with a waveform composer
@@ -351,8 +438,10 @@ affects the person's microphone. See [configuration](docs/configuration.md#live-
 
 Voice summaries use the configured chat provider, including Anthropic keys and Claude or ChatGPT
 plan sign-in. Retrying a failed summary refreshes its sidebar preview without replacing newer
-activity. The macOS app includes the microphone permission description and audio-input entitlement
-needed for dictation and voice calls.
+activity. A call the voice service turns down says why, such as "The voice service is busy. Please
+retry shortly.", and a call that cannot be saved says "Could not save this voice chat." and stays on
+its card to retry. Caps on a call's context, captions and answers cut between characters, never
+inside an emoji.
 
 ### The Pydantic AI Bot answers on a plain OpenAI key or an Anthropic key
 
@@ -379,14 +468,6 @@ expandable group instead of filling the conversation with screenshots.
 
 ## 0.0.15
 
-### The live screen keeps reconnecting after it has recovered
-
-A dropped live screen retries five times, waiting half a second, then one, two, four and eight, and
-then asks for Retry. The count of retries never went back to zero after a retry worked, so a screen
-left open through five short drops over an afternoon gave up on the sixth, although each had
-recovered within a second. The count now starts over once a reconnected screen shows a frame again,
-so only five failures in a row end in Retry.
-
 ### A model provider's own sign-in can stand in for an API key
 
 `OPENBOT_MODEL_OAUTH_FILE` names a credential file holding a Google or xAI OAuth grant. Set it and
@@ -408,13 +489,6 @@ still uses the compatibility endpoint.
 
 **A provider 403 no longer reads as an expired sign-in.** It usually means a missing project or
 resource permission, which signing in again cannot fix, so only a 401 now raises "sign in again".
-
-### A voice call no longer cuts an emoji in half
-
-A voice call caps what it carries: the chat context it joins with, the live captions, and the answer
-a delegated request comes back with. Each cap cut on UTF-16 code units, and an emoji is two of them,
-so a cap landing inside one left half of it: a box at the edge of a caption, and a broken character
-in what the voice model was given. The caps now cut between characters, as the chat's own do.
 
 ### Desktop setup shows progress, chooses its own local ports, and can sign in to a provider
 
@@ -439,14 +513,6 @@ removes that deployment's database volume and nothing else.
 Startup failures keep enough of the log to name the cause, with every secret value redacted, and
 carry a support link a whitelabel build can point elsewhere.
 
-### A failed save of a Bot's browser control leaves no copy behind
-
-The computer keeps who holds a Bot's browser, and its handoff requests, in one file per Bot under
-the profiles volume, written to a temporary file first and renamed over it. When the write or the
-rename failed, the temporary file stayed, a readable copy of that state beside the real one, and
-every later failure added another. It is now removed whether or not the save succeeds, as the
-learning setup and the model sign-in file already do.
-
 ### A Bot's image pull finds the Docker credential helper beside Docker
 
 A Docker install whose credential helper sits next to the `docker` binary rather than on the desktop
@@ -455,27 +521,11 @@ resolved `docker`, and the directory holding what it points at when it is a syml
 to the PATH the engine is invoked with. Appended, so an existing helper still wins, and the inherited
 PATH is now kept rather than replaced, which it was not before.
 
-### A voice call that cannot start says why
-
-When the voice service turned a call down, the provider wrote a message for the caller, such as
-"The voice service is busy. Please retry shortly." when it answered 429, and the call route replaced
-every one with "The voice service could not start a call. Please retry." The route now passes those
-fixed messages on, as the dictation route already does. Any other failure still reads the generic
-line, so nothing from an upstream response reaches the browser.
-
 ### OpenBot starts only on the Bun it pins
 
 An installed or cached Bun that is not the pinned version is no longer accepted, on install and on
 every start, and OpenBot acquires its own copy instead. The version already on the machine is left
 exactly as it is and simply not used.
-
-### A voice chat that could not be saved says so in a sentence
-
-Saving a finished voice call read the server's answer as JSON without a fallback. When something in
-front of OpenBot answered instead, such as a proxy's 502 page, the call's card gave the JSON
-parser's error as the reason (in Chrome, "Unexpected token '<' ... is not valid JSON"); an answer
-without a saved session failed on a property read the same way. Both now read "Could not save this voice chat.", the
-message the card already uses, and the call stays on the card to retry.
 
 ### Organization sign-in survives a callback that arrives in pieces
 
@@ -484,15 +534,6 @@ gave up if the whole request had not arrived, and on Windows the accepted socket
 listener's non-blocking mode, so a timeout did not apply. A good sign-in could be answered "Sign-in
 did not match". Both paths now read until the request line is complete, with a real timeout.
 
-### The Bots agree on one set of provider defaults
-
-The three TypeScript Bots now read a single shared list of provider facts instead of keeping their
-own copies, which is what makes a default changeable in one place rather than in three. The Mastra
-Bot also refuses a `BOT_PROVIDER` it does not recognize (such as `google`) instead of quietly
-answering through OpenAI with a different model. The picked harness in Compose now receives
-`GOOGLE_API_KEY` and `GOOGLE_GENERATIVE_AI_BASE_URL` as well, so a harness picked on
-`BOT_PROVIDER=google` has the key it needs.
-
 ### Compose file lists separate correctly on Windows
 
 The separator between Compose files fell back to `:` everywhere, which is right on macOS and Linux
@@ -500,26 +541,6 @@ and wrong on Windows, where a drive letter contains one. It now follows the plat
 reachable on every platform now that a port overlay is passed, where before it was macOS only.
 
 ## 0.0.14
-
-### One spec file, in every language
-
-`shared/model-providers.json` now holds the provider facts and every Bot's default provider and
-model. The TypeScript Bots read it through `shared/model-providers.ts` and the ten Python Bots
-through `shared/model_providers.py`, with `BOT_PROVIDER` and `BOT_MODEL` still winning over both
-as they always have. Each Bot keeps its existing default, including Mastra's `gpt-4o-mini`.
-Moving a Bot to a different model, or giving a Bot written in any other language its first one,
-is editing one row in one file instead of one line per language.
-
-Both loaders check the file against their own list of providers, in both directions, and refuse in
-the same words. A wrong row in the file used to stop the three TypeScript Bots while the ten
-Python Bots started clean and met it at their first model call instead; all thirteen stop at
-startup now, naming the key that is wrong. Adding a provider is one row in the file and one entry
-to `PROVIDER_IDS` in each loader.
-
-Compose used to substitute `gpt-5.5` for `agent-langgraph` whenever `BOT_MODEL` was unset, whatever
-`BOT_PROVIDER` named; it now passes the unset value through, so the Bot's row — or the moved
-provider's default row — is what answers. An OpenAI deployment keeps the same `gpt-5.5` either way;
-a Google or Anthropic one stops being handed a model its vendor has never heard of.
 
 ### A tool cannot be granted for an app this deployment has not added
 
