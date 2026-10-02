@@ -26,14 +26,22 @@ afterAll(async () => {
 test("database defaults and writes survive a new store and remain scoped to the user", async () => {
   const alice = await person();
   const bob = await person();
-  expect(await store.read(alice)).toEqual({ messageListEmphasis: "thread" });
+  expect(await store.read(alice)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+  });
   expect(await store.patch(alice, { messageListEmphasis: "agent" })).toEqual({
     messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
   });
   expect(await createUserPreferencesStore(database).read(alice)).toEqual({
     messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
   });
-  expect(await store.read(bob)).toEqual({ messageListEmphasis: "thread" });
+  expect(await store.read(bob)).toEqual({
+    messageListEmphasis: "thread",
+    selfHostBannerDismissed: false,
+  });
 });
 
 test("patching one preference preserves other JSON fields", async () => {

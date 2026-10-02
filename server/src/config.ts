@@ -302,6 +302,14 @@ export type DeploymentConfig = {
    */
   generativeUi: boolean;
   /**
+   * Whether the signed-in app shows the banner offering help self-hosting OpenBot.
+   *
+   * On by default, because a fresh clone is somebody evaluating the template. A fork that runs
+   * OpenBot for its own organization turns it off with OPENBOT_SELF_HOST_BANNER=false or
+   * OPENBOT_SELF_HOST_BANNER=0, since its people have nothing to self-host.
+   */
+  selfHostBanner: boolean;
+  /**
    * Where the built app is, when this process serves it.
    *
    * Set in a container image that carries both. Unset in development, where Vite serves the app and
@@ -1168,6 +1176,12 @@ function generativeUiEnabled(environment: Environment): boolean {
   return value !== "false" && value !== "0";
 }
 
+/** Same rule as generated interfaces: on unless explicitly "false" or "0". */
+function selfHostBannerEnabled(environment: Environment): boolean {
+  const value = optional(environment, "OPENBOT_SELF_HOST_BANNER");
+  return value !== "false" && value !== "0";
+}
+
 /**
  * How long the audit trail is kept.
  *
@@ -1294,6 +1308,7 @@ export function loadConfig(
       singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
     generativeUi: generativeUiEnabled(environment),
+    selfHostBanner: selfHostBannerEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),

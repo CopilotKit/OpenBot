@@ -50,7 +50,10 @@ test("preferences default to thread and persist separately for each authenticate
   const { appFor } = fixture();
   const alice = appFor("alice");
   expect(await (await alice.request(path)).json()).toEqual({
-    preferences: { messageListEmphasis: "thread" },
+    preferences: {
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: false,
+    },
   });
   const saved = await alice.request(
     path,
@@ -58,16 +61,23 @@ test("preferences default to thread and persist separately for each authenticate
   );
   expect(saved.status).toBe(200);
   expect(await (await appFor("alice").request(path)).json()).toEqual({
-    preferences: { messageListEmphasis: "agent" },
+    preferences: {
+      messageListEmphasis: "agent",
+      selfHostBannerDismissed: false,
+    },
   });
   expect(await (await appFor("bob").request(path)).json()).toEqual({
-    preferences: { messageListEmphasis: "thread" },
+    preferences: {
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: false,
+    },
   });
 });
 
 test.each([
   {},
   null,
+  { selfHostBannerDismissed: "yes" },
   { messageListEmphasis: "invalid" },
   { messageListEmphasis: "agent", userId: "bob" },
 ])("rejects invalid or extra preference fields: %j", async (body) => {
@@ -89,4 +99,27 @@ test("refuses malformed JSON, unauthenticated callers, and unavailable storage",
     );
   }
   expect(state.size).toBe(0);
+});
+
+test("saves the self-host banner dismissal without touching message list emphasis", async () => {
+  const { appFor } = fixture();
+  const alice = appFor("alice");
+  await alice.request(path, patch({ messageListEmphasis: "agent" }));
+  const saved = await alice.request(
+    path,
+    patch({ selfHostBannerDismissed: true }),
+  );
+  expect(saved.status).toBe(200);
+  expect(await (await appFor("alice").request(path)).json()).toEqual({
+    preferences: {
+      messageListEmphasis: "agent",
+      selfHostBannerDismissed: true,
+    },
+  });
+  expect(await (await appFor("bob").request(path)).json()).toEqual({
+    preferences: {
+      messageListEmphasis: "thread",
+      selfHostBannerDismissed: false,
+    },
+  });
 });

@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 
 export const Route = createFileRoute("/_authed/_app")({
@@ -13,6 +14,7 @@ function RouteComponent() {
     <SidebarShell className="h-svh overflow-hidden" width="340px">
       <AppSidebar />
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <SelfHostBanner />
         <Outlet />
       </main>
     </SidebarShell>

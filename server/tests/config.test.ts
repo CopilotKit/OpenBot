@@ -971,6 +971,32 @@ describe("generated interfaces", () => {
   });
 });
 
+describe("the self-host banner", () => {
+  test("is on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).selfHostBanner).toBe(true);
+  });
+
+  test.each(["false", "0"])(
+    "is off for OPENBOT_SELF_HOST_BANNER=%p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_SELF_HOST_BANNER: value })
+          .selfHostBanner,
+      ).toBe(false);
+    },
+  );
+
+  test.each(["true", "1", "", "no"])(
+    "stays on for OPENBOT_SELF_HOST_BANNER=%p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_SELF_HOST_BANNER: value })
+          .selfHostBanner,
+      ).toBe(true);
+    },
+  );
+});
+
 /**
  * Naming the private addresses an agent may live at.
  *

@@ -20,6 +20,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - An existing Windows clone checks text files out with LF only after
   `git rm -r --cached . && git reset --hard` on a clean tree.
 
+### The app offers help self-hosting OpenBot, until you close it
+
+A slim bar at the top of the signed-in app links to CopilotKit's engineers for help self-hosting
+OpenBot. Closing it is saved to your preferences, so it stays closed on every device. A fork running
+OpenBot for its own organization hides it for everybody with `OPENBOT_SELF_HOST_BANNER=false`.
+
 ### The Helm chart configures Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 
 These settings had no chart values and could only be passed through `config.extraEnv`. They now have

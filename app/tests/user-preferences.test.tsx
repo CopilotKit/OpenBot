@@ -96,12 +96,20 @@ test("successful writes update only the current account cache; failures preserve
   const { client, view } = setup();
   await view.findByText("General Assistant");
   const bobKey = userPreferencesQueryOptions("bob").queryKey;
-  client.setQueryData(bobKey, { messageListEmphasis: "agent" });
+  client.setQueryData(bobKey, {
+    messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
+  });
   const mutation = client
     .getMutationCache()
     .build(client, saveUserPreferencesMutationOptions(client, "alice"));
   response = async () =>
-    Response.json({ preferences: { messageListEmphasis: "thread" } });
+    Response.json({
+      preferences: {
+        messageListEmphasis: "thread",
+        selfHostBannerDismissed: false,
+      },
+    });
   await mutation.execute({ messageListEmphasis: "thread" });
   await waitFor(() =>
     expect(view.getByText("Plan next week").className).toContain(
@@ -115,6 +123,7 @@ test("successful writes update only the current account cache; failures preserve
   });
   expect(client.getQueryData<UserPreferences>(bobKey)).toEqual({
     messageListEmphasis: "agent",
+    selfHostBannerDismissed: false,
   });
   response = async () =>
     Response.json({ error: "Could not save" }, { status: 500 });
@@ -125,5 +134,5 @@ test("successful writes update only the current account cache; failures preserve
     client.getQueryData<UserPreferences>(
       userPreferencesQueryOptions("alice").queryKey,
     ),
-  ).toEqual({ messageListEmphasis: "thread" });
+  ).toEqual({ messageListEmphasis: "thread", selfHostBannerDismissed: false });
 });

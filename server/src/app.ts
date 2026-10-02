@@ -436,6 +436,8 @@ export function createApp(
        * both halves, so off means off.
        */
       generativeUi: config.generativeUi,
+      // Whether to offer help self-hosting OpenBot. A fork running it for its own people turns it off.
+      selfHostBanner: config.selfHostBanner,
       transcription: Boolean(config.transcription),
       voice: Boolean(config.voice),
       /*

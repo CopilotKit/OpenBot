@@ -18,6 +18,11 @@ export type DeploymentCapabilities = {
    * so both halves read this one answer.
    */
   generativeUi: boolean;
+  /**
+   * Whether to show the banner offering help self-hosting OpenBot. A fork that runs OpenBot for its
+   * own organization turns it off with OPENBOT_SELF_HOST_BANNER=false.
+   */
+  selfHostBanner: boolean;
   transcription?: boolean;
   voice?: boolean;
 };
@@ -55,12 +60,14 @@ export function deploymentCapabilitiesQueryOptions() {
         })
       ).json()) as {
         generativeUi?: boolean;
+        selfHostBanner?: boolean;
         transcription?: boolean;
         voice?: boolean;
       };
 
       return {
         generativeUi: body.generativeUi === true,
+        selfHostBanner: body.selfHostBanner === true,
         transcription: body.transcription === true,
         voice: body.voice === true,
       };
