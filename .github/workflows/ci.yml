@@ -620,6 +620,27 @@ jobs:
             docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
             echo "::endgroup::"
           done < <(jq -r '.[]' .github/published-images.json)
+      # Building proves the Dockerfile resolves, not that the image starts. A runtime import of a file
+      # the Dockerfile never copied (../../shared/file-download, from #698) built cleanly and crashed
+      # on start. The computer image has no dependencies to start, so it is booted and asked for health.
+      - name: The computer image starts
+        run: |
+          set -euo pipefail
+          docker buildx build --file agent-computer/Dockerfile --platform linux/amd64 --load \
+            --tag openbot-agent-computer:ci .
+          docker run -d --name computer-ci -e COMPUTER_TOKEN=ci-token-0123456789abcdef \
+            -p 127.0.0.1:4100:4100 openbot-agent-computer:ci
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4100/health >/dev/null; then
+              echo "agent-computer answered /health"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' computer-ci)" != "true" ]; then break; fi
+            sleep 1
+          done
+          echo "::error::agent-computer did not answer /health"
+          docker logs computer-ci || true
+          exit 1
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
