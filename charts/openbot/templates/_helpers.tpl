@@ -429,6 +429,120 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
       key: computer-token
       optional: {{ eq .Values.computers.mode "external" }}
 {{- /*
+  Delivery (Slack and Teams through OpenTag, text messages, push), SCIM, inbound email and
+  OpenTelemetry export.
+
+  PARENTHESISED, every map, for the reason `config.handoff` is above: these are keys this chart did
+  not have before, and `helm upgrade --reuse-values` leaves them absent on an existing deployment.
+
+  A secret the server requires is referenced whenever its switch is on, never `optional`, so a
+  Secret that lacks it fails to start the pod with the key named rather than starting a server that
+  then refuses. A secret the server treats as optional is referenced `optional: true` whenever its
+  feature is, so it can live in `secrets.existingSecret` or a store without the chart reading it.
+*/}}
+{{- $opentag := .Values.config.opentag | default dict }}
+{{- if $opentag.enabled }}
+- name: OPENTAG_SHARED_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: opentag-shared-secret
+{{- with $opentag.url }}
+- name: OPENTAG_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with $opentag.botIconUrlTemplate }}
+- name: OPENTAG_BOT_ICON_URL_TEMPLATE
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- $sms := .Values.config.sms | default dict }}
+{{- if $sms.enabled }}
+- name: TWILIO_ACCOUNT_SID
+  value: {{ $sms.accountSid | quote }}
+- name: TWILIO_AUTH_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: twilio-auth-token
+- name: TWILIO_VERIFY_SERVICE_SID
+  value: {{ $sms.verifyServiceSid | quote }}
+- name: TWILIO_FROM_NUMBER
+  value: {{ $sms.fromNumber | quote }}
+{{- end }}
+{{- with (.Values.config.push | default dict).projectId }}
+- name: EXPO_PROJECT_ID
+  value: {{ . | quote }}
+- name: EXPO_ACCESS_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" $ }}
+      key: expo-access-token
+      optional: true
+{{- end }}
+{{- with .Values.config.deliveryPublicUrl }}
+- name: DELIVERY_PUBLIC_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- $scim := .Values.config.scim | default dict }}
+{{- if $scim.enabled }}
+- name: SCIM_BEARER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: scim-bearer-token
+- name: SCIM_BEARER_TOKEN_NEXT
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: scim-bearer-token-next
+      optional: true
+{{- with $scim.connectionId }}
+- name: SCIM_CONNECTION_ID
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- $inboundEmail := .Values.config.inboundEmail | default dict }}
+{{- with $inboundEmail.domain }}
+- name: OPENBOT_INBOUND_EMAIL_DOMAIN
+  value: {{ . | quote }}
+{{- end }}
+{{- with $inboundEmail.snsTopicArns }}
+- name: OPENBOT_INBOUND_EMAIL_SNS_TOPIC_ARNS
+  value: {{ . | quote }}
+{{- end }}
+{{- $otel := .Values.config.otel | default dict }}
+{{- if or $otel.endpoint $otel.logsEndpoint }}
+{{- with $otel.endpoint }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $otel.logsEndpoint }}
+- name: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $otel.serviceName }}
+- name: OTEL_SERVICE_NAME
+  value: {{ . | quote }}
+{{- end }}
+{{- if $otel.paused }}
+- name: OPENBOT_OTEL_EXPORT
+  value: "off"
+{{- end }}
+- name: OTEL_EXPORTER_OTLP_LOGS_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: otel-logs-headers
+      optional: true
+- name: OTEL_EXPORTER_OTLP_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: otel-headers
+      optional: true
+{{- end }}
+{{- /*
   One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
   API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
   to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a

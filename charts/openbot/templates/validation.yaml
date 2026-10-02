@@ -318,3 +318,64 @@ This template renders nothing.
 {{- fail "routines.enabled but externalSecrets.data does not name worker-shared-secret. The API server reads it to recognise the worker and the CronJob reads it to be one, so every pod that mounts it fails to start." }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  Delivery, the directory and OpenTelemetry export: the refusals the server makes at boot.
+
+  Each mirrors a throw in `configuredDeliveryProviders` (server/src/delivery/routes.ts), so the value
+  to change is named by `helm install` rather than by a pod's crash loop. Nothing is refused here that
+  the server would accept: inbound email with one half set is not mounted rather than refused, and
+  is left alone here too.
+*/}}
+{{- $opentag := .Values.config.opentag | default dict }}
+{{- if and (not $opentag.enabled) (or $opentag.url $opentag.botIconUrlTemplate) }}
+{{- fail "config.opentag.url or config.opentag.botIconUrlTemplate is set but config.opentag.enabled is not. The server refuses either without the shared secret; set config.opentag.enabled and secrets.opentagSharedSecret." }}
+{{- end }}
+{{- if $opentag.enabled }}
+{{- if and $opentag.url (not (regexMatch "^https?://" $opentag.url)) }}
+{{- fail "config.opentag.url must be an http(s) URL." }}
+{{- end }}
+{{- if and $opentag.botIconUrlTemplate (not (hasPrefix "https://" $opentag.botIconUrlTemplate)) }}
+{{- fail "config.opentag.botIconUrlTemplate must be an https URL." }}
+{{- end }}
+{{- if and .Values.secrets.opentagSharedSecret (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- if lt (len .Values.secrets.opentagSharedSecret) 32 }}
+{{- fail "secrets.opentagSharedSecret must be at least 32 characters. Generate one with: openssl rand -hex 32" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $sms := .Values.config.sms | default dict }}
+{{- if $sms.enabled }}
+{{- if or (not $sms.accountSid) (not $sms.verifyServiceSid) (not $sms.fromNumber) }}
+{{- fail "config.sms.enabled needs config.sms.accountSid, config.sms.verifyServiceSid and config.sms.fromNumber. The server takes all four Twilio settings or none." }}
+{{- end }}
+{{- else if or $sms.accountSid $sms.verifyServiceSid $sms.fromNumber }}
+{{- fail "config.sms has Twilio settings but config.sms.enabled is not set. The server takes all four Twilio settings or none; set config.sms.enabled and secrets.twilioAuthToken, or clear them." }}
+{{- end }}
+{{- with (.Values.config.push | default dict).projectId }}
+{{- if not (regexMatch "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" .) }}
+{{- fail "config.push.projectId must be the native app's EAS project UUID." }}
+{{- end }}
+{{- end }}
+{{- with .Values.config.deliveryPublicUrl }}
+{{- if not (regexMatch "^https?://" .) }}
+{{- fail "config.deliveryPublicUrl must be an http(s) URL." }}
+{{- end }}
+{{- end }}
+{{- /*
+  The same secrets, for a deployment whose secrets come from a store: the value is not readable at
+  template time, but the list of keys is, checked the way `worker-shared-secret` is above.
+*/}}
+{{- if .Values.externalSecrets.enabled }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if and $opentag.enabled (not (has "opentag-shared-secret" $named)) }}
+{{- fail "config.opentag.enabled but externalSecrets.data does not name opentag-shared-secret, so the server pod cannot start." }}
+{{- end }}
+{{- if and $sms.enabled (not (has "twilio-auth-token" $named)) }}
+{{- fail "config.sms.enabled but externalSecrets.data does not name twilio-auth-token, so the server pod cannot start." }}
+{{- end }}
+{{- if and (.Values.config.scim | default dict).enabled (not (has "scim-bearer-token" $named)) }}
+{{- fail "config.scim.enabled but externalSecrets.data does not name scim-bearer-token, so the server pod cannot start." }}
+{{- end }}
+{{- end }}

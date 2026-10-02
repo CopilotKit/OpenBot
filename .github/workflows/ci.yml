@@ -218,6 +218,23 @@ jobs:
             --set networkPolicy.enabled=true \
             --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
             --set-string computers.extraEnv[0].value=http://proxy.internal:3128
+          # A delivery or directory switch with no secret behind it. Armed on every target: the chart
+          # requires the value when it holds the secret, and requires the store to name the key when
+          # a store does.
+          refuses "OpenTag switched on with no shared secret" \
+            --set config.opentag.enabled=true
+          refuses "SCIM switched on with no bearer token" \
+            --set config.scim.enabled=true
+          # The rest are refusals the server makes at boot, mirrored so the value is named at install.
+          refuses "an OpenTag URL with the pairing switched off" \
+            --set-string config.opentag.url=https://opentag.example.com
+          refuses "a partial set of Twilio settings" \
+            --set config.sms.enabled=true --set-string secrets.twilioAuthToken=token \
+            --set-string config.sms.accountSid=AC0 --set-string config.sms.verifyServiceSid=VA0
+          refuses "a push project id that is not a UUID" \
+            --set-string config.push.projectId=not-a-uuid
+          refuses "a delivery public URL that is not http(s)" \
+            --set-string config.deliveryPublicUrl=hooks.example.com
           # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
           # computers; on the others the mode is not sandbox and the refusal is not armed.
           if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then

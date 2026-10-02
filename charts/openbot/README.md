@@ -327,6 +327,41 @@ Left empty, this deployment has the Bots its tenant package declares as built-in
 package entry pointing at an endpoint that resolves to nothing is dropped rather than registered as a
 coworker nobody can talk to.
 
+## Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
+
+Each is off until its values are set, and each is the same setting [docs/configuration.md](../../docs/configuration.md)
+describes for a `.env`. Secrets go under `secrets`; with an existing Secret or an external store, use
+the key in the last column.
+
+| Feature                          | Switch                                            | Plain values                                              | Secret key                                                     |
+| -------------------------------- | ------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| Slack and Teams, through OpenTag | `config.opentag.enabled`                          | `url`, `botIconUrlTemplate`                               | `opentag-shared-secret` (required, 32+ characters)             |
+| Text messages, through Twilio    | `config.sms.enabled`                              | `accountSid`, `verifyServiceSid`, `fromNumber` (all three) | `twilio-auth-token` (required)                                 |
+| Push and native-app sign-in      | `config.push.projectId` (the EAS project UUID)    |                                                           | `expo-access-token` (optional)                                 |
+| Where Twilio calls back          | `config.deliveryPublicUrl`                        | defaults to `config.publicUrl`                            |                                                                |
+| SCIM provisioning                | `config.scim.enabled`                             | `connectionId`                                            | `scim-bearer-token` (required), `scim-bearer-token-next` (optional) |
+| Inbound email triggers           | `config.inboundEmail.domain` and `snsTopicArns`   | both needed, or the route is not mounted                  |                                                                |
+| OpenTelemetry export             | `config.otel.endpoint` or `logsEndpoint`          | `serviceName`, `paused`                                   | `otel-logs-headers`, `otel-headers` (optional)                 |
+
+```yaml
+config:
+  opentag:
+    enabled: true
+    url: https://opentag.example.com
+  scim:
+    enabled: true
+secrets:
+  opentagSharedSecret: <openssl rand -hex 32>
+  scimBearerToken: <openssl rand -hex 32>
+```
+
+The install refuses what the server would refuse at boot: a switch with no secret behind it (or, on
+`externalSecrets`, no key named for it), an OpenTag secret under 32 characters, an OpenTag URL or icon
+with the pairing off, an OpenTag URL that is not http(s) or an icon that is not https, a partial set
+of Twilio settings, a push project id that is not a UUID, and a `deliveryPublicUrl` that is not
+http(s). With `networkPolicy.enabled`, a collector inside the cluster has to be named in
+`networkPolicy.extraEgress`; the providers themselves are reached on 443.
+
 ## Upgrading the server without the computers
 
 `computers.mode: shared` runs one browser for every Bot, and on that shape the transcript's kept

@@ -195,6 +195,73 @@ config:
     # The token travels in `secrets.managedAgentToken`. Required whenever a url is set: the server
     # refuses to start with one and not the other, because an unauthenticated Bot endpoint is an
     # open door to whatever that Bot can reach.
+
+  # Slack and Microsoft Teams, through the OpenTag pairing.
+  #
+  # `enabled` is the switch, rather than the secret's presence, because a secret held in
+  # `secrets.existingSecret` or a store is not readable at template time. The shared secret travels in
+  # `secrets.opentagSharedSecret`; the server refuses one shorter than 32 characters, and refuses a
+  # `url` or icon template with no secret at all.
+  opentag:
+    enabled: false
+    # OpenTag's base URL, for messages sent when no Slack turn is open. Without it those sends fail
+    # visibly in the outbox and Slack triggers are refused. Must be http(s).
+    url: ""
+    # Optional https PNG URL with `{seed}` or `{agentId}`, used as the Bot's Slack icon.
+    botIconUrlTemplate: ""
+
+  # Text messages, through Twilio. The server takes all four Twilio settings or none, so `enabled`
+  # needs the three below and `secrets.twilioAuthToken`.
+  sms:
+    enabled: false
+    accountSid: ""
+    verifyServiceSid: ""
+    fromNumber: ""
+
+  # Push notifications and sign-in from the native app, through Expo.
+  #
+  # Setting `projectId`, the app's EAS project UUID, switches both on; the server refuses anything
+  # that is not a UUID. `secrets.expoAccessToken` is optional and sent to Expo's push service when set.
+  push:
+    projectId: ""
+
+  # The public origin Twilio calls back on, when it is not `publicUrl`. Twilio signs each request over
+  # the URL it was given, so this has to be the address Twilio was configured with. Must be http(s).
+  deliveryPublicUrl: ""
+
+  # SCIM provisioning at `<publicUrl>/api/auth/scim/v2`.
+  #
+  # `enabled` needs `secrets.scimBearerToken`, the token the directory sends. A second token in
+  # `secrets.scimBearerTokenNext` is accepted beside it, so the directory can move to a new one before
+  # the old one is removed.
+  scim:
+    enabled: false
+    # The name of the directory connection. Empty means the server's default, `directory`.
+    connectionId: ""
+
+  # Inbound email triggers: an SES receipt rule delivering through SNS to
+  # `<publicUrl>/api/events/email/sns`. Both are needed; with either missing the route is not mounted.
+  inboundEmail:
+    # The domain the receipt rule covers, such as `in.example.com`.
+    domain: ""
+    # Comma-separated ARNs of the SNS topics allowed to deliver mail.
+    snsTopicArns: ""
+
+  # Every audit row as an OTLP log record over HTTP, for a SIEM or an OpenTelemetry Collector.
+  #
+  # Setting either endpoint switches export on. Headers, which usually carry a collector's API key,
+  # are secrets: `secrets.otelHeaders` and `secrets.otelLogsHeaders`, as `key=value` pairs separated
+  # by commas. With `networkPolicy.enabled`, a collector inside the cluster has to be named in
+  # `networkPolicy.extraEgress`.
+  otel:
+    # Collector base URL; the server appends `/v1/logs`.
+    endpoint: ""
+    # Where log records go, used exactly as written. Takes precedence over `endpoint`.
+    logsEndpoint: ""
+    # The `service.name` on every record. Empty means the server's default, `openbot`.
+    serviceName: ""
+    # Stops export while an endpoint is still set.
+    paused: false
   logLevel: ""
   # Free-form additions, for anything this chart has no opinion about.
   extraEnv: []
@@ -484,6 +551,20 @@ secrets:
   googleClientSecret: ""
   microsoftClientSecret: ""
   oktaClientSecret: ""
+  # Required when `config.opentag.enabled`. At least 32 characters. Generate one with:
+  # openssl rand -hex 32
+  opentagSharedSecret: ""
+  # Required when `config.sms.enabled`.
+  twilioAuthToken: ""
+  # Optional, with `config.push.projectId`.
+  expoAccessToken: ""
+  # Required when `config.scim.enabled`; the next one is optional, for rotation.
+  scimBearerToken: ""
+  scimBearerTokenNext: ""
+  # Optional, with `config.otel`. Headers for the logs endpoint, and the general ones used when the
+  # logs ones are unset.
+  otelLogsHeaders: ""
+  otelHeaders: ""
 
 externalSecrets:
   enabled: false

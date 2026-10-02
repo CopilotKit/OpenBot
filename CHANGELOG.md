@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Helm chart configures Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
+
+These settings had no chart values and could only be passed through `config.extraEnv`. They now have
+their own: `config.opentag`, `config.sms`, `config.push`, `config.deliveryPublicUrl`, `config.scim`,
+`config.inboundEmail` and `config.otel`, with the OpenTag secret, the Twilio auth token, the Expo
+access token, the SCIM bearer tokens and the OpenTelemetry headers under `secrets` (or an existing
+Secret or store, by key). The install refuses what the server would refuse at boot, such as an
+OpenTag secret under 32 characters or a partial set of Twilio settings. With none of them set, the
+chart renders exactly as before, so a deployment already passing these through `config.extraEnv`
+keeps working unchanged until it moves them across.
+
 ### A channel cursor with a malformed time reads as the first page, not a 500
 
 `GET /api/channels` only checked that a cursor's time was a string before casting it with
