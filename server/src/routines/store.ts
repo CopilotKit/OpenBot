@@ -25,6 +25,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -532,7 +533,12 @@ export function createRoutineStore(database: Database): RoutineStore {
       }
       return await transaction
         .update(routines)
-        .set(values)
+        .set({
+          ...values,
+          // Switching back on starts a new streak; see `consecutiveFailures`. The database's clock,
+          // like the runs it is compared with, so no skew between hosts moves a run across the line.
+          ...(enabling ? { enabledAt: sql`now()` } : {}),
+        })
         .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
         .returning();
     });
@@ -973,6 +979,16 @@ export function createRoutineStore(database: Database): RoutineStore {
              * seven because skips ate two-thirds of the rows the window could hold.
              */
             ne(routineRuns.status, "skipped"),
+            /*
+             * ONLY SINCE IT WAS LAST SWITCHED ON. The rule switches a routine off after ten failures
+             * and says a person must switch it back on; counting across that would leave the eleventh
+             * run, the first after the person's fix, switching it straight off again with "failed ten
+             * times in a row", and never saying the first-failure line at all.
+             */
+            gte(
+              routineRuns.startedAt,
+              sql`(select ${routines.enabledAt} from ${routines} where ${routines.id} = ${routineId})`,
+            ),
           ),
         )
         .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))

@@ -126,6 +126,21 @@ describe("what a command inherits", () => {
     expect(JSON.stringify(env)).not.toContain("p@ss");
   });
 
+  test("a proxy password with a bare % is still stripped, and does not stop the command", () => {
+    // Decoding `p%zz` threw a URIError past the redaction, so building the environment failed
+    // and every command with it. It must not fail, and it must not fall back to passing the password.
+    const env = environmentForCommand(
+      source({
+        HTTP_PROXY: "http://bot:p%zz@proxy.internal:8080",
+        HTTPS_PROXY: "bot:p%zz@proxy.internal:8443",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("http://proxy.internal:8080");
+    expect(env.HTTPS_PROXY).toBe("proxy.internal:8443");
+    expect(JSON.stringify(env)).not.toContain("p%zz");
+  });
+
   test("a proxy URL's userinfo does not pass when it was written without a scheme", () => {
     // `HTTPS_PROXY=bot:s3cret@proxy.internal:8443` is a shape curl and wget accept. `new URL` reads
     // it as the scheme `bot:` and a path, so the redaction above found no userinfo to strip and the

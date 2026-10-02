@@ -441,10 +441,20 @@ export function createPluginRoutes(
     if (forbidden) return forbidden;
 
     const body = (await context.req.json().catch(() => null)) as {
-      clientId?: string;
-      clientSecret?: string;
+      clientId?: unknown;
+      clientSecret?: unknown;
     } | null;
-    if (!body?.clientId?.trim() || !body.clientSecret?.trim()) {
+    /*
+     * `typeof` before `.trim()`, as `POST /servers` and `/servers/custom` do: the body is JSON, so
+     * `{"clientId": 12345}` or a secret of `{}` used to reach `.trim()` here, outside the try, and
+     * answer 500 for what is a person's malformed request.
+     */
+    if (
+      typeof body?.clientId !== "string" ||
+      typeof body.clientSecret !== "string" ||
+      !body.clientId.trim() ||
+      !body.clientSecret.trim()
+    ) {
       return context.json(
         { error: "A client id and a client secret are both required." },
         400,
@@ -2302,6 +2312,14 @@ export function createPluginRoutes(
       if (!(await store.serverExists(serverId ?? ""))) {
         return `${serverId} is not an app this deployment has added, so there is nothing for a Bot to reach. Add it first, and its tools can be granted then.`;
       }
+      /*
+       * The Bot has to exist as well, which the `bot` branch below already says in the same words.
+       * `plugin_grants.agent_id` is a foreign key, so a grant naming a Bot nobody has reached the
+       * insert and failed there, and a person's mistyped Bot id answered 500 with no body where
+       * every other refusal on this route is a 403 with a sentence.
+       */
+      if (!(await store.agentIsRegistered(agentId)))
+        return "There is no such Bot.";
       return null;
     }
 
@@ -2362,6 +2380,10 @@ export function createPluginRoutes(
       if ((await store.skillOwner(ref)) === undefined) {
         return `There is no skill called ${ref}.`;
       }
+      // And the Bot, for the reason the `mcp` branch gives: an administrator's grant naming one
+      // nobody has failed on the foreign key. Everybody else is asked below, through `agentOwner`.
+      if (!(await store.agentIsRegistered(agentId)))
+        return "There is no such Bot.";
       return null;
     }
 

@@ -73,6 +73,7 @@ import {
   parseApprovalContinuation,
   parseApprovalResult,
 } from "./approvals/types";
+import { streamPathBotId } from "./computer/stream-path";
 import {
   type AuditInitiator,
   createAuditReader,
@@ -3056,15 +3057,6 @@ const toStreamUrl = (baseUrl: string, botId: string) =>
   // same reason, this socket is the one a person can type into, so it is the last thing that should
   // be reachable without it.
   `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(botId)}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
-
-/**
- * Which Bot's screen. The Bot is named in the path and its computer is located the same way every
- * other call locates it, so the live stream cannot point at a different Bot's browser.
- */
-const streamPathBotId = (pathname: string): string | null => {
-  const match = pathname.match(/^\/api\/computers\/([^/]+)\/stream$/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-};
 
 /** What each proxied socket carries: where to connect inward, and the socket once opened. */
 type StreamData = {

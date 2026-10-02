@@ -111,8 +111,8 @@ export function splitProxyCredentials(raw: string): Egress {
     }
   }
 
-  const username = url.username ? decodeURIComponent(url.username) : undefined;
-  const password = url.password ? decodeURIComponent(url.password) : undefined;
+  const username = url.username ? decodeUserinfo(url.username) : undefined;
+  const password = url.password ? decodeUserinfo(url.password) : undefined;
   url.username = "";
   url.password = "";
 
@@ -121,6 +121,23 @@ export function splitProxyCredentials(raw: string): Egress {
     ...(username ? { username } : {}),
     ...(password ? { password } : {}),
   };
+}
+
+/**
+ * A proxy username or password, percent-decoded where it was percent-encoded.
+ *
+ * A `%` not followed by two hex digits is a character somebody typed, not an escape, and
+ * `decodeURIComponent` throws `URIError` on it. That escaped every caller here, which only catches
+ * `TypeError`, and since the shell strips credentials from the proxy variables before every
+ * command, one such password made every `/exec` fail. As written is what was meant.
+ */
+function decodeUserinfo(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch (e) {
+    if (e instanceof URIError) return value;
+    throw e;
+  }
 }
 
 /**

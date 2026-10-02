@@ -1,0 +1,1 @@
+ALTER TABLE "routines" ADD COLUMN "enabled_at" timestamp with time zone DEFAULT now() NOT NULL;

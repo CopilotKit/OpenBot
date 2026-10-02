@@ -41,7 +41,7 @@ Bun.serve = (options) => {
         preload,
         "serve.ts",
       ],
-      cwd: import.meta.dir.replace(/\/tests$/, ""),
+      cwd: join(import.meta.dir, ".."),
       env,
       stdout: "pipe",
       stderr: "pipe",
@@ -149,22 +149,22 @@ describe("what answers a request", () => {
 
 describe("which file a path names", () => {
   test("the root and any directory are the page", () => {
-    expect(fileFor("/")).toEndWith("/dist/index.html");
-    expect(fileFor("/channel/")).toEndWith("/dist/index.html");
+    expect(fileFor("/")).toEndWith(join("/dist/index.html"));
+    expect(fileFor("/channel/")).toEndWith(join("/dist/index.html"));
   });
 
   test("a built asset is itself", () => {
     expect(fileFor("/assets/index-abc.js")).toEndWith(
-      "/dist/assets/index-abc.js",
+      join("/dist/assets/index-abc.js"),
     );
   });
 
   test("an encoded asset remains inside the static directory", () => {
     expect(fileFor("/assets/hello%20world.js")).toEndWith(
-      "/dist/assets/hello world.js",
+      join("/dist/assets/hello world.js"),
     );
     expect(fileFor("/assets/caf%C3%A9%25.js")).toEndWith(
-      "/dist/assets/café%.js",
+      join("/dist/assets/café%.js"),
     );
   });
 
@@ -196,12 +196,12 @@ describe("which file a path names", () => {
   });
 
   test("only decoded NUL is refused by the invalid-path guard", () => {
-    expect(fileFor("/assets/a%1Fb.js")).toEndWith("/dist/assets/ab.js");
+    expect(fileFor("/assets/a%1Fb.js")).toEndWith(join("/dist/assets/ab.js"));
   });
 
   test("a client route remains available for the router", () => {
     expect(fileFor("/channel/channel_1ed78a89")).toEndWith(
-      "/dist/channel/channel_1ed78a89",
+      join("/dist/channel/channel_1ed78a89"),
     );
   });
 
@@ -313,7 +313,7 @@ async function startProxy(upstreamPort: number) {
   const port = await unusedPort();
   const child = Bun.spawn({
     cmd: [process.execPath, "--no-env-file", "serve.ts"],
-    cwd: import.meta.dir.replace(/\/tests$/, ""),
+    cwd: join(import.meta.dir, ".."),
     env: { APP_PORT: String(port), SERVER_PORT: String(upstreamPort) },
     stdout: "pipe",
     stderr: "pipe",

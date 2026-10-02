@@ -205,3 +205,25 @@ describe("reading the agents directory from disk", () => {
     await rm(directory, { recursive: true, force: true });
   });
 });
+
+describe("a package skill's slug", () => {
+  const withSkill = (slug: string) =>
+    validateTenantPackage({
+      ...base,
+      skills: `skills: [{ slug: "${slug}", title: T, summary: S, instructions: I }]`,
+    });
+
+  test.each(["find-a-document", "a1", "x".repeat(40)])(
+    "%s has the shape the skills API accepts",
+    (slug) => {
+      expect(withSkill(slug).skills.map((skill) => skill.slug)).toEqual([slug]);
+    },
+  );
+
+  test.each(["a", "a-", "-a", "x".repeat(41)])(
+    "%s is refused, as the skills API would refuse it",
+    (slug) => {
+      expect(() => withSkill(slug)).toThrow(`skill.slug "${slug}" must be`);
+    },
+  );
+});

@@ -1,2 +1,3 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Auto detect text files and perform LF normalization, and check them out with LF on every OS.
+# Biome formats to LF and the s6 files are copied into a Linux image, so a CRLF checkout breaks both.
+* text=auto eol=lf

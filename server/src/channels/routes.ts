@@ -443,7 +443,13 @@ export function createChannelStore(
       const page = await database
         .select({
           id: channels.id,
-          recency: sql<Date>`${RECENCY}`,
+          /*
+           * To the microsecond, as text, for the cursor only: the audit reader's fix, for the same
+           * fault. The column keeps microseconds and a `Date` keeps milliseconds, so a cursor made
+           * from a `Date` named a moment just before its own row, and any channel later in that
+           * millisecond compared as newer than the cursor and was on no page at all.
+           */
+          recency: sql<string>`to_char(${RECENCY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
           pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
         })
         .from(channels)
@@ -474,7 +480,7 @@ export function createChannelStore(
         page.length > limit && last
           ? encodeChannelCursor({
               pinned: last.pinned,
-              recency: new Date(last.recency).toISOString(),
+              recency: last.recency,
               id: last.id,
             })
           : null;

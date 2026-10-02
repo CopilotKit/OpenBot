@@ -509,6 +509,11 @@ describe("credential store rotation", () => {
     });
 
     await expect(store.revoke(id)).rejects.toThrow("already revoked");
+    // As a refusal the route can answer with a status, not an error it can only pass on as a 500.
+    await expect(store.revoke(id)).rejects.toMatchObject({
+      name: "CredentialRefusedError",
+      status: 404,
+    });
   });
 });
 

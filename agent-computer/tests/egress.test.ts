@@ -91,6 +91,22 @@ describe("resolving a Bot's proxy", () => {
     expect(proxy?.server).toBe("proxy.internal:8080");
   });
 
+  test.each([
+    ["http://bot:p%zz@proxy.internal:8080", "http://proxy.internal:8080"],
+    ["bot:p%zz@proxy.internal:8080", "proxy.internal:8080"],
+  ])("a password with a bare %% is kept as written: %s", (raw, server) => {
+    // A `%` that does not start an escape is a character somebody typed. Decoding it threw a
+    // URIError, which nothing here caught, so every command the shell ran failed along with it.
+    expect(egressFor("sales", { EGRESS_PROXY_SALES: raw })).toEqual({
+      server,
+      username: "bot",
+      password: "p%zz",
+    });
+    expect(egressLabel("sales", { EGRESS_PROXY_SALES: raw })).toBe(
+      "proxy.internal:8080",
+    );
+  });
+
   test("something that is not addressable at all is still passed through", () => {
     expect(egressFor("sales", { EGRESS_PROXY_SALES: "::::" })).toEqual({
       server: "::::",

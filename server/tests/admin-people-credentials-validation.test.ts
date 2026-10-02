@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { loadConfig } from "../src/config";
+import { CredentialRefusedError } from "../src/credentials";
 import { decodeCursor } from "../src/people/store";
 import { testEnvironment } from "./support/environment";
 
@@ -14,6 +15,8 @@ const ADMIN = {
 function appWith(opts: {
   peopleList?: (query: unknown) => Promise<unknown>;
   credentialCreate?: (input: unknown) => Promise<unknown>;
+  credentialRevoke?: () => Promise<unknown>;
+  credentialRotate?: () => Promise<unknown>;
 }) {
   const calls: { people: unknown[]; credentials: unknown[] } = {
     people: [],
@@ -33,6 +36,8 @@ function appWith(opts: {
       if (opts.credentialCreate) return opts.credentialCreate(input);
       return { credential: input };
     },
+    revoke: async () => opts.credentialRevoke?.(),
+    rotate: async () => opts.credentialRotate?.(),
   };
   // createApp takes positional stores; peopleStore is the 18th parameter. Build the argument
   // list by index so a future appended store cannot silently shift it.
@@ -125,6 +130,74 @@ describe("POST /api/admin/credentials input", () => {
     );
     expect(response.status).toBe(201);
     expect(calls.credentials[0]).toMatchObject({ provider: "acme" });
+  });
+});
+
+/**
+ * A revoke or rotation the vault refuses is answered as what it is.
+ *
+ * A second click on Revoke, or a rotation aimed at a gone or mismatched credential, used to leave
+ * the route as a plain-text 500, as if the deployment were broken.
+ */
+describe("POST /api/admin/credentials/:id refusals", () => {
+  const rotation = {
+    kind: "mcp",
+    provider: "acme",
+    keyId: "key-1",
+    plaintext: "secret",
+    metadata: {},
+  };
+  const post = (app: ReturnType<typeof appWith>["app"], path: string) =>
+    app.request(`http://openbot.test/api/admin/credentials/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(rotation),
+    });
+
+  test("revoking a credential already revoked answers 404 with the reason", async () => {
+    const { app } = appWith({
+      credentialRevoke: async () => {
+        throw new CredentialRefusedError(
+          "Credential was not found or already revoked",
+          404,
+        );
+      },
+    });
+
+    const response = await post(app, "cred-1/revoke");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "Credential was not found or already revoked",
+    });
+  });
+
+  test("rotating a credential already revoked answers 409 with the reason", async () => {
+    const { app } = appWith({
+      credentialRotate: async () => {
+        throw new CredentialRefusedError(
+          "Previous credential is already revoked",
+          409,
+        );
+      },
+    });
+
+    const response = await post(app, "cred-1/rotate");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Previous credential is already revoked",
+    });
+  });
+
+  test("any other failure is still a server error, not a refusal", async () => {
+    const { app } = appWith({
+      credentialRevoke: async () => {
+        throw new Error("connection reset");
+      },
+    });
+
+    expect((await post(app, "cred-1/revoke")).status).toBe(500);
   });
 });
 
