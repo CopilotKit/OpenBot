@@ -142,3 +142,80 @@ describe("POST /api/plugins/servers/custom", () => {
     expect(seen.addCustomServer).toEqual([]);
   });
 });
+
+/**
+ * `POST /servers/:id/oauth-client` cast the body to `{ clientId?: string; clientSecret?: string }`
+ * and then called `.trim()` on it. The body is JSON, so a number or an object passed the annotation
+ * and threw a TypeError outside the try, and a person's malformed request answered 500. Every other
+ * route in this file checks `typeof` first; this one is the same 400 now, before the store or the
+ * audit trail is touched.
+ */
+describe("POST /api/plugins/servers/:id/oauth-client", () => {
+  function oauthApp(registered: unknown[]) {
+    const store = {
+      registerOAuthClient: async (input: unknown) => {
+        registered.push(input);
+      },
+    } as unknown as PluginStore;
+    const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+      context,
+      next,
+    ) => {
+      context.set("actor", {
+        id: "user-1",
+        email: "user@openbot.test",
+        role: "admin",
+      });
+      await next();
+    };
+    const canUseBot: BotAccessCheck = async () => true;
+    return createPluginRoutes(store, requireUser, canUseBot);
+  }
+
+  const send = (registered: unknown[], body: unknown) =>
+    oauthApp(registered).request(
+      "http://openbot.test/servers/github/oauth-client",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+
+  test.each([
+    ["a number client id", { clientId: 12345, clientSecret: "secret" }],
+    ["an object client id", { clientId: {}, clientSecret: "secret" }],
+    ["a number client secret", { clientId: "id", clientSecret: 12345 }],
+    ["an object client secret", { clientId: "id", clientSecret: {} }],
+    ["an array client secret", { clientId: "id", clientSecret: [] }],
+    ["a missing client secret", { clientId: "id" }],
+    ["a whitespace client id", { clientId: "   ", clientSecret: "secret" }],
+    ["a whitespace client secret", { clientId: "id", clientSecret: "  " }],
+  ])("refuses %s with 400 and never reaches the store", async (_n, body) => {
+    const registered: unknown[] = [];
+    const response = await send(registered, body);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "A client id and a client secret are both required.",
+    });
+    expect(registered).toEqual([]);
+  });
+
+  test("trims both values on the happy path", async () => {
+    const registered: unknown[] = [];
+    const response = await send(registered, {
+      clientId: "  id  ",
+      clientSecret: "  secret  ",
+    });
+
+    expect(response.status).toBe(200);
+    expect(registered).toEqual([
+      {
+        serverId: "github",
+        client: { clientId: "id", clientSecret: "secret" },
+        by: "user@openbot.test",
+      },
+    ]);
+  });
+});

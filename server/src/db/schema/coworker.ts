@@ -14,6 +14,7 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import { agents, users } from "./core";
+import { jsonb } from "./json";
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -83,6 +84,7 @@ export const routineRunStatus = pgEnum("routine_run_status", [
   "succeeded",
   "failed",
   "skipped",
+  "waiting",
 ]);
 
 /**
@@ -121,6 +123,14 @@ export const routines = pgTable(
      * value it compared against recorded somewhere a human can inspect when a clock looks wrong.
      */
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /**
+     * When this routine was last switched on, or created. The fatigue rule counts failures from
+     * here, so a routine switched off after ten failures and switched back on gets ten more chances
+     * rather than one. Not `updatedAt`, which every sweep that claims the routine moves.
+     */
+    enabledAt: timestamp("enabled_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -151,8 +161,14 @@ export const routineRuns = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /** Null means the firing is still in flight; only a finished run has succeeded/failed/skipped. */
     status: routineRunStatus("status"),
+    waiting: jsonb("waiting").$type<Record<string, unknown>>(),
     /** The refusal or the throw, capped like audit payloads. Never shown raw to a person. */
     error: text("error"),
+    /** What started this run: its schedule, a person pressing Run now, or an event trigger. */
+    source: text("source")
+      .$type<"schedule" | "run_now" | "trigger">()
+      .notNull()
+      .default("schedule"),
   },
   (table) => [
     index("routine_runs_by_routine_idx").on(table.routineId, table.startedAt),

@@ -1139,6 +1139,26 @@ describe("switching off a routine the sweep cannot schedule", () => {
     expect(await store.consecutiveFailures(routine.id)).toBe(1);
   });
 
+  test("switching a routine back on starts its failure count again", async () => {
+    const { owner, routine } = await makeRoutine();
+    for (let failure = 0; failure < 10; failure += 1) {
+      const { runId } = await store.insertRun(routine.id);
+      await store.finishRun(runId, "failed", "the integration is down");
+    }
+    expect(await store.consecutiveFailures(routine.id)).toBe(10);
+
+    // What the fatigue rule does at ten, and what the owner does once they have fixed the cause.
+    await store.setEnabled(owner.id, routine.id, false);
+    await store.setEnabled(owner.id, routine.id, true);
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+
+    // The next failure is the first of a new streak, so it is announced as one rather than
+    // switching the routine straight back off as the eleventh in a row.
+    const { runId } = await store.insertRun(routine.id);
+    await store.finishRun(runId, "failed", "still down");
+    expect(await store.consecutiveFailures(routine.id)).toBe(1);
+  });
+
   test("a routine deleted in the meantime is left alone", async () => {
     const { owner, routine } = await makeRoutine();
     await store.remove(owner.id, routine.id);
@@ -1168,6 +1188,8 @@ describe("the runner's read of one firing", () => {
       ownerUserId: owner.id,
       agentId,
       channelId: channel.id,
+      // Read at dispatch so a routine paused after it was queued still does not run.
+      enabled: true,
       instruction: "Post the standup summary.",
     });
   });

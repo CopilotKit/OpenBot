@@ -233,6 +233,10 @@ export function useChannelEvents() {
         }
 
         const activity = parsed;
+        // A group conversation's shared transcript moves with the same events; refetch it if open.
+        void queryClient.invalidateQueries({
+          queryKey: ["groups", activity.channelId],
+        });
 
         /*
          * The list is paged, so the cache holds pages rather than one array.
@@ -269,7 +273,10 @@ export function useChannelEvents() {
          */
         if (activity.deleted) {
           const { pathname } = router.state.location;
-          if (pathname === `/channel/${activity.channelId}`) {
+          if (
+            pathname === `/channel/${activity.channelId}` ||
+            pathname === `/group/${activity.channelId}`
+          ) {
             void router.navigate({ to: "/" });
           }
         }

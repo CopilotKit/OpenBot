@@ -46,6 +46,8 @@ export type SignInOptions = {
    * use this deployment, before they have signed in.
    */
   sso: boolean;
+  /** An administrator requires SSO; social sign-in stays only as the administrators' break-glass. */
+  ssoRequired: boolean;
 };
 
 async function signInOptions(): Promise<SignInOptions> {
@@ -54,11 +56,16 @@ async function signInOptions(): Promise<SignInOptions> {
   // while the server was saying it has one.
   const body = (await (
     await client("/api/capabilities", { fallback: "Could not load sign-in" })
-  ).json()) as { authProviders?: AuthProviderId[]; ssoConfigured?: boolean };
+  ).json()) as {
+    authProviders?: AuthProviderId[];
+    ssoConfigured?: boolean;
+    ssoRequired?: boolean;
+  };
 
   return {
     providers: body.authProviders ?? [],
     sso: body.ssoConfigured === true,
+    ssoRequired: body.ssoRequired === true,
   };
 }
 

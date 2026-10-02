@@ -366,6 +366,14 @@ describe("what a component may read", () => {
     expect(await store.mayCall(componentName, fn)).toBeFalse();
   });
 
+  test("revoking from a component that does not exist is an error, not a silent no-op", async () => {
+    // A grant cannot outlive its component, so there is nothing to take away; saying so beats
+    // reporting a revoke of something that was never there.
+    expect(store.revokeFunction(`nothing_${suite}`, fn)).rejects.toThrow(
+      ComponentNotFoundError,
+    );
+  });
+
   test("deleting a component takes its function grants with it", async () => {
     const doomed = `testDoomed_${suite}`;
     await makeComponent(doomed, true);

@@ -126,6 +126,13 @@ const SECTIONS: {
         linkOptions: { to: "/admin/people" },
       },
       {
+        title: "Enterprise controls",
+        description:
+          "Capabilities by role and group, SSO required, SCIM, network policy, MCP and model allowlists, Action Recording.",
+        icon: IconShieldCheck,
+        linkOptions: { to: "/admin/enterprise" },
+      },
+      {
         title: "Identity providers",
         description:
           "A company's own SAML or OpenID Connect provider, routed by email domain.",

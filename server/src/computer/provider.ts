@@ -17,6 +17,19 @@ export type ComputerLocation = {
   url?: string;
   startedAt?: string;
   egress?: string | null;
+  /** Whether this computer runs an older image than a new one would get. Only a sandbox can tell. */
+  updateAvailable?: boolean;
+};
+
+/** What moving a computer onto the current image did. */
+export type ComputerUpdate = {
+  /** False when it was already current, or there is no computer. */
+  updated: boolean;
+  /** Whether it was running, and is therefore restarting on the new image. */
+  wasRunning: boolean;
+  /** The images it ran and the ones it runs now, for the trail. */
+  from?: string;
+  to?: string;
 };
 
 /** A description of how a provider separates one Bot's computer from another. */
@@ -81,6 +94,13 @@ export interface ComputerProvider {
   reset(botId: string): Promise<{ cleared: boolean }>;
   /** List the computers that this provider owns. */
   list(): Promise<ComputerLocation[]>;
+  /**
+   * Move this Bot's computer onto the current image, keeping its files and sign-ins.
+   *
+   * Only where a computer can be out of date with the deployment and the provider can replace it
+   * in place: a Sandbox carries its pod template inline, so it keeps the one it was created with.
+   */
+  update?(botId: string): Promise<ComputerUpdate>;
   /** Prepare provider resources before the first computer request. */
   warm?(): Promise<void>;
   /**
@@ -333,6 +353,13 @@ function createLazySandboxProvider(
     stop: async (botId) => (await provider()).stop(botId),
     reset: async (botId) => (await provider()).reset(botId),
     list: async () => (await provider()).list(),
+    // Forwarded like the rest, or the gateway sees no `update` and "Update computer" answers 503.
+    update: async (botId) => {
+      const built = await provider();
+      if (!built.update)
+        throw new Error("The sandbox computer provider cannot update.");
+      return built.update(botId);
+    },
     sessionOf: async (botId) => (await provider()).sessionOf?.(botId),
   };
 }

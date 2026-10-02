@@ -6,6 +6,7 @@ import {
   useAgent,
   useCopilotKit,
 } from "@copilotkit/react-core/v2";
+import { observeApprovalAgent } from "@/lib/copilot/approval-context";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
@@ -262,6 +263,7 @@ export function ChannelChat({
       UseAgentUpdate.OnRunStatusChanged,
     ],
   });
+  useEffect(() => observeApprovalAgent(agent), [agent]);
 
   /**
    * First-message seed from the compose screen. It is taken once per mount and retained until the

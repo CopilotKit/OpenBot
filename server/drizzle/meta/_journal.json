@@ -337,6 +337,34 @@
       "when": 1790572443740,
       "tag": "0047_agent_pinning",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790730431917,
+      "tag": "0048_coworker_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790733068188,
+      "tag": "0049_coworker_parity_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790872515140,
+      "tag": "0050_review_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1790939356628,
+      "tag": "0051_routine_enabled_at",
+      "breakpoints": true
     }
   ]
 }

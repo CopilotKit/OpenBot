@@ -441,10 +441,20 @@ export function createPluginRoutes(
     if (forbidden) return forbidden;
 
     const body = (await context.req.json().catch(() => null)) as {
-      clientId?: string;
-      clientSecret?: string;
+      clientId?: unknown;
+      clientSecret?: unknown;
     } | null;
-    if (!body?.clientId?.trim() || !body.clientSecret?.trim()) {
+    /*
+     * `typeof` before `.trim()`, as `POST /servers` and `/servers/custom` do: the body is JSON, so
+     * `{"clientId": 12345}` or a secret of `{}` used to reach `.trim()` here, outside the try, and
+     * answer 500 for what is a person's malformed request.
+     */
+    if (
+      typeof body?.clientId !== "string" ||
+      typeof body.clientSecret !== "string" ||
+      !body.clientId.trim() ||
+      !body.clientSecret.trim()
+    ) {
       return context.json(
         { error: "A client id and a client secret are both required." },
         400,
@@ -2334,9 +2344,8 @@ export function createPluginRoutes(
       /*
        * A grant that could never do anything is refused rather than stored, from both ends.
        *
-       * The GRANTEE has to run here, because handing work on is a tool this deployment executes: a
-       * Bot at an endpoint runs its own loop and is handed descriptions of what it may call back
-       * for, and there is no callback path that would execute a hop.
+       * The GRANTEE must exist. Remote Bots execute through the same signed callback and handoff
+       * desk as built-in Bots, so where their model loop runs does not change the grant.
        *
        * The TARGET only has to exist. Being handed work is not the same as being able to hand it on,
        * so a target at its own endpoint is perfectly ordinary — but `ref` is bare text with no
@@ -2349,11 +2358,8 @@ export function createPluginRoutes(
       if (ref === agentId) {
         return "A Bot cannot be granted itself to hand work to.";
       }
-      const runsHere = await store.agentRunsHere(agentId);
-      if (runsHere === undefined) return "There is no such Bot.";
-      if (!runsHere) {
-        return `${agentId} runs at its own endpoint, so this deployment cannot offer it a tool for handing work on. Only a Bot that runs here can be given one.`;
-      }
+      if (!(await store.agentIsRegistered(agentId)))
+        return "There is no such Bot.";
       if (!(await store.agentIsRegistered(ref))) {
         return `There is no Bot called ${ref} to hand work to.`;
       }

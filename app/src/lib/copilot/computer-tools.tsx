@@ -1,26 +1,27 @@
-import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
 import { tryClient } from "@/lib/client";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
-import { type ControlState, readControl } from "@/lib/computers/control";
-import { useActiveBotHolder } from "./active-bot";
 import { callComputer, type ToolOutcome } from "@/lib/computers/call";
+import { type ControlState, readControl } from "@/lib/computers/control";
 import {
   runBrowserRead,
   runHelpRequest,
   runNavigation,
 } from "@/lib/computers/handoff";
+import { useActiveBotHolder } from "./active-bot";
+import { useFrontendTool } from "./approval-tools";
+import { useComputerAvailable } from "./computer-available";
 
 /**
  * Frontend registrations for computer tools, including inline rendering and policy-refusal display.
  */
 
+export type { ToolOutcome } from "@/lib/computers/call";
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
 export { callComputer } from "@/lib/computers/call";
-export type { ToolOutcome } from "@/lib/computers/call";
 
 /**
  * Secret-entry wait window. Browser takeovers use server-authoritative request state instead.
@@ -183,8 +184,11 @@ function didNotWork(outcome: ComputerOutcome): boolean {
 
 export function ComputerTools() {
   const bot = useActiveBotHolder();
+  // Not offered to a Team Bot's teammates; see useComputerAvailable.
+  const available = useComputerAvailable();
 
   useFrontendTool({
+    available,
     name: "computer_navigate",
     description:
       "Open a web page on your own computer so the person can watch. Use this when asked to look " +
@@ -253,6 +257,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_read",
     description:
       "Read the page currently open on your computer, without opening anything. Use this after you " +
@@ -269,6 +274,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_snapshot",
     description:
       "List the things on the current page you can act on: fields, buttons, links and checkboxes, " +
@@ -302,6 +308,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_type",
     description:
       "Enter text into a field on the page. Give the ref of the field from your most recent " +
@@ -352,6 +359,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_click",
     description:
       "Click something on the page: a button, a link, a checkbox or a radio option. Give the ref " +
@@ -398,6 +406,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_key",
     description:
       "Press a key, such as Enter, Tab or Escape. Give a ref to press it while a particular field " +
@@ -439,6 +448,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_request_secret",
     description:
       "Ask the person for ONE value you must not be told: a password, a one-time code, a card number. " +
@@ -498,6 +508,7 @@ export function ComputerTools() {
 
   /** Self-reported model declines: audit evidence, not an enforcement control. */
   useFrontendTool({
+    available,
     name: "report_refusal",
     description:
       "Record that you DECLINED something you were asked to do, because it looked unsafe, was outside " +
@@ -535,6 +546,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_request_help",
     description:
       "Ask the person to take control of your computer and do something you cannot: sign in, enter a " +
@@ -563,6 +575,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_list_files",
     description:
       "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
@@ -610,6 +623,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_read_file",
     description:
       "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
@@ -655,6 +669,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_run_command",
     description:
       "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
@@ -740,6 +755,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_write_file",
     description:
       "Save a file in your own workspace so you still have it later. Paths are relative to your " +
@@ -807,6 +823,7 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    available,
     name: "computer_scroll",
     description:
       "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",

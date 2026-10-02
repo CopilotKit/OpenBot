@@ -1,5 +1,14 @@
 import { cutAtCodeUnits } from "../channels/text";
 import {
+  callTriggerTool,
+  isTriggerTool,
+  TRIGGER_TOOLS,
+} from "../responsibilities/trigger-tools";
+import {
+  ResponsibilityNotFoundError,
+  ResponsibilityRefusedError,
+} from "../responsibilities/types";
+import {
   MAX_RUN_ERROR,
   type Routine,
   RoutineNotFoundError,
@@ -226,7 +235,8 @@ type Connection = {
  * belongs to the actor is {@link callTool}'s, where the actor is what authorizes the change.
  */
 export async function listTools(): Promise<McpTool[]> {
-  return TOOLS.map((tool) => ({ ...tool }));
+  // The trigger tools ride this transport so the same catalogue grant governs them.
+  return [...TOOLS, ...TRIGGER_TOOLS].map((tool) => ({ ...tool }));
 }
 
 export const listNeedsCredential = false;
@@ -368,6 +378,22 @@ export async function callTool(
   const agentId = connection.botId?.trim();
   if (!agentId) {
     return failure("A routine runs as a Bot, and this run does not name one.");
+  }
+  if (isTriggerTool(toolName)) {
+    try {
+      return asResult(
+        await callTriggerTool(ownerUserId, agentId, toolName, args),
+      );
+    } catch (error) {
+      if (error instanceof ResponsibilityRefusedError)
+        return failure(error.message);
+      if (error instanceof ResponsibilityNotFoundError)
+        return failure(
+          "There is no trigger or responsibility of yours with that id for me.",
+        );
+      const message = error instanceof Error ? error.message : String(error);
+      return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
+    }
   }
   const tools = installed;
   if (!tools) {

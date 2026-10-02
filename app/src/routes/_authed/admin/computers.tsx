@@ -47,6 +47,8 @@ function ComputersPage() {
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profile, so it requires confirmation. */
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** Updating restarts a running computer mid-task, so it is confirmed too. */
+  const [confirmingUpdate, setConfirmingUpdate] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
 
@@ -67,14 +69,10 @@ function ComputersPage() {
   const computers = fleet.data?.computers ?? null;
   const isolation = fleet.data?.isolation ?? null;
   /*
-   * One line for either failure. A list that could not be read and an action that was refused are
-   * both "this did not work", and the page has one place to say so.
+   * A list that could not be read. A refused stop, reset or update is said beside the buttons
+   * instead, because the top of this page is a long scroll away from them.
    */
-  const problem = fleet.error
-    ? "The computers could not be listed."
-    : setState.error
-      ? setState.error.message
-      : null;
+  const problem = fleet.error ? "The computers could not be listed." : null;
   const hostProblem = hostAccess.error
     ? hostAccess.error.message
     : requestGrant.error
@@ -85,9 +83,10 @@ function ComputersPage() {
           ? stopHostAccess.error.message
           : null;
 
-  const run = (botId: string, action: "stop" | "reset") => {
+  const run = (botId: string, action: "stop" | "reset" | "update") => {
     setBusy(botId);
     setConfirming(null);
+    setConfirmingUpdate(null);
     setState.mutate({ action, botId }, { onSettled: () => setBusy(null) });
   };
 
@@ -146,6 +145,14 @@ function ComputersPage() {
       />
 
       <PageSection title="Computers in this deployment">
+        {setState.error ? (
+          <p
+            className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+            role="alert"
+          >
+            {setState.error.message}
+          </p>
+        ) : null}
         {computers === null && problem ? (
           <PageEmpty>The list could not be loaded.</PageEmpty>
         ) : computers === null ? null : computers.length === 0 ? (
@@ -171,9 +178,20 @@ function ComputersPage() {
                         : computer.egress === null
                           ? "Leaves directly"
                           : `Leaves through ${computer.egress}`}
+                      {computer.updateAvailable ? " · Update available" : ""}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
+                    {computer.updateAvailable ? (
+                      <Button
+                        disabled={busy === computer.botId}
+                        onClick={() => setConfirmingUpdate(computer.botId)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Update computer
+                      </Button>
+                    ) : null}
                     <Button
                       disabled={busy === computer.botId || !computer.running}
                       onClick={() => void run(computer.botId, "stop")}
@@ -243,11 +261,53 @@ function ComputersPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setConfirmingUpdate(null);
+        }}
+        open={confirmingUpdate !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Update {confirmingUpdate ? nameFor(confirmingUpdate) : ""}'s
+              computer?
+            </DialogTitle>
+            <DialogDescription>
+              It moves onto the computer image this deployment now runs. Its
+              files and sign-ins are kept. If it is running it restarts, which
+              interrupts anything it is doing right now.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              onClick={() => setConfirmingUpdate(null)}
+              size="sm"
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={busy === confirmingUpdate}
+              onClick={() => {
+                if (confirmingUpdate) void run(confirmingUpdate, "update");
+              }}
+              size="sm"
+            >
+              {busy === confirmingUpdate ? "Updating…" : "Update it"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <p className="mt-4 text-muted-foreground text-sm">
         <strong>Stop</strong> closes the browser and keeps its logins: the next
         thing the Bot does starts it again where it left off.{" "}
         <strong>Reset</strong> deletes the profile, so the Bot is signed out of
-        everything and starts clean. Both are recorded in{" "}
+        everything and starts clean. <strong>Update computer</strong> appears
+        when a computer runs an older image than this deployment, and moves it
+        onto the new one with its files and sign-ins kept. All three are
+        recorded in{" "}
         <Link className="underline" to="/admin/audit">
           Audit
         </Link>

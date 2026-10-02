@@ -1,3 +1,4 @@
+import { PendingApprovals } from "@/components/approvals/inline-approval";
 import type { VisibleChatItem } from "./chat-messages";
 import { ToolLine } from "./tool-line";
 
@@ -97,51 +98,57 @@ export function BrowserActivity({
   const pages = steps.filter((step) => step.visited).length;
   const issues = steps.filter((step) => step.failed).length;
   const running = active && steps.some((step) => step.pending);
+  // The folded line draws its own steps, so a waiting approval gets its card beside it, not inside.
   return (
-    <ToolLine
-      label={
-        running
-          ? "Browsing…"
-          : pages
-            ? `Browsed ${pages} ${pages === 1 ? "page" : "pages"}`
-            : "Browser activity"
-      }
-      detail={
-        issues ? `${issues} ${issues === 1 ? "issue" : "issues"}` : undefined
-      }
-      running={running}
-    >
-      <ol className="space-y-2 py-1">
-        {steps.map((step) => (
-          <li key={step.id} className="min-w-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="shrink-0 text-muted-foreground">
-                {step.label}
-              </span>
-              {step.href ? (
-                <a
-                  href={step.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-current"
-                >
-                  {step.title ?? step.href}
-                </a>
-              ) : null}
-              {step.pending && (
-                <span className="text-muted-foreground">
-                  {active ? "In progress" : "Not completed"}
+    <>
+      <ToolLine
+        label={
+          running
+            ? "Browsing…"
+            : pages
+              ? `Browsed ${pages} ${pages === 1 ? "page" : "pages"}`
+              : "Browser activity"
+        }
+        detail={
+          issues ? `${issues} ${issues === 1 ? "issue" : "issues"}` : undefined
+        }
+        running={running}
+      >
+        <ol className="space-y-2 py-1">
+          {steps.map((step) => (
+            <li key={step.id} className="min-w-0">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0 text-muted-foreground">
+                  {step.label}
                 </span>
+                {step.href ? (
+                  <a
+                    href={step.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-current"
+                  >
+                    {step.title ?? step.href}
+                  </a>
+                ) : null}
+                {step.pending && (
+                  <span className="text-muted-foreground">
+                    {active ? "In progress" : "Not completed"}
+                  </span>
+                )}
+              </div>
+              {step.failed && (
+                <p className="mt-0.5 text-destructive">
+                  {step.reason ?? "This step could not be completed."}
+                </p>
               )}
-            </div>
-            {step.failed && (
-              <p className="mt-0.5 text-destructive">
-                {step.reason ?? "This step could not be completed."}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
-    </ToolLine>
+            </li>
+          ))}
+        </ol>
+      </ToolLine>
+      <PendingApprovals
+        toolCallIds={group.steps.map((step) => step.toolCall.id)}
+      />
+    </>
   );
 }

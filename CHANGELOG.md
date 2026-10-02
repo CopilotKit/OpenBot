@@ -8,6 +8,50 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A routine switched back on gets a fresh count of failures
+
+A routine that fails ten times in a row is switched off, and someone has to switch it back on.
+- **Before:** the failure count ignored that, so the first failure after re-enabling counted as the
+  eleventh. The routine was switched straight off again with "failed ten times in a row", and the
+  first-failure message never appeared.
+- **Now:** failures are counted from when the routine was last switched on, recorded in a new
+  `routines.enabled_at` column. The migration sets it to the time of the upgrade, so any failure
+  streak already under way starts again from zero at that point.
+### Bots work as coworkers
+
+A Bot can now carry on without anyone watching it. It runs standing **Responsibilities** fed by
+schedules, signed webhooks, GitHub, Linear, Sentry, PagerDuty, inbound email and Slack messages,
+drives its own computer while the app is closed, and keeps its browser profile, cookies and files
+across restarts. Its questions and approval requests reach the person who owns the conversation in
+Slack or Microsoft Teams (through OpenTag), by text message or by push, and the conversation
+resumes when they answer; charts reach Slack and Teams as native charts. **Reachability** links
+each of those places to a conversation.
+
+Approvals become one personal flow across the browser, connected apps, shell, files, the host and
+remote Bots, with custom rules, auto-review and host command modes (**Approvals**). Bots can
+message each other, share a group conversation with attributed speakers, and be published to
+teammates as **Team Bots**. **Memory** imports facts from connected apps with their source, and
+optional background research suggests next steps. A browser demonstration can be recorded and
+turned into a skill. Administrators get capability toggles, SSO-required sign-in, SCIM, network
+egress policy, action recording, OpenTelemetry export, and **Passwords** with private sign-in
+requests.
+
+Upgrading runs migrations `0048_coworker_parity`, `0049_coworker_parity_lanes` and
+`0050_review_fixes`.
+
+### A Bot's computer refuses the network until its policy arrives
+
+A computer used to allow every connection until the server had pushed its Bot's network policy,
+which left up to 30 seconds of unfiltered access after every wake. It now refuses until the policy
+arrives, and the server pushes it as the computer wakes. Cloud metadata and link-local addresses are
+refused in every mode, including `allow_all`, and the browser's WebRTC traffic now goes through the
+filter instead of around it. A computer run without an API server can set
+`EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
+
+### A malformed `%` in a stream URL no longer returns a 500
+
+A request to `/api/computers/<id>/stream` whose id held a broken percent-escape, such as `%zz`, made the server throw and answer 500. It is now treated as not matching the stream route and goes through normal routing. Valid ids behave as before.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
@@ -94,6 +138,13 @@ existed but not the Bot, so a mistyped Bot id reached the insert, failed on the 
 foreign key, and answered 500 with no body. It is now refused with "There is no such Bot.", the
 sentence the `bot` kind already used, and nothing is stored. Revoking still checks nothing.
 
+### A malformed OAuth client is refused with a 400, not a 500
+
+`POST /api/plugins/servers/:id/oauth-client` called `.trim()` on the client id and secret without
+checking they were strings, so `{"clientId": 12345, "clientSecret": "s"}`, or a secret of `{}`, threw
+outside the route's try and answered 500. It now answers the same 400 as an empty value, as the
+other plugin routes do for their own fields, before the store or the audit trail is touched.
+
 ### Browser challenges can be handed to a person without losing the Bot's page
 
 Bots pause for actionable browser challenges and resume from a fresh page snapshot after an explicit
@@ -110,6 +161,14 @@ such Bot. Its grants stayed in force, and nothing on any screen could take them 
 screens now follow the rule the Handoff panel already does: a hidden Bot is shown when it holds one
 of the grants the screen is about, marked "Hidden from your roster", and its own page draws its
 grants. Nothing on the server changed.
+
+### Revoking a function from a component that does not exist answers 404
+
+`DELETE /api/components/:name/functions/:function` was the one grant write that did not check the
+component exists. Against a name nobody has, it deleted nothing, answered `revoked: true` and wrote a
+`component.function_revoked` row naming a component that was never there. It now answers 404 and
+writes nothing, as granting a function and withholding a component already do. A function grant
+cannot outlive its component, so there is no stored row this stops anybody removing.
 
 ### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
 
@@ -153,6 +212,13 @@ error.". Compose writes `OPENAI_BASE_URL` empty when the choice is a plain OpenA
 OpenAI SDK only defaults an absent URL, so it was given "" as the address. The Bot now falls back to
 `https://api.openai.com/v1` for an empty value, as its Anthropic branch already did for
 `ANTHROPIC_BASE_URL`. An OpenAI-compatible endpoint is unchanged.
+
+### `OPENBOT_ONE_COMPUTER_EACH=false` in `.env` is honoured by `start.sh`
+
+`scripts/start.sh` read `OPENBOT_ONE_COMPUTER_EACH` from the environment alone, so the line that
+`docs/configuration.md` tells people to put in `.env` was ignored: the supervisor was still started
+and the server still told to give each Bot its own computer. It now reads the key as it reads every
+other setting, the environment first, then `.env`, then the default of `true`.
 
 ### Skill selection keeps capabilities named across multiple JSON replies
 
