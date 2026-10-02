@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildOpenBotInstructions, openbotBaseInstructions } from "./index";
 
 type ModelCase = {
@@ -22,6 +25,47 @@ function requestContextWith(context: unknown) {
   };
 }
 
+/**
+ * Run a child Bun and read what it printed, through files rather than pipes.
+ *
+ * On macOS a Bun parent holding more than about 10,240 open descriptors gets nothing back through
+ * a spawned child's pipes: the child runs, exits 0, and both pipes read empty. The full test run
+ * gets there, because Bun's resolver keeps a directory handle open for every `node_modules`
+ * directory it has resolved from, and this file runs late. Files do not have the limit, so every
+ * probe here writes stdout and stderr to a scratch directory instead.
+ */
+async function runProbe(
+  command: string[],
+  env: Record<string, string>,
+  timeoutMs?: number,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const directory = mkdtempSync(join(tmpdir(), "mastra-probe-"));
+  const out = join(directory, "stdout");
+  const err = join(directory, "stderr");
+  try {
+    const child = Bun.spawn(command, {
+      env,
+      stdout: Bun.file(out),
+      stderr: Bun.file(err),
+    });
+    const timer = timeoutMs
+      ? setTimeout(() => child.kill(), timeoutMs)
+      : undefined;
+    const exitCode = await child.exited;
+    if (timer) clearTimeout(timer);
+    const read = (path: string) => {
+      try {
+        return readFileSync(path, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    return { stdout: read(out), stderr: read(err), exitCode };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function configuredModelId(botModel: string | undefined) {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
@@ -31,7 +75,7 @@ async function configuredModelId(botModel: string | undefined) {
   };
   if (botModel !== undefined) env.BOT_MODEL = botModel;
 
-  const child = Bun.spawn(
+  const { stdout, stderr, exitCode } = await runProbe(
     [
       Bun.argv[0],
       "--no-env-file",
@@ -42,13 +86,8 @@ async function configuredModelId(botModel: string | undefined) {
         "console.log(JSON.stringify({ modelId: model.modelId }));",
       ].join("\n"),
     ],
-    { env, stdout: "pipe", stderr: "pipe" },
+    env,
   );
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
 
   if (exitCode !== 0) {
     throw new Error(
@@ -74,7 +113,7 @@ async function configuredPort(port: string | undefined) {
   };
   if (port !== undefined) env.PORT = port;
 
-  const child = Bun.spawn(
+  const { stdout, stderr, exitCode } = await runProbe(
     [
       Bun.argv[0],
       "--no-env-file",
@@ -84,13 +123,8 @@ async function configuredPort(port: string | undefined) {
         "console.log(JSON.stringify({ port: mastra.getServer()?.port }));",
       ].join("\n"),
     ],
-    { env, stdout: "pipe", stderr: "pipe" },
+    env,
   );
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
 
   const portLine = stdout
     .trim()
@@ -121,7 +155,7 @@ async function providerStartup(botProvider: string) {
     BOT_PROVIDER: botProvider,
   };
 
-  const child = Bun.spawn(
+  const { stderr, exitCode } = await runProbe(
     [
       Bun.argv[0],
       "-e",
@@ -131,13 +165,8 @@ async function providerStartup(botProvider: string) {
         "console.log(JSON.stringify({ modelId: model.modelId }));",
       ].join("\n"),
     ],
-    { env, stdout: "pipe", stderr: "pipe" },
+    env,
   );
-
-  const [stderr, exitCode] = await Promise.all([
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
   return { exitCode, stderr };
 }
 
@@ -440,27 +469,27 @@ describe("OpenBot Mastra provider requests", () => {
           return new Response("unexpected provider route", { status: 404 });
         },
       });
-      const child = Bun.spawn(
-        [
-          Bun.argv[0],
-          "--no-env-file",
-          "-e",
+      try {
+        const { stdout, stderr, exitCode } = await runProbe(
           [
-            // Only HTTP is replaced: the real Mastra Agent and provider SDK build the request.
-            "const networkFetch = globalThis.fetch;",
-            "globalThis.fetch = (input, init) => {",
-            "  const request = new Request(input, init);",
-            "  const url = new URL(request.url);",
-            '  request.headers.set("x-test-original-url", request.url);',
-            `  return networkFetch(new Request(${JSON.stringify(provider.url.toString())} + url.pathname.slice(1) + url.search, request));`,
-            "};",
-            'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
-            'const result = await mastra.getAgent("openbot").generate("Say hello");',
-            "console.log(JSON.stringify({ text: result.text }));",
-          ].join("\n"),
-        ],
-        {
-          env: {
+            Bun.argv[0],
+            "--no-env-file",
+            "-e",
+            [
+              // Only HTTP is replaced: the real Mastra Agent and provider SDK build the request.
+              "const networkFetch = globalThis.fetch;",
+              "globalThis.fetch = (input, init) => {",
+              "  const request = new Request(input, init);",
+              "  const url = new URL(request.url);",
+              '  request.headers.set("x-test-original-url", request.url);',
+              `  return networkFetch(new Request(${JSON.stringify(provider.url.toString())} + url.pathname.slice(1) + url.search, request));`,
+              "};",
+              'const { mastra } = await import("./agent-mastra/src/mastra/index.ts");',
+              'const result = await mastra.getAgent("openbot").generate("Say hello");',
+              "console.log(JSON.stringify({ text: result.text }));",
+            ].join("\n"),
+          ],
+          {
             PATH: process.env.PATH ?? "/opt/homebrew/bin:/usr/bin:/bin",
             MASTRA_TELEMETRY_DISABLED: "true",
             DO_NOT_TRACK: "1",
@@ -475,17 +504,8 @@ describe("OpenBot Mastra provider requests", () => {
               choice.provider === "anthropic" ? choice.base : "",
             OPENAI_BASE_URL: choice.provider === "anthropic" ? "" : choice.base,
           },
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
-      const timeout = setTimeout(() => child.kill(), 10_000);
-      try {
-        const [stdout, stderr, exitCode] = await Promise.all([
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-          child.exited,
-        ]);
+          10_000,
+        );
         if (choice.error) {
           expect(exitCode).not.toBe(0);
           expect(stderr).toContain(choice.error);
@@ -508,8 +528,6 @@ describe("OpenBot Mastra provider requests", () => {
           },
         ]);
       } finally {
-        clearTimeout(timeout);
-        child.kill();
         await provider.stop(true);
       }
     }, 15_000);

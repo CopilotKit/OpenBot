@@ -114,6 +114,8 @@ export type RunAssertion = {
    * person, which is what those runs were.
    */
   initiator?: AuditInitiator;
+  /** The durable handoff claim under which a remote delivery may coordinate further work. */
+  handoff?: { key: string; owner: string };
 };
 
 type SignedRun = RunAssertion & { exp: number };
@@ -150,6 +152,7 @@ export function readRunAssertion(
   signed: unknown,
   encryptionKey: string,
   now: number = Date.now(),
+  options: { ignoreExpiry?: boolean } = {},
 ): RunAssertion | null {
   if (typeof signed !== "string" || !signed) return null;
 
@@ -168,7 +171,16 @@ export function readRunAssertion(
     ) {
       return null;
     }
-    if (payload.exp <= now) return null;
+    if (!options.ignoreExpiry && payload.exp <= now) return null;
+    if (
+      payload.handoff !== undefined &&
+      (!payload.handoff ||
+        typeof payload.handoff.key !== "string" ||
+        !payload.handoff.key ||
+        typeof payload.handoff.owner !== "string" ||
+        !payload.handoff.owner)
+    )
+      return null;
     return {
       botId: payload.botId,
       actorId: payload.actorId,
@@ -191,6 +203,7 @@ export function readRunAssertion(
       // Read as a person on anything unclear, for the reason depth reads as zero: an assertion
       // minted before this existed carries none, and a person is what those runs were.
       initiator: readInitiator(payload.initiator),
+      ...(payload.handoff ? { handoff: payload.handoff } : {}),
     };
   } catch {
     return null;
@@ -207,13 +220,25 @@ function readInitiator(value: unknown): AuditInitiator {
   if (!value || typeof value !== "object") return PERSON_INITIATOR;
   const kind = (value as { kind?: unknown }).kind;
   if (kind === "person" || kind === "deployment") return { kind };
-  if (kind !== "routine" && kind !== "handoff") return PERSON_INITIATOR;
+  if (
+    kind !== "routine" &&
+    kind !== "handoff" &&
+    kind !== "responsibility" &&
+    kind !== "memory"
+  )
+    return PERSON_INITIATOR;
   const id = (value as { id?: unknown }).id;
   return typeof id === "string" && id ? { kind, id } : PERSON_INITIATOR;
 }
 
 export type CallVerdict =
-  | { ok: true; botId: string; actorId: string; initiator?: AuditInitiator }
+  | {
+      ok: true;
+      botId: string;
+      actorId: string;
+      initiator?: AuditInitiator;
+      run: RunAssertion;
+    }
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
@@ -344,5 +369,23 @@ export async function authoriseAgentCall(options: {
     botId: assertion.botId,
     actorId: assertion.actorId,
     initiator: assertion.initiator,
+    run: assertion,
   };
+}
+
+/**
+ * The assertion stored with an approved action, read for carrying that action out.
+ *
+ * The signature is checked; the expiry is not. The expiry bounds how long a live run may call back,
+ * but an approval is answered when the person gets to it, usually long after ten minutes, and the
+ * approval is what authorises the action now. Read with the live expiry, a hand-off approved late
+ * lost its depth and hand-off claim and restarted the Bot-to-Bot chain at depth zero.
+ */
+export function readApprovedRunAssertion(
+  signed: unknown,
+  encryptionKey: string,
+): RunAssertion | null {
+  return readRunAssertion(signed, encryptionKey, Date.now(), {
+    ignoreExpiry: true,
+  });
 }

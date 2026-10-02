@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createControl,
   ControlError,
   ControlRequestError,
+  createControl,
   HELP_REQUEST_TTL_MS,
   SnapshotRequiredError,
 } from "../src/control";
@@ -124,6 +124,17 @@ describe("request-aware handoff", () => {
     expect(control.humanMayDrive()).toBe(false);
     expect(() => control.admitBotAction(true)).toThrow(ControlError);
     expect(() => control.release(interrupted.id)).toThrow();
+  });
+
+  test("a request nobody took does not strand the Bot when the browser restarts", () => {
+    const { control, request } = fixture();
+    const unanswered = request();
+    control.interrupt("The browser restarted.");
+    expect(control.get(unanswered.id).request?.status).toBe("interrupted");
+    // The page is as the Bot left it, so a fresh look is all it needs, not a person.
+    expect(() => control.admitBotAction(true)).toThrow(SnapshotRequiredError);
+    control.snapshotTaken();
+    expect(() => control.admitBotAction(true)).not.toThrow();
   });
 
   test("reads are copies and reasons are bounded", () => {

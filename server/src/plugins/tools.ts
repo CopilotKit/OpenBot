@@ -1,5 +1,8 @@
 import { z } from "zod";
+import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
+import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { markUntrusted } from "../untrusted-content";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -51,9 +54,14 @@ export const REFUSAL_MARKER = "Refused.";
  * arrives at is a deployment topology decision, not a decision about what its model is told.
  */
 export function vendorAnswer(result: { text: string; isError: boolean }) {
+  /*
+   * Marked as outside content either way. A vendor's answer is somebody else's data: an issue title,
+   * an email body, a document, any of which can be written to read like an instruction. The error
+   * text is the vendor's too. See untrusted-content.ts; the transcript unwraps the envelope to draw it.
+   */
   return result.isError
-    ? `The vendor reported an error: ${result.text}`
-    : result.text;
+    ? `The vendor reported an error:\n${markUntrusted(result.text, "connector error")}`
+    : markUntrusted(result.text, "connector result");
 }
 
 export type GrantedTool = {
@@ -61,6 +69,7 @@ export type GrantedTool = {
   description: string;
   parameters: z.ZodType;
   execute: (args: unknown) => Promise<string>;
+  initiator?: AuditInitiator;
   /**
    * `<serverId>/<toolName>`, carried alongside the name the model is offered.
    *
@@ -133,6 +142,20 @@ export function grantedToolGuidance(
     (system) => !held.includes(system),
   );
 
+  const researchConnector = ["parallel-authenticated", "parallel"].find(
+    (server) =>
+      ["web_search", "web_fetch"].every((name) =>
+        tools.some((tool) => tool.ref === `${server}/${name}`),
+      ),
+  );
+  const researchTools = researchConnector
+    ? tools.filter(
+        (tool) =>
+          tool.ref === `${researchConnector}/web_search` ||
+          tool.ref === `${researchConnector}/web_fetch`,
+      )
+    : [];
+
   return [
     ...(tools.length > 0
       ? [
@@ -152,6 +175,13 @@ export function grantedToolGuidance(
           "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
           "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
           "access, and the thing that is missing is yours, not theirs.",
+        ]
+      : []),
+    ...(researchConnector
+      ? [
+          `Parallel provides public-web search and extraction: ${researchTools.map((tool) => tool.name).join(" and ")} discover sources and read selected pages.`,
+          "Parallel searches the public web; it does not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents. Generate one session_id for the conversation and reuse it on related search/fetch calls. Omit model_name unless the exact configured model identifier is known.",
+          "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
         ]
       : []),
     /*
@@ -188,13 +218,16 @@ export async function grantedTools(options: {
   botId: string;
   actorId: string;
   initiator?: AuditInitiator;
+  /** Whose account a call reaches, when not the asker's; see `callTool`'s `credentialActorId`. */
+  credentialActorFor?: (ref: string) => Promise<string>;
 }): Promise<GrantedTool[]> {
-  const { store, botId, actorId, initiator } = options;
+  const { store, botId, actorId, initiator, credentialActorFor } = options;
   const granted = await store.listForAgent(botId);
 
   return granted.tools.map((tool) => ({
     name: tool.toolName,
     ref: tool.ref,
+    initiator,
     description: tool.description,
     parameters: parametersFor(tool.inputSchema),
     execute: async (args: unknown) => {
@@ -210,10 +243,17 @@ export async function grantedTools(options: {
           botId,
           actorId,
           ...(initiator ? { initiator } : {}),
+          ...(credentialActorFor
+            ? { credentialActorId: await credentialActorFor(tool.ref) }
+            : {}),
         });
         return vendorAnswer(result);
       } catch (error) {
-        if (error instanceof PluginRefusedError) {
+        if (error instanceof HeadlessToolSuspension) throw error;
+        if (
+          error instanceof PluginRefusedError ||
+          error instanceof ApprovalRefusedError
+        ) {
           return `${REFUSAL_MARKER} ${error.message}`;
         }
         /*

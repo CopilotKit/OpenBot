@@ -24,6 +24,8 @@ import { pageCoordinates } from "./take-the-wheel";
  * CDP's modifier bitmask. Alt 1, Control 2, Meta 4, Shift 8.
  *
  * Needed or a capital letter typed with Shift arrives lower-case, and Ctrl+A selects nothing.
+ * Command is sent as Control: the Bot's computer is Linux, where Meta+A selects nothing, and a Mac
+ * user's hands reach for Command+A, Command+C and Command+Z.
  */
 function modifierBits(event: {
   altKey: boolean;
@@ -33,10 +35,24 @@ function modifierBits(event: {
 }): number {
   return (
     (event.altKey ? 1 : 0) |
-    (event.ctrlKey ? 2 : 0) |
-    (event.metaKey ? 4 : 0) |
+    (event.ctrlKey || event.metaKey ? 2 : 0) |
     (event.shiftKey ? 8 : 0)
   );
+}
+
+/** The Command key itself, pressed or released, as the Control key the Linux browser expects. */
+function remoteKey(event: KeyboardEvent) {
+  return event.key === "Meta"
+    ? {
+        key: "Control",
+        code: event.code === "MetaRight" ? "ControlRight" : "ControlLeft",
+        windowsVirtualKeyCode: 17,
+      }
+    : {
+        key: event.key,
+        code: event.code,
+        windowsVirtualKeyCode: event.keyCode,
+      };
 }
 
 /**
@@ -47,6 +63,24 @@ function modifierBits(event: {
  */
 function isPasteShortcut(event: KeyboardEvent): boolean {
   return (event.ctrlKey || event.metaKey) && keyOf(event) === "v";
+}
+
+/**
+ * Whether a keystroke is aimed at a field on this page rather than at the Bot's browser.
+ *
+ * The canvas cannot hold focus, so a keystroke meant for the remote page arrives targeted at the
+ * body (or whatever non-editable element last took a click). One targeted at an input, textarea,
+ * select or contenteditable is someone typing into this page while driving: the recorder's
+ * workflow name, the secret box under the screen. Taking those keys left the fields dead.
+ */
+function isLocalField(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT")
+  );
 }
 
 type Props = {
@@ -365,13 +399,13 @@ export function LiveScreen({
    * and they were bound first, when the signed-in app mounted, so they saw every keystroke before
    * this did: a capital N typed into the remote page started a new chat, and Ctrl+B there toggled
    * the sidebar here. Escape and the paste shortcut are not stopped, because both are meant for this
-   * page.
+   * page, and neither is a keystroke typed into one of this page's own fields.
    */
   useEffect(() => {
     if (!driving || !connected) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") return; // Escape still closes the view.
-      if (isPasteShortcut(event)) {
+      if (isPasteShortcut(event) || isLocalField(event.target)) {
         localKeyUps.current.add(event.code);
         return;
       }
@@ -380,9 +414,7 @@ export function LiveScreen({
       send({
         type: "key",
         event: "down",
-        key: event.key,
-        code: event.code,
-        windowsVirtualKeyCode: event.keyCode,
+        ...remoteKey(event),
         // Only a printable character carries text. Sending text for Backspace makes Chrome insert a
         // character instead of deleting one.
         ...(event.key.length === 1 ? { text: event.key } : {}),
@@ -398,14 +430,13 @@ export function LiveScreen({
       send({
         type: "key",
         event: "up",
-        key: event.key,
-        code: event.code,
-        windowsVirtualKeyCode: event.keyCode,
+        ...remoteKey(event),
         modifiers: modifierBits(event),
       });
     };
     /** Paste arrives as one block; CDP inserts it as text rather than key events. */
     const onPaste = (event: ClipboardEvent) => {
+      if (isLocalField(event.target)) return;
       const text = event.clipboardData?.getData("text");
       if (!text) return;
       event.preventDefault();

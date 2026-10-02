@@ -29,6 +29,8 @@ export type HostAccessDesktopOperation = {
   content?: string;
   command?: string;
   writable?: boolean;
+  /** For a command: the member's policy after the team cap, so the native dialog can say so. */
+  commandPolicy?: "ask" | "allow" | "never";
   expiresAt?: number;
 };
 

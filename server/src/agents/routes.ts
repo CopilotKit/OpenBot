@@ -8,6 +8,7 @@ import { checkAgentEndpoint } from "./endpoint";
 import { canManageAgent } from "./profile-policy";
 import {
   AgentNotFoundError,
+  AgentAssignedError,
   AgentNotManageableError,
   type AgentProfileStore,
   ManagedAgentUnavailableError,
@@ -767,6 +768,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // another user's coworker, so a roster that split "mine" on it would file other people's work
     // under yours, and only for administrators, who are the least likely to notice.
     mine: agent.ownerUserId === actor.id,
+    assignedToMe: agent.assignedToMe ?? false,
   };
 }
 
@@ -785,6 +787,9 @@ function mapStoreError(context: Context, error: unknown): Response {
   }
   if (error instanceof ManagedAgentUnavailableError) {
     return context.json({ error: error.message }, 400);
+  }
+  if (error instanceof AgentAssignedError) {
+    return context.json({ error: error.message }, 409);
   }
   throw error;
 }

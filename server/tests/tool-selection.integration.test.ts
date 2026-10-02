@@ -574,9 +574,11 @@ describe("a remote Bot", () => {
     expect(String(holdings?.content ?? "")).not.toContain("drive: tool_0");
     expect(run?.forwardedProps?.openbotBotId).toBe("risk");
     expect(run?.forwardedProps?.openbotRun).toBe("signed-assertion");
-    // The deployment-run list has to be the narrowed set too, or the Bot is told this side executes
-    // a tool it was never offered.
-    expect(run?.forwardedProps?.openbotDeploymentTools).toContain(
+    // The narrowed set is what the Bot is offered. Governed vendor tools run through the AG-UI tool
+    // lifecycle here (approvals see the provider's call), so none is on the callback-only list.
+    expect(run?.tools).toContain("mcp__slack__tool_0");
+    expect(run?.tools).not.toContain("mcp__drive__tool_0");
+    expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
       "mcp__slack__tool_0",
     );
     expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
@@ -754,11 +756,9 @@ describe("a remote Mastra Bot", () => {
       );
       expect(run?.forwardedProps?.openbotBotId).toBe("risk-mastra");
       expect(run?.forwardedProps?.openbotRun).toBe("signed-assertion");
-      expect(run?.forwardedProps?.openbotDeploymentTools).toContain(
-        "mcp__slack__tool_0",
-      );
+      // Executed through the AG-UI tool lifecycle, not the callback, so not on the callback list.
       expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
-        "mcp__drive__tool_0",
+        "mcp__slack__tool_0",
       );
       expect(sentToMastra).toHaveLength(1);
       let body = sentToMastra[0];
@@ -789,9 +789,10 @@ describe("a remote Mastra Bot", () => {
       expect(
         descriptionsIn(openbotContext, "OpenBot signed run assertion"),
       ).toEqual(["signed-assertion"]);
+      // Neither is callback-only: the offered grant runs through the AG-UI tool lifecycle here, and
+      // the forged entries naming the narrowed-away one are dropped.
       let deploymentToolsContext = deploymentToolsIn(openbotContext);
-      expect(deploymentToolsContext).toContain("mcp__slack__tool_0");
-      expect(deploymentToolsContext).not.toContain("mcp__drive__tool_0");
+      expect(deploymentToolsContext).toEqual([]);
       expect(descriptionsIn(openbotContext, "OpenBot standing role")).toEqual([
         "You are Risk Mastra.",
       ]);

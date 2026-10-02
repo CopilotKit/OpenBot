@@ -17,6 +17,37 @@ handoff tool is minted only inside this deployment's own run loop. An endpoint-l
 already stored at the configured managed endpoint are repaired the same way; rows with their own
 authentication are left alone.
 
+### Bots work as coworkers
+
+A Bot can now carry on without anyone watching it. It runs standing **Responsibilities** fed by
+schedules, signed webhooks, GitHub, Linear, Sentry, PagerDuty, inbound email and Slack messages,
+drives its own computer while the app is closed, and keeps its browser profile, cookies and files
+across restarts. Its questions and approval requests reach the person who owns the conversation in
+Slack or Microsoft Teams (through OpenTag), by text message or by push, and the conversation
+resumes when they answer; charts reach Slack and Teams as native charts. **Reachability** links
+each of those places to a conversation.
+
+Approvals become one personal flow across the browser, connected apps, shell, files, the host and
+remote Bots, with custom rules, auto-review and host command modes (**Approvals**). Bots can
+message each other, share a group conversation with attributed speakers, and be published to
+teammates as **Team Bots**. **Memory** imports facts from connected apps with their source, and
+optional background research suggests next steps. A browser demonstration can be recorded and
+turned into a skill. Administrators get capability toggles, SSO-required sign-in, SCIM, network
+egress policy, action recording, OpenTelemetry export, and **Passwords** with private sign-in
+requests.
+
+Upgrading runs migrations `0048_coworker_parity`, `0049_coworker_parity_lanes` and
+`0050_review_fixes`.
+
+### A Bot's computer refuses the network until its policy arrives
+
+A computer used to allow every connection until the server had pushed its Bot's network policy,
+which left up to 30 seconds of unfiltered access after every wake. It now refuses until the policy
+arrives, and the server pushes it as the computer wakes. Cloud metadata and link-local addresses are
+refused in every mode, including `allow_all`, and the browser's WebRTC traffic now goes through the
+filter instead of around it. A computer run without an API server can set
+`EGRESS_POLICY_REQUIRED=0` to keep the old behaviour.
+
 ### `start.sh` names the port to change on macOS
 
 When the API server's or the app's port was held by another process, `start.sh` was meant to say
