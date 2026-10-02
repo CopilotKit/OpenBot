@@ -5,76 +5,29 @@ this repository; if something here disagrees with what you see, trust the reposi
 
 ASK THIS BEFORE YOU DO ANYTHING ELSE
 
-There are three supported paths, and they are different jobs:
+There are two supported paths, and they are different jobs:
 
-  A. They have the OpenBot desktop app, or they want to try/run OpenBot locally without developer
-     tools. Use the desktop setup flow. It installs what it needs and asks for account sign-ins in
-     the window.
-  B. They want a server/container deployment. Use the published Docker image and an env file.
-  C. They want to change OpenBot itself or edit a tenant package from source. Use the clone.
+  A. They want a server/container deployment. Use the published Docker image and an env file.
+  B. They want to try OpenBot on their own machine, change OpenBot itself, or edit a tenant package
+     from source. Use the clone.
 
-Most people asking to "try OpenBot" want A. Do not send them to Bun, Docker, Node, `npx`, or a
-clone unless they specifically mean B or C.
+There is no released desktop app yet: no OpenBot release carries a desktop installer, only the
+container image list. Do not send anybody to a desktop app.
 
 OpenBot is a template to make your own and white-label, not a hosted product somebody signs up for.
-The desktop app and container run it locally; the clone is for changing the product, tenant package,
-Bots, channels, skills, or branding.
+The container runs it as released; the clone is for running it locally and for changing the
+product, tenant package, Bots, channels, skills, or branding.
 
-A. DESKTOP APP: LOCAL SETUP WITHOUT DEVELOPER TOOLS
+A. SERVER OR ONE-CONTAINER DEPLOYMENT
 
-Tell them to open the OpenBot desktop app and follow the screens:
-
-  1. Set up OpenBot.
-  2. Keep the default Bot unless they know they want a specific framework.
-  3. Choose where OpenBot lives. This is the local deployment folder the app prepares.
-  4. Click Install OpenBot.
-  5. Connect an AI provider.
-  6. Sign in to CopilotKit when the app asks.
-  7. Start OpenBot.
-
-Do not tell desktop users to install Bun or run `bun install`. The desktop installer acquires the
-pinned Bun runtime itself when it is missing. Do not tell them to install Node or run
-`npx copilotkit`: the desktop flow signs in to CopilotKit, provisions the project key, and creates
-or reuses its openbot Learning container. Start saves the assignment only for the matching key/API;
-custom container assignments and saved Admin choices remain authoritative.
-Self-hosted desktop setup uses that deployment's normal sign-in in an isolated Chrome or Edge
-window and provisions the selected project's key and container. Either browser must be installed.
-Do not tell them to clone the repository: the desktop app fetches the released deployment tree and
-uses the release's digest-pinned container images.
-
-The desktop app uses an existing Docker/Podman runtime when one is already usable. If it needs to
-install Podman, the platform decides what that looks like: Windows uses a per-user installer, macOS
-asks for the normal administrator approval, and Linux uses the distribution package manager through
-the desktop authorization prompt. It also places a Compose provider when needed. If setup reports a
-Windows WSL or virtualization blocker, follow the exact sentence in the app; that blocker is the
-source of truth.
-
-The AI provider screen offers OpenAI, Anthropic, and one OpenAI-compatible endpoint row. A compatible
-endpoint means an endpoint or gateway that speaks the OpenAI API shape, such as Ollama, vLLM, Azure
-OpenAI, or a company gateway. Do not describe raw Bedrock as OpenAI-compatible unless there is a
-gateway in front of it that provides that API.
-
-Plan sign-in and API keys are not interchangeable. OpenAI plan sign-in is routed through the
-LangGraph/Codex path. Claude plan sign-in is routed through the Claude Agent SDK path. API keys are
-the broad framework path. Do not claim every framework can use both plan sign-ins.
-
-The desktop wizard's last built-in question proves that the selected Bot can answer. After it opens
-OpenBot, validate the main path with a real browser action and a visible chart, not just a text
-reply. If they are running an already-installed release, check its version first; source-tree fixes
-land in a desktop/container install only after that release is published. Ask a Bot to open a
-simple public site, report something visible on the page, and show the result as a bar or line
-chart. Passing means you saw the browser activity and the chart rendered in the transcript.
-
-B. SERVER OR ONE-CONTAINER DEPLOYMENT
-
-Use this when they are deploying a container, not when they are just trying the desktop app.
+Use this when they are deploying a container.
 
   docker run -p 3001:3001 --env-file .env \
     -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql \
     ghcr.io/copilotkit/openbot:latest
 
 One port. The app is on 3001 as well, so open http://localhost:3001, not 3010. `latest` is the most
-recent release; a version tag such as `:v0.0.13` pins one.
+recent release; a version tag such as `:v0.0.15` pins one.
 
 The env file still needs INTELLIGENCE_API_KEY, a model credential, a real KEY_ENCRYPTION_KEY, and
 either an identity provider or OPENBOT_SINGLE_USER=true. Start from `.env.example` in this
@@ -91,16 +44,16 @@ starts. Leave MANAGED_AGENT_AG_UI_URL unset unless a Bot endpoint is actually re
 container. If their `.env` still has the laptop default `http://localhost:4201/ag-ui`, unset it for
 this path. See docs/deployment.md for platform notes, sizing and migrations.
 
-C. CLONE: CHANGE OPENBOT OR A TENANT PACKAGE
+B. CLONE: RUN OPENBOT LOCALLY, CHANGE IT, OR EDIT A TENANT PACKAGE
 
-Use this only when they want to edit code or configuration in the repository.
+Use this to run OpenBot from source on their machine, or to edit code or configuration.
 
 Requirements for the clone path:
 - Bun 1.3.14. The repository pins it in package.json.
 - Docker CLI plus Docker Compose, or a compatible `docker` command/socket. `scripts/start.sh`
   calls `docker compose` for PostgreSQL and shipped Bots; Podman works only when it is exposed
   through that Docker-compatible command path.
-- Node/npx, only to fetch the CopilotKit key from the CLI.
+- Node/npx, only for the CopilotKit CLI.
 - A CopilotKit account. Free is enough.
 - A model credential. The current source tree supports OpenAI or Anthropic for the example built-in
   Bots and the LangGraph framework Bot. Use the provider-specific key and model variables below.
@@ -124,7 +77,8 @@ The clone commands are:
   bun scripts/setup-learning.ts             # provisions its key and openbot Learning container
 
 The helper preserves custom targets and refuses to replace an existing INTELLIGENCE_API_KEY.
-For fresh self-hosted setup, set INTELLIGENCE_API_URL to its HTTPS API origin and run only
+For fresh self-hosted setup, set INTELLIGENCE_API_URL to its HTTPS API origin (or HTTP on
+localhost) and run only
 bun scripts/setup-learning.ts after bun install; skip the managed npx commands. Chrome or Edge
 must be installed. Sign in through the isolated browser window and choose an accessible project;
 the helper creates or reuses openbot and writes that project's new runtime key and assignment.
@@ -139,7 +93,23 @@ CPK_INTELLIGENCE_SKILLS_REVISION optionally pins a published revision. Saved Adm
 precedence, including off. Keep the project key server-side and use the existing Intelligence UI
 for management (a runtime project key cannot authorize those writes). See docs/automatic-learning.md.
 
-There is no licence step. `copilotkit license` still exists for self-hosted Intelligence, and
+To run Intelligence on their own Mac instead of the managed service, point them at
+https://docs.copilotkit.ai/intelligence/self-hosting-local. It is a preview for macOS with Docker
+Desktop, not a production installation, and the free Developer plan qualifies. They run, from the
+OpenBot root where `.env` is:
+
+  npx copilotkit@latest login
+  npx copilotkit@latest local setup
+  npx copilotkit@latest local connect --approve-connection
+
+`local connect` writes INTELLIGENCE_API_URL, INTELLIGENCE_GATEWAY_WS_URL and
+CPK_INTELLIGENCE_API_KEY to `.env`. OpenBot reads the first two as they are but takes its project
+key only from INTELLIGENCE_API_KEY, so copy the `cpk-...` value of CPK_INTELLIGENCE_API_KEY into
+INTELLIGENCE_API_KEY before `bash scripts/start.sh`. The local licence lasts 30 days;
+`npx copilotkit@latest local renew` renews it as often as needed while the account is in good
+standing. Skip the managed `project select` and setup-learning commands on this path.
+
+There is no licence step for managed Intelligence. `copilotkit license` still exists for self-hosted Intelligence, and
 COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
 For manual key-only setup, put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. For the default
@@ -170,7 +140,8 @@ WHAT YOU MUST NOT DO FOR THEM
 - Do not run `copilotkit login`; it signs in as them. Tell them to run it.
 - Do not put their API keys into any file you did not just tell them about, and do not echo
   values back.
-- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL unless they run Intelligence themselves.
+- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL unless they run Intelligence
+  themselves (self-hosted, or locally through `copilotkit local connect`).
 
 FAILURES YOU WILL ACTUALLY SEE
 The server refuses to start rather than running half-configured. The message names the variable.
@@ -196,7 +167,7 @@ The server refuses to start rather than running half-configured. The message nam
 
 HOW TO KNOW IT WORKED
 
-For a clone, `curl -s localhost:3001/api/capabilities` should return JSON with
+For a clone, `curl -s 127.0.0.1:3001/api/capabilities` should return JSON with
 `"mode":"intelligence"`. Then use the app, not just curl: ask a Bot to open a public site in its
 browser, report something visible on the page, and show a small chart. A plain text/math answer is
 not enough for the main path because it does not prove browser tools or component rendering.
