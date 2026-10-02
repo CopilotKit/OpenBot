@@ -377,10 +377,10 @@ describe("refreshing a server that cannot be resolved", () => {
  */
 function grantsApp(
   role: "admin" | "user" = "admin",
-  runsHere: (agentId: string) => boolean | undefined = (agentId) => {
+  canHandOn: (agentId: string) => boolean | undefined = (agentId) => {
     // Undefined is "no such Bot", which is what the store answers for one nobody registered.
     if (agentId === "never-registered") return undefined;
-    return agentId !== "at-an-endpoint";
+    return true;
   },
 ) {
   /**
@@ -416,7 +416,7 @@ function grantsApp(
     },
     skillOwner: async () => null,
     agentOwner: async () => null,
-    agentRunsHere: async (agentId: string) => runsHere(agentId),
+    agentCanHandOn: async (agentId: string) => canHandOn(agentId),
     agentIsRegistered: async (agentId: string) =>
       agentId !== "never-registered",
   });

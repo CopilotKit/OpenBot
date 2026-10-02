@@ -4230,22 +4230,21 @@ export function createPluginStore(options: PluginStoreOptions) {
      * "may this person put their skill on that Bot", and a whole profile is more than that needs.
      */
     /**
-     * Whether this Bot's run happens in this process, rather than at an endpoint somewhere.
+     * Whether this Bot can be granted handing work on, or `undefined` if there is no such Bot.
      *
-     * Undefined for a Bot nobody has heard of. Asked because a tool this deployment executes can
-     * only be offered to a run it builds: a Bot at an endpoint runs its own loop and is handed
-     * descriptions of what it may call back for, and handing work to another Bot is not one of them.
+     * Any Bot that exists can: a built-in Bot runs `message_bot` in this process, and a Bot at its
+     * own endpoint calls back for it through the signed tool callback, which reaches the same desk.
      */
-    async agentRunsHere(agentId: string): Promise<boolean | undefined> {
+    async agentCanHandOn(agentId: string): Promise<boolean | undefined> {
       const [row] = await database
-        .select({ type: agents.type })
+        .select({ id: agents.id })
         .from(agents)
         .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
         // A deleted Bot is not one anybody may be given, and answering about it at all would say it
         // had existed.
         .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
         .limit(1);
-      return row ? row.type === "built_in" : undefined;
+      return row ? true : undefined;
     },
 
     /**
@@ -4418,17 +4417,15 @@ export function createPluginStore(options: PluginStoreOptions) {
      * is a single indexed read, which is the right price for that.
      */
     /**
-     * The Bots this one may hand work to, and can actually reach.
+     * The Bots this one may hand work to.
      *
-     * FILTERED AT READ TIME, not only when the grant is made. Refusing a new grant to a Bot that
-     * runs at its own endpoint stops one being created; it does nothing about the ones already
-     * there, or about a Bot that was built in when it was granted and was pointed at an endpoint
-     * afterwards. Those rows read as configured and are inert, which is the shape of thing an
-     * administrator debugs for an afternoon: the grant is right there in the table and no hop ever
-     * happens.
+     * Whatever the grantee's type. A Bot at its own endpoint is offered `message_bot` as a tool it
+     * calls back for, and the call reaches the same handoff desk, grant check and caps as a built-in
+     * Bot's (see `createCoordinationTools`). This used to keep only built-in grantees, from before
+     * remote Bots could call back for coordination, which left every remote Bot's grant reading as
+     * configured while no hop ever happened.
      *
-     * The asking side is the one that matters here — a Bot at an endpoint runs its own loop and is
-     * never offered this tool — so it is the grantee, `agent_id`, that is checked.
+     * The join keeps a grant held by a Bot that no longer exists from counting.
      */
     async botsReachableFrom(agentId: string): Promise<string[]> {
       const rows = await database
@@ -4436,11 +4433,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         .from(pluginGrants)
         .innerJoin(agents, eq(agents.id, pluginGrants.agentId))
         .where(
-          and(
-            eq(pluginGrants.kind, "bot"),
-            eq(pluginGrants.agentId, agentId),
-            eq(agents.type, "built_in"),
-          ),
+          and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, agentId)),
         );
       return rows.map((row) => row.ref);
     },
