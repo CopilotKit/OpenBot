@@ -29,6 +29,9 @@ import { newId } from "../../../../lib/new-id";
  * Creates the channel on first send. The selected coworker stays in the URL so profile links and
  * reloads preserve the pending recipient without creating an empty channel.
  */
+/** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
+const AGENT_NOT_FOUND = "Agent not found.";
+
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
     ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
@@ -57,6 +60,7 @@ function RouteComponent() {
   const {
     data: fetched,
     isError: detailError,
+    error: detailFailure,
     isPending: detailPending,
   } = useQuery({
     ...agentQueryOptions(agent ?? ""),
@@ -76,7 +80,14 @@ function RouteComponent() {
     rosterError && profiles === undefined
       ? "Coworkers couldn't be loaded."
       : urlAgentDetailFailed
-        ? "Coworker couldn't be loaded."
+        ? /*
+           * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
+           * the Bot: a shared Team Bot link lands here once it is unpublished or undescribed. Any
+           * other failure is a load that can be retried, and says so.
+           */
+          detailFailure?.message === AGENT_NOT_FOUND
+          ? "This Bot isn't available to you. It may be unpublished, not shared with you, or not described yet."
+          : "Coworker couldn't be loaded."
         : null;
   const recipients: Recipient[] = chosen
     ? [{ id: chosen.id, name: chosen.name }]

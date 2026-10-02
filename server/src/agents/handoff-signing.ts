@@ -12,6 +12,7 @@ import type { HandoffWork } from "./handoff-runner";
 export function handoffDeliveryRunAssertion(
   work: HandoffWork,
   runId: string,
+  claim?: RunAssertion["handoff"],
 ): RunAssertion {
   return {
     botId: work.toBotId,
@@ -20,6 +21,7 @@ export function handoffDeliveryRunAssertion(
     threadId: work.threadId,
     depth: work.depth,
     ...(work.initiator ? { initiator: work.initiator } : {}),
+    ...(claim ? { handoff: claim } : {}),
   };
 }
 
@@ -27,9 +29,10 @@ export function signHandoffDeliveryRun(
   work: HandoffWork,
   encryptionKey: string,
   runId: string = randomUUID(),
+  claim?: RunAssertion["handoff"],
 ): string {
   return mintRunAssertion(
-    handoffDeliveryRunAssertion(work, runId),
+    handoffDeliveryRunAssertion(work, runId, claim),
     encryptionKey,
   );
 }

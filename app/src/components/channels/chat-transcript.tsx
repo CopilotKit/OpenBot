@@ -7,6 +7,7 @@ import {
 import {
   IconAlertTriangle,
   IconBox,
+  IconChevronDown,
   IconClock,
   IconFile,
   IconX,
@@ -45,11 +46,14 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { attachmentUrl } from "@/lib/channels/attachments";
+import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { splitChatOrigin } from "./chat-origin";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
 import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
@@ -63,6 +67,7 @@ import {
   toVisibleChatItems,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
+import { TeamBotConsentCard } from "./team-bot-consent";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
 import { VoiceChatCard } from "./voice-chat-card";
@@ -532,6 +537,10 @@ function Arriving({
  * the part a person wrote and the only part addressed to them.
  */
 function RoutineFiring({ instruction }: { instruction: string }) {
+  const responsibility = readResponsibilityTurn(instruction);
+  if (responsibility) {
+    return <ResponsibilityFiring raw={instruction} turn={responsibility} />;
+  }
   return (
     <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
       <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
@@ -539,6 +548,53 @@ function RoutineFiring({ instruction }: { instruction: string }) {
         <span className="font-medium">Routine ran.</span>{" "}
         <span className="whitespace-pre-wrap">{instruction}</span>
       </span>
+    </div>
+  );
+}
+
+/** `manual/requested` reads as "manual"; anything else keeps its event type beside the source. */
+function describeTrigger(trigger: string): string {
+  const [source, type] = trigger.split("/", 2);
+  if (!type || type === "requested") return source ?? trigger;
+  return `${source} · ${type}`;
+}
+
+/**
+ * A responsibility's turn, drawn as the event it is.
+ *
+ * The message a responsibility sends its Bot carries the success criteria, the progress so far, the
+ * trigger, the event payload in its untrusted envelope and a reminder naming the report tool — all
+ * of it addressed to the model. Drawn inline, a person scrolling their conversation read a page of
+ * scaffolding every time the responsibility ran. So the line says what happened and what the person
+ * asked for, and the whole message sits behind "Details" for anyone checking what the Bot was told.
+ */
+function ResponsibilityFiring({
+  raw,
+  turn,
+}: {
+  raw: string;
+  turn: { instruction: string; trigger: string };
+}) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
+      <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
+      <div className="min-w-0">
+        <p>
+          <span className="font-medium">Responsibility ran.</span> Trigger:{" "}
+          {describeTrigger(turn.trigger)}
+        </p>
+        <p className="whitespace-pre-wrap">{turn.instruction}</p>
+        <details className="group mt-1">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            Details
+            <IconChevronDown
+              aria-hidden
+              className="size-3 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+            />
+          </summary>
+          <p className="mt-1 whitespace-pre-wrap break-words text-xs">{raw}</p>
+        </details>
+      </div>
     </div>
   );
 }
@@ -586,7 +642,10 @@ const TranscriptMessage = memo(function TranscriptMessage({
     );
   }
   const align = isUser ? "end" : "start";
-  const invoked = isUser ? splitSkillChip(text, commandNames) : null;
+  // Slack/Teams turns carry a model-facing participant line; show a marker instead of the line.
+  const origin = isUser ? splitChatOrigin(text) : null;
+  const said = origin ? origin.text : text;
+  const invoked = isUser ? splitSkillChip(said, commandNames) : null;
 
   return (
     <MessageRow align={align}>
@@ -610,6 +669,11 @@ const TranscriptMessage = memo(function TranscriptMessage({
                 // the thing that was already a chip in the composer as a chip here too, so the
                 // transcript shows a skill was used rather than a slash that was typed.
                 <span className="whitespace-pre-wrap">
+                  {origin && (
+                    <span className="mr-1.5 inline-flex items-center rounded bg-foreground/10 px-1.5 py-0.5 align-middle text-foreground/70 text-xs">
+                      via {origin.via}
+                    </span>
+                  )}
                   {invoked ? (
                     <>
                       {/*
@@ -624,7 +688,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
                       {invoked.rest}
                     </>
                   ) : (
-                    text
+                    said
                   )}
                 </span>
               ) : (
@@ -1298,6 +1362,9 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
    * server's copy is what the model is told and "Refused." in front of a reason is right for it.
    */
   const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
+  const consent = refused ? readTeamBotConsent(body) : null;
+  if (consent) return <TeamBotConsentCard {...consent} />;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}

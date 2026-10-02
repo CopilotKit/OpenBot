@@ -1,6 +1,8 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import type { RoutineRunner } from "./runner";
 import { MINIMUM_INTERVAL_MS } from "./schedule";
 import {
   RoutineNotFoundError,
@@ -33,8 +35,61 @@ export type { RoutineStore } from "./store";
 export function createRoutineRoutes(
   routineStore: RoutineStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  options: { runner?: RoutineRunner; auditStore?: AuditStore } = {},
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+
+  /*
+   * Run now — the page's Test button. It DOES REAL WORK: the routine's Bot runs its instruction in
+   * the routine's channel exactly as a scheduled firing would, through the same runner and headless
+   * AG-UI path. A paused routine is refused (paused never runs), and so is a second click while a
+   * run is still open.
+   */
+  if (options.runner) {
+    const runner = options.runner;
+    routes.post("/:id/run", requireUser, async (context) => {
+      const id = context.req.param("id");
+      try {
+        const { runId } = await routineStore.startManualRun(
+          context.var.actor.id,
+          id,
+        );
+        if (options.auditStore)
+          await recordAuditEvent(options.auditStore, {
+            eventType: "routines.run_requested",
+            targetType: "routine",
+            targetId: id,
+            actorUserId: context.var.actor.id,
+            payload: { runId, source: "manual" },
+          }).catch(() => undefined);
+        void runner.run(runId).catch(() => {});
+        return context.json({ accepted: true, runId }, 202);
+      } catch (error) {
+        return mapStoreError(context, error);
+      }
+    });
+  }
+
+  routes.get("/:id/runs", requireUser, async (context) => {
+    try {
+      const runs = await routineStore.listRuns(
+        context.var.actor.id,
+        context.req.param("id"),
+      );
+      return context.json({
+        runs: runs.map((run) => ({
+          id: run.id,
+          status: run.status ?? "running",
+          startedAt: run.startedAt.toISOString(),
+          finishedAt: run.finishedAt?.toISOString() ?? null,
+          error: run.error,
+          source: run.source,
+        })),
+      });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
 
   routes.get("/", requireUser, async (context) => {
     const [routines, sweptAt] = await Promise.all([

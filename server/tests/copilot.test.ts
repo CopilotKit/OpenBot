@@ -5,7 +5,8 @@ import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
-import { EMPTY } from "rxjs";
+import { EMPTY, lastValueFrom } from "rxjs";
+import { z } from "zod";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";
@@ -22,6 +23,7 @@ import {
 } from "../src/copilot";
 import { grantedToolGuidance } from "../src/plugins/tools";
 import { loadTenantPackage } from "../src/tenant-package";
+import { UNTRUSTED_GUIDANCE } from "../src/untrusted-content";
 import { testEnvironment } from "./support/environment";
 
 /**
@@ -63,6 +65,50 @@ const riskRow = {
   title: "Risk & Compliance",
   roleDescription: "Investigate policies and controls.",
 };
+
+test("remote runs receive coordination tools and preserve the signed delivery scope", async () => {
+  const seen: RunAgentInput[] = [];
+  const run = spyOn(HttpAgent.prototype, "run").mockImplementation((input) => {
+    seen.push(input);
+    return EMPTY;
+  });
+  try {
+    const args: Parameters<typeof buildAgents> = [
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "https://risk.test/ag-ui",
+        },
+      ],
+      { provider: "openai", defaultModel: "test" },
+      null,
+    ];
+    args[5] = (_bot, _run, _thread, previous) =>
+      typeof previous === "string" ? previous : "new-run";
+    args[10] = async () => [
+      {
+        name: "ask_person",
+        ref: "bot/ask_person",
+        description: "Ask the owner",
+        parameters: z.object({ question: z.string() }),
+        execute: async () => "asked",
+      },
+    ];
+    const agents = await buildAgents(...args);
+    const agent = built(agents, "risk");
+    agent.threadId = "scratch-thread";
+    await agent.runAgent({
+      runId: "actual-run",
+      forwardedProps: { openbotRun: "signed-delivery" },
+    });
+    expect(seen[0]?.tools.map((tool) => tool.name)).toContain("ask_person");
+    expect(seen[0]?.forwardedProps.openbotRun).toBe("signed-delivery");
+  } finally {
+    run.mockRestore();
+  }
+});
 
 type RemoteAgentProbe = {
   remote?: unknown;
@@ -243,7 +289,7 @@ describe("registered Copilot agents", () => {
       model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
-      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}`,
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -569,6 +615,7 @@ describe("standing agent roles", () => {
         // travel in it or the Bot never hears it. Referenced rather than restated, so the assertion
         // stays exact without pinning the wording twice.
         PROVENANCE_GUIDANCE,
+        UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     });
   });
@@ -770,6 +817,7 @@ describe("standing agent roles", () => {
         "Reconcile corporate card statements.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
         PROVENANCE_GUIDANCE,
+        UNTRUSTED_GUIDANCE,
       ].join("\n\n"),
     );
   });
@@ -1166,7 +1214,9 @@ describe("a person's standing instructions", () => {
       expect(prompt).not.toContain("standing instructions");
       // Byte for byte what a deployment had before any of this existed, which is what most people
       // on most days get.
-      expect(prompt).toBe(`Be helpful.\n\n${PROVENANCE_GUIDANCE}`);
+      expect(prompt).toBe(
+        `Be helpful.\n\n${PROVENANCE_GUIDANCE}\n\n${UNTRUSTED_GUIDANCE}`,
+      );
     },
   );
 
@@ -1509,7 +1559,9 @@ describe("a chat turn is not sent a conversation the model API refuses", () => {
     const { seen, restore } = captureRuns();
 
     try {
-      agent.run(input(danglingCall));
+      await lastValueFrom(agent.run(input(danglingCall)), {
+        defaultValue: undefined,
+      });
     } finally {
       restore();
     }
@@ -1530,7 +1582,9 @@ describe("a chat turn is not sent a conversation the model API refuses", () => {
     const { seen, restore } = captureRuns();
 
     try {
-      agent.run(input(danglingCall));
+      await lastValueFrom(agent.run(input(danglingCall)), {
+        defaultValue: undefined,
+      });
     } finally {
       restore();
     }
@@ -1550,10 +1604,16 @@ describe("a chat turn is not sent a conversation the model API refuses", () => {
     const { seen, restore } = captureRuns();
 
     try {
-      agent.run(
-        input(danglingCall, [
-          { interruptId: "chatcmpl-tool-8dd56dc7497c5ea9", status: "resolved" },
-        ]),
+      await lastValueFrom(
+        agent.run(
+          input(danglingCall, [
+            {
+              interruptId: "chatcmpl-tool-8dd56dc7497c5ea9",
+              status: "resolved",
+            },
+          ]),
+        ),
+        { defaultValue: undefined },
       );
     } finally {
       restore();

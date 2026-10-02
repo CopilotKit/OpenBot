@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readRunAssertion } from "../src/agents/callback-token";
+import { ThreadBusyError } from "../src/agents/handoff-delivery";
 import {
   createHandoffRunner,
   type HandoffWork,
@@ -46,6 +47,7 @@ function runner(options?: {
   }> = [];
   const delivered: Array<{ message: string; assertion: string }> = [];
   const offered: HandoffWork[] = [];
+  const delays: number[] = [];
 
   const queue = {
     claim: async () =>
@@ -57,8 +59,17 @@ function runner(options?: {
       calls.push({ verb: "finish", key, owner });
       return true;
     },
-    release: async ({ key, owner }: { key: string; owner: string }) => {
+    release: async ({
+      key,
+      owner,
+      delayMs,
+    }: {
+      key: string;
+      owner: string;
+      delayMs: number;
+    }) => {
       calls.push({ verb: "release", key, owner });
+      delays.push(delayMs);
       return true;
     },
     offer: async ({
@@ -89,10 +100,12 @@ function runner(options?: {
     written,
     delivered,
     offered,
+    delays,
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
-      sign: (work) => signHandoffDeliveryRun(work, KEY, "delivery-run"),
+      sign: (work, claim) =>
+        signHandoffDeliveryRun(work, KEY, "delivery-run", claim),
       auditStore,
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
@@ -142,6 +155,7 @@ describe("delivering a hop", () => {
     expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
       botId: "researcher",
       depth: 1,
+      handoff: { key: "run-1:abc", owner: "replica-a" },
     });
   });
 
@@ -203,6 +217,35 @@ describe("delivering a hop", () => {
       { verb: "release", key: "run-1:abc", owner: "replica-a" },
     ]);
     expect(events).toContain("agent.handoff_failed");
+  });
+
+  test("an answer that finds the asking Bot still talking is retried in seconds, then a minute", async () => {
+    const first = runner({
+      deliver: async () => {
+        throw new ThreadBusyError("thread-1 is busy with another run");
+      },
+    });
+    await first.runner.sweep();
+    expect(first.delays).toEqual([5_000]);
+
+    const later = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new ThreadBusyError("thread-1 is busy with another run");
+      },
+    });
+    await later.runner.sweep();
+    expect(later.delays).toEqual([60_000]);
+
+    const other = runner({
+      deliver: async () => {
+        throw new Error("the gateway was unreachable");
+      },
+    });
+    await other.runner.sweep();
+    expect(other.delays).toEqual([60_000]);
   });
 
   /*
@@ -329,6 +372,32 @@ describe("a hop that failed for good", () => {
       initiator: { kind: "routine", id: "routine_7" },
     });
     expect(offered[0]?.task).toContain("did not finish within 300s");
+  });
+
+  test("a hop the deployment's controls refuse ends on its first try, and the person is told", async () => {
+    const {
+      runner: sweeper,
+      offered,
+      calls,
+    } = runner({
+      deliver: async () => {
+        const error = new Error("Use Bots is turned off for you.");
+        error.name = "CapabilityRefusedError";
+        throw error;
+      },
+    });
+
+    await sweeper.sweep();
+
+    // Retrying cannot change the answer, so the work ends now rather than five minutes from now.
+    expect(calls.filter((call) => call.verb === "release")).toEqual([]);
+    expect(calls).toContainEqual({
+      verb: "finish",
+      key: "run-1:abc",
+      owner: "replica-a",
+    });
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.task).toContain("Use Bots is turned off");
   });
 
   /*

@@ -1,5 +1,6 @@
 import {
   IconArrowLeft,
+  IconKey,
   IconLayoutGrid,
   IconPlug,
   IconSettings,
@@ -46,6 +47,12 @@ const ITEMS: {
     title: "Connected accounts",
     icon: IconPlug,
     linkOptions: { to: "/settings/connected-accounts" },
+  },
+  {
+    /* Logins saved from a Bot's private sign-in form. */
+    title: "Passwords",
+    icon: IconKey,
+    linkOptions: { to: "/settings/passwords" },
   },
   {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */

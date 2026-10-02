@@ -20,6 +20,24 @@
 # Refs are `<serverId>/<toolName>`, the same form a grant is written in. `google-drive` and `notion`
 # are catalogue connectors; a server an administrator adds by URL uses the id it was given.
 skills:
+  - slug: research-public-web
+    title: Research the public web
+    summary: Search current public sources with Parallel and write a cited brief.
+    instructions: >-
+      Use Parallel to discover relevant public sources and read
+      selected pages before answering. Use the authenticated connector when it is granted;
+      otherwise use the anonymous connector when granted. Honor an explicit user choice of another
+      authorized provider. Keep search objectives specific and queries concise. Use one session_id
+      per conversation across related search and fetch calls. Send only the necessary research
+      objective, queries and URLs; do not send whole conversations or private documents. Cite the
+      source URLs and state missing evidence or provider errors. A missing grant requires an
+      administrator; never work around a denial.
+    tools:
+      - parallel/web_search
+      - parallel/web_fetch
+      - parallel-authenticated/web_search
+      - parallel-authenticated/web_fetch
+
   - slug: find-a-document
     title: Find a document
     summary: Search the connected document sources for a file and read what it says.

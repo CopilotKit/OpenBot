@@ -21,8 +21,14 @@
  * posting three times for one bad night — or retries for ever, because a rule counting attempts
  * within a firing never sees the routine that fails cleanly, once, every single night.
  */
+
+import type { Message } from "@ag-ui/client";
+import { BOT_PAUSED_REASON, isBotPaused } from "../agents/lifecycle";
 import type { AgentActor } from "../agents/profile-types";
+import type { ApprovalContinuation } from "../approvals/types";
+import type { AuditInitiator } from "../audit";
 import type { ChannelStore } from "../channels/routes";
+import { HeadlessToolSuspension } from "../computer/headless-tools";
 import type { RoutineStore } from "./store";
 
 /** Everything a headless turn needs, injectable so tests never dial a model. */
@@ -32,7 +38,24 @@ export type TurnRunner = (input: {
   agentId: string;
   threadId: string; // the owner's thread for the routine's channel
   instruction: string; // the user message of this turn
-}) => Promise<{ replyText: string }>;
+  initiator?: AuditInitiator;
+  signal?: AbortSignal;
+  continuation?: {
+    snapshot: ApprovalContinuation;
+    result: { content: string; error?: string };
+    messageId: string;
+  };
+  userMessage?: Message;
+  /** Durable inbound delivery id; reused by lock, runner and emitted events. */
+  runId?: string;
+  /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
+  depth?: number;
+  /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
+  onText?: (text: string) => void;
+}) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
+
+/** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
+export type DrawnComponent = { name: string; args: Record<string, unknown> };
 
 export type RoutineRunner = { run(routineRunId: string): Promise<void> };
 
@@ -78,6 +101,19 @@ export function createRoutineRunner(options: {
      * say to anybody. The firing is dropped on the floor deliberately.
      */
     if (!context) return;
+    /*
+     * PAUSED NEVER RUNS, checked here at the moment of running rather than only when the firing was
+     * offered: a person who switched the routine off after the dispatch, or a Run now that raced a
+     * pause, has said what they want. Skipped, so the fatigue rule does not count it.
+     */
+    if (context.enabled === false) {
+      await routineStore.finishRun(
+        routineRunId,
+        "skipped",
+        "the routine is paused",
+      );
+      return;
+    }
 
     const { routineId, ownerUserId, agentId, channelId, instruction } = context;
     // Everything below is done AS the owner: their channel, their thread, their grants.
@@ -127,6 +163,11 @@ export function createRoutineRunner(options: {
       return;
     }
 
+    // A paused Bot's firing is skipped, not failed, so a long pause never trips the fatigue rule.
+    if (await isBotPaused(ownerUserId, agentId)) {
+      await routineStore.finishRun(routineRunId, "skipped", BOT_PAUSED_REASON);
+      return;
+    }
     let replyText: string;
     try {
       ({ replyText } = await runTurn({
@@ -137,6 +178,16 @@ export function createRoutineRunner(options: {
         instruction,
       }));
     } catch (error) {
+      if (error instanceof HeadlessToolSuspension) {
+        await routineStore.finishRun(
+          routineRunId,
+          "waiting",
+          error.message,
+          error.waiting,
+        );
+        await say(error.message);
+        return;
+      }
       const reason = reasonOf(error);
       await routineStore.finishRun(routineRunId, "failed", reason);
 

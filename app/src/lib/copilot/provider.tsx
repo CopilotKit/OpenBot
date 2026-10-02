@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { a2uiProviderOptions } from "./a2ui";
+import { SignInTool } from "./sign-in-tool";
 import "./a2ui.css";
 import { ActiveBotProvider } from "./active-bot";
 import { BotTools } from "./bot-tools";
@@ -57,6 +58,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       {/* Computer tools target the Bot declared by the mounted surface. */}
       <ActiveBotProvider>
         <ComputerTools />
+        {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
+        <SignInTool />
         {/*
           Draws a Bot bringing in another Bot. Registers no tool: `message_bot` runs on the server,
           where the grant and the caps are. A hop that happens off-screen is the thing to avoid.

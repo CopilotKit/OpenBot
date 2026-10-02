@@ -161,6 +161,31 @@ export type CatalogueEntry = {
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
   {
+    key: "parallel",
+    title: "Parallel Search",
+    vendor: "Parallel",
+    summary:
+      "Public-web search and source extraction. Free anonymous access for light use.",
+    host: "https://search.parallel.ai",
+    path: "/mcp",
+    auth: { kind: "none" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  },
+  {
+    key: "parallel-authenticated",
+    title: "Parallel Search (API key)",
+    vendor: "Parallel",
+    summary:
+      "Public-web search and extraction using this deployment's Parallel API key.",
+    host: "https://search.parallel.ai",
+    path: "/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  },
+
+  {
     key: "google-drive",
     title: "Google Drive",
     vendor: "Google",
@@ -296,6 +321,10 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       "create_routine",
       "update_routine",
       "delete_routine",
+      "create_trigger",
+      "pause_trigger",
+      "resume_trigger",
+      "delete_trigger",
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },

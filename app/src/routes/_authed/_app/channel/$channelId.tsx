@@ -5,13 +5,14 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
 import { ChannelAvatar } from "@/components/channels/avatar";
+import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
@@ -193,6 +194,9 @@ function RouteComponent() {
           </div>
         </div>
       </div>
+      {agentId && channel.data?.agentIds.length === 1 ? (
+        <BotPausedBanner agentId={agentId} />
+      ) : null}
       <ChannelBody
         channel={channel.data}
         isPending={channel.isPending}
@@ -203,8 +207,8 @@ function RouteComponent() {
 }
 
 /**
- * A channel holds exactly one coworker. More than one is not supported yet, and rendering a shared
- * transcript for several agents before the runtime can route between them would look like it works.
+ * A channel with exactly one coworker is its CopilotKit chat. One with several is a group, which
+ * redirects to its shared transcript at `/group/$channelId`.
  */
 function ChannelBody({
   channel,
@@ -227,11 +231,15 @@ function ChannelBody({
 
   const runtimeAgentId =
     channel.agentIds.length === 1 ? channel.agentIds[0] : undefined;
+  // Two or more Bots is a group conversation, with its own shared transcript. Every link to a
+  // channel lands here, so this is the one redirect they all need.
   if (!runtimeAgentId) {
     return (
-      <p className="p-8 text-sm text-muted-foreground">
-        This channel has more than one coworker, which is not supported yet.
-      </p>
+      <Navigate
+        params={{ channelId: channel.id }}
+        replace
+        to="/group/$channelId"
+      />
     );
   }
 
