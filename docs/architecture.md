@@ -271,9 +271,10 @@ through the signed callback route is dispatched the same way as one from a Bot r
 handed work is not the same as being able to hand it on, so the target of a grant may live at
 its own endpoint.
 
-One limit remains on the asking side. The grant check a hop goes through (`botsReachableFrom`) counts
-only grants held by built-in Bots, so a Bot at its own endpoint can be granted another Bot and can ask
-its person, but every hop it attempts is refused as not granted.
+The asking side works the same way. The grant check a hop goes through (`botsReachableFrom`) counts a
+grant whatever the asking Bot's type, so a Bot at its own endpoint hands work on through the signed
+callback, the same grant check, caps and audit rows as a built-in one, to a built-in Bot or to another
+Bot at its own endpoint.
 
 A coworker created through the UI with an endpoint is a remote one. Created without one, it runs at
 the managed Bot's endpoint when the deployment has one, and otherwise runs here as a built-in Bot on

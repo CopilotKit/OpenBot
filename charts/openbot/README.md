@@ -344,16 +344,6 @@ delivers anything. `config.learning.containerId` sets the initial default contai
 Automatic Learning take precedence, including switching it off. See
 [docs/automatic-learning.md](../../docs/automatic-learning.md).
 
-## Settings with no value of their own
-
-Several server settings have no dedicated chart value and are passed through `config.extraEnv` or
-`config.extraEnvFrom`: OpenTag delivery to Slack and Teams (`OPENTAG_URL`, `OPENTAG_SHARED_SECRET`),
-text messages (`TWILIO_*`), mobile push (`EXPO_ACCESS_TOKEN`, `EXPO_PROJECT_ID`), inbound email for
-Responsibilities (`OPENBOT_INBOUND_EMAIL_DOMAIN`, `OPENBOT_INBOUND_EMAIL_SNS_TOPIC_ARNS`), SCIM
-(`SCIM_*`), OpenTelemetry export (`OPENBOT_OTEL_EXPORT`, `OTEL_*`) and `DELIVERY_PUBLIC_URL`.
-`.env.example` describes each. Put the secret ones in a Secret and name it in `config.extraEnvFrom`
-rather than writing them into a values file.
-
 ## Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 
 Each is off until its values are set, and each is the same setting [docs/configuration.md](../../docs/configuration.md)
