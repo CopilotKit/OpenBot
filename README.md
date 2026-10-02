@@ -393,6 +393,7 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/coworkers.md](docs/coworkers.md)
 - [docs/deployment.md](docs/deployment.md)
 - [docs/releasing.md](docs/releasing.md)
+- [docs/parallel-research.md](docs/parallel-research.md): public-web search and extraction through Parallel
 
 ## Contributing
 

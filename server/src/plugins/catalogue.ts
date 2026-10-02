@@ -161,6 +161,31 @@ export type CatalogueEntry = {
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
   {
+    key: "parallel",
+    title: "Parallel Search",
+    vendor: "Parallel",
+    summary:
+      "Public-web search and source extraction. Free anonymous access for light use.",
+    host: "https://search.parallel.ai",
+    path: "/mcp",
+    auth: { kind: "none" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  },
+  {
+    key: "parallel-authenticated",
+    title: "Parallel Search (API key)",
+    vendor: "Parallel",
+    summary:
+      "Public-web search and extraction using this deployment's Parallel API key.",
+    host: "https://search.parallel.ai",
+    path: "/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: Object.freeze([]),
+    docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  },
+
+  {
     key: "google-drive",
     title: "Google Drive",
     vendor: "Google",

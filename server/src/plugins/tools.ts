@@ -142,6 +142,20 @@ export function grantedToolGuidance(
     (system) => !held.includes(system),
   );
 
+  const researchConnector = ["parallel-authenticated", "parallel"].find(
+    (server) =>
+      ["web_search", "web_fetch"].every((name) =>
+        tools.some((tool) => tool.ref === `${server}/${name}`),
+      ),
+  );
+  const researchTools = researchConnector
+    ? tools.filter(
+        (tool) =>
+          tool.ref === `${researchConnector}/web_search` ||
+          tool.ref === `${researchConnector}/web_fetch`,
+      )
+    : [];
+
   return [
     ...(tools.length > 0
       ? [
@@ -161,6 +175,13 @@ export function grantedToolGuidance(
           "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
           "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
           "access, and the thing that is missing is yours, not theirs.",
+        ]
+      : []),
+    ...(researchConnector
+      ? [
+          `Parallel provides public-web search and extraction: ${researchTools.map((tool) => tool.name).join(" and ")} discover sources and read selected pages.`,
+          "Parallel searches the public web; it does not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents. Generate one session_id for the conversation and reuse it on related search/fetch calls. Omit model_name unless the exact configured model identifier is known.",
+          "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
         ]
       : []),
     /*
