@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Four things change for an existing deployment:
+- Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
+  container is assigned; see below.
+- A Bot's computer refuses the network until the server pushes its policy. A computer run without
+  an API server can set `EGRESS_POLICY_REQUIRED=0` for the old behaviour.
+- The upgrade runs migrations `0042_user_preferences`, `0043_plugin_logos`, `0044_voice_sessions`,
+  `0045_channel_activity_source`, `0046_automatic_learning`, `0047_agent_pinning`,
+  `0048_coworker_parity`, `0049_coworker_parity_lanes`, `0050_review_fixes` and
+  `0051_routine_enabled_at`.
+- An existing Windows clone checks text files out with LF only after
+  `git rm -r --cached . && git reset --hard` on a clean tree.
+
 ### A request to the approvals API that is not JSON answers 400
 
 A body that could not be parsed as JSON, sent to any approvals route that reads one, such as
@@ -43,18 +55,6 @@ address, so a typo for one host opened an allow-list to all of them. `/0x8` and 
 accepted the same way. A zone id such as `fe80::1%eth0` was accepted too, and then threw from the
 filter on the first connection that policy judged. Each is now refused when the rule is saved, with
 the sentence a malformed range already got. A rule like this saved earlier matches nothing.
-
-**Before upgrading.** Four things change for an existing deployment:
-- Automatic Learning is on unless an administrator saved it off. It does nothing until a Learning
-  container is assigned; see below.
-- A Bot's computer refuses the network until the server pushes its policy. A computer run without
-  an API server can set `EGRESS_POLICY_REQUIRED=0` for the old behaviour.
-- The upgrade runs migrations `0042_user_preferences`, `0043_plugin_logos`, `0044_voice_sessions`,
-  `0045_channel_activity_source`, `0046_automatic_learning`, `0047_agent_pinning`,
-  `0048_coworker_parity`, `0049_coworker_parity_lanes`, `0050_review_fixes` and
-  `0051_routine_enabled_at`.
-- An existing Windows clone checks text files out with LF only after
-  `git rm -r --cached . && git reset --hard` on a clean tree.
 
 ### Deleting a channel twice is recorded once
 
