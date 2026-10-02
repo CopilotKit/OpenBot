@@ -91,10 +91,12 @@ function service(options: {
   >;
   maxDepth?: number;
   granted?: boolean;
+  auditFails?: boolean;
   privateShare?: Parameters<typeof createGroupConversations>[0]["privateShare"];
   listenForConsent?: Parameters<
     typeof createGroupConversations
   >[0]["listenForConsent"];
+  activity?: Parameters<typeof createGroupConversations>[0]["activity"];
 }) {
   const calls: Parameters<TurnRunner>[0][] = [];
   const audit: AuditEventInput[] = [];
@@ -122,7 +124,12 @@ function service(options: {
     },
     caps: { maxDepth: options.maxDepth ?? 1, maxPerRun: 2 },
     mayAddress: async () => options.granted ?? true,
-    auditStore: { insert: async (event) => void audit.push(event) },
+    auditStore: {
+      insert: async (event) => {
+        if (options.auditFails) throw new Error("audit store unavailable");
+        audit.push(event);
+      },
+    },
     createChannel: async (ownerUserId, agentIds) => {
       const channel = await channelStore.create(
         { id: ownerUserId, role: "user" },
@@ -136,6 +143,7 @@ function service(options: {
     ...(options.listenForConsent
       ? { listenForConsent: options.listenForConsent }
       : {}),
+    ...(options.activity ? { activity: options.activity } : {}),
   });
   return { conversations, calls, audit };
 }
@@ -315,6 +323,66 @@ describe("group conversations in PostgreSQL", () => {
           .where(eq(workItems.kind, GROUP_TURN_KIND))
       ).filter((row) => row.key.startsWith(prefix) && row.key.includes(">")),
     ).toEqual([]);
+  });
+  test("a fault after a reply is saved still posts its consent cards and hands it on", async () => {
+    const owner = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    const channel = await channelStore.create(owner, [ada, grace]);
+    createdChannels.push(channel.id);
+    const { conversations, calls } = service({
+      replies: { [ada]: () => "@Grace over to you", [grace]: () => "ok" },
+      // Only Ada's saved reply fails to reach the activity feed; the person's message still does.
+      activity: async (_turn, agentId) => {
+        if (agentId === ada) throw new Error("activity feed unavailable");
+      },
+      listenForConsent: (_ownerUserId, agentId) => () =>
+        agentId === ada
+          ? [{ botId: ada, serverId: "gmail", message: "Ada needs your mail." }]
+          : [],
+    });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-activity-fault`,
+      text: "go",
+      agentId: ada,
+    });
+    await drain(conversations);
+    const { messages } = await conversations.list(owner.id, channel.id);
+    expect(
+      messages.find((row) => row.agentId === ada && !row.consent),
+    ).toMatchObject({
+      status: "completed",
+      text: "@Grace over to you",
+    });
+    expect(messages.some((row) => row.consent?.serverId === "gmail")).toBe(
+      true,
+    );
+    expect(calls.some((call) => call.agentId === grace)).toBe(true);
+  });
+
+  test("a fault handing a saved reply on does not write over the reply", async () => {
+    const owner = await person();
+    const ada = await bot(owner, "Ada");
+    const grace = await bot(owner, "Grace");
+    const channel = await channelStore.create(owner, [ada, grace]);
+    createdChannels.push(channel.id);
+    const { conversations } = service({
+      auditFails: true,
+      replies: { [ada]: () => "@Grace over to you", [grace]: () => "ok" },
+    });
+    await conversations.send(owner.id, channel.id, {
+      id: `${prefix}-relay-fault`,
+      text: "go",
+      agentId: ada,
+    });
+    await drain(conversations);
+    const reply = (
+      await conversations.list(owner.id, channel.id)
+    ).messages.find((row) => row.agentId === ada);
+    expect(reply).toMatchObject({
+      status: "completed",
+      text: "@Grace over to you",
+    });
   });
   test("Bots answer in the order chosen, or in the order a message names them", async () => {
     const owner = await person();

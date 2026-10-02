@@ -133,6 +133,7 @@ const COMPUTER_INTENTS = new Set([
   "read_file",
   "write_file",
   "list_files",
+  "download_file",
   "run_command",
 ]);
 

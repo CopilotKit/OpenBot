@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { serve } from "bun";
 import type { Page } from "playwright";
+import { downloadHeaders } from "../../shared/file-download";
 import {
   cutAtCodeUnits,
   parseAriaSnapshot,
@@ -54,6 +55,8 @@ import { startVirtualDisplay } from "./virtual-display";
 import {
   createWorkspace,
   WorkspaceFileError,
+  WorkspaceFileNotFoundError,
+  WorkspaceFileTooLargeError,
   WorkspacePathError,
 } from "./workspace";
 
@@ -65,9 +68,9 @@ import {
  * audit row before calling this process. This process has no policy engine and no audit trail of its
  * own; its direct-port boundary is the computer token.
  *
- * `/files/read` and `/files/write` reach the durable workspace volume, confined to
- * it by workspace.ts. Reading and writing are the two operations a Bot needs to keep notes between
- * turns.
+ * `/files/read`, `/files/download` and `/files/write` reach the durable workspace volume, confined
+ * to it by workspace.ts. Reading and writing are the two operations a Bot needs to keep notes between
+ * turns; download returns the exact bytes so a PDF, image or archive is not damaged by text decoding.
  *
  * Elements are addressed by reference, not by pixel. `/snapshot` stamps every interactive element
  * with a ref and hands back a compact list; `/click` and `/type` take one of those refs. That is the
@@ -1080,6 +1083,22 @@ serve<StreamData>({
 
       // The Bot's files. Confined to the workspace by workspace.ts. Nothing here decides whether a Bot
       // MAY touch a path: the gateway in front of this process does that.
+      if (url.pathname === "/files/download" && request.method === "GET") {
+        try {
+          const file = await workspace.download(
+            url.searchParams.get("path") ?? "",
+          );
+          return new Response(file.body, {
+            headers: downloadHeaders(file.name, file.bytes),
+          });
+        } catch (error) {
+          return json(
+            { error: describe(error, "The file could not be downloaded.") },
+            fileStatus(error),
+          );
+        }
+      }
+
       if (url.pathname === "/files/read" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as {
           path?: unknown;
@@ -1494,12 +1513,15 @@ function describe(error: unknown, fallback: string): string {
  * Which status a file failure deserves.
  *
  * A path outside the workspace is the caller asking for something it may never have, so 403: retrying
- * it unchanged will never work, and it is not a fault. A missing file or an oversized write is a 400,
- * because a different request would succeed. Collapsing both into 500 would tell the Bot the computer
- * is broken and invite it to try the same thing again.
+ * it unchanged will never work, and it is not a fault. A missing download is 404, an oversized
+ * download is 413, and an ordinary bad file request is 400, because a different request could
+ * succeed. Collapsing these into 500 would tell the caller the computer is broken and invite a retry
+ * of the same request.
  */
-function fileStatus(error: unknown): 400 | 403 | 500 {
+function fileStatus(error: unknown): 400 | 403 | 404 | 413 | 500 {
   if (error instanceof WorkspacePathError) return 403;
+  if (error instanceof WorkspaceFileTooLargeError) return 413;
+  if (error instanceof WorkspaceFileNotFoundError) return 404;
   if (error instanceof WorkspaceFileError) return 400;
   return 500;
 }

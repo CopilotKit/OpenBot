@@ -42,14 +42,19 @@ export function createApprovalRoutes(
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
   routes.onError((error, context) =>
-    context.json(
-      { error: error.message },
-      error instanceof ApprovalNotFoundError
-        ? 404
-        : error instanceof ApprovalRefusedError || error instanceof z.ZodError
-          ? 400
-          : 500,
-    ),
+    // A body that is not JSON is the caller's mistake, as the delivery routes answer it, not a
+    // 500 carrying the parser's message.
+    error instanceof SyntaxError
+      ? context.json({ error: "Supply a valid request." }, 400)
+      : context.json(
+          { error: error.message },
+          error instanceof ApprovalNotFoundError
+            ? 404
+            : error instanceof ApprovalRefusedError ||
+                error instanceof z.ZodError
+              ? 400
+              : 500,
+        ),
   );
   routes.get("/", async (context) =>
     context.json(await service.inbox(context.var.actor.id)),

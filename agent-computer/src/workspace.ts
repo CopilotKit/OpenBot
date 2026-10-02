@@ -55,6 +55,10 @@ export class WorkspaceFileError extends Error {
   }
 }
 
+export class WorkspaceFileNotFoundError extends WorkspaceFileError {}
+
+export class WorkspaceFileTooLargeError extends WorkspaceFileError {}
+
 export type WorkspaceLimits = {
   /**
    * Most bytes a read hands back.
@@ -67,6 +71,8 @@ export type WorkspaceLimits = {
   writeBytes: number;
   /** Most entries a listing describes, so a Bot cannot paste a whole disk into its own context. */
   listEntries: number;
+  /** Most bytes one download may stream, so a large artifact cannot exhaust the connection. */
+  downloadBytes: number;
 };
 
 /**
@@ -88,6 +94,7 @@ export const DEFAULT_WORKSPACE_LIMITS: WorkspaceLimits = {
   readBytes: 64_000,
   writeBytes: 1_000_000,
   listEntries: 500,
+  downloadBytes: 100 * 1024 * 1024,
 };
 
 export function createWorkspace(
@@ -134,7 +141,7 @@ export function createWorkspace(
       realAnchor = await realpath(anchor);
     } catch {
       if (!forWrite) {
-        throw new WorkspaceFileError(`There is no file at ${wanted}.`);
+        throw new WorkspaceFileNotFoundError(`There is no file at ${wanted}.`);
       }
       // The parent directory does not exist yet. Walk up to the nearest one that does and verify it,
       // so a write into a new subdirectory is allowed but cannot be aimed through a symlink.
@@ -278,6 +285,45 @@ export function createWorkspace(
         text: slice.toString("utf8"),
         truncated: buffer.byteLength > slice.byteLength,
         bytes: buffer.byteLength,
+      };
+    },
+
+    /**
+     * Open a file as raw bytes for a download.
+     *
+     * The same `resolvePath` used by text reads enforces the workspace boundary, including symlink
+     * resolution. The file is streamed from disk rather than read into a string, so PDFs, images and
+     * archives are returned byte-for-byte and the text read limit does not apply.
+     */
+    async download(requested: string): Promise<{
+      path: string;
+      name: string;
+      bytes: number;
+      body: Blob;
+    }> {
+      const full = await resolvePath(requested, false);
+      const info = await stat(full).catch(() => null);
+      if (!info) {
+        throw new WorkspaceFileNotFoundError(
+          `There is no file at ${requested}.`,
+        );
+      }
+      if (!info.isFile()) {
+        throw new WorkspaceFileError(`${requested} is not a file.`);
+      }
+      if (info.size > limits.downloadBytes) {
+        throw new WorkspaceFileTooLargeError(
+          `That file is ${info.size} bytes and the download limit is ${limits.downloadBytes}.`,
+        );
+      }
+
+      return {
+        path: requested,
+        name: basename(requested.replace(/\\/g, "/")) || "download",
+        bytes: info.size,
+        // Bun serves this file without reading it into memory, and preserves the byte length a
+        // ReadableStream response loses. The caller still receives the raw bytes unchanged.
+        body: Bun.file(full),
       };
     },
 

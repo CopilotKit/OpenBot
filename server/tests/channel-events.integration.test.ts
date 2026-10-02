@@ -451,6 +451,27 @@ describe("channel change delivery", () => {
     expect(watched.of(other.id)).toEqual([]);
   });
 
+  test("announces nothing for deleting a channel already deleted", async () => {
+    const owner = await createTestUser("Twice-Deleting Member");
+    const other = await createTestUser("Other Member");
+    const channel = await createSharedChannel(owner, other);
+    await store.softDelete(owner, channel.id);
+
+    const hub = createChannelEventHub();
+    const watched = watch(hub, [owner.id, other.id]);
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      await expect(store.softDelete(owner, channel.id)).resolves.toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      await listener.stop();
+    }
+
+    expect(watched.of(owner.id)).toEqual([]);
+    expect(watched.of(other.id)).toEqual([]);
+  });
+
   test("announces nothing for a pin on a deleted channel", async () => {
     const owner = await createTestUser("Pinning Member");
     const channel = await createSharedChannel(

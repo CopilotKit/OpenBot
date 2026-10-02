@@ -577,6 +577,16 @@ describe("channel delete audit", () => {
     ]);
   });
 
+  test("a repeat delete answers 204 and writes no second row", async () => {
+    // The store's answer for a channel that was already deleted: nothing changed.
+    const response = await appWithAudit(
+      fakeStore({ softDelete: async () => false }),
+    ).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+    expect(audited).toEqual([]);
+  });
+
   /* Same discipline as bot-lifecycle-audit.test.ts: the trail records acts, not attempts. */
   test("a refused change writes nothing", async () => {
     const store = fakeStore({
@@ -1429,10 +1439,13 @@ describe("channel soft delete", () => {
     const created = await persistentStore.create(actor, [agentId]);
     createdChannelIds.push(created.id);
 
-    await persistentStore.softDelete(actor, created.id);
-    await expect(
-      persistentStore.softDelete(actor, created.id),
-    ).resolves.toBeUndefined();
+    await expect(persistentStore.softDelete(actor, created.id)).resolves.toBe(
+      true,
+    );
+    // Resolves rather than throws, and says it deleted nothing, so nothing is announced or recorded.
+    await expect(persistentStore.softDelete(actor, created.id)).resolves.toBe(
+      false,
+    );
   });
 
   test("refuses to delete a channel the caller is not a member of", async () => {

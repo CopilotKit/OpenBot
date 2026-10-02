@@ -150,6 +150,16 @@ describe("matching rule", () => {
     expect(fitted.action).toBe("created");
     expect(fitted.truncated).toBe(true);
   });
+  test("a payload whose top-level scalars alone exceed the cap is still fitted", () => {
+    // Forty 1000-character fields: before, this never returned.
+    const flat = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`field${i}`, "y".repeat(1000)]),
+    );
+    const fitted = fitPayload(flat);
+    expect(JSON.stringify(fitted).length).toBeLessThanOrEqual(32_768);
+    expect(fitted.field0).toBe("y".repeat(1000));
+    expect(fitted.truncated).toBe(true);
+  });
   test("config validation refuses a phrase listener with no phrases", () => {
     expect(() =>
       parseTriggerConfig({ kind: "slack", teamId: "T123", mode: "phrase" }),

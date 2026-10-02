@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { downloadHeaders } from "../../../shared/file-download";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
@@ -15,8 +16,10 @@ import {
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
+  WorkspaceTooLargeError,
 } from "./gateway";
 import type { PageFrameStore } from "./page-frames";
 import { dryRunAgainstHistory, REPLAYABLE_EVENT_TYPES } from "./policy-dry-run";
@@ -608,6 +611,35 @@ export function createComputerRoutes(
     }),
   );
 
+  /**
+   * A person downloading a file the Bot generated.
+   *
+   * This is a GET because a browser download is a navigation, not a JSON action. It still goes
+   * through the gateway, so the separate `computer_download_file` intent is decided and audited
+   * before the computer is asked for bytes. Ownership is enforced by the `/:botId/*` middleware
+   * above, and the response is always an opaque attachment so HTML cannot render on this origin.
+   */
+  routes.get("/:botId/files/download", async (context) => {
+    const path = context.req.query("path");
+    if (!path?.trim()) {
+      return context.json({ error: "A file path is required." }, 400);
+    }
+
+    try {
+      const file = await gateway.downloadFile(
+        context.req.param("botId"),
+        actorOf(context.var.actor),
+        { path: path.trim() },
+        context.req.raw.signal,
+      );
+      return new Response(file.body, {
+        headers: downloadHeaders(file.name, file.bytes),
+      });
+    } catch (error) {
+      return actionFailure(context, error);
+    }
+  });
+
   /*
    * A command on the Bot's computer.
    *
@@ -850,13 +882,7 @@ async function act(
   try {
     const result = await handler(
       botId,
-      {
-        id: record.id,
-        // Only a real users row may go in the audit table's foreign key column. The local development
-        // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
-        // it was is recorded in the payload regardless. See gateway.ts.
-        ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
-      },
+      actorOf(record),
       body,
       context.req.raw.signal,
     );
@@ -865,23 +891,7 @@ async function act(
     }
     return context.json(result as Record<string, unknown>);
   } catch (error) {
-    // A policy refusal is the product working. 403 with the rule that refused it, so the surface can
-    // tell the person which boundary they met rather than reporting a malfunction.
-    if (error instanceof ActionRefusedError) {
-      return context.json({ error: error.message, rule: error.rule }, 403);
-    }
-    // The computer refused the path itself, which is a different thing from the policy refusing this
-    // Bot. Same status, no rule attached, because there is no rule to go and edit.
-    if (error instanceof WorkspaceRefusedError) {
-      return context.json({ error: error.message }, 403);
-    }
-    // A 400, deliberately, NOT a 403. The surface treats 403 as "a boundary refused you" and renders
-    // it as Blocked, so returning it for "there is no file at notes.md" told both the person and the
-    // model that a policy had intervened when none had.
-    if (error instanceof WorkspaceRequestError) {
-      return context.json({ error: error.message }, 400);
-    }
-    return context.json(errorBody(error), statusFor(error));
+    return actionFailure(context, error);
   }
 }
 
@@ -892,6 +902,30 @@ async function act(
  * authentication module's internals; this is the one fact about it that matters here.
  */
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
+
+/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. */
+function actorOf(record: AppVariables["actor"]): ActionActor {
+  return {
+    id: record.id,
+    // Only a real users row may go in the audit table's foreign key column. The local development
+    // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
+    // it was is recorded in the payload regardless. See gateway.ts.
+    ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
+  };
+}
+
+/**
+ * One failure shape for JSON acting and binary download routes.
+ *
+ * A policy refusal names the rule; a workspace refusal does not, because there is no rule to edit.
+ * Keeping both here means the download route cannot accidentally turn a boundary into a 500.
+ */
+function actionFailure(context: ComputerContext, error: unknown) {
+  if (error instanceof ActionRefusedError) {
+    return context.json({ error: error.message, rule: error.rule }, 403);
+  }
+  return context.json(errorBody(error), statusFor(error));
+}
 
 function isBadRequest(value: unknown): value is BadRequest {
   return (
@@ -973,7 +1007,7 @@ function handoffId(body: Record<string, unknown> | null): string {
   return body.requestId;
 }
 
-function statusFor(error: unknown): 400 | 404 | 409 | 500 | 503 {
+function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
   if (error instanceof HandoffRequestError) return error.status;
   if (error instanceof StaleSnapshotError) return 409;
   // Same status as a stale snapshot and for the same reason: nothing is broken, the caller has to do
@@ -991,6 +1025,10 @@ function statusFor(error: unknown): 400 | 404 | 409 | 500 | 503 {
   ) {
     return 409;
   }
+  if (error instanceof WorkspaceRefusedError) return 403;
+  if (error instanceof WorkspaceRequestError) return 400;
+  if (error instanceof WorkspaceNotFoundError) return 404;
+  if (error instanceof WorkspaceTooLargeError) return 413;
   if (error instanceof ComputerUnavailableError) return 503;
   return 500;
 }

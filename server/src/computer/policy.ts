@@ -78,7 +78,7 @@ export type PolicyContext = {
    * `type`, text going into a field, including any other keypress.
    * `navigate`, opening a page.
    * `read`, looking at the page or listing what is on it.
-   * `write_file` / `read_file` / `list_files`, the workspace.
+   * `write_file` / `read_file` / `download_file` / `list_files`, the workspace.
    *
    * It still cannot see whether a keypress will submit a form, only that one is coming: a type
    * carrying `submit` reports `activate` because it ends in Enter, but a browser submits
@@ -93,6 +93,7 @@ export type PolicyContext = {
     | "navigate"
     | "read"
     | "read_file"
+    | "download_file"
     | "write_file"
     | "list_files"
     // A tool on somebody else's MCP server. Split by effect for the same reason as the browser
@@ -102,7 +103,7 @@ export type PolicyContext = {
     | "write_tool"
     | "run_command";
   /**
-   * The file a `computer_read_file` or `computer_write_file` call is aimed at.
+   * The file a `computer_read_file`, `computer_download_file` or `computer_write_file` call is aimed at.
    *
    * The path is as the Bot asked for it, relative to its workspace. Containment is not policy: a path
    * that tries to escape is refused by the computer itself and is not negotiable. A rule here is about

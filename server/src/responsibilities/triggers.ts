@@ -240,13 +240,21 @@ export function fitPayload(
 ): Record<string, unknown> {
   const whole = JSON.stringify(payload);
   if (whole.length <= MAX_EVENT_PAYLOAD) return payload;
+  // The scalars get half the cap. Uncapped, forty 1000-character fields filled it alone, the
+  // excerpt below could not shrink past "", and the loop that trims it never ended.
   const scalars: Record<string, unknown> = {};
+  let kept = 0;
   for (const [key, value] of Object.entries(payload))
     if (
       value === null ||
       ["string", "number", "boolean"].includes(typeof value)
-    )
-      scalars[key] = typeof value === "string" ? value.slice(0, 1000) : value;
+    ) {
+      const scalar = typeof value === "string" ? value.slice(0, 1000) : value;
+      const size = JSON.stringify({ [key]: scalar }).length;
+      if (kept + size > MAX_EVENT_PAYLOAD / 2) continue;
+      scalars[key] = scalar;
+      kept += size;
+    }
   const fitted: Record<string, unknown> = {
     truncated: true,
     ...scalars,

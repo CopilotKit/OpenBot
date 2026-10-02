@@ -7,6 +7,8 @@ import {
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
+  WorkspaceTooLargeError,
 } from "../src/computer/client";
 
 function clientWith(
@@ -25,6 +27,12 @@ function clientWith(
     screenshot: () => transport.call(baseUrl, botId, "/screenshot"),
     click: (input: unknown, signal?: AbortSignal) =>
       transport.post(baseUrl, botId, "/click", input, signal),
+    download: (path: string) =>
+      transport.download(
+        baseUrl,
+        botId,
+        `/files/download?path=${encodeURIComponent(path)}`,
+      ),
   };
 }
 
@@ -35,6 +43,51 @@ const ok = (body: unknown) =>
   });
 
 describe("computer client", () => {
+  describe("computer file downloads", () => {
+    test("returns raw bytes without decoding them as JSON", async () => {
+      const payload = Uint8Array.from([0, 255, 1, 2, 3]);
+      const seen: string[] = [];
+      const client = clientWith((url) => {
+        seen.push(url);
+        return new Response(payload, {
+          headers: { "content-length": String(payload.byteLength) },
+        });
+      });
+
+      const download = await client.download("reports/data.bin");
+
+      expect(download.bytes).toBe(payload.byteLength);
+      expect(
+        new Uint8Array(await new Response(download.body).arrayBuffer()),
+      ).toEqual(payload);
+      expect(seen).toEqual([
+        "http://agent-computer:4100/files/download?path=reports%2Fdata.bin",
+      ]);
+    });
+
+    test("refuses a successful response with no byte length", async () => {
+      const client = clientWith(() => new Response(Uint8Array.from([1, 2, 3])));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+    });
+
+    test.each([
+      [404, WorkspaceNotFoundError],
+      [413, WorkspaceTooLargeError],
+    ])("maps HTTP %i to its workspace error", async (status, errorType) => {
+      const client = clientWith(() =>
+        Response.json(
+          { error: "The file could not be downloaded." },
+          { status },
+        ),
+      );
+
+      await expect(client.download("x")).rejects.toBeInstanceOf(errorType);
+    });
+  });
+
   test("navigates and returns where it landed", async () => {
     const seen: string[] = [];
     const client = clientWith((url, init) => {

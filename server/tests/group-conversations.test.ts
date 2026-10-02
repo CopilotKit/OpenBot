@@ -60,3 +60,20 @@ test("a reply addresses peers by their whole @name, never itself", () => {
     [],
   );
 });
+
+test("a longer name at the same @ is the one addressed, and an email address is not a mention", () => {
+  const roster = [
+    { id: "ada", name: "Ada" },
+    { id: "ops", name: "Ops" },
+    { id: "lead", name: "Ops Lead" },
+    { id: "sam", name: "Sam" },
+  ];
+  const ids = (reply: string, speaker = "ada") =>
+    mentionedPeers(reply, roster, speaker).map((bot) => bot.id);
+  expect(ids("@Ops Lead please look")).toEqual(["lead"]);
+  expect(ids("@Ops Lead first, then @Ops")).toEqual(["lead", "ops"]);
+  // The speaker's own name still counts as the longer one.
+  expect(ids("I, @Ops Lead, will do it", "lead")).toEqual([]);
+  expect(ids("write to jo@sam.com")).toEqual([]);
+  expect(ids("(@Sam) can you check")).toEqual(["sam"]);
+});

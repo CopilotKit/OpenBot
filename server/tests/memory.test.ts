@@ -1,15 +1,20 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import type { AuthenticatedActor } from "../src/auth/guards";
+import type { MemoryIngestion } from "../src/memory/ingestion";
 import {
   normalizeConnectorRecords,
   quoteMemoryContext,
 } from "../src/memory/ingestion";
+import { createMemoryRoutes } from "../src/memory/routes";
+import type { MemoryStore } from "../src/memory/store";
 import { memoryTools } from "../src/memory/tools";
 import {
   parseMemoryInput,
   parseMemoryPatch,
   parseMemorySourceInput,
 } from "../src/memory/types";
+import { PluginRefusedError } from "../src/plugins/store";
 
 test("memory validates explicit facts and bounded source opt-in", () => {
   expect(
@@ -136,4 +141,24 @@ test("every memory tool can be offered to a remote Bot as JSON Schema", async ()
       sourceRef: null,
     },
   ]);
+});
+
+test("a source sync a connector's policy refuses answers 400 with the reason, not 503", async () => {
+  const routes = createMemoryRoutes(
+    {} as MemoryStore,
+    {
+      sync: async () => {
+        throw new PluginRefusedError("Tool refused by policy.", "deny-notion");
+      },
+    } as unknown as MemoryIngestion,
+    async (context, next) => {
+      context.set("actor", { id: "person" } as AuthenticatedActor);
+      await next();
+    },
+  );
+  const response = await routes.request("/sources/source-1/sync", {
+    method: "POST",
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "Tool refused by policy." });
 });

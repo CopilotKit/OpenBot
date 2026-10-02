@@ -26,6 +26,63 @@ A slim bar at the top of the signed-in app links to CopilotKit's engineers for h
 OpenBot. Closing it is saved to your preferences, so it stays closed on every device. A fork running
 OpenBot for its own organization hides it for everybody with `OPENBOT_SELF_HOST_BANNER=false`.
 
+### A request to the approvals API that is not JSON answers 400
+
+A body that could not be parsed as JSON, sent to any approvals route that reads one, such as
+`PATCH /api/approvals/preferences` or `POST /api/approvals/rules`, answered 500 with the parser's own
+message. It now answers 400 "Supply a valid request.", as the delivery routes do.
+
+### Syncing a memory source a policy refuses says why
+
+When a connected app's policy refused the read behind a memory source's sync, `POST
+/api/memory/sources/:id/sync` answered 503 "Memory is unavailable. Try again.", although the
+refusal's own sentence was already saved on the source. It now answers 400 with that sentence, as
+the plugin routes do for the same refusal.
+
+### `@Ops Lead` in a group addresses Ops Lead, not Ops as well
+
+In a group conversation, a reply naming `@Ops Lead` also addressed a Bot called Ops, because the
+shorter name matched at the same `@`, so both answered. An email address addressed a Bot by its
+domain: `jo@sam.com` reached a Bot called Sam. Where two names start at the same `@`, only the
+longer one is now addressed, and an `@` straight after a letter or digit is not a mention.
+
+### A webhook with many long top-level fields no longer stops the server
+
+A trigger's event is cut to 32 KiB before it is recorded, keeping each top-level text field up to
+1000 characters and an excerpt of the rest. A flat payload whose fields alone came to more than
+that, such as forty 1000-character fields, left the excerpt nothing to give up, and the loop
+trimming it never ended. That loop runs on the server's only thread, so every request stopped being
+answered. The kept fields now get at most half the space, and the rest is still in the excerpt.
+
+### A malformed IP range in an egress rule is refused instead of widening the rule
+
+An egress `cidr` rule written `10.0.0.5/` was stored as `10.0.0.5/0`, which is every IPv4
+address, so a typo for one host opened an allow-list to all of them. `/0x8` and `10.0.0.0/8/9` were
+accepted the same way. A zone id such as `fe80::1%eth0` was accepted too, and then threw from the
+filter on the first connection that policy judged. Each is now refused when the rule is saved, with
+the sentence a malformed range already got. A rule like this saved earlier matches nothing.
+
+### Deleting a channel twice is recorded once
+
+A second `DELETE` of the same channel, from a retry or a second tab, still answers 204 as before.
+It no longer tells every member again, and no longer writes another `channel.deleted` row to the
+audit trail for a deletion that did not happen.
+
+### A Bot's saved reply in a group is no longer replaced by a later error
+
+In a group conversation, a Bot's reply was saved, then handed on: to Activity, to any consent
+cards, and to the Bots it named. A fault in that hand-on, such as the audit trail being
+unreachable, wrote the error's text over the saved reply and marked it failed, and a retry did not
+bring the reply back. The reply now stays as saved, and the fault is logged as
+`group-turn-after-reply-error`.
+
+### The egress filter reaches an IPv6 upstream proxy and asks it for IPv6 hosts correctly
+
+An upstream proxy configured at an IPv6 address, such as `http://[fd00::1]:3128`, could not be
+reached: the filter handed the address to the socket with its brackets, and the socket looked it up
+as a name. A `CONNECT` to an IPv6 host was also sent to the upstream without the brackets an
+authority needs, as `CONNECT ::1:443`. Both now work.
+
 ### The Helm chart configures Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 
 These settings had no chart values and could only be passed through `config.extraEnv`. They now have
@@ -139,6 +196,16 @@ A routine that fails ten times in a row is switched off, and someone has to swit
   first-failure message never appeared.
 - **Now:** failures are counted from when the routine was last switched on, recorded in a new
   `routines.enabled_at` column. The migration sets it to the time of the upgrade, so any failure
+  streak already under way starts again from zero at that point.
+
+### Generated workspace files can be downloaded intact
+
+`GET /api/computers/:botId/files/download?path=...` streams a generated file as an opaque
+attachment instead of returning the 64 KB UTF-8 text extract. Downloads use the separate
+`computer_download_file` / `download_file` permission, remain confined to the Bot workspace, are
+capped at 100 MiB with `413`, and are recorded on the computer audit trail. Existing read, list and
+write APIs are unchanged.
+
   streak already under way starts again from zero at that point. Adds migration
   `0051_routine_enabled_at`.
 

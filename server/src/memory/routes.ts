@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
+import { PluginRefusedError } from "../plugins/store";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
 import { MemoryNotFoundError, MemoryRefusedError } from "./types";
@@ -15,7 +16,12 @@ export function createMemoryRoutes(
   routes.onError((error, context) => {
     if (error instanceof MemoryNotFoundError)
       return context.json({ error: error.message }, 404);
-    if (error instanceof MemoryRefusedError)
+    // A connector's policy refusing the read is an answer to give the person, as it is on the
+    // plugin routes, and the same sentence `sync` saves on the source.
+    if (
+      error instanceof MemoryRefusedError ||
+      error instanceof PluginRefusedError
+    )
       return context.json({ error: error.message }, 400);
     console.error(
       JSON.stringify({

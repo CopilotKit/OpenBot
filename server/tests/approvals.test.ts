@@ -716,3 +716,25 @@ test.each([
   expect(continued).toHaveLength(1);
   expect(continued[0]?.result.error).toContain("Not done");
 });
+
+test("a request body that is not JSON answers 400, not a 500 with the parser's message", async () => {
+  const routes = createApprovalRoutes(
+    {} as serviceModule.ApprovalService,
+    async (ctx, next) => {
+      ctx.set("actor", {
+        id: "owner",
+        email: "owner@example.com",
+        role: "user",
+      });
+      await next();
+    },
+  );
+  for (const [method, path] of [
+    ["PATCH", "/preferences"],
+    ["POST", "/rules"],
+  ]) {
+    const response = await routes.request(path, { method, body: "{oops" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Supply a valid request." });
+  }
+});

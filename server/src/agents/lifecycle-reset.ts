@@ -61,7 +61,8 @@ export type BotReset = ReturnType<typeof createBotReset>;
 
 export function createBotReset(options: {
   database: Database;
-  softDeleteChannel: (actor: AgentActor, channelId: string) => Promise<void>;
+  // Whether the channel was still there to delete is the store's business, not the reset's.
+  softDeleteChannel: (actor: AgentActor, channelId: string) => Promise<unknown>;
 }) {
   const { database, softDeleteChannel } = options;
 

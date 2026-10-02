@@ -460,20 +460,38 @@ export function groupTurnMessage(
  * The peers a reply addresses, in the order the reply names them.
  *
  * `@Name` with the whole name, case-insensitive, and not followed by more of a word, so a Bot called
- * "Ops" is not addressed by "@Opsgenie". Never the speaker itself.
+ * "Ops" is not addressed by "@Opsgenie". Not preceded by one either, so "jo@sam.com" does not
+ * address "Sam". Where two names start at the same `@`, the longer one is meant: "@Ops Lead"
+ * addresses "Ops Lead" and not "Ops". Never the speaker itself.
  */
 export function mentionedPeers(
   reply: string,
   roster: readonly GroupBot[],
   speakerId: string,
 ): GroupBot[] {
-  return roster
-    .flatMap((bot) => {
-      if (bot.id === speakerId || !bot.name.trim()) return [];
-      const name = bot.name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const at = reply.search(new RegExp(`@${name}(?![\\p{L}\\p{N}_])`, "iu"));
-      return at < 0 ? [] : [{ bot, at }];
-    })
+  // The speaker is matched too, so that its own longer name still hides a shorter peer's.
+  const hits = roster.flatMap((bot) => {
+    if (!bot.name.trim()) return [];
+    const name = bot.name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}_])@${name}(?![\\p{L}\\p{N}_])`,
+      "giu",
+    );
+    return Array.from(reply.matchAll(pattern), (match) => ({
+      bot,
+      at: match.index,
+      length: match[0].length,
+    }));
+  });
+  const first = new Map<string, { bot: GroupBot; at: number }>();
+  for (const hit of hits) {
+    if (hit.bot.id === speakerId || first.has(hit.bot.id)) continue;
+    const shadowed = hits.some(
+      (other) => other.at === hit.at && other.length > hit.length,
+    );
+    if (!shadowed) first.set(hit.bot.id, hit);
+  }
+  return [...first.values()]
     .sort((left, right) => left.at - right.at)
     .map(({ bot }) => bot);
 }
@@ -780,6 +798,12 @@ export function createGroupConversations(deps: {
     // Partial text, written at most this often, so the transcript shows the reply as it arrives.
     let latest: string | null = null;
     let writing: Promise<void> | null = null;
+    // How far past the save this turn got, so a fault after it finishes what never started without
+    // repeating what did: consents are collected once, and a relay that began may have sent hops.
+    let saved = false;
+    let savedReply = "";
+    let consentsPosted = false;
+    let relayStarted = false;
     let lastWrite = 0;
     const every = deps.progressEveryMs ?? 400;
     const flush = () => {
@@ -850,10 +874,53 @@ export function createGroupConversations(deps: {
         return;
       }
       await deps.store.finish(id, result.replyText, "completed");
+      saved = true;
+      savedReply = result.replyText;
       await deps.activity?.(turn, agentId, result.replyText, `group:${id}`);
+      consentsPosted = true;
       await postConsents(turn, agentId, threadId, id, consents);
+      relayStarted = true;
       await relay(turn, bot, id, result.replyText, bots, runId);
     } catch (error) {
+      // The reply is already saved: a fault handing it on is not this Bot's answer failing, and
+      // writing it over the row would replace a good reply with an error that no retry repairs.
+      if (saved) {
+        console.error(
+          JSON.stringify({
+            type: "group-turn-after-reply-error",
+            error: error instanceof Error ? error.message : String(error),
+            context: { channelId: turn.channelId, agentId, rowId: id },
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        const unfinished = async (step: string, run: () => Promise<void>) => {
+          try {
+            await run();
+          } catch (stepError) {
+            console.error(
+              JSON.stringify({
+                type: "group-turn-after-reply-error",
+                step,
+                error:
+                  stepError instanceof Error
+                    ? stepError.message
+                    : String(stepError),
+                context: { channelId: turn.channelId, agentId, rowId: id },
+                timestamp: new Date().toISOString(),
+              }),
+            );
+          }
+        };
+        if (!consentsPosted)
+          await unfinished("consents", () =>
+            postConsents(turn, agentId, threadId, id, consents),
+          );
+        if (!relayStarted)
+          await unfinished("relay", () =>
+            relay(turn, bot, id, savedReply, bots, runId),
+          );
+        return;
+      }
       await writing;
       await postConsents(turn, agentId, threadId, id, consents);
       if (error instanceof HeadlessToolSuspension)

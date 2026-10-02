@@ -197,7 +197,11 @@ export type ChannelStore = {
    * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
    * tenant package defines, which configuration owns rather than any member.
    */
-  softDelete(actor: AgentActor, channelId: string): Promise<void>;
+  /**
+   * True when this call deleted the channel; false when it was already deleted. A repeat is a
+   * no-op, so it announces nothing and its route records nothing.
+   */
+  softDelete(actor: AgentActor, channelId: string): Promise<boolean>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -661,7 +665,7 @@ export function createChannelStore(
     },
 
     async softDelete(actor, channelId) {
-      await database.transaction(
+      return await database.transaction(
         async (transaction) => {
           const [row] = await transaction
             .select({ packageId: channels.packageId })
@@ -681,10 +685,17 @@ export function createChannelStore(
             throw new ChannelPackageOwnedError(channelId);
           }
           // The guard on deletedAt is what makes a repeat call a no-op rather than a new stamp.
-          await transaction
+          const stamped = await transaction
             .update(channels)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
-            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+            .returning({ id: channels.id });
+          /*
+           * And the rest of the no-op: a repeat changed nothing, so nothing is announced. Without
+           * this, every repeat told every member again, and the route wrote another
+           * `channel.deleted` row to an append-only trail for a deletion that had not happened.
+           */
+          if (stamped.length === 0) return false;
 
           // Read on this transaction, so the members told are the ones the channel had when it was
           // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
@@ -713,6 +724,7 @@ export function createChannelStore(
           await transaction.execute(
             sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
           );
+          return true;
         },
         { isolationLevel: "read committed" },
       );
@@ -1201,8 +1213,9 @@ export function createChannelRoutes(
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
-      await store.softDelete(context.var.actor, channelId);
-      await recordDeleted(context, channelId);
+      const deleted = await store.softDelete(context.var.actor, channelId);
+      // A repeat is still 204, but it deleted nothing, and the trail records acts, not attempts.
+      if (deleted !== false) await recordDeleted(context, channelId);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);

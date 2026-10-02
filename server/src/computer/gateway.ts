@@ -41,8 +41,10 @@ export {
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
+  WorkspaceTooLargeError,
 } from "./client";
 
 import type { PageFrameStore } from "./page-frames";
@@ -59,6 +61,7 @@ import type {
   ClickInput,
   ComputerStatus,
   ControlState,
+  DownloadFileInput,
   HumanInput,
   HumanInputResult,
   KeyInput,
@@ -179,6 +182,16 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: ReadFileInput,
   ): Promise<ReadFileResult>;
+  downloadFile(
+    botId: string,
+    actor: ActionActor,
+    input: DownloadFileInput,
+    signal?: AbortSignal,
+  ): Promise<{
+    body: ReadableStream<Uint8Array>;
+    bytes: number;
+    name: string;
+  }>;
   listFiles(
     botId: string,
     actor: ActionActor,
@@ -365,6 +378,13 @@ export function createComputerGateway(
    * told the computer did not respond while the command ran on to completion inside the container.
    */
   const COMMAND_BACKSTOP_MS = 615_000;
+
+  /*
+   * A download has no command-like budget of its own. The computer refuses oversized files before
+   * streaming, but a large permitted file can still outlive the ordinary request deadline on a slow
+   * link. Five minutes is a backstop, not a size limit.
+   */
+  const DOWNLOAD_BACKSTOP_MS = 300_000;
 
   /** Read-only, so it passes straight through. Nothing has changed and there is nothing to decide. */
   async function screenshot(botId: string): Promise<ScreenshotResult> {
@@ -1092,6 +1112,40 @@ export function createComputerGateway(
     },
 
     /**
+     * The bytes leave the workspace, which is a different permission from letting a Bot read them.
+     *
+     * The decision and audit row use `computer_download_file` / `download_file`; a deployment can
+     * therefore allow `computer_read_file` while refusing this, or the reverse. The computer returns
+     * a stream, so the size limit is enforced there before any bytes are sent.
+     */
+    downloadFile(
+      botId: string,
+      actor: ActionActor,
+      input: DownloadFileInput,
+      signal?: AbortSignal,
+    ) {
+      return govern(
+        "computer_download_file",
+        botId,
+        actor,
+        { filePath: input.path, ...(signal ? { signal } : {}) },
+        async () => {
+          const download = await transport.download(
+            await locate(botId),
+            botId,
+            `/files/download?path=${encodeURIComponent(input.path)}`,
+            signal,
+            DOWNLOAD_BACKSTOP_MS,
+          );
+          return {
+            ...download,
+            name: describeFile(input.path).name || "download",
+          };
+        },
+      );
+    },
+
+    /**
      * Listing is governed too, and for the same reason the read is: what a Bot has accumulated over
      * every task it has run is worth being able to restrict. A rule denying a folder hides it from the
      * listing as well as from reads, which is the consistent answer.
@@ -1223,6 +1277,8 @@ export function intentOf(
       return "read";
     case "computer_read_file":
       return "read_file";
+    case "computer_download_file":
+      return "download_file";
     case "computer_write_file":
       return "write_file";
     case "computer_run_command":

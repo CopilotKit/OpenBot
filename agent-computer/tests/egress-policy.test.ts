@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createServer } from "node:http";
-import { connect } from "node:net";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import { connect, type Socket } from "node:net";
 import {
   egressDecision,
   egressFor,
@@ -102,6 +102,17 @@ describe("the network policy rules", () => {
         .ok,
     ).toBe(false);
     expect(parseEgressPolicy({ mode: "sometimes", rules: [] }).ok).toBe(false);
+    // Each of these once read as some other range: "" and "0x0" as /0, which is every address.
+    for (const value of [
+      "10.0.0.5/",
+      "10.0.0.0/0x8",
+      "10.0.0.0/8/9",
+      "10.0.0.0/ 8",
+      "fe80::1%eth0",
+      "fe80::%eth0/64",
+    ]) {
+      expect(parseEgressRules([{ type: "cidr", value }]).ok).toBe(false);
+    }
     expect(
       parseEgressRules([
         { type: "domain", value: "Example.COM" },
@@ -403,6 +414,83 @@ describe("the filter proxy", () => {
       expect(reached).toBe(1);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  /** Send one raw request through the filter as Bot "sales" and read the whole answer. */
+  function throughFilter(filterPort: number, request: string) {
+    const secret = egressFor("sales", {})?.password;
+    const auth = `Proxy-Authorization: Basic ${Buffer.from(`sales:${secret}`).toString("base64")}\r\n`;
+    return new Promise<string>((resolve, reject) => {
+      const socket = connect(filterPort, "127.0.0.1", () => {
+        socket.write(request.replace("\r\n\r\n", `\r\n${auth}\r\n`));
+      });
+      let seen = "";
+      socket.setTimeout(5_000, () => socket.destroy(new Error("timed out")));
+      socket.on("data", (chunk) => {
+        seen += chunk.toString();
+        if (seen.includes("reached")) socket.end();
+      });
+      socket.on("end", () => resolve(seen));
+      socket.on("error", reject);
+    });
+  }
+
+  async function listenOnIpv6Loopback(server: Server) {
+    await new Promise<void>((resolve) => server.listen(0, "::1", resolve));
+    const address = server.address();
+    return typeof address === "object" && address ? address.port : 0;
+  }
+
+  test("a plain-HTTP request to an IPv6 address is forwarded, not looked up as a name", async () => {
+    const server = createServer((_request, response) =>
+      response.end("reached"),
+    );
+    const port = await listenOnIpv6Loopback(server);
+    const filter = await startEgressFilter({ env: {} });
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    try {
+      const answer = await throughFilter(
+        filter.port,
+        `GET http://[::1]:${port}/ HTTP/1.1\r\nHost: [::1]:${port}\r\nConnection: close\r\n\r\n`,
+      );
+      expect(answer).toContain("reached");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("an upstream proxy at an IPv6 address is reached, and is asked for an IPv6 host in brackets", async () => {
+    const asked: string[] = [];
+    const upstream = createServer((request, response) => {
+      asked.push(request.url ?? "");
+      response.end("reached");
+    });
+    upstream.on("connect", (request: IncomingMessage, socket: Socket) => {
+      asked.push(request.url ?? "");
+      socket.end("HTTP/1.1 200 Connection Established\r\n\r\nreached");
+    });
+    const port = await listenOnIpv6Loopback(upstream);
+    const filter = await startEgressFilter({
+      env: { EGRESS_PROXY_DEFAULT: `http://[::1]:${port}` },
+    });
+    setEgressPolicy("sales", { mode: "allow_all", rules: [] });
+    try {
+      expect(
+        await throughFilter(
+          filter.port,
+          "GET http://site.example.test/ HTTP/1.1\r\nHost: site.example.test\r\nConnection: close\r\n\r\n",
+        ),
+      ).toContain("reached");
+      expect(
+        await throughFilter(
+          filter.port,
+          "CONNECT [2001:db8::1]:443 HTTP/1.1\r\nHost: [2001:db8::1]:443\r\n\r\n",
+        ),
+      ).toContain("reached");
+      expect(asked).toEqual(["http://site.example.test/", "[2001:db8::1]:443"]);
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
     }
   });
 
