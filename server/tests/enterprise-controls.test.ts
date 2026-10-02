@@ -141,6 +141,19 @@ describe("the computer boundary overlay", () => {
     );
   });
 
+  test("the computer switch refuses downloading a workspace file", () => {
+    const off = (capability: string) =>
+      snapshot({ rows: [row("organization", "", capability, false)] });
+    const download = context({
+      tool: { name: "computer_download_file" },
+      intent: "download_file",
+    });
+    expect(decideFromSnapshot(off("cloudComputer"), download)?.matched).toBe(
+      "capability:cloudComputer",
+    );
+    expect(decideFromSnapshot(off("cloudBrowser"), download)).toBeNull();
+  });
+
   test("a group grant reaches the snapshot's members", () => {
     const current = snapshot({
       rows: [
