@@ -7,8 +7,7 @@ with the binaries. See [desktop build versions](releasing.md#desktop-build-versi
 The [Desktop Windows signing workflow](../.github/workflows/desktop-signing.yml)
 builds OpenBot and its NSIS installer with the existing DigiCert certificate in
 Azure Key Vault. It retains verified binaries and signature evidence as Actions
-artifacts for 14 days. It does not create or publish a release. Desktop version
-`0.0.0` remains a validation build.
+artifacts for 14 days. It does not create or publish a release.
 
 Ordinary Desktop CI and fork PR builds remain unsigned. The
 `tauri.windows-signing.conf.json` overlay is passed explicitly to Tauri only by
@@ -17,13 +16,13 @@ automatically merges that filename into every Windows build.
 
 ## Request a signed validation build
 
-Before this workflow is merged to `main`, add the `windows-signing` label to a
+To sign a pull request's build, add the `windows-signing` label to a
 same-repository PR and approve its `windows-signing` environment deployment.
 The workflow checks out the exact PR head SHA from the labeling event. New
 pushes run the regression job; remove and reapply the label to sign the new SHA.
 Fork PRs cannot enter this signing job. There is no `pull_request_target` trigger.
 
-After merge, use **Actions → Desktop Windows signing → Run workflow**, select the
+To sign any ref, use **Actions → Desktop Windows signing → Run workflow**, select the
 ref to validate, and set `signing-mode` to `keyvault`. The default `none` runs
 only credential-free regressions. Environment reviewers should check the exact
 source SHA and workflow changes before approving access to the publisher's key.

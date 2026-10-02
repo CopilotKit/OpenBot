@@ -42,7 +42,7 @@ at `agent-langgraph` on a laptop.
 
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
-| `PORT`               | `3001`                             | API server port.                                                    |
+| `PORT`               | `3001`                             | API server port. `SERVER_PORT` names the same port; set either, or both to the same value, or the server refuses to start. |
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
@@ -63,7 +63,7 @@ at `agent-langgraph` on a laptop.
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
-| `OPENBOT_ACCESSIBILITY_DISABLED` | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
+| `OPENBOT_ACCESSIBILITY_DISABLED` | unset | `true` or `1` stops naming OpenBot on the analytics the runtime already sends. |
 | `COMPOSIO_API_KEY`   | unset                              | One key for the whole deployment, for the broker that holds people's accounts for a few hundred apps. Unset, there is nothing to connect, nothing to grant and no Composio tool for a Bot to call; what remains is one row that goes nowhere, under **More apps** on the admin Plugins page, naming this variable. See [Composio](plugins/composio.md). |
 
 **`OPENBOT_GENERATIVE_UI`** enables generated interfaces by default: streamed HTML/CSS/JavaScript
@@ -132,7 +132,8 @@ in-cluster Service address.
 
 `shared/model-providers.json` is one file, and every language in the box reads it: the TypeScript
 Bots through `shared/model-providers.ts`, the Python Bots through `shared/model_providers.py`, and
-any other implementation straight as JSON. It has two sections — the facts per provider, and the
+any other implementation straight as JSON. The one Bot that does not is `agent-claude-sdk`, which has
+no `bots` row. It has two sections: the facts per provider, and the
 provider and model each Bot runs:
 
 ```json
@@ -233,7 +234,7 @@ the chat model provider; neither `OPENAI_BASE_URL` nor `OPENAI_API_KEY` is inher
 
 For OpenAI, set the base URL to `https://api.openai.com/v1` and select an available transcription
 model such as `gpt-transcribe`. A compatible local endpoint can instead use
-`http://localhost:8000/v1` and its own model name. Compatibility with chat completions alone does
+`http://127.0.0.1:8000/v1` and its own model name. Compatibility with chat completions alone does
 not imply transcription support. See the [OpenAI transcription guide](https://developers.openai.com/api/docs/guides/speech-to-text).
 
 The composer shows the microphone when the service is configured. Browser microphone access needs
@@ -330,8 +331,11 @@ policies apply. See [OpenAI WebRTC](https://developers.openai.com/api/docs/guide
 | `OPENBOT_ORGANIZATION_AUTH_URL` | An OpenBot deployment that verifies employee identity and roles. Decides sign-in ahead of `OPENBOT_SINGLE_USER`. |
 
 **Some variables belong to the desktop app, not to you.** A desktop installation writes these into
-its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`
-and `CLAUDE_CODE_OAUTH_TOKEN`. When a model provider is connected by OAuth rather than by key, the
+its own deployment's `.env` and owns their values: `OPENBOT_MODEL_OAUTH_FILE`, `CHATGPT_AUTH_FILE`,
+`CLAUDE_CODE_OAUTH_TOKEN`, and the `PICKED_HARNESS_*` names that describe the Bot picked during setup
+(`PICKED_HARNESS_IMAGE`, `PICKED_HARNESS_URL`, `PICKED_HARNESS_PORT` and the rest). The server reads
+`PICKED_HARNESS_IMAGE` and `PICKED_HARNESS_URL` to hand that Bot `MANAGED_AGENT_TOKEN`, and refuses to
+start when they are set without it. When a model provider is connected by OAuth rather than by key, the
 desktop also points `OPENAI_BASE_URL` at OpenBot's own loopback route and sets `OPENAI_API_KEY` to a
 local proxy credential rather than a provider key, so those two do not mean what the table above says
 in that mode. A server you configure yourself is unaffected by all of this.
@@ -340,7 +344,7 @@ in that mode. A server you configure yourself is unaffected by all of this.
 nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
 configure, because a public URL where every visitor is an administrator fails silently. `NODE_ENV`
 does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
-configuration at all.
+configuration at all. `OPENBOT_DEV_NO_AUTH=true`, the flag's former name, is still honoured.
 
 **But not on a public address.** The flag says you meant an open deployment; it does not say who can
 reach it. If `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL` or any `TRUSTED_ORIGINS` entry is an address
@@ -509,6 +513,18 @@ SNS asks.
 Both are needed. With either missing, the email route is not mounted, and an email trigger has no
 address: its page and the Bot both say inbound email is not configured on this deployment.
 
+## Automatic Learning
+
+Learning is on by default; with no container assigned, nothing is collected or delivered and the
+deployment still starts and chats. Both variables are optional defaults that an administrator's saved
+settings under **Admin → Automatic Learning** override, including a saved off. See
+[automatic-learning.md](automatic-learning.md).
+
+| Variable                                 | Meaning                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` | Default Learning container for this deployment's Bots. 1 to 64 lowercase letters, digits and single hyphens, or the server refuses to start. |
+| `CPK_INTELLIGENCE_SKILLS_REVISION`       | An exact published skills revision to pin. Read only beside a container id. Unset follows the latest. |
+
 ## OpenTelemetry export
 
 Every audit row is also sent as an OTLP log record over HTTP, so a SIEM or an OpenTelemetry
@@ -548,7 +564,7 @@ is still the record.
 `COMPUTER_SANDBOX` is not the cluster sandbox provider. A Kubernetes deployment can instead run each
 computer as a sandboxed pod, selected by `COMPUTER_SANDBOX_NAMESPACE` with `COMPUTER_SANDBOX_IDLE_AFTER`
 and `COMPUTER_SANDBOX_TEMPLATE_FILE` beside it; those are set by the Helm chart, not by Compose, and
-are covered in [charts/openbot/README.md](../../charts/openbot/README.md). The similarly named
+are covered in [charts/openbot/README.md](../charts/openbot/README.md). The similarly named
 `COMPUTER_SANDBOX` above only toggles Chromium's own process sandbox on a Docker computer.
 
 Changing `COMPUTER_BROWSER_MODE` affects new supervised computers. A computer that already exists is
@@ -842,15 +858,24 @@ agents:
     title: Risk & Compliance
     role_description: Investigate policies and controls.
     type: remote-ag-ui
-    endpoint: ${MANAGED_AGENT_AG_UI_URL}
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
 ```
 
 Each agent requires `id`, `name`, `title`, `role_description`, and `type`.
 
-| Type           | Required field  |
-| -------------- | --------------- |
-| `built-in`     | `system_prompt` |
-| `remote-ag-ui` | `endpoint`      |
+| Type            | Required field  |
+| --------------- | --------------- |
+| `built-in`      | `system_prompt` |
+| `remote-ag-ui`  | `endpoint`      |
+| `remote-mastra` | `endpoint`, and optionally `remote_agent_id` to pick one agent on that Mastra server |
+
+A remote agent whose `endpoint` resolves to an empty string is left out rather than refused, and it
+is dropped from every channel's `permitted_agents` too. That is how the example package carries a row
+for a Bot that only exists once something is configured.
+
+An agent may list `skills:`, slugs of skills this package ships in `skills.yaml`. A slug the package
+does not ship, or the same slug twice, stops the server. Two agents with the same `id` in
+`agents.yaml` stop it as well.
 
 The two types are told different amounts, which is easy to miss. A `built-in` agent gets its
 `system_prompt`; a `remote-ag-ui` agent has none, and its `role_description` is the only instruction
@@ -909,7 +934,7 @@ channels:
     allowed_groups: [risk, compliance]
 ```
 
-Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allowed_groups`. Every `permitted_agents` entry must match an agent id.
+Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allowed_groups`. Every `permitted_agents` entry must match an agent id. A channel `id` declared twice, or an agent listed twice in one channel, stops the server.
 
 `allowed_groups` is validated and stored, and nothing reads it. It decides nothing today, and a
 deployment that writes one must not treat it as an access control. Both halves of that control are
@@ -932,7 +957,7 @@ model:
   default_model: gpt-5.6-terra
 ```
 
-`provider` must be `openai`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
+`provider` must be `openai` or `anthropic`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
 
 ### `knowledge.yaml`
 
@@ -968,7 +993,7 @@ Refs are `serverId/toolName`, the same form a grant is written in. A package may
 
 One slug is load-bearing. A Bot granted `skill-creator` is offered the four tools that let a conversation end in a saved skill, so a package shipping that skill should also grant it to a Bot in `agents.yaml` — shipping it and granting it to nobody boots a deployment where writing a skill in the composer quietly does nothing. It declares no `tools`, and should not: those four are the app's own rather than a connector's, so they are not `serverId/toolName` refs. See [architecture.md](architecture.md#writing-a-skill-in-a-conversation).
 
-Slugs are lowercase letters, digits and hyphens. If a package ships a slug somebody in the deployment already wrote a skill under, theirs keeps the name, the package loses that skill, and startup continues.
+Slugs are 2 to 40 lowercase letters, digits and hyphens, starting and ending with a letter or digit, the same rule the skills API and the app's form apply. A slug declared twice in `skills.yaml` stops the server. If a package ships a slug somebody in the deployment already wrote a skill under, theirs keeps the name, the package loses that skill, and startup continues.
 
 Omit the file entirely for a package with no skills.
 

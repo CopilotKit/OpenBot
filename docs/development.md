@@ -54,7 +54,7 @@ Use `bun run dev` only when you want the app and API server without starting the
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 
-`start.sh` leaves existing matching services alone and reports when a port is held by another process.
+`start.sh` hands every selected Docker service to `docker compose up -d` on every run, so one whose configuration changed is recreated and an unchanged one is left as it is. It leaves an API server or app that already answers as OpenBot alone, restarts the API server when it refuses the worker's secret or has no routines route, and reports when a port is held by another process.
 
 **Nothing here sweeps staged attachments.** A file dropped into the composer is stored before the
 message is sent, and the only thing that reclaims the ones never sent is

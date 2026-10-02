@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffRunner,
@@ -67,7 +67,11 @@ const desk = createHandoffDesk({
 });
 
 async function clean() {
-  await database.delete(workItems).where(like(workItems.key, `${RUN}%`));
+  // By the suite's own actor, which every hop's payload carries. A hop's key is `hop:<hash>:<hash>`,
+  // so a key prefix matches nothing, and a hop left queued is claimed by the next suite's sweep.
+  await database
+    .delete(workItems)
+    .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
   for (const id of [ASKER, TARGET]) {
     await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
     await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));

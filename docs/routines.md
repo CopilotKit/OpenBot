@@ -37,7 +37,8 @@ deleting one is not required.
 
 A routine that fails posts exactly one message about it — the first failure after a success, not
 every failure. Ten consecutive failures switch the routine off and post a second, final message
-saying so; nothing further fires until a person turns it back on.
+saying so; nothing further fires until a person turns it back on. Turning it back on starts the
+count again: only failures since the routine was last switched on count toward the ten.
 
 This is deliberately not a retry policy. A retry policy answers "did this one attempt make it through
 a dispatch that failed for a moment" — a busy queue, a server that hiccuped — and that question is
@@ -107,9 +108,9 @@ separate, because as far as the channel is concerned, that is exactly what it is
 ## Scope
 
 This ships the core: creating, listing, changing and deleting routines from chat; the schedule, the
-cap and the fatigue rule; the worker that fires them. Four follow-ups are tracked in
-[#193](https://github.com/CopilotKit/OpenBot/issues/193) and deliberately not in this pass; the first
-of them has since been closed. Audit rows now say what started the run they came out of, so a
+cap and the fatigue rule; the worker that fires them. Four follow-ups were listed in
+[#193](https://github.com/CopilotKit/OpenBot/issues/193), which is now closed; the first of them has
+been built. Audit rows now say what started the run they came out of, so a
 routine's action is told apart from the same person's own by reading the row rather than by
 correlating timestamps against `routine_runs`. See [Architecture](architecture.md#what-started-a-run). Still open:
 there is no admin view of

@@ -261,9 +261,8 @@ export type AgentRun = {
  * do-not-fabricate instruction. Copy it and you get a coworker with the name, the title, the avatar,
  * and none of that.
  *
- * The type is carried too, not only the configuration. A copy written as `remote_ag_ui` also cannot
- * be granted handoff for the rest of its life: `agentRunsHere` and `botsReachableFrom` both key on
- * `agents.type == "built_in"`, so the original may hand work on and its copy silently may not.
+ * The type is carried too, not only the configuration, so a copy runs the same way its original
+ * does.
  *
  * `null` means there is nothing to run this copy on, which the caller turns into
  * {@link ManagedAgentUnavailableError}. That can now only happen for a source that had neither an

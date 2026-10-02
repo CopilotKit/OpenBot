@@ -108,7 +108,10 @@ const MAX_CHANNEL_PAGE = 200;
  */
 type ChannelCursor = { pinned: boolean; recency: string; id: string };
 
-function encodeChannelCursor(cursor: ChannelCursor): string {
+/** The shape the encoder writes: UTC, to the millisecond (older cursors) or the microsecond. */
+const CURSOR_RECENCY = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+export function encodeChannelCursor(cursor: ChannelCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
@@ -117,8 +120,11 @@ function encodeChannelCursor(cursor: ChannelCursor): string {
  *
  * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
  * describes a position in an ordering this query no longer has.
+ *
+ * `recency` has to be the timestamp the encoder writes, not merely a string: it is cast with
+ * `::timestamptz` in the page query, so any other string used to reach PostgreSQL and answer 500.
  */
-function decodeChannelCursor(
+export function decodeChannelCursor(
   value: string | undefined,
 ): ChannelCursor | undefined {
   if (!value) return undefined;
@@ -128,6 +134,8 @@ function decodeChannelCursor(
     ) as ChannelCursor;
     return typeof parsed?.id === "string" &&
       typeof parsed?.recency === "string" &&
+      CURSOR_RECENCY.test(parsed.recency) &&
+      !Number.isNaN(Date.parse(parsed.recency)) &&
       typeof parsed?.pinned === "boolean"
       ? parsed
       : undefined;

@@ -35,9 +35,12 @@ your own machine.
 
 > **Runs on your machine.** Everything below is written for a laptop. `.env.example` carries `OPENBOT_SINGLE_USER=true`, which admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client first. [Sign-in](#sign-in) turns that off, and is required before anybody else can reach the deployment.
 
-> **Do not want to build it yourself?** We will. Our engineers will stand OpenBot up inside your
-> infrastructure, customize it into something that looks like your own product, and hand it back to you to
-> keep changing. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
+> **We can build this for you, or with you, at your company.** Our engineers will stand OpenBot up
+> inside your infrastructure, customize it into something that looks like your own product, and hand it
+> back to you to keep changing. [**Start the conversation**](https://copilotkit.ai/talk-to-an-engineer?ref=openbot_readme).
+>
+> In the meantime, run all of it on your laptop, Intelligence included: CopilotKit's free Developer plan
+> covers [running Intelligence locally](#intelligence-on-your-own-machine) in Docker on a Mac.
 
 ## What it is
 
@@ -92,9 +95,11 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    `openbot` Learning container, then writes both settings to `.env`. It preserves
    custom container assignments and refuses to replace an existing OpenBot key.
    For fresh self-hosted setup, set `INTELLIGENCE_API_URL` to that deployment's
-   HTTPS API origin and run the helper without the two `npx` commands. It opens
-   an isolated Chrome or Edge window for your usual sign-in and project choice;
-   install either browser first. Existing key-only setups can assign a container
+   HTTPS API origin (or `http://localhost` for a local one) and run the helper
+   without the two `npx` commands. It opens an isolated Chrome or Edge window for
+   your usual sign-in and project choice; install either browser first. It writes
+   the API URL, the key and the container, not `INTELLIGENCE_GATEWAY_WS_URL`, so
+   set that one to the same deployment yourself. Existing key-only setups can assign a container
    through [Admin → Automatic Learning](docs/automatic-learning.md).
    Managed Intelligence needs no separate licence token.
 
@@ -116,9 +121,31 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 5. Open <http://localhost:3010>.
 
-`scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
+`scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the routine worker, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
 
-`scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
+`scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own; `--keep-computers` leaves the computers running. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
+
+### Intelligence on your own machine
+
+To try Intelligence on one Mac instead of the managed service, follow
+[Evaluate Intelligence locally](https://docs.copilotkit.ai/intelligence/self-hosting-local). The free
+[Developer plan](https://www.copilotkit.ai/pricing) qualifies. The local licence lasts 30 days and
+`npx copilotkit@latest local renew` renews it as often as you need, while your account is in good
+standing. It is a preview for macOS with Docker Desktop,
+not a production installation. Run its
+`npx copilotkit@latest local connect` from the OpenBot root, where `.env` is.
+
+That command writes `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL` and
+`CPK_INTELLIGENCE_API_KEY` to `.env`. OpenBot reads the first two as they are, but takes its project
+key only from `INTELLIGENCE_API_KEY` and refuses to start without it, so copy the `cpk-...` value
+across before `bash scripts/start.sh`:
+
+```sh
+INTELLIGENCE_API_KEY=cpk-...   # the value of CPK_INTELLIGENCE_API_KEY
+```
+
+To give the Bots a Learning container on that stack, see
+[Automatic Learning](docs/automatic-learning.md).
 
 ## Deploy it
 
@@ -157,10 +184,19 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/`                         | Start and browse channels.                                         |
 | `/agents`                   | Create, edit, duplicate, pin, hide, delete, and launch coworkers.  |
 | `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
+| `/group/new`                | Start one conversation with two or more Bots.                      |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
+| `/bots`                     | What each of your Bots is doing, what it needs from you, and whether it is paused. |
+| `/team-bots`                | Bots your teammates published, and the ones you share.             |
+| `/responsibilities`         | Give a Bot a lasting goal, follow its progress, and decide when it should work. |
+| `/reachability`             | Continue a conversation in Slack, Microsoft Teams, by text message, or on your phone. |
+| `/memory`                   | Review what your Bots remember, and choose which connected apps can contribute facts. |
+| `/approvals`                | Choose what your Bots may do, and review actions waiting for you.  |
 | `/skills`                   | Create and enable personal skills.                                 |
 | `/routines`                 | See the routines that are standing, and stop one.                  |
 | `/settings`                 | User preferences.                                                  |
+| `/settings/connected-accounts` | Connect your apps so your Bots can work with them.              |
+| `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
 | `/admin/credentials`        | Store write-only encrypted credentials.                            |
 | `/admin/computers`          | View, stop, and reset Bot computers.                               |
 | `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
@@ -171,6 +207,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/admin/learning`           | Assign Learning containers to Bots, or pause Automatic Learning.   |
 | `/admin/people`             | List, promote, demote, and remove people who have signed in.       |
 | `/admin/identity-providers` | Register a company SAML or OIDC provider, routed by email domain.  |
+| `/admin/enterprise`         | What members may use, how Bot computers reach the network, and what is recorded about it. |
 | `/admin/audit`              | Review permitted, refused, and failed actions.                     |
 
 ## Features
@@ -184,7 +221,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
-- **Governed MCP**: Google Drive and Notion ship in the catalogue, and Composio brokers a few hundred more apps behind one account, each reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
+- **Governed MCP**: Google Drive, Notion and [Parallel Search](docs/parallel-research.md) ship in the catalogue, and Composio brokers a few hundred more apps behind one account, each reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer. A Bot granted the shipped `skill-creator` skill can write one with you in the conversation, and saves it only when you press the button on the card.
 - **Sign in with what your company already has**: Google, Microsoft or Okta from the environment, or a company's own SAML or OpenID Connect provider registered while the deployment runs and routed by email domain. Any one turns sign-in on; several may be configured at once.
 - **Decide who gets in**: `/admin/people` lists everybody who has signed in, promotes and demotes them, and removes access, which ends the session they are using and stops the next sign-in. Every change is on the audit trail.
@@ -192,7 +229,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
 - **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port. The supervisor binds there too, because it holds the Docker socket and its token is a shared secret rather than a network boundary.
 - **Durable threads and memory**: conversations survive restarts through CopilotKit Intelligence, and each deployment stamps the threads it owns.
-- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. Needs a worker process; see [docs/routines.md](docs/routines.md).
+- **Routines**: ask a Bot to do something on a schedule and it does, running as you, in the channel you asked in. A 15-minute floor and a cap of 20 enabled routines keep a sentence from scheduling more than a person meant, and ten failures in a row switch a routine off rather than burn model spend forever. Needs a worker process, which `scripts/start.sh` starts locally; see [docs/routines.md](docs/routines.md).
 
 ## Bring your own agent
 
@@ -270,6 +307,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per Bot.                                                        |
+| `worker`                 | none                       | Fires due routines by handing each run to the server.                                            |
 | PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |
 
@@ -321,8 +359,9 @@ A company's own SAML or OpenID Connect provider is registered while the deployme
 Admin → Identity providers, and routed by email domain. An OIDC registration needs every host in the
 provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 
-- `INITIAL_ADMIN_EMAILS` is required, because nothing else grants the administrator role and no
-  screen can promote somebody afterwards. It is re-read on every sign-in, so editing it takes effect
+- `INITIAL_ADMIN_EMAILS` is required, because it is what grants the first administrator. After that
+  `/admin/people` can promote others, but an address named here stays an administrator and cannot be
+  demoted or removed from that screen. It is re-read on every sign-in, so editing it takes effect
   the next time that person signs in.
 - `MICROSOFT_OAUTH_TENANT_ID` defaults to `common`, which admits personal Microsoft accounts as well
   as work ones. On a multi-tenant app registration Entra may send no `email` claim at all, so
@@ -330,7 +369,7 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
   sign-in is refused and the reason is logged: add `email` as an optional claim, or use your
   directory GUID here.
 - A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
-  in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
+  in: a client id with no secret, a `BETTER_AUTH_SECRET` shorter than 32 characters, or an Okta issuer with no
   credentials behind it.
 - **SAML and OIDC** are registered while the deployment runs rather than configured here. Sign in as
   an administrator and go to Admin → Identity providers with the metadata your identity team gave
@@ -393,7 +432,10 @@ Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to ta
 - [docs/configuration.md](docs/configuration.md)
 - [docs/development.md](docs/development.md)
 - [docs/coworkers.md](docs/coworkers.md)
+- [docs/routines.md](docs/routines.md)
+- [docs/automatic-learning.md](docs/automatic-learning.md)
 - [docs/deployment.md](docs/deployment.md)
+- [charts/openbot/README.md](charts/openbot/README.md): the Helm chart
 - [docs/releasing.md](docs/releasing.md)
 - [docs/parallel-research.md](docs/parallel-research.md): public-web search and extraction through Parallel
 

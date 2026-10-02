@@ -494,10 +494,11 @@ offers, and should be chosen rather than discovered.
 
 ## Not built yet
 
-**No approval step before a destructive action.** The destructive marker is recorded and now
-visible, but it gates nothing: a Bot granted a destructive action performs it without anybody being
-asked. That is the same position every other connector is in — but it is now a position reachable
-through the UI rather than only through a database insert, which is a real change in exposure.
+**The destructive marker gates nothing by itself.** It is recorded and visible, but a Bot granted a
+destructive action is not asked about it because of the marker. What can stop such a call is the
+same as for every other connector's write: the person's **Ask before making changes** switch, an
+approval rule on the **Approvals** page (a person's own, or a team rule), or a built-in safety
+requirement. With none of those matching, the action runs.
 
 **No way to give a Bot a whole large app to search.** A Bot carries the actions somebody switched on
 for it, one at a time. There is no search-and-run path for an app too large to tick through, which
