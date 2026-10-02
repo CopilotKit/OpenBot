@@ -4,6 +4,7 @@ import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
 import {
   createTurnRunner,
+  drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
 } from "../src/routines/run-turn";
@@ -931,4 +932,42 @@ test("a routine binds its Learning container before creating and locking the Thr
   expect(calls.acquired[0]).toMatchObject({
     learningContainerId: "routine-learning",
   });
+});
+
+test("drawnComponents returns the charts that were drawn, never a refused or unknown call", () => {
+  const call = (id: string, name: string, args: string) => ({
+    id,
+    type: "function" as const,
+    function: { name, arguments: args },
+  });
+  const messages: Message[] = [
+    {
+      id: "a1",
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        call("c1", "showBarChart", '{"title":"Top","points":[]}'),
+        call("c2", "showPieChart", '{"title":"Refused","points":[]}'),
+        call("c3", "browser_navigate", '{"url":"https://x.test"}'),
+        call("c4", "showLineChart", "not json"),
+      ],
+    },
+    {
+      id: "t1",
+      role: "tool",
+      toolCallId: "c1",
+      content: "The bar chart is saved.",
+    },
+    {
+      id: "t2",
+      role: "tool",
+      toolCallId: "c2",
+      content: "Not shown: Donut chart. Withheld.",
+    },
+    { id: "t3", role: "tool", toolCallId: "c3", content: "ok" },
+    { id: "t4", role: "tool", toolCallId: "c4", content: "saved" },
+  ];
+  expect(drawnComponents(messages)).toEqual([
+    { name: "showBarChart", args: { title: "Top", points: [] } },
+  ]);
 });

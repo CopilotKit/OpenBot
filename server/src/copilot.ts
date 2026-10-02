@@ -22,6 +22,10 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
+import {
+  executeNativeApprovalTool,
+  nativeApprovalRun,
+} from "./approvals/native-context";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,
@@ -30,19 +34,24 @@ import {
   type StoredAttachment,
 } from "./channels/attachment-parts";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import { HeadlessToolsMiddleware } from "./computer/headless-tools";
 import type { DeploymentConfig } from "./config";
 import { observeModelConnection } from "./desktop-connection-failure";
 import { desktopTelemetryProperties } from "./desktop-telemetry";
 import { observeIntelligenceAuthentication } from "./intelligence-client";
 import { RemoteLearnedSkillsMiddleware } from "./learning/remote";
 import {
+  type AcquireLearnedSkills,
   createLearningRuntime,
   LEARNED_SKILL_TOOL_NAMES,
-  type AcquireLearnedSkills,
   type LearnedSkillInvocation,
   type LearningRuntime,
 } from "./learning/runtime";
 import type { LearningSettingsStore } from "./learning/settings";
+import {
+  type LoadPersonalMemory,
+  PersonalMemoryMiddleware,
+} from "./memory/tools";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
   latestUserText,
@@ -51,6 +60,7 @@ import {
 } from "./plugins/selection";
 import type { GrantedTool } from "./plugins/tools";
 import { grantedToolGuidance, parametersFor } from "./plugins/tools";
+import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
  * The CopilotKit runtime, always in Intelligence mode.
@@ -162,6 +172,8 @@ export function standingRoleMessage(
        * "Investigate policies, transaction monitoring, and control evidence."
        */
       PROVENANCE_GUIDANCE,
+      // And for the same reason, how to read the untrusted-content envelope its tool results carry.
+      UNTRUSTED_GUIDANCE,
     ].join("\n\n"),
   };
 }
@@ -412,6 +424,8 @@ export function builtInAgentConfiguration(
        * it says comes from its own knowledge, and saying so is the only honest move available.
        */
       PROVENANCE_GUIDANCE,
+      // How to read the untrusted-content envelope every outside result arrives in.
+      UNTRUSTED_GUIDANCE,
       ...(grantedToolGuidance(tools, connectedVendors)
         ? [grantedToolGuidance(tools, connectedVendors)]
         : []),
@@ -428,7 +442,22 @@ export function builtInAgentConfiguration(
      * bounds a model that would otherwise call tools in a circle. Interrupt tools, if any are ever
      * added here, require the default of one and must not be mixed in.
      */
-    ...(allTools.length > 0 ? { tools: allTools, maxSteps: TOOL_STEPS } : {}),
+    ...(allTools.length > 0
+      ? {
+          tools: allTools.map((tool) => ({
+            ...tool,
+            execute: (args: unknown, execution?: { toolCallId?: string }) =>
+              executeNativeApprovalTool(
+                tool.name,
+                args,
+                execution?.toolCallId,
+                tools.find((granted) => granted.name === tool.name)?.initiator,
+                () => tool.execute(args),
+              ),
+          })),
+          maxSteps: TOOL_STEPS,
+        }
+      : {}),
   };
 }
 
@@ -496,6 +525,7 @@ export async function buildAgents(
    */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  loadPersonalMemory?: LoadPersonalMemory,
 ): Promise<Record<string, AbstractAgent>> {
   let vendors: readonly string[] = [];
   try {
@@ -534,9 +564,8 @@ export async function buildAgents(
   }
   return Object.fromEntries(
     await Promise.all(
-      agents.map(async (agent) => [
-        agent.id,
-        await buildAgent(
+      agents.map(async (agent) => {
+        const built = await buildAgent(
           agent,
           model,
           apiKey,
@@ -553,8 +582,11 @@ export async function buildAgents(
           loadAttachment,
           markAttachmentsSent,
           acquireLearnedSkills,
-        ),
-      ]),
+        );
+        if (loadPersonalMemory)
+          built.use(new PersonalMemoryMiddleware(agent.id, loadPersonalMemory));
+        return [agent.id, built];
+      }),
     ),
   );
 }
@@ -893,16 +925,9 @@ async function buildAgent(
      * `remote.run(input)` skips it: the endpoint would get a run with no standing role, no holdings
      * message, no tools and no signed assertion, and every one of those failures is silent.
      *
-     * WHICH IS ALSO WHY A REMOTE BOT IS OFFERED NEITHER `message_bot` NOR `ask_person`. Both are
-     * executed here, by the wrapper below, against this deployment's grants and caps. A Bot at an
-     * endpoint runs its own loop and is handed descriptions of tools it may call back for, and the
-     * callback path executes MCP refs only — so a described `message_bot` would be a tool it could
-     * announce and never invoke. Granting one is refused at the door rather than stored dead: see
-     * `enablementRefusal` in plugins/routes.ts.
-     *
-     * Making this work is a feature rather than a fix: the callback would have to carry a run
-     * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
-     * here, and worth knowing it is missing rather than assuming it is not.
+     * Coordination tools are resolved for this exact run by the same loader built-in Bots use.
+     * Their executable half stays in the signed deployment callback, where current grants, source
+     * ownership and handoff lease ownership are checked again.
      *
      * AND THE PERSON'S STANDING INSTRUCTIONS ARE NOT SENT HERE EITHER. `standingInstructions` is
      * built-in only, deliberately: a remote Bot composes its own prompt at somebody else's endpoint,
@@ -920,6 +945,8 @@ async function buildAgent(
       loadAttachment,
       markAttachmentsSent,
       acquireLearnedSkills,
+      handoff,
+      initiator,
     );
   }
 
@@ -1184,11 +1211,9 @@ function remoteAgentWithStandingRole(
    */
   remote: AbstractAgent,
   /**
-   * What this Bot was granted, described rather than executable.
-   *
-   * A framework Bot runs its own loop and calls these back through `/api/agent-tools/call`, so what
-   * it needs from here is the offer: the name, what the tool is for, and the arguments it takes.
-   * The executing half stays on this side, where the grant and the policy are.
+   * What this Bot was granted. Governed vendor and host tools execute through the AG-UI client
+   * lifecycle here, where the grant, policy and approval context are. Coordination tools use the
+   * signed deployment callback to retain verified delegation and durable person-question routing.
    */
   tools: GrantedTool[] = [],
   signRun?: SignRun,
@@ -1221,6 +1246,8 @@ function remoteAgentWithStandingRole(
   /** How this run records that those files were sent. See {@link buildAgents}. */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  coordination?: HandoffForRun,
+  initiator?: AuditInitiator,
 ) {
   /*
    * What this Bot holds, as a second standing message.
@@ -1255,9 +1282,25 @@ function remoteAgentWithStandingRole(
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
     const runAssertion = signRun
-      ? signRun(agent.id, input.runId, input.threadId)
+      ? signRun(
+          agent.id,
+          input.runId,
+          input.threadId,
+          input.forwardedProps?.openbotRun,
+        )
       : undefined;
-    const deploymentTools = tools.map((tool) => tool.name);
+    // Governed vendor/host calls use the actual AG-UI client lifecycle, so approvals capture
+    // the provider's toolCallId, messages and state. Coordination retains its signed callback.
+    const clientTools = tools.filter(
+      (tool) =>
+        typeof tool.execute === "function" &&
+        tool.name !== "message_bot" &&
+        tool.name !== "ask_person",
+    );
+    const clientNames = new Set(clientTools.map((tool) => tool.name));
+    const deploymentTools = tools
+      .filter((tool) => !clientNames.has(tool.name))
+      .map((tool) => tool.name);
     const forwardedProps = {
       ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),
       openbotBotId: agent.id,
@@ -1329,8 +1372,8 @@ function remoteAgentWithStandingRole(
           )
         : Promise.resolve(history),
     ).pipe(
-      switchMap((messages) =>
-        next.run({
+      switchMap((messages) => {
+        const prepared: RunAgentInput = {
           ...input,
           messages: [
             agent.standingMessage,
@@ -1370,8 +1413,23 @@ function remoteAgentWithStandingRole(
               : input.context,
           // Who the Bot is calling back as, so the audit row names it rather than "an agent".
           forwardedProps,
-        } as never),
-      ),
+        };
+        if (clientTools.length === 0) return next.run(prepared);
+        return new HeadlessToolsMiddleware(
+          clientTools.map((tool) => ({
+            definition: {
+              name: tool.name,
+              description: tool.description,
+              parameters: z.toJSONSchema(tool.parameters) as Record<
+                string,
+                unknown
+              >,
+            },
+            execute: (args) => tool.execute(args),
+          })),
+          initiator,
+        ).run(prepared, next);
+      }),
     );
   };
 
@@ -1383,9 +1441,15 @@ function remoteAgentWithStandingRole(
   return new CloningRemoteAgent(remote, (target) => {
     target.use((input, next) => {
       const stream = defer(() =>
-        from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
-          switchMap((offered) => runWith(offered, input, next)),
-        ),
+        from(
+          Promise.all([
+            narrow ? narrow(input) : Promise.resolve(tools),
+            coordination?.(agent.id, input) ?? Promise.resolve([]),
+          ]).then(([offered, coordinationTools]) => [
+            ...offered,
+            ...coordinationTools,
+          ]),
+        ).pipe(switchMap((offered) => runWith(offered, input, next))),
       );
       const owned =
         !!process.env.MANAGED_AGENT_TOKEN &&
@@ -1586,7 +1650,9 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
      * this existed.
      */
     if (!load)
-      return observeModelConnection(super.run({ ...input, messages: history }));
+      return nativeApprovalRun({ ...input, messages: history }, () =>
+        observeModelConnection(super.run({ ...input, messages: history })),
+      );
     /*
      * Deferred, because `run` has to answer with a stream straight away and reading the bytes is a
      * database round trip. `defer` puts that read on the subscription, which is where the run
@@ -1603,7 +1669,9 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
         ),
       ).pipe(
         switchMap((messages) =>
-          observeModelConnection(super.run({ ...input, messages })),
+          nativeApprovalRun({ ...input, messages }, () =>
+            observeModelConnection(super.run({ ...input, messages })),
+          ),
         ),
       ),
     );
@@ -1800,6 +1868,7 @@ export async function resolveRuntimeAgents(
    */
   markAttachmentsSent?: MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  loadPersonalMemory?: LoadPersonalMemory,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1835,6 +1904,7 @@ export async function resolveRuntimeAgents(
     loadAttachment,
     markAttachmentsSent,
     acquireLearnedSkills,
+    loadPersonalMemory,
   );
 }
 
@@ -1853,6 +1923,8 @@ export type SignRun = (
   runId: string,
   /** Which conversation, so a Bot handing work on cannot choose where the answer lands. */
   threadId: string,
+  /** A prior signed delegation, verified by the deployment signer before being preserved. */
+  previousAssertion?: unknown,
 ) => string;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
@@ -1939,6 +2011,7 @@ export function createRequestAgents(
    */
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
   acquireLearnedSkills?: AcquireLearnedSkills,
+  loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -1963,6 +2036,7 @@ export function createRequestAgents(
       loadAttachmentForActor?.(actor.id),
       markAttachmentsSentForActor?.(actor.id),
       acquireLearnedSkills,
+      loadPersonalMemoryForActor?.(actor.id),
     );
   };
 }
@@ -2115,6 +2189,7 @@ export function mountCopilotRuntime(
    */
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
   learningSettings?: LearningSettingsStore,
+  loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory,
 ) {
   const { intelligence } = config.runtime;
 
@@ -2163,6 +2238,7 @@ export function mountCopilotRuntime(
       loadAttachmentForActor?.(actor.id),
       markAttachmentsSentForActor?.(actor.id),
       learning?.acquire,
+      loadPersonalMemoryForActor?.(actor.id),
     );
     return agents[input.botId] ?? null;
   };
@@ -2264,6 +2340,7 @@ export function mountCopilotRuntime(
       loadAttachmentForActor,
       markAttachmentsSentForActor,
       learning?.acquire,
+      loadPersonalMemoryForActor,
     ) as never,
   });
 

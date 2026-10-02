@@ -13,10 +13,24 @@
  */
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import type { Observable } from "rxjs";
+import { headlessTurnRefusal } from "../admin/controls";
 import type { HandoffDelivery } from "./handoff-runner";
+import { guardBotTurn } from "./lifecycle";
 import { textOf } from "./message-text";
 
 /** Whatever runs an agent against a thread and records what it did. */
+
+/**
+ * The conversation an answer belongs in has a run going. Usually the Bot that asked, still finishing
+ * the sentence that said it had asked, so the first retry comes quickly rather than a minute later.
+ */
+export class ThreadBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ThreadBusyError";
+  }
+}
+
 export type ThreadRunner = {
   run: (request: {
     threadId: string;
@@ -25,6 +39,8 @@ export type ThreadRunner = {
     /** What the conversation keeps, when that is not the whole of what the model was sent. */
     persistedInputMessages?: readonly unknown[];
   }) => Observable<BaseEvent>;
+  /** Stop a run in flight, as a pause does for every other turn. */
+  stop?: (input: { threadId: string; runId: string }) => Promise<unknown>;
 };
 
 /**
@@ -288,7 +304,7 @@ export function createHandoffDelivery(options: {
            * and is tried again: a person mid-question, or the Bot that asked still finishing its own
            * sentence, is a wait rather than a failure.
            */
-          throw new Error(
+          throw new ThreadBusyError(
             `${where.threadId} is busy with another run; the hop will be tried again`,
           );
         }
@@ -330,6 +346,29 @@ export function createHandoffDelivery(options: {
         }, LOCK_RENEW_EVERY_MS);
 
         try {
+          /*
+           * The same pause guard every other turn takes: refused if the person paused the Bot while
+           * this hop waited, and stopped if they pause it while it works, on this replica at once and
+           * from any other through the watcher. The runner's check before claiming is not enough on
+           * its own, because a hop runs for minutes.
+           */
+          const paused = await guardBotTurn({
+            ownerUserId: work.actorId,
+            agentId: work.toBotId,
+          });
+          // "Use Bots" and the model allowlist, as every other headless turn meets them in the turn
+          // runner. A hop builds its agent and runs it here, so without this one a chain that began on
+          // a remote Bot reached a built-in Bot on a model off the allowlist, or ran for a person with
+          // Use Bots off.
+          const refused = await headlessTurnRefusal({
+            ownerUserId: work.actorId,
+            agentId: work.toBotId,
+          });
+          if (refused) {
+            const error = new Error(refused);
+            error.name = "CapabilityRefusedError";
+            throw error;
+          }
           await settled(
             runner.run({
               threadId: where.threadId,
@@ -379,6 +418,12 @@ export function createHandoffDelivery(options: {
               },
             }),
             deadlineMs,
+            paused,
+            () => {
+              void runner
+                .stop?.({ threadId: where.threadId, runId })
+                .catch(() => undefined);
+            },
             () =>
               `${work.toBotId} did not finish within ${Math.round(deadlineMs / 1000)}s ${
                 seen.count === 0
@@ -500,6 +545,9 @@ const DEFAULT_DELIVERY_DEADLINE_MS = 5 * 60_000;
 function settled(
   events: Observable<BaseEvent>,
   deadlineMs: number,
+  /** Aborts when the person pauses the Bot; the run is stopped and the hop fails with the reason. */
+  paused: AbortSignal,
+  stop: () => void,
   /** Written when the deadline passes, so it can say how far the run had got by then. */
   timedOut: () => string,
 ): Promise<void> {
@@ -517,16 +565,26 @@ function settled(
      * socket open, so a delivery that walked away from a stalled one would leak a connection per
      * attempt and go on paying for a run nobody is reading.
      */
+    const onPause = () => {
+      stop();
+      finish(() => reject(paused.reason));
+    };
     const finish = (settle: () => void) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      paused.removeEventListener("abort", onPause);
       subscription?.unsubscribe();
       settle();
     };
     const timer = setTimeout(() => {
       finish(() => reject(new Error(timedOut())));
     }, deadlineMs);
+    if (paused.aborted) {
+      onPause();
+      return;
+    }
+    paused.addEventListener("abort", onPause, { once: true });
     subscription = events.subscribe({
       next: (event) => {
         // Compared as a string rather than through the enum: `@ag-ui/client` re-exports the types

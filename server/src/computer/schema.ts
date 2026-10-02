@@ -73,6 +73,8 @@ export type ComputerToolName = (typeof COMPUTER_TOOLS)[number];
 
 export type NavigateInput = { url: string; toolCallId?: string };
 export type NavigateResult = {
+  /** The untrusted-content notice for the page's own fields. See untrusted-content.ts. */
+  untrusted?: string;
   challenge?: BrowserChallenge;
   url: string;
   title: string;
@@ -134,6 +136,7 @@ export type SnapshotElement = {
 };
 
 export type SnapshotResult = {
+  untrusted?: string;
   challenge?: BrowserChallenge;
   /**
    * Which snapshot these refs belong to. Must be sent back with every action.
@@ -210,6 +213,7 @@ export type ListFilesResult = {
 export type ReadFileInput = { path: string };
 export type DownloadFileInput = { path: string };
 export type ReadFileResult = {
+  untrusted?: string;
   path: string;
   text: string;
   /** True when the file was longer than the extract, so the Bot can say so rather than guess. */
@@ -238,6 +242,7 @@ export type RunCommandInput = {
  * the clock never produced an exit code of its own.
  */
 export type RunCommandResult = {
+  untrusted?: string;
   command: string;
   exitCode: number;
   stdout: string;
@@ -310,6 +315,29 @@ export type ComputerProfile = {
    * read by people and rendered in a browser.
    */
   egress: string | null;
+};
+
+/**
+ * A login typed into the Bot's current page by the computer itself.
+ *
+ * `origin` is the site the person was asked to sign in to. The computer refuses to type anything when
+ * the page is on a different origin, so a login cannot be carried to a page that redirected elsewhere.
+ */
+export type SignInFillInput = {
+  origin: string;
+  username?: string;
+  password: string;
+  /** A one-time code the person entered alongside, typed if the site asks for one. */
+  code?: string;
+};
+
+/** What the computer reports. No field here ever carries a credential. */
+export type SignInFillResult = {
+  submitted: boolean;
+  /** Whether the page still shows a password field after submitting: the plainest sign of a failure. */
+  passwordFieldVisible: boolean;
+  url: string;
+  error?: string;
 };
 
 export type SecretResult = {

@@ -25,6 +25,8 @@ import {
   SnapshotRequiredError,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import { describeHumanGesture } from "./demonstration";
+import { handleEgressPolicyRequest, startEgressFilter } from "./egress";
 import { identity } from "./identity";
 import {
   assertPageAccess,
@@ -39,8 +41,16 @@ import {
   parseScrollDelta,
 } from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
+import {
+  markElementSecret,
+  maskSensitiveValues,
+  SECRET_ATTRIBUTE,
+  SENSITIVE_FIELD_SELECTOR,
+  sensitiveRefs,
+} from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
 import { createShell } from "./shell";
+import { fillSignIn, parseSignInFill } from "./sign-in";
 import { startVirtualDisplay } from "./virtual-display";
 import {
   createWorkspace,
@@ -247,6 +257,11 @@ const workspace = createWorkspace(
  * here would put an entry in the map on the path that closes browsers, which is where the map is
  * meant to shrink.
  */
+// Every browser and shell launched below goes through the policy filter, which still chains to the
+// per-Bot upstream proxy. Started before any browser exists so nothing escapes it.
+// Only the running computer points its shell at it: a test that imports this module shares its
+// process with every later test.
+await startEgressFilter({ forShell: import.meta.main });
 const profiles = createProfiles(
   process.env.PROFILES_DIR?.trim() || "/profiles",
   async (botId) => {
@@ -354,11 +369,17 @@ async function snapshotPage(
     !before.requested
   )
     session.control.snapshotTaken();
+  const parsed = parseAriaSnapshot(yaml);
   return {
     snapshotId,
     url: target.url(),
     title,
-    ...parseAriaSnapshot(yaml),
+    truncated: parsed.truncated,
+    // A password field's value is in the aria snapshot in plain text. See secret-masking.ts.
+    elements: maskSensitiveValues(
+      parsed.elements,
+      await sensitiveRefs(target, parsed.elements),
+    ),
   };
 }
 
@@ -442,7 +463,7 @@ const SCREEN_NO_LONGER_LIVE =
 const FOLLOW_INTERVAL_MS = 1_000;
 
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
-type StreamData = { botId: string };
+type StreamData = { botId: string; recordingId?: string };
 
 serve<StreamData>({
   port: PORT,
@@ -578,7 +599,21 @@ serve<StreamData>({
         return;
       }
       try {
+        const recorded = ws.data.recordingId
+          ? await describeHumanGesture(
+              await currentPage(ws.data.botId),
+              message,
+            )
+          : null;
         await standing.cast.send(message);
+        if (recorded)
+          ws.send(
+            JSON.stringify({
+              type: "demonstration.action",
+              recordingId: ws.data.recordingId,
+              action: recorded,
+            }),
+          );
       } catch (error) {
         // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
         // and they must not be left believing it landed.
@@ -642,6 +677,9 @@ serve<StreamData>({
     if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
       return json({ error: "That is not a usable bot id." }, 400);
     }
+    // The admin network policy, pushed by the server on every change; applied without a restart.
+    if (url.pathname === "/egress-policy" && request.method === "PUT")
+      return handleEgressPolicyRequest(botId, request);
     const session = sessions.for(botId);
 
     /*
@@ -671,7 +709,17 @@ serve<StreamData>({
         if (!isPlainBotId(streamBotId)) {
           return json({ error: "That is not a usable bot id." }, 400);
         }
-        if (server.upgrade(request, { data: { botId: streamBotId } }))
+        const recordingId = url.searchParams.get("recording")?.trim();
+        if (recordingId && !/^[a-f0-9-]{36}$/.test(recordingId))
+          return json({ error: "Invalid recording identity." }, 400);
+        if (
+          server.upgrade(request, {
+            data: {
+              botId: streamBotId,
+              ...(recordingId ? { recordingId } : {}),
+            },
+          })
+        )
           return undefined as unknown as Response;
         return json({ error: "Expected a WebSocket upgrade." }, 400);
       }
@@ -765,6 +813,10 @@ serve<StreamData>({
           const field = locateRef(session, target, pending.ref, undefined);
           await field.click({ timeout: ACTION_TIMEOUT_MS });
           await field.fill(body.text, { timeout: ACTION_TIMEOUT_MS });
+          // Marked so the snapshot, screenshots and the live screen never show it back.
+          await field
+            .evaluate(markElementSecret, SECRET_ATTRIBUTE)
+            .catch(() => undefined);
           const characters = body.text.length;
           // Cleared only after it actually landed, so a failure leaves the request open and the person
           // can try again rather than being told to start over.
@@ -789,6 +841,24 @@ serve<StreamData>({
             502,
           );
         }
+      }
+
+      /**
+       * A person's login, from the private sign-in form, typed by this process.
+       *
+       * On the acting list, so it is refused while a person holds the wheel. The body is read once,
+       * handed to `fillSignIn`, and dropped: not logged, not stored, not returned. The answer says
+       * whether a form was submitted and whether a password field is still showing, and every error
+       * in it is `fillSignIn`'s own sentence rather than a browser's.
+       */
+      if (url.pathname === "/sign-in/fill" && request.method === "POST") {
+        const input = parseSignInFill(await request.json().catch(() => null));
+        if (typeof input === "string") return json({ error: input }, 400);
+        const target = await currentPage(botId);
+        const result = await fillSignIn(target, input);
+        // The page moved on, so every ref handed out before it is retired, as after a navigation.
+        if (result.submitted) session.snapshotId += 1;
+        return json(result);
       }
 
       if (
@@ -983,7 +1053,11 @@ serve<StreamData>({
       if (url.pathname === "/screenshot" && request.method === "GET") {
         try {
           const target = await currentPage(botId);
-          const buffer = await target.screenshot({ type: "png" });
+          // Sensitive fields are masked in the picture the Bot is handed. See secret-masking.ts.
+          const buffer = await target.screenshot({
+            type: "png",
+            mask: [target.locator(SENSITIVE_FIELD_SELECTOR)],
+          });
           const size = target.viewportSize() ?? { width: 1280, height: 800 };
           return json({
             base64: buffer.toString("base64"),

@@ -1693,3 +1693,45 @@ describe("a Bot on the one shared computer", () => {
     }
   });
 });
+
+describe("updating a computer's image", () => {
+  test("audits who moved the computer onto the new image", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const asked: string[] = [];
+    provider.update = async (botId) => {
+      asked.push(botId);
+      return { updated: true, wasRunning: true, from: "old", to: "new" };
+    };
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+
+    expect(await gateway.updateComputer("bot-1", ACTOR)).toMatchObject({
+      updated: true,
+    });
+    expect(asked).toEqual(["bot-1"]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.eventType).toBe("computer.updated");
+    expect(rows[0]?.targetId).toBe("bot-1");
+    expect(String(rows[0]?.payload.reason)).toContain("new");
+  });
+
+  test("a provider with no image of its own says so rather than pretending", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+    await expect(gateway.updateComputer("bot-1", ACTOR)).rejects.toThrow(
+      /no computer image/,
+    );
+    expect(rows).toHaveLength(0);
+  });
+});

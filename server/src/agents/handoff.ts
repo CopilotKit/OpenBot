@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { WorkQueue } from "../work/queue";
 import type { RunAssertion } from "./callback-token";
+import { isBotPaused } from "./lifecycle";
 import type { AgentProfileStore } from "./profile-store";
 import type { AgentActor } from "./profile-types";
 
@@ -271,6 +272,15 @@ export function createHandoffDesk(options: {
           target,
           "not_granted",
           `You have not been given ${found.name} to hand work to. An administrator grants that.`,
+        );
+      }
+      // Paused by this person: say so now rather than queue a hop that will be dropped.
+      if (await isBotPaused(from.actorId, found.id)) {
+        return refuse(
+          from,
+          target,
+          "paused",
+          `${found.name} is paused, so nothing was sent. The person can resume it from its profile.`,
         );
       }
 

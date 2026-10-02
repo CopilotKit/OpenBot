@@ -273,6 +273,10 @@ describe("Routines", () => {
       "create_routine",
       "update_routine",
       "delete_routine",
+      "create_trigger",
+      "pause_trigger",
+      "resume_trigger",
+      "delete_trigger",
     ]);
   });
 

@@ -87,6 +87,51 @@ jobs:
       - run: bun run typecheck
         working-directory: ${{ matrix.package }}
 
+  mobile:
+    name: native types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # The native app is an isolated npm package; adding it to Bun workspaces would change the
+      # existing desktop/server installation contract. CI installs its own reviewed lockfile.
+      - run: npm ci --prefix mobile --ignore-scripts
+      - run: npm run --prefix mobile typecheck
+
+  # The agent-computer tests that launch a real Chromium. They are asked for by name because a
+  # machine running `bun test` is not required to have a browser, and these are the only tests that
+  # would catch a password reaching the snapshot a model reads, a session cookie lost on restart, or
+  # WebRTC leaving around the egress filter. The browser is the one the computer image installs,
+  # pinned by agent-computer's own lockfile.
+  computer-browser:
+    name: computer (real browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: agent-computer
+      - run: bunx playwright install --with-deps chromium
+        working-directory: agent-computer
+      - run: >-
+          bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
+          tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts
+        working-directory: agent-computer
+        env:
+          OPENBOT_COMPUTER_BROWSER: '1'
+          OPENBOT_DEMONSTRATION_LIVE: '1'
+
   chart:
     name: chart (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -565,7 +610,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, mobile, computer-browser, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

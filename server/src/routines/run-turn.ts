@@ -55,11 +55,26 @@ import type {
   RunAgentInput,
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
+import { NOT_SHOWN } from "../../../shared/component-markers";
 import { frameFiring } from "../../../shared/routine-firing";
+import { headlessTurnRefusal } from "../admin/controls";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
-import type { AuditInitiator } from "../audit";
+import { guardBotTurn } from "../agents/lifecycle";
+import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
+import type { AuditInitiator, AuditStore } from "../audit";
+import {
+  createHeadlessComponentTools,
+  HEADLESS_COMPONENTS,
+} from "../components/headless";
+import type { ComponentStore } from "../components/store";
+import {
+  type HeadlessTool,
+  HeadlessToolSuspension,
+  HeadlessToolsMiddleware,
+  type HeadlessWaiting,
+} from "../computer/headless-tools";
 import { historyOrEmpty } from "../copilot";
-import type { TurnRunner } from "./runner";
+import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
  * The gap between stopping a turn and giving up on it.
@@ -217,6 +232,36 @@ function assistantText(message: Message): string | undefined {
     : undefined;
 }
 
+const COMPONENT_NAMES = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
+
+/**
+ * The display components this turn drew, in order: a component call whose result is not a refusal.
+ * A chat surface that cannot open the conversation (Teams, Slack) draws them from this.
+ */
+export function drawnComponents(messages: Message[]): DrawnComponent[] {
+  const results = new Map<string, string>();
+  for (const message of messages)
+    if (message.role === "tool" && typeof message.content === "string")
+      results.set(message.toolCallId, message.content);
+  const drawn: DrawnComponent[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? []) {
+      if (!COMPONENT_NAMES.has(call.function.name)) continue;
+      const result = results.get(call.id);
+      if (result === undefined || result.startsWith(NOT_SHOWN)) continue;
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        if (args && typeof args === "object" && !Array.isArray(args))
+          drawn.push({ name: call.function.name, args });
+      } catch {
+        // A call whose arguments are not JSON was refused by the schema check, so nothing was drawn.
+      }
+    }
+  }
+  return drawn;
+}
+
 /*
  * The frame is declared in `shared/` because the transcript has to recognise it again — see
  * `readFiring` there. Imported AND re-exported, and it needs both: the turn runner below calls it to
@@ -244,7 +289,20 @@ export function createTurnRunner(options: {
     ownerUserId: string;
     agentId: string;
     initiator: AuditInitiator;
+    depth?: number;
   }) => Promise<AbstractAgent>;
+  toolsForTurn?: (input: {
+    ownerUserId: string;
+    agentId: string;
+    initiator: AuditInitiator;
+    threadId: string;
+    runId: string;
+  }) => Promise<HeadlessTool[]>;
+  /**
+   * The governed gallery, so a turn with no browser can still answer with a chart. Offered and
+   * decided exactly as the browser would for this Bot; see `components/headless.ts`.
+   */
+  components?: { store: ComponentStore; auditStore?: AuditStore };
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
@@ -257,13 +315,47 @@ export function createTurnRunner(options: {
     runner,
     buildAgentFor,
     learningContainerForThread,
+    toolsForTurn,
+    components,
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
     lockTtlSeconds = DEFAULT_LOCK_TTL_SECONDS,
     heartbeatMs = DEFAULT_HEARTBEAT_MS,
     abortGraceMs = DEFAULT_ABORT_GRACE_MS,
   } = options;
 
-  return async ({ ownerUserId, routineId, agentId, threadId, instruction }) => {
+  return async ({
+    ownerUserId,
+    routineId,
+    agentId,
+    threadId,
+    instruction,
+    initiator: suppliedInitiator,
+    continuation,
+    signal,
+    userMessage,
+    runId: suppliedRunId,
+    depth,
+    onText,
+  }) => {
+    if (signal?.aborted) throw new Error("The headless turn was cancelled.");
+    // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
+    signal = await guardBotTurn({ ownerUserId, agentId, signal });
+    // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
+    // crosses that gate, so every one of them meets the same check here instead.
+    const refused = await headlessTurnRefusal({ ownerUserId, agentId });
+    if (refused) {
+      const error = new Error(refused);
+      error.name = "CapabilityRefusedError";
+      throw error;
+    }
+    if (continuation && continuation.snapshot.threadId !== threadId)
+      throw new Error(
+        "The interrupted conversation does not match this thread.",
+      );
+    const initiator = suppliedInitiator ?? {
+      kind: "routine" as const,
+      id: routineId,
+    };
     /*
      * One id for this turn, minted once.
      *
@@ -274,7 +366,9 @@ export function createTurnRunner(options: {
      * here and nowhere else. Re-minting or re-reading it is how a renew keeps a different lock alive
      * than the one the cleanup releases.
      */
-    const runId = crypto.randomUUID();
+    const runId = suppliedRunId ?? crypto.randomUUID();
+    if (!runId.trim())
+      throw new Error("The headless turn needs a non-empty run id.");
 
     /*
      * THE ONE ADDITION over `runCanonicalChannelAgent`.
@@ -320,12 +414,24 @@ export function createTurnRunner(options: {
      * firing it did nothing on. The seeded history above is untouched, which is what keeps a previous
      * firing's framed message (it persisted, so it is back here as history) from being framed twice.
      */
-    const turn = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: frameFiring(instruction),
-    } as Message;
-    const messages = [...seeded, turn];
+    const turn =
+      userMessage ??
+      ({
+        id: crypto.randomUUID(),
+        role: "user",
+        content: frameFiring(instruction),
+      } as Message);
+    const messages: Message[] = continuation
+      ? sanitizeSeededHistory([
+          ...continuation.snapshot.messages,
+          {
+            id: continuation.messageId,
+            role: "tool",
+            toolCallId: continuation.snapshot.toolCallId,
+            ...continuation.result,
+          },
+        ])
+      : [...seeded, turn];
 
     /*
      * WHAT THIS RUN IS ALLOWED TO PERSIST, and it is mandatory.
@@ -356,21 +462,57 @@ export function createTurnRunner(options: {
     const agent = await buildAgentFor({
       ownerUserId,
       agentId,
-      initiator: { kind: "routine", id: routineId },
+      initiator,
+      ...(depth ? { depth } : {}),
     });
     agent.threadId = threadId;
     agent.setMessages(messages);
+    if (continuation) agent.setState(continuation.snapshot.state);
+    const headlessTools = [
+      ...((await toolsForTurn?.({
+        ownerUserId,
+        agentId,
+        initiator,
+        threadId,
+        runId,
+      })) ?? []),
+      ...(components
+        ? await createHeadlessComponentTools({
+            store: components.store,
+            botId: agentId,
+            ownerUserId,
+            initiator,
+            ...(components.auditStore
+              ? { auditStore: components.auditStore }
+              : {}),
+          })
+        : []),
+    ];
+    if (headlessTools.length > 0)
+      agent.use(new HeadlessToolsMiddleware(headlessTools, initiator));
+    if (signal?.aborted) throw new Error("The headless turn was cancelled.");
 
     const input: RunAgentInput = {
       threadId,
       runId,
       messages,
       state: agent.state,
-      // Empty because a headless turn has no browser to register frontend tools. What the Bot itself
-      // may call is decided where it is built, not here.
-      tools: [],
-      context: [],
-      forwardedProps: undefined,
+      tools: headlessTools
+        .filter((tool) => !tool.hidden)
+        .map((tool) => tool.definition),
+      context: continuation?.snapshot.context ?? [],
+      forwardedProps: continuation?.snapshot.forwardedProps,
+      ...(continuation
+        ? {
+            resume: [
+              {
+                interruptId: continuation.snapshot.toolCallId,
+                status: "resolved" as const,
+                payload: continuation.result.content,
+              },
+            ],
+          }
+        : {}),
     };
 
     /*
@@ -384,6 +526,22 @@ export function createTurnRunner(options: {
       onTextMessageEndEvent: ({ textMessageBuffer }) => {
         if (textMessageBuffer.length > 0) chunks.push(textMessageBuffer);
       },
+      // The buffer is the message before this delta, so the delta is appended to report it.
+      ...(onText
+        ? {
+            onTextMessageContentEvent: ({
+              event,
+              textMessageBuffer,
+            }: {
+              event: { delta: string };
+              textMessageBuffer: string;
+            }) => {
+              onText(
+                [...chunks, `${textMessageBuffer}${event.delta}`].join("\n\n"),
+              );
+            },
+          }
+        : {}),
     });
 
     await intelligence.ɵacquireThreadLock({
@@ -399,6 +557,7 @@ export function createTurnRunner(options: {
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     let heartbeatError: unknown;
+    let waiting: HeadlessToolSuspension | undefined;
     /** Whether the deadline stopped this turn. See the throw below the `finally`. */
     let stopped = false;
     /**
@@ -410,6 +569,7 @@ export function createTurnRunner(options: {
      * way `run.mjs:94` does — `lock.threadId || threadId` — before trusting it, not use it bare.
      */
     let stopPromise: Promise<boolean | undefined> | undefined;
+    let cancelTurn: (() => void) | undefined;
 
     const clearHeartbeat = () => {
       if (heartbeat === undefined) return;
@@ -449,6 +609,14 @@ export function createTurnRunner(options: {
     heartbeat.unref?.();
 
     try {
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        cancelTurn = () => {
+          stopTurn();
+          reject(new Error("The headless turn was cancelled."));
+        };
+        signal?.addEventListener("abort", cancelTurn, { once: true });
+        if (signal?.aborted) cancelTurn();
+      });
       const completed = new Promise<void>((resolve, reject) => {
         let terminal: Error | undefined;
         runner
@@ -462,6 +630,18 @@ export function createTurnRunner(options: {
              * answered with nothing.
              */
             next: (event) => {
+              if (
+                event.type === EventType.CUSTOM &&
+                event.name === "openbot.headless.waiting"
+              ) {
+                const value = event.value as HeadlessWaiting & {
+                  message?: string;
+                };
+                waiting = new HeadlessToolSuspension(
+                  value.message ?? "The turn is waiting for human input.",
+                  value,
+                );
+              }
               if (event.type !== EventType.RUN_ERROR || terminal) return;
               const message =
                 "message" in event && typeof event.message === "string"
@@ -494,7 +674,7 @@ export function createTurnRunner(options: {
         backstop.unref?.();
       });
 
-      await Promise.race([completed, timeout]);
+      await Promise.race([completed, timeout, cancelled]);
     } finally {
       /*
        * THE SINGLE MOST IMPORTANT LINES IN THIS FILE, on every exit path — success, a thrown run, the
@@ -507,6 +687,8 @@ export function createTurnRunner(options: {
        * replace the real failure with a second one — the TTL is the backstop for that case.
        */
       clearHeartbeat();
+      if (cancelTurn) signal?.removeEventListener("abort", cancelTurn);
+      if (signal?.aborted) await stopPromise;
       if (deadline !== undefined) clearTimeout(deadline);
       if (backstop !== undefined) clearTimeout(backstop);
       spoken.unsubscribe();
@@ -536,9 +718,10 @@ export function createTurnRunner(options: {
         `The routine's turn was stopped after ${Math.round(turnTimeoutMs / 1000)}s.`,
       );
     }
+    if (waiting) throw waiting;
 
-    const said = agent.messages
-      .filter((message) => !before.has(message.id))
+    const added = agent.messages.filter((message) => !before.has(message.id));
+    const said = added
       .map(assistantText)
       .filter((text): text is string => text !== undefined);
     // The diff first, the streamed chunks as the fallback: the diff is what was persisted, which is
@@ -554,6 +737,20 @@ export function createTurnRunner(options: {
      * exchange. Posting it as the answer would be the worst of the options: the routine would read as
      * successful and the channel would carry a reply that is waiting on something.
      */
+    // The waiting details, when the CUSTOM event did not survive the trip, ride on the interrupt.
+    const carried = agent.pendingInterrupts
+      .map((interrupt) => interrupt.metadata?.[OPENBOT_WAITING_METADATA])
+      .find(
+        (value): value is HeadlessWaiting & { message?: string } =>
+          !!value &&
+          typeof value === "object" &&
+          typeof value.kind === "string",
+      );
+    if (carried)
+      throw new HeadlessToolSuspension(
+        carried.message ?? "The turn is waiting for human input.",
+        carried,
+      );
     if (agent.pendingInterrupts.length > 0) {
       throw new Error(
         "The turn stopped to ask a question, and a routine has nobody to ask.",
@@ -563,6 +760,7 @@ export function createTurnRunner(options: {
       throw new Error("The turn finished without saying anything.");
     }
 
-    return { replyText };
+    const drawn = drawnComponents(added);
+    return drawn.length > 0 ? { replyText, components: drawn } : { replyText };
   };
 }
