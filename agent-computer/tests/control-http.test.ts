@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ComputerControlState } from "../../shared/computer-control";
@@ -90,6 +90,27 @@ afterAll(async () => {
 describe.skipIf(!asked)(
   "request handoff through the actual computer HTTP dispatcher",
   () => {
+    test("profile usage is token-protected, single-Bot and never starts a browser", async () => {
+      await mkdir(join(root, "profiles", "bot-http"), { recursive: true });
+      await writeFile(join(root, "profiles", "bot-http", "History"), "12345");
+      await mkdir(join(root, "profiles", "other-bot"), { recursive: true });
+      await writeFile(join(root, "profiles", "other-bot", "Cookies"), "PRIVATE");
+      const headers = { "x-openbot-computer-token": token, "x-openbot-bot-id": "bot-http" };
+      const url = `${base}/computers/profile-usage`;
+      expect((await fetch(url)).status).toBe(401);
+      expect(
+        (await fetch(url, { headers: { ...headers, "x-openbot-bot-id": "../other-bot" } })).status,
+      ).toBe(400);
+      expect((await fetch(url + "?path=/private", { headers })).status).toBe(400);
+      expect((await fetch(url, { headers, method: "POST" })).status).toBe(405);
+      const response = await fetch(url, { headers });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        profileBytes: process.platform === "linux" ? 5 : null,
+      });
+      const health = await (await fetch(`${base}/health`, { headers })).json();
+      expect(health.browser).toBe(false);
+    });
     test("take cannot overtake admitted work; later mutations are refused, then freshness is mandatory", async () => {
       const running = post("/exec", {
         command: "printf admitted > admitted; sleep 0.3",

@@ -49,6 +49,7 @@ import {
   sensitiveRefs,
 } from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
+import { profileBytes } from "./profile-usage";
 import { createShell } from "./shell";
 import { fillSignIn, parseSignInFill } from "./sign-in";
 import { startVirtualDisplay } from "./virtual-display";
@@ -262,8 +263,9 @@ const workspace = createWorkspace(
 // Only the running computer points its shell at it: a test that imports this module shares its
 // process with every later test.
 await startEgressFilter({ forShell: import.meta.main });
+const profilesRoot = process.env.PROFILES_DIR?.trim() || "/profiles";
 const profiles = createProfiles(
-  process.env.PROFILES_DIR?.trim() || "/profiles",
+  profilesRoot,
   async (botId) => {
     if (sessions.get(botId)) sessions.renewRun(botId);
     await sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED);
@@ -676,6 +678,12 @@ serve<StreamData>({
     // orchestrator's probe must not fail on a header it never meant to send.
     if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
       return json({ error: "That is not a usable bot id." }, 400);
+    }
+    // This read requires the existing computer token and Bot validation, but no browser/session.
+    if (url.pathname === "/computers/profile-usage") {
+      if (request.method !== "GET") return json({ error: "Method not allowed." }, 405);
+      if (url.search) return json({ error: "Profile usage takes no query parameters." }, 400);
+      return json({ profileBytes: await profileBytes(profilesRoot, botId) });
     }
     // The admin network policy, pushed by the server on every change; applied without a restart.
     if (url.pathname === "/egress-policy" && request.method === "PUT")
