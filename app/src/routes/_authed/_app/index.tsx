@@ -149,9 +149,14 @@ function RouteComponent() {
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
             // cached `data`, so a stale carousel here beats an error card claiming there is
             // nothing to explore, which would be false while this list is still populated.
-            <Carousel opts={{ align: "start" }}>
+            <Carousel
+              opts={{ align: "start" }}
+              aria-labelledby="explore-agents-heading"
+            >
               <div className="flex flex-row items-center justify-between gap-4">
-                <h2 className="font-bold text-lg">Explore agents</h2>
+                <h2 id="explore-agents-heading" className="font-bold text-lg">
+                  Explore agents
+                </h2>
                 {/*
                  * `static` undoes the primitive's own absolute placement, which parks these either
                  * side of the row and off the edge of a prose-width column. They belong on the
