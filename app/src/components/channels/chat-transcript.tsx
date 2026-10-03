@@ -52,7 +52,12 @@ import { splitChatOrigin } from "./chat-origin";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
-import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import {
+  asText,
+  forDisplay,
+  REFUSAL_MARKER,
+  toolResultFailed,
+} from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
@@ -1355,6 +1360,7 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
    */
   const answer = result === undefined ? undefined : asText(result);
   const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
+  const failed = !refused && toolResultFailed(result);
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1370,6 +1376,7 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
       {...(detail ? { detail } : {})}
       label={label}
       refused={refused}
+      failed={failed}
       running={result === undefined}
     >
       {body ? (

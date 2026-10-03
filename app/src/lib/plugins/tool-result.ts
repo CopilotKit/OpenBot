@@ -116,3 +116,19 @@ export function saidItWentAhead(result: unknown, marker: string): boolean {
   if (typeof result !== "string") return false;
   return asText(result).startsWith(marker);
 }
+
+/**
+ * Whether a server-side tool reached a terminal failure rather than returning a result.
+ *
+ * These prefixes are written by the two server tool doors after the distinction between policy
+ * refusal and execution failure has already been made. A refusal has its own marker and must not
+ * be collapsed into this state.
+ */
+export function toolResultFailed(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  return (
+    answer.startsWith("The vendor reported an error:") ||
+    answer.startsWith("That tool could not be called")
+  );
+}
