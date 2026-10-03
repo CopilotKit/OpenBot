@@ -43,6 +43,26 @@ function useCarousel() {
   return context;
 }
 
+export function carouselKeyboardAction(
+  orientation: "horizontal" | "vertical",
+  key: string,
+  target: EventTarget | null,
+): "prev" | "next" | null {
+  if (
+    target instanceof HTMLElement &&
+    (target.matches("input, textarea, select") || target.isContentEditable)
+  )
+    return null;
+  if (orientation === "horizontal") {
+    if (key === "ArrowLeft") return "prev";
+    if (key === "ArrowRight") return "next";
+  } else {
+    if (key === "ArrowUp") return "prev";
+    if (key === "ArrowDown") return "next";
+  }
+  return null;
+}
+
 function Carousel({
   orientation = "horizontal",
   opts,
@@ -78,15 +98,17 @@ function Carousel({
 
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        scrollPrev();
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        scrollNext();
-      }
+      const action = carouselKeyboardAction(
+        orientation,
+        event.key,
+        event.target,
+      );
+      if (!action) return;
+      event.preventDefault();
+      if (action === "prev") scrollPrev();
+      else scrollNext();
     },
-    [scrollPrev, scrollNext],
+    [orientation, scrollPrev, scrollNext],
   );
 
   React.useEffect(() => {
@@ -101,7 +123,8 @@ function Carousel({
     api.on("select", onSelect);
 
     return () => {
-      api?.off("select", onSelect);
+      api.off("reInit", onSelect);
+      api.off("select", onSelect);
     };
   }, [api, onSelect]);
 
