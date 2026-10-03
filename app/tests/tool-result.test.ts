@@ -4,6 +4,7 @@ import {
   asText,
   forDisplay,
   saidItWentAhead,
+  toolResultFailed,
 } from "../src/lib/plugins/tool-result";
 
 /**
@@ -117,5 +118,27 @@ describe("the markers the server and the transcript both use", () => {
 
   test("a result that has not arrived yet is left to the caller's status", () => {
     expect(saidItWentAhead(undefined, HANDED_OVER)).toBe(true);
+  });
+});
+
+
+describe("telling a failed tool from a successful one", () => {
+  test("vendor errors are failures, encoded or not", () => {
+    const answer = "The vendor reported an error:\\npermission denied";
+    expect(toolResultFailed(answer)).toBe(true);
+    expect(toolResultFailed(JSON.stringify(answer))).toBe(true);
+  });
+
+  test("runtime/deployment call failures are failures", () => {
+    expect(toolResultFailed("That tool could not be called.")).toBe(true);
+    expect(
+      toolResultFailed("That tool could not be called: connection reset"),
+    ).toBe(true);
+  });
+
+  test("ordinary results, refusals, and running calls are not failures", () => {
+    expect(toolResultFailed("Found 12 results.")).toBe(false);
+    expect(toolResultFailed("Refused. The rule says no.")).toBe(false);
+    expect(toolResultFailed(undefined)).toBe(false);
   });
 });
