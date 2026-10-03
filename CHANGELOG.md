@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's turn in a group is no longer offered coordination tools it cannot call
+
+A Bot answering another Bot in a group conversation was offered `ask_person`, and `message_bot`
+when hops allowed it, but every call was refused with "This run no longer has permission to
+coordinate work in this conversation" and an `mcp.callback_refused` row nobody had caused. A run is
+now offered these tools only when a call from it would be allowed, so that turn is offered neither.
+A call that is refused anyway, from a schema offered earlier, is still refused and audited.
+
 ## 0.1.0
 
 **Before upgrading.** Six things change for an existing deployment:
