@@ -20,6 +20,7 @@
     "@better-auth/scim": "1.7.1",
     "@better-auth/sso": "^1.7.1",
     "@composio/core": "^0.18.1",
+    "@ai-sdk/openai": "3.0.99",
     "@copilotkit/runtime": "1.73.1",
     "@mastra/client-js": "^1.43.0",
     "@mastra/core": "^1.64.0",

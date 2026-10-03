@@ -1,5 +1,6 @@
 import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
+import { createOpenAI } from "@ai-sdk/openai";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
   BuiltInAgent,
@@ -202,6 +203,59 @@ export function normalizeModelBaseUrls(
   }
 }
 
+/**
+ * The model a built-in Bot answers on, as the runtime's `provider/model` string unless a
+ * deployment needs the chat-completions client built here instead.
+ *
+ * WHY AN INSTANCE IS EVER NEEDED. @copilotkit/runtime's resolveModel turns every `openai/<model>`
+ * string into the OpenAI **Responses API** — correct for api.openai.com, which serves `/responses`,
+ * and a 404 on every OpenAI-compatible endpoint that implements only `/chat/completions` (Z.AI's
+ * coding endpoint among them). No model-string form selects chat completions, so
+ * `OPENBOT_OPENAI_CHAT_COMPLETIONS=true` builds the chat model directly, with the same resolved
+ * key, the same `OPENAI_BASE_URL`, and the same model name the string form would have used: one
+ * line moves a whole deployment onto an endpoint the Responses-shaped call cannot reach.
+ *
+ * Chat completions is the older API and carries no reasoning summaries or server-side state, so
+ * this stays opt-in rather than becoming the default for every unknown base URL.
+ */
+function builtInModelSpecifier(
+  model: RuntimeModel,
+  apiKey: string | null,
+  environment: Record<string, string | undefined> = process.env,
+) {
+  if (
+    environment.OPENBOT_OPENAI_CHAT_COMPLETIONS !== "true" ||
+    model.provider !== "openai"
+  ) {
+    return `${model.provider}/${model.defaultModel}`;
+  }
+  return createOpenAI({
+    apiKey: apiKey ?? environment.OPENAI_API_KEY,
+    ...(environment.OPENAI_BASE_URL?.trim()
+      ? { baseURL: environment.OPENAI_BASE_URL.trim() }
+      : {}),
+  }).chat(model.defaultModel);
+}
+
+/**
+ * An explicit output-token budget for the built-in Bots.
+ *
+ * The AI SDK runs models it does not recognise — every name outside its per-provider tables, which
+ * is every model behind a compatible endpoint — in a compatibility mode that caps output at 4096
+ * tokens. A thinking model whose reasoning alone runs past that ceiling spends its whole budget on
+ * thinking and returns no text and no tool calls: the turn ends silently, which reads as a Bot
+ * that ignored you. `OPENBOT_MAX_OUTPUT_TOKENS` names a budget the model actually fits in; unset
+ * keeps the SDK's own behaviour for models it knows.
+ */
+function maxOutputTokensForEnvironment(
+  environment: Record<string, string | undefined> = process.env,
+): number | undefined {
+  const raw = environment.OPENBOT_MAX_OUTPUT_TOKENS?.trim();
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function runtimeModelForEnvironment(
   packageModel: RuntimeModel,
   environment: Record<string, string | undefined> = process.env,
@@ -399,8 +453,11 @@ export function builtInAgentConfiguration(
     })) ?? []),
   ];
 
+  const outputBudget = maxOutputTokensForEnvironment();
   return {
-    model: planModel ?? `${model.provider}/${model.defaultModel}`,
+    model: planModel ?? builtInModelSpecifier(model, apiKey),
+    // See maxOutputTokensForEnvironment: absent for models the SDK knows, explicit for the rest.
+    ...(outputBudget !== undefined ? { maxOutputTokens: outputBudget } : {}),
     /*
      * The package's role, then the person's own standing instructions, then what this Bot actually
      * holds, then the computer.
