@@ -358,4 +358,44 @@ describe("host access broker", () => {
       actorId: "user-a",
     });
   });
+
+  test("a cancel nobody collects does not stay pending for the life of the process", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      // Long enough that the lease is not what ends the operation, so this is the operation's
+      // own timeout queuing the cancel.
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 40,
+    });
+    broker.rememberGrant({
+      id: "grant-1",
+      botId: "bot-a",
+      actorId: "user-a",
+      displayName: "Project",
+      revoked: false,
+    });
+
+    const running = broker.callHost({
+      kind: "read_file",
+      botId: "bot-a",
+      actorId: "user-a",
+      grantId: "grant-1",
+      relativePath: "notes.txt",
+    });
+    expect(broker.nextDesktopOperation()?.operations[0]).toMatchObject({
+      kind: "read_file",
+    });
+
+    // It runs out its own time, which queues a cancel for the desktop that has to stop
+    // working on it.
+    await Promise.allSettled([running]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(broker.statusFor("user-a").pending).toHaveLength(1);
+    expect(broker.statusFor("user-a").pending[0]?.kind).toBe("cancel");
+
+    // That desktop never comes back for it. The cancel cannot outlive the chance to deliver
+    // it: nothing else ever removes this entry, so `operations` grew by one per abandoned
+    // operation and `statusFor` kept reporting it to the person as pending.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(broker.statusFor("user-a").pending).toEqual([]);
+  }, 10_000);
 });

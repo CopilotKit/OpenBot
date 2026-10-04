@@ -80,18 +80,30 @@ export function createHostAccessBroker(
       actorId: state.actorId,
       ...(state.grantId ? { grantId: state.grantId } : {}),
     };
-    operations.set(cancelOperation.operationId, {
+    const cancelState: OperationState = {
       operation: cancelOperation,
       actorId: state.actorId,
       botId: state.botId,
       grantId: state.grantId,
       leasedUntil: null,
-      expiresAt: null,
+      expiresAt: now() + operationTtlMs,
       expiryTimer: null,
       resolve: () => {},
       reject: () => {},
       settled: false,
-    });
+    };
+    // A cancel is addressed to a desktop that may never come back for it, and this map has no
+    // other bound on it: nothing but `resolveDesktopOperation` ever removed one, so a worker that
+    // did not return left the entry here for the life of the process, growing `operations` by one
+    // per abandoned operation and leaving `statusFor` reporting it to the person as pending
+    // forever. Expiring on the same clock as any other queued operation keeps the window open
+    // long enough for a desktop that reconnects to still be told to stop, and gives up on one that
+    // does not. Deleted rather than failed, because a cancel has nobody left to reject.
+    cancelState.expiryTimer = setTimeout(() => {
+      operations.delete(cancelOperation.operationId);
+    }, operationTtlMs);
+    unrefTimer(cancelState.expiryTimer);
+    operations.set(cancelOperation.operationId, cancelState);
   }
 
   function failOperation(state: OperationState, reason: string) {

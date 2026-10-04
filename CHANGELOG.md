@@ -8,6 +8,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A cancellation the native host never collected is now dropped instead of being reported as
+  pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
+  worker, and only that worker ever removed it: a worker that stopped polling left the entry in
+  memory for the life of the process, so the Host access panel showed an operation that could never
+  finish. A desktop that reconnects within the operation timeout is still told to stop.
+
 ## 0.1.0
 
 **Before upgrading.** Six things change for an existing deployment:
