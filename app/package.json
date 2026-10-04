@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ag-ui/core": "0.0.59",
+    "@bufbuild/protobuf": "2.14.0",
     "@base-ui/react": "^1.6.0",
     "@better-auth/sso": "^1.7.1",
     "@copilotkit/a2ui-renderer": "1.70.1",
