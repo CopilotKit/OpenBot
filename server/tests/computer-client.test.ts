@@ -73,6 +73,40 @@ describe("computer client", () => {
       );
     });
 
+    test("releases the connection it refuses to hand back", async () => {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([1, 2, 3]));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const client = clientWith(() => new Response(body));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+      expect(cancelled).toBe(true);
+    });
+
+    test("still names the invalid download when releasing it fails", async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([1, 2, 3]));
+        },
+        cancel() {
+          throw new Error("socket already gone");
+        },
+      });
+      const client = clientWith(() => new Response(body));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+    });
+
     test.each([
       [404, WorkspaceNotFoundError],
       [413, WorkspaceTooLargeError],
