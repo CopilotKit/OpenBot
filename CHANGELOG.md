@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's shell now honours a Stop that landed before the command was spawned, not only one that
+  arrives afterwards. A person who pressed Stop in the window between the request reaching the
+  computer and the command starting got no answer until that command finished on its own.
+
 ## 0.1.0
 
 **Before upgrading.** Six things change for an existing deployment:
