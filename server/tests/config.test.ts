@@ -566,6 +566,23 @@ describe("deployment configuration", () => {
     ).toThrow("OPENBOT_SINGLE_USER");
   });
 
+  // A name that merely starts with 127. is a public name, not loopback. Only a whole 127.x.x.x
+  // address is.
+  test.each([
+    [
+      "a public name starting 127.",
+      { OPENBOT_PUBLIC_URL: "https://127.example.com" },
+    ],
+    [
+      "a wildcard DNS name that starts 127.",
+      { TRUSTED_ORIGINS: "https://127.0.0.1.nip.io" },
+    ],
+  ])("refuses no sign-in on %s", (_label, published) => {
+    expect(() =>
+      loadConfig({ ...withoutSignIn, ...OPEN, ...published }),
+    ).toThrow("OPENBOT_SINGLE_USER");
+  });
+
   // The local workflow the flag exists for, and the two addresses the quick start hands out.
   test.each([
     {},

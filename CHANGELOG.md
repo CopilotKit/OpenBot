@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- `OPENBOT_SINGLE_USER` is now refused with a public name that starts with `127.`, such as
+  `https://127.example.com` or `https://127.0.0.1.nip.io`. The check for a loopback address matched
+  any host beginning `127.`, so a public address like that read as this machine and the no-sign-in
+  administrator was allowed on it. Only a full 127.x.x.x address counts as loopback now.
 - A cancellation the native host never collected is now dropped instead of being reported as
   pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
   worker, and only that worker ever removed it: a worker that stopped polling left the entry in
