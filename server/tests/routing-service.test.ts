@@ -151,32 +151,34 @@ describe("CoworkerRoutingService", () => {
     expect(modelCalls).toEqual([]);
   });
 
-  test("a full name that is also a suffix alias has a resolvable clarification", async () => {
-    const { service } = makeService({
+  test("a name that ends another coworker's name addresses only its own coworker", async () => {
+    const { service, modelCalls } = makeService({
       roster: [profile("analyst", "Analyst"), profile("risk", "Risk Analyst")],
     });
-    const result = await service.route({ actor: ACTOR, text: "ask analyst" });
-    expect(result.kind).toBe("ambiguous");
-    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
-    for (const name of result.names) {
-      expect(
-        await service.route({ actor: ACTOR, text: `ask ${name}` }),
-      ).toMatchObject({ kind: "selected" });
-    }
+    expect(
+      await service.route({ actor: ACTOR, text: "ask analyst" }),
+    ).toMatchObject({
+      kind: "selected",
+      agentId: "analyst",
+      viaNameMatch: true,
+    });
+    expect(
+      await service.route({ actor: ACTOR, text: "ask risk analyst" }),
+    ).toMatchObject({ kind: "selected", agentId: "risk", viaNameMatch: true });
+    expect(modelCalls).toEqual([]);
   });
-
-  test("an issued discriminator label refuses a new suffix collision", async () => {
+  test("an issued discriminator label refuses a later coworker given that exact name", async () => {
     const roster = [
       profile("a", "Risk Analyst"),
       profile("b", "Risk Analyst"),
-      profile("c", "Senior Risk Analyst (id 61)"),
+      profile("c", "Risk Analyst (id 61)"),
     ];
     const { service } = makeService({ roster });
     const label = "Risk Analyst (id 61) (2)";
     expect(
       await service.route({ actor: ACTOR, text: `ask ${label}` }),
     ).toMatchObject({ kind: "selected", agentId: "a" });
-    roster.push(profile("d", "Senior Risk Analyst (id 61) (2)"));
+    roster.push(profile("d", label));
     const result = await service.route({ actor: ACTOR, text: `ask ${label}` });
     expect(result.kind).toBe("ambiguous");
     if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
@@ -186,7 +188,6 @@ describe("CoworkerRoutingService", () => {
       ).toMatchObject({ kind: "selected" });
     }
   });
-
   test("an issued id label cannot silently change recipient after a roster collision", async () => {
     const roster = [profile("a", "Risk Analyst"), profile("b", "Risk Analyst")];
     const { service } = makeService({ roster });
@@ -194,25 +195,22 @@ describe("CoworkerRoutingService", () => {
     expect(
       await service.route({ actor: ACTOR, text: `ask ${label}` }),
     ).toMatchObject({ kind: "selected", agentId: "a" });
-    for (const name of [
-      "Senior Risk Analyst (id 61)",
-      "Risk Analyst (id 61)",
-    ]) {
-      roster.splice(2, 1, profile("c", name));
-      const result = await service.route({
-        actor: ACTOR,
-        text: `ask ${label}`,
-      });
-      expect(result.kind).toBe("ambiguous");
-      if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
-      for (const choice of result.names) {
-        expect(
-          await service.route({ actor: ACTOR, text: `ask ${choice}` }),
-        ).toMatchObject({ kind: "selected" });
-      }
+    // A coworker whose name merely ends with the label is a different name and changes nothing.
+    roster.push(profile("c", "Senior Risk Analyst (id 61)"));
+    expect(
+      await service.route({ actor: ACTOR, text: `ask ${label}` }),
+    ).toMatchObject({ kind: "selected", agentId: "a" });
+    // One given the label as its exact name makes the label ambiguous rather than switch recipient.
+    roster.splice(2, 1, profile("c", label));
+    const result = await service.route({ actor: ACTOR, text: `ask ${label}` });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    for (const choice of result.names) {
+      expect(
+        await service.route({ actor: ACTOR, text: `ask ${choice}` }),
+      ).toMatchObject({ kind: "selected" });
     }
   });
-
   test("duplicate labels remain unique beside a coworker whose literal name resembles a label", async () => {
     const { service } = makeService({
       roster: [
@@ -310,7 +308,7 @@ describe("CoworkerRoutingService", () => {
     expect(modelCalls).toHaveLength(1);
   });
 
-  test("returns visible choices for an ambiguous explicit name", async () => {
+  test("leaves a word two coworkers' names end with to the model", async () => {
     const { service, modelCalls } = makeService({
       roster: [
         profile("risk", "Risk Analyst"),
@@ -320,27 +318,23 @@ describe("CoworkerRoutingService", () => {
 
     expect(
       await service.route({ actor: ACTOR, text: "ask analyst to review this" }),
-    ).toEqual({
-      kind: "ambiguous",
-      names: ["Data Analyst", "Risk Analyst"],
-    });
-    expect(modelCalls).toEqual([]);
+    ).toMatchObject({ kind: "selected", viaMention: false });
+    expect(modelCalls).toHaveLength(1);
   });
-
-  test("treats a nested full name as ambiguous when its alias belongs to another coworker", async () => {
+  test("returns visible choices when two coworkers share the addressed full name", async () => {
     const { service, modelCalls } = makeService({
-      roster: [profile("analyst", "Analyst"), profile("risk", "Risk Analyst")],
+      roster: [profile("a", "Risk Analyst"), profile("b", "Risk Analyst")],
     });
 
-    expect(
-      await service.route({ actor: ACTOR, text: "ask analyst to review this" }),
-    ).toEqual({
-      kind: "ambiguous",
-      names: ["Analyst (id 616e616c797374)", "Risk Analyst"],
+    const result = await service.route({
+      actor: ACTOR,
+      text: "Risk Analyst, review this",
     });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    expect(result.names).toHaveLength(2);
     expect(modelCalls).toEqual([]);
   });
-
   test("prefers a unique longer explicit alias over a shared suffix", async () => {
     const { service, modelCalls } = makeService({
       roster: [profile("analyst", "Analyst"), profile("risk", "Risk Analyst")],
@@ -653,19 +647,19 @@ describe("CoworkerRoutingService", () => {
     expect(modelCalls).toHaveLength(1);
   });
 
-  test("fails safely when coworker reachability cannot be loaded", async () => {
+  test("routes on purpose alone when coworker reachability cannot be loaded", async () => {
     const { service, modelCalls } = makeService({
       reachableSystems: async () => {
         throw new Error("private reachability detail");
       },
     });
 
-    await expect(
-      service.route({ actor: ACTOR, text: "what is in Drive?" }),
-    ).rejects.toThrow("Coworker reachability is temporarily unavailable");
-    expect(modelCalls).toEqual([]);
+    expect(
+      await service.route({ actor: ACTOR, text: "help me" }),
+    ).toMatchObject({ kind: "selected", agentId: "knowledge" });
+    expect(modelCalls).toHaveLength(1);
+    expect(modelCalls[0]?.candidates.map((c) => c.reaches)).toEqual([[], []]);
   });
-
   test("passes only the actor-visible roster to intent routing", async () => {
     const visible = profile("mine", "My Private", "private", ACTOR.id);
     const inaccessible = profile("other", "Other Private", "private", "u2");
@@ -738,5 +732,54 @@ describe("CoworkerRoutingService", () => {
     expect(result).toMatchObject({ kind: "selected", reason: text });
     expect(audits[0]?.payload.reason).toBe("intent match");
     expect(JSON.stringify(audits[0])).not.toContain(text);
+  });
+  test("does not route on words in the shipped coworker names, or on a name mentioned in passing", async () => {
+    const roster = [
+      profile("general", "General Assistant"),
+      profile("knowledge", "Knowledge"),
+      profile("risk", "Risk Analyst"),
+      profile("expense", "Expense Review"),
+      profile("vendor", "Vendor Review"),
+      profile("interview", "Interview Notes"),
+      profile("release", "Release Notes"),
+      profile("followups", "Meeting Follow-ups"),
+    ];
+    for (const text of [
+      "Please review this contract for compliance risks",
+      "Summarize my meeting notes",
+      "I need an assistant to book travel",
+      "What does our knowledge base say about refunds?",
+      "Don't send this to Risk Analyst, it's about expenses",
+    ]) {
+      const { service, modelCalls } = makeService({ roster });
+      const result = await service.route({ actor: ACTOR, text });
+      expect({ text, kind: result.kind }).toEqual({ text, kind: "selected" });
+      expect({ text, model: modelCalls.length }).toEqual({ text, model: 1 });
+    }
+  });
+
+  test("routes a message that addresses a shipped coworker by its full name", async () => {
+    const roster = [
+      profile("risk", "Risk Analyst"),
+      profile("expense", "Expense Review"),
+      profile("knowledge", "Knowledge"),
+      profile("followups", "Meeting Follow-ups"),
+    ];
+    for (const [text, agentId] of [
+      ["Risk Analyst, please check this vendor", "risk"],
+      ["hey Expense Review: is this claim within policy?", "expense"],
+      ["Hi @Knowledge what is our refund policy", "knowledge"],
+      ["can you ask Meeting Follow-ups to pull the actions", "followups"],
+      ["send this to @Risk Analyst please", "risk"],
+      ["Knowledge", "knowledge"],
+    ] as const) {
+      const { service, modelCalls } = makeService({ roster });
+      expect(await service.route({ actor: ACTOR, text })).toMatchObject({
+        kind: "selected",
+        agentId,
+        viaNameMatch: true,
+      });
+      expect({ text, model: modelCalls.length }).toEqual({ text, model: 0 });
+    }
   });
 });

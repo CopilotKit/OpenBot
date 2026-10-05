@@ -8,37 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A coworker named in the message is routed to without asking a model
+### A coworker the message speaks to is routed to without asking a model
 
-Naming a coworker in the text — "ask Risk Analyst to review this" — went to the intent router like
-any other message, so the deployment paid a model call to be told what the person had already said,
-and sometimes was told something else. A name that matches exactly one coworker on that person's
-roster now routes straight to them, recorded as `matched a coworker’s name in the message` with
-`viaNameMatch: true` on the same `channel.routed` row. A name that matches more than one is refused
-with distinct labels, and the composer keeps the draft and asks the person to choose instead of
-starting the default coworker. Explicit picker choices still use `viaMention: true`. A name nobody
-on the roster answers to falls through to the router as before.
+Addressing a coworker by name went to the intent router like any other message, so the deployment
+paid a model call to be told what the person had already said, and sometimes was told something
+else. A message that speaks to a coworker by its full name now routes straight to them: it opens
+with the name ("Risk Analyst, please check this"), names it with `@`, or asks it ("ask Risk Analyst
+to review this"). It is recorded as `matched a coworker’s name in the message` with
+`viaNameMatch: true` on the same `channel.routed` row. A name in passing ("don't send this to Risk
+Analyst") and a word that only ends a name ("review this contract", "my meeting notes") still go
+to the router. When the message addresses more than one coworker, or two share the addressed name,
+it is refused with distinct labels, and the composer keeps the draft and asks the person to choose
+instead of starting the default coworker. Explicit picker choices still use `viaMention: true`.
 
-### Routing refuses rather than routes on a connector read it could not make
-
-Which systems a coworker can reach is weighed by the router alongside what the coworker is for. A
-failed read of that used to be treated as "reaches nothing", which is a statement about the
-deployment rather than an absence of one: a database that blinked quietly re-routed messages away
-from the coworker that could actually do the work. It now refuses the request with a retryable
-explanation, and the composer preserves the draft.
-
-- A cancellation the native host never collected is now dropped instead of being reported as
-  pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
-  worker, and only that worker ever removed it: a worker that stopped polling left the entry in
-  memory for the life of the process, so the Host access panel showed an operation that could never
-  finish. A desktop that reconnects within the operation timeout is still told to stop.
-- A Bot's shell now honours a Stop that landed before the command was spawned, not only one that
-  arrives afterwards. A person who pressed Stop in the window between the request reaching the
-  computer and the command starting got no answer until that command finished on its own.
-- A file download refused because the computer's response carried no usable byte length now releases
-  the connection before reporting the refusal. The unread body could be as large as the whole
-  download budget, so a computer reached through a proxy that re-chunks left a transfer running and a
-  connection checked out of the pool on every attempt.
 ### A Bot's turn in a group is no longer offered coordination tools it cannot call
 
 A Bot answering another Bot in a group conversation was offered `ask_person`, and `message_bot`

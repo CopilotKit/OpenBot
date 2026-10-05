@@ -10,10 +10,7 @@ import {
   createRoutingRoutes,
   defaultRoutingProfile,
 } from "../src/routing/routes";
-import {
-  CoworkerReachabilityUnavailableError,
-  createCoworkerRoutingService,
-} from "../src/routing/service";
+import { createCoworkerRoutingService } from "../src/routing/service";
 
 /**
  * Why a conversation went where it went, for every conversation.
@@ -337,31 +334,4 @@ test("the HTTP adapter refuses oversized routing input with 400", async () => {
   });
   expect(asked).toEqual([]);
   expect(written).toEqual([]);
-});
-
-test("reachability refusal has a safe HTTP explanation and category", async () => {
-  const routes = createRoutingRoutes(
-    {
-      route: async () => {
-        throw new CoworkerReachabilityUnavailableError();
-      },
-      routeDetailed: async () => {
-        throw new CoworkerReachabilityUnavailableError();
-      },
-    },
-    async (context, next) => {
-      context.set("actor", ACTOR);
-      await next();
-    },
-  );
-  const response = await routes.request("http://openbot.test/", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "help me" }),
-  });
-  expect(response.status).toBe(503);
-  expect(await response.json()).toEqual({
-    error: "Coworker reachability is temporarily unavailable",
-    code: "coworker_reachability_unavailable",
-  });
 });

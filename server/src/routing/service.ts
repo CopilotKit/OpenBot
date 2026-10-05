@@ -78,16 +78,6 @@ export type CreateCoworkerRoutingServiceOptions = {
   reachableSystems?: (agentId: string) => Promise<readonly string[]>;
 };
 
-/** A safe categorical failure for a roster whose connector reachability could not be checked. */
-export class CoworkerReachabilityUnavailableError extends Error {
-  readonly code = "coworker_reachability_unavailable";
-
-  constructor() {
-    super("Coworker reachability is temporarily unavailable");
-    this.name = "CoworkerReachabilityUnavailableError";
-  }
-}
-
 /** Normalize people-facing names before matching, without making matching fuzzy. */
 export function normalizeCoworkerName(value: string): string {
   return value.normalize("NFKC").toLowerCase().trim().replace(/\s+/gu, " ");
@@ -126,11 +116,6 @@ function occurrencesOf(
 
 function actorId(actor: RoutingActor): string | undefined {
   return actor.id && actor.email !== DEV_ACTOR_EMAIL ? actor.id : undefined;
-}
-
-function suffixes(name: string): string[] {
-  const tokens = name.split(" ");
-  return tokens.slice(1).map((_, index) => tokens.slice(index + 1).join(" "));
 }
 
 function displayName(name: string): string {
@@ -176,10 +161,9 @@ function buildAliasIndex(roster: readonly AgentProfile[]): AliasIndex {
   const aliases = new Map<string, Map<string, AgentProfile>>();
   const labels = new Map<string, string>();
   for (const profile of roster) {
-    const normalized = normalizeCoworkerName(profile.name);
-    for (const alias of new Set([normalized, ...suffixes(normalized)])) {
-      addAlias(aliases, alias, profile);
-    }
+    // Full names only. A trailing word of a name ("review", "notes", "analyst") is an ordinary word
+    // in a request, and matching it sent "review this contract" to whichever coworker ends in Review.
+    addAlias(aliases, normalizeCoworkerName(profile.name), profile);
   }
   // Keep encoded id aliases even when a later roster collision changes the displayed label.
   // A previously offered label must become ambiguous rather than silently address another Bot.
@@ -229,8 +213,6 @@ function buildAliasIndex(roster: readonly AgentProfile[]): AliasIndex {
     }
     labels.set(profile.id, label);
     addAlias(aliases, normalized, profile);
-    for (const suffix of suffixes(normalized))
-      addAlias(aliases, suffix, profile);
     if (duplicates > 1) {
       addAlias(aliases, normalizeCoworkerName(label), profile);
     }
@@ -291,6 +273,53 @@ function labelsFor(
     .sort(codePointCompare);
 }
 
+/** "hey", "hi" or "hello" opening a message, then an optional `@`, before the name addressed. */
+const OPENING_ADDRESS = /^(?:(?:hey|hi|hello)(?![\p{L}\p{N}\p{M}_])[\s,]*)?@?/u;
+/** "ask" as a whole word, then an optional `@`, before the name addressed. */
+const ASK_ADDRESS = /(?<![\p{L}\p{N}\p{M}_])ask\s+@?/gu;
+/** A list of names addressed together: "ask Risk Analyst and Knowledge", "@Ann, @Bob". */
+const LIST_CONTINUATION = /^(?:\s*,\s*|\s*&\s*|\s+(?:and|or)\s+)@?/u;
+
+/**
+ * Keep only the names a message ADDRESSES, so a coworker is chosen without the model only when the
+ * person spoke to it: the message opens with its full name ("Risk Analyst, please…", after an
+ * optional greeting), names it with `@`, or asks it ("ask Risk Analyst to…"). A name mentioned in
+ * passing ("don't send this to Risk Analyst") is left to the model. Names listed straight after an
+ * addressed one are addressed too, so "ask Risk Analyst and Knowledge" is still a choice to make.
+ */
+function addressedOccurrences(
+  text: string,
+  occurrences: readonly AliasOccurrence[],
+): AliasOccurrence[] {
+  const starts = new Set<number>();
+  starts.add(OPENING_ADDRESS.exec(text)?.[0].length ?? 0);
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+    starts.add(at + 1);
+  }
+  for (const match of text.matchAll(ASK_ADDRESS)) {
+    starts.add((match.index ?? 0) + match[0].length);
+  }
+  const addressed: AliasOccurrence[] = [];
+  const sorted = [...occurrences].sort(
+    (left, right) => left.start - right.start || right.end - left.end,
+  );
+  for (const occurrence of sorted) {
+    // A name that starts inside an addressed one and runs past it ("ask Ann Marie Curie" with Ann
+    // Marie and Marie Curie) is addressed too, so overlapping names stay a choice, not a guess.
+    const overlapsAddressed = addressed.some(
+      (prior) =>
+        occurrence.start > prior.start &&
+        occurrence.start < prior.end &&
+        occurrence.end > prior.end,
+    );
+    if (!starts.has(occurrence.start) && !overlapsAddressed) continue;
+    addressed.push(occurrence);
+    const continuation = LIST_CONTINUATION.exec(text.slice(occurrence.end));
+    if (continuation) starts.add(occurrence.end + continuation[0].length);
+  }
+  return addressed;
+}
+
 function explicitNameRoute(
   text: string,
   roster: readonly AgentProfile[],
@@ -300,7 +329,9 @@ function explicitNameRoute(
   const occurrences = [...aliases.entries()].flatMap(([alias, profiles]) =>
     occurrencesOf(normalizedText, alias, profiles),
   );
-  const explicitOccurrences = withoutContainedOccurrences(occurrences);
+  const explicitOccurrences = withoutContainedOccurrences(
+    addressedOccurrences(normalizedText, occurrences),
+  );
   const profiles = new Map<string, AgentProfile>();
   for (const occurrence of explicitOccurrences) {
     for (const profile of occurrence.profiles.values()) {
@@ -410,11 +441,16 @@ export function createCoworkerRoutingService(
         id: profile.id,
         name: profile.name,
         roleDescription: profile.roleDescription,
+        /*
+         * Never allowed to break routing. A connector store that is slow or unhappy must not turn
+         * "who is this for" into an error, so a failure here is the same as holding nothing: the
+         * router falls back to matching on purpose alone, which is what it did before.
+         */
         ...(options.reachableSystems
           ? {
-              reaches: await options.reachableSystems(profile.id).catch(() => {
-                throw new CoworkerReachabilityUnavailableError();
-              }),
+              reaches: await options
+                .reachableSystems(profile.id)
+                .catch(() => [] as readonly string[]),
             }
           : {}),
       })),

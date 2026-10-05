@@ -6,8 +6,8 @@ import { tryClient } from "@/lib/client";
  * The server reads the roster for the person asking and picks by what each coworker is for, so this
  * can only ever return a coworker they are already allowed to reach. `fallback` is true when it is
  * the default rather than an inferred match, which the caller can say out loud. A thrown error here
- * permits the caller to fall back to the default coworker. A routing refusal instead asks the
- * person to clarify or retry and must stop the send.
+ * permits the caller to fall back to the default coworker. An ambiguous name instead asks the
+ * person to choose and must stop the send.
  *
  * Pass `agentId` when the draft named somebody with `@`. Nothing is inferred in that case and no
  * model is called; the call exists so the choice reaches the audit trail, which otherwise had a row
@@ -60,7 +60,6 @@ export async function routeMessage(
     const body = (await response.json().catch(() => null)) as {
       error?: unknown;
       names?: unknown;
-      code?: unknown;
     } | null;
     const message =
       typeof body?.error === "string"
@@ -75,8 +74,6 @@ export async function routeMessage(
         `${message} ${body.names.join(", ")}. Choose one with @.`,
       );
     }
-    if (body?.code === "coworker_reachability_unavailable")
-      throw new CoworkerRoutingRefusedError(message);
     throw new Error(message);
   }
   return (await response.json()) as RoutingDecision;

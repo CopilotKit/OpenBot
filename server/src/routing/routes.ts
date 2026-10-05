@@ -2,7 +2,6 @@ import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import {
-  CoworkerReachabilityUnavailableError,
   type HttpCoworkerRoutingService,
   MAX_ROUTING_TEXT_LENGTH,
 } from "./service";
@@ -42,21 +41,11 @@ export function createRoutingRoutes(
         ? body.agentId.trim()
         : null;
 
-    let detail: Awaited<
-      ReturnType<HttpCoworkerRoutingService["routeDetailed"]>
-    >;
-    try {
-      detail = await routing.routeDetailed({
-        actor: context.var.actor,
-        text,
-        agentId,
-      });
-    } catch (error) {
-      if (error instanceof CoworkerReachabilityUnavailableError) {
-        return context.json({ error: error.message, code: error.code }, 503);
-      }
-      throw error;
-    }
+    const detail = await routing.routeDetailed({
+      actor: context.var.actor,
+      text,
+      agentId,
+    });
     const { result } = detail;
     if (result.kind === "none") {
       return context.json(

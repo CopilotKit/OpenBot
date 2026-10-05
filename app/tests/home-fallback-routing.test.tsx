@@ -178,14 +178,6 @@ for (const refusal of [
     },
     message: "Data Analyst, Risk Analyst",
   },
-  {
-    status: 503,
-    body: {
-      error: "Coworker reachability is temporarily unavailable",
-      code: "coworker_reachability_unavailable",
-    },
-    message: "Coworker reachability is temporarily unavailable",
-  },
 ]) {
   test(`routing refusal ${refusal.status} preserves the draft and shows the explanation without starting a fallback`, async () => {
     const starts: string[][] = [];
