@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createHandoffDesk, HANDOFF_KIND } from "../src/agents/handoff";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAuditStore } from "../src/audit";
@@ -13,7 +13,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A hop, driven against the real database rather than through fakes.
@@ -24,11 +24,7 @@ import { TEST_POOL } from "./support/database";
  * author expected, which is the wrong witness for exactly the questions worth asking.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const ASKER = `handoff-asker-${suite}`;
@@ -57,7 +53,11 @@ const desk = createHandoffDesk({
 });
 
 async function clean() {
-  await database.delete(workItems).where(like(workItems.key, `run-${suite}%`));
+  // By the suite's own actor, which every hop's payload carries. A hop's key is `hop:<hash>:<hash>`,
+  // so a key prefix matches nothing, and a hop left queued is claimed by the next suite's sweep.
+  await database
+    .delete(workItems)
+    .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
   for (const id of [ASKER, TARGET]) {
     await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
     await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));

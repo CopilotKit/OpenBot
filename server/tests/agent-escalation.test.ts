@@ -48,6 +48,36 @@ describe("asking a person", () => {
     expect(said).toContain("the person in this conversation");
   });
 
+  /*
+   * A routine's Bot stopping to ask is the case worth finding: nobody is in the conversation to
+   * answer, so the row has to say the question was raised by a schedule rather than by a person.
+   */
+  test("the row says what started the run, not only whose authority it had", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "which account?" });
+
+    expect(written[0]?.initiator).toEqual({ kind: "routine", id: "routine_7" });
+  });
+
+  test("a run that says nothing leaves the row filed as a person's", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "which account?" });
+
+    expect(written[0]?.initiator).toBe(undefined);
+  });
+
   test("the question is on the record", async () => {
     const { written, store } = recorder();
     const tool = escalationTool({
@@ -88,6 +118,76 @@ describe("asking a person", () => {
   });
 
   /*
+   * The route above refused politely. A real one fails by throwing.
+   *
+   * `askTheirOwnPerson` cannot throw, so every route this repo runs takes the happy path and the
+   * gap was invisible — but the module says who a person is is a seam, and every route a company
+   * hands in is a duty desk or a rota reached over a network. A timeout there used to come straight
+   * back out of `execute`, ending the run with nothing said on the one tool whose job is to stop
+   * the Bot falling silent, and leaving no row behind to say the person was never asked.
+   */
+  test("a route that throws is an answer, not the end of the run", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw new Error("connect ETIMEDOUT rota.internal:443");
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    expect(said).toContain("did not reach anybody");
+    // The Bot must not go on to tell the person their question is with somebody.
+    expect(said).not.toContain(PUT_TO);
+    expect(written[0]?.eventType).toBe("agent.escalation_failed");
+  });
+
+  test("what the route threw is on the row and not in the answer", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw new Error("connect ETIMEDOUT rota.internal:443");
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    // An internal address and error code are for whoever operates the rota, not for the person who
+    // asked the question and will read whatever the Bot paraphrases.
+    expect(said).not.toContain("rota.internal");
+    expect(written[0]?.payload).toMatchObject({
+      question: "which account?",
+      failure: "connect ETIMEDOUT rota.internal:443",
+    });
+  });
+
+  /*
+   * A route can throw something that is not an Error, and a run must survive that too rather than
+   * failing inside the handler written to keep it alive.
+   */
+  test("a route that throws something that is not an Error is still an answer", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        throw "the desk is closed";
+      },
+      auditStore: store,
+    });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    expect(said).toContain("did not reach anybody");
+    expect(written[0]?.payload).toMatchObject({
+      failure: "the desk is closed",
+    });
+  });
+
+  /*
    * Mid-run with a person waiting: a throw ends the run with nothing said, which reads as the Bot
    * ignoring them.
    */
@@ -97,6 +197,58 @@ describe("asking a person", () => {
     const said = await tool.execute({});
 
     expect(said).toContain("say what you need");
+  });
+
+  /*
+   * The same call, spelled the other way.
+   *
+   * A question field that is present and empty is a call with nothing in it too, and the refusal
+   * above is the sentence written for it. `message_bot`, the tool this competes with for the same
+   * decision, refuses a blank task and says so; this is the other half of that.
+   */
+  test.each([
+    ["an empty question", ""],
+    ["a question of spaces", "   "],
+  ])("%s is refused as a sentence", async (_name, question) => {
+    const tool = escalationTool({ from: FROM, route: askTheirOwnPerson });
+
+    const said = await tool.execute({ question });
+
+    expect(said).toContain("say what you need");
+    expect(said).not.toContain(PUT_TO);
+  });
+
+  test("a blank question reaches nobody and leaves no row saying it did", async () => {
+    const { written, store } = recorder();
+    let reached = 0;
+    const tool = escalationTool({
+      from: FROM,
+      route: async () => {
+        reached += 1;
+        return { reached: "the on-call engineer" };
+      },
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "  " });
+
+    // An `agent.escalated` row with no question in it is the row an operator counts escalations by,
+    // saying a person was asked something that was never said.
+    expect(reached).toBe(0);
+    expect(written).toEqual([]);
+  });
+
+  test("a question with room around it is recorded as the question", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "  which account?  " });
+
+    expect(written[0]?.payload).toMatchObject({ question: "which account?" });
   });
 });
 

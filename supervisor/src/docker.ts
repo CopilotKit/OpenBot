@@ -33,6 +33,37 @@ const docker = new Docker(
 const COMPUTER_PORT = "4100/tcp";
 
 /**
+ * Readiness, stated at create time rather than read off the image.
+ *
+ * `agent-computer/Dockerfile` declares the same HEALTHCHECK, and under Docker that was enough: the
+ * image carried it, the daemon ran it, and {@link waitUntilAnswering} could ask. Podman does not
+ * report it. Its images are OCI-manifest, the OCI image config has no healthcheck field, and the
+ * instruction is dropped, both when Podman builds the image and when it pulls one that has it. The
+ * published `agent-computer` config does carry it; `podman inspect` of that same image reports
+ * none.
+ *
+ * Silently, and into the one branch that cannot tell the difference: with no health to read,
+ * `waitUntilAnswering` accepts `Running`, and a container that is running is not a Chromium that
+ * is answering. Every cold start of a computer then raced the first request, which arrived at a
+ * port nothing was listening on yet and was reported as a computer that is not running.
+ *
+ * Passed here, the engine is told what to run instead of asked what it inherited, which is also
+ * true on Docker and one less thing that depends on how an image was built. Podman honours an
+ * explicit healthcheck: it is how every service in `docker-compose.yml` reports healthy there.
+ */
+const COMPUTER_HEALTHCHECK = {
+  Test: [
+    "CMD-SHELL",
+    `bun -e "const r = await fetch('http://localhost:${COMPUTER_PORT.split("/")[0]}/health'); process.exit(r.ok ? 0 : 1)"`,
+  ],
+  // Nanoseconds, which is what the API takes. The same numbers the Dockerfile states.
+  Interval: 2_000_000_000,
+  Timeout: 3_000_000_000,
+  StartPeriod: 2_000_000_000,
+  Retries: 30,
+};
+
+/**
  * How many times `ensure` will build a computer before giving up.
  *
  * One retry, because the only thing being retried is losing a race to another request for the same
@@ -120,6 +151,20 @@ function portOf(ports?: Docker.Port[] | undefined): number | undefined {
 }
 
 /**
+ * A published port from `inspect`, which Docker reports as a string.
+ *
+ * The daemon hands back `""` before a port is assigned and anything at all when it
+ * misbehaves, so a bare `parseInt` turns `"abc"` into a `NaN` port and `"0"` into a
+ * port nothing can dial. Only digits in range are a port; anything else is no port.
+ */
+export function parseHostPort(value: unknown): number | undefined {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
+  const port = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return undefined;
+  return port;
+}
+
+/**
  * Whether a labelled thing belongs to this deployment.
  *
  * Containers created before the namespace label existed carry the default namespace, so an existing
@@ -172,18 +217,23 @@ async function inspectOwned(names: ComputerNames): Promise<{
   port?: number;
   image?: string;
   startedAt?: string;
+  token?: string;
 } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
     if (!ours(info.Config?.Labels)) return null;
     const published =
       info.NetworkSettings?.Ports?.[COMPUTER_PORT]?.[0]?.HostPort;
+    const port = parseHostPort(published);
     return {
       status: info.State?.Status ?? "unknown",
-      ...(published ? { port: Number.parseInt(published, 10) } : {}),
+      ...(port !== undefined ? { port } : {}),
       // The resolved image, not the tag it was started from. A tag moves when the image is
       // rebuilt; this is what the container is actually running.
       ...(info.Image ? { image: info.Image } : {}),
+      // The token this container was born holding, which is the one it will check callers against
+      // for the rest of its life. See `holdsCurrentToken`.
+      token: tokenIn(info.Config?.Env),
       /*
        * When this run of the container began, which is what tells two runs apart.
        *
@@ -235,6 +285,46 @@ async function runsCurrentImage(
   }
 }
 
+/** `COMPUTER_TOKEN=...` out of a list of `KEY=value`, which is how both sides carry an environment. */
+function tokenIn(environment: string[] | undefined): string | undefined {
+  const entry = environment?.find((line) => line.startsWith(`${TOKEN_NAME}=`));
+  return entry?.slice(TOKEN_NAME.length + 1);
+}
+
+const TOKEN_NAME = "COMPUTER_TOKEN";
+
+/**
+ * Whether the computer that exists will accept the token this deployment now hands out.
+ *
+ * A computer is checked against the `COMPUTER_TOKEN` it was created with, and it holds that one for
+ * as long as the container lives. Normally that is nothing to worry about, because the shell mints
+ * the generated secrets once per deployment and deliberately does not rotate them: a computer
+ * outliving a restart is the reason it does not.
+ *
+ * The token does change, though, on exactly the occasion nobody tests: a machine set up again from
+ * nothing. Emptying the credential store, or installing over a deployment whose secrets are gone,
+ * mints a new one. Compose then rebuilds everything it owns with it, the supervisor included, and
+ * the computers are the one thing compose does not own. They survive, holding the old token, and
+ * every call to them comes back 401.
+ *
+ * What that looks like to a person is the reason this is a defect rather than an inconvenience: the
+ * gateway allows the action and the trail records it as carried out, the computer refuses it, and
+ * the screen says "Not authorised" while naming nothing. Found on a first run of v0.0.9 against a
+ * computer container created by the install before it, five days earlier.
+ *
+ * A deployment that sets no token is not a mismatch. That is a computer with no door on it, which is
+ * a choice the environment makes, and replacing a working browser over it would be this function
+ * inventing a policy of its own.
+ */
+function holdsCurrentToken(
+  existingToken: string | undefined,
+  environment: string[],
+): boolean {
+  const wanted = tokenIn(environment);
+  if (wanted === undefined) return true;
+  return existingToken === wanted;
+}
+
 /** Long enough for a cold start with a large image, short enough that a caller is not left hanging. */
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
 
@@ -262,8 +352,9 @@ async function waitUntilAnswering(
     try {
       const info = await docker.getContainer(container).inspect();
       const health = info.State?.Health?.Status;
-      // An image without a HEALTHCHECK reports nothing. Waiting forever for an answer that will
-      // never come would be worse than going ahead, so running is accepted as the best available.
+      // Nothing to read. Every computer this supervisor creates is given a healthcheck, so this is
+      // an engine that does not report one rather than an image that does not carry one, and
+      // waiting forever for an answer that will never come would be worse than going ahead.
       if (!health) {
         if (info.State?.Running) return;
       } else if (health === "healthy") {
@@ -393,7 +484,11 @@ export async function ensure(
      * ended, and a Bot carrying an hour-old handover prompt into a new conversation is the symptom
      * that found this.
      */
-    if (existing && !(await runsCurrentImage(existing.image, options.image))) {
+    if (
+      existing &&
+      (!(await runsCurrentImage(existing.image, options.image)) ||
+        !holdsCurrentToken(existing.token, options.environment))
+    ) {
       try {
         await docker
           .getContainer(names.container)
@@ -432,6 +527,7 @@ export async function ensure(
           Labels: labelsFor(names),
           Env: options.environment,
           ExposedPorts: { [COMPUTER_PORT]: {} },
+          Healthcheck: COMPUTER_HEALTHCHECK,
           HostConfig: hostConfig(names, options),
         });
       } catch (error) {

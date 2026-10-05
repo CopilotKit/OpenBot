@@ -17,22 +17,34 @@
  * by the model is theatre: "never click Submit" is evaded by sending `{ref: "e13", name: "Continue"}`.
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
-import { type AuditStore, recordAuditEvent } from "../audit";
+
+import { type ApprovalGate, currentApprovalContext } from "../approvals/types";
 import {
+  type AuditInitiator,
+  type AuditStore,
+  recordAuditEvent,
+} from "../audit";
+import { withUntrustedNotice } from "../untrusted-content";
+import {
+  ComputerStoppedError,
   ComputerUnavailableError,
   createComputerTransport,
   StaleSnapshotError,
 } from "./client";
+import { HeadlessToolSuspension } from "./headless-tools";
 import { checkComputerAddress } from "./target";
 
 export {
   ComputerUnavailableError,
   ElementNotFoundError,
+  HandoffRequestError,
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
+  WorkspaceTooLargeError,
 } from "./client";
 
 import type { PageFrameStore } from "./page-frames";
@@ -41,13 +53,15 @@ import {
   evaluateActionPolicy,
   type PolicyContext,
   type PolicyDecision,
+  policyInitiator,
 } from "./policy";
-import type { ComputerProvider } from "./provider";
+import type { ComputerProvider, ComputerUpdate } from "./provider";
 import type {
   ActionResult,
   ClickInput,
   ComputerStatus,
   ControlState,
+  DownloadFileInput,
   HumanInput,
   HumanInputResult,
   KeyInput,
@@ -63,6 +77,8 @@ import type {
   ScrollInput,
   SecretRequest,
   SecretResult,
+  SignInFillInput,
+  SignInFillResult,
   SnapshotElement,
   SnapshotResult,
   TypeInput,
@@ -92,9 +108,12 @@ export type ActionActor = {
   id: string;
   /** Null unless this is a real row in `users`, because the audit table has a foreign key to it. */
   userId?: string;
+  /** What started this run; scheduled work must not inherit person initiation. */
+  initiator?: AuditInitiator;
 };
 
 export type ComputerGatewayOptions = {
+  approvalGate?: ApprovalGate;
   provider: ComputerProvider;
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
@@ -133,6 +152,7 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult>;
   click(
     botId: string,
@@ -162,6 +182,16 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: ReadFileInput,
   ): Promise<ReadFileResult>;
+  downloadFile(
+    botId: string,
+    actor: ActionActor,
+    input: DownloadFileInput,
+    signal?: AbortSignal,
+  ): Promise<{
+    body: ReadableStream<Uint8Array>;
+    bytes: number;
+    name: string;
+  }>;
   listFiles(
     botId: string,
     actor: ActionActor,
@@ -178,14 +208,28 @@ export interface ComputerGateway {
     actor: ActionActor,
     input: WriteFileInput,
   ): Promise<WriteFileResult>;
-  control(botId: string): Promise<ControlState>;
+  control(botId: string, requestId?: string): Promise<ControlState>;
   requestHelp(
     botId: string,
     actor: ActionActor,
     reason: string,
+    toolCallId?: string,
   ): Promise<ControlState>;
-  takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
-  releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  takeControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  releaseControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
+  cancelControl(
+    botId: string,
+    actor: ActionActor,
+    requestId: string,
+  ): Promise<ControlState>;
   requestSecret(
     botId: string,
     actor: ActionActor,
@@ -196,6 +240,12 @@ export interface ComputerGateway {
     actor: ActionActor,
     text: string,
   ): Promise<SecretResult>;
+  /** Fill and submit a login form on the Bot's current page. See passwords/service.ts. */
+  signIn(
+    botId: string,
+    input: SignInFillInput,
+    signal?: AbortSignal,
+  ): Promise<SignInFillResult>;
   humanInput(botId: string, input: HumanInput): Promise<HumanInputResult>;
   computers(): Promise<{
     isolation: "per-bot" | "shared";
@@ -204,6 +254,7 @@ export interface ComputerGateway {
       running: boolean;
       startedAt: string | null;
       egress?: string | null;
+      updateAvailable?: boolean;
     }[];
   }>;
   stopComputer(
@@ -214,6 +265,8 @@ export interface ComputerGateway {
     botId: string,
     actor: ActionActor,
   ): Promise<{ cleared: boolean }>;
+  /** Move a computer onto the current image, keeping its files and sign-ins. */
+  updateComputer(botId: string, actor: ActionActor): Promise<ComputerUpdate>;
 }
 
 export function createComputerGateway(
@@ -326,6 +379,13 @@ export function createComputerGateway(
    */
   const COMMAND_BACKSTOP_MS = 615_000;
 
+  /*
+   * A download has no command-like budget of its own. The computer refuses oversized files before
+   * streaming, but a large permitted file can still outlive the ordinary request deadline on a slow
+   * link. Five minutes is a backstop, not a size limit.
+   */
+  const DOWNLOAD_BACKSTOP_MS = 300_000;
+
   /** Read-only, so it passes straight through. Nothing has changed and there is nothing to decide. */
   async function screenshot(botId: string): Promise<ScreenshotResult> {
     return get<ScreenshotResult>(botId, "/screenshot");
@@ -342,8 +402,23 @@ export function createComputerGateway(
    * on the store.
    */
   async function snapshot(botId: string): Promise<SnapshotResult> {
+    const base = await locate(botId);
+    /*
+     * Which run this is, asked before the page is drawn rather than after it.
+     *
+     * After `locate`, because on a supervisor that is the `/ensure` that reports it. But before
+     * `/snapshot`, because the two answers have to describe the same browser and asking afterwards
+     * does not guarantee it: a computer replaced while the snapshot was being taken would have its
+     * dead page stamped with the run of the browser that replaced it, so every ref on that page would
+     * resolve against the live run and the live run's own snapshots would be refused for being older.
+     *
+     * Asked first, a replacement in that window leaves a row carrying a run that is already gone.
+     * Nothing resolves against it and the next snapshot supersedes it, which is the direction this is
+     * allowed to fail in.
+     */
+    const run = await sessionOf(botId);
     const result = await transport.call<SnapshotResult>(
-      await locate(botId),
+      base,
       botId,
       "/snapshot",
       { method: "POST" },
@@ -354,10 +429,10 @@ export function createComputerGateway(
       elements: new Map(
         result.elements.map((element) => [element.ref, element]),
       ),
-      // Read after `locate`, which is the `/ensure` that reports it.
-      ...(await sessionOf(botId)),
+      ...run,
     });
-    return result;
+    // Element names and values are whatever the page says they are, so they are marked too.
+    return withUntrustedNotice(result, "web page", SNAPSHOT_FIELDS);
   }
 
   /**
@@ -378,7 +453,13 @@ export function createComputerGateway(
   }
 
   async function read(botId: string): Promise<ReadResult> {
-    return get<ReadResult>(botId, "/read");
+    // Page text is outside content: marked here, once, so the headless tools and the browser's
+    // routes hand the model the same envelope. See untrusted-content.ts.
+    return withUntrustedNotice(
+      await get<ReadResult>(botId, "/read"),
+      "web page",
+      PAGE_FIELDS,
+    );
   }
 
   /**
@@ -401,8 +482,8 @@ export function createComputerGateway(
     /**
      * The run of the computer the action is reaching, when the provider can say.
      *
-     * Undefined means unknown, not mismatched: a provider with no sessions to report, or one that
-     * could not be asked, leaves the generation check exactly as it was.
+     * Undefined means unknown, not mismatched: a provider that could not be asked leaves the
+     * generation check exactly as it was, rather than refusing every ref it holds.
      */
     session?: string,
   ): SnapshotElement | undefined {
@@ -454,17 +535,19 @@ export function createComputerGateway(
     /*
      * LOCATE FIRST, THEN ASK WHICH RUN THAT WAS. The order is the check.
      *
-     * `sessionOf` answers with what the last `/ensure` reported, and until this action has made its
-     * own, the last one belongs to the action before it. Asking first compared the stored snapshot
-     * against the previous action's run, which is the same run on every action but the first one
-     * after a replacement — exactly the action the check exists to catch. The click after a replaced
-     * container was allowed and the one after that refused, which is a guarantee arriving one action
-     * too late.
+     * On the supervisor, `sessionOf` answers with what the last `/ensure` reported, and until this
+     * action has made its own, the last one belongs to the action before it. Asking first compared
+     * the stored snapshot against the previous action's run, which is the same run on every action
+     * but the first one after a replacement — exactly the action the check exists to catch. The
+     * click after a replaced container was allowed and the one after that refused, which is a
+     * guarantee arriving one action too late. The shared provider has no `/ensure` to read back, so
+     * there it is a live `/run` call of its own — one extra round trip per ref-citing action —
+     * which asks after `locate` for the same reason even though `locate` there is a string.
      *
      * Only for an action that cites a ref. Nothing else is resolved against a snapshot, so nothing
      * else needs the run, and a scroll or a file read should not have to reach the supervisor before
      * the policy has even seen it. The address that comes back is the one the attempt then uses, so
-     * this costs no extra call for the actions that do need it.
+     * on the supervisor this costs no extra call for the actions that do need it.
      */
     const address = ref ? await locateForAction(botId) : undefined;
     const { session } = ref ? await sessionOf(botId) : { session: undefined };
@@ -512,6 +595,7 @@ export function createComputerGateway(
         ? describeFile(filePath)
         : { path: "", name: "", extension: "" },
       command: subject.command ?? "",
+      initiator: policyInitiator(actor.initiator),
       // Neutral, like the fields above: this is not an MCP call, but a `deny: mcp.effect == "write"`
       // names `mcp`, and cel-js throws on an unbound identifier — which fails closed and would refuse
       // every browser action the moment an operator wrote a rule about their tools. Empty server and
@@ -572,8 +656,36 @@ export function createComputerGateway(
           `${ref} is not on the page this computer is showing, so nothing can be checked against it before acting. Take a fresh snapshot and use the refs it returns.`,
         );
       }
-      result = await run(address);
+      const continuation = currentApprovalContext();
+      const approval = await options.approvalGate?.({
+        actorId: actor.id,
+        botId,
+        toolRef: toolName,
+        effect: ["activate", "type", "write_file", "run_command"].includes(
+          intent ?? "",
+        )
+          ? "write"
+          : "read",
+        scope: filePath
+          ? filePath.split("/").slice(0, -1).join("/") || "workspace"
+          : subject.command
+            ? "workspace"
+            : hostOf(pageUrl) || "browser",
+        args: continuation?.args ?? { ...subject, signal: undefined },
+        target: {
+          pageUrl,
+          ...(element ? { element, snapshotId } : {}),
+          ...(filePath ? { filePath } : {}),
+        },
+        continuation,
+      });
+      result =
+        approval && "replay" in approval
+          ? (approval.replay as T)
+          : await run(address);
+      await approval?.complete(result);
     } catch (error) {
+      if (error instanceof HeadlessToolSuspension) throw error;
       /**
        * A permitted action that did not happen gets its own row.
        *
@@ -603,6 +715,10 @@ export function createComputerGateway(
         pageUrl,
         decision,
         failure: error instanceof Error ? error.message : "The action failed.",
+        // A person pressing Stop mid-action is not the computer failing. The message still says so;
+        // this keeps the row's type a stop, so a count of failed actions does not read every Stop as
+        // an outage.
+        ...(error instanceof ComputerStoppedError ? { stopped: true } : {}),
       });
       throw error;
     }
@@ -634,9 +750,15 @@ export function createComputerGateway(
      * row and do not ask. What IS recorded is the period: who, when, and why the Bot asked, the fact
      * an investigator wants is that a human drove this browser between two times.
      */
-    async requestHelp(botId: string, actor: ActionActor, reason: string) {
+    async requestHelp(
+      botId: string,
+      actor: ActionActor,
+      reason: string,
+      toolCallId?: string,
+    ) {
       const state = await post<ControlState>(botId, "/control/request", {
         reason,
+        ...(toolCallId ? { toolCallId } : {}),
       });
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
@@ -646,8 +768,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async takeControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/take", {});
+    async takeControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/take", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
@@ -658,8 +782,10 @@ export function createComputerGateway(
       return state;
     },
 
-    async releaseControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/release", {});
+    async releaseControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/release", {
+        requestId,
+      });
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
@@ -667,8 +793,22 @@ export function createComputerGateway(
       return state;
     },
 
-    control(botId: string): Promise<ControlState> {
-      return get<ControlState>(botId, "/control");
+    async cancelControl(botId: string, actor: ActionActor, requestId: string) {
+      const state = await post<ControlState>(botId, "/control/cancel", {
+        requestId,
+      });
+      await writeControlEvent(auditStore, "computer.help_cancelled", {
+        botId,
+        actor,
+      });
+      return state;
+    },
+
+    control(botId: string, requestId?: string): Promise<ControlState> {
+      return get<ControlState>(
+        botId,
+        `/control${requestId ? `?requestId=${encodeURIComponent(requestId)}` : ""}`,
+      );
     },
 
     /** Return every computer that the configured provider owns. */
@@ -681,6 +821,9 @@ export function createComputerGateway(
           running: computer.status === "running",
           startedAt: computer.startedAt ?? null,
           egress: computer.egress,
+          ...(computer.updateAvailable !== undefined
+            ? { updateAvailable: computer.updateAvailable }
+            : {}),
         })),
       };
     },
@@ -711,8 +854,49 @@ export function createComputerGateway(
      * The most destructive button we have. Every login the Bot had is gone and no undo exists, so the
      * row is written whatever happens next.
      */
+    /**
+     * Move a computer onto the image this deployment now runs.
+     *
+     * Only a provider that can say a computer is out of date offers it. The row is written for a
+     * computer that was already current too, so the trail shows the button was pressed.
+     */
+    async updateComputer(botId: string, actor: ActionActor) {
+      if (!provider.update) {
+        throw new ComputerUnavailableError(
+          `The ${provider.name} computer provider has no computer image of its own to update.`,
+        );
+      }
+      const result = await provider.update(botId);
+      await writeControlEvent(auditStore, "computer.updated", {
+        botId,
+        actor,
+        reason: !result.updated
+          ? "the computer was already on the current image, or had none"
+          : result.wasRunning
+            ? `the computer is restarting on ${result.to}, keeping its files and sign-ins`
+            : `the computer will start on ${result.to} when it is next used`,
+      });
+      return result;
+    },
+
     async resetComputer(botId: string, actor: ActionActor) {
       const result = await provider.reset(botId);
+      /*
+       * The row goes in HERE, before the two deletes below, because this line is the point of no
+       * return: the profile is already gone and nothing after it can put the logins back.
+       *
+       * Both clears are Postgres deletes, and a connection reset, a failover or a statement timeout
+       * in either used to throw before the row was written -- leaving a computer wiped with nothing
+       * on the trail to say who wiped it, which is the one outcome the note above rules out. The
+       * failure still propagates, so the caller is told the clears did not finish.
+       */
+      await writeControlEvent(auditStore, "computer.reset", {
+        botId,
+        actor,
+        reason: result.cleared
+          ? "the computer and its saved state were deleted"
+          : "no saved state was present to delete",
+      });
       // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
       // computer counts generations from one again, so the row has to go with the profile.
       await snapshots.clear(botId);
@@ -725,13 +909,6 @@ export function createComputerGateway(
        * anything a person would recognise as private.
        */
       await pageFrames?.clear(botId);
-      await writeControlEvent(auditStore, "computer.reset", {
-        botId,
-        actor,
-        reason: result.cleared
-          ? "the computer and its saved state were deleted"
-          : "no saved state was present to delete",
-      });
       return result;
     },
 
@@ -755,6 +932,22 @@ export function createComputerGateway(
         reason: `${input.label} (into ${input.ref})`,
       });
       return state;
+    },
+
+    /**
+     * Typing a person's login into the Bot's browser, from the private sign-in form.
+     *
+     * The credential arrives from the passwords module and goes straight to the computer. It is not
+     * audited here, not returned, and not logged; the passwords module writes the row, without it.
+     */
+    signIn(botId: string, input: SignInFillInput, signal?: AbortSignal) {
+      return post<SignInFillResult>(
+        botId,
+        "/sign-in/fill",
+        input,
+        signal,
+        SIGN_IN_BACKSTOP_MS,
+      );
     },
 
     async supplySecret(botId: string, actor: ActionActor, text: string) {
@@ -797,14 +990,20 @@ export function createComputerGateway(
      * The transport applies its target guard before it sends a request. This is
      * the minimum rule that applies even when the action policy permits the URL.
      */
-    navigate(botId: string, actor: ActionActor, url: string) {
+    navigate(
+      botId: string,
+      actor: ActionActor,
+      url: string,
+      toolCallId?: string,
+    ) {
       return govern(
         "computer_navigate",
         botId,
         actor,
         { targetUrl: url },
-        async () => transport.navigate(await locate(botId), botId, url),
-      );
+        async () =>
+          transport.navigate(await locate(botId), botId, url, toolCallId),
+      ).then((result) => withUntrustedNotice(result, "web page", PAGE_FIELDS));
     },
 
     click(
@@ -906,6 +1105,43 @@ export function createComputerGateway(
         actor,
         { filePath: input.path },
         () => post<ReadFileResult>(botId, "/files/read", input),
+      ).then((result) =>
+        // A workspace file is whatever the Bot downloaded or was sent, so it is outside content.
+        withUntrustedNotice(result, "workspace file", ["text"]),
+      );
+    },
+
+    /**
+     * The bytes leave the workspace, which is a different permission from letting a Bot read them.
+     *
+     * The decision and audit row use `computer_download_file` / `download_file`; a deployment can
+     * therefore allow `computer_read_file` while refusing this, or the reverse. The computer returns
+     * a stream, so the size limit is enforced there before any bytes are sent.
+     */
+    downloadFile(
+      botId: string,
+      actor: ActionActor,
+      input: DownloadFileInput,
+      signal?: AbortSignal,
+    ) {
+      return govern(
+        "computer_download_file",
+        botId,
+        actor,
+        { filePath: input.path, ...(signal ? { signal } : {}) },
+        async () => {
+          const download = await transport.download(
+            await locate(botId),
+            botId,
+            `/files/download?path=${encodeURIComponent(input.path)}`,
+            signal,
+            DOWNLOAD_BACKSTOP_MS,
+          );
+          return {
+            ...download,
+            name: describeFile(input.path).name || "download",
+          };
+        },
       );
     },
 
@@ -950,6 +1186,9 @@ export function createComputerGateway(
             caller,
             COMMAND_BACKSTOP_MS,
           ),
+      ).then((result) =>
+        // What a command prints can be anything it fetched, so the output is marked.
+        withUntrustedNotice(result, "command output", ["stdout", "stderr"]),
       );
     },
 
@@ -1038,6 +1277,8 @@ export function intentOf(
       return "read";
     case "computer_read_file":
       return "read_file";
+    case "computer_download_file":
+      return "download_file";
     case "computer_write_file":
       return "write_file";
     case "computer_run_command":
@@ -1066,18 +1307,25 @@ async function write(
     command?: string;
     /** Set only when a permitted action was attempted and did not succeed. */
     failure?: string;
+    /** Set when that non-success was a person pressing Stop, so the row is typed a stop, not a failure. */
+    stopped?: boolean;
   },
 ) {
   await recordAuditEvent(auditStore, {
     // A failure is its own kind of event, not a variant of "allowed": the whole point of the extra row
     // is that a reader can tell an action that happened from one that was permitted and then did not.
-    eventType: entry.failure
-      ? "computer.action_failed"
-      : entry.decision.allowed
-        ? "computer.action_allowed"
-        : "computer.action_refused",
+    // A stop is a third kind again: the action did not happen, but nothing broke, so it is neither a
+    // failure to be counted as an outage nor an action that was carried out.
+    eventType: entry.stopped
+      ? "computer.action_stopped"
+      : entry.failure
+        ? "computer.action_failed"
+        : entry.decision.allowed
+          ? "computer.action_allowed"
+          : "computer.action_refused",
     targetType: "computer",
     targetId: entry.botId,
+    initiator: entry.actor.initiator,
     // Only ever a real users row. The audit table has a foreign key to it, so writing the local
     // development actor's id here makes every action fail on a constraint violation instead of being
     // recorded. Who it was is in the payload either way.
@@ -1159,12 +1407,14 @@ async function writeControlEvent(
   auditStore: AuditStore,
   eventType:
     | "computer.help_requested"
+    | "computer.help_cancelled"
     | "computer.control_taken"
     | "computer.control_released"
     | "computer.secret_requested"
     | "computer.secret_supplied"
     | "computer.stopped"
-    | "computer.reset",
+    | "computer.reset"
+    | "computer.updated",
   entry: {
     botId: string;
     actor: ActionActor;
@@ -1175,6 +1425,7 @@ async function writeControlEvent(
     eventType,
     targetType: "computer",
     targetId: entry.botId,
+    initiator: entry.actor.initiator,
     ...(entry.actor.userId ? { actorUserId: entry.actor.userId } : {}),
     payload: {
       bot: entry.botId,
@@ -1183,6 +1434,13 @@ async function writeControlEvent(
     },
   });
 }
+
+/** The fields of a page read that come from the page itself. */
+const PAGE_FIELDS = ["title", "text"] as const;
+const SNAPSHOT_FIELDS = ["title", "elements"] as const;
+
+/** A two-step login can take two page loads and a code; this outlasts the computer's own waits. */
+const SIGN_IN_BACKSTOP_MS = 75_000;
 
 export function hostOf(url: string): string {
   try {

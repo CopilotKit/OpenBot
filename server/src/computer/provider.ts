@@ -17,6 +17,19 @@ export type ComputerLocation = {
   url?: string;
   startedAt?: string;
   egress?: string | null;
+  /** Whether this computer runs an older image than a new one would get. Only a sandbox can tell. */
+  updateAvailable?: boolean;
+};
+
+/** What moving a computer onto the current image did. */
+export type ComputerUpdate = {
+  /** False when it was already current, or there is no computer. */
+  updated: boolean;
+  /** Whether it was running, and is therefore restarting on the new image. */
+  wasRunning: boolean;
+  /** The images it ran and the ones it runs now, for the trail. */
+  from?: string;
+  to?: string;
 };
 
 /** A description of how a provider separates one Bot's computer from another. */
@@ -81,6 +94,13 @@ export interface ComputerProvider {
   reset(botId: string): Promise<{ cleared: boolean }>;
   /** List the computers that this provider owns. */
   list(): Promise<ComputerLocation[]>;
+  /**
+   * Move this Bot's computer onto the current image, keeping its files and sign-ins.
+   *
+   * Only where a computer can be out of date with the deployment and the provider can replace it
+   * in place: a Sandbox carries its pod template inline, so it keeps the one it was created with.
+   */
+  update?(botId: string): Promise<ComputerUpdate>;
   /** Prepare provider resources before the first computer request. */
   warm?(): Promise<void>;
   /**
@@ -88,8 +108,14 @@ export interface ComputerProvider {
    *
    * A snapshot's generation only orders snapshots within one run: a replaced container counts from
    * one again, so a ref from the run before it matches a row nothing has overwritten. This is what
-   * tells the two apart. Optional because a deployment with one shared computer has no supervisor to
-   * ask, and there the comparison is skipped and behaviour is unchanged.
+   * tells the two apart.
+   *
+   * Every provider answers it, and where the answer comes from is the whole of the difference between
+   * them: a container per Bot reads it off the container, a sandbox off the moment its browser last
+   * became ready, and the one shared computer has to ask the computer, because that process serves
+   * every Bot and outlives every reset. Optional in the type only for a provider that genuinely
+   * cannot say; undefined then means unknown rather than mismatched, and the comparison is skipped
+   * exactly as it was before any of this existed.
    */
   sessionOf?(botId: string): Promise<string | undefined>;
 }
@@ -163,6 +189,36 @@ export function createSharedComputerProvider(
 
     async locate(_botId: string): Promise<string> {
       return options.baseUrl;
+    },
+
+    /**
+     * Which run of this Bot's browser is current, asked of the computer itself.
+     *
+     * NOTHING ELSE HERE KNOWS. A Bot with its own container gets a run from the container and a
+     * sandbox gets one from the moment its browser last became ready; this deployment is one process
+     * serving every Bot, and it outlives every reset, so the container says the same thing before and
+     * after the browser it was asked about was replaced. The computer is the only party that can tell
+     * a session apart from the one before it, so it is the one asked.
+     *
+     * NOT REMEMBERED, unlike the supervisor's, and the difference is `locate`: there it is an
+     * `/ensure` that refreshes the answer before every action, while here it is a string and makes no
+     * call at all. A cached run would then be the one this process first saw, for the life of the
+     * process, which is exactly the stale answer this exists to stop giving.
+     */
+    async sessionOf(botId: string): Promise<string | undefined> {
+      try {
+        const body = (await call("/run", "GET", botId)) as {
+          run?: unknown;
+        } | null;
+        return typeof body?.run === "string" && body.run.length > 0
+          ? body.run
+          : undefined;
+      } catch {
+        // Unknown, not mismatched. A computer that cannot be reached, or one from before this
+        // endpoint existed, must not turn every ref into a refusal; the comparison goes back to
+        // being skipped, which is where it started.
+        return undefined;
+      }
     },
 
     async status(botId: string): Promise<ComputerStatus> {
@@ -297,6 +353,13 @@ function createLazySandboxProvider(
     stop: async (botId) => (await provider()).stop(botId),
     reset: async (botId) => (await provider()).reset(botId),
     list: async () => (await provider()).list(),
+    // Forwarded like the rest, or the gateway sees no `update` and "Update computer" answers 503.
+    update: async (botId) => {
+      const built = await provider();
+      if (!built.update)
+        throw new Error("The sandbox computer provider cannot update.");
+      return built.update(botId);
+    },
     sessionOf: async (botId) => (await provider()).sessionOf?.(botId),
   };
 }

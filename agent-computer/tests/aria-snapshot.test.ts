@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseAriaSnapshot, parseDescriptor } from "../src/aria-snapshot";
+import {
+  cutAtCodeUnits,
+  parseAriaSnapshot,
+  parseDescriptor,
+} from "../src/aria-snapshot";
 
 /**
  * The parser, tested against captured Playwright output.
@@ -105,6 +109,51 @@ describe("parseAriaSnapshot, against captured output", () => {
     expect(byName.get("Submit order")).not.toHaveProperty("checked");
   });
 
+  /**
+   * A half-ticked "select all", captured the same way the fixture above was.
+   *
+   * `ariaSnapshot({ mode: "ai" })` against a fieldset of three boxes in Chromium 151, with the first
+   * one's `indeterminate` set — which is what a box above a partly-ticked list carries. Playwright
+   * writes that as `[checked=mixed]`: a value, where an ordinary tick is the bare `[checked]`. It is
+   * the only flag in this output that carries one, which is the whole of the bug.
+   *
+   * Captured rather than written, for the reason the note at the top of this file gives. Guessed at,
+   * the entry loses the `generic` wrapper each box sits inside and the `text` node beside it, and the
+   * guess would pass while the shipped parser walked something else.
+   */
+  const MIXED = `- group "Toppings" [ref=e2]:
+  - generic [ref=e4]:
+    - checkbox "Select all" [checked=mixed] [ref=e5]
+    - text: Select all
+  - generic [ref=e6]:
+    - checkbox "Bacon" [checked] [ref=e7]
+    - text: Bacon
+  - generic [ref=e8]:
+    - checkbox "Extra Cheese" [ref=e9]
+    - text: Extra Cheese`;
+
+  test("the mixed fixture is genuinely valid YAML", () => {
+    expect(() => Bun.YAML.parse(MIXED)).not.toThrow();
+  });
+
+  test("a half-ticked box is not reported as ticked", () => {
+    const byName = new Map(
+      parseAriaSnapshot(MIXED).elements.map((e) => [e.name, e]),
+    );
+    // Not checked, so a Bot asked to tick it clicks it. Told it was already checked, it left the
+    // rows underneath unselected and said they were done.
+    expect(byName.get("Select all")?.checked).toBe(false);
+    // And the two beside it are unchanged, so this is not a swap.
+    expect(byName.get("Bacon")?.checked).toBe(true);
+    expect(byName.get("Extra Cheese")?.checked).toBe(false);
+  });
+
+  test("a half-ticked box is still a control a Bot can act on", () => {
+    const [first] = parseAriaSnapshot(MIXED).elements;
+    // The ref is what a click needs, and it sits after the flag Playwright gave a value to.
+    expect(first).toMatchObject({ ref: "e5", role: "checkbox" });
+  });
+
   test("empty and unparseable input produce no elements rather than throwing", () => {
     expect(parseAriaSnapshot("").elements).toEqual([]);
     expect(parseAriaSnapshot("\t- [[[ not yaml").elements).toEqual([]);
@@ -119,6 +168,79 @@ describe("parseAriaSnapshot, against captured output", () => {
     const { elements, truncated } = parseAriaSnapshot(many);
     expect(elements).toHaveLength(200);
     expect(truncated).toBe(true);
+  });
+});
+
+/**
+ * A name or value longer than the 200 kept is cut, and the cut counts UTF-16 code units.
+ *
+ * An emoji is two of them. With its first half as the 200th unit, a plain `slice` leaves a lone high
+ * surrogate as the last character of what the Bot is handed: JSON carries it as a bare `\ud83d` and
+ * UTF-8 as U+FFFD, so the Bot reads back a broken character that is not on the page, in text it may
+ * well have typed itself.
+ */
+describe("a name or value too long to keep whole", () => {
+  const CUT_THROUGH = `${"a".repeat(199)}😀 and the rest`;
+  const ENDS_INSIDE = `${"a".repeat(198)}😀 and the rest`;
+
+  test("a name cut inside a character loses the whole character, not half of it", () => {
+    const { elements } = parseAriaSnapshot(`- link "${CUT_THROUGH}" [ref=e1]`);
+    expect(elements[0]?.name).toBe("a".repeat(199));
+  });
+
+  test("a value cut inside a character loses the whole character, not half of it", () => {
+    const { elements } = parseAriaSnapshot(
+      `- textbox "Message" [ref=e1]: ${CUT_THROUGH}`,
+    );
+    expect(elements[0]?.value).toBe("a".repeat(199));
+  });
+
+  test("a character that ends at the cut is kept", () => {
+    const { elements } = parseAriaSnapshot(
+      `- textbox "${ENDS_INSIDE}" [ref=e1]: ${ENDS_INSIDE}`,
+    );
+    expect(elements[0]?.name).toBe(`${"a".repeat(198)}😀`);
+    expect(elements[0]?.value).toBe(`${"a".repeat(198)}😀`);
+  });
+});
+
+/**
+ * The cut itself, at any limit.
+ *
+ * Tested directly as well as through the parser because `index.ts` cuts the readable page text with
+ * it at 6000 rather than 200, and that caller imports Playwright at load, so there is no test that
+ * can reach it. The rule is the thing worth pinning, so it is pinned where it is declared.
+ */
+describe("cutting at code units", () => {
+  const EMOJI = "\u{1F600}";
+
+  test("a limit landing between the halves of a character drops the character", () => {
+    const text = `${"a".repeat(5999)}${EMOJI}tail`;
+    const cut = cutAtCodeUnits(text, 6000);
+    expect(cut).toBe("a".repeat(5999));
+    // Not a lone high surrogate, which is what a bare `slice` leaves and what reads as U+FFFD.
+    expect(cut.charCodeAt(cut.length - 1)).toBeLessThan(0xd800);
+  });
+
+  test("a character that ends exactly at the limit is kept whole", () => {
+    const text = `${"a".repeat(5998)}${EMOJI}tail`;
+    expect(cutAtCodeUnits(text, 6000)).toBe(`${"a".repeat(5998)}${EMOJI}`);
+  });
+
+  test("text that fits is returned unchanged, emoji and all", () => {
+    const text = `hello ${EMOJI} world`;
+    expect(cutAtCodeUnits(text, 6000)).toBe(text);
+  });
+
+  test("empty text is empty rather than a thrown index", () => {
+    // `charCodeAt(-1)` is NaN and every comparison against it is false, so this returns "".
+    expect(cutAtCodeUnits("", 6000)).toBe("");
+  });
+
+  test("a low surrogate last is a whole character and is kept", () => {
+    // The guard must look only for an UNPAIRED high surrogate. A complete pair ends on its low half,
+    // and dropping that would cost a character the limit had room for.
+    expect(cutAtCodeUnits(EMOJI, 2)).toBe(EMOJI);
   });
 });
 

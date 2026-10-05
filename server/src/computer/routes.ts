@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { downloadHeaders } from "../../../shared/file-download";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AuditReader } from "../audit";
 import type { AppVariables } from "../auth/guards";
@@ -11,11 +12,14 @@ import {
   type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
+  HandoffRequestError,
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
+  WorkspaceTooLargeError,
 } from "./gateway";
 import type { PageFrameStore } from "./page-frames";
 import { dryRunAgainstHistory, REPLAYABLE_EVENT_TYPES } from "./policy-dry-run";
@@ -253,6 +257,7 @@ export function createComputerRoutes(
             : { userId: context.var.actor.id }),
         },
         body.url.trim(),
+        toolCallId || undefined,
       );
       await keepFrameOf(botId, toolCallId, result.url, result.title);
       return context.json(result);
@@ -331,11 +336,12 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/scroll", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.scroll(botId, actor, {
+    act(context, (botId, actor, body) => {
+      if (!usableDeltaY(body?.deltaY)) return badDeltaY;
+      return gateway.scroll(botId, actor, {
         ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
-      }),
-    ),
+      });
+    }),
   );
 
   /**
@@ -344,7 +350,12 @@ export function createComputerRoutes(
    */
   routes.get("/:botId/control", async (context) => {
     try {
-      return context.json(await gateway.control(context.req.param("botId")));
+      return context.json(
+        await gateway.control(
+          context.req.param("botId"),
+          context.req.query("requestId"),
+        ),
+      );
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
     }
@@ -358,6 +369,7 @@ export function createComputerRoutes(
         typeof body?.reason === "string" && body.reason.trim()
           ? body.reason.trim()
           : "The assistant needs a person to continue.",
+        typeof body?.toolCallId === "string" ? body.toolCallId : undefined,
       ),
     ),
   );
@@ -413,12 +425,30 @@ export function createComputerRoutes(
     act(context, (botId, actor) => gateway.resetComputer(botId, actor)),
   );
 
+  /**
+   * Move the computer onto the image this deployment now runs. Files and sign-ins stay; a running
+   * computer restarts, so this is a person's button and never something a wake does to a busy one.
+   */
+  routes.post("/:botId/computers/update", (context) =>
+    act(context, (botId, actor) => gateway.updateComputer(botId, actor)),
+  );
+
   routes.post("/:botId/control/take", (context) =>
-    act(context, (botId, actor) => gateway.takeControl(botId, actor)),
+    act(context, (botId, actor, body) =>
+      gateway.takeControl(botId, actor, handoffId(body)),
+    ),
   );
 
   routes.post("/:botId/control/release", (context) =>
-    act(context, (botId, actor) => gateway.releaseControl(botId, actor)),
+    act(context, (botId, actor, body) =>
+      gateway.releaseControl(botId, actor, handoffId(body)),
+    ),
+  );
+
+  routes.post("/:botId/control/cancel", (context) =>
+    act(context, (botId, actor, body) =>
+      gateway.cancelControl(botId, actor, handoffId(body)),
+    ),
   );
 
   /** The Bot asking for a value it must not be told. */
@@ -430,7 +460,10 @@ export function createComputerRoutes(
             "Say which field the value goes in, using a ref from your snapshot.",
         };
       }
-      if (typeof body?.snapshotId !== "number") {
+      if (
+        typeof body?.snapshotId !== "number" ||
+        !Number.isInteger(body.snapshotId)
+      ) {
         return { error: "The snapshotId the ref came from is required." };
       }
       return gateway.requestSecret(botId, actor, {
@@ -481,6 +514,44 @@ export function createComputerRoutes(
       string,
       unknown
     > | null;
+    /*
+     * Shaped per gesture, like the Bot's acting routes shape theirs. Only scroll was checked:
+     * a click with `{"x": "ten"}`, a type with `{"text": 123}` or a key with `{}` travelled
+     * to the computer untouched, and the failure surfaced as whatever the computer returned
+     * for garbage — mapped here to a 500, or a 200 no-op. The shapes below are the ones the
+     * gateway's `HumanInput` type already promises the computer: coordinates in viewport
+     * pixels, text to enter, a key name. Scroll keeps its existing check, which allows an
+     * absent delta the computer reads as its own default distance.
+     */
+    if (kind === "click") {
+      if (
+        typeof body?.x !== "number" ||
+        !Number.isFinite(body.x) ||
+        typeof body?.y !== "number" ||
+        !Number.isFinite(body.y)
+      ) {
+        return context.json(
+          { error: "A click needs numeric x and y coordinates." },
+          400,
+        );
+      }
+    }
+    if (kind === "type") {
+      if (typeof body?.text !== "string") {
+        return context.json({ error: "The text to enter is required." }, 400);
+      }
+    }
+    if (kind === "key") {
+      if (typeof body?.key !== "string" || !body.key) {
+        return context.json(
+          { error: "A key name is required, such as Enter or Tab." },
+          400,
+        );
+      }
+    }
+    if (kind === "scroll" && !usableDeltaY(body?.deltaY)) {
+      return context.json(badDeltaY, 400);
+    }
     try {
       return context.json(
         await gateway.humanInput(context.req.param("botId"), {
@@ -507,10 +578,17 @@ export function createComputerRoutes(
    */
   routes.get("/:botId/page-frame/:toolCallId", async (context) => {
     if (!pageFrames) return context.json({ frame: null });
-    const stored = await pageFrames.load(
-      context.req.param("botId"),
-      context.req.param("toolCallId"),
-    );
+    // Unvalidated params reach the frame table as-is. Blank or overlong ids can never name a
+    // stored frame, so they are refused here instead of becoming junk reads.
+    const botId = context.req.param("botId");
+    const toolCallId = context.req.param("toolCallId");
+    if (!botId.trim() || !toolCallId.trim()) {
+      return context.json({ error: "A Bot and a turn are required." }, 400);
+    }
+    if (botId.length > 200 || toolCallId.length > 200) {
+      return context.json({ error: "A Bot and a turn are required." }, 400);
+    }
+    const stored = await pageFrames.load(botId, toolCallId);
     return context.json({ frame: stored });
   });
 
@@ -533,17 +611,60 @@ export function createComputerRoutes(
     }),
   );
 
+  /**
+   * A person downloading a file the Bot generated.
+   *
+   * This is a GET because a browser download is a navigation, not a JSON action. It still goes
+   * through the gateway, so the separate `computer_download_file` intent is decided and audited
+   * before the computer is asked for bytes. Ownership is enforced by the `/:botId/*` middleware
+   * above, and the response is always an opaque attachment so HTML cannot render on this origin.
+   */
+  routes.get("/:botId/files/download", async (context) => {
+    const path = context.req.query("path");
+    if (!path?.trim()) {
+      return context.json({ error: "A file path is required." }, 400);
+    }
+
+    try {
+      const file = await gateway.downloadFile(
+        context.req.param("botId"),
+        actorOf(context.var.actor),
+        { path: path.trim() },
+        context.req.raw.signal,
+      );
+      return new Response(file.body, {
+        headers: downloadHeaders(file.name, file.bytes),
+      });
+    } catch (error) {
+      return actionFailure(context, error);
+    }
+  });
+
   /*
    * A command on the Bot's computer.
    *
    * Same shape as every other acting route: the gateway decides and records, this only shapes the
-   * request. `timeoutMs` is passed through and capped by the computer rather than here, so one place
-   * owns the limit.
+   * request. `timeoutMs` is validated here against the shell's own bounds (1s floor, 600s ceiling),
+   * so a NaN, an Infinity, a negative, or a ten-hour value answers 400 instead of travelling to the
+   * computer as a RangeError 500 or a run that outlasts the transport backstop.
    */
   routes.post("/:botId/exec", (context) =>
     act(context, (botId, actor, body, signal) => {
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return { error: "A command is required." };
+      }
+      if (body.timeoutMs !== undefined) {
+        if (
+          typeof body.timeoutMs !== "number" ||
+          !Number.isInteger(body.timeoutMs) ||
+          body.timeoutMs < 1_000 ||
+          body.timeoutMs > 600_000
+        ) {
+          return {
+            error:
+              "timeoutMs must be a whole number of milliseconds between 1000 and 600000.",
+          };
+        }
       }
       // The fourth argument, like every other acting route. Without it the plumbing through
       // gateway.runCommand and into the shell's own abort listener was dead code, and Stop ended the
@@ -660,8 +781,27 @@ export function createComputerRoutes(
 
     // Bounded, and biased to recency: the question is what this rule does to the traffic the
     // deployment actually has, and last week's traffic answers that better than a full scan.
-    const requested = typeof body?.limit === "number" ? body.limit : 200;
-    const limit = Math.min(Math.max(Math.trunc(requested), 1), 500);
+    //
+    // Strict on purpose. This used to read `typeof limit === "number" ? limit : 200` and clamp,
+    // so `"abc"`, `null` and `true` silently became 200, `Infinity` silently became 500, and
+    // `NaN` became `NaN` and travelled into `auditReader.list` as one. A what-if answered from
+    // the wrong slice of history is worse than no answer, because it is believed.
+    const rawLimit = body?.limit;
+    let limit = 200;
+    if (rawLimit !== undefined) {
+      if (
+        typeof rawLimit !== "number" ||
+        !Number.isInteger(rawLimit) ||
+        rawLimit < 1 ||
+        rawLimit > 500
+      ) {
+        return context.json(
+          { error: "limit must be a whole number between 1 and 500." },
+          400,
+        );
+      }
+      limit = rawLimit;
+    }
 
     const { events } = await auditReader.list({
       limit,
@@ -686,6 +826,24 @@ const badRef: BadRequest = {
   error:
     "A ref and the snapshotId it came from are both required. Take a snapshot first.",
 };
+
+const badDeltaY: BadRequest = {
+  error: "deltaY must be a finite number of pixels.",
+};
+
+/**
+ * Whether a wheel delta from an untrusted body can be carried out.
+ *
+ * `typeof value === "number"` is true of `Infinity`, and JSON carries it: `1e999` parses to it. It
+ * then survives every comparison on the way down and is erased by `JSON.stringify` on the hop to the
+ * computer, which reads the missing field as absent and scrolls its own default distance instead --
+ * so the caller is answered 200 for a scroll nobody asked for. Every other number on this surface is
+ * already checked at the edge: the timeout on `exec`, the coordinates behind `human/click`. This one
+ * was not.
+ */
+function usableDeltaY(value: unknown): boolean {
+  return value === undefined || Number.isFinite(value);
+}
 
 /**
  * Shared plumbing for acting routes that use this helper: resolve who is asking, run, and map
@@ -724,13 +882,7 @@ async function act(
   try {
     const result = await handler(
       botId,
-      {
-        id: record.id,
-        // Only a real users row may go in the audit table's foreign key column. The local development
-        // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
-        // it was is recorded in the payload regardless. See gateway.ts.
-        ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
-      },
+      actorOf(record),
       body,
       context.req.raw.signal,
     );
@@ -739,23 +891,7 @@ async function act(
     }
     return context.json(result as Record<string, unknown>);
   } catch (error) {
-    // A policy refusal is the product working. 403 with the rule that refused it, so the surface can
-    // tell the person which boundary they met rather than reporting a malfunction.
-    if (error instanceof ActionRefusedError) {
-      return context.json({ error: error.message, rule: error.rule }, 403);
-    }
-    // The computer refused the path itself, which is a different thing from the policy refusing this
-    // Bot. Same status, no rule attached, because there is no rule to go and edit.
-    if (error instanceof WorkspaceRefusedError) {
-      return context.json({ error: error.message }, 403);
-    }
-    // A 400, deliberately, NOT a 403. The surface treats 403 as "a boundary refused you" and renders
-    // it as Blocked, so returning it for "there is no file at notes.md" told both the person and the
-    // model that a policy had intervened when none had.
-    if (error instanceof WorkspaceRequestError) {
-      return context.json({ error: error.message }, 400);
-    }
-    return context.json(errorBody(error), statusFor(error));
+    return actionFailure(context, error);
   }
 }
 
@@ -766,6 +902,30 @@ async function act(
  * authentication module's internals; this is the one fact about it that matters here.
  */
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
+
+/** The audit identity derived from the signed-in actor, with the same FK rule as every acting call. */
+function actorOf(record: AppVariables["actor"]): ActionActor {
+  return {
+    id: record.id,
+    // Only a real users row may go in the audit table's foreign key column. The local development
+    // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
+    // it was is recorded in the payload regardless. See gateway.ts.
+    ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
+  };
+}
+
+/**
+ * One failure shape for JSON acting and binary download routes.
+ *
+ * A policy refusal names the rule; a workspace refusal does not, because there is no rule to edit.
+ * Keeping both here means the download route cannot accidentally turn a boundary into a 500.
+ */
+function actionFailure(context: ComputerContext, error: unknown) {
+  if (error instanceof ActionRefusedError) {
+    return context.json({ error: error.message, rule: error.rule }, 403);
+  }
+  return context.json(errorBody(error), statusFor(error));
+}
 
 function isBadRequest(value: unknown): value is BadRequest {
   return (
@@ -780,7 +940,18 @@ function asRef(
   body: Record<string, unknown> | null,
 ): { ref: string; snapshotId: number } | undefined {
   if (typeof body?.ref !== "string" || !body.ref) return undefined;
-  if (typeof body?.snapshotId !== "number") return undefined;
+  /*
+   * A snapshot id is an integer the snapshot store handed out. `typeof` alone accepts `1.5` and
+   * `Infinity` (valid JSON: `1e999` parses to it), which then never equals the stored integer, so
+   * the gateway reports a stale snapshot and the caller retries a request that was malformed.
+   * Malformed input is a 400 here, not a 409 staleness.
+   */
+  if (
+    typeof body?.snapshotId !== "number" ||
+    !Number.isInteger(body.snapshotId)
+  ) {
+    return undefined;
+  }
   return { ref: body.ref, snapshotId: body.snapshotId };
 }
 
@@ -807,11 +978,37 @@ function errorBody(error: unknown): Record<string, unknown> {
   return {
     error: describe(error),
     // Not "the refs are stale, take another snapshot", which is what the surface says without it.
-    ...(error instanceof HumanHasControlError ? { humanHasControl: true } : {}),
+    ...(error instanceof HumanHasControlError
+      ? {
+          humanHasControl: true,
+          requestId: error.requestId,
+          handoff: error.handoff,
+        }
+      : {}),
+    ...(error instanceof StaleSnapshotError
+      ? {
+          stale: true,
+          ...(error.snapshotRequired ? { snapshotRequired: true } : {}),
+        }
+      : {}),
+    ...(error instanceof HandoffRequestError
+      ? { controlRequestError: true }
+      : {}),
   };
 }
 
-function statusFor(error: unknown): 409 | 500 | 503 {
+function handoffId(body: Record<string, unknown> | null): string {
+  if (
+    typeof body?.requestId !== "string" ||
+    !body.requestId.trim() ||
+    body.requestId.length > 200
+  )
+    throw new HandoffRequestError("A requestId is required.", 400);
+  return body.requestId;
+}
+
+function statusFor(error: unknown): 400 | 403 | 404 | 409 | 413 | 500 | 503 {
+  if (error instanceof HandoffRequestError) return error.status;
   if (error instanceof StaleSnapshotError) return 409;
   // Same status as a stale snapshot and for the same reason: nothing is broken, the caller has to do
   // something else first. What differs is what that something is, which the body carries.
@@ -828,6 +1025,10 @@ function statusFor(error: unknown): 409 | 500 | 503 {
   ) {
     return 409;
   }
+  if (error instanceof WorkspaceRefusedError) return 403;
+  if (error instanceof WorkspaceRequestError) return 400;
+  if (error instanceof WorkspaceNotFoundError) return 404;
+  if (error instanceof WorkspaceTooLargeError) return 413;
   if (error instanceof ComputerUnavailableError) return 503;
   return 500;
 }

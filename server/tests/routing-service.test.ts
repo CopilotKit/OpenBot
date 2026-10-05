@@ -30,6 +30,7 @@ function profile(
     ownerUserId,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
     endpoint: null,
     hasAuth: false,
@@ -102,6 +103,160 @@ function makeService(
 }
 
 describe("CoworkerRoutingService", () => {
+  test("refuses empty service input before asking the model", async () => {
+    const { service, modelCalls, audits } = makeService();
+    for (const text of ["", "   "]) {
+      await expect(service.route({ actor: ACTOR, text })).rejects.toThrow(
+        "A message is required.",
+      );
+    }
+    expect(modelCalls).toEqual([]);
+    expect(audits).toEqual([]);
+  });
+
+  test("refuses oversized text before any routing, including picker selections", async () => {
+    const { service, modelCalls, audits } = makeService();
+    for (const agentId of [undefined, "risk"]) {
+      await expect(
+        service.route({ actor: ACTOR, text: "x".repeat(10001), agentId }),
+      ).rejects.toThrow("A message of at most 10000 characters is required.");
+    }
+    expect(modelCalls).toEqual([]);
+    expect(audits).toEqual([]);
+  });
+
+  test("accepts text at the routing limit", async () => {
+    const { service, modelCalls } = makeService();
+    await service.route({ actor: ACTOR, text: "x".repeat(10000) });
+    expect(modelCalls[0]?.text).toHaveLength(10000);
+  });
+
+  test("distinguishes name inference from picker selection in the audit", async () => {
+    const { service, audits, modelCalls } = makeService();
+    await service.route({
+      actor: ACTOR,
+      text: "ask Risk Analyst to review this",
+    });
+    await service.route({ actor: ACTOR, text: "review this", agentId: "risk" });
+    expect(audits[0]?.payload).toMatchObject({
+      reason: "matched a coworker’s name in the message",
+      viaMention: false,
+      viaNameMatch: true,
+    });
+    expect(audits[1]?.payload).toMatchObject({
+      reason: "named by the person asking",
+      viaMention: true,
+      viaNameMatch: false,
+    });
+    expect(modelCalls).toEqual([]);
+  });
+
+  test("a full name that is also a suffix alias has a resolvable clarification", async () => {
+    const { service } = makeService({
+      roster: [profile("analyst", "Analyst"), profile("risk", "Risk Analyst")],
+    });
+    const result = await service.route({ actor: ACTOR, text: "ask analyst" });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    for (const name of result.names) {
+      expect(
+        await service.route({ actor: ACTOR, text: `ask ${name}` }),
+      ).toMatchObject({ kind: "selected" });
+    }
+  });
+
+  test("an issued discriminator label refuses a new suffix collision", async () => {
+    const roster = [
+      profile("a", "Risk Analyst"),
+      profile("b", "Risk Analyst"),
+      profile("c", "Senior Risk Analyst (id 61)"),
+    ];
+    const { service } = makeService({ roster });
+    const label = "Risk Analyst (id 61) (2)";
+    expect(
+      await service.route({ actor: ACTOR, text: `ask ${label}` }),
+    ).toMatchObject({ kind: "selected", agentId: "a" });
+    roster.push(profile("d", "Senior Risk Analyst (id 61) (2)"));
+    const result = await service.route({ actor: ACTOR, text: `ask ${label}` });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    for (const choice of result.names) {
+      expect(
+        await service.route({ actor: ACTOR, text: `ask ${choice}` }),
+      ).toMatchObject({ kind: "selected" });
+    }
+  });
+
+  test("an issued id label cannot silently change recipient after a roster collision", async () => {
+    const roster = [profile("a", "Risk Analyst"), profile("b", "Risk Analyst")];
+    const { service } = makeService({ roster });
+    const label = "Risk Analyst (id 61)";
+    expect(
+      await service.route({ actor: ACTOR, text: `ask ${label}` }),
+    ).toMatchObject({ kind: "selected", agentId: "a" });
+    for (const name of [
+      "Senior Risk Analyst (id 61)",
+      "Risk Analyst (id 61)",
+    ]) {
+      roster.splice(2, 1, profile("c", name));
+      const result = await service.route({
+        actor: ACTOR,
+        text: `ask ${label}`,
+      });
+      expect(result.kind).toBe("ambiguous");
+      if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+      for (const choice of result.names) {
+        expect(
+          await service.route({ actor: ACTOR, text: `ask ${choice}` }),
+        ).toMatchObject({ kind: "selected" });
+      }
+    }
+  });
+
+  test("duplicate labels remain unique beside a coworker whose literal name resembles a label", async () => {
+    const { service } = makeService({
+      roster: [
+        profile("a", "Risk Analyst"),
+        profile("b", "Risk Analyst"),
+        profile("c", "Risk Analyst (id 61)"),
+      ],
+    });
+    const result = await service.route({
+      actor: ACTOR,
+      text: "ask Risk Analyst",
+    });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    expect(new Set(result.names).size).toBe(result.names.length);
+    for (const name of result.names) {
+      expect(
+        await service.route({ actor: ACTOR, text: `ask ${name}` }),
+      ).toMatchObject({ kind: "selected" });
+    }
+  });
+
+  test("duplicate labels remain unique beside a coworker whose suffix alias resembles a label", async () => {
+    const { service } = makeService({
+      roster: [
+        profile("a", "Risk Analyst"),
+        profile("b", "Risk Analyst"),
+        profile("c", "Senior Risk Analyst (id 61)"),
+      ],
+    });
+    const result = await service.route({
+      actor: ACTOR,
+      text: "ask Risk Analyst",
+    });
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind !== "ambiguous") throw new Error("Expected ambiguity");
+    expect(new Set(result.names).size).toBe(result.names.length);
+    for (const name of result.names) {
+      expect(
+        await service.route({ actor: ACTOR, text: `ask ${name}` }),
+      ).toMatchObject({ kind: "selected" });
+    }
+  });
+
   test("routes a unique explicit coworker name without invoking the model", async () => {
     const { service, modelCalls } = makeService();
 
@@ -113,7 +268,8 @@ describe("CoworkerRoutingService", () => {
     expect(result).toMatchObject({
       kind: "selected",
       agentId: "risk",
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     });
     expect(modelCalls).toEqual([]);
   });
@@ -128,7 +284,8 @@ describe("CoworkerRoutingService", () => {
     ).toMatchObject({
       kind: "selected",
       agentId: "risk",
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     });
     expect(modelCalls).toEqual([]);
   });
@@ -179,7 +336,7 @@ describe("CoworkerRoutingService", () => {
       await service.route({ actor: ACTOR, text: "ask analyst to review this" }),
     ).toEqual({
       kind: "ambiguous",
-      names: ["Analyst", "Risk Analyst"],
+      names: ["Analyst (id 616e616c797374)", "Risk Analyst"],
     });
     expect(modelCalls).toEqual([]);
   });
@@ -197,7 +354,8 @@ describe("CoworkerRoutingService", () => {
     ).toMatchObject({
       kind: "selected",
       agentId: "risk",
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     });
     expect(modelCalls).toEqual([]);
   });
@@ -240,7 +398,12 @@ describe("CoworkerRoutingService", () => {
         actor: ACTOR,
         text: "ask Risk Analyst and Risk Analyst to review this",
       }),
-    ).toMatchObject({ kind: "selected", agentId: "risk", viaMention: true });
+    ).toMatchObject({
+      kind: "selected",
+      agentId: "risk",
+      viaMention: false,
+      viaNameMatch: true,
+    });
     expect(modelCalls).toEqual([]);
   });
 
@@ -278,14 +441,15 @@ describe("CoworkerRoutingService", () => {
 
   test("handles many repeated explicit mentions without changing their selection", async () => {
     const { service, modelCalls } = makeService();
-    const text = Array.from({ length: 1_500 }, () => "Risk Analyst").join(
+    const text = Array.from({ length: 500 }, () => "Risk Analyst").join(
       " and ",
     );
 
     expect(await service.route({ actor: ACTOR, text })).toMatchObject({
       kind: "selected",
       agentId: "risk",
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     });
     expect(modelCalls).toEqual([]);
   });
@@ -318,7 +482,8 @@ describe("CoworkerRoutingService", () => {
     ).toMatchObject({
       kind: "selected",
       agentId: "risk-copy",
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     });
     expect(modelCalls).toEqual([]);
   });
@@ -532,6 +697,7 @@ describe("CoworkerRoutingService", () => {
       reason: "intent match",
       fallback: false,
       viaMention: false,
+      viaNameMatch: false,
       candidates: ["risk", "knowledge"],
       undecided: null,
     });

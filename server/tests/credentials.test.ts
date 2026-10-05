@@ -15,16 +15,12 @@ import {
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { credentials } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const config = loadConfig(testEnvironment({ KEY_ENCRYPTION_KEY: key }));
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const credentialIds: string[] = [];
 
 afterEach(async () => {
@@ -513,6 +509,11 @@ describe("credential store rotation", () => {
     });
 
     await expect(store.revoke(id)).rejects.toThrow("already revoked");
+    // As a refusal the route can answer with a status, not an error it can only pass on as a 500.
+    await expect(store.revoke(id)).rejects.toMatchObject({
+      name: "CredentialRefusedError",
+      status: 404,
+    });
   });
 });
 

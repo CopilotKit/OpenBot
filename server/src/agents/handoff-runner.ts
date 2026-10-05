@@ -10,9 +10,16 @@
  * renewed for as long as the run takes, because a run is minutes and a lease that lapses mid-answer
  * hands the same hop to a second replica and bills for it twice.
  */
-import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  type AuditInitiator,
+  type AuditStore,
+  recordAuditEvent,
+} from "../audit";
+import { cutAtCodeUnits } from "../channels/text";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
+import { ThreadBusyError } from "./handoff-delivery";
+import { BOT_PAUSED_REASON, isBotPaused } from "./lifecycle";
 
 /** What a hop carries, as `handoff.ts` wrote it. */
 export type HandoffWork = {
@@ -22,6 +29,8 @@ export type HandoffWork = {
   threadId: string;
   runId: string;
   depth: number;
+  /** What started the original run, preserved across queued delivery and relay hops. */
+  initiator?: AuditInitiator;
   task: string;
   constraints?: string;
   expecting?: string;
@@ -46,6 +55,10 @@ export type HandoffDelivery = {
    * Rejecting means the hop did not happen and is worth another go. Resolving means it did, whatever
    * the Bot said: a Bot that answers "I could not find that" has answered, and retrying would ask it
    * the same question again and bill for the same non-answer.
+   *
+   * Resolves with what the Bot said, because its turn runs in a scratch thread nobody is shown:
+   * the words it comes back with exist for the relay or not at all. Null means a turn of nothing
+   * but tool calls, which is a turn that happened and nothing worth carrying back.
    */
   deliver: (input: {
     work: HandoffWork;
@@ -67,7 +80,7 @@ export type HandoffDelivery = {
     shown?: string;
     /** The signed statement of the run it is starting, carrying its depth. */
     assertion: string;
-  }) => Promise<void>;
+  }) => Promise<{ answer: string | null }>;
 };
 
 export type HandoffRunReport = {
@@ -99,7 +112,7 @@ export function createHandoffRunner(options: {
   /** Who this replica is, for the lease. */
   owner: string;
   /** How the deployment signs what the addressed Bot's run is. */
-  sign: (work: HandoffWork) => string;
+  sign: (work: HandoffWork, claim: { key: string; owner: string }) => string;
   auditStore: AuditStore;
   /** How long a claim lasts before anything may take it back. */
   leaseMs?: number;
@@ -139,6 +152,38 @@ export function createHandoffRunner(options: {
    * Marked with `answerIn`, which is also what stops this recursing: a notice that fails is not
    * itself worth a notice, and the check above skips any hop that carries one.
    */
+  /**
+   * Put the answer in front of the person, the same way a failure is: by running the Bot that
+   * asked, in the conversation they are watching.
+   *
+   * THE ADDRESSED BOT NEVER SPEAKS THERE — the platform gives a thread exactly one agent — so its
+   * words come home in the asking Bot's voice, attributed. The same `answerIn` marker that stops a
+   * notice recursing stops a relay relaying: a hop that carries one enqueues nothing when it lands.
+   *
+   * The answer is clipped rather than trusted to be a paragraph. It rides inside the prompt of the
+   * relaying run, and a Bot that came back with a report the length of a book would otherwise spend
+   * the relay's whole context window repeating it.
+   */
+  const relay = (work: HandoffWork, key: string, answer: string) =>
+    queue.offer({
+      kind: HANDOFF_KIND,
+      // Outside the run's fan-out prefix and keyed on the hop, for the same two reasons as the
+      // notice below: a relay is not a Bot this run asked for, and one run may legally ask the
+      // same Bot two different things.
+      key: `relay:${key}`,
+      payload: {
+        fromBotId: work.toBotId,
+        toBotId: work.fromBotId,
+        actorId: work.actorId,
+        threadId: work.threadId,
+        runId: work.runId,
+        depth: work.depth,
+        ...(work.initiator ? { initiator: work.initiator } : {}),
+        answerIn: work.threadId,
+        task: `You asked ${work.toName ?? work.toBotId} to help with this: ${work.task}\n\nIt answered:\n\n${clip(answer)}\n\nGive the person the outcome. Keep what matters, drop the pleasantries, and say it came from ${work.toName ?? work.toBotId}.`,
+      } as unknown as Record<string, unknown>,
+    });
+
   const tell = (work: HandoffWork, key: string, reason: string) =>
     queue.offer({
       kind: HANDOFF_KIND,
@@ -164,6 +209,7 @@ export function createHandoffRunner(options: {
         threadId: work.threadId,
         runId: work.runId,
         depth: work.depth,
+        ...(work.initiator ? { initiator: work.initiator } : {}),
         answerIn: work.threadId,
         task: `You asked ${work.toBotId} to help with this and it never answered: ${forThePerson(reason)}. Tell the person plainly that it did not come back, say what you had asked it for, and offer what you can do yourself.`,
       } as unknown as Record<string, unknown>,
@@ -250,6 +296,13 @@ export function createHandoffRunner(options: {
             report.skipped.push({ key: item.key, reason: "not a hop" });
             continue;
           }
+          // A hop to a Bot its person paused is dropped, not delivered. See agents/lifecycle.ts.
+          if (await isBotPaused(work.actorId, work.toBotId)) {
+            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            ours.delete(item.key);
+            report.skipped.push({ key: item.key, reason: BOT_PAUSED_REASON });
+            continue;
+          }
 
           /*
            * A hop that has already been tried is not a fresh one, and the difference matters here more
@@ -264,7 +317,11 @@ export function createHandoffRunner(options: {
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
+                // See the same key on `agent.handoff_delivered` below: the Audit screen's Bot
+                // column reads `payload.bot`, so a row without it names no Bot.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
@@ -309,11 +366,11 @@ export function createHandoffRunner(options: {
 
           try {
             const shown = summarise(work);
-            await delivery.deliver({
+            const { answer } = await delivery.deliver({
               work,
               message: attribute(work),
               ...(shown ? { shown } : {}),
-              assertion: sign(work),
+              assertion: sign(work, { key: item.key, owner }),
             });
             const kept = await queue.finish({
               kind: HANDOFF_KIND,
@@ -338,7 +395,10 @@ export function createHandoffRunner(options: {
                 targetType: "agent",
                 targetId: work.toBotId,
                 ...(work.actorId ? { actorUserId: work.actorId } : {}),
+                initiator: { kind: "handoff", id: work.fromBotId },
                 payload: {
+                  // See the same key on `agent.handoff_delivered` below.
+                  bot: work.fromBotId,
                   from: work.fromBotId,
                   to: work.toBotId,
                   run: work.runId,
@@ -349,11 +409,28 @@ export function createHandoffRunner(options: {
               continue;
             }
             report.delivered.push(work.toBotId);
+            /*
+             * The answer goes home through the queue, like the turn that produced it: durable, so a
+             * pod dying between the turn and the relay loses the relay to a retry rather than for
+             * ever. Only for a forward hop with words to carry — a relay of a relay is the loop the
+             * `answerIn` check exists to stop, and a wordless turn has nothing to say.
+             */
+            if (!work.answerIn && answer) {
+              await relay(work, item.key, answer).catch((failure) => {
+                // The turn happened and is on record; a relay that cannot be queued must not undo
+                // that by failing the hop into a retry and a second turn.
+                console.warn(
+                  "Could not queue the relay for a delivered hop.",
+                  failure,
+                );
+              });
+            }
             await recordAuditEvent(auditStore, {
               eventType: "agent.handoff_delivered",
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
                 // See the same key on `agent.handoff_offered`: the Audit screen's Bot column reads
                 // `payload.bot`, so a row without it names no Bot.
@@ -376,7 +453,11 @@ export function createHandoffRunner(options: {
              * this hop. A person who was told their question had been handed on, and then hears
              * nothing for ever, has no way to tell a slow Bot from a broken one.
              */
-            if (item.attempts >= maxAttempts && !work.answerIn) {
+            // The deployment's controls refused it (Use Bots, the model allowlist). Trying again in a
+            // minute gets the same answer, so this is the last try, whatever the count says.
+            const refused =
+              error instanceof Error && error.name === "CapabilityRefusedError";
+            if ((refused || item.attempts >= maxAttempts) && !work.answerIn) {
               await tell(work, item.key, reason).catch((failure) => {
                 // A notice that cannot be queued must not take the release with it: leaving the row
                 // claimed would be worse than a hop nobody was told about.
@@ -388,15 +469,25 @@ export function createHandoffRunner(options: {
             }
             /*
              * Released and pushed out rather than dropped. The work still wants doing, and whatever
-             * refused it once will probably refuse it again in the next second.
+             * refused it once will probably refuse it again in the next second. A refusal by the
+             * controls is the exception: it is final, so the work ends here.
              */
-            await queue.release({
-              kind: HANDOFF_KIND,
-              key: item.key,
-              owner,
-              delayMs: 60_000,
-              reason,
-            });
+            if (refused)
+              await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            else
+              await queue.release({
+                kind: HANDOFF_KIND,
+                key: item.key,
+                owner,
+                // A busy conversation on the first try is almost always the asking Bot finishing its
+                // own reply, a second or two from free. Later tries keep the minute, so a person
+                // mid-conversation still gets the same few minutes of patience.
+                delayMs:
+                  error instanceof ThreadBusyError && item.attempts <= 1
+                    ? 5_000
+                    : 60_000,
+                reason,
+              });
             ours.delete(item.key);
             report.skipped.push({ key: item.key, reason });
             await recordAuditEvent(auditStore, {
@@ -404,7 +495,12 @@ export function createHandoffRunner(options: {
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
+                // See the same key on `agent.handoff_delivered` above. This row is the one a
+                // person's unanswered question ends on, so a Bot column showing a dash on it is
+                // the worst place in the set to have one.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
@@ -422,6 +518,21 @@ export function createHandoffRunner(options: {
       return report;
     },
   };
+}
+
+/**
+ * How much of an answer one relay will carry.
+ *
+ * Generous, because with the answer living nowhere a person is shown, what the relay drops is gone:
+ * the scratch thread that holds the rest is never mapped to a channel. The cap exists for the Bot
+ * that comes back with a book — an answer that size swamps the relaying run's prompt, and the
+ * asking Bot was told what a good answer looks like precisely so this stays a paragraph.
+ */
+const RELAY_ANSWER_LIMIT = 12_000;
+
+function clip(answer: string): string {
+  if (answer.length <= RELAY_ANSWER_LIMIT) return answer;
+  return `${cutAtCodeUnits(answer, RELAY_ANSWER_LIMIT)}\n\n[…the answer was cut here for length]`;
 }
 
 /**

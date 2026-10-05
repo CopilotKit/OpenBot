@@ -12,7 +12,6 @@
  * routine that fires a minute late has lost nothing, and a failing CronJob that pages somebody at 3am
  * should mean something worse than that.
  */
-import { randomUUID } from "node:crypto";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { createRoutineStore } from "../src/routines/store";
@@ -22,6 +21,7 @@ import {
   ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue } from "../src/work/queue";
+import { workOwner } from "../../shared/work-owner";
 
 const config = loadConfig(process.env);
 
@@ -60,7 +60,7 @@ const queue = createWorkQueue(database);
 const routineStore = createRoutineStore(database);
 
 // A name for the lease, so a stuck claim can be traced back to the pod that took it.
-const owner = `routines/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
+const owner = workOwner("routines");
 
 /**
  * Hand one opened run to the server, which owns everything about running it.

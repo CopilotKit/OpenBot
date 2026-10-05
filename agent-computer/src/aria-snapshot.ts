@@ -156,6 +156,24 @@ export function parseDescriptor(text: string): Descriptor | null {
   return { role, name, flags };
 }
 
+/**
+ * The first `limit` UTF-16 code units of `text`, one fewer when the cut would split a character.
+ *
+ * `slice` counts code units and an emoji is two, so a limit landing between the halves leaves a lone
+ * high surrogate last: JSON carries it as a bare `\ud83d` and UTF-8 as U+FFFD, and the Bot reads a
+ * broken character that is not on the page. The server's `cutAtCodeUnits` is the same rule; this
+ * process shares no code with the server, so it is repeated here rather than imported.
+ *
+ * Exported for `index.ts`, which cuts the readable page text the same way, and so that the rule has
+ * its own tests. It lives here rather than beside that caller because this module imports no
+ * Playwright: `index.ts` does, at load, so a helper declared there could not be tested at all.
+ */
+export function cutAtCodeUnits(text: string, limit: number): string {
+  const sliced = text.slice(0, limit);
+  const last = sliced.charCodeAt(sliced.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? sliced.slice(0, -1) : sliced;
+}
+
 /** Build an element from a descriptor and whatever YAML gave as its value, or null if not actionable. */
 function toElement(
   descriptor: Descriptor,
@@ -170,13 +188,13 @@ function toElement(
   const element: SnapshotElement = {
     ref,
     role: descriptor.role,
-    name: descriptor.name.slice(0, 200),
+    name: cutAtCodeUnits(descriptor.name, 200),
   };
 
   // Values arrive as text, with quoting and escapes already resolved.
   if (typeof value === "string") {
     const text = value.trim();
-    if (text) element.value = text.slice(0, 200);
+    if (text) element.value = cutAtCodeUnits(text, 200);
   }
 
   if (descriptor.flags.has("disabled")) element.disabled = true;
@@ -184,8 +202,15 @@ function toElement(
   // Playwright emits `[checked]` only when something is checked, so absence is ambiguous on its own: a
   // Bot cannot tell an unticked box from a control that does not tick. Reported as false for the roles
   // that can be checked, and left off entirely for the ones that cannot.
+  //
+  // `[checked=mixed]` is the third state and the one spelling Playwright gives the flag a value for:
+  // `aria-checked="mixed"`, which is what the box above a partly-ticked list carries. It is not
+  // ticked, and a Bot told it was left the rows underneath unselected and reported the job done. The
+  // contract this fills in is `checked?: boolean`, so "neither" has to be said as false — which is
+  // also the answer that gets the right action, since clicking a mixed box ticks it.
   if (descriptor.flags.has("checked")) {
-    element.checked = descriptor.flags.get("checked") !== "false";
+    const state = descriptor.flags.get("checked");
+    element.checked = state !== "mixed" && state !== "false";
   } else if (CHECKABLE_ROLES.has(descriptor.role)) {
     element.checked = false;
   }

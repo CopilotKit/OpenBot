@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { agents } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A jsonb column must hold JSON, not a string that looks like it.
@@ -17,11 +17,7 @@ import { TEST_POOL } from "./support/database";
  * value rather than on what comes back through the application.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const suite = randomUUID().slice(0, 8);
 const agentId = `agent_jsonb_${suite}`;
 

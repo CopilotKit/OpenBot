@@ -12,7 +12,8 @@ fullnameOverride: ""
 
 image:
   repository: ghcr.io/copilotkit/openbot
-  # Empty means the chart's appVersion, so an upgrade of the chart moves the image with it.
+  # Empty means the chart's appVersion prefixed with `v` (the form published tags take), so an
+  # upgrade of the chart moves the image with it. A value set here is used verbatim.
   tag: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -120,6 +121,17 @@ config:
   publicUrl: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.
   initialAdminEmails: ""
+  # Email domains admitted at sign-in, comma-separated. Empty admits everybody, which is what the
+  # providers below already do on their own: the Entra tenant is `common` unless you set it, which
+  # is any Microsoft account including personal ones, and Okta has no equivalent setting.
+  #
+  # A filter, not a boundary. It is checked against the address the provider returns, and OpenBot
+  # does not require a verified one, so the server REFUSES this combined with an Entra tenant of
+  # `common`: there the address is written by the tenant signing in. Set `auth.microsoft.tenantId`.
+  #
+  # Matched exactly, no wildcards: `example.com` admits neither `sub.example.com` nor
+  # `evil-example.com`. Name every domain your staff use.
+  allowedEmailDomains: ""
   # Every request is one fixed administrator. Local trials only; the deployment refuses to start
   # with no identity provider unless this says somebody meant it.
   singleUser: false
@@ -148,6 +160,14 @@ config:
     apiUrl: ""
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
+  # Learning defaults on; collection and delivery require an existing, assigned container.
+  # Fresh self-hosted setup: run scripts/setup-learning.ts on a computer with Chrome/Edge access
+  # to Intelligence, then transfer its runtime key through your secret manager and use openbot here.
+  # Existing key-only installs create it through authenticated Intelligence administration first.
+  # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
+  learning:
+    containerId: ""
+    revision: ""
   # How far one Bot may hand work to another.
   #
   # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what
@@ -175,6 +195,73 @@ config:
     # The token travels in `secrets.managedAgentToken`. Required whenever a url is set: the server
     # refuses to start with one and not the other, because an unauthenticated Bot endpoint is an
     # open door to whatever that Bot can reach.
+
+  # Slack and Microsoft Teams, through the OpenTag pairing.
+  #
+  # `enabled` is the switch, rather than the secret's presence, because a secret held in
+  # `secrets.existingSecret` or a store is not readable at template time. The shared secret travels in
+  # `secrets.opentagSharedSecret`; the server refuses one shorter than 32 characters, and refuses a
+  # `url` or icon template with no secret at all.
+  opentag:
+    enabled: false
+    # OpenTag's base URL, for messages sent when no Slack turn is open. Without it those sends fail
+    # visibly in the outbox and Slack triggers are refused. Must be http(s).
+    url: ""
+    # Optional https PNG URL with `{seed}` or `{agentId}`, used as the Bot's Slack icon.
+    botIconUrlTemplate: ""
+
+  # Text messages, through Twilio. The server takes all four Twilio settings or none, so `enabled`
+  # needs the three below and `secrets.twilioAuthToken`.
+  sms:
+    enabled: false
+    accountSid: ""
+    verifyServiceSid: ""
+    fromNumber: ""
+
+  # Push notifications and sign-in from the native app, through Expo.
+  #
+  # Setting `projectId`, the app's EAS project UUID, switches both on; the server refuses anything
+  # that is not a UUID. `secrets.expoAccessToken` is optional and sent to Expo's push service when set.
+  push:
+    projectId: ""
+
+  # The public origin Twilio calls back on, when it is not `publicUrl`. Twilio signs each request over
+  # the URL it was given, so this has to be the address Twilio was configured with. Must be http(s).
+  deliveryPublicUrl: ""
+
+  # SCIM provisioning at `<publicUrl>/api/auth/scim/v2`.
+  #
+  # `enabled` needs `secrets.scimBearerToken`, the token the directory sends. A second token in
+  # `secrets.scimBearerTokenNext` is accepted beside it, so the directory can move to a new one before
+  # the old one is removed.
+  scim:
+    enabled: false
+    # The name of the directory connection. Empty means the server's default, `directory`.
+    connectionId: ""
+
+  # Inbound email triggers: an SES receipt rule delivering through SNS to
+  # `<publicUrl>/api/events/email/sns`. Both are needed; with either missing the route is not mounted.
+  inboundEmail:
+    # The domain the receipt rule covers, such as `in.example.com`.
+    domain: ""
+    # Comma-separated ARNs of the SNS topics allowed to deliver mail.
+    snsTopicArns: ""
+
+  # Every audit row as an OTLP log record over HTTP, for a SIEM or an OpenTelemetry Collector.
+  #
+  # Setting either endpoint switches export on. Headers, which usually carry a collector's API key,
+  # are secrets: `secrets.otelHeaders` and `secrets.otelLogsHeaders`, as `key=value` pairs separated
+  # by commas. With `networkPolicy.enabled`, a collector inside the cluster has to be named in
+  # `networkPolicy.extraEgress`.
+  otel:
+    # Collector base URL; the server appends `/v1/logs`.
+    endpoint: ""
+    # Where log records go, used exactly as written. Takes precedence over `endpoint`.
+    logsEndpoint: ""
+    # The `service.name` on every record. Empty means the server's default, `openbot`.
+    serviceName: ""
+    # Stops export while an endpoint is still set.
+    paused: false
   logLevel: ""
   # Free-form additions, for anything this chart has no opinion about.
   extraEnv: []
@@ -198,6 +285,59 @@ computers:
   # do not agree: GKE has managed gVisor, AKS offers Kata and gVisor, and on EKS it is bring your own
   # node configuration. A chart that assumed a RuntimeClass would fail to install without one.
   runtimeClassName: ""
+
+  # Who the browser and the Bot's shell run as.
+  #
+  # KUBERNETES ONLY, and that is the scope rather than the whole of #261. The chart runs the
+  # all-in-one image, whose `Dockerfile` creates `pwuser`, chowns `/workspace`, `/profiles` and
+  # `/app` to it, and drops to it through s6. A computer pod overrides the command to run the
+  # browser process alone, so it never reaches s6 and ran as uid 0. The Compose and supervisor
+  # paths run `agent-computer/Dockerfile`, which builds no such user and is still uid 0; that is
+  # the rest of #261's residual and is not this.
+  #
+  # WHAT IT BUYS, honestly. It is not a containment boundary against a Bot's own shell: the image
+  # grants `pwuser` passwordless sudo for apt-get/apt/dpkg, and those escalate to root by design
+  # (`-o APT::Update::Pre-Invoke=`). gVisor and a computer per Bot remain the actual boundary. What
+  # this does buy is real and separate: the org policies and admission rules that reject uid 0
+  # outright, root-owned data stops accumulating in the volumes, and any bug yielding a constrained
+  # primitive lands as 1001 rather than as root.
+  #
+  # It does NOT move the pod between Pod Security Standards. `runAsNonRoot` is a restricted control
+  # rather than a baseline one, and restricted also wants `allowPrivilegeEscalation: false`,
+  # `capabilities.drop: [ALL]` and a seccomp profile, none of which are set here. Baseline was
+  # already met; restricted still is not.
+  #
+  # 1001, not 1000, because the base is `ubuntu:24.04` and its own `ubuntu` user already holds 1000.
+  # Verified by creating the user the way the Dockerfile does:
+  #   docker run --rm ubuntu:24.04 sh -c 'useradd -m pwuser; id pwuser'  ->  uid=1001(pwuser)
+  #
+  # `fsGroup` is what makes an existing volume usable: it is created root-owned and the kubelet
+  # applies the group on mount. `OnRootMismatch` is not a detail. Unset means `Always`, which walks
+  # every file on EVERY mount, and a real Chromium profile is tens of thousands of small ones: in
+  # `mode: sandbox` that pass would run again on every resume from idle, which is the latency
+  # agent-sandbox exists to avoid. `OnRootMismatch` runs it once, when the root still says root.
+  #
+  # A NOTE ON STORAGE. The kubelet applies fsGroup only where the volume plugin says it can.
+  # The EBS, PD and Azure Disk CSI drivers do. `hostPath` does not, and that is what
+  # rancher/local-path-provisioner hands out by default, which is the default StorageClass on k3s.
+  # There the computer now refuses to start with a message saying so, rather than coming up healthy
+  # with an empty profile.
+  #
+  # Set `computers.podSecurityContext: null` to go back to running as root.
+  #
+  # NOTHING ELSE IS SET HERE ON PURPOSE. A capability drop was proposed in #262 and declined,
+  # because gVisor is the sandbox boundary this ships and `apt-get` in a Bot's shell needs CHOWN,
+  # DAC_OVERRIDE, FOWNER, SETUID and SETGID. `allowPrivilegeEscalation: false` is the same question
+  # wearing a different hat: it is `no_new_privs`, which turns off the setuid bit `sudo apt-get`
+  # depends on. The supervisor path already makes that trade (`docker.ts` sets
+  # `no-new-privileges:true`), and can, because the image it runs installs no sudo at all. Add
+  # either here if your deployment wants it and your Bots never install packages.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    fsGroupChangePolicy: OnRootMismatch
 
   # How many browsers one computer holds at once, and how long an untouched one is kept. Empty means
   # the process default, which is a handful and thirty minutes.
@@ -266,6 +406,42 @@ routines:
   enabled: false
   # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
   schedule: "*/5 * * * *"
+
+# Deleting attachments somebody staged and then never sent. `attachedAt` stays null until an
+# attachment is actually sent, and the upload endpoint counts exactly those null rows against two
+# separate caps: eight per composer session, which is the per-message limit the composer's own screen
+# enforces, and 32 per PERSON across every channel and every session at once, which is the one that
+# makes this sweep load-bearing.
+#
+# The second cap is why never running this is worse than growth. The per-session eight is counted
+# over a bucket the client names in its own request, so a new tab is a new bucket and it bounds a
+# client that plays along and nothing else. The per-person 32 is not: it is every unsent row that
+# person holds anywhere, and the refusal they see on the 33rd file tells them anything still unsent
+# is cleared within a day, which is a promise made on this sweep's behalf. With the sweep off, a
+# changed mind is a permanent dead end naming files that are no longer on anybody's screen, and
+# anybody who reaches 32 can attach nothing, in any channel, for good.
+attachments:
+  culler:
+    # On by default, unlike `routines` above: this needs nothing but the database, which every
+    # deployment already has, so there is no failure mode where enabling it does more harm than the
+    # rows it was written to remove. Nothing but the database is meant literally — the script reads
+    # `DATABASE_URL` and no other variable, which is why this CronJob carries no secret at all.
+    enabled: true
+    # Hourly, not the five-minute schedule the other two CronJobs use: nothing here is time-sensitive
+    # the way a due routine or an idle browser is.
+    schedule: "0 * * * *"
+    # How long a staged attachment is kept before the sweep deletes it. Matches the script's own
+    # fallback, so leaving this out and never running the CronJob behave alike.
+    #
+    # A fraction is a fraction of an hour: `0.5` is thirty minutes. Be sure that is what you want —
+    # this deletes files a person picked in the composer and has not sent, and a window shorter than
+    # somebody's train of thought deletes one out from under them while the tab is still open.
+    olderThanHours: 24
+    # A ceiling on one sweep, because `concurrencyPolicy: Forbid` turns a hung one into a permanent
+    # stop. A deployment arriving with a large backlog does not need it raised: the sweep deletes in
+    # bounded batches, each its own transaction, so a run stopped at the ceiling keeps what it
+    # committed and the next one carries on from there. Raising it drains that backlog in fewer runs.
+    activeDeadlineSeconds: 300
 
 database:
   # Used when `postgresql.enabled` is false. A URL, or a secret holding one.
@@ -359,10 +535,12 @@ secrets:
   modelApiKey: ""
   computerToken: ""
   supervisorToken: ""
-  # Both from the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime
-  # key, and `npx --yes copilotkit@latest license --print` prints the licence. The chart refuses to
-  # install without them, because there is no mode where this runs with Intelligence missing.
+  # From the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime key.
+  # The chart refuses to install without it, because there is no mode where this runs with
+  # Intelligence missing.
   intelligenceApiKey: ""
+  # Optional. Managed Intelligence issues no licence token; set this only for a self-hosted
+  # Intelligence that has one, and it is passed to the server as COPILOTKIT_LICENSE_TOKEN.
   licenseToken: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
@@ -373,6 +551,20 @@ secrets:
   googleClientSecret: ""
   microsoftClientSecret: ""
   oktaClientSecret: ""
+  # Required when `config.opentag.enabled`. At least 32 characters. Generate one with:
+  # openssl rand -hex 32
+  opentagSharedSecret: ""
+  # Required when `config.sms.enabled`.
+  twilioAuthToken: ""
+  # Optional, with `config.push.projectId`.
+  expoAccessToken: ""
+  # Required when `config.scim.enabled`; the next one is optional, for rotation.
+  scimBearerToken: ""
+  scimBearerTokenNext: ""
+  # Optional, with `config.otel`. Headers for the logs endpoint, and the general ones used when the
+  # logs ones are unset.
+  otelLogsHeaders: ""
+  otelHeaders: ""
 
 externalSecrets:
   enabled: false
@@ -412,11 +604,20 @@ networkPolicy:
   extraEgress: []
   extraIngress: []
   # `computers.mode: sandbox` only. The service range the Kubernetes API server answers on, so the
-  # rule that lets the API ask for a Bot's computer can name it instead of being left open.
+  # rule that lets the API ask for a Bot's computer can name it.
   #
-  # Empty means unscoped, which is the only thing a chart can do by default: the range is the
-  # cluster's, not the release's. `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows
-  # which one yours is on; on EKS it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  # REQUIRED once `enabled` is true and `computers.mode` is sandbox, and empty here because the range
+  # is the cluster's rather than the release's, so there is nothing this chart could put in its place.
+  # `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows which one yours is on; on EKS
+  # it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  #
+  # Empty USED to mean unscoped, and unscoped was not a looser version of this rule — it was the
+  # absence of one. An egress rule with ports and no `to` matches every destination in Kubernetes, so
+  # the default granted 443 and 6443 to all of `10/8`, `172.16/12`, `192.168/16` and `169.254/16`,
+  # which are the four ranges the rule beside it exists to cut out. It is refused rather than skipped
+  # because skipping it is an outage nobody is told about: on a cluster that enforces policy the API
+  # server can no longer ask for a computer and every Bot action fails. A `helm upgrade` that stops
+  # here has changed nothing in the cluster; set this and run it again.
   kubernetesApiCidr: ""
   # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
   # an internal site adds it here, one address at a time, rather than reopening the private ranges.
@@ -426,6 +627,8 @@ networkPolicy:
   cullerExtraEgress: []
   # The same, for the routines sweep.
   routinesExtraEgress: []
+  # The same, for the attachments culler.
+  attachmentsCullerExtraEgress: []
 
 podSecurityContext:
   runAsNonRoot: false

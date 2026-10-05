@@ -323,20 +323,81 @@ export async function redeemAuthorizationCode(input: {
   // A public (DCR) client proves itself with PKCE, and some vendors refuse an unexpected empty field.
   if (input.clientSecret) params.set("client_secret", input.clientSecret);
 
-  const response = await fetch(input.tokenUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: params,
+  /*
+   * Our own catalogue, told apart from their outage before a request is attempted.
+   *
+   * `fetch` refuses a malformed URL by throwing the same kind of error a refused connection does,
+   * so without this the two would reach the same catch and read as the same sentence. They are not
+   * the same thing: one is a vendor having a bad day and the other is an endpoint in this
+   * deployment's own catalogue that nobody can ever connect through. The person gets the ordinary
+   * refusal either way, because there is nothing else to give them, and the log is where the
+   * difference has to survive.
+   *
+   * Checking it here is also what leaves the catch below covering only the transport, rather than
+   * quietly standing in for a mistake in a frozen literal.
+   */
+  if (!URL.canParse(input.tokenUrl)) {
+    console.error(
+      JSON.stringify({
+        type: "oauth-token-endpoint-unusable",
+        tokenUrl: input.tokenUrl,
+        note: "This vendor's token endpoint is not a usable address, so nobody can connect it until the catalogue is fixed.",
+      }),
+    );
+    return null;
+  }
+
+  /*
+   * A vendor that could not be reached at all, which the refusal below cannot see.
+   *
+   * `!response.ok` needs a response, and there is none when the connection is refused, the name does
+   * not resolve, TLS will not agree, or the timeout on this request fires. Unguarded, that rejection
+   * escaped a function whose whole contract is to refuse quietly, and it escaped at the worst
+   * available moment: the callback has no failure handler above it, so somebody who had just
+   * consented at the vendor got a bare 500 with no Location instead of Settings telling them it did
+   * not work. The same reasoning as the defensive read further down, one step earlier in the request.
+   *
+   * Nothing is read off the error. Which of those it was is a fact about the vendor's infrastructure
+   * on a route that answers an unauthenticated caller, and the person is told the same sentence
+   * either way.
+   */
+  let response: Response;
+  try {
+    response = await fetch(input.tokenUrl, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: params,
+      /*
+       * A redirect is a refusal, not a detour to be followed.
+       *
+       * `tokenUrl` is pinned in the catalogue because this request carries a client secret and an
+       * authorization code, and following a 302 would hand both to whatever address the answer named.
+       * Manual leaves the 3xx as the response, which is not `ok`, so it falls into the refusal below.
+       */
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
     /*
-     * A redirect is a refusal, not a detour to be followed.
+     * Logged, because refusing quietly to the person must not mean refusing quietly to the
+     * deployment. Until this, an unreachable token endpoint reached Hono's default handler, which
+     * prints the error before its 500; catching it without a line here would have bought the
+     * redirect by making a vendor outage look exactly like nobody trying to connect.
      *
-     * `tokenUrl` is pinned in the catalogue because this request carries a client secret and an
-     * authorization code, and following a 302 would hand both to whatever address the answer named.
-     * Manual leaves the 3xx as the response, which is not `ok`, so it falls into the refusal below.
+     * The status is what a person sees and this is what an operator sees, and only the second one
+     * says which vendor and why. Neither the code nor the client secret is in a transport error:
+     * they are in the request body, which never got sent.
      */
-    redirect: "manual",
-    signal: AbortSignal.timeout(15_000),
-  });
+    console.error(
+      JSON.stringify({
+        type: "oauth-token-endpoint-unreachable",
+        tokenUrl: input.tokenUrl,
+        note: "A person's consent could not be redeemed. They were sent back to Settings with a failure.",
+        error: String(error),
+      }),
+    );
+    return null;
+  }
 
   if (!response.ok) return null;
 
@@ -388,21 +449,55 @@ export async function registerDynamicClient(input: {
   registrationUrl: string;
   redirectUri: string;
 }): Promise<{ clientId: string; clientSecret: string } | null> {
-  const response = await fetch(input.registrationUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      redirect_uris: [input.redirectUri],
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-      client_name: "OpenBot",
-    }),
-    // The registration endpoint is pinned in the catalogue, so a redirect is somebody else deciding
-    // where this deployment introduces itself. Left as the response, which is not `ok`.
-    redirect: "manual",
-    signal: AbortSignal.timeout(15_000),
-  });
+  // The same catalogue check the redemption makes, and for the same reason: a registration endpoint
+  // that is not an address is this deployment's mistake, not the vendor's outage, and only the log
+  // can tell them apart.
+  if (!URL.canParse(input.registrationUrl)) {
+    console.error(
+      JSON.stringify({
+        type: "oauth-registration-endpoint-unusable",
+        registrationUrl: input.registrationUrl,
+        note: "This vendor's registration endpoint is not a usable address, so this deployment can never introduce itself.",
+      }),
+    );
+    return null;
+  }
+
+  // A vendor that could not be reached at all — see `redeemAuthorizationCode`, which states the same
+  // gap in full. This one lands on an administrator pressing Connect rather than on somebody
+  // mid-consent, and null is what turns it into the 502 that route already writes for a vendor that
+  // would not register us.
+  let response: Response;
+  try {
+    response = await fetch(input.registrationUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        redirect_uris: [input.redirectUri],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+        client_name: "OpenBot",
+      }),
+      // The registration endpoint is pinned in the catalogue, so a redirect is somebody else deciding
+      // where this deployment introduces itself. Left as the response, which is not `ok`.
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    // Logged for the same reason the redemption above is: the caller's 502 tells an administrator
+    // to check the vendor's status, and this is the line that says the vendor could not be reached
+    // at all rather than that it turned us down.
+    console.error(
+      JSON.stringify({
+        type: "oauth-registration-endpoint-unreachable",
+        registrationUrl: input.registrationUrl,
+        note: "This deployment could not introduce itself to the vendor. Connect answered 502.",
+        error: String(error),
+      }),
+    );
+    return null;
+  }
   if (!response.ok) return null;
   // A 200 is not a promise of JSON — see `redeemAuthorizationCode`. A body that will not parse is
   // the vendor answering with something other than a client, which is this function's null.

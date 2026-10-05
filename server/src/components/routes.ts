@@ -6,7 +6,16 @@ import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { DATA_FUNCTIONS, dataFunction } from "./functions";
-import { ComponentNotFoundError, type ComponentStore } from "./store";
+import {
+  SandboxedNotFoundError,
+  SandboxedPublicationRefusedError,
+  type SandboxedStore,
+} from "./sandboxed";
+import {
+  ComponentNotFoundError,
+  type ComponentStore,
+  SandboxedPublicationRequiredError,
+} from "./store";
 
 /**
  * The local development actor, which is not a row in `users`.
@@ -39,6 +48,14 @@ export function createComponentRoutes(
    * behind `requireAdmin`.
    */
   canUseBot: BotAccessCheck,
+  /**
+   * The source half of a playground component's publication.
+   *
+   * The generic switch is the only publication UI for both kinds, so this route owns the choice to
+   * delegate. The component store still refuses a generic write for a sandboxed row, which keeps a
+   * caller that reaches `publish` directly from creating the same half-published state.
+   */
+  sandboxedStore?: SandboxedStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -87,24 +104,62 @@ export function createComponentRoutes(
       return context.json({ error: "A list of components is required." }, 400);
     }
 
-    const valid = entries.flatMap((entry) => {
-      if (!entry || typeof entry !== "object") return [];
+    /*
+     * All or nothing, and a 400 names the entry. This used to drop malformed entries and
+     * answer 200 with whatever was left, so a deploy that typo'd `kind` as an object or
+     * sent a blank `description` got a success response while publishing nothing: `{added: []}`
+     * is also what "already in sync" looks like. The operator found out from a missing
+     * component, not from the API. A build announcing an empty catalogue sends `[]`, which
+     * still syncs to nothing and answers 200.
+     */
+    const valid: {
+      name: string;
+      title: string;
+      kind: string;
+      description: string;
+    }[] = [];
+    for (const [index, entry] of entries.entries()) {
+      if (!entry || typeof entry !== "object") {
+        return context.json(
+          {
+            error: `Component at index ${index} needs a name, a title, a kind and a description.`,
+          },
+          400,
+        );
+      }
       const { name, title, kind, description } = entry as Record<
         string,
         unknown
       >;
       if (
         typeof name !== "string" ||
-        !name ||
+        !name.trim() ||
         typeof title !== "string" ||
+        !title.trim() ||
         typeof kind !== "string" ||
+        !kind.trim() ||
         typeof description !== "string" ||
-        !description
+        !description.trim()
       ) {
-        return [];
+        return context.json(
+          {
+            error: `Component at index ${index} needs a name, a title, a kind and a description.`,
+          },
+          400,
+        );
       }
-      return [{ name, title, kind, description }];
-    });
+      // Trimmed, because that is the string the guard above just approved. A component's `name` is
+      // its identity -- `syncCatalogue` compares it against what is already published, `decide` and
+      // `listForAgent` look it up by it, and a grant names it -- so publishing " weatherPanel "
+      // adds a second component beside `weatherPanel` that nobody has granted and no Bot can be
+      // held back from by the name people use.
+      valid.push({
+        name: name.trim(),
+        title: title.trim(),
+        kind: kind.trim(),
+        description: description.trim(),
+      });
+    }
 
     const { added } = await store.syncCatalogue(valid);
     // Only arrivals are recorded. Announcing happens on every page load, and a row per load would
@@ -145,7 +200,8 @@ export function createComponentRoutes(
       agentId?: unknown;
       functions?: unknown;
     } | null;
-    const agentId = typeof body?.agentId === "string" ? body.agentId : "";
+    const agentId =
+      typeof body?.agentId === "string" ? body.agentId.trim() : "";
     if (!agentId) {
       return context.json({ error: "The Bot is required." }, 400);
     }
@@ -154,11 +210,29 @@ export function createComponentRoutes(
     if (!(await canUseBot(context.var.actor, agentId))) {
       return context.json({ error: "There is no such Bot." }, 404);
     }
-    const functions = Array.isArray(body?.functions)
-      ? body.functions.filter(
-          (entry): entry is string => typeof entry === "string",
-        )
-      : [];
+    /*
+     * Every entry, or a 400. This used to filter non-strings out, so
+     * `{"functions": [123, null, {}]}` became `[]`, the loop below never ran, and a
+     * governance question about X and Y was answered `allowed: true` because X and Y
+     * were not strings. A caller asking "may it call these" must get a verdict about the
+     * ones it named, not about none of them. Absent still means none.
+     */
+    const rawFunctions = body?.functions;
+    if (
+      rawFunctions !== undefined &&
+      (!Array.isArray(rawFunctions) ||
+        rawFunctions.some(
+          (entry) => typeof entry !== "string" || !entry.trim(),
+        ))
+    ) {
+      return context.json(
+        { error: "Functions must be a list of function names." },
+        400,
+      );
+    }
+    const functions = (
+      Array.isArray(rawFunctions) ? rawFunctions : []
+    ) as string[];
 
     const decision = await store.decide(name, agentId);
     if (!decision.allowed) {
@@ -224,6 +298,20 @@ export function createComponentRoutes(
     if (!functionName || !agentId) {
       return context.json(
         { error: "The function and the Bot are both required." },
+        400,
+      );
+    }
+    // A string `args` would reach `fn.run` and fail as a 502 data error instead of a malformed
+    // call. Arrays and prototype-polluted objects are refused for the same reason.
+    if (
+      body?.args !== undefined &&
+      (typeof body.args !== "object" ||
+        body.args === null ||
+        Array.isArray(body.args) ||
+        Object.getPrototypeOf(body.args) !== Object.prototype)
+    ) {
+      return context.json(
+        { error: "Function arguments must be an object." },
         400,
       );
     }
@@ -325,7 +413,19 @@ export function createComponentRoutes(
 
     const name = context.req.param("name");
     const functionName = context.req.param("function");
-    await store.revokeFunction(name, functionName);
+    // An empty function name would revoke zero rows yet answer `revoked:true` with an audit row
+    // naming nothing. Refused at the edge like the grant path.
+    if (!functionName.trim()) {
+      return context.json({ error: "A function is required." }, 400);
+    }
+    try {
+      await store.revokeFunction(name, functionName);
+    } catch (error) {
+      if (error instanceof ComponentNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
     await audit(context, "component.function_revoked", name, {
       function: functionName,
     });
@@ -340,7 +440,9 @@ export function createComponentRoutes(
     const body = (await context.req.json().catch(() => null)) as {
       agentId?: unknown;
     } | null;
-    const agentId = typeof body?.agentId === "string" ? body.agentId : "";
+    // A whitespace-only id is truthy and would be written as a grant row naming nothing.
+    const agentId =
+      typeof body?.agentId === "string" ? body.agentId.trim() : "";
     if (!agentId) {
       return context.json({ error: "The Bot is required." }, 400);
     }
@@ -363,6 +465,10 @@ export function createComponentRoutes(
 
     const name = context.req.param("name");
     const agentId = context.req.param("agentId");
+    // Revoking `"   "` would delete zero rows yet answer `revoked:true` with an audit row.
+    if (!agentId.trim()) {
+      return context.json({ error: "The Bot is required." }, 400);
+    }
     try {
       await store.revoke(name, agentId, context.var.actor.email);
     } catch (error) {
@@ -383,8 +489,20 @@ export function createComponentRoutes(
     const body = (await context.req.json().catch(() => null)) as {
       published?: unknown;
     } | null;
-    const published = body?.published !== false;
+    /*
+     * A real boolean, not truthiness. This used to read `body?.published !== false`, so an
+     * empty body, invalid JSON, `{}`, `"no"`, `0` and `null` all evaluated to true and
+     * *published* the component with a 200 and a `component.published` audit row. A toggle
+     * that publishes on malformed input fails open on the endpoint that decides what every
+     * Bot may draw, and the sibling toggles (`PUT /routines/:id/enabled`, channel pin/busy)
+     * all answer 400 on non-boolean. Only an explicit true or false moves anything.
+     */
+    if (typeof body?.published !== "boolean") {
+      return context.json({ error: "published must be true or false." }, 400);
+    }
+    const published = body.published;
 
+    let recordedBySource = false;
     try {
       if (published) {
         await store.publish(name, context.var.actor.email);
@@ -392,11 +510,40 @@ export function createComponentRoutes(
         await store.unpublish(name, context.var.actor.email);
       }
     } catch (error) {
-      if (error instanceof ComponentNotFoundError) {
+      if (error instanceof SandboxedPublicationRequiredError) {
+        if (!sandboxedStore) {
+          return context.json(
+            {
+              error:
+                "The playground source is unavailable, so the component was not published.",
+            },
+            409,
+          );
+        }
+        try {
+          if (published) {
+            await sandboxedStore.publish(name, context.var.actor.email);
+          } else {
+            await sandboxedStore.unpublish(name, context.var.actor.email);
+          }
+          recordedBySource = true;
+        } catch (sourceError) {
+          if (sourceError instanceof SandboxedPublicationRefusedError) {
+            return context.json({ error: sourceError.message }, 409);
+          }
+          if (sourceError instanceof SandboxedNotFoundError) {
+            return context.json({ error: sourceError.message }, 404);
+          }
+          throw sourceError;
+        }
+      } else if (error instanceof ComponentNotFoundError) {
         return context.json({ error: error.message }, 404);
+      } else {
+        throw error;
       }
-      throw error;
     }
+
+    if (recordedBySource) return context.json({ published });
 
     await audit(
       context,

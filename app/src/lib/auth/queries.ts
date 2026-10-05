@@ -1,13 +1,31 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client, tryClient } from "@/lib/client";
 
+/**
+ * Where this person is in first-run onboarding.
+ *
+ * On the user rather than its own query, so the `_authed` gate learns it from the request it
+ * already makes. A null `completedAt` is what sends the app to /onboarding.
+ */
+export type OnboardingStatus = {
+  step: number;
+  completedAt: string | null;
+};
+
 export type AuthenticatedUser = {
   id: string;
   email: string;
   name?: string | null;
   image?: string | null;
   role: "admin" | "user";
+  /** Null means this deployment does not track onboarding, which reads as nothing to finish. */
+  onboarding: OnboardingStatus | null;
 };
+
+/** Whether the gate holds: there is an onboarding to do and this person has not finished it. */
+export function needsOnboarding(user: AuthenticatedUser): boolean {
+  return user.onboarding !== null && user.onboarding.completedAt === null;
+}
 
 export const authKeys = {
   all: ["auth"] as const,
@@ -28,6 +46,8 @@ export type SignInOptions = {
    * use this deployment, before they have signed in.
    */
   sso: boolean;
+  /** An administrator requires SSO; social sign-in stays only as the administrators' break-glass. */
+  ssoRequired: boolean;
 };
 
 async function signInOptions(): Promise<SignInOptions> {
@@ -36,11 +56,16 @@ async function signInOptions(): Promise<SignInOptions> {
   // while the server was saying it has one.
   const body = (await (
     await client("/api/capabilities", { fallback: "Could not load sign-in" })
-  ).json()) as { authProviders?: AuthProviderId[]; ssoConfigured?: boolean };
+  ).json()) as {
+    authProviders?: AuthProviderId[];
+    ssoConfigured?: boolean;
+    ssoRequired?: boolean;
+  };
 
   return {
     providers: body.authProviders ?? [],
     sso: body.ssoConfigured === true,
+    ssoRequired: body.ssoRequired === true,
   };
 }
 

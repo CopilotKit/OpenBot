@@ -1,3 +1,4 @@
+import type { HandoffRequest } from "../../../shared/computer-control";
 import type { NavigateResult } from "./schema";
 import { checkNavigationTarget } from "./target";
 
@@ -6,6 +7,22 @@ export class ComputerUnavailableError extends Error {
   constructor(reason: string) {
     super(reason);
     this.name = "ComputerUnavailableError";
+  }
+}
+
+/**
+ * A person pressed Stop and the action was aborted mid-flight.
+ *
+ * A subclass of `ComputerUnavailableError` on purpose: everything downstream that catches an
+ * unavailable computer to tell the model still catches this unchanged. What it adds is a type the
+ * gateway can see, so the audit row it writes is `computer.action_stopped` rather than
+ * `computer.action_failed` -- a stop is not an outage, and a count of failures that includes every
+ * Stop reports one where there was none.
+ */
+export class ComputerStoppedError extends ComputerUnavailableError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ComputerStoppedError";
   }
 }
 
@@ -41,9 +58,34 @@ export class WorkspaceRequestError extends Error {
   }
 }
 
+/** The workspace has no file at the requested path. */
+export class WorkspaceNotFoundError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "WorkspaceNotFoundError";
+  }
+}
+
+/** The requested workspace file is larger than the download limit. */
+export class WorkspaceTooLargeError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "WorkspaceTooLargeError";
+  }
+}
+
+/** Raw bytes and their size, kept as a stream until the caller sends them onward. */
+export type ComputerDownload = {
+  body: ReadableStream<Uint8Array>;
+  bytes: number;
+};
+
 /** The page changed after the caller received its element references. */
 export class StaleSnapshotError extends Error {
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly snapshotRequired = false,
+  ) {
     super(reason);
     this.name = "StaleSnapshotError";
   }
@@ -58,9 +100,24 @@ export class StaleSnapshotError extends Error {
  * puts on the body, which is the only thing in the response that distinguishes them.
  */
 export class HumanHasControlError extends Error {
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly requestId?: string,
+    readonly handoff?: HandoffRequest,
+  ) {
     super(reason);
     this.name = "HumanHasControlError";
+  }
+}
+
+/** Invalid, unknown, or superseded handoff identity is distinct from page freshness. */
+export class HandoffRequestError extends Error {
+  constructor(
+    reason: string,
+    readonly status: 400 | 404 | 409,
+  ) {
+    super(reason);
+    this.name = "HandoffRequestError";
   }
 }
 
@@ -101,7 +158,15 @@ export interface ComputerTransport {
     baseUrl: string,
     botId: string,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult>;
+  download(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    caller?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ComputerDownload>;
 }
 
 /**
@@ -116,16 +181,16 @@ export function createComputerTransport(
   const doFetch = options.fetchImpl ?? fetch;
   const defaultTimeoutMs = options.timeoutMs ?? 45_000;
 
-  async function call<T>(
+  async function request(
     baseUrl: string,
     botId: string,
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
     timeoutMsOverride?: number,
-  ): Promise<T> {
+  ): Promise<Response> {
     if (caller?.aborted) {
-      throw new ComputerUnavailableError("The action was stopped.");
+      throw new ComputerStoppedError("The action was stopped.");
     }
 
     /*
@@ -137,7 +202,6 @@ export function createComputerTransport(
      * this becomes the backstop rather than the limit.
      */
     const timeoutMs = timeoutMsOverride ?? defaultTimeoutMs;
-
     const target = baseUrl.replace(/\/$/, "");
     let response: Response;
     try {
@@ -155,13 +219,43 @@ export function createComputerTransport(
           : AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
+      /*
+       * The caller's own abort is answered first, and says what the check above the fetch says.
+       *
+       * The signal is handed to fetch precisely so a Stop can land mid-flight, and a fetch aborted
+       * that way rejects with an AbortError, which is neither a TimeoutError nor a computer that is
+       * not running. Both of the other answers are statements about the infrastructure, and this
+       * message is not only read by the model: the gateway writes it into the action's audit row,
+       * and the type below is what keeps that row a stop rather than an outage.
+       */
+      if (caller?.aborted) {
+        throw new ComputerStoppedError("The action was stopped.");
+      }
       throw new ComputerUnavailableError(
         error instanceof Error && error.name === "TimeoutError"
           ? "The assistant's computer did not respond in time."
           : "The assistant's computer is not running.",
       );
     }
+    return response;
+  }
 
+  async function call<T>(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    init?: RequestInit,
+    caller?: AbortSignal,
+    timeoutMsOverride?: number,
+  ): Promise<T> {
+    const response = await request(
+      baseUrl,
+      botId,
+      path,
+      init,
+      caller,
+      timeoutMsOverride,
+    );
     const body = (await response.json().catch(() => null)) as Record<
       string,
       unknown
@@ -170,6 +264,44 @@ export function createComputerTransport(
       throwMappedError(response.status, body);
     }
     return body as T;
+  }
+
+  async function download(
+    baseUrl: string,
+    botId: string,
+    path: string,
+    caller?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ComputerDownload> {
+    const response = await request(
+      baseUrl,
+      botId,
+      path,
+      { method: "GET" },
+      caller,
+      timeoutMs,
+    );
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as Record<
+        string,
+        unknown
+      > | null;
+      throwMappedError(response.status, body);
+    }
+
+    const length = response.headers.get("content-length");
+    const bytes =
+      length !== null && /^\d+$/.test(length) ? Number(length) : Number.NaN;
+    if (!response.body || !Number.isSafeInteger(bytes) || bytes < 0) {
+      // Nothing else will ever read this body, so release it here rather than
+      // leaving the whole download budget checked out of the pool. A cancel that
+      // fails must not replace the refusal the caller is told about.
+      await response.body?.cancel().catch(() => undefined);
+      throw new ComputerUnavailableError(
+        "The assistant's computer returned an invalid file download.",
+      );
+    }
+    return { body: response.body, bytes };
   }
 
   function post<T>(
@@ -198,6 +330,7 @@ export function createComputerTransport(
     baseUrl: string,
     botId: string,
     url: string,
+    toolCallId?: string,
   ): Promise<NavigateResult> {
     const verdict = checkNavigationTarget(url, {
       allowPrivateHosts: options.allowPrivateHosts,
@@ -207,10 +340,11 @@ export function createComputerTransport(
     }
     return post<NavigateResult>(baseUrl, botId, "/navigate", {
       url: verdict.url,
+      ...(toolCallId ? { toolCallId } : {}),
     });
   }
 
-  return { call, post, navigate };
+  return { call, post, navigate, download };
 }
 
 /** Map agent-computer responses to errors that a caller can act on. */
@@ -220,18 +354,35 @@ function throwMappedError(
 ): never {
   const detail =
     typeof body?.error === "string" ? body.error : `HTTP ${status}`;
+  if (
+    body?.controlRequestError === true &&
+    (status === 400 || status === 404 || status === 409)
+  )
+    throw new HandoffRequestError(detail, status);
   if (status === 409) {
     // The computer says which kind of 409 this is. Absent, it is the ordinary one.
     if (body?.humanHasControl === true) {
-      throw new HumanHasControlError(detail);
+      throw new HumanHasControlError(
+        detail,
+        typeof body.requestId === "string" ? body.requestId : undefined,
+        body.handoff && typeof body.handoff === "object"
+          ? (body.handoff as HandoffRequest)
+          : undefined,
+      );
     }
-    throw new StaleSnapshotError(detail);
+    throw new StaleSnapshotError(detail, body?.snapshotRequired === true);
   }
   if (status === 403) {
     throw new WorkspaceRefusedError(detail);
   }
   if (status === 400) {
     throw new WorkspaceRequestError(detail);
+  }
+  if (status === 404) {
+    throw new WorkspaceNotFoundError(detail);
+  }
+  if (status === 413) {
+    throw new WorkspaceTooLargeError(detail);
   }
   if (/waiting for locator|Timeout .* exceeded/i.test(detail)) {
     const ref = detail.match(/aria-ref=([A-Za-z0-9_-]+)/)?.[1];

@@ -45,6 +45,17 @@ function invalidationRecorder() {
   return { queryClient, invalidated };
 }
 
+/*
+ * The context TanStack Query hands a mutation callback alongside its variables. These tests drive
+ * the callbacks directly rather than through a MutationObserver, so they have to supply it. Both
+ * fields are the real thing rather than a stand-in: `meta` is undefined exactly as it is for a
+ * mutation declared without one, and `mutationKey` is optional and genuinely absent, because none
+ * of these options factories sets one.
+ */
+function mutationContext(queryClient: QueryClient) {
+  return { client: queryClient, meta: undefined };
+}
+
 test("one grant is one POST of the three things it joins", async () => {
   const seen = capturingFetch(200, {});
 
@@ -88,22 +99,34 @@ test("granting one on its own still carries its refetch", async () => {
   const { queryClient, invalidated } = invalidationRecorder();
   const options = setPluginGrantMutationOptions(queryClient);
 
-  await options.mutationFn?.({
-    agentId: "agent-1",
-    granted: true,
-    kind: "mcp",
-    ref: "notion/search",
-  });
-  await options.onSuccess?.(
-    undefined as never,
+  await options.mutationFn?.(
     {
       agentId: "agent-1",
       granted: true,
       kind: "mcp",
       ref: "notion/search",
     },
-    undefined as never,
-    undefined as never,
+    mutationContext(queryClient),
+  );
+  /*
+   * ON SETTLE RATHER THAN ON SUCCESS, which is where this refetch lives now and why this call
+   * changed. `POST /api/plugins/grants` upserts the grant and then files the trail row, with no
+   * catch over either, so a refusal from it is not evidence that the grant did not land — see
+   * `invalidatePlugins`, which makes the argument for the whole surface. `onSettled` is the one slot
+   * that runs on both outcomes; `plugin-mutation-refresh.test.ts` is where the refused half is
+   * pinned, for this write and the thirteen that share its shape.
+   */
+  await options.onSettled?.(
+    undefined,
+    null,
+    {
+      agentId: "agent-1",
+      granted: true,
+      kind: "mcp",
+      ref: "notion/search",
+    },
+    undefined,
+    mutationContext(queryClient),
   );
 
   expect(seen).toHaveLength(1);

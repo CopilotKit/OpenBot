@@ -21,7 +21,13 @@ export function useNeedsYou(botId: string | undefined, when: boolean): boolean {
       const state = await readControl(botId).catch(() => null);
       if (!live) return;
       setNeeded(
-        Boolean(state && (state.requested || state.secretWanted !== undefined)),
+        Boolean(
+          state &&
+            (state.requested ||
+              state.holder === "human" ||
+              state.request?.status === "interrupted" ||
+              state.secretWanted !== undefined),
+        ),
       );
     };
 

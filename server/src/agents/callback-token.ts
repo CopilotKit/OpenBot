@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { type AuditInitiator, PERSON_INITIATOR } from "../audit";
 import { sign, verify } from "../auth/signed-value";
 
 /**
@@ -102,6 +103,19 @@ export type RunAssertion = {
    * Optional on the way in so an assertion minted before this existed still reads, and read as zero.
    */
   depth?: number;
+  /**
+   * What started this run, for the audit rows written by whoever holds the assertion.
+   *
+   * IT TRAVELS HERE FOR THE REASON `depth` DOES: a hop is A to B on up to two pods, and the thing
+   * that knows a routine began the run is the process that claimed the routine, not the one writing
+   * the row. Signed with the rest, so a Bot cannot relabel its own run as a person's.
+   *
+   * Optional on the way in so an assertion minted before this existed still reads, and read as a
+   * person, which is what those runs were.
+   */
+  initiator?: AuditInitiator;
+  /** The durable handoff claim under which a remote delivery may coordinate further work. */
+  handoff?: { key: string; owner: string };
 };
 
 type SignedRun = RunAssertion & { exp: number };
@@ -121,6 +135,7 @@ export function mintRunAssertion(
   const payload: SignedRun = {
     ...run,
     depth: run.depth ?? 0,
+    initiator: run.initiator ?? PERSON_INITIATOR,
     exp: now + RUN_TTL_MS,
   };
   const value = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -137,6 +152,7 @@ export function readRunAssertion(
   signed: unknown,
   encryptionKey: string,
   now: number = Date.now(),
+  options: { ignoreExpiry?: boolean } = {},
 ): RunAssertion | null {
   if (typeof signed !== "string" || !signed) return null;
 
@@ -155,7 +171,16 @@ export function readRunAssertion(
     ) {
       return null;
     }
-    if (payload.exp <= now) return null;
+    if (!options.ignoreExpiry && payload.exp <= now) return null;
+    if (
+      payload.handoff !== undefined &&
+      (!payload.handoff ||
+        typeof payload.handoff.key !== "string" ||
+        !payload.handoff.key ||
+        typeof payload.handoff.owner !== "string" ||
+        !payload.handoff.owner)
+    )
+      return null;
     return {
       botId: payload.botId,
       actorId: payload.actorId,
@@ -175,15 +200,105 @@ export function readRunAssertion(
         payload.depth >= 0
           ? payload.depth
           : 0,
+      // Read as a person on anything unclear, for the reason depth reads as zero: an assertion
+      // minted before this existed carries none, and a person is what those runs were.
+      initiator: readInitiator(payload.initiator),
+      ...(payload.handoff ? { handoff: payload.handoff } : {}),
     };
   } catch {
     return null;
   }
 }
 
+/**
+ * The initiator a signed payload carries, narrowed back to the union.
+ *
+ * A kind that is not one this deployment writes is read as a person rather than kept, so a field
+ * from a future version cannot arrive as a string the Audit screen has no branch for.
+ */
+function readInitiator(value: unknown): AuditInitiator {
+  if (!value || typeof value !== "object") return PERSON_INITIATOR;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "person" || kind === "deployment") return { kind };
+  if (
+    kind !== "routine" &&
+    kind !== "handoff" &&
+    kind !== "responsibility" &&
+    kind !== "memory"
+  )
+    return PERSON_INITIATOR;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id ? { kind, id } : PERSON_INITIATOR;
+}
+
 export type CallVerdict =
-  | { ok: true; botId: string; actorId: string }
+  | {
+      ok: true;
+      botId: string;
+      actorId: string;
+      initiator?: AuditInitiator;
+      run: RunAssertion;
+    }
   | { ok: false; status: 401 | 403; reason: string };
+
+/**
+ * What a framework Bot asks to run, parsed out of the request body.
+ *
+ * The route used to check `if (!body?.name)` and then call `body.name.replace`, so a
+ * non-string name (`123`, `{}`, `["mcp__x"]`) passed the truthiness guard and threw
+ * `TypeError: body.name.replace is not a function` inside the `try`, which the catch
+ * answered as a 200 tool refusal with the marker text. A caller error looked like a tool
+ * saying no, with no audit row and no 400. `args` had the same shape problem: anything
+ * non-null (`"str"`, `42`, `[]`) flowed straight into `callTool` as a `Record`.
+ *
+ * Parsed here, pure and unit-tested, so the route answers 400 before auth output or the
+ * store ever sees the values. The `mcp__server__tool` to `server/tool` mapping lives here
+ * too, so the route never calls a string method on untrusted input again.
+ */
+export type AgentToolCallInput = {
+  /** The store-shaped tool ref, with the `mcp__` prefix mapped. */
+  ref: string;
+  /** The tool arguments, defaulting to `{}` when absent. */
+  args: Record<string, unknown>;
+};
+
+export function parseAgentToolCallInput(
+  body: unknown,
+): { ok: true; value: AgentToolCallInput } | { ok: false; error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, error: "A tool is required." };
+  }
+  const name = (body as { name?: unknown }).name;
+  if (typeof name !== "string" || !name.trim()) {
+    return { ok: false, error: "A tool is required." };
+  }
+  const rawArgs = (body as { args?: unknown }).args;
+  if (rawArgs === undefined) {
+    return {
+      ok: true,
+      value: {
+        ref: name
+          .trim()
+          .replace(/^mcp__/, "")
+          .replace("__", "/"),
+        args: {},
+      },
+    };
+  }
+  if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) {
+    return { ok: false, error: "Tool arguments must be an object." };
+  }
+  return {
+    ok: true,
+    value: {
+      ref: name
+        .trim()
+        .replace(/^mcp__/, "")
+        .replace("__", "/"),
+      args: rawArgs as Record<string, unknown>,
+    },
+  };
+}
 
 /**
  * May this call proceed, and as whom?
@@ -249,5 +364,28 @@ export async function authoriseAgentCall(options: {
     };
   }
 
-  return { ok: true, botId: assertion.botId, actorId: assertion.actorId };
+  return {
+    ok: true,
+    botId: assertion.botId,
+    actorId: assertion.actorId,
+    initiator: assertion.initiator,
+    run: assertion,
+  };
+}
+
+/**
+ * The assertion stored with an approved action, read for carrying that action out.
+ *
+ * The signature is checked; the expiry is not. The expiry bounds how long a live run may call back,
+ * but an approval is answered when the person gets to it, usually long after ten minutes, and the
+ * approval is what authorises the action now. Read with the live expiry, a hand-off approved late
+ * lost its depth and hand-off claim and restarted the Bot-to-Bot chain at depth zero.
+ */
+export function readApprovedRunAssertion(
+  signed: unknown,
+  encryptionKey: string,
+): RunAssertion | null {
+  return readRunAssertion(signed, encryptionKey, Date.now(), {
+    ignoreExpiry: true,
+  });
 }

@@ -126,6 +126,39 @@ describe("what a command inherits", () => {
     expect(JSON.stringify(env)).not.toContain("p@ss");
   });
 
+  test("a proxy password with a bare % is still stripped, and does not stop the command", () => {
+    // Decoding `p%zz` threw a URIError past the redaction, so building the environment failed
+    // and every command with it. It must not fail, and it must not fall back to passing the password.
+    const env = environmentForCommand(
+      source({
+        HTTP_PROXY: "http://bot:p%zz@proxy.internal:8080",
+        HTTPS_PROXY: "bot:p%zz@proxy.internal:8443",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("http://proxy.internal:8080");
+    expect(env.HTTPS_PROXY).toBe("proxy.internal:8443");
+    expect(JSON.stringify(env)).not.toContain("p%zz");
+  });
+
+  test("a proxy URL's userinfo does not pass when it was written without a scheme", () => {
+    // `HTTPS_PROXY=bot:s3cret@proxy.internal:8443` is a shape curl and wget accept. `new URL` reads
+    // it as the scheme `bot:` and a path, so the redaction above found no userinfo to strip and the
+    // password reached the Bot's shell, where `env` prints it.
+    const env = environmentForCommand(
+      source({
+        HTTP_PROXY: "bot:s3cret@proxy.internal:8080",
+        HTTPS_PROXY: "bot:p%40ss@proxy.internal:8443",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("proxy.internal:8080");
+    expect(env.HTTPS_PROXY).toBe("proxy.internal:8443");
+    expect(JSON.stringify(env)).not.toContain("s3cret");
+    expect(JSON.stringify(env)).not.toContain("p%40ss");
+    expect(JSON.stringify(env)).not.toContain("p@ss");
+  });
+
   test("a proxy without userinfo is left alone", () => {
     const env = environmentForCommand(source(), workspaceHome);
     expect(env.HTTP_PROXY).toBe(allowed.HTTP_PROXY);
@@ -329,4 +362,64 @@ describe("what a command cannot do to the computer", () => {
     expect(result.timedOut).toBe(false);
     expect(result.stdout.trim()).toBe("ran");
   }, 15_000);
+
+  test("a Stop that landed before the command started still stops it", async () => {
+    /*
+     * An abort listener added to an already-aborted signal never fires, so the Stop was only honoured
+     * when it arrived after the child spawned. This is the ordinary race: the surface aborts, the
+     * server aborts the request it made to this computer, and Bun aborts this one in turn, which can
+     * happen before `run` reaches the spawn. The command then ran to its own limit instead of being
+     * stopped, and the person was told nothing until it finished.
+     */
+    const started = Date.now();
+    const result = await createShell(root, source()).run({
+      command: "sleep 30",
+      timeoutMs: 20_000,
+      signal: AbortSignal.abort(),
+    });
+
+    // Ends on the Stop rather than running out the command or its own limit.
+    expect(Date.now() - started).toBeLessThan(10_000);
+    // A Stop is not a timeout, and must not be reported as one.
+    expect(result.timedOut).toBe(false);
+  }, 20_000);
+
+  test("a Stop that lands mid-command still stops it", async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 300);
+    const started = Date.now();
+
+    try {
+      const result = await createShell(root, source()).run({
+        command: "sleep 30",
+        timeoutMs: 20_000,
+        signal: controller.signal,
+      });
+
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(result.timedOut).toBe(false);
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 20_000);
+
+  test.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])(
+    "a timeout of %s falls back to the default instead of killing the command at once",
+    async (_name, timeoutMs) => {
+      // Math.max(NaN, 1000) is NaN, and setTimeout(NaN) fires immediately: the command was reported
+      // as timed out before it did anything. The HTTP layer rejects these with a 400; the shell
+      // itself falls back to the default so a direct caller gets a run, not a lie.
+      const result = await createShell(root, source()).run({
+        command: 'echo "ran"',
+        timeoutMs,
+      });
+
+      expect(result.timedOut).toBe(false);
+      expect(result.stdout.trim()).toBe("ran");
+    },
+    15_000,
+  );
 });

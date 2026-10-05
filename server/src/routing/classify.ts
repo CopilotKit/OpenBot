@@ -124,15 +124,39 @@ export function routingPrompt(
 }
 
 /**
+ * Whether a message names a system, by its id or by that id with separators loosened.
+ *
+ * Matched at word boundaries rather than as a bare substring. `haystack.includes("slack")` is true
+ * of "how do I handle a slacker", and `includes("jira")` is true of the Spanish for giraffe,
+ * "jirafa" — so a message that names neither system was read as naming one, and in a fallback the
+ * whole conversation was pinned to that specialist. A system id has to sit on its own here: bounded
+ * by a non-alphanumeric character or an edge of the message, not buried inside a longer word.
+ *
+ * The id is still matched with separators loosened, so `google-drive` answers to "google drive" as
+ * somebody would type it, and its raw form is matched too. Deliberately not fuzzy beyond that: a
+ * router that guesses at near-misses is a router nobody can predict.
+ */
+function messageNames(haystack: string, system: string): boolean {
+  const spelled = system.toLowerCase().replace(/[-_]+/g, " ");
+  return bounded(haystack, spelled) || bounded(haystack, system.toLowerCase());
+}
+
+/** `needle` present in `haystack`, on word boundaries, with `needle`'s own characters taken literally. */
+function bounded(haystack: string, needle: string): boolean {
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(haystack);
+}
+
+/**
  * The one coworker that can reach a system this message names, when there is exactly one.
  *
  * A hint for the router became a decision for the fallback, and only there. A confident match on
  * purpose still wins: a specialist with no connectors is the right answer to a question about its
  * specialism, and this must not turn reach into a filter that overrides that.
  *
- * Matched on the system's own id with separators loosened, so `google-drive` answers to "Google
- * Drive" as somebody would type it. Deliberately not fuzzy beyond that: a router that guesses at
- * near-misses is a router nobody can predict.
+ * A message names a system by {@link messageNames}: its id, or that id with separators loosened, at
+ * a word boundary.
  */
 function onlyCoworkerReaching(
   text: string,
@@ -142,11 +166,7 @@ function onlyCoworkerReaching(
   const named = new Set<string>();
   for (const candidate of candidates) {
     for (const system of candidate.reaches ?? []) {
-      const spelled = system.toLowerCase().replace(/[-_]+/g, " ");
-      if (
-        haystack.includes(spelled) ||
-        haystack.includes(system.toLowerCase())
-      ) {
+      if (messageNames(haystack, system)) {
         named.add(system);
       }
     }

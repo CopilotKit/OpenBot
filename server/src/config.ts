@@ -3,9 +3,20 @@
  * for durable threads and memory. Configuration the product cannot function without belongs at the
  * boot boundary.
  */
+import {
+  isLearningContainerId,
+  type LearningTarget,
+} from "../../shared/learning";
 import { singleUserEnabled } from "./auth/dev-actor";
+import { normalizeDomain } from "./auth/email-domain";
+import { organizationAuthority } from "./auth/organization";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
+import {
+  type TranscriptionConfig,
+  transcriptionConfig,
+} from "./dictation/config";
+import { type VoiceConfig, voiceConfig } from "./voice/config";
 
 export type RuntimeCapabilities = {
   mode: "intelligence";
@@ -13,12 +24,18 @@ export type RuntimeCapabilities = {
   intelligence: IntelligenceSettings;
 };
 
-/** The Intelligence contract. Every field is required; see runtimeCapabilities. */
+/**
+ * The Intelligence contract. Three values are required; see runtimeCapabilities.
+ *
+ * `licenseToken` is optional. Managed Intelligence derives entitlement from the project key, and
+ * `@copilotkit/runtime` declares `licenseToken` optional with a `COPILOTKIT_LICENSE_TOKEN` fallback
+ * of its own. A deployment that still holds one keeps passing it; nothing here requires it.
+ */
 export type IntelligenceSettings = {
   apiUrl: string;
   gatewayWsUrl: string;
   apiKey: string;
-  licenseToken: string;
+  licenseToken?: string;
 };
 
 export type DockerComputerConfig = {
@@ -78,6 +95,13 @@ export type AuthConfig = {
   secret: string;
   trustedOrigins: string[];
   initialAdminEmails: string[];
+  /**
+   * Email domains this deployment admits, on top of whatever the provider decided.
+   *
+   * Empty means no opinion, which is what every deployment running today already does. See
+   * `auth/email-domain.ts` for why the provider's own answer is not this question.
+   */
+  allowedEmailDomains: string[];
   google?: OAuthClient;
   /**
    * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
@@ -108,9 +132,17 @@ export function configuredAuthProviders(
 }
 
 export type ManagedAgentConfig = {
-  endpoint: URL;
-  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  /** The bundled Bot, absent when this deployment's provider cannot run it. */
+  endpoint?: URL;
+  /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
   token: string;
+  /**
+   * The harness picked during setup, when there is one.
+   *
+   * Also an endpoint this deployment runs: its container was started by this deployment, on a port
+   * it chose, holding this token. It gets the same header for the same reason.
+   */
+  alsoRun?: URL;
 };
 
 /**
@@ -132,14 +164,20 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /** Optional environment default. A saved Admin setting takes precedence. */
+  learning?: LearningTarget;
+  /** Audio configuration is independent of agent model providers. */
+  transcription?: TranscriptionConfig;
+  voice?: VoiceConfig;
+  /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
+  port: number;
   databaseUrl: string;
   keyEncryptionKey: string;
   /**
-   * The Bot in the box, when this deployment has one.
+   * Authentication for the bundled Bot and/or the installed picked harness.
    *
-   * Absent is the one-container image: it carries no AG-UI process, and a required URL would
-   * register a coworker against a host that is not there. Set both the URL and the token together
-   * when a remote Bot is actually running.
+   * The bundled endpoint is optional: plan credentials can run a picked harness without it.
+   * Its presence, not this auth configuration, determines whether a bundled Bot is available.
    */
   managedAgent?: ManagedAgentConfig;
   /**
@@ -163,6 +201,22 @@ export type DeploymentConfig = {
    * packages but not a copy of one running alongside the original. See channels/thread-identity.ts.
    */
   deploymentId: string | undefined;
+  /**
+   * The key this deployment talks to Composio with, the broker that holds people's accounts for a
+   * few hundred apps so a Bot can act in Gmail or Slack without an OAuth client of this
+   * deployment's own registered with each of them.
+   *
+   * Optional, and undefined is the ordinary state rather than a degraded one. A deployment that has
+   * not bought Composio is not a deployment missing something: there is nothing to connect, nothing
+   * to grant and no Composio tool for a Bot to call, what remains on screen is one row that goes
+   * nowhere under More apps on the admin Plugins page naming this variable, and nothing else it does
+   * is any worse for that.
+   *
+   * Nothing here validates the key. There is no shape to check it against and no call worth making
+   * at boot to find out, so the first real request is what says whether it works — which is also
+   * where a key that was revoked last week would have surfaced regardless.
+   */
+  composioApiKey: string | undefined;
   /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
@@ -212,6 +266,8 @@ export type DeploymentConfig = {
     google?: { clientId: string; clientSecret: string };
   };
   auth?: AuthConfig;
+  /** Customer OpenBot authority for employee desktop sessions, separate from Intelligence. */
+  organizationAuthUrl?: string;
   /**
    * Admit everybody as one fixed administrator instead of requiring sign-in.
    *
@@ -221,6 +277,39 @@ export type DeploymentConfig = {
   singleUser: boolean;
   /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
   accessibility: boolean;
+  /**
+   * Whether a Bot may answer with an interface it wrote itself.
+   *
+   * This is not the component catalogue. A component is something this deployment holds: it was
+   * either compiled into the build or authored in the playground, an administrator granted it to a
+   * Bot, and all a Bot decides is which of them to draw. Here there is nothing to grant, because
+   * there is nothing yet — the Bot writes the markup, the styles and the script for this one answer,
+   * and they are gone when the conversation moves on.
+   *
+   * A deployment switch rather than a per-Bot grant because the SDK offers no seam for one. The
+   * interface is painted from activity events that only the runtime middleware emits, and the tool
+   * the model calls is registered by the browser for every Bot the moment that middleware is on.
+   * Narrowing the middleware to some Bots would leave the rest able to call the tool and draw
+   * nothing at all, which is a worse answer than never offering it.
+   *
+   * On by default. A deployment that cannot allow generated interfaces can explicitly opt out with
+   * OPENBOT_GENERATIVE_UI=false or OPENBOT_GENERATIVE_UI=0.
+   *
+   * What it runs is sandboxed by the SDK, in an iframe with no same-origin access to this app, so a
+   * generated interface reaches this deployment's data only through what the host hands it. This
+   * deployment hands it nothing. It can load libraries from a CDN, which is the part a deployment
+   * that must not reach the public internet from a browser tab needs to weigh.
+   */
+  generativeUi: boolean;
+  /**
+   * Whether the signed-in app shows the banner offering help self-hosting OpenBot.
+   *
+   * On by default, because a fresh clone is somebody evaluating the template. A fork that runs
+   * OpenBot for its own organization turns it off with OPENBOT_SELF_HOST_BANNER=false or
+   * OPENBOT_SELF_HOST_BANNER=0, since its people have nothing to self-host. This is the operator's
+   * switch only; a deployment on a paid Intelligence plan hides the bar too (self-host-banner.ts).
+   */
+  selfHostBanner: boolean;
   /**
    * Where the built app is, when this process serves it.
    *
@@ -296,6 +385,27 @@ function optional(environment: Environment, name: string): string | undefined {
 }
 
 /**
+ * Whether this deployment says it is in production, which is what the two hard refusals turn on.
+ *
+ * ONE PLACE, BECAUSE THE TWO GATES DID NOT AGREE. Both refuse a local-only setting on a deployed
+ * server — the example encryption key, and private-host browsing — and both compare `NODE_ENV`
+ * against `"production"`. The private-hosts gate read it through `optional`, so the comparison
+ * trimmed; the key gate compared `environment.NODE_ENV` raw.
+ *
+ * Both sides of that comparison come out of the same file. `NODE_ENV=production ` with a trailing
+ * space — invisible in an env file, and preserved verbatim by Docker's `env_file` and by every
+ * hosting dashboard with a text box — therefore tripped one refusal and slipped past the other. The
+ * one it slipped past is the one that decides whether the credential vault may be encrypted with a
+ * key printed in this repository.
+ *
+ * A helper rather than a second `optional` call, so the next gate that needs this question cannot
+ * pick the wrong way to ask it.
+ */
+function isProduction(environment: Environment): boolean {
+  return optional(environment, "NODE_ENV") === "production";
+}
+
+/**
  * The key in `.env.example`, which every clone of this repository starts with.
  *
  * It is a valid key, which is the whole problem: it is the right length and the right encoding, so
@@ -317,7 +427,7 @@ function keyEncryptionKey(environment: Environment): string {
    * in any deployment.
    */
   if (value === PLACEHOLDER_KEY) {
-    if (environment.NODE_ENV === "production") {
+    if (isProduction(environment)) {
       throw new Error(
         "KEY_ENCRYPTION_KEY is still the example key from .env.example, which is public. Generate one with: openssl rand -base64 32",
       );
@@ -328,6 +438,130 @@ function keyEncryptionKey(environment: Environment): string {
   }
 
   return value;
+}
+
+/**
+ * Whether this deployment may run with no sign-in at all.
+ *
+ * {@link singleUserEnabled} answers whether somebody ASKED for it, and the flag is how they say so.
+ * That design is deliberate and stays: `single-user.test.ts` pins it, and the boot comment in
+ * `.github/workflows/ci.yml` says the same thing in the same words. This asks the second question
+ * the flag cannot answer, which is not "is this production" but "can anybody else reach it".
+ *
+ * NOT `NODE_ENV`. It looks like the signal and is not one here: `Dockerfile` sets
+ * `NODE_ENV=production` for every container and `openbot.commonEnv` sets it for every chart
+ * install, including the local trial the chart's own `validation.yaml` offers. Gating on it would
+ * refuse a mode the chart advertises and would fail the image-boot job in CI, which runs exactly
+ * this combination on purpose.
+ *
+ * The chart already asks the right question twice, and this is the same question moved to where a
+ * deployment that never goes near Helm is also asked it:
+ *
+ *   config.singleUser + a LoadBalancer with no source ranges -> refused
+ *   config.singleUser + config.publicUrl                     -> refused
+ *
+ * So: one administrator and no sign-in is a thing you run where only you can reach it. A public
+ * URL, or a trusted origin that is not loopback, says somebody else can. `.env.example` ships the
+ * flag on so a clone runs, and README's "Deploy it" hands that same `.env` to `docker run`; what
+ * separates those two is an address, which is what this reads.
+ */
+function singleUserAllowed(
+  environment: Environment,
+  hasProvider: boolean,
+): boolean {
+  if (!singleUserEnabled(environment, hasProvider)) return false;
+
+  const reachable = [
+    optional(environment, "OPENBOT_PUBLIC_URL"),
+    optional(environment, "OPENBOT_APP_URL"),
+    ...commaSeparated(environment, "TRUSTED_ORIGINS"),
+  ].filter((value): value is string => value !== undefined);
+
+  const published = reachable.filter((value) => reachOf(value) === "public");
+  if (published.length > 0) {
+    throw new Error(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, so it cannot be combined with an address the public internet reaches: ${published.join(", ")}. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or serve it somewhere only you reach.`,
+    );
+  }
+
+  /*
+   * A private address is allowed and said out loud. index.ts already warns every boot that there is
+   * no sign-in; what it cannot say, because it never reads an address, is that this one is carried
+   * beyond the machine. Whoever is on that network is an administrator here.
+   */
+  const shared = reachable.filter((value) => reachOf(value) === "private");
+  if (shared.length > 0) {
+    console.warn(
+      `OPENBOT_SINGLE_USER admits every request as one administrator with no sign-in, and this deployment answers on an address beyond this machine: ${shared.join(", ")}. Anybody on that network is that administrator. Configure a sign-in provider before anybody else is on it.`,
+    );
+  }
+
+  return true;
+}
+
+/**
+ * How far an address reaches, which is the question `OPENBOT_SINGLE_USER` actually turns on.
+ *
+ * Not two answers but three, because the middle one is most of the deployments this flag exists
+ * for. "No sign-in, one administrator" is a thing people run on a home server at `192.168.1.10`,
+ * over Tailscale at `100.something`, on a VPN, or at `openbot.local`. None of those is loopback and
+ * none of them is a stranger's to reach, so refusing them would refuse the feature's own audience
+ * while the operator's only recourse is to turn off the flag that describes what they are doing.
+ *
+ * A routable public address is the different thing, and it is the one that refuses.
+ *
+ * UNPARSEABLE COUNTS AS PUBLIC, and so does an unrecognised name. A value nobody could read is not
+ * a value anybody checked, and the safe reading of "I cannot tell" is never "it is fine".
+ */
+type Reach = "loopback" | "private" | "public";
+
+function reachOf(raw: string): Reach {
+  let bare: string;
+  try {
+    bare = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return "public";
+  }
+  bare = bare.replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+
+  if (
+    bare === "localhost" ||
+    bare === "::1" ||
+    bare === "0:0:0:0:0:0:0:1" ||
+    /^127\./.test(bare)
+  ) {
+    return "loopback";
+  }
+
+  if (bare.includes(":")) {
+    // fc00::/7 is the unique local range and fe80::/10 the link-local one. Both are unroutable on
+    // the public internet, which is the only property being asked about here.
+    return /^f[cd]/.test(bare) || /^fe[89ab]/.test(bare) ? "private" : "public";
+  }
+
+  const octets = bare.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d{1,3}$/.test(part))) {
+    const [a, b] = octets.map(Number) as [number, number, number, number];
+    const privateV4 =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      // 169.254/16 is link-local, and 100.64/10 is the carrier-grade NAT range Tailscale hands out.
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127);
+    return privateV4 ? "private" : "public";
+  }
+
+  // A name rather than an address. `.local` is mDNS, `.internal` and `.home.arpa` are reserved for
+  // exactly this, and a single label with no dot at all is a LAN name that no public resolver
+  // answers. Anything else is a name somebody could look up.
+  const privateName =
+    !bare.includes(".") ||
+    bare.endsWith(".local") ||
+    bare.endsWith(".internal") ||
+    bare.endsWith(".lan") ||
+    bare.endsWith(".home.arpa");
+  return privateName ? "private" : "public";
 }
 
 function url(environment: Environment, name: string): string | undefined {
@@ -378,16 +612,38 @@ function managedAgentConfig(
   environment: Environment,
 ): ManagedAgentConfig | undefined {
   const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
+  // BYO writes a URL too, but does not run our image or hold our deployment token.
+  const alsoRun = optional(environment, "PICKED_HARNESS_IMAGE")
+    ? optionalHttpUrl(environment, "PICKED_HARNESS_URL")
+    : undefined;
   const token = optional(environment, "MANAGED_AGENT_TOKEN");
   if (endpoint && !token) {
     throw new Error(
       "MANAGED_AGENT_TOKEN must be set when MANAGED_AGENT_AG_UI_URL is set",
     );
   }
-  if (!endpoint || !token) {
+  if (alsoRun && !token) {
+    throw new Error(
+      "MANAGED_AGENT_TOKEN must be set when an installed PICKED_HARNESS_URL is set",
+    );
+  }
+  if ((!endpoint && !alsoRun) || !token) {
     return undefined;
   }
-  return { endpoint, token };
+  /*
+   * The harness somebody picked during setup is also an endpoint this deployment runs.
+   *
+   * It is a container this deployment started, on a port this deployment chose, holding the token
+   * this deployment generated — the same relationship the Bot in the box has. It was not getting
+   * the token because that was attached by matching one endpoint exactly, so the picked Bot was
+   * registered, addressable, routed to, and answered every call with 401. Only visible by asking it
+   * something in the window.
+   */
+  return {
+    ...(endpoint ? { endpoint } : {}),
+    token,
+    ...(alsoRun ? { alsoRun } : {}),
+  };
 }
 
 function oauthClient(
@@ -413,6 +669,30 @@ function commaSeparated(environment: Environment, name: string): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+/**
+ * Microsoft's three multi-tenant audiences, which name no directory.
+ *
+ * Anything else is a directory this deployment's administrators control, named by GUID or by a
+ * verified domain. `organizations` matters as much as `common` here and is the one a hand-written
+ * check forgets: Microsoft's own description is that it admits any work or school account in any
+ * directory, so a domain allowlist is no more enforceable under it than under `common`.
+ *
+ * Compared folded, because these arrive from an environment variable and `Common` is the same
+ * audience as `common` to Microsoft.
+ */
+const MULTI_TENANT_AUDIENCES = new Set([
+  "common",
+  "organizations",
+  "consumers",
+]);
+
+function namesNoDirectory(tenantId: string | undefined): boolean {
+  return (
+    tenantId !== undefined &&
+    MULTI_TENANT_AUDIENCES.has(tenantId.trim().toLowerCase())
+  );
 }
 
 /**
@@ -472,13 +752,81 @@ function authConfig(
     );
   }
 
+  /**
+   * Who may sign in, as distinct from who is an administrator once they have.
+   *
+   * Normalised through the same function the matcher uses, so a rule cannot mean one thing when
+   * written and another when matched.
+   */
+  const namedDomains = commaSeparated(
+    environment,
+    "SIGNIN_ALLOWED_EMAIL_DOMAINS",
+  );
+  const allowedEmailDomains = namedDomains
+    .map(normalizeDomain)
+    .filter((domain): domain is string => domain !== undefined);
+
+  /*
+   * A list that names nothing is not an empty list, and the difference is every sign-in.
+   *
+   * `commaSeparated` drops blank entries BEFORE this normalisation rather than after it, so `@`,
+   * `.` and `@.` each survive it and then normalise to nothing. That leaves a non-empty list no
+   * address can ever match, every visitor refused at the door, and nothing said at boot. The same
+   * reasoning INITIAL_ADMIN_EMAILS gives three lines up applies: start-up is the cheap moment to
+   * catch it, and somebody's sign-in is the expensive one.
+   */
+  if (namedDomains.length > 0 && allowedEmailDomains.length === 0) {
+    throw new Error(
+      "SIGNIN_ALLOWED_EMAIL_DOMAINS is set but names no domain, so every sign-in would be refused. Write it as example.com,example.co.uk",
+    );
+  }
+
+  /*
+   * A list this deployment cannot enforce is worse than no list.
+   *
+   * `common` is multi-tenant, and OpenBot never sets `requireEmailVerification` or reads
+   * `users.emailVerified`, so the address a rule is applied to is one the signing-in tenant's own
+   * administrator wrote. Anybody may create a tenant. So an allowlist under `common` refuses the
+   * honest and admits the rest, while reading on the Boundaries page as though it were a control.
+   *
+   * Refused rather than warned BECAUSE the operator has said what they want: they named domains.
+   * The warning below is for the deployment that has said nothing, where multi-tenant may well be
+   * the intent.
+   */
+  if (allowedEmailDomains.length > 0 && namesNoDirectory(microsoft?.tenantId)) {
+    throw new Error(
+      `SIGNIN_ALLOWED_EMAIL_DOMAINS names domains, but MICROSOFT_OAUTH_TENANT_ID is \`${microsoft?.tenantId}\`, which names no directory and admits accounts from any of them: the address the list is checked against is one the signing-in tenant writes for itself, so the list cannot hold. Set your directory GUID.`,
+    );
+  }
+
+  /*
+   * Nothing at all deciding who may sign in, on a deployment that is deployed. A warning rather
+   * than a refusal, because a genuinely multi-tenant deployment is a real thing; arriving there by
+   * setting nothing is the case worth naming.
+   */
+  if (
+    isProduction(environment) &&
+    allowedEmailDomains.length === 0 &&
+    namesNoDirectory(microsoft?.tenantId)
+  ) {
+    console.warn(
+      "MICROSOFT_OAUTH_TENANT_ID is unset, so it is `common` and any Microsoft account may sign in, including personal ones, and SIGNIN_ALLOWED_EMAIL_DOMAINS names no domain either. Set your directory GUID, or name the domains you admit.",
+    );
+  }
+
   return {
     baseUrl,
     secret,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
-      : ["http://localhost:3000"],
+      : /*
+         * All three spellings of the same place, because this is an allowlist of what a browser
+         * sends and not an address anything dials. `localhost` alone refused a browser pointed at
+         * `127.0.0.1:3010`, which is the address the rest of this deployment hands out.
+         */
+        ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
     initialAdminEmails,
+    allowedEmailDomains,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),
@@ -533,9 +881,15 @@ function oktaAuth(
 /**
  * Resolve the Intelligence contract, or refuse to start.
  *
- * All four values are required together. A partial set is the more dangerous shape than none at all:
- * it means somebody intended to configure Intelligence and got it wrong, so failing on the partial
- * set alone (as this did) let a completely unconfigured deployment through as if that were a choice.
+ * The three addressing values are required together. A partial set is the more dangerous shape than
+ * none at all: it means somebody intended to configure Intelligence and got it wrong, so failing on
+ * the partial set alone (as this did) let a completely unconfigured deployment through as if that
+ * were a choice.
+ *
+ * COPILOTKIT_LICENSE_TOKEN IS NO LONGER ONE OF THEM. Managed Intelligence issues a single project
+ * key and derives entitlement from it, and requiring a second credential here sent people hunting
+ * for a token the platform had stopped handing out. It is still read and still forwarded when a
+ * deployment sets one, which is what a self-hosted Intelligence with its own licence needs.
  */
 function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
@@ -549,7 +903,6 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
     INTELLIGENCE_API_KEY: settings.apiKey,
-    COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -609,9 +962,43 @@ function agentEndpointAllowedHosts(
         `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
       );
     }
-    hosts.add(host.replace(/^\[/, "").replace(/\]$/, ""));
+    hosts.add(normalizeAllowedHost(entry, host));
   }
   return hosts;
+}
+
+/**
+ * An IPv6 entry, spelled the way the endpoint check will see it.
+ *
+ * `namedAsAllowed` compares against `URL.hostname`, which the parser canonicalises: compressed,
+ * lower-case, in brackets. An entry kept as written matched only when the operator happened to
+ * write it that way, so `[0:0:0:0:0:0:0:1]:8443` was a line that silently never matched, which is
+ * the failure the URL and wildcard refusals above exist to prevent. Stripping the brackets instead
+ * folded two different names into one: `[::1]:8443`, an address and a port, and `[::1:8443]`, an
+ * address, both became `::1:8443`, so naming either admitted the other.
+ *
+ * The address goes through the URL parser rather than a hand-written normaliser, so the spelling
+ * here is the parser's own and cannot drift from it. The port is kept as written, since the parser
+ * drops a scheme's default port and an operator who wrote `:80` meant that port. A bracketed entry
+ * the parser refuses is not an address, and is refused the way a URL is: at boot, naming the entry.
+ */
+function normalizeAllowedHost(entry: string, host: string): string {
+  if (!host.startsWith("[")) return host;
+  const close = host.indexOf("]");
+  const address = close === -1 ? host : host.slice(0, close + 1);
+  const port = close === -1 ? "" : host.slice(close + 1);
+  const refusal = () =>
+    new Error(
+      `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must be a host, optionally with a port, and not a URL.`,
+    );
+  if (port && !/^:\d{1,5}$/.test(port)) throw refusal();
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${address}`).hostname;
+  } catch {
+    throw refusal();
+  }
+  return `${hostname}${port}`;
 }
 
 function privateHostsAllowed(environment: Environment): boolean {
@@ -619,9 +1006,9 @@ function privateHostsAllowed(environment: Environment): boolean {
     return false;
   }
 
-  // Through `optional`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an env
-  // file would slip past a gate that the switch beside it, which does trim, would still trip.
-  if (optional(environment, "NODE_ENV") === "production") {
+  // Through `isProduction`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an
+  // env file would slip past a gate that the switch beside it, which does trim, would still trip.
+  if (isProduction(environment)) {
     throw new Error(
       "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true is for local development only: it lets a Bot reach this deployment's own network. Remove it from this deployment's environment.",
     );
@@ -642,14 +1029,14 @@ function privateHostsAllowed(environment: Environment): boolean {
  * its meaning.
  */
 export function durationMs(value: string): number {
-  const match = /^(\d+)\s*(ms|s|m|h)?$/.exec(value.trim());
+  const match = /^(\d+)\s*(ms|s|m|h)?$/i.exec(value.trim());
   if (!match) {
     throw new Error(
       `"${value}" is not a duration. Write it as 30s, 30m, 2h, or a plain number of milliseconds.`,
     );
   }
   const amount = Number(match[1]);
-  switch (match[2]) {
+  switch (match[2]?.toLowerCase()) {
     case "h":
       return amount * 3_600_000;
     case "m":
@@ -771,6 +1158,32 @@ function accessibilityEnabled(environment: Environment): boolean {
 }
 
 /**
+ * Whether a Bot may draw an interface it wrote itself.
+ *
+ * Default-on, matching the product capability the browser can already render. Operators who cannot
+ * allow generated interfaces can explicitly opt out. `false` is the documented spelling and `0` is
+ * accepted alongside it as the conventional off value used by environment-driven switches.
+ *
+ * Anything else leaves the capability on. A typo should not silently become an opt-out, and the
+ * capability must stay consistent between runtime and browser projection.
+ *
+ * The answer has to reach the browser as well as the runtime, which is why it ends up on
+ * /api/capabilities rather than staying server-side. Enabling only the runtime half would leave the
+ * browser never offering the tool; enabling only the browser half would have a Bot generate a whole
+ * interface that nothing renders. See DeploymentConfig.generativeUi.
+ */
+function generativeUiEnabled(environment: Environment): boolean {
+  const value = optional(environment, "OPENBOT_GENERATIVE_UI");
+  return value !== "false" && value !== "0";
+}
+
+/** Same rule as generated interfaces: on unless explicitly "false" or "0". */
+function selfHostBannerEnabled(environment: Environment): boolean {
+  const value = optional(environment, "OPENBOT_SELF_HOST_BANNER");
+  return value !== "false" && value !== "0";
+}
+
+/**
  * How long the audit trail is kept.
  *
  * Refused rather than coerced, like everything else here. "We accepted your retention policy but not
@@ -805,20 +1218,69 @@ function agentStallTimeoutMs(environment: Environment): number {
   return milliseconds;
 }
 
+/** Where the API listens when nothing says otherwise: what `.env.example` and the image ship. */
+const DEFAULT_PORT = 3001;
+
+/**
+ * The port the API listens on, from either of its two names.
+ *
+ * `PORT` and `SERVER_PORT` name one number: either moves the server, and two that disagree are
+ * refused at boot rather than half-applied. Read through `optional` like every other setting here,
+ * and that is the point. An unset variable declared in a compose file, or left as `PORT=` in a
+ * `.env`, arrives as an empty string rather than as absent, so `process.env.PORT ??
+ * process.env.SERVER_PORT` never fell through to the second name, and `Number.parseInt("")` is
+ * `NaN`. Given `NaN`, `Bun.serve` binds an ephemeral port: the server came up somewhere nobody had
+ * asked for, `SERVER_PORT` ignored, and the script polling it reported a server that never
+ * started — the failure #312 set out to remove, back through the other name.
+ *
+ * A value that is not a whole port number is refused for the reason the caps above are: `30o1`
+ * used to start the server on port 30, and a typo has to fail where somebody is looking.
+ */
+function serverPort(environment: Environment): number {
+  const read = (name: string): number | undefined => {
+    const raw = optional(environment, name);
+    if (raw === undefined) return undefined;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      throw new Error(`${name} must be a whole number between 1 and 65535`);
+    }
+    return value;
+  };
+  const port = read("PORT");
+  const serverPort = read("SERVER_PORT");
+  if (port !== undefined && serverPort !== undefined && port !== serverPort) {
+    throw new Error(
+      `PORT (${port}) and SERVER_PORT (${serverPort}) disagree: set one or set both to the same value`,
+    );
+  }
+  return port ?? serverPort ?? DEFAULT_PORT;
+}
+
 export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
+  const organizationAuthValue = optional(
+    environment,
+    "OPENBOT_ORGANIZATION_AUTH_URL",
+  );
+  const organizationAuthUrl = organizationAuthValue
+    ? organizationAuthority(organizationAuthValue)
+    : undefined;
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
+    port: serverPort(environment),
+    transcription: transcriptionConfig(environment),
+    voice: voiceConfig(environment),
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
+    composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
     )?.replace(/\/+$/, ""),
@@ -831,15 +1293,23 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    learning: learningDefault(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
     auth,
-    singleUser: singleUserEnabled(
-      environment,
-      configuredAuthProviders(auth).length > 0,
-    ),
+    ...(organizationAuthUrl ? { organizationAuthUrl } : {}),
+    /*
+     * The authority short-circuits this, and that ordering is load-bearing: a white-label
+     * deployment naming an external authority lets it win, and `singleUserAllowed` is never
+     * reached and so cannot refuse a combination that already resolves.
+     */
+    singleUser:
+      !organizationAuthUrl &&
+      singleUserAllowed(environment, configuredAuthProviders(auth).length > 0),
     accessibility: accessibilityEnabled(environment),
+    generativeUi: generativeUiEnabled(environment),
+    selfHostBanner: selfHostBannerEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
@@ -850,4 +1320,19 @@ export function loadConfig(
       : {}),
     ...(workerSharedSecret ? { workerSharedSecret } : {}),
   };
+}
+
+/** Optional container default; the enabled preference alone does not collect or deliver. */
+function learningDefault(environment: Environment): LearningTarget | undefined {
+  const containerId = optional(
+    environment,
+    "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID",
+  );
+  if (!containerId) return undefined;
+  if (!isLearningContainerId(containerId))
+    throw new TypeError(
+      "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must use 1–64 lowercase letters, numbers, and single hyphens.",
+    );
+  const revision = optional(environment, "CPK_INTELLIGENCE_SKILLS_REVISION");
+  return { containerId, ...(revision ? { revision } : {}) };
 }

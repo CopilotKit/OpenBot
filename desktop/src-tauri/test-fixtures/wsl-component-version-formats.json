@@ -1,0 +1,137 @@
+{
+  "commit": "28d0fed363f0498baa1377768e676ab0f04f1944",
+  "formats": [
+    {
+      "locale": "cs-CZ",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/cs-CZ/Resources.resw",
+      "fileSha256": "51311d02372f4c61d58ca073f0f1014039734989c181ae36ac7a3e860eb0adb2",
+      "MessagePackageVersions": "Verze WSL: {}\nVerze jádra: {}\nVerze WSLg: {}\nVerze MSRDC: {}\nVerze Direct3D: {}\nVerze DXCore: {}\nVerze systému Windows: {}"
+    },
+    {
+      "locale": "da-DK",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/da-DK/Resources.resw",
+      "fileSha256": "610504ec271fecd072950f1b453eca350088c835a3803a32c5de68ae1d835d14",
+      "MessagePackageVersions": "WSL-version: {}\nKerneversion: {}\nWSLg-version: {}\nMSRDC-version: {}\nDirect3D-version: {}\nDXCore-version: {}\nWindows-version: {}"
+    },
+    {
+      "locale": "de-DE",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/de-DE/Resources.resw",
+      "fileSha256": "8201fb9932392a47bab1682849f5edc803348659cd8452d4da3b8f840d788c54",
+      "MessagePackageVersions": "WSL-Version: {}\nKernelversion: {}\nWSLg-Version: {}\nMSRDC-Version: {}\nDirect3D-Version: {}\nDXCore-Version: {}\nWindows-Version: {}"
+    },
+    {
+      "locale": "en-GB",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/en-GB/Resources.resw",
+      "fileSha256": "254ba2977d334fbf241d5d293b5b01e67993b0a3e1a047c823caf5aa108b3553",
+      "MessagePackageVersions": "WSL version: {}\nKernel version: {}\nWSLg version: {}\nMSRDC version: {}\nDirect3D version: {}\nDXCore version: {}\nWindows version: {}"
+    },
+    {
+      "locale": "en-US",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/en-US/Resources.resw",
+      "fileSha256": "1139f22a4c7e98c6f8fd73af68af7dbd94038be992834b9d59096d471ffea860",
+      "MessagePackageVersions": "WSL version: {}\nKernel version: {}\nWSLg version: {}\nMSRDC version: {}\nDirect3D version: {}\nDXCore version: {}\nWindows version: {}"
+    },
+    {
+      "locale": "es-ES",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/es-ES/Resources.resw",
+      "fileSha256": "447712b083c05cbff073a9d6dedb01c7540932e22f880dcef1b5cd329763627e",
+      "MessagePackageVersions": "Versión de WSL: {}\nVersión de kernel: {}\nVersión de WSLg: {}\nVersión de MSRDC: {}\nVersión de Direct3D: {}\nVersión de DXCore: {}\nVersión de Windows: {}"
+    },
+    {
+      "locale": "fi-FI",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/fi-FI/Resources.resw",
+      "fileSha256": "c87aef5c6e2887053150a5a18ed215b4c5a571d31e7f403dbfa919e0a4054899",
+      "MessagePackageVersions": "WSL-versio: {}\nYtimen versio: {}\nWSLg-versio: {}\nMSRDC-versio: {}\nDirect3D-versio: {}\nDXCore-versio: {}\nWindows-versio: {}"
+    },
+    {
+      "locale": "fr-FR",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/fr-FR/Resources.resw",
+      "fileSha256": "a8ff36301e68f8e55a6864d59d3e6225b29f029dc266516ad74b287e8fd5efb9",
+      "MessagePackageVersions": "Version WSL : {}\nVersion du noyau : {}\nVersion WSLg : {}\nVersion MSRDC : {}\nVersion direct3D : {}\nVersion de DXCore : {}\nVersion de Windows : {}"
+    },
+    {
+      "locale": "hu-HU",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/hu-HU/Resources.resw",
+      "fileSha256": "e532fb662636599eb34b3cc0ccaa6f693f2f40972f66c9630bec282f50643c4b",
+      "MessagePackageVersions": "WSL-verzió: {}\nKernelverzió: {}\nWSLg-verzió: {}\nMSRDC-verzió: {}\nDirect3D-verzió: {}\nDXCore-verzió: {}\nWindows-verzió: {}"
+    },
+    {
+      "locale": "it-IT",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/it-IT/Resources.resw",
+      "fileSha256": "4d337e6df2a5608d5f24b46bc6268e9aedc7fd016ea427cbf9c8c08feb9e42ef",
+      "MessagePackageVersions": "Versione WSL: {}\nVersione kernel: {}\nVersione WSLg: {}\nVersione MSRDC: {}\nVersione Direct3D: {}\nVersione DXCore: {}\nVersione di Windows: {}"
+    },
+    {
+      "locale": "ja-JP",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/ja-JP/Resources.resw",
+      "fileSha256": "724ac909743dcb2952ee8fcba4259d005cf314f23177c44664d0f485ea98ab4b",
+      "MessagePackageVersions": "WSL バージョン: {}\nカーネル バージョン: {}\nWSLg バージョン: {}\nMSRDC バージョン: {}\nDirect3D バージョン: {}\nDXCore バージョン: {}\nWindows バージョン: {}"
+    },
+    {
+      "locale": "ko-KR",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/ko-KR/Resources.resw",
+      "fileSha256": "dd13bf685de9d03dcc3ed9f8eab6c92e783be2baf7a0349077561d3941ac8349",
+      "MessagePackageVersions": "WSL 버전: {}\n커널 버전: {}\nWSLg 버전: {}\nMSRDC 버전: {}\nDirect3D 버전: {}\nDXCore 버전: {}\nWindows 버전: {}"
+    },
+    {
+      "locale": "nb-NO",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/nb-NO/Resources.resw",
+      "fileSha256": "f7949f86d4f02a93097031c3294caf9f958ffd2c7e2bd7aac4da4ec2facd9e2d",
+      "MessagePackageVersions": "WSL-versjon: {}\nKernelversjon: {}\nWSLg-versjon: {}\nMSRDC-versjon: {}\nDirect3D-versjon: {}\nDXCore-versjon: {}\nWindows-versjon: {}"
+    },
+    {
+      "locale": "nl-NL",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/nl-NL/Resources.resw",
+      "fileSha256": "3c38c144ccbbc0123e64bac65c1672f576f80b5abc447c6fef70b4b2769a6457",
+      "MessagePackageVersions": "WSL-versie: {}\nKernelversie: {}\nWSLg-versie: {}\nMSRDC-versie: {}\nDirect3D-versie: {}\nDXCore-versie: {}\nWindows-versie: {}"
+    },
+    {
+      "locale": "pl-PL",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/pl-PL/Resources.resw",
+      "fileSha256": "0270629823318e7820793a84a7337b670320d466378d6d9dc96eb04fb7cf3d58",
+      "MessagePackageVersions": "Wersja podsystemu WSL: {}\nWersja jądra: {}\nWersja usługi WSLg: {}\nWersja MSRDC: {}\nWersja Direct3D: {}\nWersja DXCore: {}\nWersja systemu Windows: {}"
+    },
+    {
+      "locale": "pt-BR",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/pt-BR/Resources.resw",
+      "fileSha256": "b11eaf234ad442baba9ea5e7d7c1b6ce65a4461810615a586110f9d87742b3fe",
+      "MessagePackageVersions": "Versão do WSL: {}\nVersão do kernel: {}\nVersão do WSLg: {}\nVersão do MSRDC: {}\nVersão do Direct3D: {}\nVersão do DXCore: {}\nVersão do Windows: {}"
+    },
+    {
+      "locale": "pt-PT",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/pt-PT/Resources.resw",
+      "fileSha256": "8797d46c27789c825abfb718dfa98a6e0f94a4e37a65ebff5ff7beb7c34987ec",
+      "MessagePackageVersions": "Versão WSL: {}\nVersão do kernel: {}\nVersão WSLg: {}\nVersão MSRDC: {}\nVersão direct3D: {}\nVersão DXCore: {}\nVersão do Windows: {}"
+    },
+    {
+      "locale": "ru-RU",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/ru-RU/Resources.resw",
+      "fileSha256": "26dbff136ed0f8ceaed5d5f1ae5e4451bb8620dc27d84ac547562846769b5e71",
+      "MessagePackageVersions": "Версия WSL: {}\nВерсия ядра: {}\nВерсия WSLg: {}\nВерсия MSRDC: {}\nВерсия Direct3D: {}\nВерсия DXCore: {}\nВерсия Windows: {}"
+    },
+    {
+      "locale": "sv-SE",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/sv-SE/Resources.resw",
+      "fileSha256": "6dc0165099f3322f33cae63b60cdefe5f7623bdd219c3bf007e81089a783908a",
+      "MessagePackageVersions": "WSL-version: {}\nKernelversion: {}\nWSLg-version: {}\nMSRDC-version: {}\nDirect3D-version: {}\nDXCore-version: {}\nWindows-version: {}"
+    },
+    {
+      "locale": "tr-TR",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/tr-TR/Resources.resw",
+      "fileSha256": "e54559d0477f8ec02a20cd13330c2c2bd042e5ea6b4aaf747ff6016e7657d9ac",
+      "MessagePackageVersions": "WSL sürümü: {}\nÇekirdek sürümü: {}\nWSLg sürümü: {}\nMSRDC sürümü: {}\nDirect3D sürümü: {}\nDXCore sürümü: {}\nWindows sürümü: {}"
+    },
+    {
+      "locale": "zh-CN",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/zh-CN/Resources.resw",
+      "fileSha256": "f6d8d85fdfeed83816f623c84be90062699031856ac06fd4eec86afef3a4e29d",
+      "MessagePackageVersions": "WSL 版本: {}\n内核版本: {}\nWSLg 版本: {}\nMSRDC 版本: {}\nDirect3D 版本: {}\nDXCore 版本: {}\nWindows 版本: {}"
+    },
+    {
+      "locale": "zh-TW",
+      "url": "https://raw.githubusercontent.com/microsoft/WSL/28d0fed363f0498baa1377768e676ab0f04f1944/localization/strings/zh-TW/Resources.resw",
+      "fileSha256": "4a781a1d2116fbbb74a8fe873d1871b45f69f5f50a224d737deecf9945af9361",
+      "MessagePackageVersions": "WSL 版本： {}\n核心版本： {}\nWSLg 版本： {}\nMSRDC 版本： {}\nDirect3D 版本： {}\nDXCore 版本： {}\nWindows 版本： {}"
+    }
+  ]
+}

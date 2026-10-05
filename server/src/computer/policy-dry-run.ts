@@ -12,19 +12,26 @@
  * behaves one way here and another way live would make this feature worse than absent.
  */
 
-import type { AuditEvent } from "../audit";
+import type { AuditEvent, AuditInitiator } from "../audit";
 import { describeFile, hostOf, intentOf } from "./gateway";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
+  policyInitiator,
 } from "./policy";
 
-/** The event types the gateway writes for a judged computer action. In one place, for the query. */
+/**
+ * The event types that record a policy DECISION about a computer action. In one place, for the query.
+ *
+ * Not `computer.action_failed`: the gateway writes that beside the decision row when a permitted
+ * action is attempted and does not succeed, so it is a second row for an action already recorded
+ * here, not a decision of its own. Replaying it too would score the action twice — see
+ * {@link dryRunAgainstHistory}.
+ */
 export const REPLAYABLE_EVENT_TYPES = [
   "computer.action_allowed",
   "computer.action_refused",
-  "computer.action_failed",
 ] as const;
 
 /** One action the candidate policy would have decided differently. */
@@ -38,7 +45,7 @@ export type DryRunChange = {
   element: { role: string; name: string } | null;
   command: string | null;
   file: string | null;
-  /** What actually happened, from the trail. A failed action was permitted first, so it was allowed. */
+  /** What the policy in force decided, from the action's decision row. */
   was: "allowed" | "refused";
   would: "allowed" | "refused";
   /** The candidate rule that decided it, or null for the default refusal. */
@@ -71,6 +78,23 @@ const CHANGES_CAP = 50;
  * Null when the row does not carry enough to replay — a row from before a field existed, or a
  * hand-inserted one. Skipped rather than guessed at.
  */
+/**
+ * The initiator an audit payload carries, narrowed back to the union.
+ *
+ * Its own reader rather than the one in `callback-token.ts`: that one narrows a value this
+ * deployment signed and can trust the shape of, and this one reads a stored row that may predate the
+ * field, have been written by an older version, or been inserted by hand. Anything it does not
+ * recognise reads as absent, and `policyInitiator` turns that into a person.
+ */
+function initiatorFromPayload(value: unknown): AuditInitiator | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "person" || kind === "deployment") return { kind };
+  if (kind !== "routine" && kind !== "handoff") return undefined;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id ? { kind, id } : undefined;
+}
+
 export function contextFromAuditPayload(
   payload: Record<string, unknown>,
 ): PolicyContext | null {
@@ -110,6 +134,13 @@ export function contextFromAuditPayload(
     file: file ? describeFile(file) : { path: "", name: "", extension: "" },
     command: text(payload.command),
     mcp: { server: "", tool: "", effect: "" },
+    /*
+     * Read off the row when it is there, neutral when it is not. The rows this replays are computer
+     * actions, which carry no initiator today, so in practice this is a person — but reading it
+     * rather than hardcoding it means a replay stays honest the day those rows do carry one, and a
+     * rule being tested against history is judged on what actually happened.
+     */
+    initiator: policyInitiator(initiatorFromPayload(payload.initiator)),
   };
 }
 
@@ -120,6 +151,14 @@ export function contextFromAuditPayload(
  * a dry-run policy's refusals, which were recorded and then carried out. That is the honest
  * baseline: the question this answers is "what would decide differently than was decided", not
  * "what would run differently than ran".
+ *
+ * A `computer.action_failed` row is skipped rather than scored. It is the outcome of an action whose
+ * decision row is already in this history, so counting it would score that action twice — and worse,
+ * a dry-run policy carries a refused action out, so a refused-then-failed action would arrive as a
+ * decision row that says "refused" and a failure row that reads as "allowed", inventing a change no
+ * policy made. The decision is on the decision row; the failure row only says it did not finish.
+ * Callers should exclude it from the query too ({@link REPLAYABLE_EVENT_TYPES}); this guards the
+ * function against being handed one regardless.
  */
 export function dryRunAgainstHistory(
   policy: ActionPolicy,
@@ -134,6 +173,13 @@ export function dryRunAgainstHistory(
   };
 
   for (const event of events) {
+    // Both carry a decision row already in this history, so scoring the outcome row would count the
+    // action twice; a stop is skipped for the same reason a failure is.
+    if (
+      event.eventType === "computer.action_failed" ||
+      event.eventType === "computer.action_stopped"
+    )
+      continue;
     const context = contextFromAuditPayload(event.payload);
     if (!context) continue;
     report.scanned += 1;

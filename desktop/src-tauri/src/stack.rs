@@ -1,0 +1,7910 @@
+//! Raising the stack: the Compose services, then the three processes that are not containers.
+//!
+//! `docker-compose.yml` has no `app`, `server` or `worker` service, and the root `Dockerfile` leaves
+//! out the supervisor because it needs a socket no serverless platform grants. So the shape is not a
+//! choice: containers for postgres, the supervisor, `agent-computer`, the Bots and a one-shot
+//! `migrate`, and three host processes for the rest. `scripts/start.sh` does exactly this for a
+//! developer. This does it for somebody who double-clicked.
+//!
+//! The shell also becomes the restart policy those three do not have. `worker/src/index.ts` names
+//! the gap itself: "this process has no restart policy watching it; it is somebody's laptop, left
+//! running".
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use crate::quiet::{command, said as command_said};
+
+use serde::{Deserialize, Serialize};
+
+use crate::engine::Address;
+use crate::problem::Problem;
+
+/// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
+/// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
+const SERVICES: [&str; 3] = ["postgres", "supervisor", "agent-computer"];
+
+/**
+The Bots that ship with OpenBot, which only run on an API key.
+
+BOTH REFUSE TO START WITHOUT ONE, saying so themselves: "OPENAI_API_KEY is not set. This Bot cannot
+answer without a model." That is correct of them and wrong of us to ignore. Somebody who signs in
+with the ChatGPT or Claude subscription they already pay for has no key by design, so raising these
+gave them two containers that died on startup and two red lines on the setup screen, about Bots they
+never chose.
+
+Started when a key exists and left alone when it does not. The Bot the person actually picked speaks
+its plan and answers either way, which is what the last screen proves.
+*/
+const AGENT_BOT: &str = "agent-bot";
+const AGENT_LANGGRAPH: &str = "agent-langgraph";
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BundledBots {
+    pub agent_bot: bool,
+    pub agent_langgraph: bool,
+}
+
+impl BundledBots {
+    /// One provider decision for both service selection and the advertised package endpoint.
+    pub fn for_credential(credential: &crate::env::ModelCredential) -> Self {
+        use crate::env::ModelCredential;
+        match credential {
+            ModelCredential::OpenAi { .. }
+            | ModelCredential::Compatible { .. }
+            | ModelCredential::ProviderOAuth { .. } => Self::openai_compatible(),
+            ModelCredential::Anthropic { .. } => Self::anthropic(),
+            ModelCredential::None
+            | ModelCredential::ClaudePlan { .. }
+            | ModelCredential::ChatGptPlan { .. } => Self::none(),
+        }
+    }
+
+    pub const fn none() -> Self {
+        Self {
+            agent_bot: false,
+            agent_langgraph: false,
+        }
+    }
+
+    pub const fn openai_compatible() -> Self {
+        Self {
+            agent_bot: true,
+            agent_langgraph: true,
+        }
+    }
+
+    pub const fn anthropic() -> Self {
+        Self {
+            agent_bot: false,
+            agent_langgraph: true,
+        }
+    }
+}
+
+pub fn selected_services(harness: bool, bots: BundledBots) -> Vec<&'static str> {
+    let mut services = SERVICES.to_vec();
+    if bots.agent_bot {
+        services.push(AGENT_BOT);
+    }
+    if bots.agent_langgraph {
+        services.push(AGENT_LANGGRAPH);
+    }
+    if harness {
+        services.push("agent-harness");
+    }
+    services
+}
+
+/// The three that are not containers, in the order they are started.
+///
+/// The server first, because the app serves a page that talks to it and the worker claims routines
+/// it owns. Nothing here waits on the others: each is supervised on its own and reports its own
+/// state, so a worker that dies does not take the window with it.
+pub const HOST_PROCESSES: [HostProcess; 3] = [
+    HostProcess {
+        name: "server",
+        cwd: "server",
+        script: "src/production-entry.ts",
+        package_script: "",
+    },
+    // `serve`, not `dev`. The dev server sets NODE_ENV to development, and the SDK reads that to
+    // decide whether to draw its developer inspector, so a desktop install opened its first window
+    // on CopilotKit's "What's New" panel covering OpenBot entirely. An installed application should
+    // not be running a development server at all: this builds once and serves the build.
+    HostProcess {
+        name: "app",
+        cwd: "app",
+        script: "",
+        package_script: APP_SCRIPT,
+    },
+    HostProcess {
+        name: "worker",
+        cwd: "worker",
+        script: "src/index.ts",
+        package_script: "",
+    },
+];
+
+#[derive(Clone, Copy, Debug)]
+/// One of the three processes Compose does not run.
+///
+/// The app is started through the package's own `dev` script, which runs Vite through bun rather
+/// than through its shebang. `node_modules/.bin/vite` begins `#!/usr/bin/env node`, so a machine
+/// with bun and no Node starts the app, fails with `node: command not found`, and is restarted
+/// five more times before this gives up on it. Which is what happened on the Linux machine this
+/// was tested on, and would happen to anybody who installed OpenBot without also having Node.
+pub struct HostProcess {
+    pub name: &'static str,
+    pub cwd: &'static str,
+    /// Empty means a package script rather than a file, which is how the app is run.
+    pub script: &'static str,
+    /// The package script to run when `script` is empty.
+    pub package_script: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Phase {
+    EngineMissing,
+    Starting,
+    Migrating,
+    WaitingForServices,
+    Running,
+    Stopped,
+    Failed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StackStatus {
+    pub phase: Phase,
+    pub detail: String,
+}
+
+/**
+The credentials a deployment needs, handed to a child process rather than left in its `.env`.
+
+THIS IS WHY THE FILE CAN STOP HOLDING THEM. Compose resolves `${VAR}` from its own environment
+before it reads `.env`, so a secret passed here reaches exactly the containers that declare it and
+is written down nowhere. The host processes take theirs the same way, alongside the `--env-file`
+that still carries the settings.
+
+A `BTreeMap` rather than the vault directly: reading a credential store once per run and passing
+what it gave is one prompt and one failure point, where reading it per command is neither.
+*/
+pub type Secrets = std::collections::BTreeMap<String, String>;
+
+fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
+    let mut command = engine.command();
+    command.current_dir(root).args(["compose"]).envs(secrets);
+    command
+}
+
+/// Check the actual selected deployment before minting an encryption key. Compose resolves
+/// project names, explicit volume names, and override files; the pinned engine owns the volume.
+/// Never include config output in diagnostics: interpolation may have put credentials in it.
+pub fn postgres_volume_exists(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<bool, Problem> {
+    let configuration = postgres_configuration(engine, root, secrets)?;
+    let volume = postgres_volume_name(&configuration)?;
+    named_volume_exists(engine, root, &volume)
+}
+
+fn postgres_configuration(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<Vec<u8>, Problem> {
+    let configuration = compose_command(engine, root, secrets)
+        .args(["config", "--format", "json"])
+        .output()
+        .map_err(|error| {
+            postgres_volume_problem(format!("Could not run Compose config: {error}"))
+        })?;
+    if !configuration.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Compose config exited with {}. Output omitted because it can contain credentials.",
+            configuration.status
+        )));
+    }
+    Ok(configuration.stdout)
+}
+
+fn named_volume_exists(engine: &Address, root: &Path, volume: &str) -> Result<bool, Problem> {
+    let inventory = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "ls", "--format", "{{.Name}}"])
+        .output()
+        .map_err(|error| postgres_volume_problem(format!("Could not list volumes: {error}")))?;
+    if !inventory.status.success() {
+        return Err(postgres_volume_problem(format!(
+            "Volume inventory exited with {}.",
+            inventory.status
+        )));
+    }
+    let names = std::str::from_utf8(&inventory.stdout)
+        .map_err(|_| postgres_volume_problem("Volume inventory was not valid UTF-8."))?;
+    Ok(names.lines().any(|name| name.trim() == volume))
+}
+
+fn postgres_volume_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify whether this installation has saved database data. No encryption key was created. Check the selected container engine and Compose configuration, then try again.",
+        detail,
+    )
+}
+
+/// A surviving database is recoverable only when Compose and the engine agree it is owned.
+pub fn leftover_database_volume(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<Option<String>, Problem> {
+    let configuration = postgres_configuration(engine, root, secrets)?;
+    let config: serde_json::Value = serde_json::from_slice(&configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
+    let Some((source, definition)) = postgres_data_volume(&config) else {
+        return Ok(None);
+    };
+    let Some(project) = config["name"].as_str().filter(|name| !name.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(name) = definition["name"].as_str() else {
+        return Ok(None);
+    };
+    // Compose's explicit names and external volumes can refer to somebody else's database.
+    // Permit only ordinary project-scoped, local storage, even if a custom volume has labels.
+    if name != format!("{project}_{source}")
+        || !name.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphanumeric() || (index > 0 && b"_.-".contains(&byte))
+        })
+        || !matches!(
+            definition.get("external"),
+            None | Some(serde_json::Value::Bool(false))
+        )
+        || definition["driver"]
+            .as_str()
+            .is_some_and(|driver| driver != "local")
+        || !empty_volume_options(&definition["driver_opts"])
+        || config["services"].as_object().is_some_and(|services| {
+            services.iter().any(|(service, configuration)| {
+                service != "postgres"
+                    && configuration["volumes"].as_array().is_some_and(|mounts| {
+                        mounts.iter().any(|mount| {
+                            mount["source"].as_str().is_some_and(|other_source| {
+                                other_source == source
+                                    || config["volumes"][other_source]["name"].as_str()
+                                        == Some(name)
+                            })
+                        })
+                    })
+            })
+        })
+    {
+        return Ok(None);
+    }
+    if !named_volume_exists(engine, root, name)? {
+        return Ok(None);
+    }
+    let inspect = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "inspect", name])
+        .output()
+        .map_err(|error| {
+            postgres_volume_problem(format!("Could not inspect the database volume: {error}"))
+        })?;
+    if !inspect.status.success() {
+        return Err(postgres_volume_problem(format!("Database volume inspection exited with {}. Output omitted because it can contain credentials.", inspect.status)));
+    }
+    let inspected: serde_json::Value = serde_json::from_slice(&inspect.stdout).map_err(|_| {
+        postgres_volume_problem("Database volume inspection did not return valid JSON.")
+    })?;
+    let Some(volumes) = inspected.as_array().filter(|volumes| volumes.len() == 1) else {
+        return Ok(None);
+    };
+    let volume = &volumes[0];
+    // Podman accepts unique name prefixes. Exact inventory and inspect matches keep the command
+    // tied to the full name the person confirmed, never a similarly named backup.
+    Ok((volume["Name"].as_str() == Some(name)
+        && volume["Driver"].as_str() == Some("local")
+        && empty_volume_options(&volume["Options"])
+        && volume["Labels"]["com.docker.compose.project"].as_str() == Some(project)
+        && volume["Labels"]["com.docker.compose.volume"].as_str() == Some(source))
+    .then(|| name.to_owned()))
+}
+
+pub fn reset_leftover_database(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    confirmed_volume: &str,
+) -> Result<(), Problem> {
+    if leftover_database_volume(engine, root, secrets)?.as_deref() != Some(confirmed_volume) {
+        return Err(Problem::plain("The leftover database no longer matches the volume you confirmed, or OpenBot could not verify that it owns the volume. Nothing was removed. Try Start again."));
+    }
+    // Never force this operation: the engine must refuse any container attachment, including a
+    // stopped container or one created after inspection. Do not stop containers to make it pass.
+    let removed = engine
+        .command()
+        .current_dir(root)
+        .args(["volume", "rm", confirmed_volume])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not reset the leftover database. Nothing else was removed.",
+                format!("Could not run volume removal: {error}"),
+            )
+        })?;
+    if !removed.status.success() {
+        return Err(Problem::with("OpenBot could not reset the leftover database. It may still be attached to a container. Nothing else was removed; stop the installation using it before trying again.", format!("Volume removal exited with {}. Output omitted because it can contain credentials.", removed.status)));
+    }
+    Ok(())
+}
+
+fn empty_volume_options(options: &serde_json::Value) -> bool {
+    options.is_null()
+        || options
+            .as_object()
+            .is_some_and(|options| options.is_empty())
+}
+
+fn postgres_volume_name(configuration: &[u8]) -> Result<String, Problem> {
+    let config: serde_json::Value = serde_json::from_slice(configuration)
+        .map_err(|_| postgres_volume_problem("Compose config did not return valid JSON."))?;
+    postgres_data_volume(&config)
+        .and_then(|(_, definition)| definition["name"].as_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            postgres_volume_problem("Compose did not resolve a named volume for Postgres data.")
+        })
+}
+
+fn postgres_data_volume(config: &serde_json::Value) -> Option<(&str, &serde_json::Value)> {
+    let postgres = &config["services"]["postgres"];
+    let data = postgres["environment"]["PGDATA"]
+        .as_str()
+        .unwrap_or("/var/lib/postgresql/data");
+    // A PGDATA subdirectory still belongs to its containing mount. Prefer the closest mount
+    // so a nested override cannot make us inspect an unrelated volume.
+    let mount = postgres["volumes"].as_array().and_then(|mounts| {
+        mounts
+            .iter()
+            .filter(|mount| {
+                mount["target"].as_str().is_some_and(|target| {
+                    data == target
+                        || data.starts_with(&format!("{}/", target.trim_end_matches('/')))
+                })
+            })
+            .max_by_key(|mount| mount["target"].as_str().unwrap().len())
+    });
+    mount
+        .filter(|mount| mount["type"].as_str() == Some("volume"))
+        .and_then(|mount| mount["source"].as_str())
+        .and_then(|source| {
+            config["volumes"]
+                .get(source)
+                .map(|definition| (source, definition))
+        })
+}
+
+const MACOS_PODMAN_PORTS_FILE: &str = ".openbot-macos-podman.yml";
+const MACOS_PODMAN_PORTS: &str = include_str!("macos-podman-ports.yml");
+const HARNESS_PORT_FILE: &str = ".openbot-harness-port.yml";
+
+fn harness_port_overlay(root: &Path, ipv4_only: bool) -> Result<Option<String>, Problem> {
+    let values = crate::env::read_already_set(
+        &root.join(".env"),
+        &["PICKED_HARNESS_HOST_PORT", "PICKED_HARNESS_PORT"],
+    )
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not read the Bot's local port.",
+            error.to_string(),
+        )
+    })?;
+    let Some(host) = values.get("PICKED_HARNESS_HOST_PORT") else {
+        return Ok(None);
+    };
+    let parse = |value: &str| {
+        value
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or_else(|| {
+                Problem::plain("The Bot's local port setting is invalid. Try Start again.")
+            })
+    };
+    let host = parse(host)?;
+    let target = parse(
+        values
+            .get("PICKED_HARNESS_PORT")
+            .map(String::as_str)
+            .unwrap_or("4202"),
+    )?;
+    if host == target {
+        return Ok(None);
+    }
+    let mut overlay = format!("services:\n  agent-harness:\n    ports: !override\n      - \"127.0.0.1:{host}:{target}\"\n");
+    if !ipv4_only {
+        overlay.push_str(&format!("      - \"[::1]:{host}:{target}\"\n"));
+    }
+    Ok(Some(overlay))
+}
+
+/// Only service creation needs the Mac Podman port overlay. In particular, `run migrate` can
+/// create its Postgres dependency, so it must use the same configuration as `up`.
+fn compose_start_command(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+    os: &str,
+) -> Result<Command, Problem> {
+    let mut command = compose_command(engine, root, secrets);
+    let macos_podman = os == "macos" && engine.engine == crate::engine::Engine::Podman;
+    let harness_ports = harness_port_overlay(root, macos_podman)?;
+    if !macos_podman && harness_ports.is_none() {
+        return Ok(command);
+    }
+
+    // Let Compose read/interpolate .env and COMPOSE_ENV_FILES itself. Adding -f directly would
+    // otherwise discard both implicit override files and COMPOSE_FILE from that environment.
+    // This output can contain credentials: retain only file-selection settings, never log it.
+    let environment = compose_command(engine, root, secrets)
+        .args(["config", "--environment"])
+        .output()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not read the deployment's Compose settings.",
+                error.to_string(),
+            )
+        })?;
+    if !environment.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not read the deployment's Compose settings.",
+            command_said(&environment.stderr),
+        ));
+    }
+    let environment = String::from_utf8(environment.stdout)
+        .map_err(|_| Problem::plain("Compose returned unreadable deployment settings."))?;
+    let files = compose_files(root, &environment)?;
+    for file in files {
+        command.arg("-f").arg(file);
+    }
+    for (file, contents) in [
+        (
+            MACOS_PODMAN_PORTS_FILE,
+            macos_podman.then_some(MACOS_PODMAN_PORTS),
+        ),
+        (HARNESS_PORT_FILE, harness_ports.as_deref()),
+    ] {
+        if let Some(contents) = contents {
+            let overlay = root.join(file);
+            if std::fs::read(&overlay).ok().as_deref() != Some(contents.as_bytes()) {
+                std::fs::write(&overlay, contents).map_err(|error| {
+                    Problem::with(
+                        "OpenBot could not prepare its local port settings.",
+                        error.to_string(),
+                    )
+                })?;
+            }
+            command.arg("-f").arg(file);
+        }
+    }
+    Ok(command)
+}
+
+fn compose_files(root: &Path, environment: &str) -> Result<Vec<String>, Problem> {
+    let setting = |key: &str| {
+        environment.lines().find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name == key).then_some(value)
+        })
+    };
+    if let Some(files) = setting("COMPOSE_FILE") {
+        let separator = setting("COMPOSE_PATH_SEPARATOR")
+            .filter(|value| !value.is_empty())
+            .unwrap_or(if cfg!(windows) { ";" } else { ":" });
+        return Ok(files.split(separator).map(str::to_owned).collect());
+    }
+
+    // Compose-go's default discovery order. A valid installed deployment contains its base
+    // file in this directory, so there is no need to search outside the selected installation.
+    let first = |names: &[&str]| {
+        names
+            .iter()
+            .find(|name| root.join(name).exists())
+            .map(|name| (*name).to_owned())
+    };
+    let base = first(&[
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+    ])
+    .ok_or_else(|| Problem::plain("The selected installation has no Compose file."))?;
+    let mut files = vec![base];
+    if let Some(existing) = first(&[
+        "compose.override.yml",
+        "compose.override.yaml",
+        "docker-compose.override.yml",
+        "docker-compose.override.yaml",
+    ]) {
+        files.push(existing);
+    }
+    Ok(files)
+}
+
+/// Resolve only image references, using public installation overrides before credentials exist.
+pub fn installation_images(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    settings: &Secrets,
+) -> Result<Vec<String>, Problem> {
+    let mut requested = selected_services(harness, BundledBots::openai_compatible());
+    requested.push("migrate");
+    let mut command = compose_command(engine, root, settings);
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    let output = command
+        .args(["config", "--images"])
+        .args(requested)
+        .output()
+        .map_err(|e| {
+            Problem::with(
+                "OpenBot could not check which software to install.",
+                e.to_string(),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(Problem::with(
+            "OpenBot could not check which software to install.",
+            command_said(&output.stderr),
+        ));
+    }
+    let images: std::collections::BTreeSet<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    if images.is_empty() {
+        return Err(Problem::plain(
+            "This deployment does not identify the software OpenBot needs to install.",
+        ));
+    }
+    Ok(images.into_iter().collect())
+}
+
+/// Pull the selected stack before `up`, including the one-shot migration and service dependencies.
+/// Keep this separate from `up`: image transfer must not include container startup or migrations.
+/// Legacy batch helper for providers with a missing-only pull policy. The desktop installation
+/// step uses `pull_image` for explicit acquisition on every provider; `up` never pulls.
+pub fn pull(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    bots: BundledBots,
+    secrets: &Secrets,
+    on_complete: impl FnOnce(crate::pull_metrics::PullMetrics),
+) -> Result<(), Problem> {
+    let Some(json_progress) = crate::pull_metrics::compose_pull_progress(engine) else {
+        return Ok(());
+    };
+    let mut requested = selected_services(harness, bots);
+    requested.push("migrate");
+    let mut command = compose_command(engine, root, secrets);
+    if json_progress {
+        command.args(["--progress", "json"]);
+    }
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    command
+        .args(["pull", "--policy", "missing", "--include-deps"])
+        .args(&requested);
+    crate::pull_metrics::run(command, None, json_progress, on_complete)
+}
+
+/// Raise the containers.
+///
+/// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,
+/// and without it Compose quietly starts compiling Chromium. Failing loudly on a missing image is
+/// the better answer, because it names a pull that did not happen.
+pub fn up(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    // Which bundled Bots can read the provider the model screen selected.
+    bots: BundledBots,
+    secrets: &Secrets,
+) -> Result<Vec<&'static str>, crate::problem::Problem> {
+    /*
+     * The picked harness rides in on its profile.
+     *
+     * `agent-harness` is profile-gated so a deployment that picked nothing does not try to start
+     * it: its image comes from `.env`, and unset that is a request to pull the empty string, which
+     * fails the whole `up` rather than the one service nobody asked for. The flag comes before
+     * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
+     */
+    let requested = selected_services(harness, bots);
+    let mut command = compose_start_command(engine, root, secrets, std::env::consts::OS)?;
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    let output = command
+        .args(["up", "-d", "--no-build", "--pull", "never"])
+        .args(&requested)
+        .output()
+        .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
+
+    if output.status.success() {
+        return Ok(requested);
+    }
+    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
+    // beside it rather than shown as the headline. See `problem.rs`.
+    let raw = command_said(&output.stderr);
+    Err(crate::problem::Problem::with(
+        crate::problem::said_about(&raw),
+        raw,
+    ))
+}
+
+/// Apply migrations, once, to completion.
+///
+/// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
+/// starting together would race, and a failed migration should stop the start rather than leave a
+/// half-migrated database serving.
+pub fn migrate(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<(), crate::problem::Problem> {
+    // The installation step supplies this image. `run` does not accept `--no-build`, and its
+    // explicit no-pull policy must report a missing image without starting another download.
+    let output = compose_start_command(engine, root, secrets, std::env::consts::OS)?
+        .args(["run", "--rm", "--pull", "never", "migrate"])
+        .output()
+        .map_err(|error| format!("could not run migrations: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
+    // beside it rather than shown as the headline. See `problem.rs`.
+    let raw = command_said(&output.stderr);
+    Err(crate::problem::Problem::with(
+        crate::problem::said_about(&raw),
+        raw,
+    ))
+}
+
+/// The label the supervisor stamps on every container it creates.
+///
+/// Matching on this rather than on a name prefix. `openbot-` is also the prefix of a kind cluster's
+/// nodes and of anything else somebody has called openbot, and stopping a person's Kubernetes
+/// cluster because it shares six letters with this one would be unforgivable.
+/// Written as the whole filter, `label=` and all. Handed to the engine without that prefix it
+/// answers `invalid filter`, and it does so at the moment somebody is being told their stack has
+/// stopped, so the prefix belongs with the label rather than at the call site.
+const SUPERVISOR_FILTER: &str = "label=openbot.supervisor=true";
+
+/// Resolve the same namespace the selected deployment gives its supervisor. Compose owns
+/// interpolation, env-file quoting and defaults; parsing .env independently can select a different
+/// deployment. Never include the resolved configuration (which can contain secrets) in an error.
+fn computer_namespace(engine: &Address, root: &Path) -> Result<Option<String>, String> {
+    let config = root.join("docker-compose.yml");
+    match std::fs::metadata(&config) {
+        Ok(metadata) if metadata.is_file() => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if !crate::deployment::stamp_path(root)
+                .try_exists()
+                .map_err(|error| format!("could not verify computer namespace ownership: {error}"))?
+            {
+                // Welcome/setup has no deployment yet. In particular, do not let Compose search
+                // a parent directory for a file belonging to another installation.
+                return Ok(None);
+            }
+            return Err("could not resolve computer namespace: installed deployment is missing docker-compose.yml".into());
+        }
+        _ => return Err("could not resolve computer namespace: selected deployment configuration is not readable".into()),
+    }
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["-f", "docker-compose.yml", "config", "--format", "json"])
+        .output()
+        .map_err(|error| format!("could not resolve computer namespace: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not resolve computer namespace: Compose configuration failed ({})",
+            output.status
+        ));
+    }
+    let config: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        format!("could not resolve computer namespace: unreadable Compose response ({error})")
+    })?;
+    let configured = config
+        .pointer("/services/supervisor/environment/COMPUTER_NAMESPACE")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("could not resolve computer namespace: supervisor configuration has no namespace")?;
+    // Match supervisor/src/names.ts: trim, default only an empty value, then the same 64-character
+    // ASCII identifier grammar. A malformed/missing response never becomes an unscoped filter.
+    let namespace = match configured.trim() {
+        "" => "openbot",
+        value => value,
+    };
+    if namespace.len() > 64
+        || !namespace.as_bytes()[0].is_ascii_alphanumeric()
+        || !namespace
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("could not resolve computer namespace: supervisor namespace is invalid".into());
+    }
+    Ok(Some(namespace.to_string()))
+}
+
+/// Stop the computers the supervisor made, which Compose does not know about.
+///
+/// A Bot's computer is created at runtime, not declared in `docker-compose.yml`, so `compose down`
+/// leaves it running: an idle Ubuntu container per Bot, with the application gone and nothing on
+/// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
+/// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
+/// Quiesce the supervisor before listing so in-flight creates and restarts are included.
+/// Returns false only when the selected root has no installed deployment to take down.
+pub fn stop_computers(engine: &Address, root: &Path) -> Result<bool, String> {
+    let Some(namespace) = computer_namespace(engine, root)? else {
+        return Ok(false);
+    };
+    // Validate ownership before stopping anything, then wait for the creator to exit. A list taken
+    // while the supervisor is active can miss a new computer or one it restarts after being stopped.
+    let supervisor = compose_command(engine, root, &Secrets::new())
+        .args(["-f", "docker-compose.yml", "stop", "supervisor"])
+        .output()
+        .map_err(|error| format!("could not stop the supervisor: {error}"))?;
+    if !supervisor.status.success() {
+        return Err(format!(
+            "could not stop the supervisor ({}): {}",
+            supervisor.status,
+            command_said(&supervisor.stderr)
+        ));
+    }
+
+    let namespace_filter = format!("label=openbot.namespace={namespace}");
+    let listed = engine
+        .command()
+        .args([
+            "ps",
+            "--quiet",
+            "--filter",
+            SUPERVISOR_FILTER,
+            "--filter",
+            &namespace_filter,
+        ])
+        .output()
+        .map_err(|error| format!("could not list the Bots' computers: {error}"))?;
+    if !listed.status.success() {
+        return Err(command_said(&listed.stderr));
+    }
+
+    let running: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if running.is_empty() {
+        return Ok(true);
+    }
+
+    let stopped = engine
+        .command()
+        .arg("stop")
+        .args(&running)
+        .output()
+        .map_err(|error| format!("could not stop the Bots' computers: {error}"))?;
+    if stopped.status.success() {
+        return Ok(true);
+    }
+    Err(command_said(&stopped.stderr))
+}
+
+pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
+    // Stop the supervisor and its runtime-created computers before removing the Compose stack.
+    if !stop_computers(engine, root)? {
+        return Ok(());
+    }
+
+    /*
+     * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
+     *
+     * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
+     * on a profiled service when the profile is named, so Stop was leaving the one container the
+     * person actually chose running on their laptop, still holding its port. The next Start then
+     * refused because something was listening on it.
+     *
+     * Named unconditionally rather than only when a harness was picked: this has to stop what an
+     * earlier run started, and whether that run picked one is not something a Stop can know.
+     */
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["-f", "docker-compose.yml", "--profile", "harness", "down"])
+        .output()
+        .map_err(|error| format!("could not stop the stack: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(command_said(&output.stderr))
+}
+
+/// Install the deployment's dependencies.
+///
+/// The three host processes are `bun` processes run from the source, so the source alone is not
+/// enough: without this the server stops at `ENOENT while resolving package 'zod'` and the app at
+/// `vite: command not found`, and neither says the word `node_modules`. Always let Bun verify
+/// the frozen install: a failed download can leave the directory behind, while a complete
+/// installation can reuse Bun's cache without changing the lockfile.
+pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
+    // `--ignore-scripts`, for two reasons that point the same way.
+    //
+    // A postinstall script is arbitrary code from somebody else's package, and an installer that
+    // runs it on a person's machine while they watch a progress bar is doing something they did not
+    // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
+    // that has bun need not have, so the install fails at "node: command not found" after the
+    // containers are already up. Found on a Linux machine with bun and no node.
+    let output = command(bun)
+        .current_dir(root)
+        .args(["install", "--frozen-lockfile", "--ignore-scripts"])
+        .output()
+        .map_err(|error| format!("could not run bun install: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "installing the deployment's dependencies failed: {}",
+        command_said(&output.stderr)
+    ))
+}
+
+/// Start one host process, with its output on disk rather than nowhere.
+///
+/// A window has no console to inherit, so a process whose output is dropped fails invisibly: the
+/// symptom is a port that never answers and a log directory that explains why.
+/// Where the pids of the host processes are written, so a later window can stop them.
+///
+/// The handles a window holds die with the window. Everything else about a running stack survives
+/// it: the containers are Compose's, and the three host processes just keep going. Without this,
+/// Stop from a restarted window had nothing to work with.
+pub fn host_pids_path(root: &Path) -> PathBuf {
+    root.join(".logs").join("host-pids.json")
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecordedHostProcess {
+    pub name: String,
+    pub pid: u32,
+    pub executable_path: String,
+    pub command_line: String,
+    pub creation_date: String,
+}
+
+/// Unix v2 evidence binds a process instance to the deployment and named launch.
+/// Unlike the legacy PID list, this survives reopening without trusting PID reuse or cwd.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct UnixHostProcess {
+    name: String,
+    deployment: PathBuf,
+    pid: u32,
+    start: String,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UnixProcess {
+    pid: u32,
+    parent: u32,
+    start: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RecordedHostPidFile {
+    UnixRecords {
+        version: u8,
+        unix_processes: Vec<UnixHostProcess>,
+    },
+    Records {
+        version: u8,
+        processes: Vec<RecordedHostProcess>,
+    },
+    Pids(Vec<u32>),
+}
+
+/// Record the pids of the processes this window started.
+pub fn record_host_pids(root: &Path, pids: &[u32]) -> Result<(), Problem> {
+    write_host_pid_file(root, &pids)
+}
+
+/// Record the host processes this window started.
+pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) -> Result<(), Problem> {
+    #[cfg(windows)]
+    record_windows_host_processes_with(root, processes, Path::new("powershell"))?;
+    #[cfg(not(windows))]
+    {
+        let records = unix_host_records(root, processes)?;
+        write_host_pid_file(
+            root,
+            &serde_json::json!({"version": 2, "unix_processes": records}),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn record_windows_host_processes_with(
+    root: &Path,
+    processes: &[(&str, u32)],
+    powershell: &Path,
+) -> Result<(), Problem> {
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not verify its Windows host process ownership.",
+            format!(
+                "{}: {detail}; ownership records retained",
+                host_pids_path(root).display()
+            ),
+        )
+    };
+    let mut seen_names = std::collections::HashSet::new();
+    let mut seen_pids = std::collections::HashSet::new();
+    for (name, pid) in processes {
+        if !HOST_PROCESSES.iter().any(|process| process.name == *name) {
+            return Err(problem(format!("unknown host launch {name}, pid {pid}")));
+        }
+        if !seen_names.insert(*name) || !seen_pids.insert(*pid) {
+            return Err(problem(format!("duplicate host launch {name}, pid {pid}")));
+        }
+    }
+
+    let snapshot = windows_processes_with(powershell)?;
+    let mut records = Vec::with_capacity(processes.len());
+    for (name, pid) in processes {
+        let matches: Vec<_> = snapshot
+            .iter()
+            .filter(|process| process.process_id == *pid)
+            .collect();
+        let live = match matches.as_slice() {
+            [] => {
+                return Err(problem(format!(
+                    "host {name}, pid {pid} is missing from the process inventory"
+                )));
+            }
+            [live] => *live,
+            _ => {
+                return Err(problem(format!(
+                    "host {name}, pid {pid} appeared more than once in the process inventory"
+                )));
+            }
+        };
+        let record = RecordedHostProcess::from_live(name, live)
+            .filter(|record| {
+                !record.executable_path.is_empty()
+                    && !record.command_line.is_empty()
+                    && !record.creation_date.is_empty()
+            })
+            .ok_or_else(|| {
+                problem(format!(
+                    "host {name}, pid {pid} has incomplete process identity metadata"
+                ))
+            })?;
+        records.push(record);
+    }
+    write_host_pid_file(
+        root,
+        &serde_json::json!({ "version": 1, "processes": records }),
+    )?;
+    Ok(())
+}
+
+/// The pids a previous window recorded, if any.
+pub fn recorded_host_pids(root: &Path) -> Result<Vec<u32>, Problem> {
+    Ok(match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes.into_iter().map(|process| process.pid).collect(),
+        Some(RecordedHostPidFile::UnixRecords {
+            version: 2,
+            unix_processes,
+        }) => unix_processes
+            .into_iter()
+            .map(|process| process.pid)
+            .collect(),
+        Some(RecordedHostPidFile::Pids(pids)) => pids,
+        _ => Vec::new(),
+    })
+}
+
+/// The recorded host processes with enough identity to verify a live Windows process.
+pub fn recorded_host_processes(root: &Path) -> Result<Vec<RecordedHostProcess>, Problem> {
+    Ok(match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes,
+        _ => Vec::new(),
+    })
+}
+
+fn recorded_host_pid_file(root: &Path) -> Result<Option<RecordedHostPidFile>, Problem> {
+    let path = host_pids_path(root);
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not read its recorded host processes.",
+            format!("{}: {detail}", path.display()),
+        )
+    };
+    let raw = match std::fs::read(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(problem(format!("could not read pidfile: {error}"))),
+    };
+    let recorded = serde_json::from_slice::<RecordedHostPidFile>(&raw)
+        .map_err(|error| problem(format!("could not decode pidfile JSON: {error}")))?;
+    let (version, supported) = match &recorded {
+        RecordedHostPidFile::Records { version, .. } => (*version, 1),
+        RecordedHostPidFile::UnixRecords { version, .. } => (*version, 2),
+        RecordedHostPidFile::Pids(_) => (0, 0),
+    };
+    if version != supported {
+        return Err(problem(format!("unsupported pidfile version {version}")));
+    }
+    Ok(Some(recorded))
+}
+
+/// Commit a complete pidfile with one replacement. Every fallible preparation step happens
+/// before the rename, so an error leaves the previous ownership evidence available for retry.
+fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) -> Result<(), Problem> {
+    use std::io::Write;
+
+    let path = host_pids_path(root);
+    let problem = |operation: &str, error: &dyn std::fmt::Display| {
+        Problem::with(
+            "OpenBot could not record its host processes.",
+            format!("{}: {operation}: {error}", path.display()),
+        )
+    };
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| problem("could not serialize pidfile", &error))?;
+    let parent = path.parent().expect("host pidfile has a .logs parent");
+    std::fs::create_dir_all(parent)
+        .map_err(|error| problem("could not create pidfile parent directory", &error))?;
+    let temporary = parent.join(format!(".host-pids-{:016x}.tmp", rand::random::<u64>()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    // Only clean up a temporary file this call created, including on a name collision.
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| problem("could not create temporary pidfile", &error))?;
+    let prepared = file
+        .write_all(&bytes)
+        .map_err(|error| problem("could not write temporary pidfile", &error))
+        .and_then(|()| {
+            file.sync_all()
+                .map_err(|error| problem("could not sync temporary pidfile", &error))
+        });
+    drop(file);
+    let result = prepared.and_then(|()| {
+        std::fs::rename(&temporary, &path)
+            .map_err(|error| problem("could not replace pidfile", &error))
+    });
+    if let Err(mut failure) = result {
+        if let Err(error) = std::fs::remove_file(&temporary) {
+            failure.detail = Some(format!(
+                "{}; could not remove temporary pidfile {}: {error}",
+                failure.detail.as_deref().unwrap_or_default(),
+                temporary.display(),
+            ));
+        }
+        return Err(failure);
+    }
+    Ok(())
+}
+
+/// The desktop approval transport belongs only to the API server. In particular it must never
+/// reach the worker running model tools or the frontend development server.
+fn configure_host_process_env(command: &mut Command, name: &str, secrets: &Secrets) {
+    command.envs(secrets);
+    if name != "server" {
+        command.env_remove("OPENBOT_DESKTOP_HOST_TOKEN");
+    }
+}
+
+pub fn spawn_host_process(
+    process: &HostProcess,
+    root: &Path,
+    logs: &Path,
+    bun: &Path,
+    secrets: &Secrets,
+) -> std::io::Result<std::process::Child> {
+    std::fs::create_dir_all(logs)?;
+    let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
+    let err = out.try_clone()?;
+
+    let mut command = command(bun);
+    command.current_dir(root.join(process.cwd));
+    /*
+     * The credentials, alongside the `--env-file` that carries the settings.
+     *
+     * They are not in that file any more, and this is where they rejoin. The environment wins over
+     * the file either way, so a machine still holding an older run's copy is overridden rather than
+     * fought with.
+     */
+    configure_host_process_env(&mut command, process.name, secrets);
+    let ports = crate::env::Ports::read(root)?;
+    command.envs(ports.settings());
+    if process.name == "server" {
+        command.env("PORT", ports.server.to_string());
+    }
+    if process.script.is_empty() {
+        command.args(["run", process.package_script]);
+    } else {
+        command.args(["--env-file=../.env", process.script]);
+    }
+    command
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .stdin(Stdio::null());
+    command.spawn()
+}
+
+/// Keep a replacement handle even if refreshing durable ownership fails. The caller must
+/// report success only after this Result succeeds; Stop still has the handle on failure.
+#[cfg(unix)]
+pub fn replace_host_process(
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    name: &'static str,
+    child: std::process::Child,
+) -> Result<(), Problem> {
+    children.retain(|(held, _)| *held != name);
+    children.push((name, child));
+    let mut live = Vec::new();
+    for (name, child) in children.iter_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                unix_ownership_problem(format!("could not inspect held {name}: {error}"))
+            })?
+            .is_none()
+        {
+            live.push((*name, child.id()));
+        }
+    }
+    record_host_processes(root, &live)
+}
+
+/// Publish only the new Windows instance. Other roles may already be dead, and their
+/// durable identities must remain available for cleanup without trusting their old PIDs again.
+#[cfg(any(not(unix), test))]
+pub fn replace_windows_host_process_with(
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    name: &'static str,
+    child: std::process::Child,
+    powershell: &Path,
+) -> Result<(), Problem> {
+    // Retire only handles known to have exited. On any later failure Stop keeps the
+    // replacement, as well as any predecessor whose exit could not be confirmed.
+    children.retain_mut(|(held, child)| *held != name || !matches!(child.try_wait(), Ok(Some(_))));
+    children.push((name, child));
+    let child = &mut children.last_mut().unwrap().1;
+    let pid = child.id();
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not verify its Windows replacement process ownership.",
+            format!("{name}, pid {pid}: {detail}; ownership retained"),
+        )
+    };
+    let require_live = |child: &mut std::process::Child| match child.try_wait() {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) => Err(problem("replacement has exited".to_string())),
+        Err(error) => Err(problem(format!("could not inspect replacement: {error}"))),
+    };
+    require_live(child)?;
+    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+        return Err(problem("unknown host role".to_string()));
+    }
+    let snapshot = windows_processes_with(powershell)?;
+    // The held Child must remain live through capture: a PID alone cannot authorize
+    // recording a process that replaced it while the inventory command was running.
+    require_live(child)?;
+    let mut matches = snapshot.iter().filter(|live| live.process_id == pid);
+    let record = matches
+        .next()
+        .filter(|live| live.parent_process_id == std::process::id())
+        .and_then(|live| RecordedHostProcess::from_live(name, live))
+        .filter(|record| {
+            !record.executable_path.is_empty()
+                && !record.command_line.is_empty()
+                && windows_creation_time(&record.creation_date).is_some()
+        })
+        .ok_or_else(|| problem("complete direct-child identity is unavailable".to_string()))?;
+    if matches.next().is_some() {
+        return Err(problem("duplicate process inventory identity".to_string()));
+    }
+    let mut records = recorded_host_processes(root)?;
+    if !records.contains(&record) {
+        records.push(record);
+    }
+    write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))
+}
+
+#[cfg(unix)]
+fn unix_ownership_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify its host process ownership.",
+        detail,
+    )
+}
+
+#[cfg(unix)]
+fn safe_unix_pid(pid: u32) -> bool {
+    pid > 1
+        && pid <= i32::MAX as u32
+        && pid != std::process::id()
+        && pid != unsafe { libc::getppid() } as u32
+}
+
+#[cfg(unix)]
+fn unix_host_records(
+    root: &Path,
+    processes: &[(&str, u32)],
+) -> Result<Vec<UnixHostProcess>, Problem> {
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    processes
+        .iter()
+        .map(|(name, pid)| {
+            if !safe_unix_pid(*pid) || !HOST_PROCESSES.iter().any(|host| host.name == *name) {
+                return Err(unix_ownership_problem(format!(
+                    "invalid host launch {name}, pid {pid}"
+                )));
+            }
+            let live = unix_process(*pid)?.ok_or_else(|| {
+                unix_ownership_problem(format!("host {name}, pid {pid} is no longer running"))
+            })?;
+            if live.parent != std::process::id() {
+                return Err(unix_ownership_problem(format!(
+                    "host {name}, pid {pid} is not a child of this window"
+                )));
+            }
+            Ok(UnixHostProcess {
+                name: name.to_string(),
+                deployment: deployment.clone(),
+                pid: *pid,
+                start: live.start,
+            })
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
+    Ok(unix_process_state(pid)?.map(|(process, _)| process))
+}
+
+#[cfg(target_os = "macos")]
+fn unix_process_state(pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if read != size {
+        let error = std::io::Error::last_os_error();
+        if read == 0 && error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(None);
+        }
+        return Err(unix_ownership_problem(format!(
+            "proc_pidinfo({pid}) returned {read}/{size} bytes: {error}"
+        )));
+    }
+    let info = unsafe { info.assume_init() };
+    if info.pbi_status == libc::SZOMB {
+        return Ok(None);
+    }
+    if info.pbi_pid != pid || info.pbi_start_tvsec == 0 {
+        return Err(unix_ownership_problem(format!(
+            "proc_pidinfo({pid}) returned invalid identity"
+        )));
+    }
+    Ok(Some((
+        UnixProcess {
+            pid,
+            parent: info.pbi_ppid,
+            start: format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
+        },
+        info.pbi_status == libc::SSTOP,
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn unix_process_state(pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
+    let path = format!("/proc/{pid}/stat");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unix_ownership_problem(format!("{path}: {error}"))),
+    };
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|error| {
+        unix_ownership_problem(format!("could not read Linux boot identity: {error}"))
+    })?;
+    parse_linux_process_state(pid, &raw, boot.trim())
+}
+
+#[cfg(all(unix, test))]
+fn parse_linux_process(pid: u32, raw: &str, boot: &str) -> Result<Option<UnixProcess>, Problem> {
+    Ok(parse_linux_process_state(pid, raw, boot)?.map(|(process, _)| process))
+}
+
+#[cfg(all(unix, any(target_os = "linux", test)))]
+fn parse_linux_process_state(
+    pid: u32,
+    raw: &str,
+    boot: &str,
+) -> Result<Option<(UnixProcess, bool)>, Problem> {
+    let invalid =
+        || unix_ownership_problem(format!("invalid Linux process inventory for pid {pid}"));
+    let (head, tail) = raw.rsplit_once(')').ok_or_else(invalid)?;
+    let (listed, _) = head.split_once('(').ok_or_else(invalid)?;
+    if listed.trim().parse::<u32>().ok() != Some(pid) || boot.is_empty() {
+        return Err(invalid());
+    }
+    let fields: Vec<_> = tail.split_whitespace().collect();
+    let parent = fields
+        .get(1)
+        .and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(invalid)?;
+    let start = fields
+        .get(19)
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .ok_or_else(invalid)?;
+    if fields.first() == Some(&"Z") {
+        return Ok(None);
+    }
+    Ok(Some((
+        UnixProcess {
+            pid,
+            parent,
+            start: format!("linux:{boot}:{start}"),
+        },
+        fields.first() == Some(&"T"),
+    )))
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+fn unix_process_state(_pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
+    Err(unix_ownership_problem(
+        "process-instance verification is unsupported on this Unix platform",
+    ))
+}
+
+#[cfg(unix)]
+fn unix_inventory() -> Result<Vec<(u32, u32)>, Problem> {
+    unix_inventory_with(Path::new("/bin/ps"))
+}
+
+#[cfg(unix)]
+fn unix_inventory_with(ps: &Path) -> Result<Vec<(u32, u32)>, Problem> {
+    let operation = format!("{} -axo pid=,ppid=", ps.display());
+    let listing = command(ps)
+        .args(["-axo", "pid=,ppid="])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !listing.status.success() {
+        return Err(cleanup_status_problem(&operation, &listing));
+    }
+    let raw = std::str::from_utf8(&listing.stdout).map_err(|error| {
+        unix_ownership_problem(format!("invalid process inventory encoding: {error}"))
+    })?;
+    let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in raw.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let invalid = || unix_ownership_problem("malformed Unix process inventory");
+        if fields.len() != 2 {
+            return Err(invalid());
+        }
+        let pid = fields[0].parse::<u32>().map_err(|_| invalid())?;
+        let parent = fields[1].parse::<u32>().map_err(|_| invalid())?;
+        if pid == 0 || !seen.insert(pid) {
+            return Err(invalid());
+        }
+        rows.push((pid, parent));
+    }
+    if rows.is_empty() {
+        return Err(unix_ownership_problem("empty Unix process inventory"));
+    }
+    Ok(rows)
+}
+
+/// Stop only recorded Unix instances and descendants whose ancestry is verified while the
+/// recorded parent is still alive. Cwd, command names and legacy PIDs never authorize a signal.
+#[cfg(unix)]
+pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
+    let records = match recorded_host_pid_file(root)? {
+        None => return Ok(0),
+        Some(RecordedHostPidFile::UnixRecords { version: 2, unix_processes }) => unix_processes,
+        _ => return Err(unix_ownership_problem(format!("{}: legacy ownership evidence has no Unix process-instance identity; cleanup unresolved", host_pids_path(root).display()))),
+    };
+    stop_unix_records(root, &records)
+}
+
+/// Held children also provide ownership when durable recording failed. Call before killing
+/// their parents so descendants remain verifiable. Exited Child handles never authorize a PID.
+#[cfg(unix)]
+pub fn stop_host_children(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+) -> Result<usize, Problem> {
+    let mut live = Vec::new();
+    for (name, child) in children {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                unix_ownership_problem(format!("could not inspect held {name}: {error}"))
+            })?
+            .is_none()
+        {
+            live.push((*name, child.id()));
+        }
+    }
+    if live.is_empty() {
+        return Ok(0);
+    }
+    stop_unix_records(root, &unix_host_records(root, &live)?)
+}
+
+/// Windows replacements may not be in the initial pidfile. A live Child plus its current direct
+/// parent and complete instance identity authorizes adding it to the existing verified inventory.
+#[cfg(not(unix))]
+pub fn stop_host_children(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+) -> Result<usize, Problem> {
+    stop_windows_host_children_with(
+        root,
+        children,
+        Path::new("powershell"),
+        Path::new("taskkill"),
+    )
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_host_children_with(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+    powershell: &Path,
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    let mut held = Vec::new();
+    for (name, child) in children.iter_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not inspect a held host process.",
+                    format!("{name}: {error}"),
+                )
+            })?
+            .is_none()
+        {
+            held.push((*name, child.id()));
+        }
+    }
+    if held.is_empty() {
+        return Ok(0);
+    }
+    let snapshot = windows_processes_with(powershell)?;
+    let mut records = recorded_host_processes(root)?;
+    for (name, pid) in held {
+        let live = snapshot.iter().find(|live| {
+            live.process_id == pid
+                && live.parent_process_id == std::process::id()
+                && HOST_PROCESSES.iter().any(|process| process.name == name)
+        });
+        let record = live.and_then(|live| RecordedHostProcess::from_live(name, live))
+            .filter(|record| !record.executable_path.is_empty() && !record.command_line.is_empty() && !record.creation_date.is_empty())
+            .ok_or_else(|| Problem::with(
+                "OpenBot could not verify a held host process.",
+                format!("{name}, pid {pid}: current direct-child identity is unavailable; ownership retained"),
+            ))?;
+        // Preserve any earlier instance too. Each is independently verified before termination.
+        if !records.contains(&record) {
+            records.push(record);
+        }
+    }
+    write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))?;
+    stop_windows_processes_under_with(root, &records, &snapshot, taskkill)
+}
+
+#[cfg(unix)]
+fn stop_unix_records(root: &Path, records: &[UnixHostProcess]) -> Result<usize, Problem> {
+    if records.is_empty() {
+        return Ok(0);
+    }
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    let inventory = unix_inventory()?;
+    stop_unix_records_with(
+        &deployment,
+        records,
+        &inventory,
+        unix_process,
+        quiesce_unix_process,
+        unix_inventory,
+        terminate_unix_process,
+    )
+}
+
+#[cfg(unix)]
+fn stop_unix_records_with<I, Q, L, T>(
+    deployment: &Path,
+    records: &[UnixHostProcess],
+    inventory: &[(u32, u32)],
+    mut inspect: I,
+    mut quiesce: Q,
+    mut inventory_now: L,
+    mut terminate: T,
+) -> Result<usize, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+    Q: FnMut(i32, &mut dyn FnMut() -> Result<bool, Problem>) -> Result<(), Problem>,
+    L: FnMut() -> Result<Vec<(u32, u32)>, Problem>,
+    T: FnMut(i32, &mut dyn FnMut() -> Result<bool, Problem>) -> Result<bool, Problem>,
+{
+    let mut stopped = 0;
+    let mut failures = Vec::new();
+    for record in records {
+        let result = (|| {
+            if record.deployment != deployment
+                || record.start.is_empty()
+                || !safe_unix_pid(record.pid)
+                || !HOST_PROCESSES.iter().any(|host| host.name == record.name)
+            {
+                return Err(unix_ownership_problem(format!(
+                    "invalid Unix ownership record for pid {}",
+                    record.pid
+                )));
+            }
+            let Some(live) = inspect(record.pid)? else {
+                return Ok(0);
+            };
+            if live.start != record.start {
+                return Ok(0);
+            }
+            if !inventory.contains(&(live.pid, live.parent)) {
+                return Err(unix_ownership_problem(format!(
+                    "process inventory lost the owned root pid {}",
+                    live.pid
+                )));
+            }
+            let mut tree = vec![(live, None)];
+            let mut seen = std::collections::HashSet::from([record.pid]);
+            let mut index = 0;
+            while index < tree.len() {
+                let parent = tree[index].0.pid;
+                // Freeze the verified parent before enumerating its children. A snapshot taken
+                // while a launcher can run misses children born during build-to-serve transitions.
+                quiesce(parent as i32, &mut || {
+                    unix_tree_owned(&tree, index, &mut inspect)
+                })?;
+                let children = inventory_now()?;
+                if !unix_tree_owned(&tree, index, &mut inspect)? {
+                    return Err(unix_ownership_problem(format!(
+                        "quiesced process {parent} exited before its descendants were inventoried"
+                    )));
+                }
+                for (pid, ppid) in children.iter().filter(|(_, ppid)| *ppid == parent) {
+                    if !safe_unix_pid(*pid) || !seen.insert(*pid) {
+                        return Err(unix_ownership_problem(
+                            "unsafe or cyclic owned process ancestry",
+                        ));
+                    }
+                    if let Some(child) = inspect(*pid)? {
+                        if child.parent != *ppid {
+                            return Err(unix_ownership_problem(format!(
+                                "process ancestry changed for pid {pid}"
+                            )));
+                        }
+                        tree.push((child, Some(index)));
+                    }
+                }
+                index += 1;
+            }
+            let mut count = 0;
+            // Descendants must actually exit before their ownership ancestor is killed.
+            // Failed cleanup leaves the anchors stopped and the durable records available
+            // for another Stop; resuming an incomplete tree would reopen the spawn race.
+            for index in (0..tree.len()).rev() {
+                let mut still_owned = || unix_tree_owned(&tree, index, &mut inspect);
+                if still_owned()? && terminate(tree[index].0.pid as i32, &mut still_owned)? {
+                    count += 1;
+                }
+            }
+            Ok(count)
+        })();
+        match result {
+            Ok(count) => stopped += count,
+            Err(problem) => failures.push(problem),
+        }
+    }
+    cleanup_result(stopped, failures)
+}
+
+#[cfg(unix)]
+fn unix_tree_owned<I>(
+    tree: &[(UnixProcess, Option<usize>)],
+    index: usize,
+    inspect: &mut I,
+) -> Result<bool, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+{
+    let mut ancestor = Some(index);
+    while let Some(at) = ancestor {
+        match inspect(tree[at].0.pid)? {
+            Some(now) if now == tree[at].0 => {}
+            None if at == index => return Ok(false),
+            _ => {
+                return Err(unix_ownership_problem(format!(
+                    "process identity or ancestry changed for pid {}",
+                    tree[at].0.pid
+                )))
+            }
+        }
+        ancestor = tree[at].1;
+    }
+    Ok(true)
+}
+
+#[cfg(unix)]
+fn quiesce_unix_process(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+) -> Result<(), Problem> {
+    quiesce_unix_process_with(
+        pid,
+        still_owned,
+        signal_unix_process,
+        |pid| Ok(unix_process_state(pid)?.is_some_and(|(_, stopped)| stopped)),
+        std::time::Duration::from_secs(2),
+    )
+}
+
+#[cfg(unix)]
+fn quiesce_unix_process_with<S, Q>(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    mut signal: S,
+    mut is_stopped: Q,
+    patience: std::time::Duration,
+) -> Result<(), Problem>
+where
+    S: FnMut(i32, i32) -> Result<bool, Problem>,
+    Q: FnMut(u32) -> Result<bool, Problem>,
+{
+    let unresolved = || {
+        unix_ownership_problem(format!(
+        "could not confirm pid {pid} stopped before descendant inventory; ownership ancestor and records retained"
+    ))
+    };
+    if !still_owned()? || !signal(pid, libc::SIGSTOP)? {
+        return Err(unresolved());
+    }
+    let deadline = std::time::Instant::now() + patience;
+    loop {
+        let stopped = is_stopped(pid as u32)?;
+        // Status is not identity. Revalidate the complete chain after the status query too.
+        if !still_owned()? {
+            return Err(unresolved());
+        }
+        if stopped {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(unresolved());
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(25)));
+    }
+}
+
+#[cfg(unix)]
+fn terminate_unix_process(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+) -> Result<bool, Problem> {
+    terminate_unix_process_with(
+        pid,
+        still_owned,
+        signal_unix_process,
+        std::time::Duration::from_secs(2),
+    )
+}
+
+#[cfg(unix)]
+fn terminate_unix_process_with<S>(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    mut signal: S,
+    patience: std::time::Duration,
+) -> Result<bool, Problem>
+where
+    S: FnMut(i32, i32) -> Result<bool, Problem>,
+{
+    // Keep the complete tree stopped through removal: SIGCONT would let a launcher or
+    // TERM handler spawn again. SIGKILL is delivered to stopped processes without resuming
+    // them. Orderly handlers do not run; all exits still require verified ownership.
+    if !still_owned()? || !signal(pid, libc::SIGKILL)? {
+        return Ok(false);
+    }
+    if wait_for_verified_unix_exit(still_owned, patience)? {
+        return Ok(true);
+    }
+    Err(Problem::with(
+        "OpenBot could not stop one of its host processes.",
+        format!(
+            "pid {pid} is still running after SIGKILL; ownership ancestor and records retained"
+        ),
+    ))
+}
+
+#[cfg(unix)]
+fn wait_for_verified_unix_exit(
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    patience: std::time::Duration,
+) -> Result<bool, Problem> {
+    let deadline = std::time::Instant::now() + patience;
+    loop {
+        if !still_owned()? {
+            return Ok(true);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(25)));
+    }
+}
+
+#[cfg(unix)]
+fn signal_unix_process(pid: i32, signal: i32) -> Result<bool, Problem> {
+    if pid <= 1 || !safe_unix_pid(pid as u32) {
+        return Err(unix_ownership_problem("refused unsafe process target"));
+    }
+    let killed = unsafe { libc::kill(pid, signal) };
+    if killed == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(false);
+    }
+    Err(Problem::with(
+        "OpenBot could not stop one of its host processes.",
+        format!("could not send signal {signal} to pid {pid}: {error}"),
+    ))
+}
+
+#[cfg(not(unix))]
+pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
+    /*
+     * Windows cannot be asked which process is in which directory cheaply, so this used to answer
+     * 0 and say the host processes end with the session. They do not, and the case it dismissed is
+     * the common one: the handles this window holds are gone the moment the window is restarted,
+     * so a window Stopping a stack an earlier one started holds nothing at all.
+     *
+     * MEASURED ON WINDOWS SERVER 2022. Stop took the five containers down, reported success, and
+     * left every host process running: the server on 3001, the worker, and both halves of the app
+     * still answering 200 on 3010. Somebody who pressed Stop still had OpenBot serving.
+     *
+     * So they are found by the ports the deployment publishes, which the shell already owns and
+     * already checks for clashes, and each is ended WITH ITS CHILDREN: `bun run serve` starts the
+     * real server as a grandchild, so ending only the process holding the port leaves that behind.
+     */
+    /*
+     * The pids this window or an earlier one recorded, which is the only way to reach the worker.
+     *
+     * It listens on no port, so the sweep below cannot see it. The server has its own loader entry,
+     * but that does not make the worker visible to the port sweep: after the port sweep alone, 3001
+     * and 3010 were free and the worker was still running.
+     */
+    stop_windows_processes_with_inventory(_root, Path::new("powershell"), Path::new("taskkill"))
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_processes_with_inventory(
+    root: &Path,
+    powershell: &Path,
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    let recorded = match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::Pids(pids)) if !pids.is_empty() => {
+            // A previous Start wrote these PIDs, but a reopened window cannot prove their
+            // process instances. Keep that unresolved evidence without authorizing a signal.
+            return Err(Problem::with(
+                "OpenBot could not verify its recorded host processes.",
+                format!(
+                    "{}: legacy PID-only evidence lacks Windows process-instance identity; cleanup unresolved; ownership records retained",
+                    host_pids_path(root).display()
+                ),
+            ));
+        }
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes,
+        _ => Vec::new(),
+    };
+    let processes = windows_processes_with(powershell)?;
+    stop_windows_processes_under_with(root, &recorded, &processes, taskkill)
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_processes_under_with(
+    root: &Path,
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    // A same-PID row without usable identity metadata is unresolved, not proof of PID reuse.
+    // Keep the original evidence for a later inventory that can positively verify or reject it.
+    if let Some(record) = recorded.iter().find(|record| {
+        processes.iter().any(|live| {
+            live.process_id == record.pid
+                && ([&live.executable_path, &live.command_line]
+                    .iter()
+                    .any(|field| matches!(field.as_deref(), None | Some("")))
+                    || live
+                        .creation_date
+                        .as_deref()
+                        .and_then(windows_creation_time)
+                        .is_none()
+                    || windows_creation_time(&record.creation_date).is_none())
+        })
+    }) {
+        return Err(Problem::with(
+            "OpenBot could not verify one of its recorded host processes.",
+            format!(
+                "{}: process inventory lacks usable identity metadata for pid {}; ownership records retained",
+                host_pids_path(root).display(),
+                record.pid
+            ),
+        ));
+    }
+    // /T already terminates each verified root's tree. A later port sweep must not reuse
+    // that pre-termination identity: Windows can assign a terminated PID to another process.
+    // Keep all ownership records on any failure so a retry can obtain a fresh inventory.
+    let stopped = stop_verified_windows_roots_with(recorded, processes, |pid| {
+        taskkill_process_tree_with(taskkill, pid)
+    })?;
+    let path = host_pids_path(root);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not remove its recorded host processes.",
+                format!("{}: could not remove pidfile: {error}", path.display()),
+            ));
+        }
+    }
+    Ok(stopped)
+}
+
+fn cleanup_result(stopped: usize, failures: Vec<Problem>) -> Result<usize, Problem> {
+    if failures.is_empty() {
+        return Ok(stopped);
+    }
+    Err(combined_cleanup_problem(failures))
+}
+
+#[cfg(not(unix))]
+fn taskkill_process_tree(pid: u32) -> Result<bool, Problem> {
+    taskkill_process_tree_with(Path::new("taskkill"), pid)
+}
+
+#[cfg(any(not(unix), test))]
+fn taskkill_process_tree_with(taskkill: &Path, pid: u32) -> Result<bool, Problem> {
+    let operation = format!("{} /PID {pid} /T /F", taskkill.display());
+    let output = command(taskkill)
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    Err(cleanup_status_problem(&operation, &output))
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_verified_windows_roots_with<F>(
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+    mut taskkill: F,
+) -> Result<usize, Problem>
+where
+    F: FnMut(u32) -> Result<bool, Problem>,
+{
+    let mut stopped = 0;
+    let mut failures = Vec::new();
+    for pid in verified_openbot_root_pids(recorded, processes) {
+        // With its children: `bun run serve` starts the real server as a grandchild, so ending
+        // only the process holding the port leaves that one behind.
+        match taskkill(pid) {
+            Ok(true) => stopped += 1,
+            Ok(false) => {}
+            Err(problem) => failures.push(problem),
+        }
+    }
+    cleanup_result(stopped, failures)
+}
+
+fn cleanup_spawn_problem(operation: &str, error: std::io::Error) -> Problem {
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        format!("could not run {operation}: {error}"),
+    )
+}
+
+fn cleanup_status_problem(operation: &str, output: &std::process::Output) -> Problem {
+    let stderr = command_said(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut detail = format!("{operation} exited with status {}", output.status);
+    if !stderr.is_empty() {
+        detail.push_str("\nstderr:\n");
+        detail.push_str(&stderr);
+    }
+    if !stdout.is_empty() {
+        detail.push_str("\nstdout:\n");
+        detail.push_str(&stdout);
+    }
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        detail,
+    )
+}
+
+fn combined_cleanup_problem(failures: Vec<Problem>) -> Problem {
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        failures
+            .into_iter()
+            .map(problem_detail)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn problem_detail(problem: Problem) -> String {
+    match problem.detail {
+        Some(detail) => format!("{}\n{}", problem.said, detail),
+        None => problem.said,
+    }
+}
+
+/// The TCP processes listening on any of `ports`, from `netstat -ano` output.
+///
+/// Pure and tested, because the column layout is the thing that goes wrong. Read as four columns
+/// rather than five, the foreign address is taken for the state and the state for the pid: nothing
+/// matches, and Stop reports success while leaving everything running. That is exactly what
+/// happened, and this test is why it did not survive.
+pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
+    let mut found: Vec<u32> = Vec::new();
+    for line in listing.lines() {
+        // Protocol, local address, foreign address, state, pid.
+        let mut fields = line.split_whitespace();
+        let (Some(proto), Some(local), Some(_foreign), Some(state), Some(pid)) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
+            continue;
+        };
+        if !proto.eq_ignore_ascii_case("TCP") || !state.eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+        // `rsplit` rather than `split`, because an IPv6 local address is `[::1]:3010`.
+        let Some(port) = local.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) else {
+            continue;
+        };
+        if !ports.contains(&port) {
+            continue;
+        }
+        let Ok(pid) = pid.parse::<u32>() else {
+            continue;
+        };
+        // A port answers on both loopbacks, so one process appears on two lines.
+        if !found.contains(&pid) {
+            found.push(pid);
+        }
+    }
+    found
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub struct WindowsProcess {
+    pub process_id: u32,
+    pub parent_process_id: u32,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default)]
+    pub command_line: Option<String>,
+    #[serde(default)]
+    pub creation_date: Option<String>,
+}
+
+impl RecordedHostProcess {
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn from_live(name: &str, live: &WindowsProcess) -> Option<Self> {
+        Some(Self {
+            name: name.to_string(),
+            pid: live.process_id,
+            executable_path: live.executable_path.clone()?,
+            command_line: live.command_line.clone()?,
+            creation_date: live.creation_date.clone()?,
+        })
+    }
+
+    fn matches(&self, live: &WindowsProcess) -> bool {
+        live.process_id == self.pid
+            && live.executable_path.as_deref() == Some(self.executable_path.as_str())
+            && live.command_line.as_deref() == Some(self.command_line.as_str())
+            && live.creation_date.as_deref() == Some(self.creation_date.as_str())
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_processes_with(powershell: &Path) -> Result<Vec<WindowsProcess>, Problem> {
+    let operation = format!("{} Get-CimInstance Win32_Process", powershell.display());
+    let output = command(powershell)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate)",
+        ])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !output.status.success() {
+        // The inventory includes other processes' command lines. Never echo a partial snapshot.
+        return Err(Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            format!("{operation} exited with status {}", output.status),
+        ));
+    }
+    windows_process_output(&output.stdout)
+}
+
+#[cfg(any(windows, test))]
+fn windows_process_output(output: &[u8]) -> Result<Vec<WindowsProcess>, Problem> {
+    let invalid_encoding = || {
+        Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            "powershell Get-CimInstance Win32_Process returned invalid UTF-8 or UTF-16LE",
+        )
+    };
+    // Windows PowerShell redirection can produce UTF-16LE, even though the script requests UTF-8.
+    if output.starts_with(&[0xff, 0xfe]) || output.get(1) == Some(&0) {
+        let bytes = output.strip_prefix(&[0xff, 0xfe]).unwrap_or(output);
+        if bytes.len() % 2 != 0 {
+            return Err(invalid_encoding());
+        }
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let text = String::from_utf16(&units).map_err(|_| invalid_encoding())?;
+        windows_processes_in(&text)
+    } else {
+        let bytes = output.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(output);
+        let text = std::str::from_utf8(bytes).map_err(|_| invalid_encoding())?;
+        windows_processes_in(text)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WindowsProcessListing {
+    Many(Vec<WindowsProcess>),
+    One(WindowsProcess),
+}
+
+pub fn windows_processes_in(listing: &str) -> Result<Vec<WindowsProcess>, Problem> {
+    let listing = serde_json::from_str::<WindowsProcessListing>(listing).map_err(|error| {
+        Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            format!(
+                "powershell Get-CimInstance Win32_Process returned invalid process JSON: {error}"
+            ),
+        )
+    })?;
+    Ok(match listing {
+        WindowsProcessListing::Many(processes) => processes,
+        WindowsProcessListing::One(process) => vec![process],
+    })
+}
+
+/// Recorded OpenBot root processes whose live identity still matches the pid file.
+pub fn verified_openbot_root_pids(
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+) -> Vec<u32> {
+    recorded
+        .iter()
+        .filter_map(|record| {
+            let live = processes
+                .iter()
+                .find(|process| process.process_id == record.pid)?;
+            (record.matches(live) && windows_creation_time(&record.creation_date).is_some())
+                .then_some(record.pid)
+        })
+        .collect()
+}
+
+/// Recorded OpenBot processes, or their live children, listening on one of the host ports.
+///
+/// A pid file entry is not ownership by itself: the live process must still match the recorded
+/// executable, command line and creation time before its tree is eligible for cleanup.
+pub fn verified_openbot_pids_listening_on(
+    listing: &str,
+    ports: &[u16],
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+) -> Vec<u32> {
+    let roots = verified_openbot_root_pids(recorded, processes);
+    pids_listening_on(listing, ports)
+        .into_iter()
+        .filter(|pid| belongs_to_any_root(*pid, &roots, processes))
+        .collect()
+}
+
+/// A UTC instant in microseconds, preserving both Windows PowerShell's JSON date format
+/// and the CIM datetime format. Unknown fields or malformed timestamps cannot prove ancestry.
+fn windows_creation_time(value: &str) -> Option<i64> {
+    fn digits(value: &str) -> Option<i64> {
+        (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| value.parse().ok())?
+    }
+
+    // ConvertTo-Json in Windows PowerShell emits /Date(milliseconds[+/-HHmm])/.
+    // The number is already UTC; the optional offset describes its local DateTime kind.
+    if let Some(value) = value
+        .strip_prefix("/Date(")
+        .and_then(|s| s.strip_suffix(")/"))
+    {
+        let offset_index = value
+            .char_indices()
+            .skip(1)
+            .find(|(_, ch)| matches!(ch, '+' | '-'))
+            .map(|(index, _)| index);
+        let milliseconds = if let Some(index) = offset_index {
+            let offset = value.get(index + 1..)?;
+            if offset.len() != 4 || digits(offset.get(..2)?)? > 23 || digits(offset.get(2..)?)? > 59
+            {
+                return None;
+            }
+            value.get(..index)?
+        } else {
+            value
+        };
+        digits(milliseconds.strip_prefix('-').unwrap_or(milliseconds))?;
+        let milliseconds: i64 = milliseconds.parse().ok()?;
+        // The .NET DateTime range is 0001-01-01 through 9999-12-31.
+        return (-62_135_596_800_000..=253_402_300_799_999)
+            .contains(&milliseconds)
+            .then(|| milliseconds * 1_000);
+    }
+
+    // CIM: yyyymmddHHMMSS.mmmmmm+/-UUU, with a signed UTC offset in minutes.
+    // https://learn.microsoft.com/en-us/windows/win32/wmisdk/cim-datetime
+    if value.len() != 25 || value.get(14..15)? != "." {
+        return None;
+    }
+    let year = digits(value.get(..4)?)?;
+    let month = digits(value.get(4..6)?)?;
+    let day = digits(value.get(6..8)?)?;
+    let hour = digits(value.get(8..10)?)?;
+    let minute = digits(value.get(10..12)?)?;
+    let second = digits(value.get(12..14)?)?;
+    let micros = digits(value.get(15..21)?)?;
+    let offset = digits(value.get(22..)?)?
+        * match value.get(21..22)? {
+            "+" => 1,
+            "-" => -1,
+            _ => return None,
+        };
+    if year == 0 || !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let month_index = usize::try_from(month - 1).ok()?;
+    if !(1..=month_days[month_index]).contains(&day) {
+        return None;
+    }
+    let prior_year = year - 1;
+    let days = 365 * prior_year + prior_year / 4 - prior_year / 100
+        + prior_year / 400
+        + month_days[..month_index].iter().sum::<i64>()
+        + day
+        - 1
+        - 719_162;
+    Some((((days * 24 + hour) * 60 + minute - offset) * 60 + second) * 1_000_000 + micros)
+}
+
+fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) -> bool {
+    if roots.contains(&pid) {
+        return true;
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut current = pid;
+    loop {
+        if !seen.insert(current) {
+            return false;
+        }
+        let Some(process) = processes
+            .iter()
+            .find(|process| process.process_id == current)
+        else {
+            return false;
+        };
+        let parent = process.parent_process_id;
+        if parent == 0 || parent == current {
+            return false;
+        }
+        let Some(parent_process) = processes
+            .iter()
+            .find(|process| process.process_id == parent)
+        else {
+            return false;
+        };
+        let times = process
+            .creation_date
+            .as_deref()
+            .and_then(windows_creation_time)
+            .zip(
+                parent_process
+                    .creation_date
+                    .as_deref()
+                    .and_then(windows_creation_time),
+            );
+        // ParentProcessId can refer to a reused PID. A newer parent instance cannot have
+        // created this child. Validate every link, including the final link to an owned root.
+        // https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-process
+        if !times.is_some_and(|(child, parent)| parent <= child) {
+            return false;
+        }
+        if roots.contains(&parent) {
+            return true;
+        }
+        current = parent;
+    }
+}
+
+/// Whether this deployment has recorded ownership for the server answering `port`.
+///
+/// Used by the passive startup probe. Absence of current, root-scoped ownership is not fatal
+/// there; it means the app must show setup instead of adopting a process on the shared port.
+pub fn recorded_server_owns_port(root: &Path, port: u16) -> Result<bool, Problem> {
+    recorded_process_owns_port(root, "server", port)
+}
+
+/// Every listener on the port must belong to the requested recorded host role. This also rejects
+/// ambiguous IPv4/IPv6 ownership rather than showing whichever unrelated address answers first.
+pub fn recorded_process_owns_port(root: &Path, name: &str, port: u16) -> Result<bool, Problem> {
+    if !HOST_PROCESSES.iter().any(|host| host.name == name) {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        recorded_process_owns_port_unix(root, name, port)
+    }
+    #[cfg(not(unix))]
+    {
+        recorded_process_owns_port_windows_with(
+            root,
+            name,
+            port,
+            Path::new("powershell"),
+            Path::new("netstat"),
+        )
+    }
+}
+
+#[cfg(unix)]
+fn recorded_process_owns_port_unix(root: &Path, name: &str, port: u16) -> Result<bool, Problem> {
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    let records = match recorded_host_pid_file(root)? {
+        Some(RecordedHostPidFile::UnixRecords {
+            version: 2,
+            unix_processes,
+        }) => unix_processes,
+        _ => return Ok(false),
+    };
+    let listening = unix_pids_listening_on(port)?;
+    if listening.is_empty() {
+        return Ok(false);
+    }
+    let records: Vec<_> = records
+        .iter()
+        .filter(|record| record.name == name && record.deployment == deployment)
+        .collect();
+    for pid in listening {
+        let mut owned = false;
+        for record in &records {
+            if unix_listener_belongs_to_record(pid, record, unix_process)? {
+                owned = true;
+                break;
+            }
+        }
+        if !owned {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(unix)]
+fn unix_listener_belongs_to_record<I>(
+    pid: u32,
+    record: &UnixHostProcess,
+    mut inspect: I,
+) -> Result<bool, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+{
+    let mut seen = std::collections::HashSet::new();
+    let mut chain = Vec::new();
+    let mut current = pid;
+    loop {
+        if !safe_unix_pid(current) || !seen.insert(current) {
+            return Ok(false);
+        }
+        let Some(live) = inspect(current)? else {
+            return Ok(false);
+        };
+        let parent = live.parent;
+        let at_root = current == record.pid;
+        if at_root && (record.start.is_empty() || live.start != record.start) {
+            return Ok(false);
+        }
+        chain.push(live);
+        if at_root {
+            // The app launcher may own a Vite child. Recheck every instance and parent link so a
+            // dead/reused anchor or a changed ancestry cannot authorize an unrelated listener.
+            for process in chain {
+                if inspect(process.pid)?.as_ref() != Some(&process) {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+        current = parent;
+    }
+}
+
+#[cfg(unix)]
+fn unix_pids_listening_on(port: u16) -> Result<Vec<u32>, Problem> {
+    let operation = format!("lsof -nP -iTCP:{port} -sTCP:LISTEN -Fp");
+    let output = command("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) {
+            return Ok(Vec::new());
+        }
+        return Err(cleanup_status_problem(&operation, &output));
+    }
+    let listed = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_lsof_pid_fields(&listed))
+}
+
+#[cfg(unix)]
+fn parse_lsof_pid_fields(listing: &str) -> Vec<u32> {
+    let mut found = Vec::new();
+    for line in listing.lines() {
+        let Some(pid) = line
+            .strip_prefix('p')
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if !found.contains(&pid) {
+            found.push(pid);
+        }
+    }
+    found
+}
+
+#[cfg(any(not(unix), test))]
+fn recorded_process_owns_port_windows_with(
+    root: &Path,
+    name: &str,
+    port: u16,
+    powershell: &Path,
+    netstat: &Path,
+) -> Result<bool, Problem> {
+    let recorded: Vec<_> = recorded_host_processes(root)?
+        .into_iter()
+        .filter(|record| record.name == name)
+        .collect();
+    if recorded.is_empty() {
+        return Ok(false);
+    }
+    let processes = windows_processes_with(powershell)?;
+    // `-p tcp` omits IPv6 (`tcpv6`); inventory both families before requiring every
+    // TCP listener to be owned. The parser ignores UDP rows in the unfiltered output.
+    let operation = format!("{} -ano", netstat.display());
+    let listing = command(netstat)
+        .arg("-ano")
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if !listing.status.success() {
+        return Err(cleanup_status_problem(&operation, &listing));
+    }
+    let listed = String::from_utf8_lossy(&listing.stdout);
+    let listening = pids_listening_on(&listed, &[port]);
+    let verified = verified_openbot_pids_listening_on(&listed, &[port], &recorded, &processes);
+    Ok(!listening.is_empty() && listening.iter().all(|pid| verified.contains(pid)))
+}
+
+/**
+The tail of one service's log.
+
+For the case where the wire says nothing. A framework that catches its own exception and ends the
+stream leaves the cause here and nowhere else, so this is not a debugging convenience: without it
+the developer half of that failure would be empty. See `ask::why_nothing_came_back`.
+
+An engine that cannot be asked returns nothing rather than failing. This is only ever called to
+explain a failure that has already happened, and a second failure on top of it helps nobody.
+*/
+pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> String {
+    compose_command(engine, root, &Secrets::new())
+        .args(["logs", "--tail", &lines.to_string(), service])
+        .output()
+        .ok()
+        .map(|out| {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            text.trim().to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// Which Compose services are not running, and the last thing each said.
+///
+/// `compose up` succeeds once it has asked for everything; a service that then exits is not its
+/// problem. Both Bots exit immediately without a model key, saying exactly that, and without this
+/// the window reports a healthy stack while nothing can answer a question.
+pub fn services_that_exited(
+    engine: &Address,
+    root: &Path,
+) -> Result<Vec<(String, String)>, crate::problem::Problem> {
+    services_that_exited_among(engine, root, None)
+}
+
+pub fn services_that_exited_among(
+    engine: &Address,
+    root: &Path,
+    requested_services: Option<&std::collections::HashSet<&str>>,
+) -> Result<Vec<(String, String)>, crate::problem::Problem> {
+    let operation = format!("{} compose ps -a", engine.engine.binary());
+    let output = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
+        .output()
+        .map_err(|error| {
+            crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("could not run {operation}: {error}"),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = command_said(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let mut detail = format!("{operation} exited with status {}", output.status);
+        if !stderr.is_empty() {
+            detail.push_str("\nstderr:\n");
+            detail.push_str(&stderr);
+        }
+        if !stdout.is_empty() {
+            detail.push_str("\nstdout:\n");
+            detail.push_str(&stdout);
+        }
+        return Err(crate::problem::Problem::with(
+            "OpenBot could not inspect its Compose services.",
+            detail,
+        ));
+    }
+
+    let mut dead = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((service, state)) = line.split_once('\t') else {
+            return Err(crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("unusable {operation} row: {line}"),
+            ));
+        };
+        let service = service.trim();
+        let state = state.trim();
+        if service.is_empty() || state.is_empty() {
+            return Err(crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("unusable {operation} row: {line}"),
+            ));
+        }
+        if !state.trim().eq_ignore_ascii_case("exited") {
+            continue;
+        }
+        // `migrate` is meant to exit: it is run to completion, not raised.
+        if service == "migrate" {
+            continue;
+        }
+        if requested_services.is_some_and(|requested| !requested.contains(service)) {
+            continue;
+        }
+        let why = compose_command(engine, root, &Secrets::new())
+            .args(["logs", "--tail", "3", service])
+            .output()
+            .ok()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .unwrap_or_default();
+        let why = why
+            .lines()
+            .rfind(|line| !line.trim().is_empty())
+            .unwrap_or("no reason in its log")
+            .trim()
+            .to_string();
+        dead.push((service.to_string(), why));
+    }
+    Ok(dead)
+}
+
+/**
+The ports this deployment's own containers already publish.
+
+MEASURED, AND IT LEAVES A PERSON STUCK. A start that fails after `compose up` leaves the containers
+it raised running, so the next press of Start finds the harness port held and refuses with
+"something is already listening on port 4206, which OpenBot uses for the Bot you picked" — about a
+container OpenBot itself started, which the person never saw and cannot find. There is no way
+forward from that screen.
+
+Our own containers are not a conflict: `compose up` is idempotent and reuses them. The check exists
+to catch somebody ELSE on the port, so what this deployment already publishes is excluded from it.
+
+An engine that cannot be asked returns nothing, which leaves the check exactly as strict as it was.
+*/
+pub fn ports_we_already_publish(engine: &Address, root: &Path) -> std::collections::HashSet<u16> {
+    let Ok(output) = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--format", "{{.Ports}}"])
+        .output()
+    else {
+        return std::collections::HashSet::new();
+    };
+    let listing = String::from_utf8_lossy(&output.stdout);
+    published_in(&listing)
+}
+
+/**
+The published ports in a `compose ps` listing.
+
+Pure, because the format is the contract and a regex over engine output is exactly the thing that
+should be pinned by a test. A row reads `127.0.0.1:4206->4206/tcp, [::1]:4206->4206/tcp`, and it is
+the number BEFORE the arrow that is taken: the one after it is the port inside the container, which
+nothing on this machine binds.
+*/
+pub fn published_in(listing: &str) -> std::collections::HashSet<u16> {
+    let mut ports = std::collections::HashSet::new();
+    for mapping in listing.lines().flat_map(|row| row.split(',')) {
+        let Some((host, _)) = mapping.split_once("->") else {
+            continue;
+        };
+        let Some((_, port)) = host.trim().rsplit_once(':') else {
+            continue;
+        };
+        if let Ok(port) = port.trim().parse::<u16>() {
+            ports.insert(port);
+        }
+    }
+    ports
+}
+
+/**
+Wait for ports we just released to actually be free.
+
+A KILL IS NOT INSTANT AND THE CHECK IS. Reclaiming this deployment's own host processes and then
+immediately asking whether their ports are held is a race, and it loses: the socket is still closing
+while the check reads it as somebody else's. Measured as "something is already listening on port
+3010" naming a process that no longer existed by the time anybody looked.
+
+Bounded, and only worth calling when something was actually stopped. A port a stranger holds stays
+held, so this costs the wait once and then reports it.
+*/
+pub fn wait_for_ports_to_clear(ports: &[u16], patience: std::time::Duration) {
+    let deadline = std::time::Instant::now() + patience;
+    while std::time::Instant::now() < deadline {
+        if ports.iter().all(|port| !something_answers(*port)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Whether anything accepts a connection on a loopback port right now.
+fn something_answers(port: u16) -> bool {
+    // A listener on either loopback can conflict, just as either can satisfy readiness below.
+    [
+        std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::net::SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port)),
+    ]
+    .iter()
+    .any(|address| {
+        std::net::TcpStream::connect_timeout(address, std::time::Duration::from_millis(300)).is_ok()
+    })
+}
+
+/// Refuse to start if something already holds a port this deployment needs.
+///
+/// Found the hard way: another deployment was listening on 3001, so the readiness check below was
+/// satisfied by a server this shell had never started. Everything looked green and none of it was
+/// ours. Checked before anything is spawned, because afterwards the two are indistinguishable from
+/// outside.
+pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
+    port_already_taken_except(ports, &std::collections::HashSet::new())
+}
+
+/// The same check, with the ports this deployment already publishes treated as its own.
+pub fn port_already_taken_except(
+    ports: &[(&'static str, u16)],
+    ours: &std::collections::HashSet<u16>,
+) -> Option<String> {
+    for (name, port) in ports {
+        if ours.contains(port) {
+            continue;
+        }
+        if something_answers(*port) {
+            return Some(format!(
+                "Port {port} for the {name} became unavailable. Try Start again so OpenBot can choose another local port."
+            ));
+        }
+    }
+    None
+}
+
+/// Wait until the API answers, or say why it never did.
+///
+/// Spawning is not starting. Each of these three can exit in the first second for a reason that has
+/// nothing to do with the others, and a shell that reports "running" because it called `spawn`
+/// three times is telling somebody the stack is up while nothing is listening. That is worse than
+/// an error, because the next thing they do is open a page that will not load and go looking for
+/// the fault in the wrong place.
+///
+/// So: watch the child, and watch the port. Whichever fails first is what gets reported, with the
+/// tail of the log that explains it.
+/// The two things that have to answer before anybody is told the stack is up.
+///
+/// The API alone is not enough. The window navigates to the app, so a person told "running" who
+/// then gets a blank window has been told something that is not true, and the API was answering the
+/// whole time.
+pub struct Ready {
+    pub api: u16,
+    pub app: u16,
+}
+
+/// Both loopbacks, in the order a person is most likely to type.
+///
+/// A process that binds one and not the other is normal rather than broken: Node resolves
+/// `localhost` to `::1` and bun to `127.0.0.1`, so which one a service ends up on depends on what
+/// started it. Asking both is how a check stays true either way.
+const LOOPBACKS: [&str; 2] = ["127.0.0.1", "[::1]"];
+
+/// Where a port is answering, or `None`.
+///
+/// Returns the address that worked rather than a boolean, so a caller that has to send somebody
+/// there can use the one that answered instead of guessing again.
+pub fn answering_at(port: u16, path: &str) -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()?;
+    LOOPBACKS.iter().find_map(|host| {
+        let base = format!("http://{host}:{port}");
+        client
+            .get(format!("{base}{path}"))
+            .send()
+            .ok()
+            .filter(|response| response.status().is_success())
+            .map(|_| base)
+    })
+}
+
+/// Where the app is answering, for the window to be pointed at.
+pub fn app_url(port: u16) -> Option<String> {
+    answering_at(port, "/")
+}
+
+/// Wait until the stack is genuinely usable, or say which part is not.
+///
+/// Watches the children as well as the ports, because three processes that died leave a port
+/// unanswered for the same length of time as three that are still starting, and only one of those
+/// is worth waiting out.
+pub fn wait_until_answering(
+    children: &mut [(&'static str, std::process::Child)],
+    logs: &Path,
+    ready: &Ready,
+    patience: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + patience;
+    let mut api_up = false;
+
+    while std::time::Instant::now() < deadline {
+        for (name, child) in children.iter_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                return Err(format!(
+                    "{name} stopped straight away ({status}). {}",
+                    tail_of(logs, name)
+                ));
+            }
+        }
+
+        // An earlier API success is no longer sufficient when the app becomes ready later.
+        api_up = answering_at(ready.api, "/api/capabilities").is_some();
+        if api_up && app_url(ready.app).is_some() {
+            return Ok(());
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(750));
+    }
+
+    if api_up {
+        return Err(format!(
+            "the API is answering, but the app is not answering on port {}. {}",
+            ready.app,
+            tail_of(logs, "app")
+        ));
+    }
+    Err(format!(
+        "the API is not answering on port {}. {}",
+        ready.api,
+        tail_of(logs, "server")
+    ))
+}
+
+/// The last build error can precede Bun's wrapper stack, version, and exit message.
+/// Bound both the file read and displayed lines while preserving that useful context.
+fn tail_of(logs: &Path, name: &str) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_BYTES: u64 = 8 * 1024;
+    let read = || -> std::io::Result<Vec<u8>> {
+        let mut file = std::fs::File::open(logs.join(format!("{name}.log")))?;
+        let offset = file.metadata()?.len().saturating_sub(MAX_BYTES);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_BYTES).read_to_end(&mut bytes)?;
+        // Do not show a truncated first line, which may include part of a credential.
+        if offset > 0 {
+            let first_line = bytes.iter().position(|byte| *byte == b'\n');
+            bytes.drain(..first_line.map_or(bytes.len(), |index| index + 1));
+        }
+        Ok(bytes)
+    };
+    let bytes = match read() {
+        Ok(bytes) => bytes,
+        Err(error) => return format!("Could not read {name}.log: {error}"),
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let tail: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(40)
+        .collect();
+    if tail.is_empty() {
+        return format!("No complete lines were available in the tail of {name}.log.");
+    }
+    let mut lines = tail;
+    lines.reverse();
+    format!(
+        "Last from {name}.log (up to 40 lines, 8 KiB):\n{}",
+        lines.join("\n")
+    )
+}
+
+/// Keep a short startup headline and useful local diagnostics, with credentials removed.
+pub fn startup_problem(problem: Problem, secrets: &Secrets) -> Problem {
+    let database_reset = problem.database_reset;
+    let mut detail = problem.said;
+    if let Some(cleanup) = problem.detail {
+        detail.push('\n');
+        detail.push_str(&cleanup);
+    }
+    let mut credentials: Vec<_> = secrets
+        .iter()
+        .filter(|(key, value)| {
+            !value.is_empty()
+                && (crate::vault::is_secret(key) || key.as_str() == "OPENBOT_DESKTOP_HOST_TOKEN")
+        })
+        .collect();
+    credentials.sort_by_key(|(_, value)| std::cmp::Reverse(value.len()));
+    for (key, value) in credentials {
+        detail = detail.replace(value, &format!("<{key}>"));
+    }
+    let mut problem = Problem::with(
+        "OpenBot could not finish starting. Try Start again, or share the details below for help.",
+        detail,
+    );
+    problem.database_reset = database_reset;
+    problem
+}
+
+/// What a directory has to contain before it can be raised.
+///
+/// Checked and named rather than discovered by failing: without this the first symptom is
+/// `os error 2` from writing `.env`, which says nothing about a missing deployment, and the second
+/// is Compose reporting no configuration file. Both are the same fact and neither says it.
+pub fn deployment_problem(root: &Path) -> Option<String> {
+    if !root.exists() {
+        return Some(format!(
+            "{} does not exist yet. OpenBot needs a copy of the deployment there before it can \
+             start one.",
+            root.display()
+        ));
+    }
+    if !root.join("docker-compose.yml").exists() {
+        return Some(format!(
+            "{} is not an OpenBot deployment: it has no docker-compose.yml.",
+            root.display()
+        ));
+    }
+    for directory in ["server", "app", "worker"] {
+        if !root.join(directory).exists() {
+            return Some(format!(
+                "{} is missing its {directory} directory, so that process cannot be started.",
+                root.display()
+            ));
+        }
+    }
+    missing_script(root)
+}
+
+/// Whether the deployment on disk is one this app knows how to start.
+///
+/// The shell and the deployment are versioned apart: the app is installed once and the deployment
+/// is fetched at a tag. So an app can meet a deployment older than the scripts it calls, and the
+/// symptom is the worst kind: every step passes, the app process exits 1 on "Script not found",
+/// the supervisor restarts it five times, and the sentence a person is finally shown names a
+/// process rather than the mismatch.
+fn missing_script(root: &Path) -> Option<String> {
+    let manifest = root.join("app").join("package.json");
+    let Ok(text) = std::fs::read_to_string(&manifest) else {
+        return Some(format!("{} cannot be read.", manifest.display()));
+    };
+    /*
+     * An unreadable manifest and one without the script are different things.
+     *
+     * Read as one, a `package.json` that will not parse was reported as a deployment "older than
+     * this version of OpenBot", which sent somebody looking for a newer installer over a file with
+     * a byte-order mark in front of it. `serde_json` refuses a document that begins with one, and
+     * plenty of Windows tooling writes one: `Set-Content -Encoding UTF8` does.
+     */
+    let manifest_json =
+        match serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
+            Ok(json) => json,
+            Err(error) => {
+                return Some(format!(
+                    "{} cannot be read as JSON: {error}. Something has rewritten it.",
+                    manifest.display()
+                ))
+            }
+        };
+    if manifest_json
+        .get("scripts")
+        .and_then(|scripts| scripts.get(APP_SCRIPT))
+        .is_some()
+    {
+        return None;
+    }
+    Some(format!(
+        "The deployment in {} is older than this version of OpenBot: its app has no \"{APP_SCRIPT}\" \
+         script, so there is no way to serve it. Install a newer OpenBot, or delete that directory \
+         and start again to fetch a deployment that matches.",
+        root.display()
+    ))
+}
+
+/// The package script that serves the app. Named once, because two places must agree on it.
+const APP_SCRIPT: &str = "serve";
+
+/// Where the shell keeps the deployment it manages.
+pub fn default_root() -> PathBuf {
+    dirs_home().join("OpenBot")
+}
+
+/// The deployment directory somebody typed, as a path.
+///
+/// Trimmed, the way the four settings entered beside it on the same screen already are. That screen
+/// enables Start on `root.trim() !== ""` and then sends the untrimmed string, so a path pasted with
+/// the space the selection picked up, or with the newline a copied line carries, arrives here whole
+/// -- and this is the one of the five values that is not a credential but a place on disk.
+///
+/// A trailing space makes a second directory beside the one everything else means: the tray's Stop
+/// and the next launch both ask `default_root`, which has no space in it, so a person is left with
+/// a deployment nothing on screen can reach. A leading one is worse, because a path that begins
+/// with a space does not begin with a separator: it stops being absolute, and the whole deployment
+/// is laid out relative to wherever the window happens to be running from.
+///
+/// Only the ends. A space inside a path is part of a directory's name and stays where it is.
+pub fn root_from(typed: &str) -> PathBuf {
+    PathBuf::from(typed.trim())
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::temp_root;
+
+    #[test]
+    fn startup_log_tail_retains_build_error_before_wrapper_without_loading_whole_log() {
+        let root = temp_root("startup-build-diagnostic");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut log = "old output must be omitted\n".repeat(1_000);
+        log.push_str("error during build: Could not resolve imported module\n");
+        log.push_str(&"    at synthetic build frame\n".repeat(20));
+        log.push_str("    at run (app/scripts/serve-or-build.ts:36:11)\n");
+        log.push_str("Bun v1.2.15 (macOS arm64)\nerror: script serve exited with code 1\n");
+        std::fs::write(root.join("app.log"), log).unwrap();
+
+        let detail = tail_of(&root, "app");
+        assert!(
+            detail.contains("Could not resolve imported module"),
+            "{detail}"
+        );
+        assert!(detail.contains("serve-or-build.ts:36:11"), "{detail}");
+        assert!(!detail.contains(&"old output must be omitted\n".repeat(20)));
+        assert!(detail.len() < 8_500, "unbounded startup diagnostic");
+        assert!(detail.lines().count() <= 42, "too many startup log lines");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_problem_keeps_build_and_cleanup_details_but_removes_credentials() {
+        let secrets = Secrets::from([
+            ("OPENAI_API_KEY".into(), "synthetic+key.long".into()),
+            (
+                "OPENBOT_DESKTOP_HOST_TOKEN".into(),
+                "synthetic-host-token".into(),
+            ),
+            ("APP_PORT".into(), "4567".into()),
+        ]);
+        let mut original = Problem::with(
+            "app stopped: Could not resolve imported module; key=synthetic+key.long",
+            "cleanup failed: port 4567 token=synthetic-host-token",
+        );
+        original.database_reset = Some("openbot_postgres-data".into());
+        let problem = startup_problem(original, &secrets);
+        assert_eq!(
+            problem.database_reset.as_deref(),
+            Some("openbot_postgres-data")
+        );
+        assert!(problem.said.len() < 120);
+        assert!(!problem.said.contains("Could not resolve"));
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("Could not resolve imported module"));
+        assert!(detail.contains("cleanup failed: port 4567"));
+        assert!(detail.contains("<OPENAI_API_KEY>"));
+        assert!(detail.contains("<OPENBOT_DESKTOP_HOST_TOKEN>"));
+        assert!(!detail.contains("synthetic+key.long"));
+        assert!(!detail.contains("synthetic-host-token"));
+    }
+
+    fn postgres_config_fixture(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "services": {"postgres": {"volumes": [{
+                "type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"
+            }]}},
+            "volumes": {"postgres-data": {"name": name}}
+        })
+    }
+
+    #[test]
+    fn postgres_volume_uses_resolved_names_and_the_mount_containing_pgdata() {
+        for name in ["openbot_postgres-data", "explicit-external-database"] {
+            let mut config = postgres_config_fixture(name);
+            config["services"]["postgres"]["environment"] =
+                serde_json::json!({"PGDATA": "/var/lib/postgresql/data/pgdata"});
+            assert_eq!(
+                postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+                name
+            );
+        }
+        let mut config = postgres_config_fixture("outer-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"PGDATA": "/var/lib/postgresql/data/nested"});
+        config["services"]["postgres"]["volumes"].as_array_mut().unwrap().push(
+            serde_json::json!({"type":"volume", "source":"inner", "target":"/var/lib/postgresql/data/nested"})
+        );
+        config["volumes"]["inner"] = serde_json::json!({"name":"actual-data-volume"});
+        assert_eq!(
+            postgres_volume_name(config.to_string().as_bytes()).unwrap(),
+            "actual-data-volume"
+        );
+    }
+
+    #[test]
+    fn postgres_volume_refuses_unresolved_or_non_volume_storage_without_disclosing_config() {
+        let mut config = postgres_config_fixture("selected-volume");
+        config["services"]["postgres"]["environment"] =
+            serde_json::json!({"SECRET": "synthetic-secret-must-not-appear-in-diagnostics"});
+        config["services"]["postgres"]["volumes"][0]["type"] = "bind".into();
+        let mut missing_name = postgres_config_fixture("selected-volume");
+        missing_name["volumes"] = serde_json::json!({});
+        for content in [
+            config.to_string(),
+            missing_name.to_string(),
+            "{}".into(),
+            "invalid-json-secret".into(),
+        ] {
+            let error = postgres_volume_name(content.as_bytes()).unwrap_err();
+            assert!(error.said.contains("No encryption key was created"));
+            assert!(!format!("{error:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed() {
+        if crate::test_support::isolated_process(
+            "stack::tests::postgres_volume_inventory_uses_selected_engine_exact_names_and_fails_closed",
+        ) { return; }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path
+                .bin
+                .join(format!("{}-deployment", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            std::fs::write(
+                root.join(".fixture-config"),
+                postgres_config_fixture("selected-db").to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                root.join(".fixture-volumes"),
+                "other-db\nselected-db-backup\n",
+            )
+            .unwrap();
+            assert!(!postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            std::fs::write(root.join(".fixture-volumes"), "other-db\nselected-db\n").unwrap();
+            assert!(postgres_volume_exists(&address, &root, &Secrets::new()).unwrap());
+            for failure in [".fixture-volume-failure", ".fixture-config-failure"] {
+                std::fs::write(root.join(failure), "").unwrap();
+                let error = postgres_volume_exists(&address, &root, &Secrets::new()).unwrap_err();
+                assert!(error.said.contains("No encryption key was created"));
+                assert!(!format!("{error:?}").contains("synthetic-secret"));
+                std::fs::remove_file(root.join(failure)).unwrap();
+            }
+            let log = std::fs::read_to_string(record).unwrap();
+            for line in log.lines() {
+                let (cwd, command) = line.split_once('\t').unwrap();
+                assert_eq!(
+                    Path::new(cwd).canonicalize().unwrap(),
+                    root.canonicalize().unwrap()
+                );
+                let command = if address.engine == crate::engine::Engine::Podman {
+                    command
+                        .strip_prefix("--connection fixture-machine ")
+                        .expect("retain selected Podman connection")
+                } else {
+                    command
+                };
+                assert!(matches!(
+                    command,
+                    "compose config --format json" | "volume ls --format {{.Name}}"
+                ));
+            }
+        }
+    }
+
+    fn leftover_database_fixture(root: &Path) -> serde_json::Value {
+        let mut config = postgres_config_fixture("openbot_postgres-data");
+        config["name"] = "openbot".into();
+        std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+        std::fs::write(
+            root.join(".fixture-volumes"),
+            "unrelated\nopenbot_postgres-data\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".fixture-inspect"), serde_json::json!([{
+            "Name": "openbot_postgres-data", "Driver": "local", "Options": {},
+            "Labels": {"com.docker.compose.project":"openbot", "com.docker.compose.volume":"postgres-data"}
+        }]).to_string()).unwrap();
+        config
+    }
+
+    #[test]
+    fn leftover_database_reset_uses_only_confirmed_compose_owned_volume() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_database_reset_uses_only_confirmed_compose_owned_volume",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        for address in computer_stop_addresses(&path) {
+            let root = path.bin.join(format!("{}-reset", address.engine.binary()));
+            std::fs::create_dir(&root).unwrap();
+            let record = root.join("commands.log");
+            std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+            leftover_database_fixture(&root);
+            assert_eq!(
+                leftover_database_volume(&address, &root, &Secrets::new()).unwrap(),
+                Some("openbot_postgres-data".into())
+            );
+            assert!(
+                reset_leftover_database(&address, &root, &Secrets::new(), "unrelated").is_err()
+            );
+            assert!(!std::fs::read_to_string(&record)
+                .unwrap()
+                .contains("volume rm"));
+            reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fixture-volumes")).unwrap(),
+                "unrelated\n"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            let removals: Vec<_> = log
+                .lines()
+                .filter(|line| line.contains("volume rm"))
+                .collect();
+            assert_eq!(removals.len(), 1);
+            assert!(removals[0].ends_with("volume rm openbot_postgres-data"));
+            assert!(!log.contains("--force") && !log.contains("prune") && !log.contains("down"));
+            if address.engine == crate::engine::Engine::Podman {
+                assert!(log.lines().all(|line| line
+                    .split_once('\t')
+                    .unwrap()
+                    .1
+                    .starts_with("--connection fixture-machine ")));
+            }
+        }
+    }
+
+    #[test]
+    fn leftover_database_reset_refuses_shared_unowned_changed_or_attached_volumes() {
+        if crate::test_support::isolated_process(
+            "stack::tests::leftover_database_reset_refuses_shared_unowned_changed_or_attached_volumes",
+        ) { return; }
+        let path = PathFixture::with_fake_engine("postgres-volume");
+        let address = computer_stop_addresses(&path)[1].clone();
+        let root = path.bin.join("reset-refusals");
+        std::fs::create_dir(&root).unwrap();
+        let record = root.join("commands.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        for scenario in [
+            "external",
+            "custom-name",
+            "driver",
+            "driver-options",
+            "shared-service",
+            "shared-alias",
+            "foreign-label",
+            "missing-label",
+            "prefix-inspect",
+            "missing",
+            "config-failure",
+            "inventory-failure",
+            "inspect-failure",
+            "attached",
+        ] {
+            let mut config = leftover_database_fixture(&root);
+            std::fs::write(&record, "").unwrap();
+            let marker = match scenario {
+                "external" => {
+                    config["volumes"]["postgres-data"]["external"] = true.into();
+                    None
+                }
+                "custom-name" => {
+                    config["volumes"]["postgres-data"]["name"] = "shared-database".into();
+                    None
+                }
+                "driver" => {
+                    config["volumes"]["postgres-data"]["driver"] = "nfs".into();
+                    None
+                }
+                "driver-options" => {
+                    config["volumes"]["postgres-data"]["driver_opts"] =
+                        serde_json::json!({"device":"/shared"});
+                    None
+                }
+                "shared-service" => {
+                    config["services"]["other"] = config["services"]["postgres"].clone();
+                    None
+                }
+                "shared-alias" => {
+                    config["services"]["other"] = config["services"]["postgres"].clone();
+                    config["services"]["other"]["volumes"][0]["source"] = "backup-alias".into();
+                    config["volumes"]["backup-alias"] =
+                        serde_json::json!({"name": "openbot_postgres-data"});
+                    None
+                }
+                "foreign-label" | "missing-label" | "prefix-inspect" => {
+                    let mut inspect: serde_json::Value = serde_json::from_str(
+                        &std::fs::read_to_string(root.join(".fixture-inspect")).unwrap(),
+                    )
+                    .unwrap();
+                    if scenario == "foreign-label" {
+                        inspect[0]["Labels"]["com.docker.compose.project"] =
+                            "another-project".into();
+                    }
+                    if scenario == "missing-label" {
+                        inspect[0]["Labels"] = serde_json::json!({});
+                    }
+                    if scenario == "prefix-inspect" {
+                        inspect[0]["Name"] = "openbot_postgres-data-backup".into();
+                    }
+                    std::fs::write(root.join(".fixture-inspect"), inspect.to_string()).unwrap();
+                    None
+                }
+                "missing" => {
+                    std::fs::write(root.join(".fixture-volumes"), "unrelated\n").unwrap();
+                    None
+                }
+                "config-failure" => Some(".fixture-config-failure"),
+                "inventory-failure" => Some(".fixture-volume-failure"),
+                "inspect-failure" => Some(".fixture-inspect-failure"),
+                "attached" => Some(".fixture-attached"),
+                _ => unreachable!(),
+            };
+            std::fs::write(root.join(".fixture-config"), config.to_string()).unwrap();
+            if let Some(marker) = marker {
+                std::fs::write(root.join(marker), "").unwrap();
+            }
+            let error =
+                reset_leftover_database(&address, &root, &Secrets::new(), "openbot_postgres-data")
+                    .expect_err(scenario);
+            assert!(
+                !format!("{error:?}").contains("synthetic-secret"),
+                "{scenario}"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            assert_eq!(
+                log.contains("volume rm"),
+                scenario == "attached",
+                "{scenario}: {log}"
+            );
+            assert!(!log.contains("--force"));
+            assert!(std::fs::read_to_string(root.join(".fixture-volumes"))
+                .unwrap()
+                .contains("unrelated"));
+            if scenario == "attached" {
+                assert!(std::fs::read_to_string(root.join(".fixture-volumes"))
+                    .unwrap()
+                    .contains("openbot_postgres-data"));
+            }
+            if let Some(marker) = marker {
+                std::fs::remove_file(root.join(marker)).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn desktop_approval_transport_credential_reaches_only_the_server() {
+        let secrets = Secrets::from([
+            ("OPENBOT_DESKTOP_HOST_TOKEN".into(), "fixture-only".into()),
+            ("INTELLIGENCE_API_KEY".into(), "other-fixture".into()),
+        ]);
+        for name in ["server", "worker", "app"] {
+            let mut command = Command::new("unused");
+            configure_host_process_env(&mut command, name, &secrets);
+            let vars: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+            assert_eq!(
+                vars[std::ffi::OsStr::new("OPENBOT_DESKTOP_HOST_TOKEN")],
+                (name == "server").then_some(std::ffi::OsStr::new("fixture-only")),
+                "approval credential exposure to {name}"
+            );
+            assert_eq!(
+                vars[std::ffi::OsStr::new("INTELLIGENCE_API_KEY")],
+                Some(std::ffi::OsStr::new("other-fixture"))
+            );
+        }
+    }
+
+    #[test]
+    fn host_processes_receive_persisted_ports_on_start_and_restart() {
+        let root = temp_root("host-selected-ports");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("ports.rs");
+        let bun = root.join(format!("ports{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(
+            &source,
+            r#"
+fn main() {
+    let role = std::env::current_dir().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(std::env::var("APP_PORT").unwrap(), "52110");
+    assert_eq!(std::env::var("SERVER_PORT").unwrap(), "52101");
+    if role == "server" { assert_eq!(std::env::var("PORT").unwrap(), "52101"); }
+}
+"#,
+        )
+        .unwrap();
+        crate::test_support::compile_fixture(&source, &bun);
+        let ports = crate::env::Ports {
+            app: 52110,
+            server: 52101,
+            ..Default::default()
+        };
+        crate::env::write(
+            &root.join(".env"),
+            &ports.settings(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap();
+        let stale = Secrets::from([
+            ("SERVER_PORT".into(), "3001".into()),
+            ("APP_PORT".into(), "3010".into()),
+            ("PORT".into(), "3001".into()),
+        ]);
+        for _ in 0..2 {
+            for process in HOST_PROCESSES {
+                std::fs::create_dir_all(root.join(process.cwd)).unwrap();
+                let status = spawn_host_process(&process, &root, &root.join(".logs"), &bun, &stale)
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+                assert!(
+                    status.success(),
+                    "{} did not receive selected ports",
+                    process.name
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn unix_fixture(pid: u32, parent: u32) -> UnixProcess {
+        UnixProcess {
+            pid,
+            parent,
+            start: format!("instance-{pid}"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn unix_record(pid: u32) -> UnixHostProcess {
+        UnixHostProcess {
+            name: "app".into(),
+            deployment: PathBuf::from("/owned"),
+            pid,
+            start: format!("instance-{pid}"),
+        }
+    }
+
+    #[cfg(unix)]
+    struct UnixDescendantFixture {
+        root: PathBuf,
+        parent: std::process::Child,
+        leaf: UnixProcess,
+        port: u16,
+    }
+
+    #[cfg(unix)]
+    impl UnixDescendantFixture {
+        fn new(ignore_term: bool) -> Self {
+            let root = temp_root("unix-descendant-cleanup");
+            std::fs::create_dir_all(&root).unwrap();
+            let source = root.join("listener.rs");
+            std::fs::write(
+                &source,
+                format!(
+                    "const TERM: i32 = {}; const IGNORE: usize = {};\n{{}}",
+                    libc::SIGTERM,
+                    libc::SIG_IGN
+                )
+                .replace(
+                    "{}",
+                    r#"
+use std::io::Write;
+extern "C" { fn signal(sig: i32, handler: usize) -> usize; }
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args[1] == "parent" {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["leaf", &args[2]]).spawn().unwrap();
+        let status = child.wait().unwrap();
+        std::fs::write("descendant-exit", status.to_string()).unwrap();
+        return;
+    }
+    if args[2] == "ignore" { unsafe { signal(TERM, IGNORE); } }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    println!("{} {}", std::process::id(), listener.local_addr().unwrap().port());
+    std::io::stdout().flush().unwrap();
+    for stream in listener.incoming() { drop(stream.unwrap()); }
+}
+"#,
+                ),
+            )
+            .unwrap();
+            let binary = root.join("listener");
+            crate::test_support::compile_fixture(&source, &binary);
+            let mut parent = Command::new(binary)
+                .args(["parent", if ignore_term { "ignore" } else { "graceful" }])
+                .current_dir(&root)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufRead::read_line(
+                &mut std::io::BufReader::new(parent.stdout.take().unwrap()),
+                &mut line,
+            )
+            .unwrap();
+            let (pid, port) = line.trim().split_once(' ').unwrap();
+            let leaf = unix_process(pid.parse().unwrap()).unwrap().unwrap();
+            assert_eq!(leaf.parent, parent.id());
+            record_host_processes(&root, &[("app", parent.id())]).unwrap();
+            Self {
+                root,
+                parent,
+                leaf,
+                port: port.parse().unwrap(),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for UnixDescendantFixture {
+        fn drop(&mut self) {
+            // Old-code regressions must also clean up the exact fixture instance after it orphans.
+            if unix_process(self.leaf.pid)
+                .unwrap()
+                .is_some_and(|now| now.start == self.leaf.start)
+            {
+                unsafe {
+                    libc::kill(self.leaf.pid as i32, libc::SIGKILL);
+                }
+            }
+            let _ = self.parent.kill();
+            let _ = self.parent.wait();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while something_answers(self.port) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                !something_answers(self.port),
+                "fixture listener was not cleaned"
+            );
+            assert!(unix_process(self.parent.id()).unwrap().is_none());
+            assert!(unix_process(self.leaf.pid).unwrap().is_none());
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_cleanup_stops_ignoring_and_graceful_listeners_before_parent() {
+        for ignore_term in [true, false] {
+            let mut fixture = UnixDescendantFixture::new(ignore_term);
+            let result = stop_processes_under(&fixture.root);
+            let parent = fixture.parent.try_wait().unwrap();
+            let leaf = unix_process(fixture.leaf.pid).unwrap();
+            let listening = something_answers(fixture.port);
+            let retry = stop_processes_under(&fixture.root);
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "ignoreTerm": ignore_term, "stop": result.as_ref().ok(),
+                    "parentExited": parent.is_some(), "leafAlive": leaf.is_some(),
+                    "listenerOpen": listening, "retry": retry.as_ref().ok(),
+                    "parentPid": fixture.parent.id(), "leafPid": fixture.leaf.pid, "port": fixture.port,
+                })
+            );
+            drop(fixture);
+            assert!(result.is_ok(), "{result:?}");
+            assert!(
+                !listening,
+                "cleanup reported success while the descendant kept its listener"
+            );
+            assert!(leaf.is_none(), "cleanup left the descendant alive");
+            assert_eq!(retry.unwrap(), 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_failure_retains_real_parent_and_durable_retry_record() {
+        let mut fixture = UnixDescendantFixture::new(true);
+        let original = std::fs::read(host_pids_path(&fixture.root)).unwrap();
+        let records = unix_host_records(&fixture.root, &[("app", fixture.parent.id())]).unwrap();
+        let mut attempts = Vec::new();
+        let result = stop_unix_records_with(
+            &std::fs::canonicalize(&fixture.root).unwrap(),
+            &records,
+            &unix_inventory().unwrap(),
+            unix_process,
+            quiesce_unix_process,
+            unix_inventory,
+            |pid, _| {
+                attempts.push(pid);
+                Err(unix_ownership_problem(
+                    "synthetic descendant signal refusal",
+                ))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, [fixture.leaf.pid as i32]);
+        assert!(
+            fixture.parent.try_wait().unwrap().is_none(),
+            "retry ancestor must stay alive"
+        );
+        assert!(unix_process_state(fixture.leaf.pid).unwrap().unwrap().1);
+        assert_eq!(
+            std::fs::read(host_pids_path(&fixture.root)).unwrap(),
+            original
+        );
+        assert_eq!(
+            unix_process(fixture.leaf.pid).unwrap(),
+            Some(fixture.leaf.clone())
+        );
+        // Retrying the durable record also handles ancestors left stopped by the failed attempt.
+        assert!(stop_processes_under(&fixture.root).is_ok());
+        assert!(!something_answers(fixture.port));
+        assert!(unix_process(fixture.leaf.pid).unwrap().is_none());
+        assert_eq!(stop_processes_under(&fixture.root).unwrap(), 0);
+        // Drop independently checks the retained instances and port before removing the fixture.
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_descendant_removal_refuses_changed_identity_and_retains_ancestor_on_failure() {
+        for failure in [
+            "reused",
+            "reparented",
+            "ancestor-reused",
+            "stuck",
+            "signal-denied",
+        ] {
+            let signaled = std::cell::Cell::new(false);
+            let mut attempts = Vec::new();
+            let result = stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100), (102, 101)],
+                |pid| {
+                    let mut live = unix_fixture(pid, if pid == 102 { 101 } else { 100 });
+                    if signaled.get() {
+                        if (failure == "reused" && pid == 102)
+                            || (failure == "ancestor-reused" && pid == 101)
+                        {
+                            live.start = "foreign-instance".into();
+                        }
+                        if failure == "reparented" && pid == 102 {
+                            live.parent = 201;
+                        }
+                    }
+                    Ok(Some(live))
+                },
+                |_, _| Ok(()),
+                || Ok([(101, 100), (102, 101)].to_vec()),
+                |pid, still_owned| {
+                    terminate_unix_process_with(
+                        pid,
+                        still_owned,
+                        |pid, signal| {
+                            attempts.push((pid, signal));
+                            signaled.set(true);
+                            if failure == "signal-denied" {
+                                Err(unix_ownership_problem("synthetic signal refusal"))
+                            } else {
+                                Ok(true)
+                            }
+                        },
+                        std::time::Duration::ZERO,
+                    )
+                },
+            );
+            assert!(result.is_err(), "{failure} must remain a cleanup failure");
+            let expected = vec![(102, libc::SIGKILL)];
+            assert_eq!(
+                attempts, expected,
+                "{failure}: ancestor or changed instance must never be signaled"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_ownership_selects_only_recorded_instance_and_verified_descendants() {
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(103, 102),
+            unix_fixture(201, 100),
+            unix_fixture(202, 201),
+        ];
+        // The other root may have the same cwd/command: neither is an ownership input.
+        let rows: Vec<_> = live.iter().map(|p| (p.pid, p.parent)).collect();
+        let mut attempted = Vec::new();
+        let count = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &rows,
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |_, _| Ok(()),
+            || Ok(rows.clone()),
+            |pid, _| {
+                attempted.push(pid);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(attempted, [103, 102, 101]);
+        for root in ["/other", "/owned-sibling"] {
+            assert!(stop_unix_records_with(
+                Path::new(root),
+                &[unix_record(101)],
+                &rows,
+                |_| panic!("a different deployment is not inspected"),
+                |_, _| Ok(()),
+                || Ok(rows.clone()),
+                |_, _| panic!("a different deployment is not signaled")
+            )
+            .is_err());
+        }
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[],
+                &rows,
+                |_| panic!("an unrecorded process is not inspected"),
+                |_, _| Ok(()),
+                || Ok(rows.clone()),
+                |_, _| panic!("an unrecorded process is not signaled")
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_reused_pids_and_changed_ancestry_never_authorize_a_signal() {
+        let changed = UnixProcess {
+            start: "reused".into(),
+            ..unix_fixture(101, 100)
+        };
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100)],
+                |_| Ok(Some(changed.clone())),
+                |_, _| Ok(()),
+                || Ok([(101, 100)].to_vec()),
+                |_, _| panic!("reused PID")
+            )
+            .unwrap(),
+            0
+        );
+        let mut reads = 0;
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101)],
+            |pid| {
+                reads += 1;
+                Ok(Some(if reads > 2 {
+                    UnixProcess {
+                        start: "changed-after-inventory".into(),
+                        ..unix_fixture(pid, 100)
+                    }
+                } else {
+                    unix_fixture(pid, if pid == 102 { 101 } else { 100 })
+                }))
+            },
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101)].to_vec()),
+            |_, _| panic!("changed instance must be revalidated")
+        )
+        .is_err());
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101)],
+            |pid| Ok(Some(unix_fixture(pid, 100))),
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101)].to_vec()),
+            |_, _| panic!("changed parent")
+        )
+        .is_err());
+        for pid in [
+            0,
+            1,
+            std::process::id(),
+            unsafe { libc::getppid() } as u32,
+            u32::MAX,
+        ] {
+            assert!(stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(pid)],
+                &[],
+                |_| panic!("unsafe PID"),
+                |_, _| Ok(()),
+                || Ok([].to_vec()),
+                |_, _| panic!("unsafe PID")
+            )
+            .is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_reports_failure_keeps_parent_and_attempts_other_owned_roots() {
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(201, 100),
+        ];
+        let mut attempted = Vec::new();
+        let problem = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101), unix_record(201)],
+            &[(101, 100), (102, 101), (201, 100)],
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101), (201, 100)].to_vec()),
+            |pid, _| {
+                attempted.push(pid);
+                if pid == 102 {
+                    Err(unix_ownership_problem(
+                        "synthetic signal refusal for pid 102",
+                    ))
+                } else {
+                    Ok(true)
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(attempted, [102, 201]);
+        assert!(problem.detail.unwrap().contains("synthetic signal refusal"));
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100)],
+                |_| Ok(Some(unix_fixture(101, 100))),
+                |_, _| Ok(()),
+                || Ok([(101, 100)].to_vec()),
+                |_, _| Ok(false)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[],
+            |_| Err(unix_ownership_problem("inventory denied")),
+            |_, _| Ok(()),
+            || Ok([].to_vec()),
+            |_, _| panic!("lost inventory")
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_inventories_children_only_after_verified_quiescence() {
+        use std::cell::RefCell;
+        // 103 is born under 102 after the initial snapshot. 201 is a foreign neighbor.
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(103, 102),
+            unix_fixture(201, 100),
+        ];
+        let frozen = RefCell::new(Vec::new());
+        let mut killed = Vec::new();
+        let count = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101), (201, 100)],
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |pid, still_owned| {
+                assert!(still_owned()?);
+                frozen.borrow_mut().push(pid);
+                Ok(())
+            },
+            || {
+                assert!(
+                    !frozen.borrow().is_empty(),
+                    "inventory ran before its parent stopped"
+                );
+                Ok(live.iter().map(|p| (p.pid, p.parent)).collect())
+            },
+            |pid, still_owned| {
+                assert_eq!(*frozen.borrow(), [101, 102, 103]);
+                assert!(still_owned()?);
+                killed.push(pid);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(killed, [103, 102, 101]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_quiescence_failure_preserves_anchors_and_attempts_other_roots() {
+        use std::cell::RefCell;
+        for failure in ["stop-denied", "inventory-denied"] {
+            let live = [
+                unix_fixture(101, 100),
+                unix_fixture(102, 101),
+                unix_fixture(201, 100),
+            ];
+            let frozen = RefCell::new(Vec::new());
+            let mut killed = Vec::new();
+            let result = stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101), unix_record(201)],
+                &[(101, 100), (102, 101), (201, 100)],
+                |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+                |pid, still_owned| {
+                    assert!(still_owned()?);
+                    if failure == "stop-denied" && pid == 102 {
+                        return Err(unix_ownership_problem("synthetic stop denied"));
+                    }
+                    frozen.borrow_mut().push(pid);
+                    Ok(())
+                },
+                || {
+                    if failure == "inventory-denied" && frozen.borrow().last() == Some(&102) {
+                        return Err(unix_ownership_problem("synthetic inventory denied"));
+                    }
+                    Ok(live.iter().map(|p| (p.pid, p.parent)).collect())
+                },
+                |pid, _| {
+                    killed.push(pid);
+                    Ok(true)
+                },
+            );
+            assert!(result.is_err(), "{failure} must remain an error");
+            assert_eq!(
+                killed,
+                [201],
+                "{failure}: unresolved tree must retain its anchors"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_quiescence_requires_confirmed_stop_and_revalidates_identity() {
+        for failure in [
+            "unconfirmed",
+            "missing",
+            "changed",
+            "status-denied",
+            "signal-denied",
+        ] {
+            let status_read = std::cell::Cell::new(false);
+            let mut signals = Vec::new();
+            let result = quiesce_unix_process_with(
+                101,
+                &mut || {
+                    if status_read.get() {
+                        if failure == "missing" {
+                            return Ok(false);
+                        }
+                        if failure == "changed" {
+                            return Err(unix_ownership_problem("changed instance"));
+                        }
+                    }
+                    Ok(true)
+                },
+                |pid, signal| {
+                    signals.push((pid, signal));
+                    if failure == "signal-denied" {
+                        return Err(unix_ownership_problem("signal denied"));
+                    }
+                    Ok(true)
+                },
+                |_| {
+                    status_read.set(true);
+                    if failure == "status-denied" {
+                        return Err(unix_ownership_problem("status denied"));
+                    }
+                    Ok(failure != "unconfirmed")
+                },
+                std::time::Duration::ZERO,
+            );
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(signals, [(101, libc::SIGSTOP)]);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_stop_state_is_separate_from_process_instance_identity() {
+        let stat = |state| format!("101 (owned) {state} 100 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 42");
+        let running = parse_linux_process_state(101, &stat("S"), "boot")
+            .unwrap()
+            .unwrap();
+        let stopped = parse_linux_process_state(101, &stat("T"), "boot")
+            .unwrap()
+            .unwrap();
+        assert_eq!(running.0, stopped.0);
+        assert!(!running.1);
+        assert!(stopped.1);
+        // A ptrace stop is not proof of our SIGSTOP quiescence.
+        assert!(
+            !parse_linux_process_state(101, &stat("t"), "boot")
+                .unwrap()
+                .unwrap()
+                .1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_inventory_command_failures_and_malformed_output_are_errors() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("unix-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let ps = root.join("ps");
+        assert!(unix_inventory_with(&ps)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("could not run"));
+        for body in [
+            "echo synthetic-ps-failure >&2; exit 9",
+            "echo malformed",
+            "exit 0",
+            "printf '101 100\\n101 100\\n'",
+        ] {
+            std::fs::write(&ps, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(unix_inventory_with(&ps).is_err(), "{body}");
+        }
+        std::fs::write(&ps, "#!/bin/sh\nprintf '101 100\\n102 101\\n'\n").unwrap();
+        assert_eq!(unix_inventory_with(&ps).unwrap(), [(101, 100), (102, 101)]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_missing_legacy_corrupt_and_versioned_records_fail_closed() {
+        let root = temp_root("unix-records");
+        assert_eq!(stop_processes_under(&root).unwrap(), 0);
+        record_host_pids(&root, &[42]).unwrap();
+        assert!(stop_processes_under(&root)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("legacy"));
+        assert_eq!(std::fs::read(host_pids_path(&root)).unwrap(), b"[42]");
+        for raw in [
+            "broken",
+            "{\"version\":2,\"unix_processes\":[{\"pid\":42}]}",
+            "{\"version\":3,\"unix_processes\":[]}",
+        ] {
+            std::fs::write(host_pids_path(&root), raw).unwrap();
+            assert!(stop_processes_under(&root).is_err());
+            assert_eq!(std::fs::read_to_string(host_pids_path(&root)).unwrap(), raw);
+        }
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":2,"unix_processes":[unix_record(101)]}),
+        )
+        .unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [101]);
+        assert!(
+            recorded_host_processes(&root).unwrap().is_empty(),
+            "Windows v1 reader must not treat Unix records as Windows evidence"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_identity_parser_uses_boot_and_start_ticks_and_rejects_malformed_inventory() {
+        let raw = "101 (command with ) spaces) S 100 101 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0";
+        let first = parse_linux_process(101, raw, "boot-one").unwrap().unwrap();
+        assert_eq!(first.parent, 100);
+        assert_eq!(first.start, "linux:boot-one:999");
+        assert_ne!(
+            first.start,
+            parse_linux_process(101, raw, "boot-two")
+                .unwrap()
+                .unwrap()
+                .start
+        );
+        for bad in [
+            "",
+            "101 malformed",
+            "101 (name) S 100",
+            "102 (wrong-pid) S 100",
+        ] {
+            assert!(parse_linux_process(101, bad, "boot-one").is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_restart_refreshes_identity_and_retains_new_handle_on_persistence_failure() {
+        let root = temp_root("unix-restart");
+        std::fs::create_dir_all(&root).unwrap();
+        let first = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let mut children = Vec::new();
+        replace_host_process(&root, &mut children, "app", first).unwrap();
+        let prior = std::fs::read(host_pids_path(&root)).unwrap();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let replacement_pid = replacement.id();
+        replace_host_process(&root, &mut children, "app", replacement).unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [replacement_pid]);
+        assert_ne!(std::fs::read(host_pids_path(&root)).unwrap(), prior);
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        std::fs::remove_file(host_pids_path(&root)).unwrap();
+        std::fs::create_dir(host_pids_path(&root)).unwrap();
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let replacement_pid = replacement.id();
+        let result = replace_host_process(&root, &mut children, "app", replacement);
+        assert_eq!(children[0].1.id(), replacement_pid);
+        let still_alive = children[0].1.try_wait().unwrap().is_none();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert!(still_alive);
+        assert!(result
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("replace pidfile"));
+        assert_eq!(std::fs::read_dir(root.join(".logs")).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_initial_inventory_does_not_own_a_direct_sibling_replacement() {
+        let original = recorded_process("server", 9000, "/Date(1000)/");
+        let rows = [
+            live_process(9000, 7000, "/Date(1000)/"),
+            live_process(9001, 7000, "/Date(2000)/"),
+            live_process(9002, 8000, "/Date(3000)/"),
+        ];
+        let listing = "TCP 127.0.0.1:3001 0.0.0.0:0 LISTENING 9001\nTCP 127.0.0.1:3010 0.0.0.0:0 LISTENING 9002\n";
+        assert_eq!(
+            verified_openbot_root_pids(std::slice::from_ref(&original), &rows),
+            [9000]
+        );
+        assert!(verified_openbot_pids_listening_on(
+            listing,
+            &[3001, 3010],
+            std::slice::from_ref(&original),
+            &rows
+        )
+        .is_empty());
+        let replacement = recorded_process("server", 9001, "/Date(2000)/");
+        assert_eq!(
+            verified_openbot_pids_listening_on(
+                listing,
+                &[3001, 3010],
+                &[original, replacement],
+                &rows
+            ),
+            [9001]
+        );
+    }
+
+    struct WindowsReplacementFixture {
+        root: PathBuf,
+        commands: CleanupCommandFixture,
+        children: Vec<(&'static str, std::process::Child)>,
+        binary: PathBuf,
+    }
+
+    impl WindowsReplacementFixture {
+        fn new() -> Self {
+            let root = temp_root("windows-replacement-records");
+            std::fs::create_dir_all(&root).unwrap();
+            let commands = CleanupCommandFixture::new(&root);
+            commands.scenario("ownership-inventory");
+            let source = root.join("held.rs");
+            std::fs::write(&source, "fn main() { let mut line = String::new(); std::io::stdin().read_line(&mut line).unwrap(); }").unwrap();
+            let binary = root.join(if cfg!(windows) { "held.exe" } else { "held" });
+            crate::test_support::compile_fixture(&source, &binary);
+            Self {
+                root,
+                commands,
+                children: Vec::new(),
+                binary,
+            }
+        }
+
+        fn spawn(&self) -> std::process::Child {
+            Command::new(&self.binary)
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap()
+        }
+
+        fn inventory(&self, rows: &[WindowsProcess]) {
+            let rows: Vec<_> = rows
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "ProcessId": row.process_id, "ParentProcessId": row.parent_process_id,
+                        "ExecutablePath": row.executable_path, "CommandLine": row.command_line,
+                        "CreationDate": row.creation_date,
+                    })
+                })
+                .collect();
+            std::fs::write(
+                self.root.join("synthetic-inventory.json"),
+                serde_json::to_vec(&rows).unwrap(),
+            )
+            .unwrap();
+        }
+
+        fn owns(&self, name: &str, pid: u32) -> bool {
+            std::fs::write(
+                self.root.join("synthetic-netstat.txt"),
+                format!("TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING {pid}\n"),
+            )
+            .unwrap();
+            recorded_process_owns_port_windows_with(
+                &self.root,
+                name,
+                45123,
+                &self.commands.command("powershell"),
+                &self.commands.command("netstat"),
+            )
+            .unwrap()
+        }
+    }
+
+    impl Drop for WindowsReplacementFixture {
+        fn drop(&mut self) {
+            for (_, child) in &mut self.children {
+                if child.try_wait().unwrap().is_none() {
+                    child.kill().unwrap();
+                }
+                child.wait().unwrap();
+            }
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    fn windows_restart_records_case<F>(both_dead: bool, mut publish: F)
+    where
+        F: FnMut(
+            &Path,
+            &mut Vec<(&'static str, std::process::Child)>,
+            &'static str,
+            std::process::Child,
+            &Path,
+        ) -> Result<(), Problem>,
+    {
+        let mut fixture = WindowsReplacementFixture::new();
+        let old_server = fixture.spawn();
+        let old_app = fixture.spawn();
+        let old = vec![
+            recorded_process("server", old_server.id(), "/Date(1000)/"),
+            recorded_process("app", old_app.id(), "/Date(1001)/"),
+        ];
+        fixture.children = vec![("server", old_server), ("app", old_app)];
+        write_host_pid_file(
+            &fixture.root,
+            &serde_json::json!({"version":1,"processes":old}),
+        )
+        .unwrap();
+        fixture.children[0].1.kill().unwrap();
+        fixture.children[0].1.wait().unwrap();
+        if both_dead {
+            fixture.children[1].1.kill().unwrap();
+            fixture.children[1].1.wait().unwrap();
+        }
+        let replacement = fixture.spawn();
+        let pid = replacement.id();
+        // The predecessor PID is now foreign; the other role can be live or absent.
+        let mut rows = vec![
+            live_process(old[0].pid, 0, "/Date(1500)/"),
+            live_process(pid, std::process::id(), "/Date(2000)/"),
+        ];
+        if !both_dead {
+            rows.push(live_host_process(
+                "app",
+                old[1].pid,
+                std::process::id(),
+                "/Date(1001)/",
+            ));
+        }
+        fixture.inventory(&rows);
+        assert!(!fixture.owns("server", pid));
+        publish(
+            &fixture.root,
+            &mut fixture.children,
+            "server",
+            replacement,
+            &fixture.commands.command("powershell"),
+        )
+        .unwrap();
+        assert!(
+            fixture.owns("server", pid),
+            "published replacement must own its listener"
+        );
+        assert!(
+            !fixture.owns("server", old[0].pid),
+            "a reused predecessor PID must remain foreign"
+        );
+        let records = recorded_host_processes(&fixture.root).unwrap();
+        assert!(
+            old.iter().all(|record| records.contains(record)),
+            "retain earlier cleanup evidence"
+        );
+        assert_eq!(records.len(), 3);
+        assert!(!fixture
+            .children
+            .iter()
+            .any(|(_, child)| child.id() == old[0].pid));
+        if both_dead {
+            let app = fixture.spawn();
+            let app_pid = app.id();
+            rows.push(live_host_process(
+                "app",
+                app_pid,
+                std::process::id(),
+                "/Date(2001)/",
+            ));
+            fixture.inventory(&rows);
+            publish(
+                &fixture.root,
+                &mut fixture.children,
+                "app",
+                app,
+                &fixture.commands.command("powershell"),
+            )
+            .unwrap();
+            assert!(fixture.owns("app", app_pid));
+            assert!(fixture.owns("server", pid));
+            assert_eq!(fixture.children.len(), 2);
+            assert_eq!(recorded_host_processes(&fixture.root).unwrap().len(), 4);
+        } else {
+            assert!(fixture.owns("app", old[1].pid));
+        }
+        assert!(!fixture.commands.log().contains("taskkill\t"));
+    }
+
+    #[test]
+    fn windows_replacement_records_new_owner_and_preserves_other_role() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_records_new_owner_and_preserves_other_role",
+        ) {
+            return;
+        }
+        windows_restart_records_case(false, replace_windows_host_process_with);
+    }
+
+    #[test]
+    fn windows_replacement_records_two_dead_roles_sequentially() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_records_two_dead_roles_sequentially",
+        ) {
+            return;
+        }
+        windows_restart_records_case(true, replace_windows_host_process_with);
+    }
+
+    #[test]
+    fn windows_replacement_recording_failure_retains_handles_and_prior_records() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_replacement_recording_failure_retains_handles_and_prior_records",
+        ) {
+            return;
+        }
+        for failure in [
+            "missing",
+            "wrong-parent",
+            "incomplete",
+            "malformed-time",
+            "duplicate",
+            "exited",
+            "read",
+        ] {
+            let mut fixture = WindowsReplacementFixture::new();
+            let prior = serde_json::to_vec(&serde_json::json!({"version":1,"processes":[recorded_process("app", 9000, "/Date(1001)/")]})).unwrap();
+            std::fs::create_dir_all(fixture.root.join(".logs")).unwrap();
+            let prior = if failure == "read" {
+                b"unreadable-records".to_vec()
+            } else {
+                prior
+            };
+            std::fs::write(host_pids_path(&fixture.root), &prior).unwrap();
+            // Even a live predecessor must not be dropped on a failed publication.
+            fixture.children.push(("server", fixture.spawn()));
+            let mut replacement = fixture.spawn();
+            let pid = replacement.id();
+            let mut live = live_process(pid, std::process::id(), "/Date(2000)/");
+            if failure == "wrong-parent" {
+                live.parent_process_id = 0;
+            }
+            if failure == "incomplete" {
+                live.creation_date = None;
+            }
+            if failure == "malformed-time" {
+                live.creation_date = Some("not-a-date".into());
+            }
+            let rows = match failure {
+                "missing" => vec![],
+                "duplicate" => vec![live.clone(), live],
+                _ => vec![live],
+            };
+            fixture.inventory(&rows);
+            if failure == "exited" {
+                replacement.kill().unwrap();
+                replacement.wait().unwrap();
+            }
+            let result = replace_windows_host_process_with(
+                &fixture.root,
+                &mut fixture.children,
+                "server",
+                replacement,
+                &fixture.commands.command("powershell"),
+            );
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(
+                std::fs::read(host_pids_path(&fixture.root)).unwrap(),
+                prior,
+                "{failure}"
+            );
+            assert_eq!(fixture.children.len(), 2, "{failure}");
+            assert_eq!(fixture.children[1].1.id(), pid);
+            assert_eq!(
+                fixture.children[1].1.try_wait().unwrap().is_none(),
+                failure != "exited"
+            );
+            assert!(!fixture.commands.log().contains("taskkill\t"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn windows_held_replacement_cleanup_keeps_evidence_on_refusal() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_held_replacement_cleanup_keeps_evidence_on_refusal",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-held-replacement-refusal");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = replacement.id();
+        let mut children = vec![("server", replacement)];
+        let old = recorded_process("server", 9000, "/Date(1000)/");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[old.clone()]}),
+        )
+        .unwrap();
+        let row = live_process(pid, std::process::id(), "/Date(2000)/");
+        std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([{
+            "ProcessId":pid,"ParentProcessId":row.parent_process_id,"ExecutablePath":row.executable_path,"CommandLine":row.command_line,"CreationDate":row.creation_date
+        }])).unwrap()).unwrap();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        );
+        let alive = children[0].1.try_wait().unwrap().is_none();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        let problem = result.unwrap_err();
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("synthetic held cleanup refused"),
+            "{problem:?}"
+        );
+        assert!(alive);
+        assert_eq!(
+            recorded_host_processes(&root).unwrap(),
+            [old, recorded_process("server", pid, "/Date(2000)/")]
+        );
+        assert!(fixture
+            .log()
+            .contains(&format!("taskkill\t/PID {pid} /T /F")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing() {
+        if crate::test_support::isolated_process("stack::tests::windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing") { return; }
+        for parent in [0, std::process::id()] {
+            let root = temp_root("windows-held-identity-refusal");
+            std::fs::create_dir_all(&root).unwrap();
+            let fixture = CleanupCommandFixture::new(&root);
+            fixture.scenario("held-refusal");
+            let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+            let pid = replacement.id();
+            let mut children = vec![("server", replacement)];
+            let original = serde_json::to_vec(&serde_json::json!({"version":1,"processes":[recorded_process("server",9000,"original")]})).unwrap();
+            std::fs::create_dir_all(root.join(".logs")).unwrap();
+            std::fs::write(host_pids_path(&root), &original).unwrap();
+            std::fs::write(root.join("synthetic-inventory.json"),serde_json::to_vec(&serde_json::json!([{"ProcessId":pid,"ParentProcessId":parent,"ExecutablePath":"synthetic","CommandLine":"synthetic","CreationDate":if parent==0 {"instance"} else {""}}])).unwrap()).unwrap();
+            let result = stop_windows_host_children_with(
+                &root,
+                &mut children,
+                &fixture.command("powershell"),
+                &fixture.command("taskkill"),
+            );
+            let alive = children[0].1.try_wait().unwrap().is_none();
+            children[0].1.kill().unwrap();
+            children[0].1.wait().unwrap();
+            assert!(result.unwrap_err().said.contains("verify"));
+            assert!(alive);
+            assert_eq!(std::fs::read(host_pids_path(&root)).unwrap(), original);
+            assert!(!fixture.log().contains("taskkill\t"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
+        match std::net::TcpListener::bind("[::1]:0") {
+            Ok(listener) => Some(listener),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+                ) =>
+            {
+                eprintln!("IPv6 loopback unavailable; skipping IPv6 socket regression: {error}");
+                None
+            }
+            Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+        }
+    }
+
+    #[test]
+    fn dependency_install_retries_partial_directory_and_rechecks_cached_success() {
+        let root = temp_root("dependency-install-retry");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("fake_bun.rs");
+        std::fs::write(&source, r#"
+use std::io::Write;
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    assert_eq!(args, ["install", "--frozen-lockfile", "--ignore-scripts"]);
+    let previous = std::fs::read_to_string("attempts.log").unwrap_or_default();
+    let mut log = std::fs::OpenOptions::new().create(true).append(true).open("attempts.log").unwrap();
+    writeln!(log, "{}", args.join(" ")).unwrap();
+    std::fs::create_dir_all("node_modules").unwrap();
+    if previous.is_empty() {
+        eprintln!("synthetic interrupted dependency download");
+        std::process::exit(9);
+    }
+    std::fs::write("node_modules/installed-package", "cached package contents").unwrap();
+}
+"#).unwrap();
+        let bun = root.join(if cfg!(windows) {
+            "fake-bun.exe"
+        } else {
+            "fake-bun"
+        });
+        crate::test_support::compile_fixture(&source, &bun);
+        let first = install_dependencies(&root, &bun);
+        assert!(
+            root.join("node_modules").is_dir(),
+            "failure must leave a partial directory"
+        );
+        let second = install_dependencies(&root, &bun);
+        let third = install_dependencies(&root, &bun);
+        let attempts = std::fs::read_to_string(root.join("attempts.log")).unwrap();
+        let installed = std::fs::read_to_string(root.join("node_modules/installed-package"));
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "firstError": first.as_ref().err(), "retrySucceeded": second.is_ok(),
+                "cachedSucceeded": third.is_ok(), "invocations": attempts.lines().count(),
+                "installed": installed.as_ref().ok(),
+            })
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(first
+            .unwrap_err()
+            .contains("synthetic interrupted dependency download"));
+        assert!(second.is_ok(), "{second:?}");
+        assert!(third.is_ok(), "{third:?}");
+        assert_eq!(
+            attempts.lines().count(),
+            3,
+            "retry and cached checks must invoke Bun"
+        );
+        assert_eq!(installed.unwrap(), "cached package contents");
+    }
+
+    fn host_command_line(name: &str) -> &'static str {
+        match name {
+            "worker" => r#"bun --env-file=../.env src/index.ts"#,
+            _ => r#"bun --env-file=../.env src/production-entry.ts"#,
+        }
+    }
+
+    fn recorded_process(name: &str, pid: u32, creation_date: &str) -> RecordedHostProcess {
+        RecordedHostProcess {
+            name: name.to_string(),
+            pid,
+            executable_path: r"C:\Users\person\.bun\bin\bun.exe".to_string(),
+            command_line: host_command_line(name).to_string(),
+            creation_date: creation_date.to_string(),
+        }
+    }
+
+    fn live_host_process(name: &str, pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
+        WindowsProcess {
+            process_id: pid,
+            parent_process_id: parent,
+            executable_path: Some(r"C:\Users\person\.bun\bin\bun.exe".to_string()),
+            command_line: Some(host_command_line(name).to_string()),
+            creation_date: Some(creation_date.to_string()),
+        }
+    }
+
+    fn live_process(pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
+        live_host_process("server", pid, parent, creation_date)
+    }
+
+    struct PathFixture {
+        previous: Option<std::ffi::OsString>,
+        previous_record: Option<std::ffi::OsString>,
+        previous_scenario: Option<std::ffi::OsString>,
+        bin: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl PathFixture {
+        fn with_fake_engine(scenario: &str) -> Self {
+            Self::with_fake_engine_and_inherited_path(scenario, true)
+        }
+
+        fn with_broken_engine() -> Self {
+            Self::with_fake_engine_and_inherited_path("spawn", false)
+        }
+
+        fn with_fake_engine_and_inherited_path(scenario: &str, inherit_path: bool) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("PATH");
+            let previous_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD");
+            let previous_scenario = std::env::var_os("OPENBOT_FAKE_ENGINE_SCENARIO");
+            let bin = temp_root("openbot-stack-fake-engine-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let docker = bin.join(if cfg!(windows) {
+                "docker.exe"
+            } else {
+                "docker"
+            });
+            if scenario == "spawn" {
+                std::fs::write(&docker, "not an executable").unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+                    permissions.set_mode(0o644);
+                    std::fs::set_permissions(&docker, permissions).unwrap();
+                }
+            } else {
+                let source = bin.join("fake_engine.rs");
+                std::fs::write(&source, FAKE_ENGINE_SOURCE).unwrap();
+                crate::test_support::compile_fixture(&source, &docker);
+            }
+            let mut path = std::ffi::OsString::from(&bin);
+            if inherit_path {
+                if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
+                    path.push(if cfg!(windows) { ";" } else { ":" });
+                    path.push(previous);
+                }
+            }
+            if !inherit_path && cfg!(windows) {
+                path.push(if cfg!(windows) { ";" } else { ":" });
+                path.push(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()));
+            }
+            std::env::set_var("PATH", path);
+            std::env::set_var("OPENBOT_FAKE_ENGINE_SCENARIO", scenario);
+            Self {
+                previous,
+                previous_record,
+                previous_scenario,
+                bin,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for PathFixture {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var("PATH", previous);
+            } else {
+                std::env::remove_var("PATH");
+            }
+            if let Some(previous) = &self.previous_record {
+                std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", previous);
+            } else {
+                std::env::remove_var("OPENBOT_TEST_ENGINE_RECORD");
+            }
+            if let Some(previous) = &self.previous_scenario {
+                std::env::set_var("OPENBOT_FAKE_ENGINE_SCENARIO", previous);
+            } else {
+                std::env::remove_var("OPENBOT_FAKE_ENGINE_SCENARIO");
+            }
+            std::fs::remove_dir_all(&self.bin).ok();
+        }
+    }
+
+    const FAKE_ENGINE_SOURCE: &str = r#"
+use std::io::Write;
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let joined = args.join(" ");
+    if let Ok(path) = std::env::var("OPENBOT_TEST_ENGINE_RECORD") {
+        let cwd = std::env::current_dir().unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
+    }
+    let scenario = std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap();
+    if scenario == "postgres-volume" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let (file, failure) = if actual == ["compose", "config", "--format", "json"] {
+            (".fixture-config", ".fixture-config-failure")
+        } else if actual == ["volume", "ls", "--format", "{{.Name}}"] {
+            (".fixture-volumes", ".fixture-volume-failure")
+        } else if actual == ["volume", "inspect", "openbot_postgres-data"] {
+            (".fixture-inspect", ".fixture-inspect-failure")
+        } else if actual == ["volume", "rm", "openbot_postgres-data"] {
+            if std::path::Path::new(".fixture-attached").exists() {
+                eprintln!("synthetic-secret attached container");
+                std::process::exit(2);
+            }
+            let inventory = std::fs::read_to_string(".fixture-volumes").unwrap();
+            let remaining: String = inventory.lines().filter(|name| *name != "openbot_postgres-data").map(|name| format!("{name}\n")).collect();
+            std::fs::write(".fixture-volumes", remaining).unwrap();
+            return;
+        } else { panic!("unexpected volume probe command: {actual:?}"); };
+        if std::path::Path::new(failure).exists() {
+            eprintln!("synthetic-secret-must-not-appear-in-diagnostics");
+            std::process::exit(17);
+        }
+        print!("{}", std::fs::read_to_string(file).unwrap());
+        return;
+    }
+    if scenario == "macos-podman-start" {
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        if actual == ["compose", "config", "--environment"] {
+            if std::path::Path::new(".fixture-config-failure").exists() {
+                eprintln!("synthetic invalid deployment override");
+                std::process::exit(17);
+            }
+            print!("{}", std::fs::read_to_string(".fixture-compose-environment").unwrap_or_default());
+            return;
+        }
+        if actual.iter().any(|arg| arg == "up" || arg == "run") {
+            let files: Vec<_> = actual.windows(2).filter(|pair| pair[0] == "-f").map(|pair| &pair[1]).collect();
+            if !files.iter().any(|file| file.ends_with(".openbot-macos-podman.yml")) {
+                eprintln!("Error response from daemon: rootlessport conflict with ID 1");
+                std::process::exit(126);
+            }
+            for file in files { assert!(std::path::Path::new(file).is_file(), "missing compose file {file}"); }
+            return;
+        }
+        panic!("unexpected startup command: {actual:?}");
+    }
+    if scenario == "computer-stop" {
+        let root = std::path::PathBuf::from(std::env::var("OPENBOT_TEST_ENGINE_RECORD").unwrap()).with_extension("");
+        let race = root.join(".fixture-race").exists();
+        let actual = if args.first().map(String::as_str) == Some("--connection") { &args[2..] } else { &args[..] };
+        let without_file;
+        let actual = if actual.get(1).map(String::as_str) == Some("-f") {
+            without_file = std::iter::once(actual[0].clone()).chain(actual[3..].iter().cloned()).collect::<Vec<_>>();
+            &without_file[..]
+        } else { actual };
+        match actual.first().map(String::as_str) {
+            Some("compose") if actual.get(1).map(String::as_str) == Some("config") => {
+                if std::path::Path::new(".fixture-config-failure").exists() { std::process::exit(17); }
+                print!("{}", std::fs::read_to_string(".fixture-config").unwrap());
+            }
+            Some("compose") if actual == ["compose", "stop", "supervisor"] => {
+                if root.join(".fixture-supervisor-stop-failure").exists() {
+                    eprintln!("fixture supervisor stop refused");
+                    std::process::exit(17);
+                }
+                if race {
+                    // An in-flight create/restart completes before the supervisor exits.
+                    std::fs::write(root.join("late.running"), "").unwrap();
+                    std::fs::write(root.join("restarted.running"), "").unwrap();
+                    std::fs::write(root.join("supervisor.stopped"), "").unwrap();
+                }
+            }
+            Some("ps") => {
+                // Model the engine's AND-label filtering over owned, other-namespace, and
+                // non-supervisor rows. The connected proof separately exercises the real daemon.
+                let mut labels = vec![
+                    ("current", "true", "fixture-selected"),
+                    ("other", "true", "fixture-other"),
+                    ("unowned", "false", "fixture-selected"),
+                    ("default", "true", "openbot"),
+                ];
+                if race {
+                    labels.extend([("late", "true", "fixture-selected"), ("restarted", "true", "fixture-selected")]);
+                }
+                for (id, supervisor, namespace) in labels {
+                    let matches = actual.windows(2).filter(|pair| pair[0] == "--filter").all(|pair| {
+                        pair[1] == format!("label=openbot.supervisor={supervisor}")
+                            || pair[1] == format!("label=openbot.namespace={namespace}")
+                    });
+                    if matches && (!race || root.join(format!("{id}.running")).exists()) { println!("{id}"); }
+                }
+                if race && !root.join("supervisor.stopped").exists() {
+                    // The list is already fixed when the active supervisor creates these.
+                    std::fs::write(root.join("late.running"), "").unwrap();
+                    std::fs::write(root.join("restarted.running"), "").unwrap();
+                }
+            }
+            Some("stop") => {
+                if race {
+                    for id in &actual[1..] {
+                        std::fs::remove_file(root.join(format!("{id}.running"))).unwrap();
+                    }
+                    if !root.join("supervisor.stopped").exists() {
+                        // A still-active supervisor can also restart an existing computer.
+                        std::fs::write(root.join("current.running"), "").unwrap();
+                    }
+                }
+            }
+            Some("compose") if actual == ["compose", "--profile", "harness", "down"] => {
+                if race {
+                    std::fs::write(root.join("supervisor.stopped"), "").unwrap();
+                    std::fs::write(root.join("stack.down"), "").unwrap();
+                }
+            }
+            _ => std::process::exit(2),
+        }
+        return;
+    }
+    match (scenario.as_str(), joined.as_str()) {
+        ("exit17", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\tUp\n");
+            eprint!("compose ps refused\n");
+            std::process::exit(17);
+        }
+        ("empty", args) if args.starts_with("compose ps ") => {}
+        ("blank-lines", args) if args.starts_with("compose ps ") => {
+            print!("\n  \n\t\n");
+        }
+        ("empty-service", args) if args.starts_with("compose ps ") => {
+            print!("\tExited\n");
+        }
+        ("empty-state", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\t \n");
+        }
+        ("mixed", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\tUp\nmigrate\tExited\nserver\tExited\n");
+        }
+        ("mixed", args) if args == "compose logs --tail 3 server" => {
+            print!("line one\nlast reason\n");
+        }
+        _ => {
+            eprintln!("unexpected: {joined}");
+            std::process::exit(2);
+        }
+    }
+}
+"#;
+
+    struct CleanupCommandFixture {
+        previous_scenario: Option<std::ffi::OsString>,
+        previous_root: Option<std::ffi::OsString>,
+        previous_log: Option<std::ffi::OsString>,
+        bin: PathBuf,
+        log: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CleanupCommandFixture {
+        fn new(root: &Path) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous_scenario = std::env::var_os("DTA028_CLEANUP_SCENARIO");
+            let previous_root = std::env::var_os("DTA028_CLEANUP_ROOT");
+            let previous_log = std::env::var_os("DTA028_CLEANUP_LOG");
+            let bin = temp_root("openbot-cleanup-command-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let source = bin.join("cleanup_command.rs");
+            std::fs::write(&source, CLEANUP_COMMAND_SOURCE).unwrap();
+            let compiled = bin.join(if cfg!(windows) {
+                "cleanup-command.exe"
+            } else {
+                "cleanup-command"
+            });
+            crate::test_support::compile_fixture(&source, &compiled);
+            for name in ["lsof", "netstat", "taskkill", "powershell"] {
+                std::fs::copy(
+                    &compiled,
+                    bin.join(if cfg!(windows) {
+                        format!("{name}.exe")
+                    } else {
+                        name.to_string()
+                    }),
+                )
+                .unwrap();
+            }
+            let log = bin.join("commands.log");
+            std::env::set_var("DTA028_CLEANUP_ROOT", root);
+            std::env::set_var("DTA028_CLEANUP_LOG", &log);
+            Self {
+                previous_scenario,
+                previous_root,
+                previous_log,
+                bin,
+                log,
+                _guard: guard,
+            }
+        }
+
+        fn command(&self, name: &str) -> PathBuf {
+            self.bin.join(if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.to_string()
+            })
+        }
+
+        fn scenario(&self, scenario: &str) {
+            std::env::set_var("DTA028_CLEANUP_SCENARIO", scenario);
+            let _ = std::fs::remove_file(&self.log);
+        }
+
+        fn log(&self) -> String {
+            std::fs::read_to_string(&self.log).unwrap_or_default()
+        }
+    }
+
+    impl Drop for CleanupCommandFixture {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous_scenario {
+                std::env::set_var("DTA028_CLEANUP_SCENARIO", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_SCENARIO");
+            }
+            if let Some(previous) = &self.previous_root {
+                std::env::set_var("DTA028_CLEANUP_ROOT", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_ROOT");
+            }
+            if let Some(previous) = &self.previous_log {
+                std::env::set_var("DTA028_CLEANUP_LOG", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_LOG");
+            }
+            std::fs::remove_dir_all(&self.bin).ok();
+        }
+    }
+
+    const CLEANUP_COMMAND_SOURCE: &str = r#"
+use std::io::Write;
+
+fn log(program: &str, args: &[String]) {
+    if let Ok(path) = std::env::var("DTA028_CLEANUP_LOG") {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        writeln!(file, "{program}\t{}", args.join(" ")).unwrap();
+    }
+}
+
+fn main() {
+    let exe = std::env::current_exe().unwrap();
+    let program = exe.file_stem().unwrap().to_string_lossy().into_owned();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    log(&program, &args);
+    let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
+    let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
+    match (program.as_str(), scenario.as_str()) {
+        ("powershell", "legacy-evidence" | "legacy-evidence-v1") => {
+            assert_eq!(args.len(), 4);
+            assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+            assert!(args[3].contains("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate"));
+            print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap());
+        }
+        ("taskkill", "legacy-evidence") => panic!("legacy PID evidence must never authorize taskkill"),
+        ("taskkill", "legacy-evidence-v1") => assert_eq!(args, ["/PID", "9000", "/T", "/F"]),
+        ("taskkill", "snapshot-reuse") => {
+            if args.get(1).map(String::as_str) == Some("9001") {
+                std::fs::write(std::path::Path::new(&root).join("foreign-replacement"), "9000").unwrap();
+            }
+        }
+        ("netstat", "snapshot-reuse") => {
+            assert!(std::path::Path::new(&root).join("foreign-replacement").exists());
+            println!("TCP 127.0.0.1:3010 0.0.0.0:0 LISTENING 9000");
+        }
+        ("powershell", "held-refusal") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("netstat", "held-refusal") => {},
+        ("powershell", "already-running" | "ownership-inventory" | "ownership-netstat-fail") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("netstat", "ownership-inventory" | "ownership-netstat-fail") => {
+            // Model netstat's protocol filter at the command boundary: `-p tcp` excludes
+            // IPv6 even though both address families use TCP in the output's Proto column.
+            let protocol = if args == ["-ano"] {
+                None
+            } else if args == ["-ano", "-p", "tcp"] {
+                Some(false)
+            } else if args == ["-ano", "-p", "tcpv6"] {
+                Some(true)
+            } else {
+                panic!("unexpected netstat arguments: {args:?}");
+            };
+            let listing = std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-netstat.txt")).unwrap();
+            for line in listing.lines() {
+                let mut fields = line.split_whitespace();
+                let proto = fields.next().unwrap_or_default();
+                let local = fields.next().unwrap_or_default();
+                if protocol.map_or(true, |ipv6| proto == "TCP" && local.starts_with('[') == ipv6) {
+                    println!("{line}");
+                }
+            }
+            if scenario == "ownership-netstat-fail" {
+                eprintln!("synthetic netstat status failure after partial listing");
+                std::process::exit(19);
+            }
+        },
+        ("netstat", "already-running") => {
+            println!("  Proto  Local Address          Foreign Address        State           PID");
+            println!("  TCP    127.0.0.1:45123        0.0.0.0:0              LISTENING       9000");
+            println!("  TCP    127.0.0.1:45124        0.0.0.0:0              LISTENING       9002");
+        },
+        ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
+        ("powershell", "inventory-fail") => {
+            print!("synthetic partial inventory that must not be trusted");
+            std::process::exit(17);
+        }
+        ("powershell", "inventory-empty") => print!("[]"),
+        ("powershell", "inventory-malformed") => print!("[{{"),
+        ("powershell", "inventory-blank") => {},
+        ("netstat", "inventory-empty")
+        | ("netstat", "pidfile-mixed")
+        | ("netstat", "pidfile-ok") => {},
+        ("taskkill", "pidfile-mixed") => {
+            if args.iter().any(|arg| arg == "9000") {
+                eprintln!("synthetic taskkill status failure");
+                std::process::exit(17);
+            }
+        }
+        ("taskkill", "pidfile-ok") => {},
+        ("lsof", "lsof-ok") => {
+            println!("p101\nn{root}/server\np202\nn{root}\np303\nn{root}/worker");
+        }
+        ("lsof", "lsof-empty") => {}
+        ("lsof", "lsof-fail") => {
+            eprintln!("synthetic lsof status failure");
+            std::process::exit(17);
+        }
+        ("netstat", "windows-ok") | ("netstat", "windows-taskkill-fail") => {
+            println!("  Proto  Local Address          Foreign Address        State           PID");
+            println!("  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       9000");
+            println!("  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9001");
+        }
+        ("netstat", "windows-netstat-fail") => {
+            eprintln!("synthetic netstat status failure");
+            std::process::exit(19);
+        }
+        ("taskkill", "windows-ok") => {}
+        ("taskkill", "windows-taskkill-fail") => {
+            if args.iter().any(|arg| arg == "9000") {
+                eprintln!("synthetic taskkill status failure");
+                std::process::exit(5);
+            }
+        }
+        _ => {
+            eprintln!("unexpected cleanup command scenario: {program} {scenario}");
+            std::process::exit(44);
+        }
+    }
+}
+"#;
+
+    #[test]
+    fn service_inspection_spawn_failure_is_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_spawn_failure_is_a_problem",
+        ) {
+            return;
+        }
+        let _fixture = PathFixture::with_broken_engine();
+        let root = temp_root("openbot-service-inspection-spawn");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem =
+            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                .expect_err("a failed inspection command must stop startup");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect its Compose services."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("could not run docker compose ps -a")),
+            "{problem:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_nonzero_status_is_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_nonzero_status_is_a_problem",
+        ) {
+            return;
+        }
+        let _fixture = PathFixture::with_fake_engine("exit17");
+        let root = temp_root("openbot-service-inspection-status");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem =
+            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                .expect_err("a nonzero inspection status must stop startup");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect its Compose services."
+        );
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("docker compose ps -a exited with status"),
+            "{detail}"
+        );
+        assert!(detail.contains("compose ps refused"), "{detail}");
+        assert!(detail.contains("agent-computer\tUp"), "{detail}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_empty_success_is_healthy() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_empty_success_is_healthy",
+        ) {
+            return;
+        }
+        let _fixture = PathFixture::with_fake_engine("empty");
+        let root = temp_root("openbot-service-inspection-empty");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("a successful empty listing is healthy");
+
+        assert!(dead.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_blank_lines_are_healthy_empty_output() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_blank_lines_are_healthy_empty_output",
+        ) {
+            return;
+        }
+        let _fixture = PathFixture::with_fake_engine("blank-lines");
+        let root = temp_root("openbot-service-inspection-blank-lines");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("blank service inspection output is empty health evidence");
+
+        assert!(dead.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_service_inspection_rows_are_a_problem() {
+        if crate::test_support::isolated_process(
+            "stack::tests::malformed_service_inspection_rows_are_a_problem",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-service-inspection-malformed");
+        std::fs::create_dir_all(&root).unwrap();
+
+        for scenario in ["empty-service", "empty-state"] {
+            let _fixture = PathFixture::with_fake_engine(scenario);
+            let problem =
+                services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                    .expect_err("a malformed nonempty row cannot prove health");
+
+            assert_eq!(
+                problem.said,
+                "OpenBot could not inspect its Compose services."
+            );
+            assert!(
+                problem
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("unusable docker compose ps -a row")),
+                "{problem:?}"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_reports_only_unexpected_exited_services() {
+        if crate::test_support::isolated_process(
+            "stack::tests::service_inspection_reports_only_unexpected_exited_services",
+        ) {
+            return;
+        }
+        let _fixture = PathFixture::with_fake_engine("mixed");
+        let root = temp_root("openbot-service-inspection-rows");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("service inspection should succeed");
+
+        assert_eq!(
+            dead,
+            vec![("server".to_string(), "last reason".to_string())]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_cleanup_returns_taskkill_failures_after_attempting_later_targets() {
+        let recorded = [
+            recorded_process("app", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
+        ];
+        let processes = [
+            live_host_process("app", 9000, 7000, "/Date(1000)/"),
+            live_host_process("worker", 9001, 7000, "/Date(2000)/"),
+        ];
+        let mut attempted = Vec::new();
+
+        let problem = stop_verified_windows_roots_with(&recorded, &processes, |pid| {
+            attempted.push(pid);
+            if pid == 9000 {
+                Err(Problem::with(
+                    "OpenBot could not inspect or stop its host processes.",
+                    format!("taskkill /PID {pid} /T /F exited with status 5"),
+                ))
+            } else {
+                Ok(true)
+            }
+        })
+        .expect_err("taskkill failure must be reported");
+
+        assert_eq!(attempted, vec![9000, 9001]);
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect or stop its host processes."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("taskkill /PID 9000")),
+            "{problem:?}"
+        );
+    }
+
+    #[test]
+    fn windows_cleanup_does_not_reuse_identity_after_terminating_the_root() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_does_not_reuse_identity_after_terminating_the_root",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-no-post-termination-sweep");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("snapshot-reuse");
+        let recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+        let snapshot = [
+            live_host_process("app", 9001, 0, "/Date(1000)/"),
+            live_host_process("app", 9000, 9001, "/Date(2000)/"),
+        ];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":recorded}),
+        )
+        .unwrap();
+        let result = stop_windows_processes_under_with(
+            &root,
+            &recorded,
+            &snapshot,
+            &fixture.command("taskkill"),
+        );
+        let log = fixture.log();
+        let replacement_created = root.join("foreign-replacement").exists();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            replacement_created,
+            "fixture must replace the child after the owned root is stopped"
+        );
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(
+            log, "taskkill\t/PID 9001 /T /F\n",
+            "a stopped process tree cannot authorize another taskkill"
+        );
+    }
+
+    #[test]
+    fn source_bound_windows_command_failures_use_disposable_commands() {
+        if crate::test_support::isolated_process(
+            "stack::tests::source_bound_windows_command_failures_use_disposable_commands",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-source-bound-windows-cleanup");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let taskkill = fixture.command("taskkill");
+        let recorded = [
+            recorded_process("app", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
+        ];
+        let processes = [
+            live_host_process("app", 9000, 7000, "/Date(1000)/"),
+            live_host_process("worker", 9001, 7000, "/Date(2000)/"),
+            live_process(9002, 9000, "/Date(3000)/"),
+        ];
+
+        fixture.scenario("windows-taskkill-fail");
+        let problem = stop_windows_processes_under_with(&root, &recorded, &processes, &taskkill)
+            .expect_err("taskkill status failure must cross the production helper");
+        let log = fixture.log();
+        assert!(
+            !log.contains("netstat\t"),
+            "cleanup must not retarget terminated PIDs: {log}"
+        );
+        assert!(log.contains("taskkill\t/PID 9000 /T /F"), "{log}");
+        assert!(
+            log.contains("taskkill\t/PID 9001 /T /F"),
+            "later owned target was not attempted: {log}"
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("synthetic taskkill status failure")),
+            "{problem:?}"
+        );
+
+        fixture.scenario("windows-ok");
+        let stopped = stop_windows_processes_under_with(&root, &recorded, &processes, &taskkill)
+            .expect("all synthetic Windows cleanup commands should succeed");
+        assert_eq!(stopped, 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn windows_cleanup_evidence_fixture() -> (PathBuf, CleanupCommandFixture) {
+        let root = temp_root("windows-cleanup-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("legacy-evidence");
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9000,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"/Date(1000)/"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        (root, fixture)
+    }
+
+    #[test]
+    fn windows_cleanup_retains_nonempty_legacy_pid_evidence_as_unresolved() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_retains_nonempty_legacy_pid_evidence_as_unresolved",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        let original = b" \r\n[9000]\r\n";
+        std::fs::write(&path, original).unwrap();
+        let result = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        );
+        let retained = std::fs::read(&path).ok();
+        let log = fixture.log();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!log.contains("taskkill\t"), "{log}");
+        assert!(
+            result.is_err(),
+            "legacy cleanup returned {result:?}; evidence retained: {}; commands: {log}",
+            retained.is_some()
+        );
+        let detail = result.unwrap_err().detail.unwrap();
+        assert!(detail.contains("legacy"), "{detail}");
+        assert!(detail.contains("unresolved"), "{detail}");
+        assert!(detail.contains("retained"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()), "{detail}");
+        assert_eq!(retained.as_deref(), Some(original.as_slice()));
+    }
+
+    #[test]
+    fn windows_cleanup_missing_and_empty_legacy_evidence_are_safe_noops() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_missing_and_empty_legacy_evidence_are_safe_noops",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        for original in [None, Some(" []\r\n")] {
+            fixture.scenario("legacy-evidence");
+            if let Some(original) = original {
+                std::fs::write(&path, original).unwrap();
+            }
+            assert_eq!(
+                stop_windows_processes_with_inventory(
+                    &root,
+                    &fixture.command("powershell"),
+                    &fixture.command("taskkill"),
+                )
+                .unwrap(),
+                0
+            );
+            assert!(!path.exists());
+            let log = fixture.log();
+            assert!(log.contains("powershell\t"), "{log}");
+            assert!(!log.contains("taskkill\t"), "{log}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_cleanup_evidence_errors_preserve_files_without_commands() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_evidence_errors_preserve_files_without_commands",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let path = host_pids_path(&root);
+        for (original, reason) in [
+            ("not json", "decode pidfile JSON"),
+            (
+                r#"{"version":9,"processes":[]}"#,
+                "unsupported pidfile version 9",
+            ),
+        ] {
+            std::fs::write(&path, original).unwrap();
+            let problem = stop_windows_processes_with_inventory(
+                &root,
+                &fixture.command("powershell"),
+                &fixture.command("taskkill"),
+            )
+            .unwrap_err();
+            assert!(problem.detail.unwrap().contains(reason));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+            assert!(fixture.log().is_empty());
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let problem = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        )
+        .unwrap_err();
+        assert!(problem.detail.unwrap().contains("could not read pidfile"));
+        assert!(path.is_dir());
+        assert!(fixture.log().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_cleanup_versioned_evidence_still_requires_live_identity() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_cleanup_versioned_evidence_still_requires_live_identity",
+        ) {
+            return;
+        }
+        let (root, fixture) = windows_cleanup_evidence_fixture();
+        let record = recorded_process("server", 9000, "/Date(1000)/");
+        let original =
+            serde_json::to_vec(&serde_json::json!({"version":1,"processes":[record]})).unwrap();
+        let path = host_pids_path(&root);
+        std::fs::write(&path, &original).unwrap();
+        fixture.scenario("legacy-evidence-v1");
+        assert_eq!(
+            stop_windows_processes_with_inventory(
+                &root,
+                &fixture.command("powershell"),
+                &fixture.command("taskkill"),
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!path.exists());
+        assert!(fixture.log().contains("taskkill\t/PID 9000 /T /F"));
+
+        std::fs::write(&path, &original).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            r#"[{"ProcessId":9000,"ParentProcessId":7000}]"#,
+        )
+        .unwrap();
+        fixture.scenario("legacy-evidence");
+        let problem = stop_windows_processes_with_inventory(
+            &root,
+            &fixture.command("powershell"),
+            &fixture.command("taskkill"),
+        )
+        .unwrap_err();
+        assert!(problem
+            .detail
+            .unwrap()
+            .contains("lacks usable identity metadata"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert!(!fixture.log().contains("taskkill\t"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_pidfile_preserves_all_records_on_partial_failure_and_retries() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_pidfile_preserves_all_records_on_partial_failure_and_retries",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-pidfile-retry");
+        let recorded = [
+            recorded_process("server", 9000, "/Date(1000)/"),
+            recorded_process("worker", 9001, "/Date(2000)/"),
+        ];
+        let processes = [
+            live_host_process("server", 9000, 0, "/Date(1000)/"),
+            live_host_process("worker", 9001, 0, "/Date(2000)/"),
+        ];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": recorded}),
+        )
+        .unwrap();
+        let path = host_pids_path(&root);
+        let before = std::fs::read(&path).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("pidfile-mixed");
+        let problem = stop_windows_processes_under_with(
+            &root,
+            &recorded,
+            &processes,
+            &fixture.command("taskkill"),
+        )
+        .expect_err("a failed root must retain ownership evidence for retry");
+        assert!(problem.detail.unwrap().contains("17"));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let log = fixture.log();
+        assert!(log.contains("taskkill\t/PID 9000 /T /F"), "{log}");
+        assert!(log.contains("taskkill\t/PID 9001 /T /F"), "{log}");
+
+        fixture.scenario("pidfile-ok");
+        let retry_records = recorded_host_processes(&root).unwrap();
+        assert_eq!(
+            stop_windows_processes_under_with(
+                &root,
+                &retry_records,
+                &processes[..1],
+                &fixture.command("taskkill")
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!path.exists());
+        assert!(!fixture.log().contains("/PID 9001"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_pidfile_unknown_identity_is_preserved_without_killing_any_process() {
+        if crate::test_support::isolated_process("stack::tests::windows_pidfile_unknown_identity_is_preserved_without_killing_any_process") { return; }
+        let root = temp_root("windows-pidfile-unknown-identity");
+        let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": recorded}),
+        )
+        .unwrap();
+        let path = host_pids_path(&root);
+        let before = std::fs::read(&path).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let mut cases: Vec<_> = [None, Some(String::new())]
+            .into_iter()
+            .flat_map(|missing| (0..3).map(move |field| (field, missing.clone())))
+            .collect();
+        cases.extend([
+            (2, Some("invalid-date".to_string())),
+            (2, Some("20260931010101.000000+000".to_string())),
+        ]);
+        for (field, missing) in cases {
+            let mut live = live_process(9000, 0, "/Date(1000)/");
+            match field {
+                0 => live.executable_path = missing.clone(),
+                1 => live.command_line = missing.clone(),
+                _ => live.creation_date = missing.clone(),
+            }
+            fixture.scenario("pidfile-ok");
+            let problem = stop_windows_processes_under_with(
+                &root,
+                &recorded,
+                &[live],
+                &fixture.command("taskkill"),
+            )
+            .expect_err("an unresolved identity field does not prove PID reuse or exit");
+            let detail = problem.detail.unwrap();
+            assert!(detail.contains("9000"), "{detail}");
+            assert!(detail.contains(&path.display().to_string()), "{detail}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(fixture.log(), "");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors() {
+        if crate::test_support::isolated_process("stack::tests::windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors") { return; }
+        let root = temp_root("windows-pidfile-remove");
+        let recorded = [recorded_process("server", 9000, "/Date(1000)/")];
+        let fixture = CleanupCommandFixture::new(&root);
+        let path = host_pids_path(&root);
+        for processes in [vec![], vec![live_process(9000, 0, "/Date(2000)/")]] {
+            write_host_pid_file(
+                &root,
+                &serde_json::json!({"version": 1, "processes": recorded}),
+            )
+            .unwrap();
+            fixture.scenario("pidfile-ok");
+            assert_eq!(
+                stop_windows_processes_under_with(
+                    &root,
+                    &recorded,
+                    &processes,
+                    &fixture.command("taskkill")
+                )
+                .unwrap(),
+                0
+            );
+            assert!(!path.exists());
+            assert!(!fixture.log().contains("taskkill\t"));
+        }
+        std::fs::create_dir(&path).unwrap();
+        let problem =
+            stop_windows_processes_under_with(&root, &[], &[], &fixture.command("taskkill"))
+                .expect_err("a required pidfile removal failure must be reported");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("could not remove pidfile"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()), "{detail}");
+        assert!(path.is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_cleanup_success_counts_verified_root_trees() {
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+        ];
+        let mut attempted = Vec::new();
+
+        let stopped = stop_verified_windows_roots_with(&recorded, &processes, |pid| {
+            attempted.push(pid);
+            Ok(true)
+        })
+        .expect("verified child cleanup should succeed");
+
+        assert_eq!(stopped, 1);
+        assert_eq!(attempted, vec![8636]);
+    }
+
+    /// Real `netstat -ano` output, because the column layout is what went wrong.
+    ///
+    /// Stop reported success and left the server and the app serving, because this was read as four
+    /// columns: the foreign address was taken for the state, the state for the pid, and nothing
+    /// ever matched.
+    #[test]
+    #[cfg(not(unix))]
+    fn the_processes_holding_our_ports_are_found_in_netstat_output() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1044\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       8748\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       8636\r\n  TCP    127.0.0.1:3010         127.0.0.1:51888        ESTABLISHED     8636\r\n  TCP    [::1]:3010             [::]:0                 LISTENING       8636\r\n  TCP    127.0.0.1:5432         0.0.0.0:0              LISTENING       9999\r\n";
+        let found = super::pids_listening_on(listing, &[3010, 3001]);
+        // Both host processes, each once, and nothing else: not the established connection, not
+        // Postgres on a published container port, not RPC on 135.
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.contains(&8748), "{found:?}");
+        assert!(found.contains(&8636), "{found:?}");
+        assert!(
+            !found.contains(&9999),
+            "a container's port is not ours to kill: {found:?}"
+        );
+        assert!(!found.contains(&1044), "{found:?}");
+    }
+
+    #[test]
+    fn only_recorded_openbot_pids_are_selected_from_netstat_output() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       8636\r\n  TCP    [::1]:3010             [::]:0                 LISTENING       8636\r\n";
+        let recorded = [recorded_process(
+            "server",
+            8636,
+            "20260909010101.000000-420",
+        )];
+        let processes = [live_process(8636, 7000, "20260909010101.000000-420")];
+
+        let found = super::verified_openbot_pids_listening_on(
+            listing,
+            &[3010, 3001],
+            &recorded,
+            &processes,
+        );
+
+        assert_eq!(found, vec![8636]);
+    }
+
+    #[cfg(unix)]
+    fn spawn_owned_listener(label: &str) -> (std::process::Child, u16, PathBuf) {
+        let dir = temp_root(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("listener.rs");
+        std::fs::write(
+            &source,
+            r#"
+use std::io::Write;
+use std::net::TcpListener;
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    println!("{}", listener.local_addr().unwrap().port());
+    std::io::stdout().flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(60));
+}
+"#,
+        )
+        .unwrap();
+        let binary = dir.join("listener");
+        crate::test_support::compile_fixture(&source, &binary);
+        let mut child = Command::new(&binary)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut port = String::new();
+        use std::io::BufRead;
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut port)
+            .unwrap();
+        let port = port.trim().parse().unwrap();
+        (child, port, dir)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_lsof_pid_parser_keeps_only_pid_fields_once() {
+        let listing = "p111\nf3\nnTCP 127.0.0.1:3010 (LISTEN)\np222\nf4\np111\nnot-a-pid\npbad\n";
+        assert_eq!(parse_lsof_pid_fields(listing), vec![111, 222]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_recorded_server_ownership_requires_the_recorded_process_to_own_the_port() {
+        let root_a = temp_root("unix-already-running-root-a");
+        let root_b = temp_root("unix-already-running-root-b");
+        std::fs::create_dir_all(&root_a).unwrap();
+        std::fs::create_dir_all(&root_b).unwrap();
+        let mut inert = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let (mut listener, port, listener_dir) =
+            spawn_owned_listener("unix-already-running-listener-b");
+        record_host_processes(&root_a, &[("server", inert.id())]).unwrap();
+        record_host_processes(&root_b, &[("server", listener.id())]).unwrap();
+
+        assert!(
+            !recorded_server_owns_port(&root_a, port).unwrap(),
+            "root A recorded a live server PID, but a different process owns the answering port"
+        );
+        assert!(
+            recorded_server_owns_port(&root_b, port).unwrap(),
+            "root B recorded the process that owns the answering port"
+        );
+
+        let _ = inert.kill();
+        let _ = inert.wait();
+        let _ = listener.kill();
+        listener.wait().expect("reap owned listener");
+        std::fs::remove_dir_all(listener_dir).expect("remove owned listener fixture");
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn recorded_server_ownership_requires_matching_identity_on_listening_port() {
+        if crate::test_support::isolated_process(
+            "stack::tests::recorded_server_ownership_requires_matching_identity_on_listening_port",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-already-running-windows-owner");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        let recorded = recorded_process("server", 9000, "20260909010101.000000-420");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[recorded]}),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9000,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909010101.000000-420"},
+                {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909020202.000000-420"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(recorded_process_owns_port_windows_with(
+            &root,
+            "server",
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        assert!(!recorded_process_owns_port_windows_with(
+            &root,
+            "server",
+            45124,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        let log = fixture.log();
+        assert!(log.contains("powershell\t"), "{log}");
+        assert!(log.contains("netstat\t-ano\n"), "{log}");
+        assert!(!log.contains("taskkill\t"), "{log}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recorded_server_ownership_is_false_without_current_records() {
+        if crate::test_support::isolated_process(
+            "stack::tests::recorded_server_ownership_is_false_without_current_records",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-already-running-no-owner");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        assert!(!recorded_process_owns_port_windows_with(
+            &root,
+            "server",
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat")
+        )
+        .unwrap());
+        assert!(fixture.log().is_empty(), "{}", fixture.log());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn probe_windows_port_ownership_fixture(
+        listing: &str,
+        scenario: &str,
+    ) -> Result<bool, Problem> {
+        let root = temp_root("windows-port-ownership");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario(scenario);
+        let app = recorded_process("app", 9001, "20260909010101.000000-420");
+        write_host_pid_file(&root, &serde_json::json!({"version":1,"processes":[app]})).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":9001,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("app"),"CreationDate":"20260909010101.000000-420"},
+                {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"20260909010102.000000-420"},
+                {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":"foreign.exe","CommandLine":"foreign app","CreationDate":"20260909010102.000000-420"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(root.join("synthetic-netstat.txt"), listing).unwrap();
+        let result = recorded_process_owns_port_windows_with(
+            &root,
+            "app",
+            45123,
+            &fixture.command("powershell"),
+            &fixture.command("netstat"),
+        );
+        let log = fixture.log();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(log.contains("powershell\t"), "{log}");
+        assert!(log.contains("netstat\t"), "{log}");
+        assert!(!log.contains("taskkill\t"), "{log}");
+        result
+    }
+
+    #[test]
+    fn windows_port_ownership_accepts_owned_ipv6_listener() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_accepts_owned_ipv6_listener",
+        ) {
+            return;
+        }
+        assert!(probe_windows_port_ownership_fixture(
+            "TCP [::1]:45123 [::]:0 LISTENING 9000\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_rejects_foreign_ipv6_beside_owned_ipv4() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_rejects_foreign_ipv6_beside_owned_ipv4",
+        ) {
+            return;
+        }
+        assert!(!probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::]:0 LISTENING 9002\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_accepts_owned_dual_stack_ignoring_udp_and_connections() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_accepts_owned_dual_stack_ignoring_udp_and_connections",
+        ) {
+            return;
+        }
+        assert!(probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::]:0 LISTENING 9000\n\
+             TCP [::1]:45123 [::1]:51999 ESTABLISHED 9002\n\
+             UDP 127.0.0.1:45123 *:* 9002\n\
+             UDP [::1]:45123 *:* 9002\n",
+            "ownership-inventory",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn windows_port_ownership_reports_failed_netstat_with_partial_listing() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_port_ownership_reports_failed_netstat_with_partial_listing",
+        ) {
+            return;
+        }
+        let problem = probe_windows_port_ownership_fixture(
+            "TCP 127.0.0.1:45123 0.0.0.0:0 LISTENING 9000\n",
+            "ownership-netstat-fail",
+        )
+        .expect_err("partial command output cannot prove ownership");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("netstat"), "{detail}");
+        assert!(detail.contains("19"), "{detail}");
+        assert!(
+            detail.contains("synthetic netstat status failure after partial listing"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn a_reused_recorded_pid_is_not_selected_without_matching_identity() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n";
+        let recorded = [recorded_process(
+            "server",
+            424242,
+            "20260909010101.000000-420",
+        )];
+        let processes = [live_process(424242, 7000, "20260909020202.000000-420")];
+
+        let found =
+            super::verified_openbot_pids_listening_on(listing, &[3001], &recorded, &processes);
+
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_verified_recorded_host_keeps_its_listening_child_eligible_for_cleanup() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+        ];
+
+        let roots = super::verified_openbot_root_pids(&recorded, &processes);
+        let found =
+            super::verified_openbot_pids_listening_on(listing, &[3010], &recorded, &processes);
+
+        assert_eq!(roots, vec![8636]);
+        assert_eq!(found, vec![9000]);
+    }
+
+    struct UnserializablePidfile;
+
+    impl Serialize for UnserializablePidfile {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("synthetic serializer refusal"))
+        }
+    }
+
+    #[test]
+    fn pidfile_serialization_failure_preserves_prior_evidence() {
+        let root = temp_root("pidfile-serialization");
+        let path = host_pids_path(&root);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"[42]").unwrap();
+        let problem = write_host_pid_file(&root, &UnserializablePidfile).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(
+            detail.contains("serialize pidfile") && detail.contains("synthetic serializer refusal")
+        );
+        assert!(detail.contains(&path.display().to_string()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"[42]");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pidfile_writes_report_filesystem_obstructions_without_partial_files() {
+        let root = temp_root("pidfile-obstruction");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = host_pids_path(&root);
+        let logs = root.join(".logs");
+        std::fs::write(&logs, b"prior obstruction").unwrap();
+        let problem = record_host_pids(&root, &[42]).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(&path.display().to_string()));
+        assert!(detail.contains("parent directory"));
+        assert_eq!(std::fs::read(&logs).unwrap(), b"prior obstruction");
+        std::fs::remove_file(&logs).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+        let problem = record_host_pids(&root, &[42]).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(&path.display().to_string()));
+        assert!(detail.contains("replace pidfile"));
+        assert!(path.is_dir());
+        assert_eq!(std::fs::read_dir(&logs).unwrap().count(), 1);
+        std::fs::remove_dir(&path).unwrap();
+        record_host_pids(&root, &[42]).unwrap();
+        record_host_pids(&root, &[43, 44]).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"[43,44]");
+        assert_eq!(recorded_host_pids(&root).unwrap(), [43, 44]);
+        assert_eq!(std::fs::read_dir(&logs).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pidfile_denied_replacement_preserves_previous_record_and_removes_temporary() {
+        let root = temp_root("pidfile-denied-replacement");
+        record_host_pids(&root, &[42]).unwrap();
+        let path = host_pids_path(&root);
+        assert!(Command::new("/usr/bin/chflags")
+            .arg("uchg")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let result = record_host_pids(&root, &[43]);
+        // Release the fixture's immutable flag before assertions, including on a writer failure.
+        assert!(Command::new("/usr/bin/chflags")
+            .arg("nouchg")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let detail = result.unwrap_err().detail.unwrap();
+        assert!(detail.contains("replace pidfile"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"[42]");
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The pids survive the window that started them, which is the whole point of writing them.
+    #[test]
+    fn recorded_pids_are_read_back_and_a_missing_file_is_not_an_error() {
+        let dir = temp_root("pids");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Nothing recorded is an empty list, not a panic: a deployment somebody started by hand
+        // has no pidfile at all.
+        assert!(recorded_host_pids(&dir).unwrap().is_empty());
+
+        record_host_pids(&dir, &[4242, 4243, 4244]).unwrap();
+        assert_eq!(recorded_host_pids(&dir).unwrap(), vec![4242, 4243, 4244]);
+
+        // Corrupt evidence must stop cleanup before any process is selected.
+        std::fs::write(host_pids_path(&dir), "not json").unwrap();
+        assert!(recorded_host_pids(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pidfile_readers_distinguish_missing_legacy_records_and_untrusted_evidence() {
+        let root = temp_root("pidfile-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let path = host_pids_path(&root);
+        assert!(recorded_host_pids(&root).unwrap().is_empty());
+        assert!(recorded_host_processes(&root).unwrap().is_empty());
+        record_host_pids(&root, &[42]).unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
+        let legacy = recorded_host_processes(&root).unwrap();
+        assert!(verified_openbot_root_pids(&legacy, &[live_process(42, 0, "created")]).is_empty());
+        let recorded = recorded_process("server", 42, "created");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": [recorded]}),
+        )
+        .unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
+        assert_eq!(recorded_host_processes(&root).unwrap(), [recorded]);
+        for bytes in [
+            b"not json".as_slice(),
+            b"\xff",
+            br#"{"version":2,"processes":[]}"#,
+            br#"{"version":1,"processes":[{}]}"#,
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            for problem in [
+                recorded_host_pids(&root).unwrap_err(),
+                recorded_host_processes(&root).unwrap_err(),
+            ] {
+                assert!(problem
+                    .detail
+                    .unwrap()
+                    .contains(&path.display().to_string()));
+            }
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(recorded_host_pids(&root)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains(&path.display().to_string()));
+        assert!(recorded_host_processes(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_inventory_requires_a_complete_typed_json_result() {
+        assert!(windows_processes_in("[]").unwrap().is_empty());
+        let one = r#"{"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun serve","CreationDate":"created"}"#;
+        assert_eq!(windows_processes_in(one).unwrap().len(), 1);
+        assert_eq!(
+            windows_processes_in(&format!("[{one},{one}]"))
+                .unwrap()
+                .len(),
+            2
+        );
+        for text in [
+            "",
+            "  ",
+            "null",
+            "{}",
+            "[{}]",
+            "[",
+            "[42]",
+            r#"{"ProcessId":"42","ParentProcessId":0}"#,
+        ] {
+            assert!(windows_processes_in(text).is_err(), "{text}");
+        }
+        assert!(windows_processes_in(&format!("[{one},{{}}]")).is_err());
+        for text in ["[]", one] {
+            let expected = windows_processes_in(text).unwrap();
+            let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            assert_eq!(windows_process_output(&utf16).unwrap(), expected);
+            assert_eq!(
+                windows_process_output(&[&[0xff, 0xfe], utf16.as_slice()].concat()).unwrap(),
+                expected
+            );
+            assert_eq!(
+                windows_process_output(&[&[0xef, 0xbb, 0xbf], text.as_bytes()].concat()).unwrap(),
+                expected
+            );
+        }
+        for bytes in [b"\xff".as_slice(), b"\xff\xfe[", b"\xff\xfe\x00\xd8"] {
+            assert!(windows_process_output(bytes).is_err());
+        }
+        let recorded = recorded_process("server", 42, "created");
+        for live in [
+            WindowsProcess {
+                process_id: 43,
+                ..live_process(42, 0, "created")
+            },
+            WindowsProcess {
+                executable_path: Some("other.exe".into()),
+                ..live_process(42, 0, "created")
+            },
+            WindowsProcess {
+                command_line: Some("other args".into()),
+                ..live_process(42, 0, "created")
+            },
+            live_process(42, 0, "reused"),
+        ] {
+            assert!(
+                verified_openbot_root_pids(std::slice::from_ref(&recorded), &[live]).is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn windows_recording_refuses_partial_inventory_without_replacing_pidfile() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_refuses_partial_inventory_without_replacing_pidfile",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-record-partial-inventory");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = br#"{"version":1,"processes":[{"name":"server","pid":7000,"executable_path":"prior.exe","command_line":"prior","creation_date":"prior-created"}]}"#;
+        std::fs::write(&path, prior).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun src/index.ts","CreationDate":"created-server"},
+                {"ProcessId":44,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun src/index.ts","CreationDate":"created-worker"},
+                {"ProcessId":999,"ParentProcessId":0,"ExecutablePath":"other.exe","CommandLine":"other","CreationDate":"created-other"}
+            ])).unwrap(),
+        )
+        .unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 43), ("worker", 44)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("a missing requested live pid must not produce partial ownership evidence");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("app") && detail.contains("43"), "{detail}");
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_refuses_incomplete_identity_without_replacing_pidfile() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_refuses_incomplete_identity_without_replacing_pidfile",
+        ) {
+            return;
+        }
+        for (field, value) in [
+            ("ExecutablePath", serde_json::Value::Null),
+            ("CommandLine", serde_json::Value::Null),
+            ("CreationDate", serde_json::Value::String(String::new())),
+        ] {
+            let root = temp_root("windows-record-incomplete-identity");
+            std::fs::create_dir_all(root.join(".logs")).unwrap();
+            let fixture = CleanupCommandFixture::new(&root);
+            fixture.scenario("held-refusal");
+            let path = host_pids_path(&root);
+            let prior = b"[]";
+            std::fs::write(&path, prior).unwrap();
+            let mut row = serde_json::json!({
+                "ProcessId":42,
+                "ParentProcessId":0,
+                "ExecutablePath":"bun.exe",
+                "CommandLine":"bun src/index.ts",
+                "CreationDate":"created-server"
+            });
+            row.as_object_mut()
+                .unwrap()
+                .insert(field.to_string(), value);
+            std::fs::write(
+                root.join("synthetic-inventory.json"),
+                serde_json::to_vec(&serde_json::json!([row])).unwrap(),
+            )
+            .unwrap();
+
+            let problem = record_windows_host_processes_with(
+                &root,
+                &[("server", 42)],
+                &fixture.command("powershell"),
+            )
+            .expect_err("a requested pid with incomplete identity must not be omitted");
+
+            let detail = problem.detail.as_deref().unwrap_or_default();
+            assert!(
+                detail.contains("server") && detail.contains("42"),
+                "{detail}"
+            );
+            assert!(detail.contains("identity"), "{detail}");
+            assert_eq!(std::fs::read(&path).unwrap(), prior);
+            assert!(!fixture.log().contains("taskkill\t"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn windows_recording_refuses_duplicate_inventory_rows_without_replacing_pidfile() {
+        if crate::test_support::isolated_process("stack::tests::windows_recording_refuses_duplicate_inventory_rows_without_replacing_pidfile") { return; }
+        let root = temp_root("windows-record-duplicate-inventory");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = b"[]";
+        std::fs::write(&path, prior).unwrap();
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"first.exe","CommandLine":"first","CreationDate":"created-first"},
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"second.exe","CommandLine":"second","CreationDate":"created-second"}
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate inventory rows for one pid cannot identify one process instance");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("more than once") && detail.contains("42"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_refuses_duplicate_requested_hosts_without_inventory_or_replacement() {
+        if crate::test_support::isolated_process("stack::tests::windows_recording_refuses_duplicate_requested_hosts_without_inventory_or_replacement") { return; }
+        let root = temp_root("windows-record-duplicate-request");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let path = host_pids_path(&root);
+        let prior = b"[]";
+        std::fs::write(&path, prior).unwrap();
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("server", 43)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate requested host names must not replace ownership evidence");
+
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("duplicate") && detail.contains("server"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        assert_eq!(fixture.log(), "");
+
+        let problem = record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 42)],
+            &fixture.command("powershell"),
+        )
+        .expect_err("duplicate requested pids must not replace ownership evidence");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("duplicate") && detail.contains("42"),
+            "{detail}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), prior);
+        assert_eq!(fixture.log(), "");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_recording_writes_all_requested_records_and_ignores_extra_rows() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_recording_writes_all_requested_records_and_ignores_extra_rows",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-record-complete-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        std::fs::write(
+            root.join("synthetic-inventory.json"),
+            serde_json::to_vec(&serde_json::json!([
+                {"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"server.exe","CommandLine":"server args","CreationDate":"created-server"},
+                {"ProcessId":43,"ParentProcessId":0,"ExecutablePath":"app.exe","CommandLine":"app args","CreationDate":"created-app"},
+                {"ProcessId":44,"ParentProcessId":0,"ExecutablePath":"worker.exe","CommandLine":"worker args","CreationDate":"created-worker"},
+                {"ProcessId":999,"ParentProcessId":0,"ExecutablePath":"other.exe","CommandLine":"other args","CreationDate":"created-other"}
+            ])).unwrap(),
+        )
+        .unwrap();
+
+        record_windows_host_processes_with(
+            &root,
+            &[("server", 42), ("app", 43), ("worker", 44)],
+            &fixture.command("powershell"),
+        )
+        .unwrap();
+
+        let records = recorded_host_processes(&root).unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0],
+            RecordedHostProcess {
+                name: "server".to_string(),
+                pid: 42,
+                executable_path: "server.exe".to_string(),
+                command_line: "server args".to_string(),
+                creation_date: "created-server".to_string(),
+            }
+        );
+        assert_eq!(
+            records[1],
+            RecordedHostProcess {
+                name: "app".to_string(),
+                pid: 43,
+                executable_path: "app.exe".to_string(),
+                command_line: "app args".to_string(),
+                creation_date: "created-app".to_string(),
+            }
+        );
+        assert_eq!(
+            records[2],
+            RecordedHostProcess {
+                name: "worker".to_string(),
+                pid: 44,
+                executable_path: "worker.exe".to_string(),
+                command_line: "worker args".to_string(),
+                creation_date: "created-worker".to_string(),
+            }
+        );
+        assert!(!records.iter().any(|record| record.pid == 999));
+        let log = fixture.log();
+        assert!(
+            log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("taskkill\t") && !log.contains("netstat\t"),
+            "{log}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_inventory_command_errors_preserve_pidfiles_and_select_no_processes() {
+        if crate::test_support::isolated_process("stack::tests::windows_inventory_command_errors_preserve_pidfiles_and_select_no_processes") { return; }
+        let root = temp_root("inventory-command-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let powershell = fixture.command("powershell");
+        let taskkill = fixture.command("taskkill");
+        let path = host_pids_path(&root);
+        for scenario in ["inventory-fail", "inventory-malformed", "inventory-blank"] {
+            fixture.scenario(scenario);
+            std::fs::write(&path, "[]").unwrap();
+            assert!(windows_processes_with(&powershell).is_err());
+            assert!(stop_windows_processes_with_inventory(&root, &powershell, &taskkill).is_err());
+            assert!(
+                record_windows_host_processes_with(&root, &[("server", 42)], &powershell).is_err()
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
+            let log = fixture.log();
+            assert!(
+                log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+                "{log}"
+            );
+            assert!(log.contains("$ErrorActionPreference = 'Stop'"), "{log}");
+            assert!(log.contains("-InputObject @("), "{log}");
+            assert!(
+                !log.contains("taskkill\t") && !log.contains("netstat\t"),
+                "{log}"
+            );
+        }
+        let missing = root.join("no-powershell");
+        assert!(windows_processes_with(&missing).is_err());
+        assert!(stop_windows_processes_with_inventory(&root, &missing, &taskkill).is_err());
+        assert!(record_windows_host_processes_with(&root, &[("server", 42)], &missing).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
+        fixture.scenario("inventory-empty");
+        std::fs::write(&path, "invalid").unwrap();
+        assert!(stop_windows_processes_with_inventory(&root, &powershell, &taskkill).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid");
+        assert_eq!(fixture.log(), "");
+        std::fs::write(&path, "[]").unwrap();
+        assert_eq!(
+            stop_windows_processes_with_inventory(&root, &powershell, &taskkill).unwrap(),
+            0
+        );
+        assert!(!fixture.log().contains("taskkill\t"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A manifest with a byte-order mark in front of it is still a manifest.
+    ///
+    /// Windows tooling writes one freely (`Set-Content -Encoding UTF8` does), `serde_json` refuses
+    /// a document that begins with one, and the refusal was reported as a deployment older than
+    /// this version of OpenBot. That sent somebody looking for a newer installer over three bytes.
+    #[test]
+    fn a_byte_order_mark_does_not_make_a_deployment_look_old() {
+        let dir = temp_root("bom");
+        let app = dir.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            app.join("package.json"),
+            "\u{feff}{\"scripts\":{\"serve\":\"bun serve.ts\"}}",
+        )
+        .unwrap();
+        assert_eq!(missing_script(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// And a manifest that is genuinely broken says so, rather than blaming the version.
+    #[test]
+    fn an_unreadable_manifest_is_not_reported_as_an_old_deployment() {
+        let dir = temp_root("broken");
+        let app = dir.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("package.json"), "{ this is not json").unwrap();
+        let problem = missing_script(&dir).expect("a broken manifest is a problem");
+        assert!(problem.contains("cannot be read as JSON"), "{problem}");
+        assert!(!problem.contains("older than"), "{problem}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_root_is_named_rather_than_left_to_errno() {
+        let missing = std::env::temp_dir().join("openbot-not-here-at-all");
+        let problem = deployment_problem(&missing).expect("a missing root is a problem");
+        assert!(problem.contains("does not exist"), "{problem}");
+        assert!(!problem.contains("os error"), "leaked an errno: {problem}");
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_deployment_says_which_part_is_missing() {
+        let dir = temp_root("empty");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let problem = deployment_problem(&dir).expect("an empty directory is not a deployment");
+        assert!(problem.contains("docker-compose.yml"), "{problem}");
+
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        let problem = deployment_problem(&dir).expect("still missing the three processes");
+        assert!(problem.contains("server"), "{problem}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_deployment_older_than_this_app_is_named_as_that_rather_than_left_to_fail() {
+        let dir = temp_root("old");
+        for part in ["server", "app", "worker"] {
+            std::fs::create_dir_all(dir.join(part)).unwrap();
+        }
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        // What v0.0.7 shipped: a dev script and nothing to serve a build with.
+        std::fs::write(
+            dir.join("app").join("package.json"),
+            r#"{"scripts":{"dev":"vite","build":"vite build"}}"#,
+        )
+        .unwrap();
+
+        let problem = deployment_problem(&dir).expect("an older deployment is a problem");
+        assert!(problem.contains(APP_SCRIPT), "{problem}");
+        assert!(problem.to_lowercase().contains("older"), "{problem}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_complete_deployment_has_no_problem() {
+        let dir = temp_root("complete");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        for directory in ["server", "app", "worker"] {
+            std::fs::create_dir_all(dir.join(directory)).unwrap();
+        }
+        std::fs::write(
+            dir.join("app").join("package.json"),
+            r#"{"scripts":{"serve":"vite preview"}}"#,
+        )
+        .unwrap();
+        assert!(deployment_problem(&dir).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_deployment_directory_pasted_with_a_stray_space_is_the_one_it_names() {
+        // The fifth value on the setup screen that trimming missed. The screen enables Start on
+        // `root.trim() !== ""` and then sends the untrimmed string, which is exactly what the API
+        // URL, the gateway URL, the intelligence key and the model key were rescued from.
+        //
+        // A trailing space is a second directory beside the one everything else means: the tray's
+        // Stop and the next launch both ask `default_root`, which has no space in it. A leading one
+        // is worse, because a path that begins with a space does not begin with a separator: the
+        // whole deployment stops being absolute and lands under wherever the window is running
+        // from.
+        assert_eq!(
+            root_from("  /home/me/OpenBot  "),
+            PathBuf::from("/home/me/OpenBot")
+        );
+        assert_eq!(
+            root_from("/home/me/OpenBot\n"),
+            PathBuf::from("/home/me/OpenBot")
+        );
+        assert!(
+            root_from(" /home/me/OpenBot").has_root(),
+            "a leading space turned an absolute path into a relative one"
+        );
+    }
+
+    #[test]
+    fn a_space_inside_the_path_is_part_of_the_path() {
+        // Only the ends. "Documents and Settings" is a directory, and a person whose home has a
+        // space in it must still be able to say where OpenBot lives.
+        assert_eq!(
+            root_from("/home/me/My Files/OpenBot"),
+            PathBuf::from("/home/me/My Files/OpenBot")
+        );
+        assert_eq!(
+            root_from(r"C:\Users\me\Open Bot"),
+            PathBuf::from(r"C:\Users\me\Open Bot")
+        );
+        // And an ordinary path is handed back exactly as it was.
+        assert_eq!(
+            root_from("/home/me/OpenBot"),
+            PathBuf::from("/home/me/OpenBot")
+        );
+    }
+
+    #[test]
+    fn a_port_nobody_holds_is_not_reported_as_taken() {
+        // 0 is never listening; this asserts the check does not invent a problem.
+        assert!(port_already_taken(&[("nothing", 1)]).is_none());
+    }
+
+    /// The published side of a mapping, which is the only side anything on this machine binds.
+    /// A plan is not a key, and provider-specific Bots are not raised to fail.
+    #[test]
+    fn bundled_bot_service_selection_follows_the_selected_provider() {
+        for bot in [AGENT_BOT, AGENT_LANGGRAPH] {
+            assert!(
+                !SERVICES.contains(&bot),
+                "{bot} is started unconditionally as well"
+            );
+        }
+
+        let no_key = selected_services(false, BundledBots::none());
+        assert!(!no_key.contains(&AGENT_BOT));
+        assert!(!no_key.contains(&AGENT_LANGGRAPH));
+
+        let openai = selected_services(false, BundledBots::openai_compatible());
+        assert!(openai.contains(&AGENT_BOT));
+        assert!(openai.contains(&AGENT_LANGGRAPH));
+
+        let anthropic = selected_services(false, BundledBots::anthropic());
+        assert!(
+            !anthropic.contains(&AGENT_BOT),
+            "Anthropic credentials must not start the OpenAI-only managed Bot"
+        );
+        assert!(anthropic.contains(&AGENT_LANGGRAPH));
+
+        let picked = selected_services(true, BundledBots::none());
+        assert!(picked.contains(&"agent-harness"));
+    }
+
+    /// Stop has to name the profile, or the one Bot the person picked keeps running.
+    #[test]
+    fn stopping_names_the_harness_profile() {
+        let source = include_str!("stack.rs");
+        assert!(
+            source
+                .contains(r#".args(["-f", "docker-compose.yml", "--profile", "harness", "down"])"#),
+            "compose down without the profile leaves agent-harness running"
+        );
+    }
+
+    #[test]
+    fn the_published_ports_are_read_off_a_real_listing() {
+        // Verbatim from `compose ps --format '{{.Ports}}'` against a running deployment.
+        let listing = "127.0.0.1:4200->4200/tcp, [::1]:4200->4200/tcp\n\
+                       127.0.0.1:4206->4206/tcp, [::1]:4206->4206/tcp\n\
+                       127.0.0.1:5544->5432/tcp, [::1]:5544->5432/tcp\n";
+        let found = published_in(listing);
+        assert!(found.contains(&4200) && found.contains(&4206));
+        // The published port, not the one inside the container: nothing on this machine binds 5432.
+        assert!(found.contains(&5544), "the published side was missed");
+        assert!(
+            !found.contains(&5432),
+            "the container's own port was taken as published"
+        );
+        assert_eq!(found, std::collections::HashSet::from([4200, 4206, 5544]));
+    }
+
+    #[test]
+    fn published_ports_include_every_ipv4_only_row() {
+        let listing = "127.0.0.1:4200->3000/tcp\r\n\
+                       \r\n\
+                       127.0.0.1:4206->3001/tcp\r\n\
+                       127.0.0.1:5544->5432/tcp\r\n";
+        assert_eq!(
+            published_in(listing),
+            std::collections::HashSet::from([4200, 4206, 5544])
+        );
+    }
+
+    #[test]
+    fn multiline_published_ports_exempt_owned_listeners_but_reject_foreign_listener() {
+        let listeners = [(); 4].map(|()| std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+        let [first, second, third, foreign] = listeners
+            .each_ref()
+            .map(|listener| listener.local_addr().unwrap().port());
+        let listing = format!(
+            "127.0.0.1:{first}->{foreign}/tcp\n\
+             127.0.0.1:{second}->{foreign}/tcp\n\
+             127.0.0.1:{third}->{foreign}/tcp\n"
+        );
+        let ours = published_in(&listing);
+        let owned_ports = [("API server", first), ("Bot", second), ("Database", third)];
+
+        assert!(port_already_taken(&owned_ports).is_some());
+        assert_eq!(
+            port_already_taken_except(&owned_ports, &ours),
+            None,
+            "every published host port must be exempted across all Compose rows"
+        );
+        let problem = port_already_taken_except(&[("Foreign server", foreign)], &ours)
+            .expect("a container-side port must not exempt an unrelated host listener");
+        assert!(problem.contains(&foreign.to_string()), "{problem}");
+        assert!(problem.contains("Foreign server"), "{problem}");
+    }
+
+    /// A service with no published ports says nothing rather than confusing the parser.
+    #[test]
+    fn a_listing_with_nothing_published_yields_nothing() {
+        assert!(published_in("").is_empty());
+        assert!(published_in("4206/tcp").is_empty());
+    }
+
+    /**
+    A port this deployment already publishes is not a stranger on the port.
+
+    The measured failure: a start that fell over after `compose up` left the harness container
+    running, and the next attempt refused because of it, naming a port the person never chose.
+    */
+    #[test]
+    fn our_own_published_port_is_not_a_conflict() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(port_already_taken(&[("Bot you picked", port)]).is_some());
+        let ours = std::collections::HashSet::from([port]);
+        assert_eq!(
+            port_already_taken_except(&[("Bot you picked", port)], &ours),
+            None,
+            "a container this deployment started was treated as somebody else"
+        );
+    }
+
+    #[test]
+    fn a_held_port_is_named_along_with_what_uses_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let problem =
+            port_already_taken(&[("API server", port)]).expect("a held port is a problem");
+        assert!(problem.contains(&port.to_string()), "{problem}");
+        assert!(
+            problem.contains("API server"),
+            "must say what it is for: {problem}"
+        );
+    }
+
+    #[test]
+    fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let ports = [("API server", port)];
+
+        let problem = port_already_taken(&ports).expect("an IPv6-only listener is a conflict");
+        assert!(problem.contains(&port.to_string()), "{problem}");
+        assert!(problem.contains("API server"), "{problem}");
+        assert_eq!(
+            port_already_taken_except(&ports, &std::collections::HashSet::from([port])),
+            None
+        );
+
+        drop(listener);
+        wait_for_ports_to_clear(&[port], std::time::Duration::from_secs(3));
+        assert_eq!(port_already_taken(&ports), None);
+    }
+
+    #[test]
+    fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let patience = std::time::Duration::from_millis(250);
+        let started = std::time::Instant::now();
+
+        wait_for_ports_to_clear(&[port], patience);
+
+        assert!(
+            started.elapsed() >= patience,
+            "the wait returned while the IPv6 listener still held the port"
+        );
+        drop(listener);
+        let started = std::time::Instant::now();
+        let patience = std::time::Duration::from_secs(3);
+        wait_for_ports_to_clear(&[port], patience);
+        assert!(started.elapsed() < patience, "a released port kept waiting");
+    }
+
+    #[test]
+    fn compose_port_overlay_is_limited_to_macos_podman() {
+        let root = temp_root("compose-platform-policy");
+        let secrets = Secrets::from([("SYNTHETIC_SETTING".into(), "preserved".into())]);
+        for (engine, os) in [
+            (crate::engine::Engine::Docker, "macos"),
+            (crate::engine::Engine::Docker, "linux"),
+            (crate::engine::Engine::Docker, "windows"),
+            (crate::engine::Engine::Podman, "linux"),
+            (crate::engine::Engine::Podman, "windows"),
+        ] {
+            let command =
+                compose_start_command(&Address::new(engine, None), &root, &secrets, os).unwrap();
+            assert_eq!(command.get_args().collect::<Vec<_>>(), ["compose"]);
+            assert_eq!(command.get_current_dir(), Some(root.as_path()));
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == "SYNTHETIC_SETTING"
+                    && value == Some(std::ffi::OsStr::new("preserved"))));
+            assert!(
+                !root.exists(),
+                "{engine:?} on {os} must not write a Mac Podman overlay"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_port_overlay_preserves_discovery_and_explicit_file_selection() {
+        let root = temp_root("compose-file-selection");
+        std::fs::create_dir_all(&root).unwrap();
+        for file in ["docker-compose.yml", "docker-compose.override.yml"] {
+            std::fs::write(root.join(file), "services: {}\n").unwrap();
+        }
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["docker-compose.yml", "docker-compose.override.yml"]
+        );
+        std::fs::write(root.join("compose.yaml"), "services: {}\n").unwrap();
+        std::fs::write(root.join("compose.override.yml"), "services: {}\n").unwrap();
+        assert_eq!(
+            compose_files(&root, "").unwrap(),
+            ["compose.yaml", "compose.override.yml"]
+        );
+        assert_eq!(
+            compose_files(
+                &root,
+                "COMPOSE_FILE=first.yml:folder/custom file.yml\nCOMPOSE_PATH_SEPARATOR=:\n"
+            )
+            .unwrap(),
+            ["first.yml", "folder/custom file.yml"]
+        );
+        assert_eq!(
+            compose_files(
+                &root,
+                "COMPOSE_FILE=first.yml|custom.yml\nCOMPOSE_PATH_SEPARATOR=|\n"
+            )
+            .unwrap(),
+            ["first.yml", "custom.yml"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dynamic_harness_overlay_keeps_container_port_and_loopback_policy() {
+        let root = temp_root("dynamic-harness-port");
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(harness_port_overlay(&root, false).unwrap().is_none());
+        std::fs::write(
+            root.join(".env"),
+            "PICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT=52106\n",
+        )
+        .unwrap();
+        let dual = harness_port_overlay(&root, false).unwrap().unwrap();
+        assert!(dual.contains("ports: !override"));
+        assert!(dual.contains("127.0.0.1:52106:4206"));
+        assert!(dual.contains("[::1]:52106:4206"));
+        let mac_podman = harness_port_overlay(&root, true).unwrap().unwrap();
+        assert!(mac_podman.contains("127.0.0.1:52106:4206"));
+        assert!(!mac_podman.contains("[::1]"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires Docker Compose; configuration only, no running engine needed"]
+    fn dynamic_harness_port_is_applied_by_real_compose_without_changing_container_ports() {
+        let root = temp_root("dynamic-harness-compose");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), source).unwrap();
+        std::fs::write(
+            root.join("docker-compose.override.yml"),
+            "services:\n  agent-harness:\n    labels:\n      regression: preserved\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".env"), "PICKED_HARNESS_IMAGE=synthetic:local\nPICKED_HARNESS_PORT=4206\nPICKED_HARNESS_HOST_PORT=52106\nPOSTGRES_PORT=55432\n").unwrap();
+        let command = compose_start_command(
+            &Address::new(crate::engine::Engine::Docker, None),
+            &root,
+            &Secrets::new(),
+            "windows",
+        )
+        .unwrap();
+        let output = {
+            let mut command = command;
+            command
+                .args(["--profile", "*", "config", "--format", "json"])
+                .output()
+                .unwrap()
+        };
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let config: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let harness = &config["services"]["agent-harness"];
+        assert_eq!(harness["labels"]["regression"], "preserved");
+        let ports = harness["ports"].as_array().unwrap();
+        assert_eq!(ports.len(), 2);
+        for port in ports {
+            assert_eq!(port["published"], "52106");
+            assert_eq!(port["target"], 4206);
+            assert!(matches!(
+                port["host_ip"].as_str(),
+                Some("127.0.0.1" | "::1")
+            ));
+        }
+        for port in config["services"]["postgres"]["ports"].as_array().unwrap() {
+            assert_eq!(port["published"], "55432");
+            assert_eq!(port["target"], 5432);
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            source
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Real Compose merging is the important assertion: without !override, IPv6 ports survive.
+    /// This only reads configuration; it never contacts a container engine or registry.
+    #[test]
+    #[ignore = "requires Docker Compose; only reads configuration, no running engine needed"]
+    fn macos_podman_port_overlay_replaces_all_six_ports_and_preserves_other_settings() {
+        let root = temp_root("compose-ports-merge");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = include_str!("../../../docker-compose.yml");
+        std::fs::write(root.join("docker-compose.yml"), source).unwrap();
+        std::fs::write(root.join(MACOS_PODMAN_PORTS_FILE), MACOS_PODMAN_PORTS).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services:\n  supervisor:\n    environment:\n      COMPUTER_NAMESPACE: regression-kept\n    labels:\n      regression: kept\n").unwrap();
+        let docker =
+            std::env::var_os("OPENBOT_TEST_COMPOSE_DOCKER").unwrap_or_else(|| "docker".into());
+        let config = |overlay: bool| {
+            let mut command = Command::new(&docker);
+            command
+                .current_dir(&root)
+                .env_clear()
+                .env("PATH", env!("OPENBOT_TEST_TOOL_PATH"));
+            command.arg("compose");
+            if overlay {
+                command.args([
+                    "-f",
+                    "docker-compose.yml",
+                    "-f",
+                    "docker-compose.override.yml",
+                    "-f",
+                    MACOS_PODMAN_PORTS_FILE,
+                ]);
+            }
+            let output = command
+                .args(["--profile", "*", "config", "--format", "json"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        for settings in [
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\n".to_string(),
+            "PICKED_HARNESS_IMAGE=synthetic-harness:local\nPOSTGRES_PORT=15432\nSUPERVISOR_PORT=14500\nCOMPUTER_PORT=14100\nBOT_PORT=14200\nLANGGRAPH_PORT=14201\nPICKED_HARNESS_PORT=14206\n".to_string(),
+        ] {
+            std::fs::write(root.join(".env"), &settings).unwrap();
+            let mut before = config(false);
+            let after = config(true);
+            let mut published = 0;
+            for (_, service) in before["services"].as_object_mut().unwrap() {
+                if let Some(ports) = service.get_mut("ports").and_then(serde_json::Value::as_array_mut) {
+                    assert_eq!(ports.len(), 2, "the released port pattern must exercise dual loopback");
+                    ports.retain(|port| port["host_ip"] == "127.0.0.1");
+                    assert_eq!(ports.len(), 1);
+                    published += 1;
+                }
+            }
+            assert_eq!(published, 6, "all published services must be covered");
+            assert_eq!(after, before, "only the duplicate IPv6 loopback mappings may change");
+            assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), settings);
+            assert_eq!(std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(), source);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports() {
+        if crate::test_support::isolated_process("stack::tests::macos_podman_up_and_migrate_keep_deployment_overrides_without_duplicate_ports") { return; }
+        let path = PathFixture::with_fake_engine("macos-podman-start");
+        let [_, podman] = computer_stop_addresses(&path);
+        let (root, record) = computer_stop_root(&path, "podman-start", "{}");
+        let original = "services: {}\n";
+        let settings = "POSTGRES_PORT=5544\nPICKED_HARNESS_PORT=4206\n";
+        std::fs::write(root.join(".env"), settings).unwrap();
+        std::fs::write(root.join("docker-compose.override.yml"), "services: {}\n").unwrap();
+        let services = up(&podman, &root, true, BundledBots::none(), &Secrets::new()).unwrap();
+        assert_eq!(
+            services,
+            ["postgres", "supervisor", "agent-computer", "agent-harness"]
+        );
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        for action in [
+            "--profile harness up -d --no-build --pull never",
+            "run --rm --pull never migrate",
+        ] {
+            let line = log.lines().find(|line| line.contains(action)).unwrap();
+            let base = line.find("-f docker-compose.yml").unwrap();
+            let existing = line.find("-f docker-compose.override.yml").unwrap();
+            let desktop = line.find(".openbot-macos-podman.yml").unwrap();
+            assert!(base < existing && existing < desktop, "{line}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("docker-compose.yml")).unwrap(),
+            original
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".env")).unwrap(),
+            settings
+        );
+
+        std::fs::write(root.join("custom override.yml"), "services: {}\n").unwrap();
+        std::fs::write(
+            root.join(".fixture-compose-environment"),
+            "COMPOSE_FILE=docker-compose.yml;custom override.yml\nCOMPOSE_PATH_SEPARATOR=;\n",
+        )
+        .unwrap();
+        std::fs::remove_file(&record).unwrap();
+        migrate(&podman, &root, &Secrets::new()).unwrap();
+        let log = std::fs::read_to_string(&record).unwrap();
+        assert!(
+            log.contains("-f docker-compose.yml -f custom override.yml"),
+            "{log}"
+        );
+        assert!(!log.contains("docker-compose.override.yml"), "{log}");
+
+        std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
+        std::fs::remove_file(&record).unwrap();
+        assert!(
+            up(&podman, &root, true, BundledBots::none(), &Secrets::new())
+                .unwrap_err()
+                .detail
+                .unwrap()
+                .contains("synthetic invalid deployment override")
+        );
+        assert!(!std::fs::read_to_string(record).unwrap().contains(" up "));
+    }
+
+    #[test]
+    fn migrate_is_not_raised_as_a_service() {
+        // Raised alongside the others it exits immediately, and Compose reports a service that will
+        // not stay up. It is run to completion instead, by `migrate`.
+        assert!(!SERVICES.contains(&"migrate"));
+    }
+
+    #[test]
+    fn the_bots_computers_are_found_by_label_rather_than_by_a_name_that_starts_with_openbot() {
+        // A name filter would also match a kind cluster's nodes, which are called
+        // openbot-control-plane and openbot-worker and belong to somebody else.
+        assert!(
+            SUPERVISOR_FILTER.starts_with("label="),
+            "without this the engine answers `invalid filter`: {SUPERVISOR_FILTER}"
+        );
+        assert!(SUPERVISOR_FILTER.contains("openbot.supervisor=true"));
+        assert!(!SUPERVISOR_FILTER.contains("name="));
+    }
+
+    fn computer_stop_root(path: &PathFixture, label: &str, config: &str) -> (PathBuf, PathBuf) {
+        let root = path.bin.join(label);
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+        std::fs::write(root.join(".fixture-config"), config).unwrap();
+        let record = path.bin.join(format!("{label}.log"));
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        (root, record)
+    }
+
+    fn resolved_namespace_fixture(namespace: &str) -> String {
+        serde_json::json!({"services":{"supervisor":{"environment":{"COMPUTER_NAMESPACE":namespace}}}}).to_string()
+    }
+
+    fn computer_stop_addresses(path: &PathFixture) -> [Address; 2] {
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        std::fs::copy(
+            path.bin.join(format!("docker{suffix}")),
+            path.bin.join(format!("podman{suffix}")),
+        )
+        .unwrap();
+        [
+            Address::new(crate::engine::Engine::Docker, None),
+            Address::new(
+                crate::engine::Engine::Podman,
+                Some("fixture-machine".into()),
+            ),
+        ]
+    }
+
+    fn computer_shutdown_race_root(path: &PathFixture, label: &str) -> (PathBuf, PathBuf) {
+        let (root, record) =
+            computer_stop_root(path, label, &resolved_namespace_fixture("fixture-selected"));
+        std::fs::write(root.join(".fixture-race"), "").unwrap();
+        for id in ["current", "other", "unowned"] {
+            std::fs::write(root.join(format!("{id}.running")), "").unwrap();
+        }
+        for id in ["current", "late", "restarted", "other", "unowned"] {
+            std::fs::write(root.join(format!("{id}.volume")), id).unwrap();
+        }
+        (root, record)
+    }
+
+    fn assert_computer_shutdown_preserves_foreign_and_volumes(root: &Path) {
+        let surviving: Vec<_> = ["current", "late", "restarted"]
+            .into_iter()
+            .filter(|id| root.join(format!("{id}.running")).exists())
+            .collect();
+        assert!(
+            surviving.is_empty(),
+            "computers survived shutdown: {surviving:?}"
+        );
+        for id in ["other", "unowned"] {
+            assert!(
+                root.join(format!("{id}.running")).exists(),
+                "{id} was stopped"
+            );
+        }
+        for id in ["current", "late", "restarted", "other", "unowned"] {
+            assert_eq!(
+                std::fs::read_to_string(root.join(format!("{id}.volume"))).unwrap(),
+                id
+            );
+        }
+        assert!(root.join("supervisor.stopped").exists());
+        assert!(root.join("stack.down").exists());
+    }
+
+    #[test]
+    fn computer_stop_quiesces_supervisor_before_final_snapshot_and_preserves_other_computers() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_quiesces_supervisor_before_final_snapshot_and_preserves_other_computers") { return; }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            down(&address, &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            println!("{} shutdown trace:\n{log}", address.engine.binary());
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+            let config = log.find("config --format json").unwrap();
+            let supervisor = log
+                .find("compose -f docker-compose.yml stop supervisor")
+                .unwrap();
+            let snapshot = log.find("ps --quiet").unwrap();
+            let computers = log.find("stop current late restarted").unwrap();
+            let teardown = log.find("--profile harness down").unwrap();
+            assert!(
+                config < supervisor
+                    && supervisor < snapshot
+                    && snapshot < computers
+                    && computers < teardown,
+                "{log}"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_stop_supervisor_failure_prevents_snapshot_and_is_retryable() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_supervisor_failure_prevents_snapshot_and_is_retryable",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let (root, record) =
+                computer_shutdown_race_root(&path, &format!("root-{}", address.engine.binary()));
+            let failure = root.join(".fixture-supervisor-stop-failure");
+            std::fs::write(&failure, "").unwrap();
+            let error = down(&address, &root).unwrap_err();
+            assert!(
+                error.contains("supervisor") && error.contains("fixture supervisor stop refused"),
+                "{error}"
+            );
+            let log = std::fs::read_to_string(&record).unwrap();
+            assert_eq!(log.lines().count(), 2, "{log}");
+            assert!(
+                !log.contains("ps --quiet") && !log.contains("harness down"),
+                "{log}"
+            );
+            assert!(root.join("current.running").exists());
+            assert!(!root.join("supervisor.stopped").exists());
+            assert!(!root.join("stack.down").exists());
+            std::fs::remove_file(failure).unwrap();
+            down(&address, &root).unwrap();
+            assert_computer_shutdown_preserves_foreign_and_volumes(&root);
+        }
+    }
+
+    #[test]
+    fn computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_filters_both_ownership_and_selected_namespace_for_each_engine") { return; }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for address in computer_stop_addresses(&path) {
+            let prefix = if address.connection.is_some() {
+                "--connection fixture-machine "
+            } else {
+                ""
+            };
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("root-{}", address.engine.binary()),
+                &resolved_namespace_fixture("fixture-selected"),
+            );
+            down(&address, &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                log.contains(&format!(
+                    "{prefix}compose -f docker-compose.yml config --format json"
+                )),
+                "{log}"
+            );
+            assert!(log.contains(&format!("{prefix}ps --quiet --filter label=openbot.supervisor=true --filter label=openbot.namespace=fixture-selected")), "{log}");
+            assert!(
+                log.lines()
+                    .any(|line| line.ends_with(&format!("\t{prefix}stop current"))),
+                "{log}"
+            );
+            assert!(
+                !log.contains("stop current other") && !log.contains("stop unowned"),
+                "{log}"
+            );
+            assert!(
+                log.contains(&format!(
+                    "{prefix}compose -f docker-compose.yml --profile harness down"
+                )),
+                "{log}"
+            );
+        }
+    }
+
+    #[test]
+    fn computer_stop_preserves_supervisor_default_and_trim_rules() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_preserves_supervisor_default_and_trim_rules",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        for (index, namespace) in ["openbot", "", "  ", " fixture-selected "]
+            .iter()
+            .enumerate()
+        {
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("case-{index}"),
+                &resolved_namespace_fixture(namespace),
+            );
+            down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap();
+            let expected = if index == 3 { "current" } else { "default" };
+            assert!(std::fs::read_to_string(record)
+                .unwrap()
+                .lines()
+                .any(|line| line.ends_with(&format!("\tstop {expected}"))));
+        }
+        for (index, namespace) in ["9Mixed_Case-namespace".to_string(), "a".repeat(64)]
+            .iter()
+            .enumerate()
+        {
+            let (root, record) = computer_stop_root(
+                &path,
+                &format!("valid-{index}"),
+                &resolved_namespace_fixture(namespace),
+            );
+            down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap();
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(
+                log.contains(&format!("label=openbot.namespace={namespace}")),
+                "{log}"
+            );
+            assert!(!log.contains("\tstop "), "{log}");
+        }
+    }
+
+    #[test]
+    fn computer_stop_refuses_unresolved_namespace_before_listing_or_stopping() {
+        if crate::test_support::isolated_process(
+            "stack::tests::computer_stop_refuses_unresolved_namespace_before_listing_or_stopping",
+        ) {
+            return;
+        }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        let configs = [
+            "not json".to_string(),
+            "{\"services\":{}}".to_string(),
+            "{\"services\":{\"supervisor\":{\"environment\":{\"COMPUTER_NAMESPACE\":12}}}}"
+                .to_string(),
+            resolved_namespace_fixture("_invalid"),
+            resolved_namespace_fixture("bad/value"),
+            resolved_namespace_fixture(&"a".repeat(65)),
+        ];
+        for (index, config) in configs.iter().enumerate() {
+            let (root, record) = computer_stop_root(&path, &format!("invalid-{index}"), config);
+            let error =
+                down(&Address::new(crate::engine::Engine::Docker, None), &root).unwrap_err();
+            assert!(error.contains("namespace"), "{error}");
+            let log = std::fs::read_to_string(record).unwrap();
+            assert!(log.lines().count() == 1, "{log}");
+        }
+        let (root, record) = computer_stop_root(&path, "provider-failure", "{}");
+        std::fs::write(root.join(".fixture-config-failure"), "").unwrap();
+        assert!(down(&Address::new(crate::engine::Engine::Docker, None), &root).is_err());
+        assert!(!std::fs::read_to_string(record).unwrap().contains("\tps "));
+    }
+
+    #[test]
+    fn computer_stop_without_installed_config_never_searches_parent_or_lists_globally() {
+        if crate::test_support::isolated_process("stack::tests::computer_stop_without_installed_config_never_searches_parent_or_lists_globally") { return; }
+        let path = PathFixture::with_fake_engine("computer-stop");
+        let record = path.bin.join("no-stack.log");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let absent = path.bin.join("absent");
+        let empty = path.bin.join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        for root in [&absent, &empty] {
+            down(&Address::new(crate::engine::Engine::Docker, None), root).unwrap();
+            assert!(!record.exists());
+        }
+        crate::deployment::record(&empty, "fixture").unwrap();
+        assert!(down(&Address::new(crate::engine::Engine::Docker, None), &empty).is_err());
+        assert!(!record.exists());
+    }
+
+    struct ReadinessFixture {
+        root: PathBuf,
+        children: Vec<(&'static str, std::process::Child)>,
+        ready: Ready,
+    }
+
+    impl ReadinessFixture {
+        fn new(api: &str, app: &str) -> Self {
+            let root = temp_root("current-api-readiness");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut fixture = Self {
+                root,
+                children: Vec::new(),
+                ready: Ready { api: 0, app: 0 },
+            };
+            let source = fixture.root.join("readiness.rs");
+            std::fs::write(
+                &source,
+                r#"
+use std::io::{Read, Write};
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let name = &args[1];
+    let mode = &args[2];
+    let statuses: Vec<&str> = mode.split(',').collect();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut listeners = vec![listener];
+    // An unbound IPv6 fallback takes about two seconds to refuse on Windows. Serve the
+    // same status on both loopbacks so the regression tests HTTP state, not that delay.
+    match std::net::TcpListener::bind(("::1", port)) {
+        Ok(listener) => listeners.push(listener),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported) => {}
+        Err(error) => panic!("could not bind fixture IPv6 loopback: {}", error),
+    }
+    for listener in &listeners { listener.set_nonblocking(true).unwrap(); }
+    let mut requests = std::fs::File::create(format!("{name}.requests")).unwrap();
+    std::fs::write(format!("{name}.port"), port.to_string()).unwrap();
+    let mut ipv4_requests = 0_usize;
+    loop {
+        for listener in &listeners {
+            let (mut stream, _) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(error) => panic!("could not accept fixture request: {}", error),
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                if stream.read(&mut byte).unwrap() == 0 { break; }
+                request.push(byte[0]);
+            }
+            // answering_at tries IPv4 first. Its IPv6 fallback belongs to that same poll,
+            // and must not advance the scripted response to the next service state.
+            let index = if listener.local_addr().unwrap().is_ipv4() {
+                let index = ipv4_requests;
+                ipv4_requests += 1;
+                index
+            } else { ipv4_requests.saturating_sub(1) };
+            let status = if mode == "exit" { "503" } else { statuses[index.min(statuses.len() - 1)] };
+            writeln!(requests, "{status} {}", String::from_utf8_lossy(&request).lines().next().unwrap()).unwrap();
+            write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            if mode == "exit" { std::process::exit(17); }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+"#,
+            )
+            .unwrap();
+            let binary = fixture
+                .root
+                .join(format!("readiness{}", std::env::consts::EXE_SUFFIX));
+            crate::test_support::compile_fixture(&source, &binary);
+            for (name, mode) in [("server", api), ("app", app)] {
+                std::fs::write(
+                    fixture.root.join(format!("{name}.log")),
+                    format!("synthetic {name} diagnostic"),
+                )
+                .unwrap();
+                fixture.children.push((
+                    name,
+                    Command::new(&binary)
+                        .args([name, mode])
+                        .current_dir(&fixture.root)
+                        .spawn()
+                        .unwrap(),
+                ));
+                let port_file = fixture.root.join(format!("{name}.port"));
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                let port = loop {
+                    if let Ok(port) = std::fs::read_to_string(&port_file) {
+                        if let Ok(port) = port.parse() {
+                            break port;
+                        }
+                    }
+                    assert!(fixture
+                        .children
+                        .last_mut()
+                        .unwrap()
+                        .1
+                        .try_wait()
+                        .unwrap()
+                        .is_none());
+                    assert!(std::time::Instant::now() < deadline, "fixture did not bind");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                };
+                if name == "server" {
+                    fixture.ready.api = port;
+                } else {
+                    fixture.ready.app = port;
+                }
+            }
+            fixture
+        }
+
+        fn wait(&mut self, patience: std::time::Duration) -> Result<(), String> {
+            wait_until_answering(&mut self.children, &self.root, &self.ready, patience)
+        }
+
+        fn requests(&self, name: &str) -> String {
+            std::fs::read_to_string(self.root.join(format!("{name}.requests"))).unwrap()
+        }
+    }
+
+    impl Drop for ReadinessFixture {
+        fn drop(&mut self) {
+            for (_, child) in &mut self.children {
+                let _ = child.kill();
+                child.wait().expect("owned HTTP fixture must be reaped");
+            }
+            for port in [self.ready.api, self.ready.app] {
+                assert!(!something_answers(port), "owned HTTP listener must close");
+            }
+            eprintln!(
+                "readiness fixture cleaned: pids={:?}; ports={:?}",
+                self.children
+                    .iter()
+                    .map(|(_, child)| child.id())
+                    .collect::<Vec<_>>(),
+                [self.ready.api, self.ready.app]
+            );
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn readiness_rechecks_api_after_an_earlier_success() {
+        let mut fixture = ReadinessFixture::new("200,503", "503,200");
+        let result = fixture.wait(std::time::Duration::from_secs(2));
+        let api_requests = fixture.requests("server");
+        let live = fixture
+            .children
+            .iter_mut()
+            .all(|(_, child)| child.try_wait().unwrap().is_none());
+        let api_now = answering_at(fixture.ready.api, "/api/capabilities");
+        let app_now = app_url(fixture.ready.app);
+        eprintln!("current API readiness: result={result:?}; children_alive={live}; api_requests={api_requests:?}; api_now={api_now:?}; app_now={app_now:?}");
+        drop(fixture);
+        assert!(live && api_now.is_none() && app_now.is_some());
+        let error = result.expect_err("a historical API success cannot satisfy readiness");
+        assert!(api_requests.lines().count() >= 2, "{api_requests}");
+        assert!(error.contains("the API is not answering"), "{error}");
+        assert!(error.contains("synthetic server diagnostic"), "{error}");
+    }
+
+    #[test]
+    fn readiness_accepts_currently_healthy_api_and_app() {
+        let mut fixture = ReadinessFixture::new("200", "200");
+        let result = fixture.wait(std::time::Duration::from_secs(2));
+        let api_requests = fixture.requests("server");
+        let app_requests = fixture.requests("app");
+        drop(fixture);
+        assert!(result.is_ok(), "{result:?}");
+        assert!(api_requests.contains("200 GET /api/capabilities HTTP/1.1"));
+        assert!(app_requests.contains("200 GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn readiness_timeout_names_the_currently_unavailable_service() {
+        for (api, app, missing) in [("503", "200", "server"), ("200", "503", "app")] {
+            let mut fixture = ReadinessFixture::new(api, app);
+            let result = fixture.wait(std::time::Duration::from_millis(100));
+            let port = if missing == "server" {
+                fixture.ready.api
+            } else {
+                fixture.ready.app
+            };
+            drop(fixture);
+            let error = result.unwrap_err();
+            let service = if missing == "server" { "API" } else { "app" };
+            assert!(
+                error.contains(&format!("the {service} is not answering on port {port}")),
+                "{error}"
+            );
+            assert!(
+                error.contains(&format!("synthetic {missing} diagnostic")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn readiness_reports_child_exit_without_waiting_for_timeout() {
+        let mut fixture = ReadinessFixture::new("exit", "200");
+        let started = std::time::Instant::now();
+        let result = fixture.wait(std::time::Duration::from_secs(30));
+        let elapsed = started.elapsed();
+        let status = fixture.children[0].1.try_wait().unwrap().unwrap();
+        drop(fixture);
+        let error = result.unwrap_err();
+        assert!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
+        assert_eq!(status.code(), Some(17));
+        assert!(error.contains("server stopped straight away"), "{error}");
+        assert!(error.contains("synthetic server diagnostic"), "{error}");
+    }
+
+    #[test]
+    fn readiness_asks_both_loopbacks_because_a_runtime_picks_one() {
+        assert!(LOOPBACKS.contains(&"127.0.0.1"));
+        assert!(
+            LOOPBACKS.contains(&"[::1]"),
+            "an IPv6-only bind still counts as answering"
+        );
+    }
+
+    #[test]
+    fn nothing_is_answering_on_a_port_nothing_is_listening_on() {
+        // Port 1 needs privilege to bind, so this asks about a port that cannot quietly be
+        // somebody else's server.
+        assert_eq!(answering_at(1, "/"), None);
+    }
+
+    #[test]
+    fn the_app_is_served_as_a_build_rather_than_by_a_development_server() {
+        let app = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "app")
+            .expect("the app is one of the three");
+        assert_eq!(
+            app.package_script, "serve",
+            "`dev` sets NODE_ENV=development, and the SDK draws its developer inspector over the \
+             application when it reads that"
+        );
+    }
+
+    #[test]
+    fn the_three_host_processes_are_the_three_that_are_not_containers() {
+        let names: Vec<_> = HOST_PROCESSES.iter().map(|p| p.name).collect();
+        assert_eq!(names, vec!["server", "app", "worker"]);
+    }
+
+    #[test]
+    fn the_server_uses_the_production_loader_entry() {
+        let server = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "server")
+            .expect("the server is one of the three");
+        assert_eq!(server.script, "src/production-entry.ts");
+    }
+
+    #[test]
+    fn the_worker_keeps_its_own_index_entry() {
+        let worker = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "worker")
+            .expect("the worker is one of the three");
+        assert_eq!(worker.script, "src/index.ts");
+    }
+
+    #[test]
+    fn the_server_starts_before_the_app_that_talks_to_it() {
+        let server = HOST_PROCESSES
+            .iter()
+            .position(|p| p.name == "server")
+            .unwrap();
+        let app = HOST_PROCESSES.iter().position(|p| p.name == "app").unwrap();
+        assert!(server < app);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unix_app_listener_requires_stable_recorded_ancestry() {
+        let live = [
+            unix_fixture(401, 400),
+            unix_fixture(402, 401),
+            unix_fixture(403, 402),
+        ];
+        let inspect = |pid| Ok(live.iter().find(|row| row.pid == pid).cloned());
+        assert!(unix_listener_belongs_to_record(403, &unix_record(401), inspect).unwrap());
+        assert!(!unix_listener_belongs_to_record(403, &unix_record(501), inspect).unwrap());
+        let mut reused = unix_record(401);
+        reused.start = "earlier-instance".into();
+        assert!(!unix_listener_belongs_to_record(403, &reused, inspect).unwrap());
+        let mut seen = std::collections::HashMap::new();
+        assert!(
+            !unix_listener_belongs_to_record(403, &unix_record(401), |pid| {
+                let count = seen.entry(pid).or_insert(0);
+                *count += 1;
+                let mut row = live.iter().find(|row| row.pid == pid).cloned();
+                if pid == 402 && *count > 1 {
+                    row.as_mut().unwrap().parent = 999;
+                }
+                Ok(row)
+            })
+            .unwrap()
+        );
+        assert!(
+            !unix_listener_belongs_to_record(403, &unix_record(401), |pid| {
+                Ok(Some(unix_fixture(pid, if pid == 403 { 402 } else { 403 })))
+            })
+            .unwrap()
+        );
+    }
+
+    fn ancestry_listeners(pids: &[u32]) -> String {
+        pids.iter()
+            .map(|pid| format!("TCP 127.0.0.1:3010 0.0.0.0:0 LISTENING {pid}\n"))
+            .collect()
+    }
+
+    fn assert_windows_ancestry_selection(
+        recorded: &[RecordedHostProcess],
+        processes: &[WindowsProcess],
+        listeners: &[u32],
+        expected: &[u32],
+    ) {
+        let listing = ancestry_listeners(listeners);
+        assert_eq!(
+            verified_openbot_pids_listening_on(&listing, &[3010], recorded, processes),
+            expected,
+            "listener ownership: {processes:?}"
+        );
+    }
+
+    #[test]
+    fn windows_ancestry_rejects_a_reused_newer_parent_pid() {
+        let recorded = [recorded_process("app", 9001, "20260910010101.000000-420")];
+        let processes = [
+            live_host_process("app", 9001, 7000, "20260910010101.000000-420"),
+            live_host_process("app", 9000, 9001, "20260909010101.000000-420"),
+        ];
+        assert_windows_ancestry_selection(&recorded, &processes, &[9000], &[]);
+    }
+
+    #[test]
+    fn windows_ancestry_checks_intermediate_parent_instances() {
+        let recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+        let processes = [
+            live_host_process("app", 9001, 7000, "/Date(1000)/"),
+            live_host_process("app", 9002, 9001, "/Date(3000)/"),
+            live_host_process("app", 9003, 9002, "/Date(2000)/"),
+        ];
+        assert_windows_ancestry_selection(
+            &recorded,
+            &processes,
+            &[9001, 9002, 9003],
+            &[9001, 9002],
+        );
+    }
+
+    #[test]
+    fn windows_ancestry_compares_instants_and_preserves_direct_and_descendant_ownership() {
+        for (parent, child, owned) in [
+            (
+                "20260910010101.000000-420",
+                "20260910010101.000001-420",
+                true,
+            ),
+            (
+                "20260910010101.000001-420",
+                "20260910010101.000000-420",
+                false,
+            ),
+            (
+                "20260910010101.000000-420",
+                "20260910010101.000000-420",
+                true,
+            ),
+            // Local date order reverses at a timezone boundary; compare UTC instants.
+            (
+                "20260910003000.000000+060",
+                "20260909234500.000000+000",
+                true,
+            ),
+            (
+                "20260909234500.000000+000",
+                "20260910003000.000000+060",
+                false,
+            ),
+            ("/Date(1000)/", "/Date(1001)/", true),
+            ("/Date(1001)/", "/Date(1000)/", false),
+            ("/Date(1000+0700)/", "/Date(1001-0800)/", true),
+            ("/Date(-1)/", "/Date(0)/", true),
+            ("19700101010000.000000+060", "/Date(0)/", true),
+            ("19700101000000.000001+000", "/Date(0)/", false),
+        ] {
+            let recorded = [recorded_process("app", 9001, parent)];
+            let processes = [
+                live_host_process("app", 9001, 7000, parent),
+                live_host_process("app", 9002, 9001, child),
+            ];
+            let expected: &[u32] = if owned { &[9001, 9002] } else { &[9001] };
+            assert_windows_ancestry_selection(&recorded, &processes, &[9001, 9002], expected);
+        }
+    }
+
+    #[test]
+    fn windows_ancestry_refuses_missing_or_invalid_times_at_every_link() {
+        for invalid in [
+            None,
+            Some(""),
+            Some("unknown"),
+            Some("20260910010101.000000+***"),
+            Some("20260931010101.000000+000"),
+            Some("20260229010101.000000+000"),
+            Some("20260910240101.000000+000"),
+            Some("20260910010160.000000+000"),
+            Some("20260910010101.00000x+000"),
+            Some("/Date()/"),
+            Some("/Date(9223372036854775807)/"),
+            Some("/Date(0+2400)/"),
+            Some("/Date(0+0060)/"),
+            Some("/Date(0+000)/"),
+            Some("/Date(0)"),
+        ] {
+            for index in 0..3 {
+                let mut recorded = [recorded_process("app", 9001, "/Date(1000)/")];
+                let mut processes = [
+                    live_host_process("app", 9001, 7000, "/Date(1000)/"),
+                    live_host_process("app", 9002, 9001, "/Date(2000)/"),
+                    live_host_process("app", 9003, 9002, "/Date(3000)/"),
+                ];
+                processes[index].creation_date = invalid.map(str::to_string);
+                if index == 0 {
+                    recorded[0].creation_date = invalid.unwrap_or("").to_string();
+                }
+                assert_windows_ancestry_selection(&recorded, &processes, &[9003], &[]);
+                if index == 0 {
+                    assert_windows_ancestry_selection(&recorded, &processes, &[9001], &[]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn windows_app_port_requires_the_app_role_and_its_verified_descendant() {
+        if crate::test_support::isolated_process(
+            "stack::tests::windows_app_port_requires_the_app_role_and_its_verified_descendant",
+        ) {
+            return;
+        }
+        let root = temp_root("windows-app-role-port");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("already-running");
+        let app = recorded_process("app", 9001, "20260909010101.000000-420");
+        let server = recorded_process("server", 9002, "20260909010101.000000-420");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[app,server]}),
+        )
+        .unwrap();
+        std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([
+            {"ProcessId":9001,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("app"),"CreationDate":"20260909010101.000000-420"},
+            {"ProcessId":9000,"ParentProcessId":9001,"ExecutablePath":"synthetic-child.exe","CommandLine":"synthetic child","CreationDate":"20260909010102.000000-420"},
+            {"ProcessId":9002,"ParentProcessId":7000,"ExecutablePath":r"C:\Users\person\.bun\bin\bun.exe","CommandLine":host_command_line("server"),"CreationDate":"20260909010101.000000-420"}
+        ])).unwrap()).unwrap();
+        let owns = |name, port| {
+            recorded_process_owns_port_windows_with(
+                &root,
+                name,
+                port,
+                &fixture.command("powershell"),
+                &fixture.command("netstat"),
+            )
+            .unwrap()
+        };
+        assert!(owns("app", 45123));
+        assert!(!owns("server", 45123));
+        assert!(!owns("app", 45124));
+        assert!(owns("server", 45124));
+        assert!(!owns("worker", 45123));
+        let log = fixture.log();
+        assert!(!log.contains("taskkill"), "{log}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

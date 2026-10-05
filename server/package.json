@@ -12,24 +12,36 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ag-ui/client": "0.0.57",
+    "@ag-ui/client": "0.0.59",
+    "@ag-ui/mastra": "1.1.2",
     "@better-auth/drizzle-adapter": "^1.7.1",
+    "@better-auth/electron": "1.7.1",
+    "@better-auth/expo": "1.7.1",
+    "@better-auth/scim": "1.7.1",
     "@better-auth/sso": "^1.7.1",
-    "@copilotkit/runtime": "1.69.0",
+    "@composio/core": "^0.18.1",
+    "@copilotkit/runtime": "1.73.1",
+    "@mastra/client-js": "^1.43.0",
+    "@mastra/core": "^1.64.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@opentelemetry/api-logs": "0.221.0",
+    "@opentelemetry/exporter-logs-otlp-http": "0.221.0",
+    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/sdk-logs": "0.221.0",
     "better-auth": "^1.7.1",
     "cel-js": "^0.8.2",
     "cron-parser": "^5",
     "drizzle-orm": "^0.45.2",
+    "eventsource": "3.0.7",
     "hono": "^4.10.0",
     "postgres": "^3.4.9",
     "rxjs": "7.8.1",
+    "twilio": "5.13.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.39.0",
-    "drizzle-kit": "^0.31.10",
-    "eventsource": "3.0.7"
+    "drizzle-kit": "^0.31.10"
   }
 }

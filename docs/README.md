@@ -7,11 +7,17 @@ Start with the root [README](../README.md), then use these references:
 - [Development](development.md): local setup, migrations, ports, and quality checks.
 - [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
+- [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.
+- [Parallel research](parallel-research.md): public-web search and extraction through the Parallel Search connector.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:
+  - [Composio](plugins/composio.md): the broker, and so the one page here that is a catalogue of apps rather than a single connector.
   - [Google Drive](plugins/google-drive.md)
   - [Notion](plugins/notion.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
 - [Kubernetes](../charts/openbot/README.md): the Helm chart, what a cluster needs before it, and the values that differ per cloud.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
+- [Windows desktop signing](windows-signing.md): protected Azure Key Vault signing and verification of the app and NSIS installer.
+- [Desktop provider OAuth](../desktop/PROVIDER_OAUTH.md): what a distributor configures to offer Google and xAI sign-in in a desktop build.
+- [Desktop telemetry](../desktop/TELEMETRY.md): every event the desktop app sends, and what it carries.
 
 Do not include credential values, customer data, transcripts, or local-only notes in public docs.

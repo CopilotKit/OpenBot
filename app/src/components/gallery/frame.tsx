@@ -14,7 +14,7 @@ export function GalleryFrame({
   children: ReactNode;
 }) {
   return (
-    <figure className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card">
+    <figure className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card dark:border-transparent">
       {(title || action) && (
         <figcaption className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">
           <div className="min-w-0">

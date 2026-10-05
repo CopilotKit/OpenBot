@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -20,6 +21,7 @@ import type { AgentActor, AgentProfile } from "../agents/profile-types";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
+import { parsePageLimit } from "../paging";
 import {
   agentProfiles,
   channelAgents,
@@ -33,6 +35,7 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
+import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 
 export type AgentChannel = {
@@ -41,12 +44,22 @@ export type AgentChannel = {
   agentIds: string[];
   threadId: string;
   active: boolean;
+  /**
+   * When something was last said here, or null for a conversation nobody has used.
+   *
+   * On the channel itself rather than only on the roster summary, because the conversation screen
+   * needs it: a thread the history store does not know about is an empty NEW conversation when this
+   * is null and a conversation whose history is unreachable when it is set, and those are different
+   * things to put on the screen. See the note in `channel-chat.tsx`.
+   */
+  lastMessageAt: Date | null;
 };
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
+  /** A few words about the conversation, or null. Readers fall back to the channel's name. */
+  summary: string | null;
   lastMessage: string | null;
-  lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
   createdAt: Date;
   /** Whether the caller pinned this channel. A pin is per-member, so this is the caller's, only. */
@@ -95,7 +108,10 @@ const MAX_CHANNEL_PAGE = 200;
  */
 type ChannelCursor = { pinned: boolean; recency: string; id: string };
 
-function encodeChannelCursor(cursor: ChannelCursor): string {
+/** The shape the encoder writes: UTC, to the millisecond (older cursors) or the microsecond. */
+const CURSOR_RECENCY = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+export function encodeChannelCursor(cursor: ChannelCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
@@ -104,8 +120,11 @@ function encodeChannelCursor(cursor: ChannelCursor): string {
  *
  * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
  * describes a position in an ordering this query no longer has.
+ *
+ * `recency` has to be the timestamp the encoder writes, not merely a string: it is cast with
+ * `::timestamptz` in the page query, so any other string used to reach PostgreSQL and answer 500.
  */
-function decodeChannelCursor(
+export function decodeChannelCursor(
   value: string | undefined,
 ): ChannelCursor | undefined {
   if (!value) return undefined;
@@ -115,6 +134,8 @@ function decodeChannelCursor(
     ) as ChannelCursor;
     return typeof parsed?.id === "string" &&
       typeof parsed?.recency === "string" &&
+      CURSOR_RECENCY.test(parsed.recency) &&
+      !Number.isNaN(Date.parse(parsed.recency)) &&
       typeof parsed?.pinned === "boolean"
       ? parsed
       : undefined;
@@ -176,32 +197,53 @@ export type ChannelStore = {
    * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
    * tenant package defines, which configuration owns rather than any member.
    */
-  softDelete(actor: AgentActor, channelId: string): Promise<void>;
+  /**
+   * True when this call deleted the channel; false when it was already deleted. A repeat is a
+   * no-op, so it announces nothing and its route records nothing.
+   */
+  softDelete(actor: AgentActor, channelId: string): Promise<boolean>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
     activity: ChannelActivity,
+    source?: {
+      id: string;
+      /** Enrich this source's preview at the same timestamp only while this text still matches. */
+      enrichFrom?: string;
+    },
+  ): Promise<void>;
+  /**
+   * Tell a channel's members that a turn started or ended in it, by the thread it runs in.
+   *
+   * Keyed by thread because that is all a headless turn knows. A thread that maps to no channel —
+   * the scratch thread a handoff answers in — resolves to nothing and signals nowhere, which is
+   * the point of a scratch thread. Announced, never written: `busy` is a moment, not a fact about
+   * the channel, and a missed one costs a dot until the next real event rather than any data.
+   */
+  signalBusy(threadId: string, busy: boolean): Promise<void>;
+  /**
+   * The same signal, from a person's own run, by the channel they are in.
+   *
+   * A browser knows exactly when its run starts and stops and which channel it is in, which the
+   * server cannot see: the runtime does not tell this deployment when a person's turn begins. So
+   * the browser reports it, and this checks the caller belongs to the channel before announcing —
+   * the membership check `signalBusy` does not need, because that one is only ever called by the
+   * server about work it started itself.
+   */
+  signalChannelBusy(
+    actor: AgentActor,
+    channelId: string,
+    busy: boolean,
   ): Promise<void>;
 };
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
-const MAX_ACTIVITY_CODE_POINTS = 200;
+const MAX_ACTIVITY_GRAPHEMES = 200;
 
-/**
- * Reduce a message to one line of plain text.
- *
- * A preview is rendered as text wherever a roster appears, so control characters have nothing to do
- * there: at best they are invisible, at worst a terminal escape somebody put in a message follows it
- * into a log. Newlines collapse to spaces because a preview is one line by definition.
- */
+/** Reduce a message to the one line a roster draws. See `oneLine` for why it is shared. */
 function previewOf(text: string) {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point.
-  const flattened = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
-  const collapsed = flattened.replace(/\s+/g, " ");
-  const codePoints = Array.from(collapsed);
-  if (codePoints.length <= MAX_ACTIVITY_CODE_POINTS) return collapsed;
-  return `${codePoints.slice(0, MAX_ACTIVITY_CODE_POINTS - 1).join("")}…`;
+  return oneLine(text, MAX_ACTIVITY_GRAPHEMES);
 }
 
 function channelName(names: string[]) {
@@ -274,7 +316,7 @@ export function createChannelStore(
       threadId,
     });
 
-    return { id, name, agentIds, threadId, active: true };
+    return { id, name, agentIds, threadId, active: true, lastMessageAt: null };
   };
 
   const store: ChannelStore = {
@@ -357,6 +399,7 @@ export function createChannelStore(
           name: channels.name,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
+          lastMessageAt: channels.lastMessageAt,
           deletedAt: agentProfiles.deletedAt,
         })
         .from(channels)
@@ -391,6 +434,7 @@ export function createChannelStore(
         agentIds: rows.map((row) => row.agentId),
         threadId: first.threadId,
         active: rows.every((row) => row.deletedAt === null),
+        lastMessageAt: first.lastMessageAt,
       };
     },
 
@@ -411,7 +455,13 @@ export function createChannelStore(
       const page = await database
         .select({
           id: channels.id,
-          recency: sql<Date>`${RECENCY}`,
+          /*
+           * To the microsecond, as text, for the cursor only: the audit reader's fix, for the same
+           * fault. The column keeps microseconds and a `Date` keeps milliseconds, so a cursor made
+           * from a `Date` named a moment just before its own row, and any channel later in that
+           * millisecond compared as newer than the cursor and was on no page at all.
+           */
+          recency: sql<string>`to_char(${RECENCY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
           pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
         })
         .from(channels)
@@ -442,7 +492,7 @@ export function createChannelStore(
         page.length > limit && last
           ? encodeChannelCursor({
               pinned: last.pinned,
-              recency: new Date(last.recency).toISOString(),
+              recency: last.recency,
               id: last.id,
             })
           : null;
@@ -456,6 +506,7 @@ export function createChannelStore(
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
+          channelSummary: channels.summary,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
@@ -514,6 +565,7 @@ export function createChannelStore(
           agentIds: [row.agentId],
           threadId: row.threadId,
           active: row.deletedAt === null,
+          summary: row.channelSummary,
           lastMessage: row.lastMessage,
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
@@ -613,7 +665,7 @@ export function createChannelStore(
     },
 
     async softDelete(actor, channelId) {
-      await database.transaction(
+      return await database.transaction(
         async (transaction) => {
           const [row] = await transaction
             .select({ packageId: channels.packageId })
@@ -633,10 +685,17 @@ export function createChannelStore(
             throw new ChannelPackageOwnedError(channelId);
           }
           // The guard on deletedAt is what makes a repeat call a no-op rather than a new stamp.
-          await transaction
+          const stamped = await transaction
             .update(channels)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
-            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
+            .returning({ id: channels.id });
+          /*
+           * And the rest of the no-op: a repeat changed nothing, so nothing is announced. Without
+           * this, every repeat told every member again, and the route wrote another
+           * `channel.deleted` row to an append-only trail for a deletion that had not happened.
+           */
+          if (stamped.length === 0) return false;
 
           // Read on this transaction, so the members told are the ones the channel had when it was
           // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
@@ -665,12 +724,13 @@ export function createChannelStore(
           await transaction.execute(
             sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
           );
+          return true;
         },
         { isolationLevel: "read committed" },
       );
     },
 
-    recordActivity(actor, channelId, activity) {
+    recordActivity(actor, channelId, activity, source) {
       return database.transaction(
         async (transaction) => {
           const [membership] = await transaction
@@ -711,12 +771,14 @@ export function createChannelStore(
           }
 
           // A person's message and the agent's reply are reported separately, so they can arrive out
-          // of order. Only ever move forwards.
+          // of order. Only move forwards, except to enrich the same source's placeholder.
+          // The source, timestamp and text comparison is atomic across server replicas.
           const lastMessage = previewOf(activity.text);
           const applied = await transaction
             .update(channels)
             .set({
               lastMessage,
+              lastMessageSourceId: source?.id ?? null,
               lastMessageAt: activity.at,
               lastMessageAgentId: activity.agentId,
               updatedAt: new Date(),
@@ -727,6 +789,17 @@ export function createChannelStore(
                 or(
                   isNull(channels.lastMessageAt),
                   lt(channels.lastMessageAt, activity.at),
+                  source?.enrichFrom !== undefined
+                    ? and(
+                        eq(channels.lastMessageAt, activity.at),
+                        eq(channels.lastMessageSourceId, source.id),
+                        eq(channels.lastMessage, previewOf(source.enrichFrom)),
+                        ne(channels.lastMessage, lastMessage),
+                        activity.agentId === null
+                          ? isNull(channels.lastMessageAgentId)
+                          : eq(channels.lastMessageAgentId, activity.agentId),
+                      )
+                    : undefined,
                 ),
               ),
             )
@@ -754,6 +827,76 @@ export function createChannelStore(
           );
         },
         { isolationLevel: "read committed" },
+      );
+    },
+
+    async signalBusy(threadId, busy) {
+      // The channel this thread is shown in, if any. A scratch thread maps to nothing, so a hop
+      // running there signals nowhere and the branch below returns without announcing.
+      const [mapped] = await database
+        .select({ channelId: intelligenceChannelMappings.channelId })
+        .from(intelligenceChannelMappings)
+        .where(eq(intelligenceChannelMappings.threadId, threadId))
+        .limit(1);
+      if (!mapped) return;
+
+      const members = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .where(eq(channelMemberships.channelId, mapped.channelId));
+      if (members.length === 0) return;
+
+      // No table write: busy is a moment, and the roster query stays the source of truth. Just the
+      // announcement, carrying the members the same way recordActivity does.
+      const event: ChannelActivityEvent = {
+        channelId: mapped.channelId,
+        memberIds: members.map((member) => member.userId),
+        lastMessage: null,
+        lastMessageAt: null,
+        lastMessageAgentId: null,
+        busy,
+      };
+      await database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+      );
+    },
+
+    async signalChannelBusy(actor, channelId, busy) {
+      const [membership] = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .innerJoin(
+          channels,
+          and(
+            eq(channels.id, channelMemberships.channelId),
+            isNull(channels.deletedAt),
+          ),
+        )
+        .where(
+          and(
+            eq(channelMemberships.channelId, channelId),
+            eq(channelMemberships.userId, actor.id),
+          ),
+        );
+      // Not a member, no such channel, or a deleted one: the same refusal every way, so belonging
+      // to a channel is not something an outsider can probe for.
+      if (!membership) throw new ChannelNotFoundError(channelId);
+
+      const members = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .where(eq(channelMemberships.channelId, channelId));
+
+      const event: ChannelActivityEvent = {
+        channelId,
+        memberIds: members.map((member) => member.userId),
+        lastMessage: null,
+        lastMessageAt: null,
+        lastMessageAgentId: null,
+        busy,
+      };
+      await database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
       );
     },
   };
@@ -815,10 +958,22 @@ type ActivityInputParseResult =
 /**
  * Parse a reported message.
  *
- * `at` comes from the client that saw the message, because only it knows when the message arrived, * but it is never trusted as a clock: the store compares it against what is stored and only ever
- * moves forwards, so a wrong one can lose a report, not corrupt the row.
+ * `at` comes from the client that saw the message, because only it knows when the message arrived,
+ * and it may say when, but not later than now. The store compares it against what is stored and
+ * only ever moves forwards, and that guard is shared with every other clock in the deployment:
+ * the routine runner's, a relayed handoff answer's, every other member's browser. A browser whose
+ * clock ran seven minutes ahead used to stamp the row seven minutes into the future, and it was
+ * not that report that got lost — every correct one for the next seven minutes was, silently: a
+ * routine's reply landed in the thread and never on the roster. Clamped rather than refused,
+ * because clocks are a little ahead all the time and a report a second early is still the report.
+ * A stamp in the past is kept as it is, so a person's message and the reply, reported separately
+ * by the same clock, still land in the order that clock saw them.
  */
-export function parseActivityInput(input: unknown): ActivityInputParseResult {
+export function parseActivityInput(
+  input: unknown,
+  /** The server's own clock, injectable so a test can be about a specific gap. */
+  now: Date = new Date(),
+): ActivityInputParseResult {
   if (!isChannelInputObject(input)) {
     return { ok: false, error: "Activity must be a JSON object." };
   }
@@ -830,13 +985,20 @@ export function parseActivityInput(input: unknown): ActivityInputParseResult {
   if (object.agentId !== null && typeof object.agentId !== "string") {
     return { ok: false, error: "Agent ID must be a string or null." };
   }
+  if (
+    typeof object.agentId === "string" &&
+    object.agentId.trim().length === 0
+  ) {
+    return { ok: false, error: "Agent ID must be a string or null." };
+  }
   if (typeof object.at !== "string") {
     return { ok: false, error: "Timestamp is required." };
   }
-  const at = new Date(object.at);
-  if (Number.isNaN(at.getTime())) {
+  const reported = new Date(object.at);
+  if (Number.isNaN(reported.getTime())) {
     return { ok: false, error: "Timestamp must be an ISO-8601 date." };
   }
+  const at = reported.getTime() > now.getTime() ? now : reported;
 
   return {
     ok: true,
@@ -948,12 +1110,21 @@ export function createChannelRoutes(
   routes.get("/", requireUser, async (context) => {
     try {
       const url = new URL(context.req.url);
-      const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      /*
+       * Parsed strictly, not coerced: `Number.parseInt` reads `"12abc"` as 12 and `"3.9"`
+       * as 3, so a typo silently returned the wrong page. A run of digits is clamped into
+       * range like the store already does; anything else is a 400 naming the parameter.
+       */
+      const parsed = parsePageLimit(
+        url.searchParams.get("limit"),
+        MAX_CHANNEL_PAGE,
+      );
+      if (!parsed.ok) return context.json({ error: parsed.error }, 400);
       const page = await store.list(context.var.actor, {
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       });
 
       return context.json({
@@ -970,12 +1141,37 @@ export function createChannelRoutes(
       await context.req.json().catch(() => null),
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+    // A whitespace channel id would reach the store and answer 500 on some backends instead of
+    // a 400 for a malformed call.
+    const channelId = context.req.param("channelId");
+    if (!channelId.trim()) {
+      return context.json({ error: "A channel id is required." }, 400);
+    }
 
     try {
-      await store.recordActivity(
+      await store.recordActivity(context.var.actor, channelId, parsed.value);
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:channelId/busy", requireUser, async (context) => {
+    const body = (await context.req.json().catch(() => null)) as {
+      busy?: unknown;
+    } | null;
+    if (typeof body?.busy !== "boolean") {
+      return context.json({ error: "busy must be true or false" }, 400);
+    }
+    if (!context.req.param("channelId").trim()) {
+      return context.json({ error: "A channel id is required." }, 400);
+    }
+
+    try {
+      await store.signalChannelBusy(
         context.var.actor,
         context.req.param("channelId"),
-        parsed.value,
+        body.busy,
       );
       return context.body(null, 204);
     } catch (error) {
@@ -1017,8 +1213,9 @@ export function createChannelRoutes(
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
-      await store.softDelete(context.var.actor, channelId);
-      await recordDeleted(context, channelId);
+      const deleted = await store.softDelete(context.var.actor, channelId);
+      // A repeat is still 204, but it deleted nothing, and the trail records acts, not attempts.
+      if (deleted !== false) await recordDeleted(context, channelId);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -1043,22 +1240,28 @@ export function createChannelRoutes(
   return routes;
 }
 
-function channelDto(channel: AgentChannel): AgentChannel {
+/** A channel as it goes over the wire: the same shape, with the date serialised. */
+type ChannelWire = Omit<AgentChannel, "lastMessageAt"> & {
+  lastMessageAt: string | null;
+};
+
+function channelDto(channel: AgentChannel): ChannelWire {
   return {
     id: channel.id,
     name: channel.name,
     agentIds: channel.agentIds,
     threadId: channel.threadId,
     active: channel.active,
+    // ISO-8601 so the browser gets a string it can compare, like the roster's copy.
+    lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
   };
 }
 
 function channelSummaryDto(channel: ChannelSummary) {
   return {
     ...channelDto(channel),
+    summary: channel.summary,
     lastMessage: channel.lastMessage,
-    // Serialised as ISO-8601 so the browser gets a string it can sort and format.
-    lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
     lastMessageAgentId: channel.lastMessageAgentId,
     createdAt: channel.createdAt.toISOString(),
     pinned: channel.pinned,

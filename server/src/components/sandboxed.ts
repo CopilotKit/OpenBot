@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { asc, eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
@@ -73,8 +74,20 @@ export class SandboxedNameRefusedError extends Error {
   }
 }
 
+/** A playground component cannot be published as a drawable thing until its source is usable. */
+export class SandboxedPublicationRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SandboxedPublicationRefusedError";
+  }
+}
+
 const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right);
+}
 
 /**
  * The one place a sandboxed component's name is decided.
@@ -238,42 +251,156 @@ export function createSandboxedStore(
      * nobody wants and both would be reachable if this were two endpoints.
      */
     async publish(name: string, by: string): Promise<SandboxedRecord> {
-      const row = await requireRow(name);
+      const outcome = await database.transaction(async (transaction) => {
+        const [row] = await transaction
+          .select()
+          .from(sandboxedComponents)
+          .where(eq(sandboxedComponents.name, name))
+          .limit(1)
+          .for("update");
+        if (!row) {
+          throw new SandboxedPublicationRefusedError(
+            `${name} has no stored playground source to publish.`,
+          );
+        }
 
-      await database
-        .update(sandboxedComponents)
-        .set({
-          publishedDescription: row.draftDescription,
-          publishedHtml: row.draftHtml,
-          publishedCss: row.draftCss,
-          publishedJsFunctions: row.draftJsFunctions,
-          publishedArgumentSchema: row.draftArgumentSchema,
-          published: true,
-          publishedAt: new Date(),
-          revision: row.revision + 1,
-          updatedAt: new Date(),
-        })
-        .where(eq(sandboxedComponents.name, name));
+        const [governance] = await transaction
+          .select()
+          .from(components)
+          .where(eq(components.name, name))
+          .limit(1)
+          .for("update");
+        if (governance?.kind !== "sandboxed") {
+          throw new SandboxedPublicationRefusedError(
+            `${name} has no playground governance row to publish.`,
+          );
+        }
 
-      await database
-        .update(components)
-        .set({
-          publishedDescription: row.draftDescription,
-          published: true,
-          publishedAt: new Date(),
-          updatedBy: by,
-          updatedAt: new Date(),
-        })
-        .where(eq(components.name, name));
+        if (!row.draftDescription.trim()) {
+          throw new SandboxedPublicationRefusedError(
+            `${name} needs a description before it can be published.`,
+          );
+        }
+        if (!row.draftHtml.trim()) {
+          throw new SandboxedPublicationRefusedError(
+            `${name} needs rendered HTML before it can be published.`,
+          );
+        }
 
-      await recordAuditEvent(auditStore, {
-        eventType: "component.published",
-        targetType: "component",
-        targetId: name,
-        payload: { actor: by, kind: "sandboxed", revision: row.revision + 1 },
+        const unchanged =
+          row.published &&
+          governance.published &&
+          row.publishedDescription === row.draftDescription &&
+          row.publishedHtml === row.draftHtml &&
+          row.publishedCss === row.draftCss &&
+          row.publishedJsFunctions === row.draftJsFunctions &&
+          sameJson(row.publishedArgumentSchema, row.draftArgumentSchema);
+        if (unchanged) return { record: toRecord(row), changed: false };
+
+        const now = new Date();
+        const revision = row.revision + 1;
+        await transaction
+          .update(sandboxedComponents)
+          .set({
+            publishedDescription: row.draftDescription,
+            publishedHtml: row.draftHtml,
+            publishedCss: row.draftCss,
+            publishedJsFunctions: row.draftJsFunctions,
+            publishedArgumentSchema: row.draftArgumentSchema,
+            published: true,
+            publishedAt: now,
+            revision,
+            updatedAt: now,
+          })
+          .where(eq(sandboxedComponents.name, name));
+
+        await transaction
+          .update(components)
+          .set({
+            publishedDescription: row.draftDescription,
+            published: true,
+            publishedAt: now,
+            updatedBy: by,
+            updatedAt: now,
+          })
+          .where(eq(components.name, name));
+
+        const [updated] = await transaction
+          .select()
+          .from(sandboxedComponents)
+          .where(eq(sandboxedComponents.name, name))
+          .limit(1);
+        if (!updated) {
+          throw new SandboxedPublicationRefusedError(
+            `${name} disappeared while it was being published.`,
+          );
+        }
+        return { record: toRecord(updated), changed: true };
       });
 
-      return toRecord(await requireRow(name));
+      if (outcome.changed) {
+        await recordAuditEvent(auditStore, {
+          eventType: "component.published",
+          targetType: "component",
+          targetId: name,
+          payload: {
+            actor: by,
+            kind: "sandboxed",
+            revision: outcome.record.revision,
+          },
+        });
+      }
+      return outcome.record;
+    },
+
+    /**
+     * Withdraw a playground component from every Bot.
+     *
+     * The source and the governance row are two halves of one publication, so they are withdrawn
+     * together. The published columns stay put: re-publishing the same draft is a decision to make
+     * it drawable again, not a request to reconstruct source that was deliberately retained.
+     */
+    async unpublish(name: string, by: string): Promise<void> {
+      const changed = await database.transaction(async (transaction) => {
+        const [governance] = await transaction
+          .select()
+          .from(components)
+          .where(eq(components.name, name))
+          .limit(1)
+          .for("update");
+        if (governance?.kind !== "sandboxed") {
+          throw new SandboxedNotFoundError(name);
+        }
+
+        const [row] = await transaction
+          .select()
+          .from(sandboxedComponents)
+          .where(eq(sandboxedComponents.name, name))
+          .limit(1)
+          .for("update");
+        if (!governance.published && !row?.published) return false;
+
+        const now = new Date();
+        if (row) {
+          await transaction
+            .update(sandboxedComponents)
+            .set({ published: false, updatedAt: now })
+            .where(eq(sandboxedComponents.name, name));
+        }
+        await transaction
+          .update(components)
+          .set({ published: false, updatedBy: by, updatedAt: now })
+          .where(eq(components.name, name));
+        return true;
+      });
+
+      if (!changed) return;
+      await recordAuditEvent(auditStore, {
+        eventType: "component.unpublished",
+        targetType: "component",
+        targetId: name,
+        payload: { actor: by, kind: "sandboxed" },
+      });
     },
 
     async remove(name: string, by: string): Promise<void> {

@@ -55,6 +55,27 @@ export function recordChannelActivityMutationOptions() {
   });
 }
 
+/**
+ * Tell the roster this channel is (or is no longer) running a turn.
+ *
+ * Fire-and-forget, like recorded activity: a working indicator that fails to appear or to clear is
+ * worth nothing next to the run itself, and a person is never shown an error for it. The server
+ * broadcasts it to the channel's members, so the row shows a working dot even on a tab that has
+ * navigated elsewhere.
+ *
+ * A plain function, not a mutation handle: the turn it reports on outlives the screen that started
+ * it, and `mutate` on an unmounted component is a no-op.
+ */
+export async function setChannelBusy(variables: {
+  channelId: string;
+  busy: boolean;
+}) {
+  await tryClient(`/api/channels/${variables.channelId}/busy`, {
+    method: "POST",
+    body: { busy: variables.busy },
+  });
+}
+
 /** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
 export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({

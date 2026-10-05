@@ -1,0 +1,63 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: The SDK's primitive renderers use inline styles, so these narrowly scoped host-brand overrides need priority. */
+/* The public SDK catalog owns rendering and behavior; these hooks only match OpenBot's tokens.
+ * !important is scoped to our catalog because the shipped basic components use inline styles. */
+[data-openbot-a2ui] {
+  --a2ui-primary-color: var(--primary);
+  color: inherit;
+  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-size: 0.9333rem;
+  line-height: 1.5;
+}
+
+[data-openbot-a2ui] > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-openbot-a2ui="Card"] > div {
+  background: var(--card) !important;
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+  padding: 1rem !important;
+}
+
+[data-openbot-a2ui="Button"] > button {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  font: inherit;
+  font-weight: 500;
+}
+
+[data-openbot-a2ui] :is(input, textarea, select) {
+  background: var(--background);
+  color: var(--foreground);
+  border-color: var(--input) !important;
+  border-radius: var(--radius) !important;
+  accent-color: var(--primary);
+  font: inherit;
+}
+
+[data-openbot-a2ui] :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+[data-openbot-a2ui] :is(button, input, textarea, select):disabled {
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+[data-openbot-a2ui="Divider"] > hr {
+  border-color: var(--border) !important;
+}
+
+[data-openbot-a2ui="Text"] :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1.067rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em;
+}

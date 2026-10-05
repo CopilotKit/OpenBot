@@ -228,6 +228,54 @@ describe("falling back to somebody who can actually answer", () => {
     expect(decision.agentId).toBe("general-assistant");
   });
 
+  /*
+   * A system id buried inside a longer word does not name the system.
+   *
+   * `includes("slack")` is true of "slacker" and `includes("jira")` is true of "jirafa" — the
+   * Spanish for giraffe — so a message that names neither system was read as naming one and, in a
+   * fallback, pinned the whole conversation to that specialist. The id has to sit on its own.
+   */
+  const NAMED: RoutingCandidate[] = [
+    { id: "general", name: "General", roleDescription: "everyday work" },
+    {
+      id: "slackbot",
+      name: "Slack",
+      roleDescription: "chat",
+      reaches: ["slack"],
+    },
+    {
+      id: "jirabot",
+      name: "Jira",
+      roleDescription: "tickets",
+      reaches: ["jira"],
+    },
+  ];
+
+  test("a system id inside an unrelated word is not a match", async () => {
+    const slacker = await BROKEN.route(
+      "how do I deal with a slacker on my team",
+      NAMED,
+      "general",
+    );
+    expect(slacker.agentId).toBe("general");
+
+    const giraffe = await BROKEN.route(
+      "escribe un cuento sobre una jirafa",
+      NAMED,
+      "general",
+    );
+    expect(giraffe.agentId).toBe("general");
+  });
+
+  test("the same system named on its own still routes to its holder", async () => {
+    const decision = await BROKEN.route(
+      "post this update to slack for me",
+      NAMED,
+      "general",
+    );
+    expect(decision.agentId).toBe("slackbot");
+  });
+
   test("uses the default when two coworkers reach the same system", async () => {
     // Not a decision this can make. Two holders is exactly the case the router is for.
     const shared: RoutingCandidate[] = [

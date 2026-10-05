@@ -1,245 +1,366 @@
-/**
- * Who has the wheel.
- *
- * One browser has at most one driver. When a Bot meets a login wall it can ask for
- * help; a person takes control, does the part only they can do, and hands back. While a person holds
- * control every acting call from the Bot is refused, because two drivers on one page is how a Bot
- * clicks "Confirm" on a form a human was still filling in.
- *
- * State lives in this process rather than in the server because this process owns the browser, and a
- * takeover that the browser does not know about is not a takeover. The server records it and decides
- * who may ask for it; this decides whether the next action happens.
- *
- * This module has no Playwright import, so state-machine tests do not need a browser. Browser work
- * stays in `index.ts`.
- */
-
-export type ControlState = {
-  holder: "bot" | "human";
-  since: string;
-  /** Why the Bot asked, so the person knows what they are being handed. Set when the Bot requests. */
-  reason?: string;
-  /** True once the Bot has asked for help and no person has taken the wheel yet. */
-  requested: boolean;
-  /**
-   * When the Bot asked, so an unanswered request can stop being shown.
-   *
-   * A request nobody answers used to last forever. The run that made it had already ended, but the
-   * prompt stayed on the computer, and control belongs to the computer rather than to a conversation
-   * — so every later conversation with that Bot showed a live "Take control" for work it was not
-   * doing, with the reason the Bot gave, written for whoever asked and rendered to whoever looked.
-   */
-  requestedAt?: string;
-  /**
-   * A secret the Bot is waiting for, described by its label only.
-   *
-   * Secret entry is scoped rather than a full takeover. The Bot names the field, says what it needs,
-   * and the person types into a masked box that goes straight to the page.
-   *
-   * The label is all that is ever stored. The value passes through one request and is not kept here,
-   * not returned, and not on any path the model reads.
-   */
-  secretWanted?: string;
-  /**
-   * Which field the secret goes in, as a ref from the Bot's snapshot.
-   *
-   * Required so a secret cannot be sent to whichever field happens to have focus.
-   */
-  secretRef?: string;
-  secretSnapshotId?: number;
-};
-
-/** Refusal because a person is driving. Distinct from a failure, so the Bot can be told to wait. */
+import type {
+  ComputerControlState,
+  HandoffRequest,
+  HandoffSource,
+} from "../../shared/computer-control";
+import { createActionBarrier } from "./action-barrier";
+import type { ControlStore, StoredControl } from "./control-store";
+export type ControlState = ComputerControlState;
 export class ControlError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ControlError";
   }
 }
-
-/** What a caller must say to ask for a secret. Rejected as a request error, not thrown. */
 export class ControlRequestError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 | 409 = 400,
+  ) {
     super(message);
     this.name = "ControlRequestError";
   }
 }
-
+export class SnapshotRequiredError extends Error {
+  constructor() {
+    super("Take a fresh browser snapshot after handback before acting.");
+    this.name = "SnapshotRequiredError";
+  }
+}
 export const NO_SECRET_PENDING = "Nothing is waiting for a secret.";
-/**
- * How long an unanswered request to take the wheel is shown for.
- *
- * Long enough that somebody who stepped away can still act on it, short enough that it does not
- * follow the Bot into tomorrow's conversations. The run that made it is already over either way:
- * nothing resumes when a person takes the wheel this late, so the value trades "still useful" against
- * "still on screen" and nothing else.
- */
 export const HELP_REQUEST_TTL_MS = 10 * 60 * 1000;
-
+export const SECRET_REQUEST_TTL_MS = HELP_REQUEST_TTL_MS;
 export const HUMAN_HAS_CONTROL =
-  "A person has control of the computer right now. Wait for them to hand it back before acting.";
+  "A person has control or has been asked to take control. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
   "Take control before driving the computer yourself.";
+type Options = {
+  store?: ControlStore;
+  invalidateSnapshot?: () => void;
+  drainTimeoutMs?: number;
+};
 
-/**
- * The wheel, as a state machine.
- *
- * A factory rather than a module-level `let` so a test can have its own, and so two of these cannot
- * accidentally share state. `now` is injected for the same reason: `since` is part of the published
- * state, and a test that cannot control the clock has to either skip it or match it loosely.
- */
+/** Request identity is durable; secret values never enter this state machine. */
 export function createControl(
   now: () => string = () => new Date().toISOString(),
+  options: Options = {},
 ) {
-  let state: ControlState = {
+  const barrier = createActionBarrier();
+  const restored = options.store?.load();
+  const data: StoredControl = restored ?? {
+    version: 1,
     holder: "bot",
     since: now(),
-    requested: false,
+    resumeSnapshotRequired: false,
+    recoveryRequired: false,
+    requests: [],
+    aliases: {},
   };
+  let secret:
+    | { label: string; ref: string; snapshotId?: number; requestedAt: string }
+    | undefined;
+  let storageError: Error | undefined;
+  const current = () =>
+    data.requests.find((r) => r.id === data.currentRequestId);
+  const active = (request: HandoffRequest | undefined) =>
+    request?.status === "waiting" || request?.status === "taken";
+  function persist() {
+    // Keep the current identity and the latest 32 terminal records. Their aliases expire together.
+    const cutoff = Date.parse(now()) - 30 * 24 * 60 * 60 * 1000;
+    const keep = data.requests
+      .filter(
+        (r) =>
+          r.id === data.currentRequestId || Date.parse(r.updatedAt) >= cutoff,
+      )
+      .slice(-33);
+    const ids = new Set(keep.map((r) => r.id));
+    data.requests = keep;
+    data.aliases = Object.fromEntries(
+      Object.entries(data.aliases)
+        .filter(([, id]) => ids.has(id))
+        .slice(-256),
+    );
+    if (storageError) throw storageError;
+    try {
+      options.store?.save(structuredClone(data));
+    } catch (error) {
+      storageError = new Error(
+        "The handoff state could not be saved. Computer actions are disabled until storage is repaired.",
+        { cause: error },
+      );
+      barrier.close();
+      throw storageError;
+    }
+  }
+  function finish(
+    request: HandoffRequest,
+    status: "completed" | "cancelled" | "expired" | "interrupted",
+    interruption?: string,
+  ) {
+    request.status = status;
+    request.updatedAt = now();
+    request.finishedAt = request.updatedAt;
+    delete request.expiresAt;
+    if (interruption) request.interruption = interruption;
+  }
+  function syncAdmission() {
+    if (active(current()) || data.holder === "human" || data.recoveryRequired)
+      barrier.close();
+    else barrier.open();
+  }
+  function expire() {
+    if (storageError) throw storageError;
+    const request = current();
+    if (
+      request?.status === "waiting" &&
+      request.expiresAt &&
+      Date.parse(now()) > Date.parse(request.expiresAt)
+    ) {
+      finish(request, "expired");
+      persist();
+      syncAdmission();
+    }
+    if (
+      secret &&
+      Date.parse(now()) - Date.parse(secret.requestedAt) > SECRET_REQUEST_TTL_MS
+    )
+      secret = undefined;
+  }
+  function get(requestId?: string): ControlState {
+    expire();
+    const request = requestId
+      ? data.requests.find((r) => r.id === requestId)
+      : current();
+    if (requestId && !request)
+      throw new ControlRequestError("That handoff request was not found.", 404);
+    const live = current();
+    return {
+      holder: data.holder,
+      since: data.since,
+      requested: live?.status === "waiting",
+      reason: active(live) ? live?.reason : undefined,
+      request: request ? { ...request } : undefined,
+      transitioning:
+        (active(live) || data.holder === "human" || data.recoveryRequired) &&
+        barrier.pending() > 0,
+      resumeSnapshotRequired: data.resumeSnapshotRequired,
+      ...(secret
+        ? {
+            secretWanted: secret.label,
+            secretRef: secret.ref,
+            secretSnapshotId: secret.snapshotId,
+          }
+        : {}),
+    };
+  }
+  function intended(id: string): HandoffRequest {
+    expire();
+    const request = current();
+    if (!request || request.id !== id)
+      throw new ControlRequestError(
+        "That request is no longer the current handoff.",
+        409,
+      );
+    return request;
+  }
+  function interrupt(reason: string): ControlState {
+    const request = current();
+    // Recovery is for a page a person was driving: what they left it as is unknown until someone
+    // looks. A request nobody took left the page exactly as the Bot had it, and holding the Bot
+    // until a person "checks" a page no person touched stranded it asking for control it had.
+    const personHadIt = data.holder === "human" || request?.status === "taken";
+    if (request && active(request)) finish(request, "interrupted", reason);
+    if (personHadIt) data.recoveryRequired = true;
+    data.holder = "bot";
+    data.since = now();
+    data.resumeSnapshotRequired = true;
+    secret = undefined;
+    options.invalidateSnapshot?.();
+    persist();
+    syncAdmission();
+    return get();
+  }
+  // A persisted active request names a page in a previous process. Never call that completion.
+  if (restored && (active(current()) || data.holder === "human"))
+    interrupt(
+      "The computer process restarted; the previous page was interrupted. Request help again to continue.",
+    );
+  if (restored && !active(current()) && data.holder === "bot") {
+    data.resumeSnapshotRequired = true;
+    persist();
+  }
+  syncAdmission();
+
+  function rememberAlias(toolCallId: string, requestId: string) {
+    Object.defineProperty(data.aliases, toolCallId, {
+      value: requestId,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
 
   return {
-    /**
-     * The current state, as the surface polls it. A copy, so a caller cannot mutate the machine.
-     *
-     * An unanswered request is dropped once it is older than {@link HELP_REQUEST_TTL_MS}. It is
-     * expired on read rather than on a timer because there is nothing to wake: the run that asked
-     * has ended, and the only thing that cares is whoever looks next.
-     *
-     * Only ever the ASK. A person actually holding the wheel is never timed out from under them:
-     * they may be halfway through typing a code, and taking the browser back mid-sign-in is worse
-     * than any stale prompt.
-     */
-    get(): ControlState {
+    get,
+    requestHelp(
+      reason: unknown,
+      toolCallId?: string,
+      source: HandoffSource = "model",
+    ): ControlState {
+      expire();
       if (
-        state.requested &&
-        state.holder === "bot" &&
-        state.requestedAt &&
-        Date.parse(now()) - Date.parse(state.requestedAt) > HELP_REQUEST_TTL_MS
-      ) {
-        const { reason: _reason, requestedAt: _at, ...rest } = state;
-        state = { ...rest, requested: false };
+        toolCallId !== undefined &&
+        (!toolCallId.trim() || toolCallId.length > 200)
+      )
+        throw new ControlRequestError(
+          "The tool call id must be a nonempty string of at most 200 characters.",
+        );
+      const previous =
+        toolCallId && Object.hasOwn(data.aliases, toolCallId)
+          ? data.aliases[toolCallId]
+          : undefined;
+      if (previous) return get(previous);
+      const existing = current();
+      if (active(existing) || data.holder === "human") {
+        if (toolCallId && existing) {
+          rememberAlias(toolCallId, existing.id);
+          persist();
+        }
+        return get();
       }
-      return { ...state };
-    },
-
-    /**
-     * The Bot asking for help.
-     *
-     * It does not take control: it says it is stuck and why, and a person decides. A Bot that could
-     * hand itself to a human could also hand a human a page they never asked to see.
-     */
-    requestHelp(reason: unknown): ControlState {
-      state = {
-        ...state,
-        requested: true,
-        requestedAt: now(),
+      barrier.close(); // Before any persistence or awaited browser operation.
+      const at = now();
+      const request: HandoffRequest = {
+        id: crypto.randomUUID(),
+        toolCallId,
         reason:
           typeof reason === "string" && reason.trim()
-            ? reason.trim()
+            ? reason.trim().slice(0, 500)
             : "The assistant needs a person to continue.",
+        source,
+        status: "waiting",
+        createdAt: at,
+        updatedAt: at,
+        expiresAt: new Date(Date.parse(at) + HELP_REQUEST_TTL_MS).toISOString(),
       };
-      return this.get();
+      data.currentRequestId = request.id;
+      data.requests.push(request);
+      if (toolCallId) rememberAlias(toolCallId, request.id);
+      persist();
+      return get();
     },
-
-    /** The Bot asking for one value it must not be told, naming the field it goes in. */
+    async take(requestId: string): Promise<ControlState> {
+      const request = intended(requestId);
+      if (request.status === "taken" && data.holder === "human") return get();
+      if (request.status !== "waiting")
+        throw new ControlRequestError(
+          "That request is no longer waiting for control.",
+          409,
+        );
+      barrier.close();
+      // Never await here from requestHelp: a navigation detector still owns its action lease.
+      await barrier.drain(options.drainTimeoutMs);
+      const after = intended(requestId);
+      if (after.status === "taken" && data.holder === "human") return get();
+      if (after.status !== "waiting")
+        throw new ControlRequestError(
+          "That request is no longer waiting for control.",
+          409,
+        );
+      after.status = "taken";
+      after.updatedAt = now();
+      delete after.expiresAt;
+      data.holder = "human";
+      data.since = now();
+      secret = undefined;
+      persist();
+      return get();
+    },
+    release(requestId: string): ControlState {
+      const request = intended(requestId);
+      if (request.status === "completed" && data.holder === "bot") return get();
+      if (
+        data.holder !== "human" ||
+        (request.status !== "taken" && request.status !== "cancelled")
+      )
+        throw new ControlRequestError(
+          "That request is no longer held by a person.",
+          409,
+        );
+      if (request.status === "taken") finish(request, "completed");
+      data.holder = "bot";
+      data.since = now();
+      data.resumeSnapshotRequired = true;
+      data.recoveryRequired = false;
+      secret = undefined;
+      options.invalidateSnapshot?.();
+      persist();
+      syncAdmission();
+      return get();
+    },
+    cancel(requestId: string): ControlState {
+      const request = intended(requestId);
+      if (request.status === "cancelled") return get();
+      if (!active(request))
+        throw new ControlRequestError("That request is no longer active.", 409);
+      finish(request, "cancelled");
+      persist();
+      syncAdmission();
+      return get();
+    },
+    interrupt,
+    snapshotTaken() {
+      if (
+        data.holder === "bot" &&
+        data.resumeSnapshotRequired &&
+        !active(current())
+      ) {
+        data.resumeSnapshotRequired = false;
+        persist();
+      }
+    },
+    assertBotMayAct(browserMutation = false) {
+      expire();
+      if (data.holder === "human" || active(current()) || data.recoveryRequired)
+        throw new ControlError(HUMAN_HAS_CONTROL);
+      if (browserMutation && data.resumeSnapshotRequired)
+        throw new SnapshotRequiredError();
+    },
+    admitBotAction(browserMutation = false): () => void {
+      this.assertBotMayAct(browserMutation);
+      return barrier.enter();
+    },
+    humanMayDrive(): boolean {
+      return data.holder === "human" && barrier.pending() === 0;
+    },
     requestSecret(input: {
       label?: unknown;
       ref?: unknown;
       snapshotId?: unknown;
     }): ControlState {
-      if (typeof input.ref !== "string" || !input.ref.trim()) {
+      if (typeof input.ref !== "string" || !input.ref.trim())
         throw new ControlRequestError(
           "Say which field the value goes in, using a ref from your snapshot.",
         );
-      }
-      state = {
-        ...state,
-        secretWanted:
+      secret = {
+        label:
           typeof input.label === "string" && input.label.trim()
-            ? input.label.trim()
+            ? input.label.trim().slice(0, 500)
             : "the value this page is asking for",
-        secretRef: input.ref.trim(),
-        secretSnapshotId:
+        ref: input.ref.trim(),
+        snapshotId:
           typeof input.snapshotId === "number" ? input.snapshotId : undefined,
+        requestedAt: now(),
       };
-      return this.get();
+      return get();
     },
-
-    /**
-     * The pending secret request, or null.
-     *
-     * Read before typing so the caller can refuse when nothing asked for one: this is what keeps the
-     * masked box from being a general-purpose way to type into the page.
-     */
     pendingSecret(): { ref: string; snapshotId?: number } | null {
-      if (!state.secretWanted || !state.secretRef) return null;
-      return { ref: state.secretRef, snapshotId: state.secretSnapshotId };
+      expire();
+      return secret ? { ref: secret.ref, snapshotId: secret.snapshotId } : null;
     },
-
-    /**
-     * The secret landed, so the request is closed.
-     *
-     * Called only after the value reaches the field. A failure leaves the request open so the person
-     * can try again.
-     */
-    secretSupplied(): void {
-      state = {
-        ...state,
-        secretWanted: undefined,
-        secretRef: undefined,
-        secretSnapshotId: undefined,
-      };
-    },
-
-    /**
-     * A person taking the wheel.
-     *
-     * `reason` survives, because it is the thing they were just asked to do. Any pending secret is
-     * cleared: a person with full browser control can type the password into the page, and a masked
-     * box left open behind them no longer corresponds to an active request.
-     */
-    take(): ControlState {
-      state = {
-        holder: "human",
-        since: now(),
-        reason: state.reason,
-        requested: false,
-      };
-      return this.get();
-    },
-
-    /**
-     * A person handing back.
-     *
-     * `reason` is dropped: it described the thing the person was asked to do, and once they have done
-     * it, leaving it set would have the surface still showing the old request. Any pending secret goes
-     * with it, a person who took the whole wheel and handed it back has dealt with the login, and a
-     * secret box left open afterwards is asking for a password nothing is waiting for.
-     */
-    release(): ControlState {
-      state = {
-        holder: "bot",
-        since: now(),
-        requested: false,
-      };
-      return this.get();
-    },
-
-    /**
-     * The Bot may not act while a person holds the wheel.
-     *
-     * Refused rather than queued. A queued click lands after the person has moved on and is worse than
-     * a refusal, which the Bot can explain and wait out.
-     */
-    assertBotMayAct(): void {
-      if (state.holder === "human") throw new ControlError(HUMAN_HAS_CONTROL);
-    },
-
-    /** Whether a person's input should be applied. The socket being open is not permission. */
-    humanMayDrive(): boolean {
-      return state.holder === "human";
+    secretSupplied() {
+      secret = undefined;
     },
   };
 }
-
 export type Control = ReturnType<typeof createControl>;

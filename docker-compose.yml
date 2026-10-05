@@ -24,7 +24,15 @@ services:
       # the name and leaves the address. Proven from inside `agent-computer`, where the gateway on
       # :5432 answered and began authenticating as `openbot` on `openbot`, with the password in
       # this file. The server on the host still reaches it, because that is what loopback is.
+      # Both loopback addresses, because `localhost` is not one address.
+      #
+      # It resolves to ::1 and 127.0.0.1 in an order the platform decides, and a client that gets
+      # ::1 first does not fall back: Bun and Node both fail the connection outright rather than
+      # trying the other. Publishing on one of them makes `localhost` work on some machines and not
+      # others, for a reason nothing in the error mentions. Publishing on both is still loopback,
+      # so nothing here is reachable from another host.
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "[::1]:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -39,6 +47,18 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+    # Named, and pullable, for the same reason as agent-computer below: a release publishes this
+    # image, and a machine that can name it does not need a toolchain to build it. `pull_policy`
+    # is what decides between the two, because a service carrying a `build` section builds by
+    # default however its image is named. IMAGE_PULL_POLICY=missing makes it pull instead.
+    #
+    # Not a guarantee that nothing is built: a pull that fails falls back to building, silently,
+    # which is right for a developer and wrong for an installed OpenBot, where there is no
+    # toolchain and the honest answer is that the image could not be fetched. Anything shipping
+    # these images to a machine that cannot build them overrides the `build` section away rather
+    # than relying on this variable.
+    image: ${SERVER_IMAGE:-openbot-server:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     command: ["bun", "x", "drizzle-kit", "migrate", "--config=drizzle.config.ts"]
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
@@ -57,10 +77,12 @@ services:
     # Tagged explicitly because the supervisor starts one computer per Bot from this image by name,
     # and a Compose-derived name would change with the project.
     image: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback only. This process drives a browser holding real logins; COMPUTER_TOKEN is the
       # request control, and loopback keeps the surface off routed networks.
       - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
+      - "[::1]:${COMPUTER_PORT:-4100}:4100"
     # Per-Bot egress, in a file of its own because the names are not knowable here.
     #
     # `EGRESS_PROXY_<BOT>` is derived from the Bot's id, so there is no fixed list to write out the
@@ -79,6 +101,9 @@ services:
       # shutdown notes tell you to use -- hands the container an empty string instead. Reaches only
       # a loopback-bound port; a deployment sets a real value in .env.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # `headed` runs full Chromium behind the same streamed screen, so a person taking the wheel
+      # gets a browser sites treat like their ordinary desktop browser. Headless remains the default.
+      COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headless}
       # How many Bots may hold a running browser at once, and how long an untouched one is kept.
       # A few hundred MB each, so on a deployment with many Bots these are the difference between
       # a container that holds steady and one that is killed for memory. Defaults are 8 and 30
@@ -147,7 +172,7 @@ services:
       - spire-agent-socket:/tmp/spire-agent/public
       - spire-agent-data:/opt/spire/data
       # Read-only, and only so the docker workload attestor can see which container is asking.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
 
   # One computer per Bot.
   #
@@ -158,6 +183,9 @@ services:
     build:
       context: .
       dockerfile: supervisor/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${SUPERVISOR_IMAGE:-openbot-supervisor:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     # The same file, because this process does not read these itself: it forwards every EGRESS_PROXY
     # key out of its own environment into each computer it creates, so it has to be given them first.
     env_file:
@@ -172,6 +200,8 @@ services:
       SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
       # Handed to every computer this creates, so the server and the computers share one secret.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # Forwarded into every per-Bot computer the supervisor creates.
+      COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headless}
       COMPUTER_IMAGE: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.
@@ -201,12 +231,24 @@ services:
       # COMPUTER_NETWORK and reaches the supervisor as `supervisor:4300`, which is unaffected because
       # the process still listens on every interface inside its own container.
       - "127.0.0.1:${SUPERVISOR_PORT:-4500}:4300"
+      - "[::1]:${SUPERVISOR_PORT:-4500}:4300"
     volumes:
       # Read-only because this service only ever needs to ask; it is still root-equivalent, which is
       # the whole reason nothing else here gets it.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      #
+      # The source is a setting because the default is wrong on one of the engines this runs on.
+      # Docker puts its socket at this path, and so does Podman on macOS, where `podman machine`
+      # symlinks it to the rootless socket inside the virtual machine. Rootless Podman on Linux does
+      # not: the path is either absent or, with podman-docker installed, a symlink to
+      # /run/podman/podman.sock, which is the *rootful* socket and is not the one running. The
+      # supervisor then holds a dead socket and reports that it cannot reach Docker. Point
+      # ENGINE_SOCKET at $XDG_RUNTIME_DIR/podman/podman.sock there.
+      - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       # To register an entry per Bot as each computer is created.
       - spire-server-socket:/tmp/spire-server/private
+    security_opt:
+      # The engine socket carries an SELinux label this container is not allowed to read.
+      - label=disable
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4300/health')\""]
       interval: 10s
@@ -218,18 +260,22 @@ services:
     build:
       context: .
       dockerfile: agent-bot/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${BOT_IMAGE:-openbot-agent-bot:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
       # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
       # host: the server calls it over localhost, and other containers use the compose network.
       - "127.0.0.1:${BOT_PORT:-4200}:4200"
+      - "[::1]:${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       # Server sends this on every call to the managed Bot. It refuses to start without it.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       # gpt-5.5, not the deployment default: this Bot writes /v1/chat/completions by hand, and
       # gpt-5.6-* rejects function tools there unless reasoning is turned off. Its own variable, so
       # a BOT_MODEL set for the framework Bot cannot silently take its tools away.
@@ -240,14 +286,72 @@ services:
       timeout: 5s
       retries: 5
 
+  # The harness somebody picked during setup, whichever one it is.
+  #
+  # ONE SERVICE RATHER THAN TWELVE, because a picked harness is a choice and not twelve branches in
+  # this file. The image and the port come from `.env`, which the shell writes from the pick, and
+  # both are facts about the image: each harness fixes its own port in its own Dockerfile.
+  #
+  # Behind a profile so a deployment that has picked nothing does not try to start it. Without that
+  # an unset `PICKED_HARNESS_IMAGE` becomes a request to pull the empty string, which fails the
+  # whole `compose up` rather than the one service nobody asked for.
+  #
+  # No `build:`, so `pull_policy` cannot be `build` here as it is elsewhere: this image is only ever
+  # published, never built from this tree.
+  agent-harness:
+    profiles: ["harness"]
+    image: ${PICKED_HARNESS_IMAGE:-}
+    pull_policy: missing
+    ports:
+      # Loopback, and on the image's own port on both sides. The server is a host process, so it
+      # reaches this the same way it reaches agent-bot: over the published port, not the compose
+      # network.
+      - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+      - "[::1]:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+    environment:
+      # Every harness refuses without this; it is what makes the endpoint the server's alone.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      # Deployment-owned tools use the same signed callback as agent-langgraph.
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+      # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
+      # rest, and the ones the choice did not imply are written empty rather than left stale: see
+      # `ModelCredential`.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
+      BOT_PROVIDER: ${BOT_PROVIDER:-openai}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
+      # there either way; this variable is what tells the harness to read it.
+      CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # A bind mount, not a named volume, and read-write on purpose. The signed-in plan's access
+      # token expires within the hour and the harness renews it, so the renewal has to land back on
+      # this machine or every restart would replay a refresh token that had already been spent.
+      #
+      # The provider writes by atomically replacing the file with a sibling temporary file, so the
+      # mount has to be the containing directory rather than the file mount point.
+      - ./.langchain:/root/.langchain
+
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
     build:
       context: .
       dockerfile: agent-langgraph/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, for the same reason as agent-bot above.
       - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
+      - "[::1]:${LANGGRAPH_PORT:-4201}:4201"
     environment:
       # The selected provider reads its own key. Models requiring the Responses API use
       # BOT_RESPONSES_API instead of changing the streaming loop here.
@@ -255,14 +359,18 @@ services:
       # Same server-to-Bot request boundary as agent-bot above.
       MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_CONTAINER_BASE_URL:-${OPENAI_BASE_URL:-}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      # gpt-5.5, to stay comparable with agent-bot above rather than because 5.6 does not work:
-      # set BOT_MODEL to one and the Responses API is switched on for it automatically.
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+      # Unset, this Bot takes the spec file's row for its model rather than this line
+      # substituting gpt-5.5 whatever BOT_PROVIDER named — a provider other than OpenAI was
+      # handed that substitute and then failed at its own vendor on it. The file's OpenAI row is
+      # the same gpt-5.5 as before, so an OpenAI deployment answers on the model it always did;
+      # BOT_MODEL still wins when it is set, and a 5.6 tier named there switches the Responses
+      # API on by itself below.
+      BOT_MODEL: ${BOT_MODEL:-}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
       # How hard it thinks, on a model that reasons. Empty leaves the provider's own default.
       BOT_REASONING_EFFORT: ${BOT_REASONING_EFFORT:-}

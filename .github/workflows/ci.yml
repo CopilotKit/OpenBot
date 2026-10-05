@@ -35,6 +35,20 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      - name: Desktop version tracks the release version
+        run: bun desktop/scripts/desktop-version.ts check
+      # The chart's default image tag is its appVersion, and a release must move both together. They
+      # drifted once, appVersion left pointing at a tag that was never published, and a default
+      # `helm install` sat in ImagePullBackOff. This refuses a tree where package.json (the last
+      # version published) and the chart's appVersion have come apart.
+      - name: Chart appVersion tracks the release version
+        run: |
+          pkg=$(bun -e 'console.log(require("./package.json").version)')
+          chart=$(bun -e 'console.log(require("yaml").parse(require("fs").readFileSync("charts/openbot/Chart.yaml","utf8")).appVersion)')
+          if [ "$pkg" != "$chart" ]; then
+            echo "::error::package.json is $pkg but charts/openbot/Chart.yaml appVersion is $chart. The release workflow moves them together; bring them back into line."
+            exit 1
+          fi
 
   # The two packages that are deployables in their own right rather than root workspaces. Root
   # `typecheck` is `bun run --filter '*' typecheck`, and `--filter '*'` enumerates `workspaces`, which
@@ -72,6 +86,51 @@ jobs:
         working-directory: ${{ matrix.package }}
       - run: bun run typecheck
         working-directory: ${{ matrix.package }}
+
+  mobile:
+    name: native types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # The native app is an isolated npm package; adding it to Bun workspaces would change the
+      # existing desktop/server installation contract. CI installs its own reviewed lockfile.
+      - run: npm ci --prefix mobile --ignore-scripts
+      - run: npm run --prefix mobile typecheck
+
+  # The agent-computer tests that launch a real Chromium. They are asked for by name because a
+  # machine running `bun test` is not required to have a browser, and these are the only tests that
+  # would catch a password reaching the snapshot a model reads, a session cookie lost on restart, or
+  # WebRTC leaving around the egress filter. The browser is the one the computer image installs,
+  # pinned by agent-computer's own lockfile.
+  computer-browser:
+    name: computer (real browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: agent-computer
+      - run: bunx playwright install --with-deps chromium
+        working-directory: agent-computer
+      - run: >-
+          bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
+          tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts
+        working-directory: agent-computer
+        env:
+          OPENBOT_COMPUTER_BROWSER: '1'
+          OPENBOT_DEMONSTRATION_LIVE: '1'
 
   chart:
     name: chart (${{ matrix.target }})
@@ -159,6 +218,23 @@ jobs:
             --set networkPolicy.enabled=true \
             --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
             --set-string computers.extraEnv[0].value=http://proxy.internal:3128
+          # A delivery or directory switch with no secret behind it. Armed on every target: the chart
+          # requires the value when it holds the secret, and requires the store to name the key when
+          # a store does.
+          refuses "OpenTag switched on with no shared secret" \
+            --set config.opentag.enabled=true
+          refuses "SCIM switched on with no bearer token" \
+            --set config.scim.enabled=true
+          # The rest are refusals the server makes at boot, mirrored so the value is named at install.
+          refuses "an OpenTag URL with the pairing switched off" \
+            --set-string config.opentag.url=https://opentag.example.com
+          refuses "a partial set of Twilio settings" \
+            --set config.sms.enabled=true --set-string secrets.twilioAuthToken=token \
+            --set-string config.sms.accountSid=AC0 --set-string config.sms.verifyServiceSid=VA0
+          refuses "a push project id that is not a UUID" \
+            --set-string config.push.projectId=not-a-uuid
+          refuses "a delivery public URL that is not http(s)" \
+            --set-string config.deliveryPublicUrl=hooks.example.com
           # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
           # computers; on the others the mode is not sandbox and the refusal is not armed.
           if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
@@ -187,18 +263,19 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_DB: openbot
+          POSTGRES_DB: openbot_test
           POSTGRES_USER: openbot
           POSTGRES_PASSWORD: openbot
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U openbot -d openbot"
+          --health-cmd "pg_isready -U openbot -d openbot_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot
+      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
+      TEST_DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -215,6 +292,14 @@ jobs:
       # Bot's own tree and not in the root one.
       - run: bun install --frozen-lockfile
         working-directory: agent-langgraph
+      # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
+      # from that Bot's own dependency tree.
+      - run: bun install
+        working-directory: agent-mastra
+      # Same for the desktop app: root test discovery imports its React tests, whose JSX runtime is
+      # pinned by the desktop lockfile rather than the root one.
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts
@@ -222,6 +307,119 @@ jobs:
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.
       - run: bun run test:ci
+
+  startup:
+    name: startup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun test app/tests/build-cache.test.ts
+
+  python-harness:
+    name: python harness regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: CrewAI provider-boundary regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-crewai
+          . .venv-crewai/bin/activate
+          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
+          python -m pytest agent-crewai/tests -q
+      - name: Claude client-tool continuation regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-claude-sdk
+          . .venv-claude-sdk/bin/activate
+          python -m pip install --requirement agent-claude-sdk/requirements.txt --requirement agent-claude-sdk/requirements-test.txt
+          python -m pytest agent-claude-sdk/tests -q
+      - name: LangGraph AG-UI provider-boundary regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-langgraph-agui
+          . .venv-langgraph-agui/bin/activate
+          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
+          python -m pytest agent-langgraph-agui/tests -q
+      - name: LlamaIndex model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-llamaindex
+          . .venv-llamaindex/bin/activate
+          python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
+          python -m pytest agent-llamaindex/tests -q
+      - name: Agno model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-agno
+          . .venv-agno/bin/activate
+          python -m pip install --requirement agent-agno/requirements.txt --requirement agent-agno/requirements-test.txt
+          python -m pytest agent-agno/tests -q
+      - name: Strands model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-strands
+          . .venv-strands/bin/activate
+          python -m pip install --requirement agent-strands/requirements.txt --requirement agent-strands/requirements-test.txt
+          python -m pytest agent-strands/tests -q
+      - name: Pydantic AI model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-pydantic-ai
+          . .venv-pydantic-ai/bin/activate
+          python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
+          python -m pytest agent-pydantic-ai/tests -q
+      - name: Google ADK tool-call regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-adk
+          . .venv-adk/bin/activate
+          python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
+          python -m pytest agent-adk/tests -q
+      - name: Langroid model-choice and tool-call regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-langroid
+          . .venv-langroid/bin/activate
+          python -m pip install --requirement agent-langroid/requirements.txt --requirement agent-langroid/requirements-test.txt
+          python -m pytest agent-langroid/tests -q
+      - name: AG2 model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-ag2
+          . .venv-ag2/bin/activate
+          python -m pip install --requirement agent-ag2/requirements.txt --requirement agent-ag2/requirements-test.txt
+          python -m pytest agent-ag2/tests -q
+      - name: Microsoft Agent Framework model-choice regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-microsoft
+          . .venv-microsoft/bin/activate
+          python -m pip install --requirement agent-microsoft/requirements.txt --requirement agent-microsoft/requirements-test.txt
+          python -m pytest agent-microsoft/tests -q
+      - run: bun install --frozen-lockfile
+      - run: bun test tests/compose.test.ts
+      - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
+        env:
+          PICKED_HARNESS_IMAGE: openbot-agent-langgraph-agui:test
 
   build:
     name: build
@@ -288,10 +486,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # Loaded rather than pushed: this runs on pull requests, including from forks, and it proves
       # the image builds without granting anything the ability to publish one.
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -323,7 +521,6 @@ jobs:
              -e INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai \
             -e INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai \
             -e INTELLIGENCE_API_KEY=ci-not-a-real-key \
-            -e COPILOTKIT_LICENSE_TOKEN=ci-not-a-real-licence \
             openbot:ci
           for attempt in $(seq 1 150); do
             if curl -fsS http://localhost:3001/api/capabilities >/dev/null 2>&1; then
@@ -356,8 +553,94 @@ jobs:
             docker logs openbot-ci
             exit 1
           }
+      - name: A Bot's shell cannot reach the deployment secrets
+        run: |
+          set -uo pipefail
+          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c '
+                for e in /proc/[0-9]*/environ; do tr "\0" "\n" < "$e" 2>/dev/null; done
+              ' | grep -q "^KEY_ENCRYPTION_KEY="; then
+            echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from a sibling process /proc/<pid>/environ."
+            exit 1
+          fi
+          if docker exec -u pwuser openbot-ci env -i PATH=/usr/bin:/bin sh -c \
+                'cat /run/s6/container_environment/KEY_ENCRYPTION_KEY 2>/dev/null' | grep -q .; then
+            echo "::error::A pwuser shell reads KEY_ENCRYPTION_KEY from /run/s6/container_environment."
+            exit 1
+          fi
+          echo "pwuser cannot reach KEY_ENCRYPTION_KEY"
       - if: always()
         run: docker rm -f openbot-ci >/dev/null 2>&1 || true
+
+  # The five images the release publishes alongside the one above. Nothing else here builds them:
+  # they are built by `docker compose up --build`, which only the smoke journey runs and which
+  # cannot run in CI. So a broken `supervisor/Dockerfile` used to surface during a release, after
+  # the `openbot` image had already been pushed, which is the one failure this repository calls out
+  # as leaving a published image with nothing pointing at it.
+  #
+  # Built, not pushed, and one architecture: this answers whether the Dockerfile resolves. Whether
+  # it resolves on arm64 too is answered at release time, on an arm64 runner.
+  #
+  # No registry cache, so a release builds these a second time. `type=gha` needs ACTIONS_* in the
+  # environment, which `build-push-action` injects and a plain `run:` step does not have, and
+  # reaching for another action to export them would buy minutes in a job that runs rarely at the
+  # price of a dependency in the one workflow whose inputs are a security boundary.
+  component-dockerfiles:
+    name: component dockerfiles
+    runs-on: ubuntu-latest
+    # The same cost gate as `image` above, and for the same reason: `agent-computer` pulls
+    # Playwright's base and `server` builds the app, so this is minutes rather than seconds. On main
+    # and through the release's workflow_call it always runs.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-ci')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # A Dockerfile the release does not publish is one a machine would build from source, so the
+      # list and the tree have to agree. Checked here rather than trusted, because the failure is
+      # silent: the release succeeds and a laptop somewhere compiles the app.
+      - name: Every buildable service is published
+        run: |
+          set -euo pipefail
+          found="$(find . -mindepth 2 -maxdepth 2 -name Dockerfile -not -path './node_modules/*' \
+            | sed -e 's|^\./||' -e 's|/Dockerfile$||' | sort)"
+          published="$(jq -r '.[]' .github/published-images.json | sort)"
+          if [ "$found" != "$published" ]; then
+            echo "::error::.github/published-images.json does not match the Dockerfiles in the tree."
+            diff <(echo "$published") <(echo "$found") || true
+            exit 1
+          fi
+      - name: They build
+        run: |
+          set -euo pipefail
+          while read -r image; do
+            echo "::group::$image"
+            docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
+            echo "::endgroup::"
+          done < <(jq -r '.[]' .github/published-images.json)
+      # Building proves the Dockerfile resolves, not that the image starts. A runtime import of a file
+      # the Dockerfile never copied (../../shared/file-download, from #698) built cleanly and crashed
+      # on start. The computer image has no dependencies to start, so it is booted and asked for health.
+      - name: The computer image starts
+        run: |
+          set -euo pipefail
+          docker buildx build --file agent-computer/Dockerfile --platform linux/amd64 --load \
+            --tag openbot-agent-computer:ci .
+          docker run -d --name computer-ci -e COMPUTER_TOKEN=ci-token-0123456789abcdef \
+            -p 127.0.0.1:4100:4100 openbot-agent-computer:ci
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4100/health >/dev/null; then
+              echo "agent-computer answered /health"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' computer-ci)" != "true" ]; then break; fi
+            sleep 1
+          done
+          echo "::error::agent-computer did not answer /health"
+          docker logs computer-ci || true
+          exit 1
 
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
@@ -365,7 +648,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, build, migrations, image]
+    needs: [static, deployables, mobile, computer-browser, chart, test, startup, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

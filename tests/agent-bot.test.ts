@@ -55,3 +55,16 @@ test("agent-bot still refuses to start without its server token", async () => {
   expect(exitCode).toBe(1);
   expect(stderr).toContain("MANAGED_AGENT_TOKEN is not set");
 });
+
+test("agent-bot refuses a model it cannot drive however the name is spaced", async () => {
+  for (const model of ["gpt-5.6-terra", " gpt-5.6-terra", "\tgpt-6 "]) {
+    const { exitCode, stderr } = await startBot({
+      MANAGED_AGENT_TOKEN: "test-token",
+      OPENAI_API_KEY: "sk-test",
+      BOT_MODEL: model,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("cannot be used by this Bot");
+  }
+});

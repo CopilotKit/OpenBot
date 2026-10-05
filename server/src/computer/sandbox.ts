@@ -15,7 +15,11 @@
  * in-cluster service account gives a token and a CA, which is what `inClusterConfig` reads.
  */
 import { readFile } from "node:fs/promises";
-import type { ComputerLocation, ComputerProvider } from "./provider";
+import type {
+  ComputerLocation,
+  ComputerProvider,
+  ComputerUpdate,
+} from "./provider";
 import type { ComputerStatus } from "./schema";
 
 const SERVICE_ACCOUNT = "/var/run/secrets/kubernetes.io/serviceaccount";
@@ -31,14 +35,19 @@ export class SandboxError extends Error {
 
 /** One Sandbox, in the shape the parts of it this file reads. */
 type Sandbox = {
-  metadata?: { name?: string; creationTimestamp?: string };
-  spec?: { operatingMode?: "Running" | "Suspended" };
+  metadata?: { name?: string; creationTimestamp?: string; generation?: number };
+  spec?: {
+    operatingMode?: "Running" | "Suspended";
+    podTemplate?: PodTemplate;
+  };
   status?: {
     serviceFQDN?: string;
     conditions?: {
       type?: string;
       status?: string;
       reason?: string;
+      /** The generation of the Sandbox this condition was computed against. */
+      observedGeneration?: number;
       /** When this condition last changed, which is how one run of a computer is told from the next. */
       lastTransitionTime?: string;
     }[];
@@ -46,6 +55,39 @@ type Sandbox = {
     nodeName?: string;
   };
 };
+
+/** The part of a pod template this file compares: which image each container runs. */
+type PodTemplate = {
+  spec?: {
+    containers?: { name?: string; image?: string }[];
+    initContainers?: { name?: string; image?: string }[];
+  };
+};
+
+/**
+ * Which image each container of a pod template runs, as one comparable string.
+ *
+ * IMAGES, NOT THE WHOLE TEMPLATE. The API server fills defaults into what it stores (a port's
+ * protocol, for one), so a stored template never compares equal to the mounted one byte for byte,
+ * and a comparison of the whole thing would call every computer out of date forever. What an
+ * upgrade changes is the image, and that is what decides whether new computer code has reached it.
+ */
+export function imagesOf(podTemplate: unknown): string {
+  const spec = (podTemplate as PodTemplate | undefined)?.spec;
+  const list = (
+    kind: string,
+    containers: { name?: string; image?: string }[] | undefined,
+  ) =>
+    (containers ?? []).map(
+      (container) => `${kind}/${container.name ?? ""}=${container.image ?? ""}`,
+    );
+  return [
+    ...list("container", spec?.containers),
+    ...list("init", spec?.initContainers),
+  ]
+    .sort()
+    .join(",");
+}
 
 export type SandboxProviderOptions = {
   /** Where the Bots' computers live. The provider is scoped to exactly this namespace. */
@@ -103,13 +145,26 @@ export async function readSandboxTemplate(
       `COMPUTER_SANDBOX_TEMPLATE_FILE points at ${path}, which cannot be read. That file is what a Bot's computer is cut from; the chart mounts it when computers.mode is sandbox.`,
     );
   }
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
-  if (!parsed.podTemplate) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new SandboxError(
+      `${path} is not valid JSON, so there is nothing to make a computer from.`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new SandboxError(
+      `${path} is not valid JSON, so there is nothing to make a computer from.`,
+    );
+  }
+  const podTemplate = (parsed as Record<string, unknown>).podTemplate;
+  if (!podTemplate) {
     throw new SandboxError(
       `${path} has no podTemplate, so there is nothing to make a computer from.`,
     );
   }
-  return parsed;
+  return parsed as Record<string, unknown>;
 }
 
 /** How long a read token is reused before the file is consulted again. */
@@ -189,9 +244,14 @@ function isSuspended(sandbox: Sandbox): boolean {
 
 export function createSandboxComputerProvider(
   options: SandboxProviderOptions,
-): ComputerProvider {
+): ComputerProvider & {
+  update(botId: string): Promise<ComputerUpdate>;
+  restarting(botId: string): Promise<void> | undefined;
+} {
   const doFetch = options.fetchImpl ?? fetch;
   const resumeTimeoutMs = options.resumeTimeoutMs ?? 120_000;
+  /** Restarts started by `update` and not yet finished, one per Bot. */
+  const lastRestart = new Map<string, Promise<void>>();
   const base = () =>
     `${options.apiServer}/apis/${GROUP}/${VERSION}/namespaces/${options.namespace}/sandboxes`;
 
@@ -276,6 +336,80 @@ export function createSandboxComputerProvider(
     }
   }
 
+  /** Whether this computer runs a different image from the one a new computer would get. */
+  function isOutOfDate(sandbox: Sandbox): boolean {
+    return (
+      imagesOf(sandbox.spec?.podTemplate) !==
+      imagesOf(options.template.podTemplate)
+    );
+  }
+
+  /**
+   * Put the current pod template on a Sandbox, and optionally its operating mode in the same write.
+   *
+   * A JSON patch that replaces `spec.podTemplate` whole, rather than a merge patch. A merge patch
+   * merges maps key by key, so a field the template has since dropped (a node selector, an env
+   * source) would linger on the computer and it would be running a pod nobody wrote.
+   * `volumeClaimTemplates` is not touched: the CRD makes it immutable, and it is what holds the
+   * profile and the workspace.
+   *
+   * THIS DOES NOT RESTART A RUNNING POD. The agent-sandbox controller cuts a pod from the template
+   * only when there is none, and leaves an existing pod's spec alone (v0.5.6, `reconcilePod`). A new
+   * template therefore reaches a computer through a suspend and a resume, which is why both callers
+   * pair this with one.
+   */
+  async function replaceTemplate(
+    botId: string,
+    operatingMode: "Running" | "Suspended",
+  ): Promise<Sandbox | undefined> {
+    return (await call(`/${sandboxNameFor(botId)}`, {
+      method: "PATCH",
+      contentType: "application/json-patch+json",
+      body: JSON.stringify([
+        {
+          op: "replace",
+          path: "/spec/podTemplate",
+          value: options.template.podTemplate,
+        },
+        { op: "add", path: "/spec/operatingMode", value: operatingMode },
+      ]),
+    })) as Sandbox | undefined;
+  }
+
+  /**
+   * Wait for the pod of a computer being suspended to be gone.
+   *
+   * The Suspended condition, at or after the generation the suspend wrote. The condition on its own
+   * is not enough: the controller does not clear it on resume, so a stale True from the last idle
+   * suspend could say "gone" about a pod that is still running.
+   */
+  async function waitForSuspended(
+    botId: string,
+    generation: number | undefined,
+  ): Promise<void> {
+    const deadline = Date.now() + resumeTimeoutMs;
+    for (;;) {
+      const sandbox = await read(botId);
+      if (!sandbox) return;
+      const suspended = sandbox.status?.conditions?.find(
+        (condition) => condition.type === "Suspended",
+      );
+      if (
+        suspended?.status === "True" &&
+        (generation === undefined ||
+          (suspended.observedGeneration ?? 0) >= generation)
+      ) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new SandboxError(
+          `The computer for ${botId} did not stop within ${Math.round(resumeTimeoutMs / 1000)}s to take its new image.`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+
   return {
     name: "sandbox",
     isolation: "per-bot",
@@ -293,15 +427,36 @@ export function createSandboxComputerProvider(
          * Woken, because somebody is asking for it.
          *
          * `locate` runs immediately before an action, so reaching a suspended computer here means a
-         * person is waiting. A merge patch rather than a replace: the controller owns most of this
-         * object and writing the whole thing back would fight it.
+         * person is waiting. A patch rather than a replace: the controller owns most of this object
+         * and writing the whole thing back would fight it.
+         *
+         * And brought up to date on the way, because this is the one moment it costs nothing. There
+         * is no pod, so the pod the controller is about to create is cut from whatever the template
+         * says now, and the volumes are the Sandbox's own and are not in the patch. A computer woken
+         * without this runs the image it was first created with for ever.
          */
-        await call(`/${sandboxNameFor(botId)}`, {
-          method: "PATCH",
-          contentType: "application/merge-patch+json",
-          body: JSON.stringify({ spec: { operatingMode: "Running" } }),
-        });
+        if (isOutOfDate(existing)) {
+          await replaceTemplate(botId, "Running");
+          console.info(
+            JSON.stringify({
+              type: "computer-sandbox-updated",
+              botId,
+              reason:
+                "it was woken, and its image differed from the current one",
+              from: imagesOf(existing.spec?.podTemplate),
+              to: imagesOf(options.template.podTemplate),
+            }),
+          );
+        } else {
+          await call(`/${sandboxNameFor(botId)}`, {
+            method: "PATCH",
+            contentType: "application/merge-patch+json",
+            body: JSON.stringify({ spec: { operatingMode: "Running" } }),
+          });
+        }
       }
+      // A computer that is running on an older image is left alone here. It may be in the middle of
+      // a task, and restarting it under the Bot is the person's decision, which is `update`.
 
       const ready = await waitForReady(botId);
       const fqdn = ready.status?.serviceFQDN;
@@ -359,6 +514,66 @@ export function createSandboxComputerProvider(
       return { cleared: true };
     },
 
+    /**
+     * Move this Bot's computer onto the current image now, keeping its files and sign-ins.
+     *
+     * A suspended computer has its template replaced and stays suspended: the next wake creates
+     * its pod from the new one, and waking it now would spend a pod on nobody. A running one is
+     * suspended with the new template in the same write, which sends the computer SIGTERM so its
+     * browser saves its session and flushes its profile, and then resumed.
+     *
+     * The resume is not awaited. A suspend waits out a pod's grace period and a resume a pod
+     * schedule and a browser launch, which together outlast the idle timeout of the load balancer in
+     * front of a request. If this process dies before the resume, the computer is suspended on the
+     * new image, and the next action wakes it exactly as it wakes an idle one.
+     */
+    async update(botId: string) {
+      const sandbox = await read(botId);
+      if (!sandbox) return { updated: false, wasRunning: false };
+      const from = imagesOf(sandbox.spec?.podTemplate);
+      const to = imagesOf(options.template.podTemplate);
+      if (!isOutOfDate(sandbox)) {
+        return { updated: false, wasRunning: !isSuspended(sandbox), from, to };
+      }
+      if (isSuspended(sandbox)) {
+        await replaceTemplate(botId, "Suspended");
+        return { updated: true, wasRunning: false, from, to };
+      }
+      const patched = await replaceTemplate(botId, "Suspended");
+      const restarted = (async () => {
+        await waitForSuspended(botId, patched?.metadata?.generation);
+        // Reset while it was stopping: there is nothing left to bring back.
+        if (!(await read(botId))) return;
+        await call(`/${sandboxNameFor(botId)}`, {
+          method: "PATCH",
+          contentType: "application/merge-patch+json",
+          body: JSON.stringify({ spec: { operatingMode: "Running" } }),
+        });
+        await waitForReady(botId);
+      })();
+      lastRestart.set(botId, restarted);
+      restarted
+        .catch((error: unknown) => {
+          console.error(
+            JSON.stringify({
+              type: "computer-sandbox-update-resume-failed",
+              botId,
+              reason: error instanceof Error ? error.message : String(error),
+              note: "The computer is on its new image and suspended; the next action wakes it.",
+            }),
+          );
+        })
+        .finally(() => {
+          if (lastRestart.get(botId) === restarted) lastRestart.delete(botId);
+        });
+      return { updated: true, wasRunning: true, from, to };
+    },
+
+    /** The restart an `update` started, for a test to wait on. Undefined once it has finished. */
+    restarting(botId: string): Promise<void> | undefined {
+      return lastRestart.get(botId);
+    },
+
     async list(): Promise<ComputerLocation[]> {
       const body = (await call("")) as { items?: Sandbox[] } | undefined;
       return (body?.items ?? []).map((sandbox) => {
@@ -371,6 +586,7 @@ export function createSandboxComputerProvider(
           botId,
           status:
             isSuspended(sandbox) || !isReady(sandbox) ? "stopped" : "running",
+          updateAvailable: isOutOfDate(sandbox),
           url: sandbox.status?.serviceFQDN
             ? `http://${sandbox.status.serviceFQDN}:4100`
             : "",

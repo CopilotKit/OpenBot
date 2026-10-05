@@ -2,19 +2,78 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
+import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 
 /**
  * Keep the roster live.
  *
  * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
  * list to recover events missed while disconnected.
+ *
+ * Two connections can drop and only one is this one. `onopen` covers this socket. The other is the
+ * server's subscription to Postgres, which stays invisible here — so the server sends a resync when
+ * it comes back, answered with the same refetch.
  */
+
+/** The server saying it may have missed announcements, so the roster we hold may be wrong. */
+export type ChannelResyncEvent = { resync: true };
+
+/** What arrives on the socket. `resync` is the discriminant; an activity event never carries it. */
+export type ChannelSocketMessage = ChannelActivityEvent | ChannelResyncEvent;
+
+export function isResync(message: unknown): message is ChannelResyncEvent {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as ChannelResyncEvent).resync === true
+  );
+}
+
+/**
+ * Whether a parsed socket payload has the shape of anything this roster handles.
+ *
+ * The `try` around `JSON.parse` is not enough: `JSON.parse("null")` succeeds with
+ * `null`, and `JSON.parse("5")` succeeds with `5`, and both used to reach `isResync`
+ * — `null.resync` throwing a `TypeError` inside `onmessage` for the first, and a
+ * spurious roster-wide refetch for the second when the channel id came back
+ * `undefined`. Binary frames arrive as `Blob` rather than text and never parse.
+ */
+export function isChannelSocketMessage(
+  value: unknown,
+): value is ChannelSocketMessage {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse one socket frame into something the roster can act on, or `null` to drop it.
+ *
+ * Pure and exported so the drop rules are provable without a socket: unparseable
+ * text, non-object JSON (`null`, numbers, strings, arrays) and activity events with
+ * no string channel id are all ignored rather than crashing or refetching the roster.
+ */
+export function parseChannelSocketMessage(
+  data: unknown,
+): ChannelSocketMessage | null {
+  if (typeof data !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!isChannelSocketMessage(parsed)) return null;
+  if (isResync(parsed)) return parsed;
+  if (typeof parsed.channelId !== "string") return null;
+  return parsed;
+}
 
 export type ChannelActivityEvent = {
   channelId: string;
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** The channel's newly written summary. Absent on an ordinary activity event. */
+  summary?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**
@@ -24,6 +83,13 @@ export type ChannelActivityEvent = {
    * made in another tab or on another replica.
    */
   pinned?: boolean;
+  /**
+   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   *
+   * Carries no message: it patches only the row's `busy` flag, so the roster can show a working
+   * indicator without disturbing the preview or the order.
+   */
+  busy?: boolean;
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -72,6 +138,16 @@ export function applyChannelEvent(
   const previous = page.channels[index];
   if (!previous) return data;
 
+  /* One field, and no re-sort: naming a conversation is not something anybody said in it. */
+  if (activity.summary !== undefined) {
+    if (previous.summary === activity.summary) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, summary: activity.summary };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
   /*
    * A pin patches the one field it is about.
    *
@@ -83,6 +159,22 @@ export function applyChannelEvent(
     if (previous.pinned === activity.pinned) return data;
     const channels = page.channels.slice();
     channels[index] = { ...previous, pinned: activity.pinned };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
+  /*
+   * A busy signal patches the one field it is about, and never re-sorts.
+   *
+   * The spread below would carry this event's null message onto the row and wipe the preview. Busy
+   * is also not activity — a channel does not jump to the top of the roster because a turn started
+   * in it — so the order is left exactly as it was.
+   */
+  if (activity.busy !== undefined) {
+    if ((previous.busy ?? false) === activity.busy) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, busy: activity.busy };
     const pages = data.pages.slice();
     pages[holdingPage] = { ...page, channels };
     return { ...data, pages };
@@ -106,9 +198,7 @@ const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
 function socketUrl() {
-  const url = new URL("/api/channels/events", window.location.href);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
+  return buildSocketUrl("/api/channels/events");
 }
 
 export function useChannelEvents() {
@@ -132,12 +222,21 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let activity: ChannelActivityEvent;
-        try {
-          activity = JSON.parse(message.data as string);
-        } catch {
+        const parsed = parseChannelSocketMessage(message.data);
+        if (!parsed) return;
+
+        // Refetch rather than patch: there is no delta to apply. Checked before anything reads
+        // `channelId`, because this message has none.
+        if (isResync(parsed)) {
+          void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
           return;
         }
+
+        const activity = parsed;
+        // A group conversation's shared transcript moves with the same events; refetch it if open.
+        void queryClient.invalidateQueries({
+          queryKey: ["groups", activity.channelId],
+        });
 
         /*
          * The list is paged, so the cache holds pages rather than one array.
@@ -174,7 +273,10 @@ export function useChannelEvents() {
          */
         if (activity.deleted) {
           const { pathname } = router.state.location;
-          if (pathname === `/channel/${activity.channelId}`) {
+          if (
+            pathname === `/channel/${activity.channelId}` ||
+            pathname === `/group/${activity.channelId}`
+          ) {
             void router.navigate({ to: "/" });
           }
         }

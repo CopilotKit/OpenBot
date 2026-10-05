@@ -248,3 +248,71 @@ describe("registering an agent that answers badly", () => {
     expect(result.reason.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * An agent that keeps talking.
+ *
+ * The check needs the opening of the stream and says so: the cap beside it is named for how much of
+ * the answer is enough to prove the far end is an agent. What decides whether that cap means
+ * anything is whether the read stops there, and the person registering an agent that streams for a
+ * while is the one who finds out.
+ */
+describe("registering an agent that streams a long answer", () => {
+  /** The events, and then a run that goes on writing: a Bot working through a long document. */
+  function talkativeAgent() {
+    return Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async start(controller) {
+              const encoder = new TextEncoder();
+              controller.enqueue(
+                encoder.encode(
+                  'event: RUN_STARTED\ndata: {"type":"RUN_STARTED"}\n\n' +
+                    'event: TEXT_MESSAGE_START\ndata: {"type":"TEXT_MESSAGE_START"}\n\n',
+                ),
+              );
+              // A kilobyte at a time, slowly, the way a model streams. Nothing here closes: the run
+              // is still going, which is the whole point.
+              for (let chunk = 0; chunk < 4_000; chunk += 1) {
+                controller.enqueue(
+                  encoder.encode(
+                    `event: TEXT_MESSAGE_CONTENT\ndata: {"type":"TEXT_MESSAGE_CONTENT","delta":"${"x".repeat(960)}"}\n\n`,
+                  ),
+                );
+                await Bun.sleep(20);
+              }
+              controller.close();
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+  }
+
+  test("is reported as working, without waiting for it to finish", async () => {
+    const agent = talkativeAgent();
+
+    try {
+      const started = Date.now();
+      const result = await testAgentConnection(
+        `http://127.0.0.1:${agent.port}/ag-ui`,
+        { allowPrivateHosts: true, timeoutMs: 3_000 },
+      );
+      const took = Date.now() - started;
+
+      // It answered, immediately and correctly, with events this check can read. Anything else is
+      // this deployment describing a working agent as one that may not be reachable.
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.events).toContain("RUN_STARTED");
+      // Well inside the timeout. The check has what it needs after the opening of the stream, and
+      // an answer that arrives only when the agent stops talking is an answer that depends on the
+      // agent stopping.
+      expect(took).toBeLessThan(2_000);
+    } finally {
+      agent.stop(true);
+    }
+  });
+});

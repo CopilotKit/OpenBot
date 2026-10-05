@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { parse } from "yaml";
@@ -51,7 +51,30 @@ const approvedThemeVariables = new Set([
   "--sidebar-ring",
 ]);
 
-export function validateThemeCss(css: string) {
+export function validateThemeCss(rawCss: string) {
+  /*
+   * A comment is not something a theme defines, so it is taken out before anything below reads the
+   * text as definitions.
+   *
+   * Every rule here is about what a theme may DEFINE — two blocks, approved variables, no imports
+   * and no URLs — and a comment defines nothing. They were applied to the raw file anyway, so a
+   * stylesheet carrying the line every hand-written stylesheet opens with, saying whose brand it is
+   * and where the colours came from, was refused twice over. Above the blocks it survived the
+   * removal of them and read as a second selector: "Tenant theme may only define :root and .dark
+   * blocks". Inside one it was split on the semicolons around it and read as a variable name, so the
+   * refusal quoted the comment back as the variable it was not. A tenant package is loaded at
+   * start-up, so neither of those is a warning: the deployment does not come up, over a comment, and
+   * says nothing about comments.
+   *
+   * Taking them out first is stricter than leaving them in, never weaker. A comment wedged into the
+   * middle of the word `url` makes something a browser does not read as a URL token, and the test
+   * below did not read it as one either; with the comment gone, both do, and it is refused. A
+   * comment that is never closed does not match and is not removed, so it stays as the nonsense it
+   * is and is still refused. What a comment cannot do here is hide anything: what is left once they
+   * are gone is what a browser would act on.
+   */
+  const css = rawCss.replace(/\/\*[\s\S]*?\*\//g, " ");
+
   if (/@import|url\s*\(/i.test(css)) {
     throw new Error("Tenant theme must not contain imports or URLs");
   }
@@ -93,7 +116,22 @@ type PackageFiles = {
    * package had until now.
    */
   skills?: string;
+  /**
+   * A coworker per file, from `agents/` beside `agents.yaml`, in the order they should be read.
+   *
+   * `agents.yaml` holds every coworker in one file, so adding one means editing a file somebody
+   * else is also editing, and sending one means sending a fragment of it. A directory makes a
+   * coworker a thing you can copy in, delete, or hand to somebody. Both are read, and a package
+   * with only `agents.yaml` is unchanged.
+   */
+  agentFiles?: PackageAgentFile[];
   themeCss: string;
+};
+
+/** One file from `agents/`, kept with its name so a refusal can say which file it came from. */
+export type PackageAgentFile = {
+  filename: string;
+  contents: string;
 };
 
 /**
@@ -140,7 +178,7 @@ type TenantAgent = {
   title: string;
   roleDescription: string;
   avatarSeed?: string;
-  type: "built_in" | "remote_ag_ui";
+  type: "built_in" | "remote_ag_ui" | "remote_mastra";
   configuration: Record<string, unknown>;
   /**
    * The package skills this coworker is given, by slug.
@@ -170,9 +208,11 @@ export type TenantPackage = {
   productName: string;
   stylesheet: string | null;
   agents: TenantAgent[];
+  /** Remote agents explicitly disabled by a blank endpoint, not arbitrary removed YAML rows. */
+  omittedAgentIds: string[];
   channels: TenantChannel[];
   model: {
-    provider: "openai";
+    provider: "openai" | "anthropic";
     credentialSecretRef: string;
     defaultModel: string;
   };
@@ -305,6 +345,160 @@ export function expandEnvironment(
   );
 }
 
+/**
+ * The coworkers one YAML document declares, in the order it declares them.
+ *
+ * `source` names the file in any refusal, because a package can now declare coworkers in more than
+ * one place and "agent.id is required" is no use when there are eleven files it could be in.
+ *
+ * A remote coworker whose endpoint interpolates to nothing is dropped rather than refused, and its
+ * id is collected so a channel naming it is dropped too. That is what lets a package carry a row
+ * for a Bot somebody has not picked yet.
+ */
+function parseAgents(
+  values: unknown[],
+  source: string,
+  omittedAgentIds: Set<string>,
+): TenantAgent[] {
+  return values.flatMap((value) => {
+    const agent = asRecord(value, "agent");
+    const type: TenantAgent["type"] | undefined =
+      agent.type === "built-in"
+        ? "built_in"
+        : agent.type === "remote-ag-ui"
+          ? "remote_ag_ui"
+          : // A Mastra server, dialled through `@ag-ui/mastra` rather than an AG-UI route of its
+            // own. Seedable like the others: it is an address, and the same one this deployment
+            // would have been given by hand.
+            agent.type === "remote-mastra"
+            ? "remote_mastra"
+            : undefined;
+    if (!type) {
+      throw new Error(
+        `${source}: agent.type must be built-in, remote-ag-ui or remote-mastra`,
+      );
+    }
+    const id = requiredString(agent.id, "agent.id");
+    /*
+     * A Bot may not be named after a deployment route.
+     *
+     * The computer router's bot-access guard steps aside for those names, and a request cannot
+     * tell a Bot called `policy` from `/policy` itself, so such a Bot would be served to anybody
+     * who can sign in without the guard ever being asked. A package id is the only way a Bot gets
+     * a chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
+     * closes it rather than moving it.
+     */
+    if (DEPLOYMENT_ROUTES.has(id)) {
+      throw new Error(
+        `${source}: agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
+      );
+    }
+    if (type === "remote_ag_ui" || type === "remote_mastra") {
+      const endpoint =
+        typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
+      if (!endpoint) {
+        omittedAgentIds.add(id);
+        return [];
+      }
+    }
+    return [
+      {
+        id,
+        name: requiredString(agent.name, "agent.name"),
+        title: requiredString(agent.title, "agent.title"),
+        roleDescription: requiredString(
+          agent.role_description,
+          "agent.role_description",
+        ),
+        avatarSeed:
+          agent.avatar_seed === undefined
+            ? undefined
+            : requiredString(agent.avatar_seed, "agent.avatar_seed"),
+        type,
+        configuration:
+          type === "built_in"
+            ? {
+                systemPrompt: requiredString(
+                  agent.system_prompt,
+                  "agent.system_prompt",
+                ),
+              }
+            : {
+                endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                /*
+                 * Which agent on that server, when the server is a roster.
+                 *
+                 * Optional, and only meaningful for Mastra: a package naming one gets that one,
+                 * and a package naming none gets the only agent there or a refusal. Carried here
+                 * so a seeded Mastra Bot is as specific as one added by hand. See
+                 * `pickFromRoster`.
+                 */
+                ...(type === "remote_mastra" &&
+                typeof agent.remote_agent_id === "string" &&
+                agent.remote_agent_id.trim().length > 0
+                  ? { remoteAgentId: agent.remote_agent_id.trim() }
+                  : {}),
+              },
+        skills:
+          agent.skills === undefined || agent.skills === null
+            ? []
+            : stringArray(agent.skills, "agent.skills"),
+      },
+    ];
+  });
+}
+
+/**
+ * Every coworker the package declares: `agents.yaml` first, then one file at a time from `agents/`.
+ *
+ * A file under `agents/` may hold a list under `agents:`, the way `agents.yaml` does, or the one
+ * coworker on its own. The second is the point of the directory — a coworker somebody sends you is
+ * a file you drop in, not a fragment to paste into the middle of a file you already have.
+ *
+ * Two declarations of the same id are refused, and the refusal names both files. Preferring one
+ * would make which coworker a deployment runs depend on the order a directory happened to be read
+ * in, and a clone that copied a file in twice under different names would never find out.
+ */
+function collectAgents(
+  agentsYaml: Record<string, unknown>,
+  agentFiles: PackageAgentFile[],
+  omittedAgentIds: Set<string>,
+): TenantAgent[] {
+  const agents = parseAgents(
+    asList(agentsYaml.agents, "agents.yaml agents"),
+    "agents.yaml",
+    omittedAgentIds,
+  );
+  // The same refusal within `agents.yaml` as across files. Sync upserts one row per entry, so a
+  // repeated id there was not refused but silently became whichever entry came last.
+  const declaredIn = new Map<string, string>();
+  for (const agent of agents) {
+    if (declaredIn.has(agent.id)) {
+      throw new Error(`agent "${agent.id}" is declared twice in agents.yaml`);
+    }
+    declaredIn.set(agent.id, "agents.yaml");
+  }
+  for (const file of agentFiles) {
+    const source = `agents/${file.filename}`;
+    const document = yaml(file.contents, source);
+    const values =
+      document.agents === undefined
+        ? [document]
+        : asList(document.agents, `${source} agents`);
+    for (const agent of parseAgents(values, source, omittedAgentIds)) {
+      const existing = declaredIn.get(agent.id);
+      if (existing) {
+        throw new Error(
+          `agent "${agent.id}" is declared in both ${existing} and ${source}`,
+        );
+      }
+      declaredIn.set(agent.id, source);
+      agents.push(agent);
+    }
+  }
+  return agents;
+}
+
 export function validateTenantPackage(files: PackageFiles): TenantPackage {
   if (files.themeCss.trim()) {
     validateThemeCss(files.themeCss);
@@ -323,79 +517,30 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
   const omittedAgentIds = new Set<string>();
-  const agents = asList(agentsYaml.agents, "agents.yaml agents").flatMap(
-    (value) => {
-      const agent = asRecord(value, "agent");
-      const type: TenantAgent["type"] | undefined =
-        agent.type === "built-in"
-          ? "built_in"
-          : agent.type === "remote-ag-ui"
-            ? "remote_ag_ui"
-            : undefined;
-      if (!type) {
-        throw new Error("agent.type must be built-in or remote-ag-ui");
-      }
-      const id = requiredString(agent.id, "agent.id");
-      /*
-       * A Bot may not be named after a deployment route.
-       *
-       * The computer router's bot-access guard steps aside for those names, and a request cannot
-       * tell a Bot called `policy` from `/policy` itself, so such a Bot would be served to anybody
-       * who can sign in without the guard ever being asked. A package id is the only way a Bot gets
-       * a chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
-       * closes it rather than moving it.
-       */
-      if (DEPLOYMENT_ROUTES.has(id)) {
-        throw new Error(
-          `agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
-        );
-      }
-      if (type === "remote_ag_ui") {
-        const endpoint =
-          typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
-        if (!endpoint) {
-          omittedAgentIds.add(id);
-          return [];
-        }
-      }
-      return [
-        {
-          id,
-          name: requiredString(agent.name, "agent.name"),
-          title: requiredString(agent.title, "agent.title"),
-          roleDescription: requiredString(
-            agent.role_description,
-            "agent.role_description",
-          ),
-          avatarSeed:
-            agent.avatar_seed === undefined
-              ? undefined
-              : requiredString(agent.avatar_seed, "agent.avatar_seed"),
-          type,
-          configuration:
-            type === "built_in"
-              ? {
-                  systemPrompt: requiredString(
-                    agent.system_prompt,
-                    "agent.system_prompt",
-                  ),
-                }
-              : {
-                  endpoint: requiredString(agent.endpoint, "agent.endpoint"),
-                },
-          skills:
-            agent.skills === undefined || agent.skills === null
-              ? []
-              : stringArray(agent.skills, "agent.skills"),
-        },
-      ];
-    },
+  const agents = collectAgents(
+    agentsYaml,
+    files.agentFiles ?? [],
+    omittedAgentIds,
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
+  /*
+   * An id left blank in one place and declared properly in another is declared, not omitted.
+   * Otherwise it was seeded and then filtered out of every channel that names it, and disabled and
+   * re-enabled on each sync. A real declaration wins whichever file it is in, so the answer does not
+   * depend on the order a directory is read in.
+   */
+  for (const id of agentIds) omittedAgentIds.delete(id);
   const packageSkills = parseTenantSkills(skillsYaml.skills);
   const skillSlugs = new Set(packageSkills.map((skill) => skill.slug));
   for (const agent of agents) {
+    // Sync writes one grant row per entry in a single INSERT ... ON CONFLICT, which Postgres refuses
+    // when two of its rows collide, so a repeated slug stopped the server at boot with a SQL error.
+    const named = new Set<string>();
     for (const slug of agent.skills) {
+      if (named.has(slug)) {
+        throw new Error(`agent "${agent.id}" names skill "${slug}" twice`);
+      }
+      named.add(slug);
       /*
        * Checked against this package's own skills and nothing else, and refused rather than dropped.
        *
@@ -412,20 +557,32 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       }
     }
   }
+  const channelIds = new Set<string>();
   const channels = asList(channelsYaml.channels, "channels.yaml channels").map(
     (value) => {
       const channel = asRecord(value, "channel");
+      const id = requiredString(channel.id, "channel.id");
+      // Sync upserts one channel per entry, so a repeated id silently became the last one.
+      if (channelIds.has(id)) {
+        throw new Error(`channel "${id}" is declared twice in channels.yaml`);
+      }
+      channelIds.add(id);
       const permittedAgents = stringArray(
         channel.permitted_agents,
         "channel.permitted_agents",
       ).filter((agentId) => !omittedAgentIds.has(agentId));
+      // Each becomes a (channel, agent) row under a primary key, so a repeat stopped the server at
+      // boot with a duplicate-key error instead of a sentence naming the channel.
+      if (new Set(permittedAgents).size !== permittedAgents.length) {
+        throw new Error(`channel "${id}" lists the same agent twice`);
+      }
       for (const agentId of permittedAgents) {
         if (!agentIds.has(agentId)) {
           throw new Error(`channel references unknown agent "${agentId}"`);
         }
       }
       return {
-        id: requiredString(channel.id, "channel.id"),
+        id,
         name: requiredString(channel.name, "channel.name"),
         description: requiredString(channel.description, "channel.description"),
         permittedAgents,
@@ -437,8 +594,8 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
     },
   );
   const model = asRecord(modelYaml.model, "model");
-  if (model.provider !== "openai") {
-    throw new Error("model.provider must be openai");
+  if (model.provider !== "openai" && model.provider !== "anthropic") {
+    throw new Error("model.provider must be openai or anthropic");
   }
   const sources = asList(knowledgeYaml.sources, "knowledge.yaml sources").map(
     (value) => {
@@ -463,9 +620,10 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       ? requiredString(skin.stylesheet, "skin.stylesheet")
       : null,
     agents,
+    omittedAgentIds: [...omittedAgentIds],
     channels,
     model: {
-      provider: "openai",
+      provider: model.provider,
       credentialSecretRef: requiredString(
         model.credential_secret_ref,
         "model.credential_secret_ref",
@@ -486,12 +644,20 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
  */
 function parseTenantSkills(value: unknown): TenantSkill[] {
   if (value === undefined || value === null) return [];
+  // Sync upserts one skill per entry, so a repeated slug silently became the last one.
+  const slugs = new Set<string>();
   return asList(value, "skills.yaml skills").map((entry) => {
     const skill = asRecord(entry, "skill");
     const slug = requiredString(skill.slug, "skill.slug");
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    if (slugs.has(slug)) {
+      throw new Error(`skill "${slug}" is declared twice in skills.yaml`);
+    }
+    slugs.add(slug);
+    // The same pattern as the skills route, the store and the app's form. Looser, it seeded slugs
+    // such as `a`, `a-` or sixty characters that none of those would accept or let anybody edit.
+    if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(slug)) {
       throw new Error(
-        `skill.slug "${slug}" must be lowercase letters, digits and hyphens, and start with a letter or digit`,
+        `skill.slug "${slug}" must be lowercase letters, digits and hyphens, 2 to 40 characters, starting and ending with a letter or digit`,
       );
     }
     const tools =
@@ -518,6 +684,42 @@ function parseTenantSkills(value: unknown): TenantSkill[] {
       tools,
     };
   });
+}
+
+/**
+ * The coworker files beside `agents.yaml`, read in a fixed order.
+ *
+ * No directory is a package that keeps every coworker in one file, which is every package written
+ * before this and stays supported. `.yaml` and `.yml` only, so a README or an editor's leftovers
+ * sitting in there is not something the deployment tries to parse.
+ *
+ * Sorted by filename rather than taken in the order the filesystem answers, because the order
+ * decides which file a duplicate id is blamed on, and a refusal that names a different file on
+ * another machine is not one anybody can act on.
+ *
+ * `${NAME}` is expanded here exactly as it is in `agents.yaml`: these are the clone's own files,
+ * written by whoever wrote the rest of the package.
+ */
+async function readAgentFiles(sourcePath: string): Promise<PackageAgentFile[]> {
+  const directory = join(sourcePath, "agents");
+  const entries = await readdir(directory).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return [];
+      throw error;
+    },
+  );
+  const filenames = entries
+    .filter((entry) => entry.endsWith(".yaml") || entry.endsWith(".yml"))
+    .sort();
+  return await Promise.all(
+    filenames.map(async (filename) => ({
+      filename,
+      contents: expandEnvironment(
+        await readFile(join(directory, filename), "utf8"),
+        `agents/${filename}`,
+      ),
+    })),
+  );
 }
 
 export async function loadTenantPackage(
@@ -558,6 +760,7 @@ export async function loadTenantPackage(
       if (error.code === "ENOENT") return "";
       throw error;
     });
+  const agentFiles = await readAgentFiles(sourcePath);
   const tenantPackage = validateTenantPackage({
     brand,
     agents,
@@ -565,6 +768,7 @@ export async function loadTenantPackage(
     model,
     knowledge,
     skills,
+    agentFiles,
     themeCss,
   });
 
@@ -573,8 +777,17 @@ export async function loadTenantPackage(
     sourcePath,
     // `skills` is in the checksum, so editing it is a package change like any other and the
     // deployment notices on the next boot rather than reporting itself unchanged.
+    // `agents/` is in the checksum for the reason `skills` is: a coworker added, edited or removed
+    // there is a package change, and a deployment that did not notice would go on running the
+    // roster it booted with while the repository said otherwise.
     checksum: createHash("sha256")
-      .update([...contents, skills].join("\n"))
+      .update(
+        [
+          ...contents,
+          skills,
+          ...agentFiles.map((file) => `${file.filename}\n${file.contents}`),
+        ].join("\n"),
+      )
       .digest("hex"),
   };
 }
@@ -622,6 +835,34 @@ export async function synchronizeTenantPackage(
 
     if (!deploymentPackage) {
       throw new Error("Tenant package could not be synchronized");
+    }
+
+    // Disable only explicitly unconfigured agents still owned by this package. Keep canonical
+    // rows and conversation memberships: runtime tombstones preserve their readable history.
+    // Normal seeding below clears deletedAt if an endpoint is configured again.
+    if (tenantPackage.omittedAgentIds.length > 0) {
+      const now = new Date();
+      await transaction
+        .update(agentProfiles)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            isNull(agentProfiles.ownerUserId),
+            isNull(agentProfiles.deletedAt),
+            inArray(
+              agentProfiles.agentId,
+              transaction
+                .select({ id: agentTable.id })
+                .from(agentTable)
+                .where(
+                  and(
+                    eq(agentTable.packageId, deploymentPackage.id),
+                    inArray(agentTable.id, tenantPackage.omittedAgentIds),
+                  ),
+                ),
+            ),
+          ),
+        );
     }
 
     for (const agent of tenantPackage.agents) {
@@ -689,7 +930,7 @@ export async function synchronizeTenantPackage(
     }
 
     for (const channel of tenantPackage.channels) {
-      await transaction
+      const [ownedChannel] = await transaction
         .insert(channelTable)
         .values({
           id: channel.id,
@@ -700,6 +941,7 @@ export async function synchronizeTenantPackage(
         })
         .onConflictDoUpdate({
           target: channelTable.id,
+          setWhere: eq(channelTable.packageId, deploymentPackage.id),
           set: {
             name: channel.name,
             description: channel.description,
@@ -707,7 +949,15 @@ export async function synchronizeTenantPackage(
             packageId: deploymentPackage.id,
             updatedAt: new Date(),
           },
-        });
+        })
+        .returning({ id: channelTable.id });
+
+      if (!ownedChannel) {
+        throw new Error(
+          `Tenant package channel "${channel.id}" collides with a channel this package does not own`,
+        );
+      }
+
       await transaction
         .delete(channelAgents)
         .where(eq(channelAgents.channelId, channel.id));
@@ -754,6 +1004,13 @@ export async function synchronizeTenantPackage(
         and(
           eq(pluginGrants.kind, "skill"),
           eq(pluginGrants.grantedBy, PACKAGE_GRANT),
+          inArray(
+            pluginGrants.agentId,
+            transaction
+              .select({ id: agentTable.id })
+              .from(agentTable)
+              .where(eq(agentTable.packageId, deploymentPackage.id)),
+          ),
         ),
       );
 

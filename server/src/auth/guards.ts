@@ -17,13 +17,15 @@ export type AuthService = {
   api: {
     getSession: (input: {
       headers: Headers;
-      query: { disableCookieCache: boolean };
+      query?: { disableCookieCache: boolean };
     }) => Promise<{
       user: {
         id: string;
         email: string;
         name?: string | null;
         image?: string | null;
+        /** Set only by a server-verified organization authority. */
+        role?: OpenBotRole;
       };
     } | null>;
   };
@@ -64,7 +66,9 @@ export function createRequireUser(
       return context.json({ error: "Authentication required." }, 401);
     }
 
-    const roles = await roleRepository.rolesForUser(session.user.id);
+    const roles = session.user.role
+      ? [session.user.role]
+      : await roleRepository.rolesForUser(session.user.id);
     const role = roles.includes("admin")
       ? "admin"
       : roles.includes("user")

@@ -12,7 +12,7 @@ import {
   users,
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Registering a client twice, and connecting twice, against a real vault.
@@ -24,11 +24,7 @@ import { TEST_POOL } from "./support/database";
  * it.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };

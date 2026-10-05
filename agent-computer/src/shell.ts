@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { egressShellEnvironment, splitProxyCredentials } from "./egress";
+
 /**
  * Running a command on the Bot's computer.
  *
@@ -188,16 +190,9 @@ function extraShellEnvNames(raw: string | undefined): readonly string[] {
  * the network without `env` printing a password. Same split `egress.ts` uses for the browser proxy.
  */
 function withoutUserinfo(raw: string): string {
-  try {
-    const url = new URL(raw.trim());
-    if (url.username === "" && url.password === "") return raw;
-    url.username = "";
-    url.password = "";
-    return url.toString().replace(/\/$/, "");
-  } catch (e) {
-    if (e instanceof TypeError) return raw;
-    throw e;
-  }
+  const { server, username, password } = splitProxyCredentials(raw);
+  if (username === undefined && password === undefined) return raw;
+  return server;
 }
 
 function clamp(text: string): { text: string; truncated: boolean } {
@@ -227,9 +222,18 @@ export function createShell(
        * Bounded at both ends. Only `Math.min` was applied, so a zero or negative `timeoutMs` from a
        * caller made `setTimeout` fire immediately: the command was killed before it did anything and
        * the answer said it had timed out, which is true and useless.
+       *
+       * A non-finite value is the same failure one step earlier: `Math.max(NaN, 1000)` is `NaN`,
+       * and `setTimeout(NaN)` fires immediately too. The HTTP layer rejects those with a 400, so
+       * this is defence in depth for a direct caller — fall back to the default rather than run a
+       * command that is already out of time.
        */
+      const requested =
+        typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs)
+          ? input.timeoutMs
+          : DEFAULT_TIMEOUT_MS;
       const timeoutMs = Math.min(
-        Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS),
+        Math.max(requested, MIN_TIMEOUT_MS),
         MAX_TIMEOUT_MS,
       );
 
@@ -261,7 +265,11 @@ export function createShell(
        */
       const child = spawn("/bin/bash", ["-c", input.command], {
         cwd: workspaceDir,
-        env: environmentForCommand(sourceEnv, workspaceDir),
+        // The egress filter's address last, so a command cannot be pointed around it.
+        env: {
+          ...environmentForCommand(sourceEnv, workspaceDir),
+          ...egressShellEnvironment(),
+        },
         detached: true,
       });
 
@@ -329,6 +337,12 @@ export function createShell(
       // The person's Stop reaches the command, not just the request that started it.
       const onAbort = stop;
       input.signal?.addEventListener("abort", onAbort, { once: true });
+      // A listener added to an already-aborted signal never fires, so listening alone only honours a
+      // Stop that arrives from here on. The abort can beat the spawn above: the surface aborts, the
+      // server aborts the request it made to this computer, and Bun aborts this one in turn, which
+      // happens before this line whenever the person was quick. Reading the flag is what makes the
+      // Stop mean the same thing whenever it landed.
+      if (input.signal?.aborted) stop();
 
       const exitCode = await new Promise<number>((resolve) => {
         child.on("close", (code) => resolve(code ?? -1));

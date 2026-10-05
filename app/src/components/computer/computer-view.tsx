@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  type ControlState,
-  readControl,
-  releaseControl,
-  supplySecret,
-  takeControl,
-} from "@/lib/computers/control";
+import { supplySecret } from "@/lib/computers/control";
 import {
   readPageFrame,
   readScreenshot,
   type Screenshot,
 } from "@/lib/computers/screen";
+import { useComputerControl } from "@/lib/computers/use-control";
 import { ChannelAvatar } from "../channels/avatar";
+import { ComputerControlButton } from "./computer-controls";
+import { DemonstrationRecorder } from "./demonstration-recorder";
 import { LiveScreen } from "./live-screen";
+import { useElementVisible, usePageVisible } from "./preview-visibility";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
 function isBlankBrowser(shot: Screenshot): boolean {
@@ -223,30 +221,8 @@ export function ComputerView({
   const [shot, setShot] = useState<Screenshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [control, setControl] = useState<ControlState | null>(null);
-  /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
-  const [secret, setSecret] = useState("");
-  const [secretProblem, setSecretProblem] = useState<string | null>(null);
-  const [sendingSecret, setSendingSecret] = useState(false);
-  const driving = control?.holder === "human";
-  /** Read by the polling loop without restarting it on control changes. */
-  const drivingRef = useRef(false);
-  drivingRef.current = driving;
-
-  /** Release control; the Bot's waiting tool call resumes from this state change. */
-  const handBack = async () => {
-    const state = await releaseControl(computerId);
-    if (state) setControl(state);
-  };
-  /** Secret prompts keep the screen live even though the human does not hold the wheel. */
-  const secretPending = Boolean(control?.secretWanted);
-  const secretPendingRef = useRef(false);
-  secretPendingRef.current = secretPending;
-  // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
-  const generation = useRef(0);
-  /** Force a short watch window after non-Bot actions such as secret entry. */
-  const watchUntil = useRef(0);
-
+  const [streamProblem, setStreamProblem] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   /**
    * A finished turn is history, and history is not polled.
    *
@@ -277,6 +253,33 @@ export function ComputerView({
   const [, setFrameArrived] = useState(0);
 
   const settled = !active && (finished || Boolean(knownPage));
+  const {
+    control,
+    busy: changingControl,
+    change: changeControl,
+    refresh: refreshControl,
+  } = useComputerControl(computerId, !settled);
+  /** Held only until it is sent. Never lifted into a URL, a log, or anything that outlives this form. */
+  const [secret, setSecret] = useState("");
+  const [secretProblem, setSecretProblem] = useState<string | null>(null);
+  const [sendingSecret, setSendingSecret] = useState(false);
+  const pageVisible = usePageVisible();
+  const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
+  const driving = control?.holder === "human" && !control.transitioning;
+  /** Read by the polling loop without restarting it on control changes. */
+  const drivingRef = useRef(false);
+  drivingRef.current = driving;
+
+  /** Secret prompts keep the screen live even though the human does not hold the wheel. */
+  const secretPending = Boolean(control?.secretWanted);
+  const secretPendingRef = useRef(false);
+  secretPendingRef.current = secretPending;
+  // Held in a ref so a slow response cannot overwrite a newer frame after the component moved on.
+  const generation = useRef(0);
+  /** Force a short watch window after non-Bot actions such as secret entry. */
+  const watchUntil = useRef(0);
+
+  const visualVisible = pageVisible && (expanded || previewIntersecting);
 
   /*
    * The frame this turn's page was showing, fetched once and then kept.
@@ -317,6 +320,7 @@ export function ComputerView({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
     if (settled) return;
+    if (!visualVisible) return;
     const mine = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
     // Consecutive identical frames observed during post-action settling.
@@ -364,25 +368,7 @@ export function ComputerView({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [computerId, active, intervalMs, secretPending, settled]);
-
-  /** Poll control state independently from screenshot polling so help/secret prompts surface. */
-  useEffect(() => {
-    if (settled) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      const state = await readControl(computerId);
-      if (!live) return;
-      if (state) setControl(state);
-      timer = setTimeout(tick, 1000);
-    };
-    void tick();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [computerId, settled]);
+  }, [computerId, active, intervalMs, secretPending, settled, visualVisible]);
 
   // Input forwarding lives in LiveScreen on the socket.
   // Escape is bound to the window so it works regardless of overlay focus.
@@ -452,7 +438,7 @@ export function ComputerView({
 
   return (
     <>
-      <figure className="overflow-hidden rounded-2xl border">
+      <figure ref={previewRef} className="overflow-hidden rounded-2xl border">
         {/* Inline preview remains in transcript; click opens a readable full-size view. */}
         <button
           type="button"
@@ -497,36 +483,39 @@ export function ComputerView({
           )}
         </button>
 
-        {/*
-         * The Bot ASKING for the wheel, which is not the same thing as a person wanting it.
-         *
-         * The standing "who is driving" prose and the everyday Take control button live in the
-         * full-size view, where there is a page big enough to drive. This row is the exception: a
-         * request is an exceptional state with a reason attached, it is the one moment the screen is
-         * waiting on a person rather than the other way round, and making them open the full-size
-         * view to find out what was wanted would hide the reason behind a click. Taking the wheel
-         * from here opens that view, because driving is what they are being asked to do.
-         */}
+        {/* The request reason appears above the always-available ownership controls. */}
         {!driving && !settled && control?.requested ? (
           <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
             <span>
               <strong className="font-medium">The assistant needs you.</strong>{" "}
               {control.reason}
             </span>
-            <button
-              type="button"
-              onClick={async () => {
-                const state = await takeControl(computerId);
-                if (state) setControl(state);
-                setExpanded(true);
-              }}
-              className="shrink-0 rounded-md bg-primary px-3 py-1 font-medium text-primary-foreground text-xs"
-            >
-              Take control
-            </button>
           </div>
         ) : null}
 
+        {!settled && control?.requested ? (
+          <div className="px-3 pb-2 text-sm">
+            <button
+              type="button"
+              className="underline"
+              disabled={changingControl}
+              onClick={() => void changeControl?.("cancel")}
+            >
+              Cancel request
+            </button>
+          </div>
+        ) : null}
+        {!settled && control?.transitioning ? (
+          <p className="px-3 py-2 text-sm">
+            Finishing the assistant's current action before giving you control…
+          </p>
+        ) : null}
+        {!settled && control?.request?.status === "interrupted" ? (
+          <p className="px-3 py-2 text-sm">
+            The browser was interrupted. {control.request.interruption} Open the
+            screen and take control again to check it.
+          </p>
+        ) : null}
         {/*
           Secret values go directly to the page path and are never included in the conversation.
           Audit records that a secret was supplied, not the value.
@@ -544,8 +533,7 @@ export function ComputerView({
               // Clear even on failure so plaintext is not left in the DOM.
               setSecret("");
               setSecretProblem(result.ok ? null : (result.error ?? null));
-              const state = await readControl(computerId);
-              if (state) setControl(state);
+              await refreshControl?.();
             }}
           >
             <label className="block" htmlFor="openbot-secret">
@@ -582,12 +570,23 @@ export function ComputerView({
           </form>
         ) : null}
 
-        {/*
-         * The inline card carries no persistent footer: taking the wheel, handing it back, and the
-         * standing "who is driving" prose all live in the full-size view, where there is a page big
-         * enough to drive. The two rows above appear only while the Bot is stuck — waiting on a
-         * credential, or asking for the wheel — and go again when it is not.
-         */}
+        {!settled ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
+            <span className="text-xs text-muted-foreground">
+              {!control
+                ? "Checking who has control…"
+                : control.transitioning
+                  ? "Finishing the current action…"
+                  : driving
+                    ? "You have control. Open the screen to click and type."
+                    : "The assistant has control."}
+            </span>
+            <ComputerControlButton
+              computerId={computerId}
+              onTakeControl={() => setExpanded(true)}
+            />
+          </div>
+        ) : null}
       </figure>
 
       {/*
@@ -644,7 +643,8 @@ export function ComputerView({
                       <LiveScreen
                         computerId={computerId}
                         driving={driving}
-                        onProblem={setProblem}
+                        onProblem={setStreamProblem}
+                        retryKey={retryKey}
                       />
                       {/*
                         A live screen that ends reports why through `onProblem`, and this is the
@@ -652,9 +652,19 @@ export function ComputerView({
                         landed in `problem`, which only the sibling `NothingToSee` reads, so the
                         screen ended with the stale last frame frozen on the canvas and nothing said.
                       */}
-                      {problem ? (
-                        <div className="absolute inset-0 flex items-center justify-center bg-background/85 p-4 text-center text-sm text-muted-foreground">
-                          <span>{problem}</span>
+                      {streamProblem ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/85 p-4 text-center text-sm text-muted-foreground">
+                          <span>{streamProblem}</span>
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => {
+                              setStreamProblem(null);
+                              setRetryKey((value) => value + 1);
+                            }}
+                          >
+                            Retry
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -675,6 +685,11 @@ export function ComputerView({
                   offering control of whatever the Bot has open now. Those sentences are about the
                   present and this view is a record; a record does not get a steering wheel.
                 */}
+                {control?.transitioning ? (
+                  <p className="mt-3 text-center text-sm">
+                    Finishing the current action before giving you control…
+                  </p>
+                ) : null}
                 {settled ? null : (
                   <div className="mt-4 flex items-center justify-center gap-4">
                     <span className="flex min-w-0 items-center gap-2 text-sm">
@@ -701,27 +716,15 @@ export function ComputerView({
                         </span>
                       ) : null}
                     </span>
-                    {driving ? (
-                      <button
-                        type="button"
-                        onClick={() => void handBack()}
-                        className="shrink-0 rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground text-sm"
-                      >
-                        Hand back
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const state = await takeControl(computerId);
-                          if (state) setControl(state);
-                        }}
-                        className="shrink-0 rounded-md border px-3 py-1.5 font-medium text-sm"
-                      >
-                        Take control
-                      </button>
-                    )}
+                    <ComputerControlButton computerId={computerId} />
                   </div>
+                )}
+                {!settled && (
+                  <DemonstrationRecorder
+                    botId={computerId}
+                    driving={driving}
+                    onRecordingChange={() => setRetryKey((value) => value + 1)}
+                  />
                 )}
               </div>
             </div>,

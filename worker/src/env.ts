@@ -1,0 +1,75 @@
+import { workOwner } from "../../shared/work-owner";
+
+/**
+ * What the worker needs from its environment, parsed and ready to use.
+ *
+ * `serverInternalUrl` never carries a trailing slash, so `routineRunUrl` cannot
+ * produce the double-slash `//internal/routines/run` that a `SERVER_INTERNAL_URL`
+ * with a trailing slash used to build — a 404 the sweep only reported as "the server
+ * answered 404 rather than 202". `owner` always carries a random suffix, so two
+ * workers on one host never share a lease name; see `shared/work-owner.ts`.
+ */
+export type WorkerEnv = {
+  workerSharedSecret: string;
+  serverInternalUrl: string;
+  databaseUrl: string;
+  owner: string;
+};
+
+/**
+ * Read and validate the worker's three settings, failing fast and loudly.
+ *
+ * Whitespace-only values are refused exactly like unset ones: the old `if (!value)`
+ * guards let `"   "` through, and the loop then failed on every tick — `fetch` to
+ * `"   /internal/..."`, `createDatabase("   ")` on the first query — logging
+ * `routine-sweep-tick-failed` forever instead of saying at boot what was misconfigured.
+ */
+export function loadWorkerEnv(
+  environment: Record<string, string | undefined> = process.env,
+): WorkerEnv {
+  const workerSharedSecret = environment.WORKER_SHARED_SECRET?.trim();
+  if (!workerSharedSecret) {
+    throw new Error(
+      "WORKER_SHARED_SECRET is not set, so this worker cannot authenticate itself to /internal/routines/run and no routine could be fired.",
+    );
+  }
+
+  const rawServerUrl = environment.SERVER_INTERNAL_URL?.trim();
+  if (!rawServerUrl) {
+    throw new Error(
+      "SERVER_INTERNAL_URL is not set, so this worker does not know where to hand a routine run.",
+    );
+  }
+  const serverInternalUrl = rawServerUrl.replace(/\/+$/, "");
+  if (!serverInternalUrl) {
+    throw new Error(
+      "SERVER_INTERNAL_URL is not set, so this worker does not know where to hand a routine run.",
+    );
+  }
+  try {
+    const parsed = new URL(serverInternalUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("not http(s)");
+    }
+  } catch {
+    throw new Error(
+      "SERVER_INTERNAL_URL must be a valid http(s) URL, so this worker knows where to hand a routine run.",
+    );
+  }
+
+  const databaseUrl = environment.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error(
+      "DATABASE_URL is not set, so this worker has no database to read routines from or claim them in.",
+    );
+  }
+
+  const owner = workOwner("routines", environment);
+
+  return { workerSharedSecret, serverInternalUrl, databaseUrl, owner };
+}
+
+/** Where a claimed run is handed to the server. Built on the normalised base URL. */
+export function routineRunUrl(serverInternalUrl: string): string {
+  return `${serverInternalUrl}/internal/routines/run`;
+}

@@ -42,6 +42,7 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     ownerUserId: actor.id,
     systemOwned: false,
     hidden: false,
+    pinned: false,
     deletedAt: null,
     ...overrides,
   };
@@ -80,6 +81,9 @@ function fakeStore(
     },
     async setHidden(receivedActor, id, hidden) {
       calls.push(["setHidden", receivedActor, id, hidden]);
+    },
+    async setPinned(receivedActor, id, pinned) {
+      calls.push(["setPinned", receivedActor, id, pinned]);
     },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
@@ -289,6 +293,12 @@ describe("agent lifecycle routes", () => {
     const unhidden = await app.request("http://openbot.test/agent-1/unhide", {
       method: "POST",
     });
+    const pinned = await app.request("http://openbot.test/agent-1/pin", {
+      method: "POST",
+    });
+    const unpinned = await app.request("http://openbot.test/agent-1/unpin", {
+      method: "POST",
+    });
     const deleted = await app.request("http://openbot.test/agent-1", {
       method: "DELETE",
     });
@@ -300,15 +310,32 @@ describe("agent lifecycle routes", () => {
     expect(duplicated.status).toBe(201);
     expect(hidden.status).toBe(204);
     expect(unhidden.status).toBe(204);
+    expect(pinned.status).toBe(204);
+    expect(unpinned.status).toBe(204);
     expect(deleted.status).toBe(204);
     expect(store.calls).toEqual([
       ["list", actor, false],
       ["get", actor, "agent-1"],
-      ["create", actor, validInput],
+      /*
+       * `create` carries a system prompt and `update` does not, and that difference is the point.
+       * This input names no endpoint, so on a deployment with no Bot in the box the coworker runs
+       * here on its own role description rather than being refused — the form calls the endpoint
+       * optional and it now is. `update` is deliberately untouched: changing an existing Bot's type
+       * is a different act and must not happen through the edit path.
+       *
+       * The other create in this file passes an endpoint and correctly gets no prompt.
+       */
+      [
+        "create",
+        actor,
+        { ...validInput, systemPrompt: validInput.roleDescription },
+      ],
       ["update", actor, "agent-1", validInput],
       ["duplicate", actor, "agent-1"],
       ["setHidden", actor, "agent-1", true],
       ["setHidden", actor, "agent-1", false],
+      ["setPinned", actor, "agent-1", true],
+      ["setPinned", actor, "agent-1", false],
       ["softDelete", actor, "agent-1"],
     ]);
   });
@@ -339,11 +366,14 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          assignedToMe: false,
           visibility: "private",
           hidden: false,
+          pinned: false,
           systemOwned: false,
           canManage: true,
           mine: true,
+          builtIn: false,
         },
         {
           id: "agent-2",
@@ -351,11 +381,14 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          assignedToMe: false,
           visibility: "private",
           hidden: false,
+          pinned: false,
           systemOwned: false,
           canManage: false,
           mine: false,
+          builtIn: false,
         },
         {
           id: "system-agent",
@@ -363,11 +396,14 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          assignedToMe: false,
           visibility: "public",
           hidden: false,
+          pinned: false,
           systemOwned: true,
           canManage: false,
           mine: false,
+          builtIn: false,
         },
       ],
     });
@@ -662,6 +698,8 @@ describe("which Bots a Bot may hand work to", () => {
       enabled: true,
       canGrant: true,
       reachable: ["knowledge"],
+      // No canHandOn reader was wired, and a Bot nothing can vouch for is not offered grants.
+      grantable: false,
     });
   });
 

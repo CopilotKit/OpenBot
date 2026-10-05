@@ -1,0 +1,4 @@
+pydantic-ai-slim[openai,anthropic,google,ag-ui]
+fastapi
+python-multipart
+uvicorn[standard]

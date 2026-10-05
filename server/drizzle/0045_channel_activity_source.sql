@@ -1,0 +1,1 @@
+ALTER TABLE "channels" ADD COLUMN "last_message_source_id" text;

@@ -6,6 +6,7 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { canSend, type Recipient } from "@/components/channels/compose-state";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import {
   Combobox,
   ComboboxContent,
@@ -14,6 +15,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox";
+import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
@@ -27,6 +29,9 @@ import { newId } from "../../../../lib/new-id";
  * Creates the channel on first send. The selected coworker stays in the URL so profile links and
  * reloads preserve the pending recipient without creating an empty channel.
  */
+/** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
+const AGENT_NOT_FOUND = "Agent not found.";
+
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
     ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
@@ -37,8 +42,10 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
 function RouteComponent() {
   const { agent } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { start, pending } = useStartChannel();
-  const { data: profiles } = useQuery(agentListQueryOptions());
+  const { startChosen, pending } = useStartChannel();
+  const { data: profiles, isError: rosterError } = useQuery(
+    agentListQueryOptions(),
+  );
 
   const [error, setError] = useState<string | null>(null);
   // Optimistic seed shown before the first channel record exists.
@@ -50,24 +57,53 @@ function RouteComponent() {
    * Hidden coworkers are omitted from the roster but may still be valid recipients from a profile
    * link, so fetch the URL-selected coworker when it is absent from the visible list.
    */
-  const { data: fetched } = useQuery({
+  const {
+    data: fetched,
+    isError: detailError,
+    error: detailFailure,
+    isPending: detailPending,
+  } = useQuery({
     ...agentQueryOptions(agent ?? ""),
-    enabled: Boolean(agent) && !listed,
+    enabled: Boolean(agent) && profiles !== undefined && !listed,
     retry: false,
   });
-  const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
+  const chosen =
+    listed ??
+    (fetched?.id === agent ? fetched : undefined) ??
+    (agent ? undefined : defaultAgentProfile(profiles));
+  const needsUrlAgentDetail =
+    Boolean(agent) && profiles !== undefined && !listed;
+  const waitingForUrlAgent =
+    needsUrlAgentDetail && detailPending && !detailError;
+  const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
+  const loadError =
+    rosterError && profiles === undefined
+      ? "Coworkers couldn't be loaded."
+      : urlAgentDetailFailed
+        ? /*
+           * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
+           * the Bot: a shared Team Bot link lands here once it is unpublished or undescribed. Any
+           * other failure is a load that can be retried, and says so.
+           */
+          detailFailure?.message === AGENT_NOT_FOUND
+          ? "This Bot isn't available to you. It may be unpublished, not shared with you, or not described yet."
+          : "Coworker couldn't be loaded."
+        : null;
   const recipients: Recipient[] = chosen
     ? [{ id: chosen.id, name: chosen.name }]
     : [];
   const skillCommands = useSkillCommands(chosen?.id ?? "");
 
+  if (profiles === undefined && !rosterError) return null;
+
   return (
     <div className="flex h-full flex-col">
       <div className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center">
+        <SidebarToggle className="mr-1" />
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Do not auto-open when the recipient came from the URL; the field is already answered.
-          defaultOpen={!agent}
+          defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
           autoHighlight
           items={profiles ?? []}
           isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
@@ -85,6 +121,10 @@ function RouteComponent() {
           value={chosen ?? null}
         >
           <ComboboxInput
+            // The popup opening is not enough on its own: typing filters through this input, so
+            // the caret starts here whenever the recipient question is still open. Same condition
+            // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
+            autoFocus={!chosen}
             placeholder="Choose a coworker…"
             // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
             className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
@@ -112,12 +152,14 @@ function RouteComponent() {
         autoFocus
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
-        disabled={recipients.length === 0}
+        disabled={
+          Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
+        }
         messages={sent ? [sent] : []}
         notice={
-          error ? (
+          loadError || error ? (
             <p className="pb-2 text-sm text-destructive" role="alert">
-              {error}
+              {loadError ?? error}
             </p>
           ) : null
         }
@@ -129,7 +171,9 @@ function RouteComponent() {
           setSent(seedMessage(draft.text, newId()));
 
           try {
-            await start(recipient.id, draft.text);
+            // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
+            // home screen, and the trail has to say so for both.
+            await startChosen(recipient.id, draft.text);
           } catch (caught) {
             // Preserve the unsent draft when channel creation fails.
             setSent(null);

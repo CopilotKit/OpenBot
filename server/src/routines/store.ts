@@ -25,6 +25,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -32,15 +33,19 @@ import {
   ne,
   sql,
 } from "drizzle-orm";
+import type { HeadlessWaiting } from "../computer/headless-tools";
 import type { Database } from "../db/client";
 import {
   channelAgents,
   channelMemberships,
   channels,
   routineRuns,
+  routineSweeps,
   routines,
 } from "../db/schema";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
+
+const SWEEP_ID = "routines";
 
 export class RoutineNotFoundError extends Error {
   constructor(message = "That routine does not exist.") {
@@ -84,7 +89,7 @@ const TOO_MANY_ENABLED = `You already have ${MAX_ENABLED_ROUTINES} routines swit
 /** How many names an ambiguity refusal reads out before it gives up and says "and others". */
 const MAX_NAMED_CHANNELS = 5;
 
-export type RoutineRunOutcome = "succeeded" | "failed" | "skipped";
+export type RoutineRunOutcome = "succeeded" | "failed" | "skipped" | "waiting";
 
 export type Routine = {
   id: string;
@@ -150,6 +155,22 @@ export type RoutineRunContext = {
   agentId: string;
   channelId: string;
   instruction: string;
+  /**
+   * Read at the moment of running, so a routine switched off after its firing was dispatched (or a
+   * Run now that raced a pause) is closed as skipped instead of run. Paused never runs.
+   */
+  enabled?: boolean;
+};
+
+/** One row of a routine's run history. `status: null` is a run still in flight. */
+export type RoutineRunSummary = {
+  id: string;
+  status: RoutineRunOutcome | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+  error: string | null;
+  /** What started it: the schedule, a person's Run now, or an event trigger. */
+  source: "schedule" | "run_now" | "trigger";
 };
 
 export type RoutinePatch = Partial<{
@@ -170,6 +191,17 @@ export type RoutineStore = {
   ): Promise<Routine>;
   remove(ownerUserId: string, id: string): Promise<void>;
   setEnabled(ownerUserId: string, id: string, enabled: boolean): Promise<void>;
+  /**
+   * Run now (the page's Test): opens a run row for the owner's own enabled routine. Refused for a
+   * paused routine and while another run of it is still open, so a double click is one run.
+   */
+  startManualRun(ownerUserId: string, id: string): Promise<{ runId: string }>;
+  /** The owner's run history for one routine, newest first. */
+  listRuns(
+    ownerUserId: string,
+    id: string,
+    limit?: number,
+  ): Promise<RoutineRunSummary[]>;
 
   /* The sweep's half. Deliberately not owner-scoped — see the boundary comment below. */
 
@@ -209,6 +241,7 @@ export type RoutineStore = {
     runId: string,
     status: RoutineRunOutcome,
     error?: string,
+    waiting?: HeadlessWaiting,
   ): Promise<void>;
   /**
    * Close every run row that has sat open (`status is null`) longer than `olderThanMs` as
@@ -223,6 +256,8 @@ export type RoutineStore = {
    * failure.
    */
   reapAbandonedRuns(olderThanMs: number, error: string): Promise<number>;
+  recordSweep(owner: string): Promise<void>;
+  lastSweptAt(): Promise<Date | null>;
   /**
    * Switch a routine off because its own schedule refuses to advance, and record why.
    *
@@ -498,7 +533,12 @@ export function createRoutineStore(database: Database): RoutineStore {
       }
       return await transaction
         .update(routines)
-        .set(values)
+        .set({
+          ...values,
+          // Switching back on starts a new streak; see `consecutiveFailures`. The database's clock,
+          // like the runs it is compared with, so no skew between hosts moves a run across the line.
+          ...(enabling ? { enabledAt: sql`now()` } : {}),
+        })
         .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
         .returning();
     });
@@ -632,6 +672,58 @@ export function createRoutineStore(database: Database): RoutineStore {
       if (deleted.length === 0) throw new RoutineNotFoundError();
     },
 
+    async startManualRun(ownerUserId, id) {
+      const routine = await loadOwned(ownerUserId, id);
+      if (!routine.enabled)
+        throw new RoutineRefusedError(
+          "This routine is paused, and paused routines never run. Switch it on first.",
+        );
+      return await database.transaction(async (transaction) => {
+        // Serialized per routine so two clicks cannot both see "nothing open" and both open a run.
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`routine-run-${id}`}))`,
+        );
+        const [open] = await transaction
+          .select({ id: routineRuns.id })
+          .from(routineRuns)
+          .where(
+            and(
+              eq(routineRuns.routineId, id),
+              isNull(routineRuns.status),
+              // Younger than the reaper's cutoff: an older open row is abandoned, not running.
+              sql`${routineRuns.startedAt} > now() - interval '10 minutes'`,
+            ),
+          )
+          .limit(1);
+        if (open)
+          throw new RoutineRefusedError(
+            "This routine is already running. Wait for that run to finish.",
+          );
+        const runId = `routine_run_${crypto.randomUUID()}`;
+        await transaction
+          .insert(routineRuns)
+          .values({ id: runId, routineId: id, source: "run_now" });
+        return { runId };
+      });
+    },
+
+    async listRuns(ownerUserId, id, limit = 50) {
+      await loadOwned(ownerUserId, id);
+      return await database
+        .select({
+          id: routineRuns.id,
+          status: routineRuns.status,
+          startedAt: routineRuns.startedAt,
+          finishedAt: routineRuns.finishedAt,
+          error: routineRuns.error,
+          source: routineRuns.source,
+        })
+        .from(routineRuns)
+        .where(eq(routineRuns.routineId, id))
+        .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))
+        .limit(Math.min(Math.max(limit, 1), 100));
+    },
+
     async setEnabled(ownerUserId, id, enabled) {
       // One field through the same path, so enabling re-checks the cap and recomputes the next run
       // rather than having a second, quieter version of those rules.
@@ -746,6 +838,7 @@ export function createRoutineStore(database: Database): RoutineStore {
           agentId: routines.agentId,
           channelId: routines.channelId,
           instruction: routines.instruction,
+          enabled: routines.enabled,
         })
         .from(routineRuns)
         .innerJoin(routines, eq(routines.id, routineRuns.routineId))
@@ -765,11 +858,12 @@ export function createRoutineStore(database: Database): RoutineStore {
       return row ?? null;
     },
 
-    async finishRun(runId, status, error) {
+    async finishRun(runId, status, error, waiting) {
       await database
         .update(routineRuns)
         .set({
           status,
+          ...(waiting ? { waiting } : {}),
           // The database's clock closes the row, the same as it opened it.
           finishedAt: sql`now()`,
           // Left alone rather than nulled when there was no error, so finishing a run twice cannot
@@ -787,6 +881,25 @@ export function createRoutineStore(database: Database): RoutineStore {
         // calls finishRun("failed") — matches no row here and is a silent no-op, rather than
         // relabeling what the first finish already recorded.
         .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
+    },
+
+    async recordSweep(owner) {
+      await database
+        .insert(routineSweeps)
+        .values({ id: SWEEP_ID, owner, sweptAt: sql`now()` })
+        .onConflictDoUpdate({
+          target: routineSweeps.id,
+          set: { owner, sweptAt: sql`now()` },
+        });
+    },
+
+    async lastSweptAt() {
+      const [row] = await database
+        .select({ sweptAt: routineSweeps.sweptAt })
+        .from(routineSweeps)
+        .where(eq(routineSweeps.id, SWEEP_ID))
+        .limit(1);
+      return row?.sweptAt ?? null;
     },
 
     async reapAbandonedRuns(olderThanMs, error) {
@@ -866,6 +979,16 @@ export function createRoutineStore(database: Database): RoutineStore {
              * seven because skips ate two-thirds of the rows the window could hold.
              */
             ne(routineRuns.status, "skipped"),
+            /*
+             * ONLY SINCE IT WAS LAST SWITCHED ON. The rule switches a routine off after ten failures
+             * and says a person must switch it back on; counting across that would leave the eleventh
+             * run, the first after the person's fix, switching it straight off again with "failed ten
+             * times in a row", and never saying the first-failure line at all.
+             */
+            gte(
+              routineRuns.startedAt,
+              sql`(select ${routines.enabledAt} from ${routines} where ${routines.id} = ${routineId})`,
+            ),
           ),
         )
         .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))

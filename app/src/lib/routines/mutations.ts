@@ -39,3 +39,18 @@ export function deleteRoutineMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateRoutines(queryClient),
   });
 }
+
+/**
+ * Run now — the Test button. This DOES REAL WORK: the Bot carries out the instruction in the
+ * routine's channel exactly as a scheduled firing would. Refused for a paused routine.
+ */
+export function runRoutineNowMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (id: string) =>
+      client(`/api/routines/${encodeURIComponent(id)}/run`, {
+        method: "POST",
+        fallback: "That routine could not be started.",
+      }),
+    onSuccess: () => invalidateRoutines(queryClient),
+  });
+}

@@ -72,6 +72,7 @@ export type PeopleStore = {
   list: (query?: PeopleQuery) => Promise<PeoplePage>;
   setRole: (userId: string, role: OpenBotRole) => Promise<void>;
   revoke: (userId: string, revokedBy: string) => Promise<void>;
+  retireOwned: (userId: string, revokedBy: string) => Promise<void>;
   restore: (userId: string) => Promise<void>;
   find: (userId: string) => Promise<Person | undefined>;
   isRevoked: (email: string) => Promise<boolean>;
@@ -85,8 +86,11 @@ const DEFAULT_PAGE = 50;
  *
  * A ceiling rather than a suggestion, because the limit arrives over HTTP and the whole point of
  * paging is that no single request can be made to read the entire deployment.
+ *
+ * Exported so the route parses against the same ceiling the store enforces, rather than the two
+ * drifting apart unnoticed.
  */
-const MAX_PAGE = 200;
+export const MAX_PAGE = 200;
 
 /** Where a page stopped. Both halves of the sort, because either alone is ambiguous. */
 type Cursor = { lastSignedInAt: string | null; email: string };
@@ -100,14 +104,28 @@ function encodeCursor(cursor: Cursor): string {
  *
  * A malformed one is treated as no cursor rather than as an error: it means the first page, which is
  * a sensible answer to a stale or hand-edited link, and there is nothing here worth refusing over.
+ *
+ * Exported for regression tests: a well-formed cursor carrying a non-date `lastSignedInAt` must
+ * also fall back instead of reaching `::timestamptz` in SQL and answering 500.
  */
-function decodeCursor(value: string | undefined): Cursor | undefined {
+export function decodeCursor(value: string | undefined): Cursor | undefined {
   if (!value) return undefined;
   try {
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
     ) as Cursor;
     if (typeof parsed?.email !== "string") return undefined;
+    // A well-formed cursor with a non-date `lastSignedInAt` would reach
+    // `${cursor.lastSignedInAt}::timestamptz` in SQL and answer 500. Treat it as no cursor
+    // (first page), consistent with how a stale or hand-edited cursor is handled above.
+    if (
+      parsed.lastSignedInAt !== null &&
+      parsed.lastSignedInAt !== undefined &&
+      (typeof parsed.lastSignedInAt !== "string" ||
+        Number.isNaN(Date.parse(parsed.lastSignedInAt)))
+    ) {
+      return undefined;
+    }
     return {
       email: parsed.email,
       lastSignedInAt:
@@ -167,6 +185,17 @@ export function createPeopleStore(
         sql`(${users.email} ilike ${pattern} escape '\\' or coalesce(${users.name}, '') ilike ${pattern} escape '\\')`,
       );
     }
+    if (cursor) {
+      filters.push(
+        sql`(
+          (${users.lastSignedInAt} is null and (${cursor.lastSignedInAt}::timestamptz is not null or ${users.email} > ${cursor.email}))
+          or (${users.lastSignedInAt} is not null and ${cursor.lastSignedInAt}::timestamptz is not null and (
+            ${users.lastSignedInAt} < ${cursor.lastSignedInAt}::timestamptz
+            or (${users.lastSignedInAt} = ${cursor.lastSignedInAt}::timestamptz and ${users.email} > ${cursor.email})
+          ))
+        )`,
+      );
+    }
 
     const rows = await database
       .select({
@@ -185,13 +214,12 @@ export function createPeopleStore(
         providers: sql<
           string[]
         >`coalesce(array_agg(distinct ${accounts.providerId}) filter (where ${accounts.providerId} is not null), '{}')`,
-        lastSignedInAt: sql<Date | null>`max(${sessions.createdAt})`,
+        lastSignedInAt: users.lastSignedInAt,
         revoked: sql<boolean>`bool_or(${revokedAccess.email} is not null)`,
       })
       .from(users)
       .leftJoin(userRoles, eq(userRoles.userId, users.id))
       .leftJoin(accounts, eq(accounts.userId, users.id))
-      .leftJoin(sessions, eq(sessions.userId, users.id))
       .leftJoin(
         revokedAccess,
         eq(revokedAccess.email, sql`lower(${users.email})`),
@@ -205,26 +233,7 @@ export function createPeopleStore(
        * signed in floats above everybody who just did. On a deployment of any size that is the
        * whole first screen given to people who have never used it.
        */
-      /*
-       * The keyset, applied after grouping because it is about the aggregate.
-       *
-       * The sort is (last sign-in desc nulls last, email asc), so the cursor has to compare on both
-       * or two people who signed in within the same millisecond would hide each other. `nulls last`
-       * is why this is written out rather than a plain tuple comparison: a null on the descending
-       * side sorts after every value, which is the opposite of what `<` says about it.
-       */
-      .having(
-        cursor
-          ? sql`(
-              (max(${sessions.createdAt}) is null and (${cursor.lastSignedInAt}::timestamptz is not null or ${users.email} > ${cursor.email}))
-              or (max(${sessions.createdAt}) is not null and ${cursor.lastSignedInAt}::timestamptz is not null and (
-                max(${sessions.createdAt}) < ${cursor.lastSignedInAt}::timestamptz
-                or (max(${sessions.createdAt}) = ${cursor.lastSignedInAt}::timestamptz and ${users.email} > ${cursor.email})
-              ))
-            )`
-          : undefined,
-      )
-      .orderBy(sql`max(${sessions.createdAt}) desc nulls last`, users.email)
+      .orderBy(sql`${users.lastSignedInAt} desc nulls last`, users.email)
       // One more than asked for, so "is there another page" is answered without a second count
       // query over the same aggregate.
       .limit(limit + 1);
@@ -301,20 +310,22 @@ export function createPeopleStore(
           .onConflictDoNothing();
         await tx.delete(sessions).where(eq(sessions.userId, userId));
       });
+    },
 
-      /*
-       * After the transaction, and deliberately not inside it.
-       *
-       * Retiring a credential is a write to the vault plus an audit row, and the vault is reached
-       * through its own interface rather than this transaction's handle. Holding the person's removal
-       * open until that finishes would make an unrelated failure able to undo the deny-list row and
-       * the session deletion, which are the two things that must not fail to stick.
-       *
-       * So the order is: stop them getting in, then stop us holding their secret. If the second half
-       * throws, the first is already done and the audit trail shows a removal with no retirement
-       * beside it — which is the honest record of what happened, and is recoverable by removing them
-       * again.
-       */
+    /*
+     * After `revoke`, and deliberately not inside it.
+     *
+     * Retiring a credential is a write to the vault plus an audit row, and the vault is reached
+     * through its own interface rather than that transaction's handle. Holding the person's removal
+     * open until that finishes would make an unrelated failure able to undo the deny-list row and
+     * the session deletion, which are the two things that must not fail to stick.
+     *
+     * So the order is: stop them getting in, then stop us holding their secret. If the second half
+     * throws, the first is already done and the audit trail shows a removal with no retirement
+     * beside it — which is the honest record of what happened, and is recoverable by removing them
+     * again.
+     */
+    async retireOwned(userId, revokedBy) {
       await retireOwnedCredentials?.(userId, revokedBy);
     },
 

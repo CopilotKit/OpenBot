@@ -9,6 +9,29 @@ import type {
   RoutingUndecided,
 } from "./classify";
 
+const PICKED_HARNESS_AGENT_ID = "picked-harness";
+
+export function defaultRoutingProfile(
+  roster: readonly AgentProfile[],
+): AgentProfile | undefined {
+  return (
+    roster.find((agent) => agent.id === PICKED_HARNESS_AGENT_ID) ??
+    roster.find((agent) => agent.visibility === "public") ??
+    roster[0]
+  );
+}
+
+export const MAX_ROUTING_TEXT_LENGTH = 10000;
+
+export class CoworkerRoutingInputError extends Error {
+  constructor(
+    message = `A message of at most ${MAX_ROUTING_TEXT_LENGTH} characters is required.`,
+  ) {
+    super(message);
+    this.name = "CoworkerRoutingInputError";
+  }
+}
+
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 const WORD_CHARACTER = /[\p{L}\p{N}\p{M}_]/u;
 
@@ -20,6 +43,7 @@ export type CoworkerRouteResult =
       reason: string;
       fallback: boolean;
       viaMention: boolean;
+      viaNameMatch?: true;
     }
   | { kind: "ambiguous"; names: string[] }
   | { kind: "none" };
@@ -149,28 +173,65 @@ function addAlias(
 }
 
 function buildAliasIndex(roster: readonly AgentProfile[]): AliasIndex {
-  const byNormalizedName = new Map<string, AgentProfile[]>();
-  for (const profile of roster) {
-    const normalized = normalizeCoworkerName(profile.name);
-    const profiles = byNormalizedName.get(normalized);
-    if (profiles) profiles.push(profile);
-    else byNormalizedName.set(normalized, [profile]);
-  }
-
   const aliases = new Map<string, Map<string, AgentProfile>>();
   const labels = new Map<string, string>();
   for (const profile of roster) {
     const normalized = normalizeCoworkerName(profile.name);
-    const duplicates = byNormalizedName.get(normalized) ?? [];
-    const label =
-      duplicates.length > 1
-        ? `${displayName(profile.name)} (id ${utf8Hex(profile.id)})`
-        : profile.name;
+    for (const alias of new Set([normalized, ...suffixes(normalized)])) {
+      addAlias(aliases, alias, profile);
+    }
+  }
+  // Keep encoded id aliases even when a later roster collision changes the displayed label.
+  // A previously offered label must become ambiguous rather than silently address another Bot.
+  for (const profile of roster) {
+    addAlias(
+      aliases,
+      normalizeCoworkerName(
+        `${displayName(profile.name)} (id ${utf8Hex(profile.id)})`,
+      ),
+      profile,
+    );
+  }
+  // A generated numeric discriminator is also part of an encoded id label. If a natural alias
+  // reuses an old discriminator, merge the original id at the same span so containment cannot
+  // discard it and quietly route to the newly named coworker.
+  for (const profile of roster) {
+    const base = normalizeCoworkerName(
+      `${displayName(profile.name)} (id ${utf8Hex(profile.id)})`,
+    );
+    for (const alias of aliases.keys()) {
+      if (
+        alias.startsWith(base) &&
+        /^ \((?:[2-9]|[1-9]\d+)\)$/u.test(alias.slice(base.length))
+      ) {
+        addAlias(aliases, alias, profile);
+      }
+    }
+  }
+  const reservedLabels = new Set(aliases.keys());
+  for (const profile of roster) {
+    const normalized = normalizeCoworkerName(profile.name);
+    const duplicates = aliases.get(normalized)?.size ?? 0;
+    let label = profile.name;
+    if (duplicates > 1) {
+      const base = `${displayName(profile.name)} (id ${utf8Hex(profile.id)})`;
+      label = base;
+      let discriminator = 2;
+      while (
+        reservedLabels.has(normalizeCoworkerName(label)) &&
+        !(
+          label === base && aliases.get(normalizeCoworkerName(base))?.size === 1
+        )
+      ) {
+        label = `${base} (${discriminator++})`;
+      }
+      reservedLabels.add(normalizeCoworkerName(label));
+    }
     labels.set(profile.id, label);
     addAlias(aliases, normalized, profile);
     for (const suffix of suffixes(normalized))
       addAlias(aliases, suffix, profile);
-    if (duplicates.length > 1) {
+    if (duplicates > 1) {
       addAlias(aliases, normalizeCoworkerName(label), profile);
     }
   }
@@ -252,9 +313,10 @@ function explicitNameRoute(
       kind: "selected",
       agentId: chosen.id,
       name: chosen.name,
-      reason: "named by the person asking",
+      reason: "matched a coworker’s name in the message",
       fallback: false,
-      viaMention: true,
+      viaMention: false,
+      viaNameMatch: true,
     };
   }
   if (profiles.size > 1) {
@@ -267,6 +329,7 @@ function auditReason(
   selected: Extract<CoworkerRouteResult, { kind: "selected" }>,
   undecided: RoutingUndecided | null,
 ): string {
+  if (selected.viaNameMatch) return selected.reason;
   if (selected.viaMention) return "named by the person asking";
   if (selected.fallback)
     return undecided ? `fallback: ${undecided}` : "fallback";
@@ -293,6 +356,7 @@ export function createCoworkerRoutingService(
         reason: auditReason(selected, undecided),
         fallback: selected.fallback,
         viaMention: selected.viaMention,
+        viaNameMatch: selected.viaNameMatch === true,
         candidates,
         undecided,
       },
@@ -302,6 +366,11 @@ export function createCoworkerRoutingService(
   async function routeDetailed(
     input: CoworkerRoutingInput,
   ): Promise<CoworkerRouteDetail> {
+    if (!input.text.trim())
+      throw new CoworkerRoutingInputError("A message is required.");
+    if (input.text.length > MAX_ROUTING_TEXT_LENGTH) {
+      throw new CoworkerRoutingInputError();
+    }
     // The store applies this same policy in SQL; keep this canonical policy check at the service
     // boundary so a broader store implementation cannot leak a coworker into routing.
     const roster = (await options.store.list(input.actor, false)).filter(
@@ -334,8 +403,7 @@ export function createCoworkerRoutingService(
       return { result: explicit, undecided: null };
     }
 
-    const preferred =
-      roster.find(({ visibility }) => visibility === "public") ?? roster[0];
+    const preferred = defaultRoutingProfile(roster);
     if (!preferred) return { result: { kind: "none" }, undecided: null };
     const candidates: RoutingCandidate[] = await Promise.all(
       roster.map(async (profile) => ({

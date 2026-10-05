@@ -4,6 +4,7 @@ import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
 import {
   createTurnRunner,
+  drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
 } from "../src/routines/run-turn";
@@ -24,6 +25,7 @@ import {
  */
 
 const OWNER = "user_owner";
+const ROUTINE_ID = "routine_standup";
 const AGENT_ID = "bot_helper";
 const THREAD_ID = "thread_owner_channel_1";
 const INSTRUCTION = "Post the standup summary.";
@@ -106,6 +108,7 @@ function harness(options: {
   abortGraceMs?: number;
   heartbeatMs?: number;
   lockTtlSeconds?: number;
+  learningContainerId?: string;
 }) {
   const order: string[] = [];
   const calls = {
@@ -195,12 +198,33 @@ function harness(options: {
     },
   };
 
+  const builtFor: { initiator: { kind: string; id?: string } }[] = [];
   const runTurn = createTurnRunner({
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     runner: runner as any,
-    buildAgentFor: async () => agent,
+    ...(options.learningContainerId
+      ? {
+          learningContainerForThread: async (input: {
+            threadId: string;
+            agentId: string;
+            userId: string;
+          }) => {
+            expect(input).toEqual({
+              threadId: THREAD_ID,
+              agentId: AGENT_ID,
+              userId: OWNER,
+            });
+            order.push("learning-assignment");
+            return options.learningContainerId;
+          },
+        }
+      : {}),
+    buildAgentFor: async (input) => {
+      builtFor.push(input);
+      return agent;
+    },
     ...(options.turnTimeoutMs === undefined
       ? {}
       : { turnTimeoutMs: options.turnTimeoutMs }),
@@ -218,12 +242,13 @@ function harness(options: {
   const run = () =>
     runTurn({
       ownerUserId: OWNER,
+      routineId: ROUTINE_ID,
       agentId: AGENT_ID,
       threadId: THREAD_ID,
       instruction: INSTRUCTION,
     });
 
-  return { run, agent, calls, order };
+  return { run, agent, calls, order, builtFor };
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -879,4 +904,70 @@ describe("a RUN_ERROR through next", () => {
     await expect(run()).rejects.toThrow("the model refused");
     expect(calls.cleaned).toHaveLength(1);
   });
+});
+
+describe("what the trail is told started the turn", () => {
+  test("the Bot is built for the routine, not for the owner acting by hand", async () => {
+    const { run, builtFor } = harness({});
+
+    await run();
+
+    expect(builtFor).toHaveLength(1);
+    expect(builtFor[0]?.initiator).toEqual({
+      kind: "routine",
+      id: ROUTINE_ID,
+    });
+  });
+});
+
+test("a routine binds its Learning container before creating and locking the Thread", async () => {
+  const { run, order, calls } = harness({
+    learningContainerId: "routine-learning",
+  });
+  await run();
+  expect(order[0]).toBe("learning-assignment");
+  expect(calls.threads[0]).toMatchObject({
+    learningContainerId: "routine-learning",
+  });
+  expect(calls.acquired[0]).toMatchObject({
+    learningContainerId: "routine-learning",
+  });
+});
+
+test("drawnComponents returns the charts that were drawn, never a refused or unknown call", () => {
+  const call = (id: string, name: string, args: string) => ({
+    id,
+    type: "function" as const,
+    function: { name, arguments: args },
+  });
+  const messages: Message[] = [
+    {
+      id: "a1",
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        call("c1", "showBarChart", '{"title":"Top","points":[]}'),
+        call("c2", "showPieChart", '{"title":"Refused","points":[]}'),
+        call("c3", "browser_navigate", '{"url":"https://x.test"}'),
+        call("c4", "showLineChart", "not json"),
+      ],
+    },
+    {
+      id: "t1",
+      role: "tool",
+      toolCallId: "c1",
+      content: "The bar chart is saved.",
+    },
+    {
+      id: "t2",
+      role: "tool",
+      toolCallId: "c2",
+      content: "Not shown: Donut chart. Withheld.",
+    },
+    { id: "t3", role: "tool", toolCallId: "c3", content: "ok" },
+    { id: "t4", role: "tool", toolCallId: "c4", content: "saved" },
+  ];
+  expect(drawnComponents(messages)).toEqual([
+    { name: "showBarChart", args: { title: "Top", points: [] } },
+  ]);
 });

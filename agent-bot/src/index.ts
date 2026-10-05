@@ -3,6 +3,13 @@ import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
+import { listenPort } from "../../shared/listen-port";
+import {
+  apiKeyOrPlaceholder,
+  botSettings,
+  keyIsRequired,
+  requiresResponsesApi,
+} from "../../shared/model-providers";
 import { toProviderMessages } from "./history";
 
 /**
@@ -16,7 +23,12 @@ import { toProviderMessages } from "./history";
  * running where its effects are visible to the person watching.
  */
 
-const PORT = Number.parseInt(process.env.PORT ?? "4200", 10);
+const resolvedPort = listenPort(process.env.PORT, 4200);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const PORT = resolvedPort.port;
 const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
 if (!MANAGED_AGENT_TOKEN) {
   console.error(
@@ -27,24 +39,29 @@ if (!MANAGED_AGENT_TOKEN) {
 /**
  * Which model drives the Bot.
  *
+ * This Bot speaks one provider's API by hand, so the provider is this file's and only the model is
+ * configurable. What the default is, and which file every language in the box reads it from, is
+ * `shared/model-providers.json`: this Bot's `bots.agent-bot` row, under `BOT_MODEL` when a
+ * deployment sets one. The provider is pinned to `openai` rather than read from the environment —
+ * this file has never read `BOT_PROVIDER`, and a Bot that answers on chat completions by hand
+ * cannot start answering somewhere else because a variable changed.
+ *
  * `gpt-5.5` works through `/v1/chat/completions`, which is the API this file uses.
  *
  * `gpt-5.6-*` models require the Responses API for tool use and cannot be used by this
  * chat-completions streaming loop.
  */
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+const MODEL = botSettings("agent-bot", process.env, "openai").model;
 /*
- * Refuse a model this file cannot use, rather than discover it one tool call at a time.
- *
- * `gpt-5.6-*` rejects function tools on `/v1/chat/completions`: "To use function tools, use
- * /v1/responses or set reasoning_effort to 'none'." The provider answers with an error, this Bot
- * ends the run, and the person sees no reply and no reason. Silence is the worst failure available
- * here, and it is what a single mistaken `BOT_MODEL` produced: every tool-using turn stopped dead
- * while the Bot looked healthy.
+ * Refuse a model this file cannot use, rather than discover it one tool call at a time — the
+ * failure `requiresResponsesApi` names, asked as a question about this Bot rather than about the
+ * model. The provider answers with an error, this Bot ends the run, and the person sees no reply
+ * and no reason. Silence is the worst failure available here, and it is what a single mistaken
+ * `BOT_MODEL` produced: every tool-using turn stopped dead while the Bot looked healthy.
  *
  * Startup is where a deployment can act on it, which is the same posture as the token check above.
  */
-if (/^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL)) {
+if (requiresResponsesApi(MODEL)) {
   console.error(
     `BOT_MODEL=${MODEL} cannot be used by this Bot. It speaks /v1/chat/completions directly, and ` +
       "that endpoint refuses function tools for this model, so every tool call would fail with no " +
@@ -74,15 +91,26 @@ const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
  * should fail in front of whoever is deploying, not in front of whoever is asking.
  */
 const API_KEY = process.env.OPENAI_API_KEY?.trim();
-if (!API_KEY) {
+/*
+ * UNLESS AN ENDPOINT WAS NAMED, in which case the endpoint is the model and the key belongs to it.
+ *
+ * Ollama, vLLM, LM Studio and llama.cpp all serve this API with no key at all, and the setup window
+ * offers exactly those by name. Requiring one here refused the whole keyless half of that feature:
+ * the person filled in an address, the app raised this Bot, and it exited on startup with
+ * "OPENAI_API_KEY is not set" about a key their endpoint does not have. The two ends of one feature
+ * disagreeing.
+ *
+ * The check still holds for plain OpenAI, which is the case it was written for.
+ */
+if (!API_KEY && keyIsRequired("openai", BASE_URL)) {
   console.error(
-    "OPENAI_API_KEY is not set. This Bot cannot answer without a model.",
+    "OPENAI_API_KEY is not set, and no OPENAI_BASE_URL names an endpoint that needs no key. This Bot cannot answer without a model.",
   );
   process.exit(1);
 }
 
 const openai = new OpenAI({
-  apiKey: API_KEY,
+  apiKey: apiKeyOrPlaceholder(API_KEY),
   baseURL: BASE_URL,
 });
 
@@ -235,4 +263,4 @@ serve({
   },
 });
 
-console.info(`agent-bot listening on http://localhost:${PORT}/ag-ui`);
+console.info(`agent-bot listening on http://127.0.0.1:${PORT}/ag-ui`);

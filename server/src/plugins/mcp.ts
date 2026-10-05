@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { cutAtCodeUnits } from "../channels/text";
 
 /**
  * The only place in this deployment that speaks MCP to somebody else's server.
@@ -42,16 +44,88 @@ export const MAX_RESULT_CHARS = 20_000;
  * from memory. For a knowledge connector that is precisely the failure the whole slice exists to
  * prevent — an answer with nothing behind it. So nothing is stated, in words.
  */
-export function resultText(content: unknown): {
+/**
+ * How much of a resource link's title, name or description a model is shown.
+ *
+ * Long enough for a heading and a sentence, short enough that a link's own metadata cannot spend
+ * the result cap its pointer has to fit in.
+ */
+const LINK_FIELD_CHARS = 400;
+
+/**
+ * A resource_link as the lines a model reads: the pointer first, then bounded metadata.
+ *
+ * The URI is the link's identity; the title or name and the description are metadata. The URI
+ * therefore leads, whole, and the other two are cut, so that a server's long name cannot push its
+ * own pointer past {@link MAX_RESULT_CHARS} below and leave the model holding a link with nowhere
+ * to go. Truncation may lose what a resource was called, never where it is. Each line is labelled,
+ * so the fields are told apart by name rather than by position.
+ *
+ * The spec's `title` is the name meant for people, `name` the one meant for programs; the title is
+ * shown when a server gives one. Null when the link names nothing, so the caller names its type.
+ */
+function resourceLinkText(item: {
+  uri?: unknown;
+  name?: unknown;
+  title?: unknown;
+  description?: unknown;
+}): string | null {
+  const field = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value : null;
+  const bounded = (value: string) =>
+    value.length > LINK_FIELD_CHARS
+      ? `${value.slice(0, LINK_FIELD_CHARS)}…`
+      : value;
+  const lines: string[] = [];
+  const uri = field(item.uri);
+  if (uri !== null) lines.push(`uri: ${uri}`);
+  const title = field(item.title);
+  const name = field(item.name);
+  if (title !== null) lines.push(`title: ${bounded(title)}`);
+  else if (name !== null) lines.push(`name: ${bounded(name)}`);
+  const description = field(item.description);
+  if (description !== null) {
+    lines.push(`description: ${bounded(description)}`);
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+export function resultText(
+  content: unknown,
+  structuredContent?: unknown,
+): {
   text: string;
   truncated: boolean;
 } {
   const parts = Array.isArray(content) ? content : [];
-  const joined = parts
+  let joined = parts
     .map((part) => {
-      const item = part as { type?: string; text?: string };
+      if (!part || typeof part !== "object") return "[unknown]";
+      const item = part as {
+        type?: string;
+        text?: string;
+        uri?: unknown;
+        name?: unknown;
+        title?: unknown;
+        description?: unknown;
+        resource?: { text?: unknown } | null;
+      };
       if (item.type === "text" && typeof item.text === "string") {
         return item.text;
+      }
+      // An embedded resource with text in it is text, and often the answer itself: GitHub's MCP
+      // server returns a file it read as one, beside a line saying the download worked. A resource
+      // carrying bytes (`blob`) has no text to read and is named below like any other part.
+      if (item.type === "resource" && typeof item.resource?.text === "string") {
+        return item.resource.text;
+      }
+      // A resource_link is a pointer, not the file: a URI, a name, sometimes a title, and often a
+      // sentence of what it is. Named as "[resource_link]", the model was told a link arrived and
+      // never shown where it went, so a search that answered with pages produced no page it could
+      // open.
+      if (item.type === "resource_link") {
+        const shown = resourceLinkText(item);
+        if (shown !== null) return shown;
       }
       // A non-text part is named rather than dropped. A model told "[image]" can say the tool
       // returned an image; a model handed nothing concludes the tool returned nothing.
@@ -63,17 +137,32 @@ export function resultText(content: unknown): {
   // that sent one newline has said nothing, and which shape of nothing arrived should not change
   // what the model is told.
   if (joined.trim() === "") {
-    return {
-      text: "The tool returned no content. Nothing was found, so there is nothing here to answer from.",
-      truncated: false,
-    };
+    /*
+     * MCP tools with an output schema often put the answer in `structuredContent` and leave
+     * `content` empty. Treating that as "nothing was found" is the same lie an empty string was:
+     * the tool answered, and the model fills the gap from memory. Read only when `content` had
+     * nothing; a text part already present is the representation the server chose to show.
+     */
+    const structured =
+      structuredContent !== null &&
+      structuredContent !== undefined &&
+      typeof structuredContent === "object"
+        ? JSON.stringify(structuredContent)
+        : "";
+    if (structured === "") {
+      return {
+        text: "The tool returned no content. Nothing was found, so there is nothing here to answer from.",
+        truncated: false,
+      };
+    }
+    joined = structured;
   }
 
   if (joined.length <= MAX_RESULT_CHARS) {
     return { text: joined, truncated: false };
   }
   return {
-    text: `${joined.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    text: `${cutAtCodeUnits(joined, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
     truncated: true,
   };
 }
@@ -82,6 +171,33 @@ export type McpTool = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+};
+
+/**
+ * A tool as a transport listed it, including anything that transport happens to know about it.
+ *
+ * Three optional fields rather than a separate type per transport, so `refreshTools` reads
+ * `tool.effect` with no cast and no `"effect" in tool` sniffing. Optional because a transport may
+ * know none of it for a given tool, and a field always left undefined would be an invitation to
+ * read it as meaning something.
+ *
+ * AN MCP SERVER CAN PUBLISH AN EFFECT, and this docblock used to say it could not. That sentence
+ * was not a stale comment, it was load bearing: the argument that surfacing a recorded effect could
+ * not disturb any existing curated read rested on MCP listings never carrying one, which was true
+ * only because {@link listTools} was discarding `annotations`. The specification defines
+ * `annotations.destructiveHint`, servers publish it, and a tool a vendor declared destructive was
+ * classifying as a read for any curated entry whose hand-written `writeTools` happened to omit the
+ * name. Version is the field MCP genuinely has no concept of; effect and destructive are not.
+ *
+ * `McpTool` stays exactly what a `tools/list` answer contains, because that is what it is for.
+ */
+export type ListedTool = McpTool & {
+  /** What the vendor said this action does, when it said anything. */
+  effect?: "read" | "write";
+  /** Whether the vendor marked it as destroying something. */
+  destructive?: boolean;
+  /** The vendor's version string, when calling the action requires one. */
+  version?: string;
 };
 
 export class McpServerError extends Error {
@@ -199,6 +315,22 @@ function vendorFailure(error: unknown): string {
 }
 
 /**
+ * The Authorization header a stored token becomes.
+ *
+ * Bearer by default, which is what an MCP server's own token usually is. A token that already
+ * names its scheme is sent as written, because some vendors forward the header straight to an API
+ * that only speaks Basic: DataForSEO's hosted server answers the handshake and the tool listing to
+ * anything, then returns 401 on every real call made with Bearer, so a deployment that could only
+ * say Bearer looked connected and never worked. The scheme travels with the credential rather than
+ * as a setting on the server row, so rotating a token can change how it is presented and nothing
+ * else has to know.
+ */
+export function authorizationHeader(token: string): string {
+  const trimmed = token.trim();
+  return /^(basic|bearer)\s+\S/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
+}
+
+/**
  * Build, use and close a client.
  *
  * The `finally` closes the transport whatever happened, because a thrown error is the case where a
@@ -210,7 +342,7 @@ async function withClient<T>(
 ): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(connection.url), {
     requestInit: connection.token
-      ? { headers: { Authorization: `Bearer ${connection.token}` } }
+      ? { headers: { Authorization: authorizationHeader(connection.token) } }
       : undefined,
   });
   const client = new Client({ name: "openbot", version: "1.0.0" });
@@ -238,8 +370,43 @@ async function withClient<T>(
  */
 export const listNeedsCredential = true;
 
+/**
+ * ONLY THE HINT THAT NARROWS IS BELIEVED, and the omission of the other one is the decision here.
+ *
+ * The SDK declares four hints on `annotations` — `readOnlyHint`, `destructiveHint`,
+ * `idempotentHint`, `openWorldHint` — and warns in the same place that a client should never make
+ * tool use decisions from annotations a server it does not trust supplied. That warning is the
+ * whole design of this function. `destructiveHint` can only ever move an action from read to write,
+ * so a server that lies with it can restrict itself and nothing else. `readOnlyHint` moves an
+ * action the other way, and `classifyTool` exists to make sure nothing but review can do that.
+ *
+ * WHAT HONOURING `readOnlyHint` WOULD ACTUALLY BUY, which is the reason withholding it costs
+ * nothing. For a curated vendor it changes no answer: an advertised name absent from the reviewed
+ * `writeTools` already classifies as a read, so recording `read` for it lands on the same result by
+ * a worse route. For a name the reviewed list DOES hold, `classifyTool` consults review first and
+ * ignores the column, so the hint would be discarded anyway. The single case where it would change
+ * an answer is a server an administrator added by URL, which has no reviewed list behind it and
+ * whose every tool is a write for exactly that reason — and there, believing it means letting an
+ * arbitrary server declare its own tools harmless and be believed. Zero accuracy gained, one
+ * fail-open introduced, so it is not read at all.
+ *
+ * `destructiveHint` is taken on presence of `true` only, never inverted. The specification gives it
+ * a default of true when a tool is not read-only, and applying that default would reclassify every
+ * unannotated action of every MCP vendor as a write — correct by the letter and a mass revocation
+ * of grants people already hold. An absent hint stays absent, which leaves the reviewed list
+ * deciding exactly as it did before, and only an explicit declaration narrows anything.
+ *
+ * A server that sets both hints is contradicting itself, and is read as destructive. The
+ * specification says `destructiveHint` is meaningless while `readOnlyHint` is true, but resolving
+ * an incoherent listing towards the permissive reading is the one direction that could hurt.
+ */
+function declaredEffect(annotations: ToolAnnotations | undefined) {
+  if (annotations?.destructiveHint !== true) return {};
+  return { effect: "write", destructive: true } as const;
+}
+
 /** What this server says it offers, right now. */
-export async function listTools(connection: Connection): Promise<McpTool[]> {
+export async function listTools(connection: Connection): Promise<ListedTool[]> {
   return withClient(connection, async (client) => {
     const result = await client.listTools(undefined, {
       timeout: LIST_TIMEOUT_MS,
@@ -248,6 +415,7 @@ export async function listTools(connection: Connection): Promise<McpTool[]> {
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: (tool.inputSchema ?? {}) as Record<string, unknown>,
+      ...declaredEffect(tool.annotations),
     }));
   });
 }
@@ -280,7 +448,10 @@ export async function callTool(
       { timeout: CALL_TIMEOUT_MS },
     );
 
-    const { text, truncated } = resultText(result.content);
+    const { text, truncated } = resultText(
+      result.content,
+      "structuredContent" in result ? result.structuredContent : undefined,
+    );
     return { text, isError: result.isError === true, truncated };
   });
 }

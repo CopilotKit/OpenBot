@@ -1,11 +1,19 @@
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { a2uiProviderOptions } from "./a2ui";
+import { SignInTool } from "./sign-in-tool";
+import "./a2ui.css";
 import { ActiveBotProvider } from "./active-bot";
+import { BotTools } from "./bot-tools";
 import { ComputerTools } from "./computer-tools";
 import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
+import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
+import { SkillTools } from "./skill-tools";
 
 /**
  * The CopilotKit client, wrapped once for the whole authenticated app.
@@ -22,11 +30,36 @@ import { SandboxedTools } from "./sandboxed-tools";
  * runtime rather than returning it).
  */
 export function CopilotProvider({ children }: { children: ReactNode }) {
+  const { data: capabilities } = useQuery(deploymentCapabilitiesQueryOptions());
+
   return (
-    <CopilotKitProvider runtimeUrl="/api/copilotkit" credentials="include">
+    <CopilotKitProvider
+      runtimeUrl="/api/copilotkit"
+      credentials="include"
+      {...a2uiProviderOptions(capabilities?.generativeUi)}
+      /*
+       * Passed only when this deployment actually has the capability, and this is the load-bearing
+       * part rather than a tidiness. The SDK reads generative UI as on when EITHER the runtime says
+       * so OR this prop is present at all, so passing it unconditionally would switch the browser
+       * half on in a deployment that had switched the server half off. The Bot would then be offered
+       * the tool, generate a whole interface, and nothing would draw it, because the events that
+       * paint one come from the runtime middleware this deployment declined to run.
+       *
+       * Absent, the SDK asks the runtime and believes the answer, which is the behaviour we want
+       * while this query is still in flight.
+       *
+       * The object carries guidance only. It does not turn anything on that the server has not
+       * already turned on; it replaces the SDK's shadcn-flavoured house style with OpenBot's.
+       */
+      {...(capabilities?.generativeUi
+        ? { openGenerativeUI: { designSkill: GENERATIVE_UI_DESIGN_SKILL } }
+        : {})}
+    >
       {/* Computer tools target the Bot declared by the mounted surface. */}
       <ActiveBotProvider>
         <ComputerTools />
+        {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
+        <SignInTool />
         {/*
           Draws a Bot bringing in another Bot. Registers no tool: `message_bot` runs on the server,
           where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
@@ -37,6 +70,13 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />
+        {/* Offered only on a Bot holding the skill-creator skill; see skill-tools.tsx. */}
+        <SkillTools />
+        {/*
+          Making a coworker from a conversation. Registers nothing unless the declared Bot holds the
+          `bot-creator` skill, so most runs are not offered these four tools at all.
+        */}
+        <BotTools />
         {children}
       </ActiveBotProvider>
     </CopilotKitProvider>

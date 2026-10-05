@@ -5,6 +5,12 @@ question get the answers their own accounts can see, and neither sees anything t
 themselves. Read-only: the scope requested is `drive.readonly`, so Google refuses a write before
 this deployment has to.
 
+The connector reaches Drive over its ordinary REST API (`www.googleapis.com/drive/v3`), not Google's
+hosted Drive MCP server. The MCP server is gated behind the Google Workspace Developer Preview
+Program; the REST API underneath has been generally available since 2015, so this trades "no code" for
+"no dependency on a preview", which for a connector people rely on is the better side of the trade.
+The tool names match Google's MCP server exactly, so a later swap back to it would keep every grant.
+
 Setting it up takes two people, and neither can do the other's half:
 
 | Who               | Does                                                    | Where                                    |
@@ -16,29 +22,13 @@ There is deliberately no endpoint for an administrator to connect an account on 
 
 ## What an administrator does
 
-### 0. Enrol the project in the Developer Preview Program
+### 1. Enable the Drive API
 
-The Workspace MCP servers are, in Google's words, "available as part of the Google Workspace
-Developer Preview Program". A project that is not enrolled can have every other step below correct —
-APIs enabled, client registered, a token Google's own `tokeninfo` endpoint validates — and still be
-refused, because this gate is checked against the project rather than against the credential.
-
-It refuses with `The caller does not have permission`, which says nothing about enrolment. Do this
-first; it is the step with the least evidence that it is missing.
-
-### 1. Enable both APIs
-
-In a Google Cloud project, enable **both** of these:
-
-- `drive.googleapis.com` — the Drive API
-- `drivemcp.googleapis.com` — the Drive **MCP** API
-
-Enabling the first does not enable the second. They are separate APIs, and the connector talks to the
-second one. This is the single most likely reason a correctly-configured connector still returns
-`403`; see [Troubleshooting](#troubleshooting).
-
-Each other Workspace product is its own pair — Gmail is `gmail.googleapis.com` and
-`gmailmcp.googleapis.com` — so the same step returns for every connector added later.
+In a Google Cloud project, enable `drive.googleapis.com` — the Drive API. That is the only API this
+connector calls; it reaches Drive over the REST API rather than a Workspace MCP server, so there is
+no second API to turn on and no preview program to enrol in. A connector that returns `403` where the
+credential is otherwise good is most often this API not being enabled on the project; see
+[Troubleshooting](#troubleshooting).
 
 ### 2. Configure the OAuth consent screen
 
@@ -137,50 +127,31 @@ of the API's, `https` against `http`, a trailing slash.
 The client the error is about is the one whose ID is in the URL. A deployment with more than one
 Google client can have the URI registered on the wrong one.
 
-### "The vendor rejected this credential (401)"
+### "Google Drive refused this request (401)."
 
-Google will not accept the token at all. Reconnecting the account is the usual fix. If it persists,
-the scopes granted do not cover this server — check what the **Access** section reports as granted
-against what the connector asks for.
+Google will not accept the token at all. Reconnecting the account at
+`/settings/connected-accounts/google-drive` is the usual fix. If it persists, the scopes granted do
+not cover this connector — check what the **Access** section reports as granted against the
+`drive.readonly` scope this connector asks for.
 
-Worth knowing when reading raw logs: Google's MCP servers answer an unauthenticated `tools/list`
-with **401 and a complete, valid tool list in the body**. A wall of successful-looking JSON in an
-error is a refusal, not a parsing bug.
+### "Google Drive refused this request (403): …"
 
-### "The vendor accepted the credential and refused the request (403). It said: …"
+The credential is fine; Google accepted it and refused the request. Read the sentence after the colon
+— it is Google's own, and for the most common cause it names the API and includes the console URL to
+enable it. That cause is [step 1](#1-enable-the-drive-api): `drive.googleapis.com` is not enabled on
+the project.
 
-The credential is fine. Read the sentence after "It said:" — it is Google's own, and for the most
-common cause it names the API and includes the console URL to enable it. That cause is
-[step 1](#1-enable-both-apis): `drivemcp.googleapis.com` is not enabled, even where
-`drive.googleapis.com` is.
+Enabling an API takes a few minutes to propagate. Wait, then try again.
 
-Enabling an API takes a few minutes to propagate. Wait, then press **Refresh tools** again.
+If the sentence is about access to a specific file rather than an API, the account genuinely cannot
+see what was asked for, which is the connector working as intended.
 
-If the sentence is about access rather than an API, the account genuinely cannot see what was asked
-for, which is the connector working as intended.
+### "Google Drive could not be reached: …" or "Google Drive did not answer in time."
 
-### "The caller does not have permission"
-
-Google's `PERMISSION_DENIED`, arriving as an `isError` result rather than an HTTP status. It is a
-statement about the **project**, not about the credential, which is what makes it so misleading: the
-token is fine, and every check that a person can run says so.
-
-Worth knowing how thoroughly fine, because it saves repeating the work. Minting an access token from
-the stored refresh token and asking `https://oauth2.googleapis.com/tokeninfo` about it returns 200
-with the right `aud`, the right `azp` and the granted scope — Google validating its own token. The
-refusal is downstream of everything OpenBot controls.
-
-In order of likelihood:
-
-1. **The project is not enrolled** in the Developer Preview Program ([step 0](#0-enrol-the-project-in-the-developer-preview-program)).
-2. **A scope is missing.** Google's guide lists Drive as needing `drive.readonly` *and*
-   `drive.file`, added together. OpenBot requests only `drive.readonly`, deliberately: `drive.file`
-   is write-capable, and the connector's read-only guarantee is currently the scope itself rather
-   than only the tool classification. Widening it is a decision about what this deployment may do to
-   somebody's Drive, so it is not done pre-emptively.
-
-A missing scope usually reads as "insufficient authentication scopes" instead, which is why
-enrolment is the first thing to check rather than the second.
+Not a credential problem: the request never got a verdict from Google. The first is a network or DNS
+failure carrying its own reason; the second is a request that ran past the connector's timeout. Both
+are worth retrying, and a persistent one is about the path between this deployment and Google rather
+than about the account.
 
 ### "You have not connected your Google Drive account."
 
@@ -205,5 +176,5 @@ rather than handed an empty string it would fill in from memory.
 - [Architecture](../architecture.md) — where plugins, grants, policy and audit sit.
 - [Configuration](../configuration.md) — `OPENBOT_PUBLIC_URL`, `OPENBOT_APP_URL`,
   `KEY_ENCRYPTION_KEY`.
-- [Google's own guide](https://developers.google.com/workspace/guides/configure-mcp-servers) to
-  configuring Workspace MCP servers.
+- [Google Drive API](https://developers.google.com/workspace/drive/api/reference/rest/v3) — the REST
+  API this connector calls.

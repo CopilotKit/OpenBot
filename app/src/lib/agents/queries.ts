@@ -18,6 +18,15 @@ export type AgentProfile = {
   visibility: AgentVisibility;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
+  /**
+   * Whether it runs on this deployment's own Bot.
+   *
+   * Creating a coworker with no endpoint stores the deployment's managed address, so `endpoint`
+   * alone cannot tell "built-in" from "hosted by a person" — and the difference decides whether the
+   * Connection screen asks for a callback token. A built-in coworker calls tools back with the
+   * deployment's own credential and needs no setup at all.
+   */
+  builtIn: boolean;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**
@@ -28,6 +37,10 @@ export type AgentProfile = {
    */
   hasCallbackToken: boolean;
   hidden: boolean;
+  /** Whether the signed-in person pinned it to the top of their agents list. Nobody else's. */
+  pinned: boolean;
+  /** A Team Bot an administrator assigned to this person; the sidebar always lists it. */
+  assignedToMe?: boolean;
   systemOwned: boolean;
   canManage: boolean;
   /**
@@ -39,12 +52,43 @@ export type AgentProfile = {
   mine: boolean;
 };
 
+/**
+ * Whether this is an agent shared with you: made public by somebody else, not your own.
+ *
+ * Written once so the roster (`/`) and the browse screen (`/agents`) can't drift apart on what
+ * "shared with you" means — both filter their list through this, not a copy of the rule.
+ */
+export function isSharedWithYou(agent: AgentProfile): boolean {
+  return !agent.mine && agent.visibility === "public";
+}
+
 export const agentKeys = {
   all: ["agents"] as const,
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
+  botRouteDetail: (agentId: string) =>
+    ["agents", "bot-route-detail", agentId] as const,
   handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
+  capabilities: () => ["agents", "capabilities"] as const,
 };
+
+/** What kinds of coworker this deployment can create. */
+export type AgentCapabilities = {
+  /** Whether a coworker can run on the deployment's own Bot, with no endpoint of its own. */
+  builtInAvailable: boolean;
+};
+
+export function agentCapabilitiesQueryOptions() {
+  return queryOptions({
+    queryKey: agentKeys.capabilities(),
+    queryFn: (): Promise<AgentCapabilities> =>
+      client("/api/agents/capabilities", "capabilities", {
+        fallback: "Could not load what this deployment supports",
+      }),
+    // Deployment configuration, not data: it cannot change without the server restarting.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 /** Which Bots one Bot may hand work to, and whether this deployment lets it. */
 export type HandoffGrants = {
@@ -59,6 +103,14 @@ export type HandoffGrants = {
   canGrant: boolean;
   /** Bot ids this Bot may address today. */
   reachable: string[];
+  /**
+   * Whether this Bot can hold such a grant at all.
+   *
+   * The handing-on tool executes inside this deployment's own run loop, so only a Bot that runs in
+   * it can be offered one. False means every grant would be refused, and the screen should say that
+   * once instead of letting each switch bounce with the same message.
+   */
+  grantable: boolean;
 };
 
 export function agentListQueryOptions(hidden = false) {
@@ -71,11 +123,16 @@ export function agentListQueryOptions(hidden = false) {
   });
 }
 
+/** Package-defined IDs remain one path segment without changing their stored or cache identity. */
+export function agentApiPath(agentId: string): string {
+  return `/api/agents/${encodeURIComponent(agentId)}`;
+}
+
 export function agentQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.detail(agentId),
     queryFn: (): Promise<AgentProfile> =>
-      client(`/api/agents/${agentId}`, "agent", {
+      client(agentApiPath(agentId), "agent", {
         fallback: "Could not load this coworker",
       }),
   });
@@ -85,7 +142,7 @@ export function agentHandoffQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.handoff(agentId),
     queryFn: (): Promise<HandoffGrants> =>
-      client(`/api/agents/${agentId}/handoff`, "handoff", {
+      client(`${agentApiPath(agentId)}/handoff`, "handoff", {
         fallback: "Could not load which Bots this one may ask",
       }),
   });

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   AgentNotFoundError,
   createAgentProfileStore,
@@ -19,11 +19,9 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,
@@ -139,6 +137,35 @@ describe("reading a person's channels", () => {
     expect(seen.sort()).toEqual(expected.sort());
   });
 
+  test("channels made in the same millisecond are each on a page", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const expected: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      expected.push((await createChannel(owner, [agentId])).id);
+    }
+    // One transaction's worth of channels, as a package sync or an import makes them: the same
+    // instant, kept by PostgreSQL to the microsecond and by a JavaScript `Date` to the millisecond.
+    await database
+      .update(channels)
+      .set({ createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz` })
+      .where(inArray(channels.id, expected));
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const result = await store.list(owner, {
+        limit: 2,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...result.channels.map((channel) => channel.id));
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+
+    expect(seen.sort()).toEqual(expected.sort());
+  });
+
   test("a channel with two Bots is never split across pages", async () => {
     /*
      * The reason the page is chosen over channels and the agents joined afterwards. Limiting the row
@@ -223,6 +250,8 @@ describe("channel activity", () => {
     expect((await store.list(owner)).channels).toEqual([
       {
         ...channel,
+        // Nothing has named this conversation: the sweep that does runs outside this store.
+        summary: null,
         lastMessage: "Categorized three expenses.",
         lastMessageAgentId: agentId,
         lastMessageAt: at,
@@ -345,6 +374,33 @@ describe("channel activity", () => {
     expect(
       (await store.list(owner)).channels.map((channel) => channel.id),
     ).toEqual([busy.id, quiet.id]);
+  });
+
+  test("a title rides along on the roster without touching its order", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const quiet = await createChannel(owner, [agentId]);
+    const busy = await createChannel(owner, [agentId]);
+
+    await store.recordActivity(owner, busy.id, {
+      agentId,
+      at: new Date(),
+      text: "Said something.",
+    });
+    // Named the older, quieter conversation, which is the case that would expose a summary leaking
+    // into the ordering: it sorts second before and must still sort second after.
+    await database
+      .update(channels)
+      .set({ summary: "An older subject", summaryAt: new Date() })
+      .where(eq(channels.id, quiet.id));
+
+    const roster = (await store.list(owner)).channels;
+
+    expect(roster.map((channel) => channel.id)).toEqual([busy.id, quiet.id]);
+    expect(roster.map((channel) => channel.summary)).toEqual([
+      null,
+      "An older subject",
+    ]);
   });
 });
 

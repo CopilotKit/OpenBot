@@ -69,4 +69,4 @@ WORKDIR /app/server
 
 # Migrations are a release step, not a start step: two replicas starting together would race, and a
 # failed migration should stop a deploy rather than leave a half-migrated database serving.
-CMD ["bun", "src/index.ts"]
+CMD ["bun", "src/production-entry.ts"]

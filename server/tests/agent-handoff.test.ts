@@ -51,8 +51,11 @@ function desk(options?: {
   role?: "admin" | "user";
 }) {
   const rows: Array<{ kind: string; key: string; payload: unknown }> = [];
-  const events: Array<{ eventType: string; payload: Record<string, unknown> }> =
-    [];
+  const events: Array<{
+    eventType: string;
+    payload: Record<string, unknown>;
+    initiator?: { kind: string; id?: string };
+  }> = [];
 
   const queue = {
     offer: async (item: {
@@ -84,6 +87,7 @@ function desk(options?: {
       recorded.push({
         eventType: event.eventType,
         payload: event.payload ?? {},
+        ...(event.initiator ? { initiator: event.initiator } : {}),
       });
     },
   };
@@ -303,6 +307,67 @@ describe("handing work to another Bot", () => {
    * a hop that was refused is invisible everywhere else, and "why did it not ask the specialist" is
    * the question somebody asks about a thin answer.
    */
+  /*
+   * The row that records a hop beginning. It asserts the person whose authority the run carries, so
+   * without this it reads as an action that person took, which is the whole reason the column exists.
+   */
+  test("the offered row says what started the run, not only whose authority it had", async () => {
+    const started = desk();
+    await started.desk.send({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(started.events[0]?.eventType).toBe("agent.handoff_offered");
+    expect(started.events[0]?.initiator).toEqual({
+      kind: "routine",
+      id: "routine_7",
+    });
+  });
+
+  test("a refusal says it too, so a refused hop is not filed as a person's", async () => {
+    const refused = desk({ granted: false });
+    await refused.desk.send({
+      from: { ...FROM, initiator: { kind: "handoff", id: "researcher" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(refused.events[0]?.eventType).toBe("agent.handoff_refused");
+    expect(refused.events[0]?.initiator).toEqual({
+      kind: "handoff",
+      id: "researcher",
+    });
+  });
+
+  test("a queued hop carries the run initiator to the delivery signer", async () => {
+    const started = desk();
+    await started.desk.send({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(started.rows[0]?.payload).toMatchObject({
+      fromBotId: "assistant",
+      toBotId: "researcher",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+  });
+
+  test("a run that says nothing leaves the row filed as a person's", async () => {
+    const plain = desk();
+    await plain.desk.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(plain.events[0]?.initiator).toBe(undefined);
+  });
+
   test("both outcomes leave a row naming the run and the reason", async () => {
     const allowed = desk();
     await allowed.desk.send({
@@ -338,7 +403,56 @@ describe("handing work to another Bot", () => {
     expect(refused.events[0]?.payload).toMatchObject({
       reason: "not_granted",
       run: "run-1",
+      /*
+       * And the refusal names the Bot too, which is the half this was missing.
+       *
+       * The accepted row above was given `bot` and its refusal was not, so the pair the trail calls
+       * "both outcomes" rendered one Bot and one dash. On the row the notes call the more important
+       * of the two: a hop that happened is visible in the transcript, and a refused one is
+       * invisible everywhere except here.
+       */
+      bot: "assistant",
     });
+  });
+
+  /*
+   * Every way a hop can be refused, not only the one the pair above happens to use.
+   *
+   * `refuse` is one function and all five reasons go through it, so this could not drift per reason
+   * — but that is the argument for asserting it once across all of them rather than trusting it.
+   */
+  test("every refusal names the Bot that was refused", async () => {
+    const cases: Array<[string, ReturnType<typeof desk>]> = [
+      ["no_task", desk()],
+      ["not_granted", desk({ granted: false })],
+      ["unknown_bot", desk()],
+      ["depth", desk({ caps: { maxDepth: 0, maxPerRun: 3 } })],
+      ["fan_out", desk({ caps: { maxDepth: 2, maxPerRun: 0 } })],
+    ];
+    const envelopes: Record<string, { target: string; task: string }> = {
+      no_task: { target: "researcher", task: "" },
+      not_granted: { target: "researcher", task: "t" },
+      unknown_bot: { target: "nobody-by-that-name", task: "t" },
+      depth: { target: "researcher", task: "t" },
+      fan_out: { target: "researcher", task: "t" },
+    };
+
+    for (const [name, harness] of cases) {
+      const envelope = envelopes[name] as { target: string; task: string };
+      const outcome = await harness.desk.send({
+        from: FROM,
+        target: envelope.target,
+        envelope: { task: envelope.task },
+      });
+
+      expect(outcome.ok).toBe(false);
+      expect(harness.events.map((event) => event.eventType)).toEqual([
+        "agent.handoff_refused",
+      ]);
+      // The asking Bot, the same one `agent.handoff_offered` records, so the two rows of a pair
+      // read as one Bot's two possible outcomes rather than as one Bot and a dash.
+      expect(harness.events[0]?.payload).toMatchObject({ bot: "assistant" });
+    }
   });
 });
 

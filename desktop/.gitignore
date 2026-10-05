@@ -1,0 +1,10 @@
+dist/
+node_modules/
+target/
+
+# Written by Tauri from the capabilities and the plugins in Cargo.toml. Build output that
+# happens to be JSON, so it is regenerated on every build and belongs to nobody to review.
+src-tauri/gen/
+build-version.json
+src-tauri/tauri.build-version.conf.json
+src-tauri/build-version.plist

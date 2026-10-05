@@ -19,6 +19,22 @@ describe("health endpoint", () => {
 });
 
 describe("runtime capabilities", () => {
+  test("reports transcription without exposing its endpoint, model, or key", async () => {
+    const configured = createApp(
+      loadConfig(
+        testEnvironment({
+          TRANSCRIPTION_PROVIDER: "openai-compatible",
+          TRANSCRIPTION_BASE_URL: "https://speech.private.example/v1",
+          TRANSCRIPTION_MODEL: "private-speech-model",
+          TRANSCRIPTION_API_KEY: "private-speech-key",
+        }),
+      ),
+    );
+    const response = await configured.request("/api/capabilities");
+    const body = await response.text();
+    expect(JSON.parse(body).transcription).toBe(true);
+    expect(body).not.toContain("private");
+  });
   test("reports the Intelligence runtime without exposing configuration secrets", async () => {
     const response = await app.request("http://openbot.local/api/capabilities");
 
@@ -26,11 +42,19 @@ describe("runtime capabilities", () => {
     await expect(response.json()).resolves.toEqual({
       mode: "intelligence",
       durableHistory: true,
+      // Default-on. The browser reads this to decide whether to offer the tool that generates an
+      // interface, so it has to be here and not only in the runtime.
+      generativeUi: true,
+      // Default-on: a fresh clone is somebody evaluating the template.
+      selfHostBanner: true,
+      transcription: false,
+      voice: false,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
       // sign-in page which companies use this deployment.
       ssoConfigured: false,
+      ssoRequired: false,
     });
   });
 
@@ -47,11 +71,51 @@ describe("runtime capabilities", () => {
     expect(Object.keys(parsed)).toEqual([
       "mode",
       "durableHistory",
+      "generativeUi",
+      "selfHostBanner",
+      "transcription",
+      "voice",
       "authProviders",
       "ssoConfigured",
+      "ssoRequired",
     ]);
     // The provider list is names, never the clients and secrets behind them.
     expect(body).not.toContain("google-client-secret");
+  });
+
+  /*
+   * The answer has to reach the browser, not just the runtime.
+   *
+   * The app offers the model the tool that generates an interface, and it decides whether to from
+   * this field. The two halves disagreeing is the one configuration this capability must not be able
+   * to end up in: runtime-only means the tool is never offered, browser-only means a Bot writes a
+   * whole interface that nothing renders.
+   */
+  test("reports generated interfaces as off when the deployment opts out", async () => {
+    const disabled = createApp(
+      loadConfig(testEnvironment({ OPENBOT_GENERATIVE_UI: "false" })),
+    );
+
+    const response = await disabled.request(
+      "http://openbot.local/api/capabilities",
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).generativeUi).toBe(false);
+  });
+
+  // A fork running OpenBot for its own people turns the banner off, and the browser has to hear it.
+  test("reports the self-host banner as off when the deployment opts out", async () => {
+    const disabled = createApp(
+      loadConfig(testEnvironment({ OPENBOT_SELF_HOST_BANNER: "false" })),
+    );
+
+    const response = await disabled.request(
+      "http://openbot.local/api/capabilities",
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).selfHostBanner).toBe(false);
   });
 });
 

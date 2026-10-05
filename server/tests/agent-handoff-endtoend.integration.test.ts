@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createHandoffDesk } from "../src/agents/handoff";
 import {
   createHandoffRunner,
@@ -18,7 +18,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A hop from end to end: a Bot calls the tool, and another replica delivers it.
@@ -32,11 +32,7 @@ import { TEST_POOL } from "./support/database";
  * question the two files either side already answer.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8);
 const ASKER = `e2e-asker-${suite}`;
@@ -71,7 +67,11 @@ const desk = createHandoffDesk({
 });
 
 async function clean() {
-  await database.delete(workItems).where(like(workItems.key, `${RUN}%`));
+  // By the suite's own actor, which every hop's payload carries. A hop's key is `hop:<hash>:<hash>`,
+  // so a key prefix matches nothing, and a hop left queued is claimed by the next suite's sweep.
+  await database
+    .delete(workItems)
+    .where(sql`${workItems.payload}->>'actorId' = ${ACTOR}`);
   for (const id of [ASKER, TARGET]) {
     await database.delete(pluginGrants).where(eq(pluginGrants.agentId, id));
     await database.delete(agentProfiles).where(eq(agentProfiles.agentId, id));
@@ -146,6 +146,7 @@ describe("a hop, from the tool call to the delivery", () => {
       delivery: {
         deliver: async ({ work, message }) => {
           delivered.push({ work, message });
+          return { answer: null };
         },
       },
     });
@@ -195,6 +196,7 @@ describe("a hop, from the tool call to the delivery", () => {
           delivery: {
             deliver: async ({ work }) => {
               seen.push(work.toBotId);
+              return { answer: null };
             },
           },
         }),
@@ -231,7 +233,7 @@ describe("a hop, from the tool call to the delivery", () => {
       owner: `replica-${suite}`,
       sign: () => "signed",
       auditStore,
-      delivery: { deliver: async () => {} },
+      delivery: { deliver: async () => ({ answer: null }) },
     });
     await runner.sweep();
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isComposing } from "@/lib/composing";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
@@ -78,11 +79,17 @@ function BoundariesPage() {
     });
   };
 
-  if (problem && !policy) {
+  /*
+   * A read that failed says so. This screen used to set "The boundary could not be read." itself;
+   * since the read became a query, that sentence (or the server's own) is the query's error, and
+   * without this the page sat on its title with nothing under it for as long as it was open.
+   */
+  const unreadable = problem ?? stored.error?.message ?? null;
+  if (unreadable && !policy) {
     return (
       <PageShell title="Boundaries">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {problem}
+          {unreadable}
         </p>
       </PageShell>
     );
@@ -178,9 +185,13 @@ function BoundariesPage() {
             <code>key</code> being pressed, the file being touched, the{" "}
             <code>command</code> being run, and <code>mcp.server</code>,{" "}
             <code>mcp.tool</code> and <code>mcp.effect</code> for a call to
-            somebody else&rsquo;s tools. A rule that cannot be evaluated counts
-            as a match, so a mistyped deny refuses rather than quietly
-            permitting what it was meant to forbid.
+            somebody else&rsquo;s tools. <code>initiator.kind</code> says what
+            started the run &mdash; <code>person</code>, <code>routine</code> or{" "}
+            <code>handoff</code> &mdash; which <code>actor.id</code> cannot,
+            because a scheduled run carries its owner&rsquo;s authority while
+            nobody is watching. A rule that cannot be evaluated counts as a
+            match, so a mistyped deny refuses rather than quietly permitting
+            what it was meant to forbid.
           </>
         }
         title="It may never"
@@ -220,6 +231,9 @@ function BoundariesPage() {
         <div className="mt-3 flex gap-2">
           <Input
             aria-label="A rule, written in CEL"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             className="min-w-0 flex-1 font-mono text-xs"
             onChange={(event) => {
               setDraft(event.target.value);
@@ -227,7 +241,9 @@ function BoundariesPage() {
               setTested(null);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter") addRule(draft);
+              // Not the Enter that confirms a composed character, which would put a half-typed
+              // rule into the policy in force.
+              if (event.key === "Enter" && !isComposing(event)) addRule(draft);
             }}
             placeholder='tool.name == "computer_click" && contains(element.name, "submit")'
             value={draft}

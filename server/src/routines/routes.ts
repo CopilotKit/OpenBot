@@ -1,6 +1,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import type { RoutineRunner } from "./runner";
+import { MINIMUM_INTERVAL_MS } from "./schedule";
 import {
   RoutineNotFoundError,
   RoutineRefusedError,
@@ -32,12 +35,71 @@ export type { RoutineStore } from "./store";
 export function createRoutineRoutes(
   routineStore: RoutineStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  options: { runner?: RoutineRunner; auditStore?: AuditStore } = {},
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
+  /*
+   * Run now — the page's Test button. It DOES REAL WORK: the routine's Bot runs its instruction in
+   * the routine's channel exactly as a scheduled firing would, through the same runner and headless
+   * AG-UI path. A paused routine is refused (paused never runs), and so is a second click while a
+   * run is still open.
+   */
+  if (options.runner) {
+    const runner = options.runner;
+    routes.post("/:id/run", requireUser, async (context) => {
+      const id = context.req.param("id");
+      try {
+        const { runId } = await routineStore.startManualRun(
+          context.var.actor.id,
+          id,
+        );
+        if (options.auditStore)
+          await recordAuditEvent(options.auditStore, {
+            eventType: "routines.run_requested",
+            targetType: "routine",
+            targetId: id,
+            actorUserId: context.var.actor.id,
+            payload: { runId, source: "manual" },
+          }).catch(() => undefined);
+        void runner.run(runId).catch(() => {});
+        return context.json({ accepted: true, runId }, 202);
+      } catch (error) {
+        return mapStoreError(context, error);
+      }
+    });
+  }
+
+  routes.get("/:id/runs", requireUser, async (context) => {
+    try {
+      const runs = await routineStore.listRuns(
+        context.var.actor.id,
+        context.req.param("id"),
+      );
+      return context.json({
+        runs: runs.map((run) => ({
+          id: run.id,
+          status: run.status ?? "running",
+          startedAt: run.startedAt.toISOString(),
+          finishedAt: run.finishedAt?.toISOString() ?? null,
+          error: run.error,
+          source: run.source,
+        })),
+      });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.get("/", requireUser, async (context) => {
-    const routines = await routineStore.listFor(context.var.actor.id);
-    return context.json({ routines: routines.map(routineDto) });
+    const [routines, sweptAt] = await Promise.all([
+      routineStore.listFor(context.var.actor.id),
+      routineStore.lastSweptAt().catch(() => null),
+    ]);
+    return context.json({
+      routines: routines.map(routineDto),
+      sweep: sweepDto(sweptAt),
+    });
   });
 
   routes.put("/:id/enabled", requireUser, async (context) => {
@@ -46,13 +108,15 @@ export function createRoutineRoutes(
     if (typeof enabled !== "boolean") {
       return context.json({ error: "enabled must be true or false." }, 400);
     }
+    // An empty id would reach the store and answer 500 on some backends instead of a 400 for a
+    // malformed call. Owner-scoping stays in the store; shape is checked here.
+    const id = context.req.param("id");
+    if (!id.trim()) {
+      return context.json({ error: "A routine id is required." }, 400);
+    }
 
     try {
-      await routineStore.setEnabled(
-        context.var.actor.id,
-        context.req.param("id"),
-        enabled,
-      );
+      await routineStore.setEnabled(context.var.actor.id, id, enabled);
       return context.json({ enabled });
     } catch (error) {
       return mapStoreError(context, error);
@@ -60,8 +124,12 @@ export function createRoutineRoutes(
   });
 
   routes.delete("/:id", requireUser, async (context) => {
+    const id = context.req.param("id");
+    if (!id.trim()) {
+      return context.json({ error: "A routine id is required." }, 400);
+    }
     try {
-      await routineStore.remove(context.var.actor.id, context.req.param("id"));
+      await routineStore.remove(context.var.actor.id, id);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -83,6 +151,8 @@ export function createRoutineRoutes(
  */
 type RoutineDto = {
   id: string;
+  /** Which Bot carries it out, so a Bot's own screen can show only its routines. */
+  agentId: string;
   schedule: string;
   timezone: string;
   instruction: string;
@@ -92,9 +162,25 @@ type RoutineDto = {
   lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
 };
 
+export const SWEEP_SILENCE_MS = MINIMUM_INTERVAL_MS;
+
+type SweepDto = {
+  lastSweptAt: string | null;
+  working: boolean;
+};
+
+function sweepDto(sweptAt: Date | null, now = new Date()): SweepDto {
+  return {
+    lastSweptAt: sweptAt?.toISOString() ?? null,
+    working:
+      sweptAt !== null && now.getTime() - sweptAt.getTime() <= SWEEP_SILENCE_MS,
+  };
+}
+
 function routineDto(routine: RoutineSummary): RoutineDto {
   return {
     id: routine.id,
+    agentId: routine.agentId,
     schedule: routine.schedule,
     timezone: routine.timezone,
     instruction: routine.instruction,

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ComponentPreview } from "@/components/component-preview";
+import { AdminComponentPreview } from "@/components/component-preview";
 import { PageShell } from "@/components/layout/page-shell";
 import { SettingsItemBackground } from "@/components/settings/background";
 import {
@@ -90,7 +90,10 @@ function RouteComponent() {
                   <SettingsItemBackground className="h-full w-full rounded-md" />
                 </div>
                 <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
-                  <ComponentPreview name={component.name} />
+                  <AdminComponentPreview
+                    kind={component.kind}
+                    name={component.name}
+                  />
                 </div>
               </div>
             </Link>

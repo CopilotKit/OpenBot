@@ -1,0 +1,22 @@
+# Podman's macOS VM strips host IPs before configuring rootless port forwarding. Publishing
+# IPv4 and IPv6 loopback for the same port therefore creates two identical internal mappings.
+# !override replaces the port list; ordinary Compose merging would retain the IPv6 entries.
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+  supervisor:
+    ports: !override
+      - "127.0.0.1:${SUPERVISOR_PORT:-4500}:4300"
+  agent-computer:
+    ports: !override
+      - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
+  agent-bot:
+    ports: !override
+      - "127.0.0.1:${BOT_PORT:-4200}:4200"
+  agent-langgraph:
+    ports: !override
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
+  agent-harness:
+    ports: !override
+      - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"

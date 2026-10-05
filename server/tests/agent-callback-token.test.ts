@@ -5,9 +5,15 @@ import {
   looksLikeCallbackToken,
   mintCallbackToken,
   mintRunAssertion,
+  readApprovedRunAssertion,
   readRunAssertion,
   sameToken,
 } from "../src/agents/callback-token";
+import { createApp } from "../src/app";
+import { loadConfig } from "../src/config";
+import { PluginRefusedError, type PluginStore } from "../src/plugins/store";
+import { markUntrusted } from "../src/untrusted-content";
+import { testEnvironment } from "./support/environment";
 
 const KEY = "test-encryption-key-not-a-real-one";
 const RUN = { botId: "knowledge", actorId: "user_7", runId: "run_1" };
@@ -43,7 +49,11 @@ describe("the run assertion", () => {
   test("survives a round trip", () => {
     const signed = mintRunAssertion(RUN, KEY);
     // A run that began with a person is depth zero, which is what an unstated depth means.
-    expect(readRunAssertion(signed, KEY)).toEqual({ ...RUN, depth: 0 });
+    expect(readRunAssertion(signed, KEY)).toEqual({
+      ...RUN,
+      depth: 0,
+      initiator: { kind: "person" },
+    });
   });
 
   test("is refused when signed with another key", () => {
@@ -71,6 +81,7 @@ describe("the run assertion", () => {
     expect(readRunAssertion(signed, KEY, 60 * 1000)).toEqual({
       ...RUN,
       depth: 0,
+      initiator: { kind: "person" },
     });
   });
 
@@ -115,6 +126,14 @@ describe("who may call a tool back, and as whom", () => {
       ok: true,
       botId: AGENT_A,
       actorId: "visitor_9",
+      initiator: { kind: "person" },
+      run: {
+        botId: AGENT_A,
+        actorId: "visitor_9",
+        runId: "r1",
+        depth: 0,
+        initiator: { kind: "person" },
+      },
     });
   });
 
@@ -167,6 +186,14 @@ describe("who may call a tool back, and as whom", () => {
       ok: true,
       botId: AGENT_A,
       actorId: "visitor_9",
+      initiator: { kind: "person" },
+      run: {
+        botId: AGENT_A,
+        actorId: "visitor_9",
+        runId: "r1",
+        depth: 0,
+        initiator: { kind: "person" },
+      },
     });
   });
 
@@ -293,6 +320,48 @@ describe("how deep a run is", () => {
     }
   });
 
+  test("what started the run survives a round trip", () => {
+    for (const initiator of [
+      { kind: "person" } as const,
+      { kind: "deployment" } as const,
+      { kind: "routine", id: "routine_7" } as const,
+      { kind: "responsibility", id: "responsibility_7" } as const,
+      { kind: "handoff", id: "research-assistant" } as const,
+    ]) {
+      const signed = mintRunAssertion({ ...RUN, initiator }, KEY);
+      expect(readRunAssertion(signed, KEY)?.initiator).toEqual(initiator);
+    }
+  });
+
+  test("a run that says nothing about what started it reads as a person", () => {
+    expect(
+      readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.initiator,
+    ).toEqual({ kind: "person" });
+  });
+
+  /*
+   * The point of putting this inside the signature. A Bot cannot relabel its own run, and a kind
+   * this deployment does not write cannot arrive as a string the Audit screen has no branch for.
+   */
+  test("an initiator that is not one reads as a person rather than being kept", () => {
+    for (const nonsense of [
+      { kind: "administrator" },
+      { kind: "routine" },
+      { kind: "handoff", id: "" },
+      { kind: "routine", id: 7 },
+      "routine",
+      null,
+    ]) {
+      const signed = mintRunAssertion(
+        { ...RUN, initiator: nonsense as never },
+        KEY,
+      );
+      expect(readRunAssertion(signed, KEY)?.initiator).toEqual({
+        kind: "person",
+      });
+    }
+  });
+
   test("the conversation survives a round trip, and is absent when there is none", () => {
     expect(
       readRunAssertion(mintRunAssertion({ ...RUN, threadId: "t1" }, KEY), KEY)
@@ -301,5 +370,323 @@ describe("how deep a run is", () => {
     expect(readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.threadId).toBe(
       undefined,
     );
+  });
+});
+
+/**
+ * WHAT THE ROUTE THIS TOKEN GUARDS HANDS BACK WHEN THE CALL FAILS, which nothing exercised at all.
+ *
+ * `/api/agent-tools/call` is where a Bot running its own loop in its own process calls a tool. What
+ * it answers with goes straight into that model's context as the tool result, so this surface is
+ * the widest audience any error message in this deployment reaches: a model repeats what it is
+ * given, to the person asking and into whatever it writes next.
+ *
+ * THE IN-PROCESS SIBLING ALREADY DECIDES THIS and decides it the other way. `plugins/tools.ts`
+ * wraps the identical `callTool` for a Bot running here, and its catch refuses to relay anything on
+ * the `isDeploymentFault` shelf — "a contradiction in this deployment's own tables says nothing to
+ * a model". The route below relayed `error.message` with no such question asked, so one of the two
+ * doors to one store answered a query failure with `Failed query: … params: …` and the other
+ * answered "That tool could not be called." Which door a Bot came through is a deployment topology
+ * decision, not a disclosure decision.
+ */
+describe("the tool-call route a callback token guards", () => {
+  /** The deployment-wide token, which authenticates without naming a Bot of its own. */
+  const DEPLOYMENT_TOKEN = "deployment-wide-agent-token";
+
+  const config = loadConfig(
+    testEnvironment({ AGENT_TOOL_TOKEN: DEPLOYMENT_TOKEN }),
+  );
+
+  /**
+   * The app with one thing in it: a store whose `callTool` throws what the test is about.
+   *
+   * `pluginStore` is the fifteenth positional argument, so the gap is spelled rather than guessed —
+   * a miscount here would silently hand the store to `componentStore` and leave the route absent.
+   */
+  function appWhoseToolThrows(thrown: unknown) {
+    return createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        callTool: async () => {
+          throw thrown;
+        },
+      } as unknown as PluginStore,
+    );
+  }
+
+  /** What the model is handed, as the route builds it. */
+  async function toolResult(thrown: unknown): Promise<string> {
+    const response = await appWhoseToolThrows(thrown).request(
+      "http://openbot.local/api/agent-tools/call",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-openbot-agent-token": DEPLOYMENT_TOKEN,
+        },
+        body: JSON.stringify({
+          name: "mcp__linear__LINEAR_CREATE_ISSUE",
+          args: {},
+          run: mintRunAssertion(
+            { botId: "knowledge", actorId: "usr_7", runId: "run_1" },
+            config.keyEncryptionKey,
+          ),
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { text: string; isError: boolean };
+    expect(body.isError).toBe(true);
+    return body.text;
+  }
+
+  /**
+   * The drizzle shape, spelled the way `plugin-store.integration.test.ts` spells it: the statement
+   * and every value bound to it in `message`, the driver's own error on `cause`, and `query` and
+   * `params` as own properties — which is what {@link isQueryFailure} recognises it by.
+   */
+  function queryFailure() {
+    return Object.assign(
+      new Error(
+        'Failed query: select "credential_id" from "mcp_user_credentials" where "server_id" = $1 and "user_id" = $2 params: linear, usr_7',
+      ),
+      {
+        query:
+          'select "credential_id" from "mcp_user_credentials" where "server_id" = $1 and "user_id" = $2',
+        params: ["linear", "usr_7"],
+        cause: new Error("canceling statement due to statement timeout"),
+      },
+    );
+  }
+
+  test("a query of this deployment's own never reaches the model that asked", async () => {
+    const text = await toolResult(queryFailure());
+
+    /*
+     * Not the statement, and not the values bound to it. On this path those are server ids, user
+     * ids and credential ids, and a model handed them can repeat them to the person asking, quote
+     * them into a document it writes, or send them to the next tool it calls — which is why this
+     * is the worst of the three places this shape has been found leaking.
+     */
+    expect(text).not.toContain("Failed query");
+    expect(text).not.toContain("params:");
+    expect(text).not.toContain("mcp_user_credentials");
+    expect(text).not.toContain("usr_7");
+    // The same thing the in-process door says about the same shelf, which is the property.
+    expect(text).toContain("That tool could not be called.");
+  });
+
+  /**
+   * ONLY A REFUSAL IS MARKED AS ONE, because the marker is what the transcript draws.
+   *
+   * `chat-transcript.tsx` labels a tool result that starts with `REFUSAL_MARKER` as blocked, and the
+   * model reads "Refused." as "not allowed". `callTool` throws `PluginRefusedError` for a boundary
+   * holding, and rethrows a vendor that broke after recording `mcp.call_failed`. The in-process door
+   * keeps the two apart — "one means 'not allowed', the other means 'it broke'" — and this route
+   * put the marker in front of every throw, so on a Bot running its own loop a vendor outage and a
+   * database fault were both drawn as a policy refusal. Asked of both doors with the same store.
+   */
+  test("a throw is marked as a refusal only when it is one, the way the in-process door marks it", async () => {
+    const { grantedTools, REFUSAL_MARKER } = await import(
+      "../src/plugins/tools"
+    );
+    const throws: [string, unknown][] = [
+      ["vendor failure", new Error("fetch failed")],
+      ["deployment fault", queryFailure()],
+      [
+        "refusal",
+        new PluginRefusedError(
+          "No Bot holds linear/LINEAR_CREATE_ISSUE, so nothing was called.",
+          null,
+        ),
+      ],
+    ];
+
+    const seen: string[] = [];
+    for (const [kind, thrown] of throws) {
+      const callback = await toolResult(thrown);
+      const [tool] = await grantedTools({
+        store: {
+          callTool: async () => {
+            throw thrown;
+          },
+          listForAgent: async () => ({
+            tools: [
+              {
+                toolName: "mcp__linear__LINEAR_CREATE_ISSUE",
+                ref: "linear/LINEAR_CREATE_ISSUE",
+                description: "Create an issue.",
+                inputSchema: { type: "object" },
+              },
+            ],
+          }),
+        } as unknown as PluginStore,
+        botId: "knowledge",
+        actorId: "usr_7",
+      });
+      const inProcess = await tool?.execute({});
+      seen.push(
+        `${kind}: marked ${callback.startsWith(REFUSAL_MARKER)}, same as in-process ${callback === inProcess}`,
+      );
+    }
+
+    expect(seen).toEqual([
+      "vendor failure: marked false, same as in-process true",
+      "deployment fault: marked false, same as in-process true",
+      "refusal: marked true, same as in-process true",
+    ]);
+  });
+
+  /**
+   * AND THE REFUSAL STILL SPEAKS, because a guard that silences everything is not the fix.
+   *
+   * A `PluginRefusedError` is this deployment telling a Bot it may not do something, and its
+   * sentence is written for whoever reads the answer. Losing it would turn every policy boundary
+   * into an unexplained failure, which is what the marker on this route exists to prevent.
+   */
+  test("a refusal this deployment wrote is still relayed in full", async () => {
+    expect(
+      await toolResult(
+        new PluginRefusedError(
+          "No Bot holds linear/LINEAR_CREATE_ISSUE, so nothing was called.",
+          null,
+        ),
+      ),
+    ).toContain("No Bot holds linear/LINEAR_CREATE_ISSUE");
+  });
+
+  /** And a vendor's own words, which are the useful half of a 403 and are nobody's secret. */
+  test("a vendor's own sentence is still relayed", async () => {
+    expect(
+      await toolResult(new Error("The caller does not have permission.")),
+    ).toContain("The caller does not have permission.");
+  });
+
+  /**
+   * A VENDOR THAT ANSWERED WITH AN ERROR, rather than one that threw, which is how an MCP server says
+   * no: `{ isError: true }` and a sentence, resolved and not thrown.
+   *
+   * The in-process door names that sentence as the vendor's (`plugins/tools.ts`), because handing it
+   * over as content already cost a diagnosis: Google's "The caller does not have permission" read as
+   * a result, and the model told the person it had no access to their Drive. Neither framework Bot
+   * words it on its way through — the LangGraph Bot passes an `isError` answer on untouched, and
+   * the Python one reads only `text` — so what this route writes is what the model reads.
+   */
+  function storeAnswering(result: { text: string; isError: boolean }) {
+    return {
+      callTool: async () => ({ ...result, truncated: false }),
+      listForAgent: async () => ({
+        tools: [
+          {
+            toolName: "mcp__linear__LINEAR_CREATE_ISSUE",
+            ref: "linear/LINEAR_CREATE_ISSUE",
+            description: "Create an issue.",
+            inputSchema: { type: "object" },
+          },
+        ],
+      }),
+    } as unknown as PluginStore;
+  }
+
+  /** Both doors' answers to one call against the same store: the callback route's, and the in-process one's. */
+  async function bothDoors(store: PluginStore) {
+    const response = await createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    ).request("http://openbot.local/api/agent-tools/call", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-openbot-agent-token": DEPLOYMENT_TOKEN,
+      },
+      body: JSON.stringify({
+        name: "mcp__linear__LINEAR_CREATE_ISSUE",
+        args: {},
+        run: mintRunAssertion(
+          { botId: "knowledge", actorId: "usr_7", runId: "run_1" },
+          config.keyEncryptionKey,
+        ),
+      }),
+    });
+    expect(response.status).toBe(200);
+    const callback = (await response.json()) as {
+      text: string;
+      isError: boolean;
+    };
+
+    const { grantedTools } = await import("../src/plugins/tools");
+    const [tool] = await grantedTools({
+      store,
+      botId: "knowledge",
+      actorId: "usr_7",
+    });
+    const inProcess = await tool?.execute({});
+    return { callback, inProcess };
+  }
+
+  test("a vendor's error answer is named as the vendor's, the way the in-process door names it", async () => {
+    const { callback, inProcess } = await bothDoors(
+      storeAnswering({
+        text: "The caller does not have permission.",
+        isError: true,
+      }),
+    );
+
+    expect(callback.isError).toBe(true);
+    // One store, one answer: which door a Bot comes through is topology, not what its model is told.
+    expect(callback.text).toBe(inProcess);
+    // The vendor's words, inside the untrusted-content envelope the model reads outside data in.
+    expect(callback.text).toBe(
+      `The vendor reported an error:\n${markUntrusted("The caller does not have permission.", "connector error")}`,
+    );
+  });
+
+  test("a vendor's result that is not an error reaches the model as the vendor wrote it", async () => {
+    const { callback, inProcess } = await bothDoors(
+      storeAnswering({ text: "Created LIN-42.", isError: false }),
+    );
+
+    // As the vendor wrote it, marked as untrusted data rather than rewritten.
+    expect(callback).toEqual({
+      text: markUntrusted("Created LIN-42.", "connector result"),
+      isError: false,
+    });
+    expect(callback.text).toBe(inProcess);
+  });
+});
+
+describe("an approved action's stored run", () => {
+  test("is read after the live expiry, and still refused with the wrong key", () => {
+    const signed = mintRunAssertion({ ...RUN, depth: 2 }, KEY, 0);
+    expect(readRunAssertion(signed, KEY)).toBeNull();
+    expect(readApprovedRunAssertion(signed, KEY)?.depth).toBe(2);
+    expect(readApprovedRunAssertion(signed, "another-key")).toBeNull();
+    expect(readApprovedRunAssertion(`${signed}x`, KEY)).toBeNull();
   });
 });

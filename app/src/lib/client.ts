@@ -98,5 +98,11 @@ export async function client<T>(
 
   if (key === undefined) return response;
 
-  return ((await response.json()) as Record<string, T>)[key];
+  // A 204 or a non-JSON body used to throw a bare SyntaxError, and `null` or an array body threw
+  // a TypeError on property access. Malformed success is a failed request with the fallback.
+  const body = (await response.json().catch(() => null)) as unknown;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error(options.fallback ?? "That request failed.");
+  }
+  return (body as Record<string, T>)[key];
 }

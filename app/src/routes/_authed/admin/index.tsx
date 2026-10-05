@@ -94,6 +94,13 @@ const SECTIONS: {
         linkOptions: { to: "/admin/skills" },
       },
       {
+        title: "Automatic Learning",
+        description:
+          "Learn from completed conversations and review proposed skills.",
+        icon: IconFileText,
+        linkOptions: { to: "/admin/learning" },
+      },
+      {
         title: "UI Components",
         description: "Custom pieces a Bot can draw in a conversation.",
         icon: IconLayoutGrid,
@@ -117,6 +124,13 @@ const SECTIONS: {
           "Everybody who has signed in, who administers this deployment, and whose access has been removed.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Enterprise controls",
+        description:
+          "Capabilities by role and group, SSO required, SCIM, network policy, MCP and model allowlists, Action Recording.",
+        icon: IconShieldCheck,
+        linkOptions: { to: "/admin/enterprise" },
       },
       {
         title: "Identity providers",

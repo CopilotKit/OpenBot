@@ -9,6 +9,12 @@ import {
 } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { useBotNames } from "@/lib/agents/bot-names";
+import {
+  DID_NOT_HAPPEN_EVENT_TYPES,
+  eventTypeFilter,
+  outcomeOf,
+  REFUSED_EVENT_TYPES,
+} from "@/lib/audit/outcome";
 import { auditEventsQueryOptions } from "@/lib/audit/queries";
 import { silenceOf } from "@/lib/audit/silence";
 
@@ -23,6 +29,9 @@ export const Route = createFileRoute("/_authed/admin/audit")({
 type AuditEvent = {
   id: string;
   actorUserId: string | null;
+  /** Absent on a deployment that has not migrated yet. */
+  initiatorKind?: string;
+  initiatorId?: string | null;
   eventType: string;
   targetType: string;
   targetId: string | null;
@@ -30,32 +39,25 @@ type AuditEvent = {
   createdAt: string;
 };
 
+/*
+ * The saved views, built from the same lists the row label and colour are decided by.
+ *
+ * Written out by hand here and again below, they had already drifted: a refusal on one list and not
+ * the other is a row drawn as "Allowed" or a row missing from the view somebody clicks to ask what
+ * this deployment refused. See `@/lib/audit/outcome`, which is now the only place either question is
+ * answered.
+ */
 const FILTERS = [
   { label: "Everything", search: "" },
   { label: "Computer actions", search: "?eventType=computer.action_allowed" },
-  {
-    label: "Blocked",
-    /*
-     * Include every refusal family, not only browser policy refusals.
-     *
-     * `mcp.callback_refused` is here because it is a refusal, even though nothing about a Bot was
-     * judged: a caller could not prove which Bot it was. Somebody filtering for what this deployment
-     * turned away wants that in the list, and it is the one refusal with no policy behind it, so
-     * leaving it out would hide the only evidence that anything was attempted.
-     *
-     * `routines.dispatch_refused` is the same shape one boundary over: the worker, not a Bot, and a
-     * stale or missing secret rather than a policy decision. The same reasoning that put
-     * `mcp.callback_refused` here applies unchanged — nobody was judged, something was still turned
-     * away, and the saved view a person clicks for "what did this deployment block" should show it.
-     */
-    search:
-      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused,routines.dispatch_refused",
-  },
+  { label: "Blocked", search: eventTypeFilter(REFUSED_EVENT_TYPES) },
   {
     label: "Did not happen",
-    // A stalled stream belongs here. It is the same complaint as an action that was allowed and then
-    // did not take: nothing was refused, and nothing came of it either.
-    search: "?eventType=computer.action_failed,agent.stream_stalled",
+    search: eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES),
+  },
+  {
+    label: "Nobody watching",
+    search: "?initiatorKind=routine,handoff,responsibility,memory",
   },
 ] as const;
 
@@ -114,6 +116,7 @@ function AuditPage() {
                   <th className="px-4 py-2 font-medium">What</th>
                   <th className="px-4 py-2 font-medium">On</th>
                   <th className="px-4 py-2 font-medium">Bot</th>
+                  <th className="px-4 py-2 font-medium">Started by</th>
                   <th className="px-4 py-2 font-medium">Decision</th>
                 </tr>
               </thead>
@@ -128,6 +131,56 @@ function AuditPage() {
       </PageSection>
     </PageShell>
   );
+}
+
+function StartedBy({
+  event,
+  nameFor,
+}: {
+  event: AuditEvent;
+  nameFor: (botId: string) => string;
+}) {
+  if (event.initiatorKind === "routine") {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        A routine
+      </span>
+    );
+  }
+  if (event.initiatorKind === "handoff") {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        {event.initiatorId
+          ? `Handed on by ${nameFor(event.initiatorId)}`
+          : "Handed on"}
+      </span>
+    );
+  }
+  if (
+    event.initiatorKind === "responsibility" ||
+    event.initiatorKind === "memory"
+  ) {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        {event.initiatorKind === "memory"
+          ? "A memory source"
+          : "A responsibility"}
+      </span>
+    );
+  }
+  if (event.initiatorKind === "deployment") {
+    return <span className="text-muted-foreground">This deployment</span>;
+  }
+  return <span className="text-muted-foreground">A person</span>;
 }
 
 function Row({
@@ -148,19 +201,8 @@ function Row({
     | { role?: string; name?: string }
     | string
     | undefined;
-  const refused =
-    event.eventType === "computer.action_refused" ||
-    event.eventType === "component.refused" ||
-    event.eventType === "component.function_refused" ||
-    event.eventType === "mcp.call_rejected" ||
-    /*
-     * A caller that could not prove which Bot it was. Refused like the others, and it has to read
-     * that way here: the fallback below calls anything it does not recognise "Allowed", which for a
-     * refusal is the one wrong answer. A trail that is confidently wrong is worse than a silent one.
-     */
-    event.eventType === "mcp.callback_refused" ||
-    // The worker turned away at the door, same reasoning as the caller above.
-    event.eventType === "routines.dispatch_refused";
+  const outcome = outcomeOf(event.eventType);
+  const refused = outcome === "refused";
   const stalled = event.eventType === "agent.stream_stalled";
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
@@ -181,7 +223,7 @@ function Row({
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
   // muted foreground reads as "Allowed", which a turn nobody ever got an answer to was not.
-  const failed = event.eventType === "computer.action_failed" || stalled;
+  const failed = outcome === "did-not-happen";
   const silence = stalled ? silenceOf(payload) : null;
 
   return (
@@ -262,6 +304,9 @@ function Row({
         ) : (
           "-"
         )}
+      </td>
+      <td className="px-4 py-2">
+        <StartedBy event={event} nameFor={nameFor} />
       </td>
       <td className="px-4 py-2">
         <span
@@ -350,7 +395,9 @@ function Row({
             {decision.rule}
           </div>
         ) : null}
-        {decision.mode === "dry-run" && decision.carriedOut ? (
+        {decision.mode === "dry-run" &&
+        decision.allowed === false &&
+        decision.carriedOut ? (
           <div className="text-xs text-muted-foreground">
             dry-run: recorded, not enforced
           </div>
@@ -401,6 +448,7 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_requested": "The Bot asked for a secret",
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
+  "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
 
   "component.granted": "Granted to this Bot",

@@ -1,3 +1,4 @@
+import type { Attachment } from "@copilotkit/react-core/v2";
 import {
   getChipsByTrigger,
   isSegmentsEmpty,
@@ -27,9 +28,13 @@ export type ComposerDraft = {
   /** Commands that survive into the sent message, in the order they were typed. */
   commandIds: string[];
   isEmpty: boolean;
+  attachments: Attachment[];
 };
 
-export function toDraft(segments: Segment[]): ComposerDraft {
+export function toDraft(
+  segments: Segment[],
+  attachments: Attachment[] = [],
+): ComposerDraft {
   const agentChips = getChipsByTrigger(segments, AGENT_TRIGGER);
   const commandChips = getChipsByTrigger(segments, COMMAND_TRIGGER);
 
@@ -38,7 +43,24 @@ export function toDraft(segments: Segment[]): ComposerDraft {
     agentId: agentChips.at(-1)?.value ?? null,
     commandIds: commandChips.map((chip) => chip.value),
     isEmpty: isSegmentsEmpty(segments),
+    attachments,
   };
+}
+
+/**
+ * A pasted screenshot with no text is the whole feature: `isEmpty` only answers "is there text",
+ * so an attachment alone must be enough to unlock Send rather than riding on top of it. An
+ * upload still in flight holds the gate either way, since sending would race the file that has
+ * not finished becoming a source yet.
+ */
+export function canSendDraft(draft: ComposerDraft): boolean {
+  if (
+    draft.attachments.some((attachment) => attachment.status === "uploading")
+  ) {
+    return false;
+  }
+
+  return draft.attachments.length > 0 || !draft.isEmpty;
 }
 
 /** Collapse multiple agent mentions to the most recent one while preserving identity on no-op. */

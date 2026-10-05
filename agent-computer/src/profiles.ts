@@ -12,9 +12,9 @@
  *
  * Profile behavior in this image and Playwright version:
  *   - A cookie with an expiry survives close-and-reopen. So does localStorage.
- *   - A session cookie (no expiry) does not, and should not: Chromium drops those on restart, exactly
- *     as a desktop browser does. Any "stay signed in" worth the name sets an expiring cookie, but this
- *     is why a site that only ever issues session cookies will still ask a Bot to sign in again.
+ *   - A session cookie (no expiry) does not: Chromium drops those on restart, exactly as a desktop
+ *     browser does. Here a restart is a pod being deleted by an idle suspend or an image update, so
+ *     `session-cookies.ts` writes them to a file in the same profile and puts them back on launch.
  *   - Killing the browser process with SIGKILL leaves no stale singleton lock in the profile, and the
  *     profile reopens with its cookies intact. The widely-reported `SingletonLock` breakage does not
  *     reproduce here. The defensive sweep below stays anyway, because it is three lines and the
@@ -33,15 +33,20 @@
  * Kubernetes or ECS, where the orchestrator's own restart policy brings a process back.
  */
 
-import { readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
+import { browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
 import { botIdsIn } from "./profile-listing";
+import {
+  type SessionCookieKeeper,
+  sessionCookieKeeper,
+} from "./session-cookies";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
 // from the playwright-free `./env` instead of pulling this module's browser driver in with it.
@@ -90,22 +95,56 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * Said out loud at start-up either way. An operator should not have to read this file to find out
  * whether the browser rendering the open internet is sandboxed.
  */
-const SANDBOX_ENABLED = process.env.COMPUTER_SANDBOX === "on";
+const BROWSER_RUNTIME = browserRuntimeFromEnv(process.env);
+const LOCAL_CHROME = BROWSER_RUNTIME.backend === "local-chrome";
+// Native Chrome has no container boundary. Always retain its own process sandbox and OS keychain.
+const SANDBOX_ENABLED = LOCAL_CHROME || process.env.COMPUTER_SANDBOX === "on";
 
 const LAUNCH_ARGS = [
   ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
-  "--password-store=basic",
+  ...(LOCAL_CHROME ? [] : ["--password-store=basic"]),
   // Drop the automation signals Chromium sets for itself, so a real person who takes the wheel can
   // sign in to a site that refuses obvious automation (Google among them). This is the flag, not a
   // JS patch of `navigator.webdriver`: the flag turns the property off at the source, where spoofing
   // it from a script leaves the other tells a detector cross-checks. It does not change what the Bot
-  // may do; the governed path is unchanged. The larger tell — a headless build reporting
-  // `HeadlessChrome` in its user agent — is only removed by running headed under a virtual display,
-  // which is a heavier image change tracked separately; this reduces the signals it can reduce
-  // without one.
+  // may do; the governed path is unchanged. Full Chromium is selected explicitly in both modes;
+  // headed mode also provides a window a person can use on the native desktop or virtual display.
   "--disable-blink-features=AutomationControlled",
 ];
+
+/**
+ * WebRTC kept inside the proxy, written into the profile before Chromium reads it.
+ *
+ * Chromium sends WebRTC over UDP straight past an HTTP proxy unless told not to, so a page in a Bot's
+ * browser could reach the network around the egress filter. `disable_non_proxied_udp` allows only
+ * UDP through a proxy, and an HTTP proxy carries none, so WebRTC goes over the proxy or not at all.
+ * A preference rather than the `--force-webrtc-ip-handling-policy` switch, which current Chromium
+ * no longer reads (measured: the switch on the command line, packets still sent). Merged into
+ * whatever Preferences the profile already has, so nothing else the profile remembers is lost.
+ */
+export async function keepWebRtcInsideProxy(profileDir: string) {
+  const file = join(profileDir, "Default", "Preferences");
+  let preferences: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      preferences = parsed;
+  } catch {
+    // No Preferences yet (a new profile), or one Chromium never finished writing: start clean.
+  }
+  const webrtc =
+    preferences.webrtc && typeof preferences.webrtc === "object"
+      ? (preferences.webrtc as Record<string, unknown>)
+      : {};
+  if (webrtc.ip_handling_policy === "disable_non_proxied_udp") return;
+  preferences.webrtc = {
+    ...webrtc,
+    ip_handling_policy: "disable_non_proxied_udp",
+  };
+  await mkdir(join(profileDir, "Default"), { recursive: true });
+  await writeFile(file, JSON.stringify(preferences));
+}
 
 console.info(
   JSON.stringify({
@@ -202,8 +241,14 @@ const MAX_LIVE_BROWSERS = numberFromEnv("COMPUTER_MAX_BROWSERS", 8);
  *
  * The other half. A deployment under the cap still holds a browser per Bot that was used once last
  * Tuesday, and that memory is doing nothing for anybody.
+ *
+ * Zero is the documented way to say "keep them resident", which is why it is read as a value here
+ * rather than as a value that is not set. Read like the cap, an operator who wrote it got the
+ * default back and the sweep they had switched off carried on closing their browsers.
  */
-const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
+const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000, {
+  zeroSwitchesItOff: true,
+});
 
 /** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
 const IDLE_SWEEP_MS = 60_000;
@@ -234,12 +279,48 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     usedAt: number;
     /** Point `page` at whatever is open now. Called on every page opening and closing. */
     retarget: () => void;
+    /** Keeps this browser's session cookies on the profile volume. Absent for a native Chrome. */
+    sessionCookies?: SessionCookieKeeper;
+  };
+
+  /**
+   * Write a browser's session cookies one last time and stop checking them.
+   *
+   * Before the close, because a closed context has no cookies to read. Bounded like the
+   * announcement, because a browser that will not answer must not hold a close open.
+   */
+  const keepSessionCookies = async (running: LiveBrowser): Promise<void> => {
+    const keeper = running.sessionCookies;
+    if (!keeper) return;
+    await settleWithin(
+      keeper.save().then(() => keeper.stop()),
+      ANNOUNCE_BUDGET_MS,
+    );
   };
 
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<string, LiveBrowser>();
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
+  /** Closes and resets in flight, so a Bot's browser is never reopened from a profile being closed or deleted. */
+  const closing = new Map<string, Promise<void>>();
+
+  const whileClosing = async (
+    botId: string,
+    work: () => Promise<void>,
+  ): Promise<void> => {
+    const { promise: done, resolve } = Promise.withResolvers<void>();
+    const held = Promise.all([closing.get(botId), done]).then(() => undefined);
+    closing.set(botId, held);
+    try {
+      await work();
+    } finally {
+      resolve();
+      void held.then(() => {
+        if (closing.get(botId) === held) closing.delete(botId);
+      });
+    }
+  };
 
   // Checked, not joined. `join(root, botId)` normalizes `..` away, so a Bot id of `../workspace`
   // used to resolve outside the root and `reset` would delete whatever was there.
@@ -265,8 +346,11 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
     // Bounded, because this now sits on the launch path: `enforceCap` evicts from inside another
     // Bot's launch, so a teardown that never answers would pin that launch and every caller waiting
     // on it. The close is the thing that must happen; being told about it is best effort.
-    await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
-    await closeAndWait(running.context).catch(() => undefined);
+    await whileClosing(botId, async () => {
+      await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
+      await keepSessionCookies(running);
+      await closeAndWait(running.context).catch(() => undefined);
+    });
     return true;
   };
 
@@ -344,6 +428,9 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      * container restarts. This turns that into one slow request instead of an outage.
      */
     async page(botId: string): Promise<Page> {
+      // Only when something is closing: an unconditional await would let a stop slip in ahead of the launch.
+      const closingNow = closing.get(botId);
+      if (closingNow) await closingNow;
       /*
        * One launch at a time per Bot. Calls that arrive during a launch wait for that launch instead
        * of starting another browser against the same profile directory.
@@ -371,15 +458,23 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         // next line and the live screen's follow loop re-attaches to it within the second, so this is
         // a browser being swapped rather than one going away. Telling the viewer here would end a
         // screen that is about to be fine, which is the opposite of what the announcement is for.
+        await existing.sessionCookies?.stop();
         await existing.context.close().catch(() => undefined);
         live.delete(botId);
       }
 
       const launch = (async () => {
         const dir = directoryFor(botId);
-        await sweepLocks(dir);
+        // A second native helper can target the same data root on another port. Do not remove an
+        // active Chrome profile's lock; Chrome reports contention and handles its own stale locks.
+        if (!LOCAL_CHROME) {
+          await sweepLocks(dir);
+          await keepWebRtcInsideProxy(dir);
+        }
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
+          channel: BROWSER_RUNTIME.channel,
+          headless: BROWSER_RUNTIME.mode === "headless",
           args: LAUNCH_ARGS,
           // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
           // "controlled by automated software" banner. Dropped for the same reason as the flag above:
@@ -398,6 +493,27 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           handleSIGHUP: false,
           ...(proxy ? { proxy } : {}),
         });
+        /*
+         * Session cookies back before anything navigates, so the first request a site sees from this
+         * launch is already signed in. Not for a native Chrome: its cookies are protected by the OS
+         * keychain, and a plain file beside them would undo that. The container profile uses the
+         * basic password store, so the file adds no exposure the volume did not already have.
+         */
+        const sessionCookies = LOCAL_CHROME
+          ? undefined
+          : sessionCookieKeeper(botId, dir, context);
+        if (sessionCookies) {
+          await sessionCookies.restore().catch((error: unknown) => {
+            console.info(
+              JSON.stringify({
+                type: "computer-session-cookies-not-restored",
+                botId,
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          });
+          sessionCookies.start();
+        }
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
         const record: LiveBrowser = {
@@ -406,6 +522,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           startedAt: new Date().toISOString(),
           usedAt: Date.now(),
           retarget: () => {},
+          ...(sessionCookies ? { sessionCookies } : {}),
         };
         record.retarget = () => {
           const next = chooseLivePage(context.pages());
@@ -467,8 +584,10 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
      */
     async reset(botId: string): Promise<void> {
       // Its own reason rather than borrowing stop's, so the trail says which of the two happened.
-      await closeOnRequest(botId, "it was reset");
-      await rm(directoryFor(botId), { recursive: true, force: true });
+      await whileClosing(botId, async () => {
+        await closeOnRequest(botId, "it was reset");
+        await rm(directoryFor(botId), { recursive: true, force: true });
+      });
     },
 
     /**
@@ -520,6 +639,8 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
           settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS),
         ),
       );
+      // Written before the close, so a pod deleted by a suspend or an image update keeps its sign-ins.
+      await Promise.all(entries.map(([, c]) => keepSessionCookies(c)));
       await Promise.all(entries.map(([, c]) => closeAndWait(c.context)));
     },
 

@@ -140,8 +140,16 @@ function SkillsPage() {
            * Nothing while the two queries are still in flight. The alternative is the empty state
            * standing there saying this person has written no skills, which is a claim the page has
            * not yet earned.
+           *
+           * And not after a read that failed, for the same reason: `isPending` goes false on a
+           * failed fetch too, and no list is no evidence of no skills. A list already held stays on
+           * screen through a failed refetch, because `data` is still there.
            */}
-          {loading ? null : mine.length === 0 ? (
+          {loading ? null : !data ? (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              Your skills could not be loaded.
+            </p>
+          ) : mine.length === 0 ? (
             <Empty className="mt-4 h-[180px] border border-dashed">
               <EmptyHeader>
                 <EmptyTitle className="text-muted-foreground">

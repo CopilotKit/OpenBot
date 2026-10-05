@@ -12,9 +12,19 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { textOfChunk } from "./deltas";
+import { listenPort } from "../../shared/listen-port";
+import {
+  apiKeyOrPlaceholder,
+  baseUrlVariableFor,
+  botSettings,
+  keyIsRequired,
+  keyVariableFor,
+  requiresResponsesApi,
+} from "../../shared/model-providers";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
+import { streamRun } from "./stream";
+import { toolAnswer } from "./tool-answer";
 
 /**
  * The same Bot, on a framework.
@@ -36,7 +46,12 @@ import { readReasoningEffort } from "./model-options";
  * The graph provides model orchestration without changing that contract.
  */
 
-const PORT = Number.parseInt(process.env.PORT ?? "4201", 10);
+const resolvedPort = listenPort(process.env.PORT, 4201);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const PORT = resolvedPort.port;
 const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
 if (!MANAGED_AGENT_TOKEN) {
   console.error(
@@ -57,47 +72,48 @@ if (!MANAGED_AGENT_TOKEN) {
  * Each provider reads its own key. A deployment that only runs Anthropic never needs an OpenAI key,
  * which is the point of making this configurable rather than assuming one vendor.
  *
- * The default is unchanged so the two shipped Bots stay comparable out of the box.
- */
-const PROVIDER = (process.env.BOT_PROVIDER ?? "openai").toLowerCase();
-/*
- * An unset model and an empty one are the same thing.
+ * The default comes from `shared/model-providers.json` — this Bot's `bots.agent-langgraph` row —
+ * so the two shipped Bots stay comparable out of the box and every language in the box reads the
+ * same decision. Which variable each provider's key and endpoint arrive in is read from the same
+ * file's provider rows rather than repeated here.
  *
- * `??` only catches undefined, and a compose file passing `BOT_MODEL: ${BOT_MODEL:-}` hands this an
- * empty string, which is a value. The agent then asked its provider for a model named "" and the
- * run died with "you must provide a model parameter", which reads as a broken Bot rather than as
- * missing configuration.
+ * Blank is OpenAI, the reading every other consumer of `BOT_PROVIDER` gives it: the desktop writes
+ * an empty provider when switching back to OpenAI, and the server reads empty as OpenAI. An unset
+ * environment falls through to the spec row, and when that says openai — as it does today — the
+ * two readings are the same. Padded and differently-cased names are the same provider, because a
+ * value typed into a setup window arrives with a space on it more often than not. A name nobody
+ * has heard of is kept, so the check below can put it in its message. The lookup order is
+ * environment over spec file over provider default; see `botSettings`.
  */
-const MODEL = process.env.BOT_MODEL?.trim() || defaultModelFor(PROVIDER);
+const { provider: PROVIDER, model: MODEL } = botSettings("agent-langgraph");
 /**
  * OpenAI only. Its newer models require the Responses API, which the integration handles.
  *
  * Inferred from the model rather than left to a separate switch. `gpt-5.6-*` rejects function tools
  * on `/v1/chat/completions`, so a deployment that set `BOT_MODEL` to one and did not also know about
  * this flag got a Bot that started, looked healthy, and failed on its first tool call. The switch is
- * still honoured, so a model this list has not heard of can be told to use it.
+ * still honoured, so a model the registry has not heard of can be told to use it.
  */
-const NEEDS_RESPONSES_API = /^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL);
+const NEEDS_RESPONSES_API = requiresResponsesApi(MODEL);
 const USE_RESPONSES_API =
   process.env.BOT_RESPONSES_API === "true" || NEEDS_RESPONSES_API;
 /**
- * OpenAI only, and the same variable the API server reads for its built-in agents.
+ * Read from the provider registry rather than spelled out here three times, under the names the
+ * API server already reads. Sharing the names is the point: one line moves the built-in agents and
+ * this Bot together, and a deployment cannot end up with half of itself pointed somewhere else.
  *
- * Unset, `openai` means OpenAI. Set, it means any endpoint speaking that API: a gateway in front of
- * several providers, a proxy, or a model on hardware you control. The integration owns the HTTP, so
- * this is a base URL rather than another provider branch, and `BOT_MODEL` is sent verbatim because
- * an endpoint names its own catalogue.
- */
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
-/**
- * The same idea for the other two providers, under the names the API server already reads.
+ * Unset, this is that provider's own public endpoint. Set, it means any endpoint speaking that API:
+ * a gateway in front of several providers, a proxy, or a model on hardware you control. The
+ * integration owns the HTTP, so this is a base URL rather than another provider branch, and
+ * `BOT_MODEL` is sent verbatim because an endpoint names its own catalogue.
  *
- * Sharing the variable names is the point: one line moves the built-in agents and this Bot
- * together, and a deployment cannot end up with half of itself pointed somewhere else.
+ * Only the provider this Bot was configured for is read, and each branch of `buildModel` below
+ * ever took its own and no other, so nothing that used to be visible has changed.
  */
-const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
-const GOOGLE_BASE_URL =
-  process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
+const baseUrlVariable = baseUrlVariableFor(PROVIDER);
+const BASE_URL = baseUrlVariable
+  ? process.env[baseUrlVariable]?.trim() || undefined
+  : undefined;
 
 /**
  * OpenAI only, and Responses API only: how hard this Bot is allowed to think.
@@ -133,12 +149,6 @@ if (REASONING_EFFORT && !USE_RESPONSES_API) {
   process.exit(1);
 }
 
-function defaultModelFor(provider: string): string {
-  if (provider === "anthropic") return "claude-sonnet-4-5";
-  if (provider === "google") return "gemini-2.5-flash";
-  return "gpt-5.5";
-}
-
 /**
  * The key this provider needs, checked at startup rather than on the first run.
  *
@@ -146,13 +156,7 @@ function defaultModelFor(provider: string): string {
  * a missing key should fail in front of whoever is deploying, not as a conversation that errors in
  * front of somebody trying to use it.
  */
-const KEY_VARIABLE: Record<string, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GOOGLE_API_KEY",
-};
-
-const keyVariable = KEY_VARIABLE[PROVIDER];
+const keyVariable = keyVariableFor(PROVIDER);
 if (!keyVariable) {
   console.error(
     `BOT_PROVIDER=${PROVIDER} is not one this Bot knows. Use openai, anthropic or google.`,
@@ -160,7 +164,8 @@ if (!keyVariable) {
   process.exit(1);
 }
 const API_KEY = process.env[keyVariable]?.trim();
-if (!API_KEY) {
+// Unless an endpoint was named to answer instead: see `keyIsRequired`.
+if (!API_KEY && keyIsRequired(PROVIDER, BASE_URL)) {
   console.error(
     `${keyVariable} is not set, and BOT_PROVIDER=${PROVIDER} needs it. This Bot cannot answer without a model.`,
   );
@@ -194,24 +199,24 @@ function buildModel() {
   if (PROVIDER === "anthropic") {
     return new ChatAnthropic({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
-      ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
+      ...(BASE_URL ? { anthropicApiUrl: BASE_URL } : {}),
     });
   }
   if (PROVIDER === "google") {
     return new ChatGoogleGenerativeAI({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
-      ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
+      ...(BASE_URL ? { baseUrl: BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
-    apiKey: API_KEY,
+    apiKey: apiKeyOrPlaceholder(API_KEY),
     streaming: true,
-    ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
+    ...(BASE_URL ? { configuration: { baseURL: BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
     /*
      * `reasoning.effort`, not the `reasoningEffort` convenience field: the integration deprecated
@@ -229,7 +234,9 @@ function buildModel() {
  * here, in this process, and every call it makes goes back through the deployment that granted it.
  */
 const TOOL_URL =
-  process.env.OPENBOT_TOOL_URL ?? "http://localhost:3001/api/agent-tools/call";
+  // Numeric, never `localhost`: it resolves to `::1` under Node and `127.0.0.1` under bun, so a
+  // name here reaches a different interface depending on what started the process.
+  process.env.OPENBOT_TOOL_URL ?? "http://127.0.0.1:3001/api/agent-tools/call";
 const TOOL_TOKEN = process.env.AGENT_TOOL_TOKEN ?? "";
 
 async function callTool(
@@ -263,8 +270,7 @@ async function callTool(
        */
       body: JSON.stringify({ name, args, run }),
     });
-    const body = (await response.json()) as { text?: string };
-    return body.text ?? "The tool returned nothing.";
+    return await toolAnswer(response);
   } catch (error) {
     // Reported to the model as a result rather than thrown: the run continues and says what broke.
     return `That tool could not be called: ${
@@ -332,9 +338,7 @@ function buildGraph(input: RunAgentInput) {
 
   return new StateGraph(MessagesAnnotation)
     .addNode("answer", async (state) => ({
-      messages: [
-        withVisibleReply((await bound.invoke(state.messages)) as AIMessage),
-      ],
+      messages: [await bound.invoke(state.messages)],
     }))
     .addNode("tools", async (state) => {
       const last = state.messages.at(-1) as AIMessage;
@@ -386,37 +390,6 @@ function buildGraph(input: RunAgentInput) {
     .compile();
 }
 
-/**
- * A reply with nothing in it ends the run in silence, so give it a line to end on.
- *
- * When a model returns no text and no tool call, the conditional edge sees no calls and returns END,
- * and the person is left looking at a turn that produced no answer and no reason. Strict providers do
- * this on a run they will not answer. Re-asking tends to get the same empty reply, so rather than
- * loop, the run ends on a visible message saying what happened. Only a genuinely empty reply is
- * touched: a reply with any text, or any tool call, is returned exactly as the model produced it.
- */
-function withVisibleReply(reply: AIMessage): AIMessage {
-  const hasCall = (reply.tool_calls ?? []).length > 0;
-  if (hasCall || hasVisibleText(reply.content)) return reply;
-  return new AIMessage({ content: EMPTY_REPLY_FALLBACK });
-}
-
-function hasVisibleText(content: AIMessage["content"]): boolean {
-  if (typeof content === "string") return content.trim().length > 0;
-  if (Array.isArray(content)) {
-    return content.some((part) =>
-      typeof part === "string"
-        ? part.trim().length > 0
-        : typeof (part as { text?: unknown }).text === "string" &&
-          (part as { text: string }).text.trim().length > 0,
-    );
-  }
-  return false;
-}
-
-const EMPTY_REPLY_FALLBACK =
-  "The model returned an empty reply and the run ended without an answer. This can happen with a strict provider; try asking again.";
-
 async function runAgent(input: RunAgentInput): Promise<Response> {
   const encoder = new EventEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -431,169 +404,19 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
         runId: input.runId,
       } as BaseEvent);
 
-      /*
-       * One message id per stretch of prose.
-       *
-       * A run is several turns now: the Bot may speak, call a tool, read the result and speak
-       * again. Reusing one id reopens a message the surface has already closed, and the second half
-       * of the answer is dropped.
-       */
-      let messageIndex = 0;
-      let messageId = `msg_${input.runId}_0`;
-      let textOpen = false;
-      const closeText = () => {
-        if (!textOpen) return;
-        send({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
-        textOpen = false;
-        messageIndex += 1;
-        messageId = `msg_${input.runId}_${messageIndex}`;
-      };
+      // The graph is built and its event stream opened inside `streamRun`, so a failure doing either
+      // is reported as RUN_ERROR through the same path as a failure mid-stream.
+      await streamRun(
+        async () =>
+          buildGraph(input).streamEvents(
+            { messages: toLangChainMessages(input, PROVIDER) },
+            { version: "v2" },
+          ),
+        input,
+        send,
+      );
 
-      try {
-        const graph = buildGraph(input);
-        const events = await graph.streamEvents(
-          { messages: toLangChainMessages(input) },
-          { version: "v2" },
-        );
-
-        // Accumulated rather than emitted per chunk, because a tool call's arguments arrive in
-        // fragments and AG-UI wants one call. The framework hands back assembled `tool_calls` on the
-        // final message, which is precisely the plumbing agent-bot does by hand.
-        /** Calls seen on the way past, so a result can be paired with the arguments it answered. */
-        const pending = new Map<
-          string,
-          { name: string; args: Record<string, unknown> }
-        >();
-
-        for await (const event of events) {
-          if (event.event === "on_chat_model_stream") {
-            const chunk = event.data?.chunk as
-              | { content?: unknown }
-              | undefined;
-            /*
-             * Both content shapes, because the API decides which one arrives.
-             *
-             * Chat completions streams a string. The Responses API streams content blocks, so
-             * reading only the string shape dropped every delta and the run finished having said
-             * nothing — the "no text at all on gpt-5.6-*" this repository documents in
-             * `.env.example` and `docker-compose.yml`.
-             */
-            const text = textOfChunk(chunk?.content);
-            if (!text) continue;
-
-            if (!textOpen) {
-              send({
-                type: "TEXT_MESSAGE_START",
-                messageId,
-                role: "assistant",
-              } as BaseEvent);
-              textOpen = true;
-            }
-            send({
-              type: "TEXT_MESSAGE_CONTENT",
-              messageId,
-              delta: text,
-            } as BaseEvent);
-          }
-
-          if (event.event === "on_chat_model_end") {
-            const output = event.data?.output as AIMessage | undefined;
-            if (output) {
-              for (const call of output.tool_calls ?? []) {
-                pending.set(call.id ?? call.name, {
-                  name: call.name,
-                  args: (call.args ?? {}) as Record<string, unknown>,
-                });
-              }
-            }
-          }
-
-          /*
-           * The tools node finished. Reported here, in order, rather than collected for the end: the
-           * surface draws a conversation, and a call arriving after the answer it informed reads as
-           * though the Bot spoke first and did the work afterwards.
-           */
-          if (event.event === "on_chain_end" && event.name === "tools") {
-            const output = event.data?.output as
-              | { messages?: { tool_call_id?: string; content?: unknown }[] }
-              | undefined;
-            // Prose and tool calls cannot interleave inside one message.
-            closeText();
-            for (const message of output?.messages ?? []) {
-              const id = message.tool_call_id ?? "";
-              const call = pending.get(id);
-              if (!call) continue;
-              send({
-                type: "TOOL_CALL_START",
-                toolCallId: id,
-                toolCallName: call.name,
-              } as BaseEvent);
-              send({
-                type: "TOOL_CALL_ARGS",
-                toolCallId: id,
-                delta: JSON.stringify(call.args),
-              } as BaseEvent);
-              send({ type: "TOOL_CALL_END", toolCallId: id } as BaseEvent);
-              send({
-                type: "TOOL_CALL_RESULT",
-                messageId: `${id}-result`,
-                toolCallId: id,
-                content: String(message.content ?? ""),
-                role: "tool",
-              } as BaseEvent);
-              pending.delete(id);
-            }
-          }
-        }
-
-        closeText();
-
-        /*
-         * Calls this process did not run, which is what a tool the surface owns looks like from here.
-         *
-         * The graph ends the run on one of those rather than inventing a result, so the `tools` node
-         * never fires and the loop above never reports the call. Without this the run is a clean
-         * RUN_STARTED/RUN_FINISHED pair carrying nothing at all: the person's message sits there with
-         * no answer under it, the surface never learns there was a browser action to execute, and
-         * because an empty run is not an error by the protocol, nothing says so. No result is sent
-         * with them; producing it is the surface's half, and it begins the next run holding it.
-         */
-        for (const [id, call] of pending) {
-          send({
-            type: "TOOL_CALL_START",
-            toolCallId: id,
-            toolCallName: call.name,
-          } as BaseEvent);
-          send({
-            type: "TOOL_CALL_ARGS",
-            toolCallId: id,
-            delta: JSON.stringify(call.args),
-          } as BaseEvent);
-          send({ type: "TOOL_CALL_END", toolCallId: id } as BaseEvent);
-        }
-        pending.clear();
-
-        send({
-          type: "RUN_FINISHED",
-          threadId: input.threadId,
-          runId: input.runId,
-        } as BaseEvent);
-      } catch (error) {
-        // A text message left open would strand the surface mid-message, so it is closed before the
-        // error is reported. agent-bot has the same hazard and the same ordering.
-        if (textOpen) {
-          send({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
-        }
-        send({
-          type: "RUN_ERROR",
-          message:
-            error instanceof Error
-              ? error.message
-              : "The Bot could not answer.",
-        } as BaseEvent);
-      } finally {
-        controller.close();
-      }
+      controller.close();
     },
   });
 
@@ -634,4 +457,4 @@ serve({
   },
 });
 
-console.info(`agent-langgraph listening on http://localhost:${PORT}/ag-ui`);
+console.info(`agent-langgraph listening on http://127.0.0.1:${PORT}/ag-ui`);

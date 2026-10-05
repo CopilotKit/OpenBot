@@ -5,6 +5,7 @@ import {
   type RoutineTools,
   useRoutineTools,
 } from "../src/plugins/builtin-routines";
+import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 import {
   type Routine,
   RoutineNotFoundError,
@@ -104,14 +105,46 @@ afterEach(() => {
   useRoutineTools(null);
 });
 
+describe("a list too long for one result", () => {
+  test("is cut between characters, never through one", async () => {
+    const listing = (instruction: string) =>
+      recordingTools({
+        async listFor() {
+          return [{ ...SUMMARY, instruction }];
+        },
+      });
+
+    // Where the instruction starts in a listing, measured rather than assumed, so the emoji's high
+    // half lands on the last code unit the limit keeps whatever words surround it.
+    listing("MARKER");
+    const probe = await callTool(CONNECTION, "list_routines", {});
+    const before = probe.text.indexOf("MARKER");
+    expect(before).toBeGreaterThan(-1);
+
+    const filler = "a".repeat(MAX_RESULT_CHARS - 1 - before);
+    listing(`${filler}😀tail`);
+    const result = await callTool(CONNECTION, "list_routines", {});
+
+    expect(result.truncated).toBe(true);
+    expect(result.text.split("\n\n[truncated")[0]).toBe(
+      `${probe.text.slice(0, before)}${filler}`,
+    );
+  });
+});
+
 describe("the tool list", () => {
-  test("is the four routine tools, named exactly", async () => {
+  test("is the four routine tools and the five trigger tools, named exactly", async () => {
     const tools = await listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
       "create_routine",
       "list_routines",
       "update_routine",
       "delete_routine",
+      "create_trigger",
+      "list_triggers",
+      "pause_trigger",
+      "resume_trigger",
+      "delete_trigger",
     ]);
     for (const tool of tools) {
       expect(tool.description.length).toBeGreaterThan(0);
@@ -150,7 +183,7 @@ describe("the tool list", () => {
     // that refused without one would store zero tools and Routines would advertise nothing.
     useRoutineTools(null);
     const tools = await listTools();
-    expect(tools).toHaveLength(4);
+    expect(tools).toHaveLength(9);
   });
 });
 

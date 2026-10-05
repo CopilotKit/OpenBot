@@ -1,22 +1,73 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { electron } from "@better-auth/electron";
+import { expo } from "@better-auth/expo";
+import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { createEnterpriseStore } from "../admin/settings-store";
 import type { AuditEventInput, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
 import {
   accounts,
+  scimConnectionBindings,
+  scimGroupMembers,
+  scimGroups,
+  scimIdentityTombstones,
+  scimProjectionGrants,
+  scimSubjects,
+  scimUsers,
   sessions,
   ssoProviders,
   users,
   verifications,
 } from "../db/schema";
+import { DOMAIN_REFUSAL_MESSAGE, emailDomainAllowed } from "./email-domain";
 import { encryptSsoConfig } from "./encrypt-sso-config";
-import { applyConfiguredAdmin, seedRole } from "./roles";
+import { applyConfiguredAdmin, isConfiguredAdmin, seedRole } from "./roles";
+import { recordProvisioned, scimOptions } from "./scim";
+
+/** What a person sees when SSO is required and they tried another way in. */
+/** The native app's custom scheme (mobile/app.config.ts). */
+const NATIVE_APP_ORIGIN = "openbotmobile://";
+
+export const SSO_REQUIRED_MESSAGE =
+  "This deployment requires signing in through your company's identity provider. Enter your work email to continue.";
+
+/**
+ * SSO-required mode, decided on every sign-in, account link and account creation.
+ *
+ * Better Auth's `validateUserInfo` is told how the identity arrived (`oauth` for Google, Microsoft
+ * and Okta-by-OAuth; `sso-oidc` / `sso-saml` for a registered enterprise provider; `scim` for a
+ * directory). While `sso_required` is on, only the last three are admitted.
+ *
+ * BREAK-GLASS: an address in INITIAL_ADMIN_EMAILS may still sign in another way, so a broken or
+ * misconfigured identity provider cannot lock every administrator out. Each such sign-in is written
+ * as `session.break_glass`. Fails closed: settings that cannot be read refuse the sign-in.
+ */
+export async function decideSignInMethod(input: {
+  method: string;
+  email: string | undefined;
+  ssoRequired: () => Promise<boolean>;
+  initialAdminEmails: readonly string[];
+}): Promise<"allow" | "break_glass" | "refuse"> {
+  if (["sso-oidc", "sso-saml", "scim"].includes(input.method)) return "allow";
+  let required: boolean;
+  try {
+    required = await input.ssoRequired();
+  } catch {
+    required = true;
+  }
+  if (!required) return "allow";
+  if (input.email && isConfiguredAdmin(input.email, input.initialAdminEmails)) {
+    return "break_glass";
+  }
+  return "refuse";
+}
 
 /**
  * Write a row about a sign-in, and never let the writing of it stop one.
@@ -37,6 +88,30 @@ async function record(
       JSON.stringify({
         type: "sign-in-audit-write-failed",
         eventType: event.eventType,
+        error: String(error),
+      }),
+    );
+  }
+}
+
+export async function stampSignIn(
+  database: Database,
+  userId: string,
+  at: Date,
+): Promise<void> {
+  try {
+    await database
+      .update(users)
+      .set({
+        lastSignedInAt: sql`greatest(coalesce(${users.lastSignedInAt}, ${at}), ${at})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "sign-in-stamp-write-failed",
+        userId,
         error: String(error),
       }),
     );
@@ -125,7 +200,28 @@ export function createAuth(
    * They converge again at the browser: `signIn.social({ provider })` starts all three, so the
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
+  const scimDeps = {
+    database,
+    initialAdminEmails: authConfig.initialAdminEmails,
+    ...(auditStore ? { auditStore } : {}),
+  };
+  const scimPluginOptions = scimOptions(scimDeps);
+  const enterpriseStore = createEnterpriseStore(database);
+
+  /*
+   * The native app signs in through its custom scheme, and the Expo plugin appends the session cookie
+   * to that redirect. Any Android app can register the same scheme, so the scheme is trusted only on
+   * a deployment that runs the native app (EXPO_PROJECT_ID, as for push). Elsewhere a sign-in can
+   * never be sent there.
+   */
+  const nativeApp = Boolean(process.env.EXPO_PROJECT_ID?.trim());
   const plugins = [
+    ...(nativeApp ? [expo()] : []),
+    /*
+     * SCIM 2.0 at /api/auth/scim/v2, only when SCIM_BEARER_TOKEN is set. See scim.ts.
+     */
+    ...(scimPluginOptions ? [scim(scimPluginOptions)] : []),
+    electron({ clientID: "openbot-desktop", codeExpiresIn: 120 }),
     ...(authConfig.okta
       ? [
           genericOAuth({
@@ -164,9 +260,69 @@ export function createAuth(
   ];
 
   return betterAuth({
+    user: {
+      additionalFields: {
+        preferences: {
+          type: "json",
+          required: false,
+          // Settings validates and patches this field for both SSO and single-user mode.
+          input: false,
+        },
+        /*
+         * Directory groups, written by SCIM's projection (scim.ts) and read by the per-group
+         * capability switches and network policies. Never accepted from a sign-in request.
+         */
+        groups: {
+          type: "string[]",
+          required: false,
+          input: false,
+        },
+      },
+      validateUserInfo: async ({ user, source }) => {
+        const verdict = await decideSignInMethod({
+          method: source.method,
+          email: typeof user.email === "string" ? user.email : undefined,
+          ssoRequired: async () =>
+            (await enterpriseStore.settings()).ssoRequired,
+          initialAdminEmails: authConfig.initialAdminEmails,
+        });
+        if (verdict === "allow") return;
+        const provider = source.oauth?.providerId ?? source.method;
+        if (verdict === "break_glass") {
+          await record(auditStore, {
+            eventType: "session.break_glass",
+            targetType: "person",
+            payload: {
+              email: user.email,
+              provider,
+              action: source.action,
+              reason:
+                "SSO is required, and this address is named in INITIAL_ADMIN_EMAILS, so it was let in another way",
+            },
+          });
+          return;
+        }
+        await record(auditStore, {
+          eventType: "session.refused",
+          targetType: "person",
+          payload: {
+            email: user.email,
+            provider,
+            reason: "SSO is required on this deployment",
+          },
+        });
+        return {
+          error: "sso_required",
+          errorDescription: SSO_REQUIRED_MESSAGE,
+        };
+      },
+    },
     baseURL: authConfig.baseUrl,
     secret: authConfig.secret,
-    trustedOrigins: authConfig.trustedOrigins,
+    trustedOrigins: [
+      ...authConfig.trustedOrigins,
+      ...(nativeApp ? [NATIVE_APP_ORIGIN] : []),
+    ],
     /*
      * Wrapped, so a company's client secret is ciphertext in the column.
      *
@@ -178,7 +334,22 @@ export function createAuth(
       drizzleAdapter(database, {
         provider: "pg",
         usePlural: true,
-        schema: { users, sessions, accounts, verifications, ssoProviders },
+        schema: {
+          users,
+          sessions,
+          accounts,
+          verifications,
+          ssoProviders,
+          scimConnectionBindings,
+          scimIdentityTombstones,
+          scimSubjects,
+          scimUsers,
+          scimProjectionGrants,
+          scimGroups,
+          scimGroupMembers,
+        },
+        // The SCIM plugin needs interactive transactions; nothing else here asked for them.
+        transaction: Boolean(scimPluginOptions),
       }),
       config.keyEncryptionKey,
     ),
@@ -220,6 +391,25 @@ export function createAuth(
            * list is keyed on the address rather than the id.
            */
           before: async (user) => {
+            /*
+             * Asked before the deny list because it needs no query, and before the account exists
+             * because an address this deployment does not admit must not leave a user row behind.
+             */
+            if (
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (await isRevoked?.(user.email)) {
               // The row a removed person coming back produces. Nothing else records the attempt:
               // no user row is written and no session exists to look at afterwards.
@@ -237,7 +427,7 @@ export function createAuth(
             }
             return { data: user };
           },
-          after: async (user) => {
+          after: async (user, context) => {
             /*
              * Who is an administrator is decided by email, not by which provider signed them in. A
              * deployment mid-migration has the same person arriving through Entra one week and
@@ -249,6 +439,9 @@ export function createAuth(
               user.email,
               authConfig.initialAdminEmails,
             );
+            if (context?.path?.startsWith("/scim")) {
+              await recordProvisioned(scimDeps, user);
+            }
           },
         },
       },
@@ -264,6 +457,29 @@ export function createAuth(
               .from(users)
               .where(eq(users.id, session.userId))
               .limit(1);
+            /*
+             * And again for an account that already exists, for the reason the deny list is checked
+             * twice: the user hook fires only for a new one, so a domain later removed from the
+             * list would otherwise keep admitting everybody who had already signed in once.
+             */
+            if (
+              user &&
+              !emailDomainAllowed(user.email, authConfig.allowedEmailDomains)
+            ) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                targetId: session.userId,
+                actorUserId: session.userId,
+                payload: {
+                  email: user.email,
+                  reason: "email domain not admitted by this deployment",
+                },
+              });
+              throw new APIError("FORBIDDEN", {
+                message: DOMAIN_REFUSAL_MESSAGE,
+              });
+            }
             if (user && (await isRevoked?.(user.email))) {
               await record(auditStore, {
                 eventType: "session.refused",
@@ -282,6 +498,8 @@ export function createAuth(
             return { data: session };
           },
           after: async (session) => {
+            await stampSignIn(database, session.userId, session.createdAt);
+
             /*
              * The configured floor, re-applied on every sign-in. Editing the list has to mean
              * something for people already in the table, or adding yourself after you first signed

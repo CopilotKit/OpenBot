@@ -128,23 +128,59 @@ export function readChosenSkills(
   answer: string,
   skills: readonly SelectableSkill[],
 ): string[] | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const chosen = (parsed as { skills?: unknown }).skills;
-  if (!Array.isArray(chosen)) return null;
+  /*
+   * Every complete object with a skills list, not the answer as a whole.
+   *
+   * `response_format` asks for bare JSON and does not guarantee it: Anthropic's OpenAI-compatible
+   * endpoint ignores the field, and a model left to itself often fences its object or leads with a
+   * sentence. Parsed whole, every such answer read as a selector that could not say, and a Bot on
+   * that model was offered its entire catalogue on every run. A greedy brace match also swallows
+   * two adjacent objects into invalid JSON. Unioning their lists avoids dropping a skill when the
+   * model revises its selection. The router at `server/src/routing/classify.ts` still uses the
+   * greedy match; this scanner is local to skill selection. An answer with no usable object is null.
+   */
   const known = new Set(skills.map((skill) => skill.slug));
-  return [
-    ...new Set(
-      chosen.filter(
-        (slug): slug is string => typeof slug === "string" && known.has(slug),
-      ),
-    ),
-  ];
+  const selected = new Set<string>();
+  let foundSkillsList = false;
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < answer.length; index += 1) {
+    const char = answer[index];
+    if (depth === 0) {
+      if (char === "{") {
+        start = index;
+        depth = 1;
+      }
+      continue;
+    }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth !== 0) continue;
+      try {
+        const parsed: unknown = JSON.parse(answer.slice(start, index + 1));
+        if (typeof parsed !== "object" || parsed === null) continue;
+        const chosen = (parsed as { skills?: unknown }).skills;
+        if (!Array.isArray(chosen)) continue;
+        foundSkillsList = true;
+        for (const slug of chosen) {
+          if (typeof slug === "string" && known.has(slug)) selected.add(slug);
+        }
+      } catch {
+        // A brace pair in the surrounding prose is not necessarily JSON.
+      }
+    }
+  }
+  return foundSkillsList ? [...selected] : null;
 }
 
 /**
@@ -180,11 +216,14 @@ export async function selectTools<Tool extends SelectableTool>(input: {
   text: string;
   choose: (
     prompt: string,
+    signal?: AbortSignal,
   ) => Promise<string | null> | (string | null) | Promise<never>;
+  signal?: AbortSignal;
   /** Overridable so a deployment that measured its own knee is not stuck with ours. */
   floor?: number;
 }): Promise<Selection<Tool>> {
   const { tools, skills, text } = input;
+  input.signal?.throwIfAborted();
   const floor = input.floor ?? SELECTION_FLOOR;
   const everything = (reason: SelectionReason): Selection<Tool> => ({
     offered: [...tools],
@@ -204,10 +243,16 @@ export async function selectTools<Tool extends SelectableTool>(input: {
 
   let chosen: string[] | null = null;
   try {
-    const answer = await input.choose(selectionPrompt(text, skills));
+    const answer = await input.choose(
+      selectionPrompt(text, skills),
+      input.signal,
+    );
+    input.signal?.throwIfAborted();
     chosen =
       typeof answer === "string" ? readChosenSkills(answer, skills) : null;
   } catch {
+    // A user stopping the run is not an unavailable selector. Never start a fallback model run.
+    input.signal?.throwIfAborted();
     // A selector that failed is not an error a person should ever see. It costs this run the
     // narrowing and nothing else, which is the behaviour that shipped before it existed.
     chosen = null;

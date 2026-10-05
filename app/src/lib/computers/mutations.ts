@@ -1,9 +1,19 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { clearActivity } from "./activity";
 import { type ActionPolicy, computerKeys } from "./queries";
 
-/** Stopping frees the container; resetting also deletes the browser profile. */
-export type ComputerAction = "stop" | "reset";
+/**
+ * Stopping frees the container; resetting also deletes the browser profile; updating moves the
+ * computer onto the current image and keeps the profile.
+ */
+export type ComputerAction = "stop" | "reset" | "update";
+
+const PAST: Record<ComputerAction, string> = {
+  stop: "stopped",
+  reset: "reset",
+  update: "updated",
+};
 
 function invalidateComputers(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: computerKeys.all });
@@ -19,11 +29,15 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
         `/api/computers/${encodeURIComponent(variables.botId)}/computers/${variables.action}`,
         {
           method: "POST",
-          fallback: `The computer could not be ${variables.action}.`,
+          fallback: `The computer could not be ${PAST[variables.action]}.`,
         },
       );
     },
-    onSuccess: () => invalidateComputers(queryClient),
+    /** A reset deletes the profile those commands ran on; a stop keeps it, so only reset forgets. */
+    onSuccess: (_result, variables) => {
+      if (variables.action === "reset") clearActivity(variables.botId);
+      return invalidateComputers(queryClient);
+    },
   });
 }
 

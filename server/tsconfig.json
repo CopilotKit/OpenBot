@@ -3,9 +3,31 @@
   // `scripts` too: the migration runner and the culler entrypoint ship in the image, so they are
   // product code that happens to live outside `src`.
   //
+  // `../scripts/composio-smoke.ts` FOR THE SAME REASON, one directory further out. It ships in the
+  // image — the Dockerfile copies that one file and no other — it is what `docs/plugins/composio.md`
+  // tells an operator to run when Composio misbehaves, and it imports `src/plugins/composio*`
+  // directly, so it is this workspace's code that happens to live at the repository root. Nothing
+  // else covered it: the root `scripts/` directory is in no workspace, and `bun run typecheck` is
+  // `bun run --filter '*' typecheck`, which matches workspaces only and never the root manifest.
+  //
+  // THE FILE AND NOT THE DIRECTORY, which is the line the Dockerfile already draws. The rest of
+  // `../scripts` is the laptop's, and `check-rendered-chart.ts` and `test-ci.ts` carry no import and
+  // no export, so TypeScript reads them as global scripts rather than as modules and taking the
+  // whole directory in fails the build on five errors. Three of them are that, all TS1375: a file
+  // that is not a module may not use top-level `await`, and both files do.
+  //
+  // THE OTHER TWO ARE NOT THE TWO SCRIPTS COLLIDING WITH EACH OTHER, which is what this comment used
+  // to say and what the code does not do — `status` appears in `test-ci.ts` and nowhere else in that
+  // directory. Its `const status = await proc.exited` collides with the AMBIENT `status`, which
+  // `lib.dom.d.ts` declares as a `string` and which is in scope because nothing here narrows `lib`:
+  // TS2451 for the redeclaration, and then TS2367 on the line below it, because comparing the lib's
+  // `string` with `0` is two types that do not overlap. A global shared with the standard library,
+  // not with a sibling. Named individually the way `app/tsconfig.json` names the two `shared` files
+  // it reaches for.
+  //
   // `tests` is NOT here yet, and that is a known gap rather than a decision: the suite has never been
   // type-checked and turning it on surfaces a few hundred years of accumulated `any`. It is what let
   // a test pass an options object where a connection string belongs and hear nothing back. Its own
   // change, because it is a sweep and not a fix.
-  "include": ["src", "scripts"]
+  "include": ["src", "scripts", "../scripts/composio-smoke.ts"]
 }

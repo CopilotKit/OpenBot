@@ -31,11 +31,15 @@ export function matchesToken(expected: string, offered: string): boolean {
  * parameter.
  */
 export function offeredToken(headers: Headers, url: URL): string {
-  if (url.pathname === "/stream") return url.searchParams.get("token") ?? "";
+  // The header path trims; the query path must too, or `?token=%20SECRET` 401s while the same
+  // value in a header succeeds and the failure looks stream-specific.
+  if (url.pathname === "/stream")
+    return url.searchParams.get("token")?.trim() ?? "";
   const header = headers.get("x-openbot-computer-token")?.trim();
   if (header) return header;
   const authorization = headers.get("authorization")?.trim() ?? "";
-  return authorization.replace(/^Bearer /i, "");
+  // The remainder needs trimming too: `Bearer   SECRET  ` left leading spaces behind.
+  return authorization.replace(/^Bearer /i, "").trim();
 }
 
 /**
@@ -69,8 +73,15 @@ const ACTING_PATHS = new Set([
   "/scroll",
   "/exec",
   "/files/write",
+  // Typing a person's login into the page. Refused while they hold the wheel, like any other typing.
+  "/sign-in/fill",
 ]);
 
 export function actsOnTheComputer(pathname: string): boolean {
   return ACTING_PATHS.has(pathname);
+}
+
+/** Only page mutations need a fresh browser snapshot after handback. */
+export function mutatesBrowser(pathname: string): boolean {
+  return ["/navigate", "/click", "/type", "/key", "/scroll"].includes(pathname);
 }

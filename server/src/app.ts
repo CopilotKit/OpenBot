@@ -1,14 +1,35 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
-import { authoriseAgentCall, sameToken } from "./agents/callback-token";
+import { MAX_IMAGE_BYTES } from "../../shared/attachments";
+import { enterpriseControls } from "./admin/controls";
+import { createEnterpriseGate } from "./admin/gate";
+import { createEnterpriseAdminRoutes } from "./admin/routes";
+import {
+  authoriseAgentCall,
+  parseAgentToolCallInput,
+  type RunAssertion,
+  sameToken,
+} from "./agents/callback-token";
+import { computerAccessCheck } from "./agents/computer-access";
+import {
+  type BotLifecycleServices,
+  createBotLifecycleRoutes,
+} from "./agents/lifecycle-routes";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { createApprovalRoutes } from "./approvals/routes";
+import type { ApprovalService } from "./approvals/service";
 import {
+  type AuditEventType,
+  type AuditInitiator,
+  AuditQueryError,
   type AuditReader,
   type AuditStore,
   auditQueryFromUrl,
+  DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "./audit";
 import { createDevRequireUser } from "./auth/dev-actor";
@@ -20,7 +41,13 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import { desktopAuthPage } from "./auth/native-browser";
+import {
+  createAttachmentRoutes,
+  createChannelAttachmentRoutes,
+} from "./channels/attachments";
 import type { ChannelEventHub } from "./channels/events";
+import { createGroupRoutes, type GroupConversations } from "./channels/group";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
@@ -34,18 +61,111 @@ import type { PageFrameStore } from "./computer/page-frames";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
-import type { CredentialAdminService, CredentialInput } from "./credentials";
+import {
+  type CredentialAdminService,
+  type CredentialInput,
+  CredentialRefusedError,
+} from "./credentials";
+import type { Database } from "./db/client";
+import { withoutStatement } from "./db/query-failure";
+import {
+  createDeliveryRoutes,
+  createDeliveryWebhookRoutes,
+} from "./delivery/routes";
+import type { DemonstrationRecorder } from "./demonstrations/recording";
+import { createDemonstrationRoutes } from "./demonstrations/routes";
+import type { DemonstrationStore } from "./demonstrations/store";
+import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
+import { createTranscriptionProvider } from "./dictation/provider";
+import { createDictationRoutes } from "./dictation/routes";
+import type { HostAccessBroker } from "./host-access/broker";
+import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
-import type { PeopleStore } from "./people/store";
+import {
+  createLearningRoutes,
+  type LearningAdminDependencies,
+} from "./learning/routes";
+import type { MemoryIngestion } from "./memory/ingestion";
+import { createMemoryRoutes } from "./memory/routes";
+import type { MemoryStore } from "./memory/store";
+import { parsePageLimit } from "./paging";
+import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
+import type { SignInService } from "./passwords/service";
+import type { OnboardingStore } from "./people/onboarding";
+import { MAX_PAGE, type PeopleStore } from "./people/store";
+import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
-import type { PluginStore } from "./plugins/store";
-import { REFUSAL_MARKER } from "./plugins/tools";
+import {
+  isDeploymentFault,
+  PluginRefusedError,
+  type PluginStore,
+} from "./plugins/store";
+import { REFUSAL_MARKER, vendorAnswer } from "./plugins/tools";
+import type { ProactiveEngine } from "./proactive/engine";
+import { createProactiveRoutes } from "./proactive/routes";
+import type { ProactiveStore } from "./proactive/store";
+import {
+  type ModelProviderProxy,
+  mountProviderOAuthProxy,
+} from "./provider-oauth";
+import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
+import type { ResponsibilityEngine } from "./responsibilities/engine";
+import { createGithubResponsibilityRoutes } from "./responsibilities/github";
+import { createResponsibilityRoutes } from "./responsibilities/routes";
+import type { TriggerStore } from "./responsibilities/triggers";
+import type { ResponsibilityStore } from "./responsibilities/types";
 import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
+import type { SelfHostBanner } from "./self-host-banner";
+import { createTeamBotRoutes } from "./team-bots/routes";
+import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
+import {
+  INSTRUCTIONS_LIMIT,
+  InstructionsTooLongError,
+  type UserInstructionsStore,
+} from "./user-instructions";
+import type { UserPreferencesStore } from "./user-preferences";
+import { userPreferencesRoutes } from "./user-preferences-routes";
+import { createVoiceProvider } from "./voice/provider";
+import { createVoiceRoutes } from "./voice/routes";
+import type { VoiceSessionServices } from "./voice/session-routes";
+
+/**
+ * How much of a multipart body is boundary, headers and other fields rather than file.
+ *
+ * Generous on purpose. Measured against what the composer actually sends — one `file` part and one
+ * `uploadGroup` field — the framing is 360 bytes for a short filename and 614 for a 255-character
+ * one; a filename full of non-ASCII percent-encodes to a few times that and is still nowhere near
+ * this. 64 KiB is therefore an allowance no honest request can exhaust, and it raises the amount of
+ * memory a hostile request can pin by 0.8%, which was never the number that mattered.
+ */
+const MULTIPART_FRAMING_ALLOWANCE = 64 * 1024;
+
+/**
+ * The ceiling on the whole POST body of a channel attachment upload.
+ *
+ * THIS IS NOT `MAX_IMAGE_BYTES`, AND THE DIFFERENCE IS THE POINT. Every other gate on this path —
+ * the composer's pre-check, `attachmentsConfigFor`'s `maxSize`, the handler's own 413 — measures
+ * THE FILE. This one measures THE ENVELOPE: `bodyLimit` runs before anything has parsed the
+ * multipart body, so all it can count is bytes on the wire, file and framing together.
+ *
+ * Set to `MAX_IMAGE_BYTES` exactly, those two units were silently treated as one, and the ~360
+ * bytes of boundary and headers wrapped around a file at the documented ceiling were enough to push
+ * the body over it: an 8,388,608-byte image — the exact number the composer publishes as the limit —
+ * was refused 413, while 8,388,308 bytes went through. A limit nobody can reach is a limit that is
+ * wrong, so the envelope's ceiling is the file's ceiling plus room for the envelope.
+ *
+ * The slack costs nothing it was protecting against. A body between the two numbers is still read
+ * into memory, and then still refused by the handler once `file.size` is a thing anybody can look
+ * at — which is where a text upload, whose real limit is `MAX_FILE_BYTES`, is refused too. What the
+ * door exists to stop is the 2GB body, and it still does.
+ */
+export const UPLOAD_BODY_LIMIT_BYTES =
+  MAX_IMAGE_BYTES + MULTIPART_FRAMING_ALLOWANCE;
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -53,6 +173,19 @@ import type { PackageStatusReader } from "./tenant-package";
  * The address is on the row rather than only the user id, because the id means nothing to a person
  * reading the trail a year later and the user row may be gone by then.
  */
+export type DeploymentToolCallInput = {
+  name: string;
+  args: Record<string, unknown>;
+  botId: string;
+  actorId: string;
+  initiator?: AuditInitiator;
+  /** Full verified scope. A caller cannot choose a different source thread, depth or lease. */
+  run: RunAssertion;
+};
+export type DeploymentToolCaller = (
+  input: DeploymentToolCallInput,
+) => Promise<{ text: string; isError: boolean } | null>;
+
 async function recordPersonEvent(
   auditStore: AuditStore | undefined,
   context: { var: AppVariables },
@@ -191,8 +324,107 @@ export function createApp(
    * has no door for this at all, not a locked one.
    */
   routineStore?: RoutineStore,
+  /**
+   * Where each person is in first-run onboarding.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves /api/me reporting no onboarding to track, which is the correct degraded
+   * behaviour: a deployment that cannot read the status must not lock everybody behind a gate
+   * nothing can finish.
+   */
+  onboardingStore?: OnboardingStore,
+  /**
+   * One person's standing instructions, which every built-in coworker they run is told.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes answering 503 rather than "you have written none". The difference
+   * matters on exactly this screen: a person who cannot be told what they saved would otherwise be
+   * shown an empty box, and the obvious thing to do with an empty box is fill it in again.
+   */
+  userInstructions?: UserInstructionsStore,
+  /**
+   * The database behind a channel's staged and sent files: upload, fetch, delete.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, the same
+   * degraded shape every other optional store here takes: a deployment that never built the
+   * database has no door for this at all, not a locked one.
+   */
+  attachmentDatabase?: Database,
+  /** Session-only broker for native owner-approved host folder access. */
+  hostAccessBroker?: HostAccessBroker,
+  /** Fresh desktop-only bearer token for the native host worker poll/result channel. */
+  desktopHostToken?: string,
+  /** Server-owned tools that are not MCP but use the same signed agent callback route. */
+  deploymentToolCaller?: DeploymentToolCaller,
+  /**
+   * The broker behind apps a person connects through Composio rather than an administrator
+   * registering an MCP server.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Passed in already built, like the copilot handler and the intent router, so this module never
+   * imports the vendor's package. Absent leaves the plugin surface reporting that no broker is
+   * configured, which is the correct degraded behaviour: a deployment with no Composio API key has
+   * no app directory to offer, rather than one that lists apps nobody can connect.
+   */
+  composio?: { broker: ComposioBroker },
+  /** Native model OAuth stays server-side; callers hold only a separate local bearer. */
+  modelProviderProxy?: ModelProviderProxy,
+  userPreferences?: UserPreferencesStore,
+  voiceSessions?: VoiceSessionServices,
+  learning?: LearningAdminDependencies,
+  coworker?: {
+    demonstrations?: {
+      store: DemonstrationStore;
+      recorder: DemonstrationRecorder;
+    };
+    approvals?: ApprovalService;
+    /** The private sign-in form and the Passwords vault. See passwords/service.ts. */
+    passwords?: SignInService;
+    delivery?: {
+      authenticated: Omit<
+        Parameters<typeof createDeliveryRoutes>[0],
+        "requireUser"
+      >;
+      webhooks: Parameters<typeof createDeliveryWebhookRoutes>[0];
+    };
+    memory?: { store: MemoryStore; ingestion: MemoryIngestion };
+    proactive?: { store: ProactiveStore; engine: ProactiveEngine };
+    responsibilities?: {
+      store: ResponsibilityStore;
+      engine: ResponsibilityEngine;
+      bindings: ResponsibilityBindingStore;
+      /** Event triggers: owner management, public signed ingress and optional SES/SNS email. */
+      triggers?: {
+        store: TriggerStore;
+        emailDomain: string | null;
+        ingressRoutes: Hono;
+        emailRoutes: Hono | null;
+      };
+    };
+    groups?: GroupConversations;
+    teamBots?: TeamBots;
+    /** Pause, reset, Activity and attention for a person's own Bots. See agents/lifecycle.ts. */
+    lifecycle?: BotLifecycleServices;
+  },
+  /**
+   * Whether to offer help self-hosting, which also hides it from a deployment that pays for
+   * Intelligence. Absent falls back to the operator's switch alone, so a test or a build without the
+   * resolver still answers from `config.selfHostBanner` rather than asking the network.
+   */
+  selfHostBanner?: SelfHostBanner,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
+  mountDesktopConnectionFailure(app, desktopHostToken);
+  mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
@@ -202,6 +434,23 @@ export function createApp(
     context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
+      /*
+       * Whether a Bot may answer with an interface it wrote itself.
+       *
+       * Projected because the browser holds half of this capability. The runtime middleware turns a
+       * generated interface into the events that paint it, and the SDK's provider registers the tool
+       * that produces one; a deployment that switched the runtime half off while the browser went on
+       * offering the tool would have Bots writing interfaces nothing ever draws. One flag, read by
+       * both halves, so off means off.
+       */
+      generativeUi: config.generativeUi,
+      // Whether to offer help self-hosting OpenBot. A fork running it for its own people turns it off,
+      // and a deployment that pays for Intelligence never sees it. See self-host-banner.ts.
+      selfHostBanner: selfHostBanner
+        ? await selfHostBanner.shown()
+        : config.selfHostBanner,
+      transcription: Boolean(config.transcription),
+      voice: Boolean(config.voice),
       /*
        * Which identity providers this deployment can sign somebody in with.
        *
@@ -221,6 +470,12 @@ export function createApp(
        * companies use this deployment, which is not theirs to have before they sign in.
        */
       ssoConfigured: ((await identityProviders?.list()) ?? []).length > 0,
+      /*
+       * Whether an administrator requires SSO. The screen then leads with SSO and keeps social
+       * sign-in only as the administrators' audited break-glass; the server refuses everybody else.
+       */
+      ssoRequired:
+        enterpriseControls()?.snapshot()?.settings.ssoRequired === true,
     }),
   );
   /*
@@ -237,7 +492,22 @@ export function createApp(
     "/api/auth/sso/delete-provider",
   ]);
 
+  const AUTH_ROUTE_EVENTS: Record<string, AuditEventType | undefined> = {
+    "/api/auth/sso/register": "identity_provider.registered",
+    "/api/auth/sso/delete-provider": "identity_provider.removed",
+  };
+
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
+    if (
+      context.req.method === "GET" &&
+      new URL(context.req.url).pathname === "/api/auth/desktop" &&
+      !config.organizationAuthUrl
+    ) {
+      return desktopAuthPage(
+        context.req.raw,
+        configuredAuthProviders(config.auth),
+      );
+    }
     if (!auth) {
       return context.json(
         { error: "No identity provider is configured." },
@@ -262,7 +532,43 @@ export function createApp(
       }
     }
 
-    return auth.handler(context.req.raw);
+    const eventType =
+      AUTH_ROUTE_EVENTS[new URL(context.req.url).pathname] ?? undefined;
+
+    // Read before the handler runs, because it consumes the stream: a clone taken afterwards is of
+    // a request whose body is already gone, and the row would name no provider.
+    const named =
+      auditStore && eventType
+        ? ((await context.req.raw
+            .clone()
+            .json()
+            .catch(() => null)) as { providerId?: unknown } | null)
+        : null;
+
+    const answer = await auth.handler(context.req.raw);
+
+    if (auditStore && eventType && answer.ok) {
+      const session = await auth.api.getSession({
+        headers: context.req.raw.headers,
+        query: { disableCookieCache: true },
+      });
+      await recordAuditEvent(auditStore, {
+        eventType,
+        targetType: "identity_provider",
+        ...(typeof named?.providerId === "string"
+          ? { targetId: named.providerId }
+          : {}),
+        ...(session?.user ? { actorUserId: session.user.id } : {}),
+        payload: {
+          ...(typeof named?.providerId === "string"
+            ? { providerId: named.providerId }
+            : {}),
+          ...(session?.user?.email ? { by: session.user.email } : {}),
+        },
+      });
+    }
+
+    return answer;
   });
 
   const authenticationUnavailable: MiddlewareHandler<{
@@ -276,10 +582,188 @@ export function createApp(
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
-
-  app.get("/api/me", requireUser, (context) =>
-    context.json({ user: context.var.actor }),
+  // Enterprise controls: capability switches and the model allowlist in front of the routes they
+  // govern, the admin screen's API, and the SCIM verbs the GET/POST auth handler above does not take.
+  app.use("/api/*", createEnterpriseGate(requireUser));
+  app.route("/api/admin/enterprise", createEnterpriseAdminRoutes(requireUser));
+  app.on(["PUT", "PATCH", "DELETE"], "/api/auth/scim/*", (context) =>
+    auth
+      ? auth.handler(context.req.raw)
+      : context.json({ error: "No identity provider is configured." }, 503),
   );
+
+  app.route(
+    "/api/audio",
+    createDictationRoutes(
+      requireUser,
+      config.transcription
+        ? createTranscriptionProvider(config.transcription)
+        : undefined,
+    ),
+  );
+  app.route(
+    "/api/voice",
+    createVoiceRoutes(
+      requireUser,
+      config.voice ? createVoiceProvider(config.voice) : undefined,
+      channelStore,
+      agentProfileStore,
+      voiceSessions,
+      learning?.status
+        ? async (agentId) =>
+            (await learning.status?.(agentId))?.configured ?? false
+        : undefined,
+    ),
+  );
+
+  app.get("/api/me", requireUser, async (context) =>
+    context.json({
+      user: {
+        ...context.var.actor,
+        /*
+         * Read here rather than in the guard, so only this route pays the extra query. Null means
+         * this deployment does not track onboarding, which the app reads as nothing to finish;
+         * a not-yet-completed status is what sends it to /onboarding.
+         */
+        onboarding: onboardingStore
+          ? await onboardingStore.status(context.var.actor.id)
+          : null,
+      },
+    }),
+  );
+  app.post("/api/me/onboarding", requireUser, async (context) => {
+    if (!onboardingStore) {
+      return context.json({ error: "Onboarding is not available." }, 503);
+    }
+
+    const body = (await context.req.json().catch(() => undefined)) as
+      | { step?: unknown; completed?: unknown }
+      | undefined;
+
+    if (body?.completed === true) {
+      await onboardingStore.complete(context.var.actor.id);
+    } else if (
+      typeof body?.step === "number" &&
+      Number.isInteger(body.step) &&
+      body.step >= 0 &&
+      // The column's range — the only bound the server knows, since the wizard's length is the
+      // app's fact rather than the deployment's.
+      body.step <= 2_147_483_647
+    ) {
+      await onboardingStore.setStep(context.var.actor.id, body.step);
+    } else {
+      return context.json(
+        { error: "Send the step to move to, or completed: true." },
+        400,
+      );
+    }
+
+    return context.json({
+      onboarding: await onboardingStore.status(context.var.actor.id),
+    });
+  });
+  /*
+   * A person's own standing instructions, read and written by the person they belong to.
+   *
+   * `requireUser` and never `requireAdmin`, and scoped to `context.var.actor.id` rather than to
+   * anything in the path or the body. There is deliberately no route here for reading somebody
+   * else's or writing on their behalf: these instructions go into a prompt that then speaks as that
+   * person's coworker, so a way to set them for another account would be a way to put words in
+   * somebody's mouth in every channel they work in. An administrator has no business here either,
+   * for the same reason.
+   */
+  app.route(
+    "/api/settings/preferences",
+    userPreferencesRoutes(requireUser, userPreferences),
+  );
+
+  app.get("/api/settings/instructions", requireUser, async (context) => {
+    if (!userInstructions) {
+      return context.json(
+        { error: "Standing instructions are not available." },
+        503,
+      );
+    }
+
+    return context.json({
+      // "" is what having written none looks like to a text box, and the store's null is what it
+      // looks like to a database. The translation happens once, here.
+      instructions: (await userInstructions.read(context.var.actor.id)) ?? "",
+    });
+  });
+  app.put("/api/settings/instructions", requireUser, async (context) => {
+    if (!userInstructions) {
+      return context.json(
+        { error: "Standing instructions are not available." },
+        503,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => undefined)) as
+      | { instructions?: unknown }
+      | undefined;
+
+    if (typeof body?.instructions !== "string") {
+      return context.json({ error: "Send the instructions to save." }, 400);
+    }
+
+    /*
+     * The cap is the store's rule, so the store is what enforces it and this catches the refusal
+     * rather than checking the length again. A second copy of `> 4000` here is a second place for
+     * the number to be changed in only one of them.
+     */
+    let saved: string;
+    try {
+      saved = await userInstructions.write(
+        context.var.actor.id,
+        body.instructions,
+      );
+    } catch (error) {
+      if (error instanceof InstructionsTooLongError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
+
+    /*
+     * The trail records that they changed and how long they now are, NEVER what they say.
+     *
+     * The audit table is append-only and read by administrators, and this is a person's own note
+     * about how they want to be spoken to. Recording the text would put it somewhere they cannot
+     * edit it and somebody else can read it, which is not what a preferences screen promises. The
+     * length is enough to answer the question a trail is for: when did this change, and to what
+     * extent.
+     */
+    if (auditStore) {
+      await recordAuditEvent(auditStore, {
+        eventType: "configuration.changed",
+        targetType: "user_instructions",
+        targetId: context.var.actor.id,
+        actorUserId: context.var.actor.id,
+        payload: {
+          change: saved === "" ? "instructions_cleared" : "instructions_saved",
+          characters: saved.length,
+          limit: INSTRUCTIONS_LIMIT,
+        },
+      });
+    }
+
+    return context.json({ instructions: saved });
+  });
+  if (learning) {
+    app.route(
+      "/api/admin/learning",
+      createLearningRoutes(
+        learning,
+        requireUser,
+        [
+          ...(config.auth?.trustedOrigins ?? []),
+          ...(config.appUrl ? [config.appUrl] : []),
+        ],
+        auditStore,
+      ),
+    );
+  }
   app.get("/api/admin/status", requireUser, (context) => {
     const denied = requireAdmin(context);
     return denied ?? context.json({ status: "ok" });
@@ -293,9 +777,16 @@ export function createApp(
       return context.json({ error: "Audit logging is not configured." }, 503);
     }
 
-    return context.json(
-      await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
-    );
+    try {
+      return context.json(
+        await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
+      );
+    } catch (error) {
+      if (error instanceof AuditQueryError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
   });
   /*
    * Who is here, and what they may do.
@@ -315,12 +806,26 @@ export function createApp(
     /*
      * A page, not the deployment.
      *
-     * `limit` is clamped by the store, so a caller cannot ask for everybody by naming a large
-     * number. `search` is what makes paging usable: an administrator looking for one colleague
-     * should not have to walk pages to reach them.
+     * `limit` is parsed strictly and clamped into range at the edge, against the same ceiling the
+     * store enforces, so a caller cannot ask for everybody by naming a large number and a typo
+     * like `12abc` is a 400 rather than a silently coerced page. `search` is what makes paging
+     * usable: an administrator looking for one colleague should not have to walk pages to reach
+     * them.
      */
     const url = new URL(context.req.url);
-    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+    const parsed = parsePageLimit(url.searchParams.get("limit"), MAX_PAGE);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
+    // An unbounded `search` becomes a `%...% ILIKE` full scan. Cap it so a multi-megabyte
+    // query cannot be used as a cheap denial of service against the people table.
+    const search = url.searchParams.get("search");
+    if (search !== null && search.length > 200) {
+      return context.json(
+        { error: "A search of at most 200 characters is required." },
+        400,
+      );
+    }
 
     return context.json(
       await peopleStore.list({
@@ -330,7 +835,7 @@ export function createApp(
         ...(url.searchParams.get("cursor")
           ? { cursor: url.searchParams.get("cursor") as string }
           : {}),
-        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
       }),
     );
   });
@@ -462,6 +967,10 @@ export function createApp(
       );
     }
 
+    if (revoked) {
+      await peopleStore.retireOwned(userId, context.var.actor.id);
+    }
+
     return context.json({ person: await peopleStore.find(userId) });
   });
 
@@ -590,12 +1099,19 @@ export function createApp(
         return context.json({ error: "Credential input is invalid." }, 400);
       }
 
-      return context.json({
-        credential: await credentialService.rotate({
-          ...input,
-          previousCredentialId: context.req.param("credentialId"),
-        }),
-      });
+      try {
+        return context.json({
+          credential: await credentialService.rotate({
+            ...input,
+            previousCredentialId: context.req.param("credentialId"),
+          }),
+        });
+      } catch (error) {
+        if (error instanceof CredentialRefusedError) {
+          return context.json({ error: error.message }, error.status);
+        }
+        throw error;
+      }
     },
   );
   app.post(
@@ -613,12 +1129,20 @@ export function createApp(
         );
       }
 
-      return context.json({
-        credential: await credentialService.revoke(
-          context.req.param("credentialId"),
-          context.var.actor.id,
-        ),
-      });
+      try {
+        return context.json({
+          credential: await credentialService.revoke(
+            context.req.param("credentialId"),
+            context.var.actor.id,
+          ),
+        });
+      } catch (error) {
+        // Not found or already revoked: the second click on Revoke, answered as what it is.
+        if (error instanceof CredentialRefusedError) {
+          return context.json({ error: error.message }, error.status);
+        }
+        throw error;
+      }
     },
   );
   app.get("/api/admin/package", requireUser, async (context) => {
@@ -665,6 +1189,7 @@ export function createApp(
             await recordAuditEvent(auditStore, {
               eventType: "routines.dispatch_refused",
               targetType: "worker",
+              initiator: DEPLOYMENT_INITIATOR,
               payload: {
                 reason: !expected
                   ? "unconfigured"
@@ -688,10 +1213,11 @@ export function createApp(
         return context.json({ error: "This endpoint is the worker's." }, 401);
       }
       const body = await context.req.json().catch(() => null);
-      if (
-        typeof (body as { routineRunId?: unknown } | null)?.routineRunId !==
-        "string"
-      ) {
+      const routineRunId = (body as { routineRunId?: unknown } | null)
+        ?.routineRunId;
+      // An empty id is a string and used to answer 202 Accepted while the worker swallows the
+      // failure. Only a non-empty id is accepted for dispatch.
+      if (typeof routineRunId !== "string" || !routineRunId.trim()) {
         return context.json({ error: "A routineRunId is required." }, 400);
       }
       /*
@@ -701,9 +1227,7 @@ export function createApp(
        * the fatigue rule owns it. `run()` never throws by contract; this swallow only guards against
        * that contract being wrong without turning a bug there into an unhandled rejection here.
        */
-      void routineRunner
-        .run((body as { routineRunId: string }).routineRunId)
-        .catch(() => {});
+      void routineRunner.run(routineRunId).catch(() => {});
       return context.json({ accepted: true }, 202);
     });
   }
@@ -743,10 +1267,28 @@ export function createApp(
         computerGateway,
         computerPolicy,
         requireUser,
-        canUseBot,
+        // Not `canUseBot`: a Team Bot's teammates use the Bot, not its owner's signed-in computer.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
         pageFrames,
         auditReader,
       ),
+    );
+  }
+
+  if (hostAccessBroker) {
+    app.route(
+      "/api/host-access",
+      createHostAccessRoutes({
+        broker: hostAccessBroker,
+        desktopToken: desktopHostToken,
+        requireUser,
+        canUseBot,
+        auditStore,
+        botName: agentProfileStore
+          ? async (botId, actor) =>
+              (await agentProfileStore.get(actor, botId))?.name ?? null
+          : undefined,
+      }),
     );
   }
 
@@ -778,8 +1320,16 @@ export function createApp(
                 config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0,
               reachableFrom: (agentId) =>
                 pluginStore.botsReachableFrom(agentId),
+              // The same answer the write path checks, read up front so the screen can say it once.
+              canHandOn: (agentId) => pluginStore.agentCanHandOn(agentId),
             }
           : undefined,
+        // Whether "built-in" is a kind of coworker this deployment can actually make: the create
+        // path falls back to the managed Bot's endpoint, so without one it can only refuse.
+        config.managedAgent?.endpoint !== undefined,
+        // The managed Bot's address, so a coworker created without an endpoint — which creation
+        // stores as running at this address — can be told apart from one a person hosts.
+        config.managedAgent?.endpoint?.toString(),
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -826,47 +1376,228 @@ export function createApp(
     );
   }
 
+  if (attachmentDatabase) {
+    /*
+     * `bodyLimit` sits in front of the upload route itself, not beside the mount below: the handler
+     * in channels/attachments.ts calls `file.arrayBuffer()` before it has looked at a single byte of
+     * size, so an unbounded body is read into memory in full before anything gets the chance to
+     * refuse it. A person (or an attacker) posting a 2GB body would have it buffered in RAM before
+     * the 413 the handler already knows how to return. `MAX_IMAGE_BYTES` is the largest thing this
+     * route could ever legitimately accept — a text upload is refused smaller, inside the handler,
+     * once the sniffed type is known — so refusing anything larger at the door costs nothing a real
+     * upload was ever going to use.
+     *
+     * The ceiling is `UPLOAD_BODY_LIMIT_BYTES` and not `MAX_IMAGE_BYTES` itself because THIS GATE
+     * MEASURES A DIFFERENT THING FROM EVERY OTHER ONE. See that constant.
+     */
+    const channelAttachments = new Hono<{ Variables: AppVariables }>();
+    channelAttachments.use(
+      "*",
+      bodyLimit({
+        maxSize: UPLOAD_BODY_LIMIT_BYTES,
+        /*
+         * THE REFUSAL AT THE DOOR HAS TO LOOK LIKE THE HANDLER'S OWN.
+         *
+         * hono's default `onError` answers with the plain string "Payload Too Large". The composer
+         * (app/src/components/channels/composer/attachments.ts) reads `{ error }` off every failed
+         * upload and falls back to a generic `Could not upload "<name>"` when the body will not
+         * parse as JSON — so the default body cost the person the one sentence that would have told
+         * them what went wrong, on the single refusal where the reason is both knowable and
+         * actionable. This is the same `{ error }` shape and the same number the handler's own 413
+         * names, so the two paths are indistinguishable from the outside.
+         *
+         * THE FILENAME AND THE KIND ARE BOTH DELIBERATELY ABSENT, and for the same reason: nothing
+         * has parsed the multipart body at this point, which is the entire reason this middleware
+         * runs ahead of the handler. The handler's sentences can say `'notes.txt' is larger than the
+         * 1MB limit for files` because by then it has sniffed the bytes. This one cannot, and must
+         * not guess — a 9MB text file refused here as being over "the 8MB limit for images" would
+         * send somebody off to shrink it to 7MB, whereupon the handler would refuse it a second time
+         * with a different number. So the sentence names the only thing that is true of every body
+         * this gate rejects: none of them can be under the largest ceiling the route has.
+         */
+        onError: (context) =>
+          context.json(
+            {
+              // The same rounding as `megabytes` in channels/attachments.ts, so the door and the
+              // handler name one limit in one voice.
+              error: `That upload is larger than the ${(MAX_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB limit.`,
+            },
+            413,
+          ),
+      }),
+    );
+    channelAttachments.route(
+      "/",
+      createChannelAttachmentRoutes(attachmentDatabase, requireUser),
+    );
+    app.route("/api/channels", channelAttachments);
+
+    app.route(
+      "/api/attachments",
+      createAttachmentRoutes(attachmentDatabase, requireUser),
+    );
+  }
+
   if (routineStore) {
-    app.route("/api/routines", createRoutineRoutes(routineStore, requireUser));
+    app.route(
+      "/api/routines",
+      createRoutineRoutes(routineStore, requireUser, {
+        runner: routineRunner,
+        auditStore,
+      }),
+    );
+  }
+
+  if (coworker?.delivery) {
+    app.route(
+      "/api/delivery/webhooks",
+      createDeliveryWebhookRoutes(coworker.delivery.webhooks),
+    );
+    app.route(
+      "/api/delivery",
+      createDeliveryRoutes({ ...coworker.delivery.authenticated, requireUser }),
+    );
+  }
+  if (coworker?.demonstrations)
+    app.route(
+      "/api/demonstrations",
+      createDemonstrationRoutes(
+        coworker.demonstrations.store,
+        coworker.demonstrations.recorder,
+        requireUser,
+      ),
+    );
+  if (coworker?.lifecycle)
+    app.route(
+      "/api/bots",
+      createBotLifecycleRoutes(coworker.lifecycle, requireUser),
+    );
+  if (coworker?.groups)
+    app.route("/api/groups", createGroupRoutes(coworker.groups, requireUser));
+  if (coworker?.teamBots)
+    app.route(
+      "/api/team-bots",
+      createTeamBotRoutes(coworker.teamBots, requireUser),
+    );
+  if (coworker?.approvals)
+    app.route(
+      "/api/approvals",
+      createApprovalRoutes(coworker.approvals, requireUser),
+    );
+  if (coworker?.passwords) {
+    app.route(
+      "/api/sign-in-requests",
+      createSignInRoutes(
+        coworker.passwords,
+        requireUser,
+        // A sign-in is typed into the Bot's computer, so it answers to the same rule.
+        agentProfileStore ? computerAccessCheck(agentProfileStore) : canUseBot,
+      ),
+    );
+    app.route(
+      "/api/passwords",
+      createPasswordRoutes(coworker.passwords, requireUser),
+    );
+  }
+  if (coworker?.proactive)
+    app.route(
+      "/api/proactive",
+      createProactiveRoutes(
+        coworker.proactive.store,
+        coworker.proactive.engine,
+        requireUser,
+      ),
+    );
+  if (coworker?.memory)
+    app.route(
+      "/api/memory",
+      createMemoryRoutes(
+        coworker.memory.store,
+        coworker.memory.ingestion,
+        requireUser,
+      ),
+    );
+  if (coworker?.responsibilities) {
+    const { store, engine, bindings } = coworker.responsibilities;
+    app.route(
+      "/api/responsibilities",
+      createResponsibilityRoutes(
+        store,
+        engine,
+        requireUser,
+        bindings,
+        coworker.responsibilities.triggers,
+      ),
+    );
+    if (coworker.responsibilities.triggers) {
+      app.route(
+        "/api/events/triggers",
+        coworker.responsibilities.triggers.ingressRoutes,
+      );
+      if (coworker.responsibilities.triggers.emailRoutes)
+        app.route(
+          "/api/events/email",
+          coworker.responsibilities.triggers.emailRoutes,
+        );
+    }
+    app.route(
+      "/api/events/github",
+      createGithubResponsibilityRoutes({
+        bindingFor: bindings.githubBindingFor,
+        ingest: (event) => engine.ingest(event),
+      }),
+    );
   }
 
   if (componentStore) {
     app.route(
       "/api/components",
-      createComponentRoutes(componentStore, requireUser, auditStore, canUseBot),
+      createComponentRoutes(
+        componentStore,
+        requireUser,
+        auditStore,
+        canUseBot,
+        sandboxedStore,
+      ),
     );
   }
 
   if (pluginStore) {
     app.route(
       "/api/plugins",
-      createPluginRoutes(pluginStore, requireUser, canUseBot, {
-        encryptionKey: config.keyEncryptionKey,
-        /*
-         * Whether the person a consent was started for still has access, asked when the callback
-         * lands rather than when the flow began.
-         *
-         * The callback carries no session — identity comes from the state — so this is where the
-         * question gets asked at all. `find` answers both halves of it: no row means a user id that
-         * names nobody, and `revoked` means an administrator removed them while they were away at
-         * the vendor. Either way there is no live person for a fresh refresh token to belong to.
-         *
-         * No people store means this deployment cannot answer the question, so it refuses rather
-         * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
-         * would be a hole nothing else closes.
-         */
-        personHasAccess: async (userId) => {
-          if (!peopleStore) return false;
-          const person = await peopleStore.find(userId);
-          return person !== undefined && !person.revoked;
+      createPluginRoutes(
+        pluginStore,
+        requireUser,
+        canUseBot,
+        {
+          encryptionKey: config.keyEncryptionKey,
+          /*
+           * Whether the person a consent was started for still has access, asked when the callback
+           * lands rather than when the flow began.
+           *
+           * The callback carries no session — identity comes from the state — so this is where the
+           * question gets asked at all. `find` answers both halves of it: no row means a user id that
+           * names nobody, and `revoked` means an administrator removed them while they were away at
+           * the vendor. Either way there is no live person for a fresh refresh token to belong to.
+           *
+           * No people store means this deployment cannot answer the question, so it refuses rather
+           * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
+           * would be a hole nothing else closes.
+           */
+          personHasAccess: async (userId) => {
+            if (!peopleStore) return false;
+            const person = await peopleStore.find(userId);
+            return person !== undefined && !person.revoked;
+          },
+          // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
+          // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
+          // whether a Bot without its own credential has any way to call back.
+          botsMayCallBack: Boolean(config.agentToolToken),
+          publicUrl: config.publicUrl,
+          appUrl: config.appUrl,
         },
-        // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
-        // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
-        // whether a Bot without its own credential has any way to call back.
-        botsMayCallBack: Boolean(config.agentToolToken),
-        publicUrl: config.publicUrl,
-        appUrl: config.appUrl,
-      }),
+        composio,
+      ),
     );
   }
 
@@ -882,7 +1613,7 @@ export function createApp(
    * no person behind it. Absent secret means the route does not exist: a deployment that has not
    * configured this refuses rather than accepting anybody who can reach the port.
    */
-  if (pluginStore) {
+  if (pluginStore || deploymentToolCaller) {
     const legacyToken = config.agentToolToken ?? "";
     app.post("/api/agent-tools/call", async (context) => {
       /*
@@ -930,6 +1661,7 @@ export function createApp(
           await recordAuditEvent(auditStore, {
             eventType: "mcp.callback_refused",
             targetType: "mcp_tool",
+            initiator: DEPLOYMENT_INITIATOR,
             targetId:
               typeof body?.name === "string"
                 ? body.name.slice(0, 120)
@@ -944,25 +1676,87 @@ export function createApp(
         return context.json({ error: verdict.reason }, verdict.status);
       }
 
-      if (!body?.name) {
-        return context.json({ error: "A tool is required." }, 400);
+      const parsedCall = parseAgentToolCallInput(body);
+      if (!parsedCall.ok) {
+        return context.json({ error: parsedCall.error }, 400);
       }
 
       try {
+        const deploymentResult = await deploymentToolCaller?.({
+          name: parsedCall.value.ref,
+          args: parsedCall.value.args,
+          botId: verdict.botId,
+          actorId: verdict.actorId,
+          initiator: verdict.initiator,
+          run: verdict.run,
+        });
+        if (deploymentResult) return context.json(deploymentResult);
+
+        if (!pluginStore) {
+          return context.json({
+            text: `${REFUSAL_MARKER} That tool is not registered in this deployment.`,
+            isError: true,
+          });
+        }
+
         const result = await pluginStore.callTool({
-          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
-          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
-          args: body.args ?? {},
+          ref: parsedCall.value.ref,
+          args: parsedCall.value.args,
           botId: verdict.botId,
           // From the assertion, never the body: this is the name the audit row will carry.
           actorId: verdict.actorId,
+          ...(verdict.initiator ? { initiator: verdict.initiator } : {}),
         });
-        return context.json({ text: result.text, isError: result.isError });
-      } catch (error) {
-        // A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
-        // marker leads it so a transcript can draw a refusal without reading the wording.
+        // Worded by the helper the in-process door uses, so a framework Bot's model reads a vendor's
+        // error as the vendor's and not as a result. Neither Bot words it on its way through.
         return context.json({
-          text: `${REFUSAL_MARKER} ${error instanceof Error ? error.message : "That tool could not be called."}`,
+          text: vendorAnswer(result),
+          isError: result.isError,
+        });
+      } catch (error) {
+        /*
+         * A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
+         * marker leads it so a transcript can draw a refusal without reading the wording.
+         *
+         * AND THE SAME QUESTION THE IN-PROCESS DOOR ASKS, which this one asked of nothing at all.
+         *
+         * CRITERION. Nothing on the `isDeploymentFault` shelf has its message relayed from here,
+         * and nothing leaving here carries a statement or a value bound to one.
+         *
+         * WHAT THIS SURFACE IS. The answer goes into the calling Bot's model as the tool result, so
+         * it is the widest audience an error message in this deployment reaches: a model repeats
+         * what it is handed — to the person asking, into whatever it writes next, and to the next
+         * tool it calls. `plugins/tools.ts` wraps the identical `callTool` for a Bot running in
+         * this process and has refused that shelf for exactly this reason since the
+         * `ServerRowAmbiguousError` finding; the two doors to one store disagreeing meant a query
+         * failure came back as `Failed query: … params: linear, usr_…` through one of them and as a
+         * fixed sentence through the other. Which door a Bot arrives at is a deployment topology
+         * decision and was never a disclosure decision.
+         *
+         * AND THROUGH {@link withoutStatement} AS WELL, because the two answer different questions
+         * and `isDeploymentFault` says so itself: it "settles who may be told, not what". The shelf
+         * decides whether this audience may hear a sentence at all; the door decides what any
+         * sentence is allowed to contain. Today the two overlap on a query failure and this arm can
+         * only be reached by something neither recognises — which is exactly the state the last two
+         * findings in this area were found in, one predicate apart from a leak.
+         *
+         * AND ONLY A REFUSAL CARRIES THE MARKER, which is the in-process door's third question. The
+         * transcript draws an answer that starts with it as a boundary holding, and the model reads
+         * "Refused." as "not allowed". `callTool` throws `PluginRefusedError` for that, and rethrows
+         * a vendor that broke after recording `mcp.call_failed`; marking every throw drew a vendor
+         * outage, or a fault of this deployment's own, as a policy refusing.
+         */
+        if (error instanceof PluginRefusedError) {
+          return context.json({
+            text: `${REFUSAL_MARKER} ${withoutStatement(error)}`,
+            isError: true,
+          });
+        }
+        return context.json({
+          text:
+            error instanceof Error && !isDeploymentFault(error)
+              ? `That tool could not be called: ${withoutStatement(error)}`
+              : "That tool could not be called.",
           isError: true,
         });
       }
@@ -1060,20 +1854,23 @@ function credentialInput(
       body.kind !== "connector" &&
       body.kind !== "mcp") ||
     typeof body.provider !== "string" ||
+    !body.provider.trim() ||
     typeof body.keyId !== "string" ||
+    !body.keyId.trim() ||
     typeof body.plaintext !== "string" ||
     !body.plaintext ||
     !body.metadata ||
     typeof body.metadata !== "object" ||
-    Array.isArray(body.metadata)
+    Array.isArray(body.metadata) ||
+    Object.getPrototypeOf(body.metadata) !== Object.prototype
   ) {
     return null;
   }
 
   return {
     kind: body.kind,
-    provider: body.provider,
-    keyId: body.keyId,
+    provider: body.provider.trim(),
+    keyId: body.keyId.trim(),
     metadata: body.metadata as Record<string, unknown>,
     plaintext: body.plaintext,
     actorUserId,

@@ -14,13 +14,20 @@ export type AgentChannel = {
   agentIds: string[];
   threadId: string;
   active: boolean;
+  /**
+   * ISO-8601 when something was last said here, or null for a conversation nobody has used.
+   *
+   * The conversation screen needs this to tell two silences apart: a new conversation with no
+   * history, and one whose history this deployment cannot reach. See `channel-chat.tsx`.
+   */
+  lastMessageAt: string | null;
 };
 
-/** A channel plus the last thing said in it, which is what the roster renders. */
+/** A channel plus what the roster renders about it. */
 export type ChannelSummary = AgentChannel & {
+  /** A few words about the conversation, or null. The roster falls back to `name`. */
+  summary: string | null;
   lastMessage: string | null;
-  /** ISO-8601, or null for a channel nobody has used yet. */
-  lastMessageAt: string | null;
   lastMessageAgentId: string | null;
   /** ISO-8601. Ordering falls back to this, so a channel just created sorts to the top. */
   createdAt: string;
@@ -28,6 +35,15 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
   lastReadAt: string | null;
+  /**
+   * Whether a turn is running in this channel right now.
+   *
+   * Socket-only and transient: the server never persists it and the roster query never returns it,
+   * so it is undefined until a busy event arrives and is dropped whenever the roster is refetched.
+   * A headless turn — a handoff hop, a relay — sets it, which is how the roster shows work the
+   * browser never streamed.
+   */
+  busy?: boolean;
 };
 
 export const channelKeys = {

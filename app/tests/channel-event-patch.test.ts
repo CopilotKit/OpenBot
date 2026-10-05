@@ -16,11 +16,13 @@ function channel(
     agentIds: [],
     threadId: `thread-${id}`,
     active: true,
+    summary: null,
     lastMessage: null,
     lastMessageAt: null,
     lastMessageAgentId: null,
     createdAt: "2024-01-01T00:00:00.000Z",
     pinned: false,
+    lastReadAt: null,
     ...overrides,
   };
 }
@@ -166,6 +168,121 @@ describe("a pin", () => {
     // React re-renders nothing at all.
     expect(
       applyChannelEvent(data, event({ channelId: "a", pinned: true })),
+    ).toBe(data);
+  });
+});
+
+/**
+ * A busy signal: a turn started or ended in the channel.
+ *
+ * Server-side headless work — a handoff hop, a relay — that no browser streamed, surfaced on the
+ * roster as a working indicator. Message-less on purpose: it must not disturb the preview or the
+ * order the way an ordinary activity event does.
+ */
+describe("a busy signal", () => {
+  test("patches only the busy flag, leaving the last message and order alone", () => {
+    const data = cache([
+      channel("a", {
+        lastMessage: "Said something.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+      channel("b", { lastMessageAt: "2024-05-01T00:00:00.000Z" }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", busy: true }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    // Only `busy` changed on row a; its message survives, and b did not jump ahead of it.
+    expect(patched.pages[0]?.channels.map((row) => row.id)).toEqual(["a", "b"]);
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      busy: true,
+    });
+  });
+
+  test("clears the same way", () => {
+    const patched = applyChannelEvent(
+      cache([channel("a", { busy: true })]),
+      event({ channelId: "a", busy: false }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]?.busy).toBe(false);
+  });
+
+  test("returns the same cache when the row already says so", () => {
+    const data = cache([channel("a", { busy: true })]);
+
+    expect(applyChannelEvent(data, event({ channelId: "a", busy: true }))).toBe(
+      data,
+    );
+  });
+});
+
+/**
+ * A conversation the server has just named.
+ *
+ * Written by a sweep some seconds after the message that prompted it, so it arrives on its own long
+ * after that message was announced.
+ */
+describe("a summary", () => {
+  test("patches only the summary, leaving the last message alone", () => {
+    const data = cache([
+      channel("a", {
+        lastMessage: "Said something.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", summary: "Expense categories" }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      summary: "Expense categories",
+    });
+  });
+
+  test("does not move the row it names", () => {
+    // Naming a conversation is not something anybody said in it. A row that jumped to the top
+    // seconds after the message that put it there would read as a second message arriving.
+    const data = cache([
+      channel("recent", { lastMessageAt: "2024-04-02T00:00:00.000Z" }),
+      channel("older", { lastMessageAt: "2024-04-01T00:00:00.000Z" }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "older", summary: "Something older" }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels.map((row) => row.id)).toEqual([
+      "recent",
+      "older",
+    ]);
+  });
+
+  test("returns the same cache when the row already says so", () => {
+    const data = cache([channel("a", { summary: "Expense categories" })]);
+
+    expect(
+      applyChannelEvent(
+        data,
+        event({ channelId: "a", summary: "Expense categories" }),
+      ),
     ).toBe(data);
   });
 });

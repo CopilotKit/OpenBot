@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readRunAssertion } from "../src/agents/callback-token";
+import { ThreadBusyError } from "../src/agents/handoff-delivery";
 import {
   createHandoffRunner,
   type HandoffWork,
 } from "../src/agents/handoff-runner";
+import { signHandoffDeliveryRun } from "../src/agents/handoff-signing";
 import type { AuditStore } from "../src/audit";
 import type { WorkItem, WorkQueue } from "../src/work/queue";
 
@@ -12,6 +15,8 @@ import type { WorkItem, WorkQueue } from "../src/work/queue";
  * Running the other Bot twice for one hop. Finishing work that is no longer this replica's. And
  * letting a lease lapse in the middle of a run, which is the same as the first with extra steps.
  */
+
+const KEY = "test-encryption-key-not-a-real-one";
 
 const WORK: HandoffWork = {
   fromBotId: "assistant",
@@ -31,6 +36,8 @@ function runner(options?: {
     message: string;
     shown?: string;
   }) => Promise<void>;
+  /** What the delivery says the Bot answered. Null — nothing worth relaying — unless a test cares. */
+  answer?: string | null;
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
@@ -40,6 +47,7 @@ function runner(options?: {
   }> = [];
   const delivered: Array<{ message: string; assertion: string }> = [];
   const offered: HandoffWork[] = [];
+  const delays: number[] = [];
 
   const queue = {
     claim: async () =>
@@ -51,8 +59,17 @@ function runner(options?: {
       calls.push({ verb: "finish", key, owner });
       return true;
     },
-    release: async ({ key, owner }: { key: string; owner: string }) => {
+    release: async ({
+      key,
+      owner,
+      delayMs,
+    }: {
+      key: string;
+      owner: string;
+      delayMs: number;
+    }) => {
       calls.push({ verb: "release", key, owner });
+      delays.push(delayMs);
       return true;
     },
     offer: async ({
@@ -83,15 +100,18 @@ function runner(options?: {
     written,
     delivered,
     offered,
+    delays,
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
-      sign: (work) => `signed:${work.toBotId}:${work.depth}`,
+      sign: (work, claim) =>
+        signHandoffDeliveryRun(work, KEY, "delivery-run", claim),
       auditStore,
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
           delivered.push({ message, assertion });
           await options?.deliver?.({ work, message, shown });
+          return { answer: options?.answer ?? null };
         },
       },
     }),
@@ -132,7 +152,47 @@ describe("delivering a hop", () => {
 
     await sweep.sweep();
 
-    expect(delivered[0]?.assertion).toBe("signed:researcher:1");
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      depth: 1,
+      handoff: { key: "run-1:abc", owner: "replica-a" },
+    });
+  });
+
+  test("the delivery assertion preserves the run initiator across the queue", async () => {
+    const { runner: sweep, delivered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: {
+            ...WORK,
+            initiator: { kind: "routine", id: "routine_7" },
+          },
+          attempts: 1,
+        },
+      ],
+    });
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)).toMatchObject({
+      botId: "researcher",
+      actorId: "user-1",
+      threadId: "thread-1",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+  });
+
+  test("a legacy queued hop without an initiator is still read as a person's", async () => {
+    const { runner: sweep, delivered } = runner();
+
+    await sweep.sweep();
+
+    expect(readRunAssertion(delivered[0]?.assertion, KEY)?.initiator).toEqual({
+      kind: "person",
+    });
   });
 
   /*
@@ -157,6 +217,35 @@ describe("delivering a hop", () => {
       { verb: "release", key: "run-1:abc", owner: "replica-a" },
     ]);
     expect(events).toContain("agent.handoff_failed");
+  });
+
+  test("an answer that finds the asking Bot still talking is retried in seconds, then a minute", async () => {
+    const first = runner({
+      deliver: async () => {
+        throw new ThreadBusyError("thread-1 is busy with another run");
+      },
+    });
+    await first.runner.sweep();
+    expect(first.delays).toEqual([5_000]);
+
+    const later = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new ThreadBusyError("thread-1 is busy with another run");
+      },
+    });
+    await later.runner.sweep();
+    expect(later.delays).toEqual([60_000]);
+
+    const other = runner({
+      deliver: async () => {
+        throw new Error("the gateway was unreachable");
+      },
+    });
+    await other.runner.sweep();
+    expect(other.delays).toEqual([60_000]);
   });
 
   /*
@@ -196,6 +285,40 @@ describe("delivering a hop", () => {
     });
   });
 
+  /*
+   * And so do the rows either side of it, which is the half the assertion above did not reach.
+   *
+   * A delivery is the outcome that is also visible in the transcript. A hop that was retried or
+   * that failed is visible nowhere else at all, so those are the rows somebody actually comes to
+   * this screen for — and they were the ones rendering a dash where the Bot's name belongs.
+   */
+  test("a hop that was retried or that failed names the Bot too", async () => {
+    const retried = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ],
+    });
+    await retried.runner.sweep();
+
+    expect(
+      retried.written.find(
+        (event) => event.eventType === "agent.handoff_retried",
+      )?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
+
+    const failed = runner({
+      deliver: async () => {
+        throw new Error("the gateway was unreachable");
+      },
+    });
+    await failed.runner.sweep();
+
+    expect(
+      failed.written.find((event) => event.eventType === "agent.handoff_failed")
+        ?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
+  });
+
   /* Releasing an unusable row would put it back on the queue for ever. */
   test("a row that is not a hop is finished rather than released", async () => {
     const { runner: sweep, calls } = runner({
@@ -225,7 +348,12 @@ describe("a hop that failed for good", () => {
   test("the Bot that asked is sent back to tell the person", async () => {
     const { runner: sweeper, offered } = runner({
       claimed: [
-        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 5 },
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: { ...WORK, initiator: { kind: "routine", id: "routine_7" } },
+          attempts: 5,
+        },
       ] as unknown as WorkItem[],
       deliver: async () => {
         throw new Error("researcher did not finish within 300s");
@@ -241,8 +369,35 @@ describe("a hop that failed for good", () => {
       toBotId: "assistant",
       answerIn: "thread-1",
       threadId: "thread-1",
+      initiator: { kind: "routine", id: "routine_7" },
     });
     expect(offered[0]?.task).toContain("did not finish within 300s");
+  });
+
+  test("a hop the deployment's controls refuse ends on its first try, and the person is told", async () => {
+    const {
+      runner: sweeper,
+      offered,
+      calls,
+    } = runner({
+      deliver: async () => {
+        const error = new Error("Use Bots is turned off for you.");
+        error.name = "CapabilityRefusedError";
+        throw error;
+      },
+    });
+
+    await sweeper.sweep();
+
+    // Retrying cannot change the answer, so the work ends now rather than five minutes from now.
+    expect(calls.filter((call) => call.verb === "release")).toEqual([]);
+    expect(calls).toContainEqual({
+      verb: "finish",
+      key: "run-1:abc",
+      owner: "replica-a",
+    });
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.task).toContain("Use Bots is turned off");
   });
 
   /*
@@ -339,6 +494,112 @@ describe("a hop that failed for good", () => {
 
     expect(offered).toEqual([]);
     expect(calls.map((call) => call.verb)).toContain("release");
+  });
+});
+
+/**
+ * The answer coming home.
+ *
+ * The addressed Bot's turn runs in a scratch thread nobody is shown, so its words reach the person
+ * one way: a backwards hop that runs the asking Bot, in the conversation being watched, with the
+ * answer in its prompt. Attributed by the deployment, in the asking Bot's voice — the only voice
+ * that thread admits.
+ */
+describe("relaying the answer home", () => {
+  test("a delivered hop sends the answer back through the Bot that asked", async () => {
+    const { runner: sweeper, offered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: { ...WORK, initiator: { kind: "routine", id: "routine_7" } },
+          attempts: 1,
+        },
+      ],
+      answer: "The outage was Tuesday, 02:10 to 02:45.",
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toMatchObject({
+      fromBotId: "researcher",
+      toBotId: "assistant",
+      answerIn: "thread-1",
+      threadId: "thread-1",
+      depth: 1,
+      initiator: { kind: "routine", id: "routine_7" },
+    });
+    expect(offered[0]?.task).toContain("find the outage window");
+    expect(offered[0]?.task).toContain(
+      "The outage was Tuesday, 02:10 to 02:45.",
+    );
+  });
+
+  test("its key is outside the run's own prefix, like the notice", async () => {
+    const { runner: sweeper, calls } = runner({ answer: "Tuesday." });
+
+    await sweeper.sweep();
+
+    const key = calls.find((call) => call.verb === "offer")?.key ?? "";
+    expect(key.startsWith("run-1:")).toBe(false);
+    expect(key).toContain("run-1:abc");
+  });
+
+  /* A relay of a relay is a loop. The `answerIn` marker that stops a notice stops this too. */
+  test("a relay is not itself relayed", async () => {
+    const { runner: sweeper, offered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "relay:run-1:abc",
+          payload: { ...WORK, answerIn: "thread-1" },
+          attempts: 1,
+        },
+      ] as unknown as WorkItem[],
+      answer: "Understood, telling them now.",
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+  });
+
+  test("a turn that said nothing sends nothing home", async () => {
+    const { runner: sweeper, offered } = runner({ answer: null });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+  });
+
+  /*
+   * The answer rides inside the relaying run's prompt, and a Bot that came back with a book would
+   * spend that run's whole context window repeating it.
+   */
+  test("an answer the length of a book is clipped, and says so", async () => {
+    const { runner: sweeper, offered } = runner({
+      answer: "x".repeat(20_000),
+    });
+
+    await sweeper.sweep();
+
+    expect(offered[0]?.task).toContain("[…the answer was cut here for length]");
+    expect((offered[0]?.task ?? "").length).toBeLessThan(14_000);
+  });
+
+  test("an answer cut inside a character loses the whole character, not half of it", async () => {
+    // 12,000 code units are kept, and an emoji is two: its high half on the last kept unit would
+    // reach the relaying run's prompt as a lone surrogate.
+    const { runner: sweeper, offered } = runner({
+      answer: `${"x".repeat(11_999)}😀tail`,
+    });
+
+    await sweeper.sweep();
+
+    expect(offered[0]?.task).toContain(
+      `${"x".repeat(11_999)}\n\n[…the answer was cut here for length]`,
+    );
   });
 });
 

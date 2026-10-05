@@ -4,12 +4,15 @@ import { StaleSnapshotError } from "../src/computer/client";
 import {
   ActionRefusedError,
   createComputerGateway,
+  WorkspaceNotFoundError,
   WorkspaceRefusedError,
+  WorkspaceTooLargeError,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
-import type {
-  ComputerLocation,
-  ComputerProvider,
+import {
+  type ComputerLocation,
+  type ComputerProvider,
+  createSharedComputerProvider,
 } from "../src/computer/provider";
 import type { SnapshotResult } from "../src/computer/schema";
 import {
@@ -98,6 +101,11 @@ function fakeComputer(options?: {
         return Response.json({
           image: "aGVsbG8=",
           mimeType: "image/png",
+        });
+      case "/files/download":
+        calls.push("downloadFile");
+        return new Response(Uint8Array.from([0, 1, 2, 255]), {
+          headers: { "content-length": "4" },
         });
       case "/files/read":
         calls.push("readFile");
@@ -435,6 +443,30 @@ describe("the computer gateway", () => {
     expect(rows[0]?.payload.element).toBeUndefined();
   });
 
+  test("a permitted action stopped mid-flight is recorded as a stop, not a failure", async () => {
+    // A person pressing Stop is not the computer failing. The row still says so in its message, but
+    // its TYPE is `computer.action_stopped`, so a count of `action_failed` rows — the natural way to
+    // measure outages — does not read every Stop as one.
+    const { gateway, rows } = await gatewayWith(PERMISSIVE);
+    const stop = new AbortController();
+    stop.abort();
+
+    await expect(
+      gateway.runCommand(
+        "bot-1",
+        ACTOR,
+        { command: "cat secrets.txt" },
+        stop.signal,
+      ),
+    ).rejects.toThrow(/stopped/);
+
+    // The decision that permitted it, then the outcome — a stop, not a failure.
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.eventType).toBe("computer.action_allowed");
+    expect(rows[1]?.eventType).toBe("computer.action_stopped");
+    expect(rows[1]?.payload.failure).toContain("stopped");
+  });
+
   test("a command the policy refuses is recorded and never reaches the computer", async () => {
     const { gateway, calls, rows } = await gatewayWith({
       ...PERMISSIVE,
@@ -687,6 +719,67 @@ describe("the computer gateway", () => {
     expect(rows[0]?.targetId).toBe("bot-2");
   });
 
+  /*
+   * "The most destructive button we have. Every login the Bot had is gone and no undo exists, so the
+   * row is written whatever happens next."
+   *
+   * The profile is destroyed by `provider.reset` before either of the two Postgres deletes runs, so
+   * a delete that fails cannot put it back -- it can only take the row with it, which is the one
+   * thing that note rules out.
+   */
+  test("resetComputer records the reset even when clearing the stored page fails", async () => {
+    const { provider, fetchImpl } = fakeComputer({
+      resetResult: { cleared: true },
+    });
+    const { store, rows } = fakeAudit();
+    const snapshots: SnapshotStore = {
+      ...createInMemorySnapshotStore(),
+      clear: async () => {
+        throw new Error("connection reset by peer");
+      },
+    };
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+
+    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
+      "connection reset by peer",
+    );
+
+    expect(rows.map((row) => row.eventType)).toContain("computer.reset");
+    expect(rows[0]?.targetId).toBe("bot-1");
+  });
+
+  test("resetComputer records the reset even when clearing the screenshots fails", async () => {
+    const { provider, fetchImpl } = fakeComputer({
+      resetResult: { cleared: true },
+    });
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      pageFrames: {
+        clear: async () => {
+          throw new Error("statement timeout");
+        },
+      } as unknown as NonNullable<
+        Parameters<typeof createComputerGateway>[0]["pageFrames"]
+      >,
+    });
+
+    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
+      "statement timeout",
+    );
+
+    expect(rows.map((row) => row.eventType)).toContain("computer.reset");
+  });
+
   test("computers maps provider status 'running' and 'stopped' directly and preserves egress distinctions", async () => {
     const locations: ComputerLocation[] = [
       {
@@ -757,6 +850,100 @@ describe("the computer gateway", () => {
     });
   });
 
+  test("downloads raw bytes through the separate download intent and records it", async () => {
+    const { gateway, calls, rows, requests } = await gatewayWith(PERMISSIVE, {
+      token: "computer-secret",
+    });
+
+    const download = await gateway.downloadFile("bot-1", ACTOR, {
+      path: "reports/Q3 file.pdf",
+    });
+
+    expect(download.name).toBe("Q3 file.pdf");
+    expect(download.bytes).toBe(4);
+    expect(
+      new Uint8Array(await new Response(download.body).arrayBuffer()),
+    ).toEqual(Uint8Array.from([0, 1, 2, 255]));
+    expect(calls).toContain("downloadFile");
+    expect(rows[0]?.eventType).toBe("computer.action_allowed");
+    expect(rows[0]?.payload).toMatchObject({
+      action: "computer_download_file",
+      bot: "bot-1",
+      file: "reports/Q3 file.pdf",
+    });
+    const request = requests.find(({ url }) => url.includes("/files/download"));
+    expect(request?.init?.method).toBe("GET");
+    expect(request?.init?.headers).toMatchObject({
+      "x-openbot-bot-id": "bot-1",
+      "x-openbot-computer-token": "computer-secret",
+    });
+    expect(new URL(request?.url ?? "").searchParams.get("path")).toBe(
+      "reports/Q3 file.pdf",
+    );
+  });
+
+  test("an absent policy refuses a download before the computer is asked", async () => {
+    const { gateway, calls, rows } = await gatewayWith(undefined);
+
+    await expect(
+      gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(calls).not.toContain("downloadFile");
+    expect(rows[0]?.eventType).toBe("computer.action_refused");
+    expect(rows[0]?.payload.action).toBe("computer_download_file");
+  });
+
+  test("a download rule does not reuse the read-file permission", async () => {
+    const separate = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['tool.name == "computer_read_file"'],
+    });
+    await expect(
+      separate.gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+    ).resolves.toMatchObject({ name: "report.pdf" });
+    expect(separate.calls).toContain("downloadFile");
+
+    const denied = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['intent == "download_file"'],
+    });
+    await expect(
+      denied.gateway.downloadFile("bot-1", ACTOR, { path: "report.pdf" }),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(denied.calls).not.toContain("downloadFile");
+    expect(denied.rows[0]?.eventType).toBe("computer.action_refused");
+  });
+
+  test("records a failed download attempt after the allowed decision", async () => {
+    const { gateway, rows } = await gatewayWith(PERMISSIVE, {
+      routes: {
+        "/files/download": () =>
+          Response.json({ error: "No such file." }, { status: 404 }),
+      },
+    });
+
+    await expect(
+      gateway.downloadFile("bot-1", ACTOR, { path: "missing.pdf" }),
+    ).rejects.toThrow(WorkspaceNotFoundError);
+    expect(rows.map(({ eventType }) => eventType)).toEqual([
+      "computer.action_allowed",
+      "computer.action_failed",
+    ]);
+  });
+
+  test("maps an oversized computer response to a 413-equivalent error", async () => {
+    const { gateway } = await gatewayWith(PERMISSIVE, {
+      routes: {
+        "/files/download": () =>
+          Response.json({ error: "Too large." }, { status: 413 }),
+      },
+    });
+
+    await expect(
+      gateway.downloadFile("bot-1", ACTOR, { path: "big.zip" }),
+    ).rejects.toThrow(WorkspaceTooLargeError);
+  });
+
   test("routes acting, control, file, secret, and human input calls to the correct endpoint paths", async () => {
     const { gateway, requests } = await gatewayWith(PERMISSIVE);
 
@@ -765,8 +952,8 @@ describe("the computer gateway", () => {
     await gateway.listFiles("bot-1", ACTOR, { path: "notes" });
     await gateway.control("bot-1");
     await gateway.requestHelp("bot-1", ACTOR, "Sign in");
-    await gateway.takeControl("bot-1", ACTOR);
-    await gateway.releaseControl("bot-1", ACTOR);
+    await gateway.takeControl("bot-1", ACTOR, "request-1");
+    await gateway.releaseControl("bot-1", ACTOR, "request-1");
     await gateway.requestSecret("bot-1", ACTOR, {
       label: "Password",
       ref: "e1",
@@ -1316,5 +1503,235 @@ describe("acting on a ref the server cannot resolve", () => {
     await gateway.scroll("bot-1", ACTOR, { deltaY: 200 });
 
     expect(calls).toEqual(["scroll"]);
+  });
+});
+
+/**
+ * The deployment with one computer for every Bot.
+ *
+ * Every session case above supplies a provider that reports a run, and the shared computer is the one
+ * that had nothing to report it from: no supervisor, no container per Bot, one process that outlives
+ * every reset. The ordering the rest of this file exercises was therefore inert exactly there, and
+ * the two failures it exists to stop were both reachable. These go through the real provider rather
+ * than a fake, because the fake is what hid it.
+ */
+describe("a Bot on the one shared computer", () => {
+  const FRESH = {
+    snapshotId: 1,
+    url: "https://fresh.example/start",
+    title: "Start",
+    truncated: false,
+    elements: [{ ref: "e1", role: "link", name: "Sign in" }],
+  } satisfies SnapshotResult;
+
+  /** A shared computer that answers which run each Bot's browser is on, as the real one does. */
+  function sharedComputer() {
+    let run = "run-1";
+    let live: SnapshotResult = SNAPSHOT;
+    let afterSnapshot: (() => void) | undefined;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/run") return Response.json({ run });
+        if (path === "/snapshot") {
+          const answer = Response.json(live);
+          // A computer that goes away as it answers, which is the window the run has to be read before.
+          afterSnapshot?.();
+          return answer;
+        }
+        if (path === "/computers/reset") return Response.json({ reset: true });
+        if (path === "/click")
+          return Response.json({
+            action: "click",
+            url: live.url,
+            elapsedMs: 1,
+          });
+        return Response.json({ error: path }, { status: 404 });
+      },
+    });
+    return {
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      stop: () => server.stop(true),
+      /** A new browser session: a restart, an eviction, a redeploy, or a reset. */
+      replaceRun: (next: string) => {
+        run = next;
+      },
+      showing: (next: SnapshotResult) => {
+        live = next;
+      },
+      /** Something that happens the instant the snapshot is answered, and before anything else is asked. */
+      onSnapshot: (effect: () => void) => {
+        afterSnapshot = effect;
+      },
+    };
+  }
+
+  function gatewayOn(computer: ReturnType<typeof sharedComputer>) {
+    const snapshots = createInMemorySnapshotStore();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider: createSharedComputerProvider({ baseUrl: computer.baseUrl }),
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+    return { gateway, rows, snapshots };
+  }
+
+  test("a save still in flight when the wipe landed cannot resurrect the page", async () => {
+    /*
+     * `clear` deletes the row, so a save that was already on its way finds nothing to conflict with
+     * and inserts unconditionally. The row is back, describing a page the reset destroyed, and the
+     * policy decides about its elements: a deny rule on "Submit order" fires on a click nowhere near
+     * one, or a rule written for the new page does not fire on one that is.
+     *
+     * The write cannot tell the two apart, and does not have to. The resurrected row carries the run
+     * that took it, the reset gave the Bot a new one, and the read refuses the citation.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, rows, snapshots } = gatewayOn(computer);
+      const taken = await gateway.snapshot("bot-1");
+
+      await gateway.resetComputer("bot-1", ACTOR);
+      expect(await snapshots.load("bot-1")).toBeUndefined();
+      // The reset closed that browser, so the next one is a different run.
+      computer.replaceRun("run-2");
+      // And now the save that was in flight when it landed, carrying the run it was taken on.
+      await snapshots.save("bot-1", {
+        snapshotId: taken.snapshotId,
+        url: taken.url,
+        elements: new Map(
+          taken.elements.map((element) => [element.ref, element]),
+        ),
+        session: "run-1",
+      });
+
+      const refusal = await gateway
+        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(StaleSnapshotError);
+      expect(rows.at(-1)?.payload.element).toBe("not in the current snapshot");
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("a restarted computer's first snapshot lands instead of being read as stale", async () => {
+    /*
+     * The generation lives in a map in the computer's process, and a restart, a redeploy, or the idle
+     * sweep dropping the session all mint it at zero again. Nothing clears the server's row, so with
+     * the generation as the only ordering the fresh page looks older than the dead one and every
+     * snapshot is dropped until the counter climbs back past it. Refs then resolve against a page
+     * nobody is on.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, snapshots } = gatewayOn(computer);
+      await gateway.snapshot("bot-1");
+      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+
+      computer.replaceRun("run-2");
+      computer.showing(FRESH);
+      await gateway.snapshot("bot-1");
+
+      const held = await snapshots.load("bot-1");
+      expect(held?.snapshotId).toBe(1);
+      expect(held?.url).toBe(FRESH.url);
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("a computer replaced while a snapshot was being taken does not stamp the page with the new run", async () => {
+    /*
+     * The run is asked for on the same path as the snapshot, and the two answers have to describe the
+     * same browser. Asked afterwards, they need not: a container that goes away between answering
+     * `/snapshot` and answering this one stamps the page it drew with the run of the browser that
+     * replaced it, and the row then claims the live run is showing a page from the dead one. Every
+     * ref on it resolves, and the fresh browser's own snapshots are refused for being older, which is
+     * both halves of the bug back inside a smaller window.
+     *
+     * Asked first, the stamp is the run that was live when we asked. A computer replaced underneath
+     * leaves a row nothing will match until the next snapshot lands, which is the direction this is
+     * allowed to fail in.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, rows, snapshots } = gatewayOn(computer);
+      computer.onSnapshot(() => computer.replaceRun("run-2"));
+
+      const taken = await gateway.snapshot("bot-1");
+      expect((await snapshots.load("bot-1"))?.session).toBe("run-1");
+
+      const refusal = await gateway
+        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(StaleSnapshotError);
+      expect(rows.at(-1)?.payload.element).toBe("not in the current snapshot");
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("within one run an older snapshot still does not overwrite a newer one", async () => {
+    // The control. Ordering across runs that also stopped ordering within one would let two replicas
+    // snapshotting the same computer land in whichever order Postgres saw them.
+    const computer = sharedComputer();
+    try {
+      const { gateway, snapshots } = gatewayOn(computer);
+      await gateway.snapshot("bot-1");
+      computer.showing(FRESH);
+      await gateway.snapshot("bot-1");
+
+      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+    } finally {
+      computer.stop();
+    }
+  });
+});
+
+describe("updating a computer's image", () => {
+  test("audits who moved the computer onto the new image", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const asked: string[] = [];
+    provider.update = async (botId) => {
+      asked.push(botId);
+      return { updated: true, wasRunning: true, from: "old", to: "new" };
+    };
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+
+    expect(await gateway.updateComputer("bot-1", ACTOR)).toMatchObject({
+      updated: true,
+    });
+    expect(asked).toEqual(["bot-1"]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.eventType).toBe("computer.updated");
+    expect(rows[0]?.targetId).toBe("bot-1");
+    expect(String(rows[0]?.payload.reason)).toContain("new");
+  });
+
+  test("a provider with no image of its own says so rather than pretending", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+    await expect(gateway.updateComputer("bot-1", ACTOR)).rejects.toThrow(
+      /no computer image/,
+    );
+    expect(rows).toHaveLength(0);
   });
 });

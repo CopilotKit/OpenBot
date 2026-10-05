@@ -20,6 +20,7 @@ import {
   channels,
   intelligenceChannelMappings,
   routineRuns,
+  routineSweeps,
   routines,
   users,
   workItems,
@@ -33,7 +34,7 @@ import {
   ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue, DEFAULT_MAX_ATTEMPTS } from "../src/work/queue";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * Both halves of the sweep against a real PostgreSQL and the real `work_items` queue.
@@ -54,9 +55,7 @@ import { TEST_POOL } from "./support/database";
  * whether the consumer honours the booleans the queue hands back: a `renew` that says the lease has
  * gone, a `finish` that says the item was not ours, an attempt count that has reached its cap.
  */
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const profileStore = createAgentProfileStore(
   database,
@@ -1262,5 +1261,31 @@ describe("consuming a claimed firing", () => {
         leaseMs: 30_000,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("saying that a sweep happened at all", () => {
+  test("records the pass, so a deployment with no worker is not silence", async () => {
+    await database.delete(routineSweeps);
+
+    const before = await store.lastSweptAt();
+    expect(before).toBeNull();
+
+    await offerDueRoutines(sweepOptions());
+
+    const after = await store.lastSweptAt();
+    expect(after).not.toBeNull();
+    expect(Date.now() - (after as Date).getTime()).toBeLessThan(60_000);
+  });
+
+  test("keeps one row however many passes run, and names the last sweeper", async () => {
+    await database.delete(routineSweeps);
+
+    await offerDueRoutines(sweepOptions({ owner: "sweeper-one" }));
+    await offerDueRoutines(sweepOptions({ owner: "sweeper-two" }));
+
+    const rows = await database.select().from(routineSweeps);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.owner).toBe("sweeper-two");
   });
 });

@@ -15,8 +15,9 @@ behind a list. Twelve screens render through `PageShell` today and seven build t
 It does not cover where the data comes from — that is `openbot-data-access`, which owns queries,
 mutations, and the pending/error/empty/rows branching. It does not cover the gallery components
 under `components/gallery`, which a Bot draws inside a conversation rather than a person navigating
-to. It does not cover the primitives under `components/ui`, which are shadcn files with their own
-upstream.
+to. It does not cover the primitives under `components/ui`, which are this repository's own design-system
+primitives: they began as shadcn output, but there is no upstream to re-pull from, and they are
+formatted and linted like the rest of the app.
 
 ## The Default
 

@@ -22,6 +22,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { terminateMemberComputersMutationOptions } from "@/lib/enterprise/mutations";
 import {
   setPersonAccessMutationOptions,
   setPersonRoleMutationOptions,
@@ -54,7 +55,8 @@ function describe(person: Person): string {
     ? `last signed in ${new Date(person.lastSignedInAt).toLocaleDateString()}`
     : "never signed in";
 
-  if (person.revoked) return `Access removed · ${providers || "no provider"}`;
+  if (person.revoked)
+    return `Access removed · ${providers || "no provider"} · ${when}`;
   if (person.configuredAdmin) {
     return `Administrator by configuration · ${when}`;
   }
@@ -78,10 +80,12 @@ function PeoplePage() {
   const currentUser = useQuery(currentUserQueryOptions());
   const setRole = useMutation(setPersonRoleMutationOptions(queryClient));
   const setAccess = useMutation(setPersonAccessMutationOptions(queryClient));
+  // Offboarding: stops this person's Bots' computers, keeping their disks. Access is unchanged.
+  const terminate = useMutation(terminateMemberComputersMutationOptions());
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
-  const failure = setRole.error ?? setAccess.error;
+  const failure = setRole.error ?? setAccess.error ?? terminate.error;
 
   return (
     <PageShell
@@ -95,6 +99,16 @@ function PeoplePage() {
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {failure.message}
+          </p>
+        ) : null}
+        {terminate.data ? (
+          <p className="mt-4 text-muted-foreground text-sm" role="status">
+            Stopped {terminate.data.stopped.length}{" "}
+            {terminate.data.stopped.length === 1 ? "computer" : "computers"}
+            {terminate.data.failed.length > 0
+              ? `; ${terminate.data.failed.length} could not be stopped`
+              : ""}
+            . Their disks are kept.
           </p>
         ) : null}
         {/*
@@ -150,6 +164,14 @@ function PeoplePage() {
                        * second switch: two switches on one row invites somebody to flip the wrong
                        * one, and these two do very different things.
                        */}
+                      <Button
+                        disabled={terminate.isPending}
+                        onClick={() => terminate.mutate(person.id)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Stop computers
+                      </Button>
                       <Button
                         disabled={busy || isSelf || person.configuredAdmin}
                         onClick={() =>

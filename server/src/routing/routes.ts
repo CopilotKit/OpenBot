@@ -1,7 +1,13 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
-import type { HttpCoworkerRoutingService } from "./service";
+import {
+  CoworkerReachabilityUnavailableError,
+  type HttpCoworkerRoutingService,
+  MAX_ROUTING_TEXT_LENGTH,
+} from "./service";
+
+export { defaultRoutingProfile } from "./service";
 
 /**
  * Translate the shared coworker-routing result into the established HTTP contract.
@@ -23,16 +29,34 @@ export function createRoutingRoutes(
     } | null;
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) return context.json({ error: "A message is required." }, 400);
+    if (text.length > MAX_ROUTING_TEXT_LENGTH) {
+      return context.json(
+        {
+          error: `A message of at most ${MAX_ROUTING_TEXT_LENGTH} characters is required.`,
+        },
+        400,
+      );
+    }
     const agentId =
       typeof body?.agentId === "string" && body.agentId.trim()
         ? body.agentId.trim()
         : null;
 
-    const detail = await routing.routeDetailed({
-      actor: context.var.actor,
-      text,
-      agentId,
-    });
+    let detail: Awaited<
+      ReturnType<HttpCoworkerRoutingService["routeDetailed"]>
+    >;
+    try {
+      detail = await routing.routeDetailed({
+        actor: context.var.actor,
+        text,
+        agentId,
+      });
+    } catch (error) {
+      if (error instanceof CoworkerReachabilityUnavailableError) {
+        return context.json({ error: error.message, code: error.code }, 503);
+      }
+      throw error;
+    }
     const { result } = detail;
     if (result.kind === "none") {
       return context.json(

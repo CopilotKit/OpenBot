@@ -14,23 +14,35 @@
 #   no serverless container platform permits. Without it every Bot shares the browser below, exactly
 #   as they do on a laptop with no supervisor configured. Per-Bot isolation is A6.
 #
-# THE BASE IS PLAYWRIGHT'S, not Bun's, because Chromium and its system libraries have to stay
-# matched and that image is the only place that is guaranteed. The tag must move with the
-# `playwright` dependency in `agent-computer/package.json`. Bump both or neither.
+# Chromium comes from Playwright's own installer, but the final image is not Playwright's all-browser
+# image. Keep this version matched to `agent-computer/package.json`: bump both or neither.
 
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
+FROM node:24.18.1-bookworm-slim AS node-toolchain
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun-toolchain
 
-# unzip is not in the Playwright image and bun's installer needs it.
-# Bun is pinned. The installer takes whatever is newest otherwise, so the runtime drifts from the
-# one the lockfile was resolved against and an image built next month is not the image built today.
-ARG BUN_VERSION=1.3.14
-# Into /usr/local rather than /root/.bun, because the runtime stage runs as `pwuser` and cannot read
-# root's home. Set before the install, or the installer has already chosen the wrong directory.
+FROM ubuntu:24.04 AS base
+
+# The Bun image digest pins the amd64/arm64 release bytes, including if its tag changes.
+ARG PLAYWRIGHT_VERSION=1.62.1
+# Keep Bun and global installs readable by the runtime's unprivileged user.
 ENV BUN_INSTALL=/usr/local
 ENV PATH="/usr/local/bin:${PATH}"
-RUN apt-get update && apt-get install -y --no-install-recommends unzip xz-utils \
-  && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --from=node-toolchain /usr/local /usr/local
+COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl unzip xz-utils \
+  && ln -s bun /usr/local/bin/bunx \
+  && bunx --bun "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+  && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/* \
+  # PINNED, BECAUSE THE CHART NAMES THESE NUMBERS. `computers.podSecurityContext` runs a computer
+  # pod as 1001, and without `--uid` that is only where these happen to land today: `ubuntu:24.04`
+  # ships its own `ubuntu` user at 1000, so the next two are 1001 and 1002. Let the base add one
+  # more user ahead of these and every number shifts, the chart keeps asking for 1001, and a Bot's
+  # computer starts as a uid that owns none of its files. Pinning makes it a contract.
+  && useradd --uid 1001 --create-home --shell /bin/bash pwuser \
+  && useradd --uid 1002 --create-home --shell /usr/sbin/nologin apiuser
 
 
 FROM base AS deps
@@ -56,7 +68,6 @@ RUN cd agent-computer && bun install --frozen-lockfile
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
 RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
-  && cp -r app/package.json /prod/app-package.json \
   && cd /prod && mkdir -p app server worker \
   && cp /src/app/package.json app/package.json \
   && cp /src/server/package.json server/package.json \
@@ -100,10 +111,21 @@ RUN case "${TARGETARCH}" in \
 
 WORKDIR /app
 
+# BOTH HALVES OF THE TREE COME FROM /prod. A workspace install is two directories, not one: the
+# packages it could hoist go to the root `node_modules`, and a per-workspace `node_modules` sits
+# beside each manifest holding the rest. The server's half used to be taken from /src, which is the
+# unpruned install, so the prune above bought nothing where the server actually resolves — and
+# `@copilotkit/aimock`, a development dependency, shipped as a symlink into a store the prune had
+# emptied, along with the two `.bin` shims pointing at it. Every dependency `server/package.json`
+# declares resolves from the /prod half; the ones it does not declare are absent now rather than
+# present and broken.
 COPY --from=deps /prod/node_modules node_modules
+COPY --from=deps /prod/server/node_modules server/node_modules
 COPY --from=deps /src/package.json package.json
 COPY --from=deps /src/bun.lock bun.lock
-COPY --from=deps /src/server/node_modules server/node_modules
+# The browser's tree is a separate install root with its own lockfile rather than a workspace of the
+# one above, so there is no /prod half of it to take and it ships as resolved, `typescript` included.
+# Pruning it would mean a second `--production` install in the stage above.
 COPY --from=deps /src/agent-computer/node_modules agent-computer/node_modules
 
 COPY server server
@@ -111,6 +133,19 @@ COPY shared shared
 COPY examples examples
 COPY agent-computer/src agent-computer/src
 COPY agent-computer/package.json agent-computer/package.json
+
+# `bun run composio:smoke`, because the manifest copied above carries that entry and the question it
+# answers belongs here rather than on a laptop: it asks what THIS deployment's Composio key can see,
+# and that key is the one in this container's environment. It reads `server/src/plugins/composio*`,
+# which is already in the image, so the file itself was the only thing missing and the entry was an
+# instruction that could not be followed where it shipped.
+#
+# ONE FILE, NOT `scripts/`. The others there are the laptop's. `diagram` and `mock:knowledge` reach
+# for `roughjs` and `@copilotkit/aimock`, which the prune above removes; `test:ci` runs a suite that
+# is not in the image; `generate:app-config` writes a file the build has already baked into
+# `app/dist`. Copying the directory ships four more entries with nothing to do here, to fix one that
+# has something to do.
+COPY scripts/composio-smoke.ts scripts/composio-smoke.ts
 
 # The built app, served by the API on the same origin. There is no CORS in this server, so this is
 # not a convenience: two origins would simply fail.
@@ -186,9 +221,9 @@ ENV AGENT_COMPUTER_URL=http://127.0.0.1:4100
 # NOTHING THAT MATTERS RUNS AS ROOT.
 #
 # s6 stays root because that is the only way it can drop each service to a different user, and they
-# genuinely differ: the browser and API run as `pwuser`, the database as `postgres`. One shared
-# account would put the process that renders the open internet in the same skin as the one holding
-# the audit trail.
+# genuinely differ: the browser and the Bot's shell run as `pwuser`, the API and migrations as
+# `apiuser`, the database as `postgres`. One shared account would put the process that renders the
+# open internet in the same skin as the one holding the audit trail.
 #
 # This matters more than usual here. Chromium is launched with `--no-sandbox` unless the host can
 # support its sandbox, and with that flag the process user IS the boundary, so root would mean a

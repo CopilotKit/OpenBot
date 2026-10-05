@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ComputerStoppedError,
+  ComputerUnavailableError,
   createComputerTransport,
   ElementNotFoundError,
   HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
+  WorkspaceNotFoundError,
+  WorkspaceTooLargeError,
 } from "../src/computer/client";
 
 function clientWith(
@@ -23,6 +27,12 @@ function clientWith(
     screenshot: () => transport.call(baseUrl, botId, "/screenshot"),
     click: (input: unknown, signal?: AbortSignal) =>
       transport.post(baseUrl, botId, "/click", input, signal),
+    download: (path: string) =>
+      transport.download(
+        baseUrl,
+        botId,
+        `/files/download?path=${encodeURIComponent(path)}`,
+      ),
   };
 }
 
@@ -33,6 +43,85 @@ const ok = (body: unknown) =>
   });
 
 describe("computer client", () => {
+  describe("computer file downloads", () => {
+    test("returns raw bytes without decoding them as JSON", async () => {
+      const payload = Uint8Array.from([0, 255, 1, 2, 3]);
+      const seen: string[] = [];
+      const client = clientWith((url) => {
+        seen.push(url);
+        return new Response(payload, {
+          headers: { "content-length": String(payload.byteLength) },
+        });
+      });
+
+      const download = await client.download("reports/data.bin");
+
+      expect(download.bytes).toBe(payload.byteLength);
+      expect(
+        new Uint8Array(await new Response(download.body).arrayBuffer()),
+      ).toEqual(payload);
+      expect(seen).toEqual([
+        "http://agent-computer:4100/files/download?path=reports%2Fdata.bin",
+      ]);
+    });
+
+    test("refuses a successful response with no byte length", async () => {
+      const client = clientWith(() => new Response(Uint8Array.from([1, 2, 3])));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+    });
+
+    test("releases the connection it refuses to hand back", async () => {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([1, 2, 3]));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const client = clientWith(() => new Response(body));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+      expect(cancelled).toBe(true);
+    });
+
+    test("still names the invalid download when releasing it fails", async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from([1, 2, 3]));
+        },
+        cancel() {
+          throw new Error("socket already gone");
+        },
+      });
+      const client = clientWith(() => new Response(body));
+
+      await expect(client.download("x")).rejects.toThrow(
+        ComputerUnavailableError,
+      );
+    });
+
+    test.each([
+      [404, WorkspaceNotFoundError],
+      [413, WorkspaceTooLargeError],
+    ])("maps HTTP %i to its workspace error", async (status, errorType) => {
+      const client = clientWith(() =>
+        Response.json(
+          { error: "The file could not be downloaded." },
+          { status },
+        ),
+      );
+
+      await expect(client.download("x")).rejects.toBeInstanceOf(errorType);
+    });
+  });
+
   test("navigates and returns where it landed", async () => {
     const seen: string[] = [];
     const client = clientWith((url, init) => {
@@ -310,9 +399,18 @@ describe("the caller's Stop", () => {
     const stop = new AbortController();
     stop.abort();
 
-    expect(
-      client.click({ ref: "e1", snapshotId: 1 }, stop.signal),
-    ).rejects.toBeDefined();
+    // A stop, and a distinguishable one: `ComputerStoppedError` so the gateway types the audit row
+    // `computer.action_stopped` rather than counting a person's Stop as a failed action. It stays a
+    // subclass of `ComputerUnavailableError`, so everything catching an unavailable computer to tell
+    // the model is unaffected.
+    const error = await client
+      .click({ ref: "e1", snapshotId: 1 }, stop.signal)
+      .then(
+        () => null,
+        (reason) => reason,
+      );
+    expect(error).toBeInstanceOf(ComputerStoppedError);
+    expect(error).toBeInstanceOf(ComputerUnavailableError);
     expect(called).toBe(false);
   });
 
@@ -393,5 +491,71 @@ describe("the deadline a call is given", () => {
     await expect(
       transport.post("http://computer", "bot-1", "/exec", {}, undefined, 5_000),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("a person's Stop", () => {
+  /*
+   * Stop is the person saying "not that". The transport already answers it that way when the signal
+   * is already aborted before the request leaves; the signal is handed to fetch precisely so Stop can
+   * also land mid-flight, and that half was reported as a dead computer. The message is not only what
+   * the model reads: the gateway writes it into the action's audit row as `failure`, so a person's
+   * Stop was recorded as an outage.
+   */
+  test("a Stop that lands mid-action is reported as a stop, not as a dead computer", async () => {
+    const controller = new AbortController();
+    const aborting = ((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          // What fetch does when the signal it was given aborts.
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+        controller.abort();
+      })) as unknown as typeof fetch;
+
+    const transport = createComputerTransport({ fetchImpl: aborting });
+
+    await expect(
+      transport.post(
+        "http://computer",
+        "bot-1",
+        "/click",
+        {},
+        controller.signal,
+      ),
+    ).rejects.toThrow("The action was stopped.");
+  });
+
+  test("a Stop pressed before the request leaves still says the same thing", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const transport = createComputerTransport({
+      fetchImpl: (() => {
+        throw new Error("the request should never have been sent");
+      }) as unknown as typeof fetch,
+    });
+
+    await expect(
+      transport.post(
+        "http://computer",
+        "bot-1",
+        "/click",
+        {},
+        controller.signal,
+      ),
+    ).rejects.toThrow("The action was stopped.");
+  });
+
+  test("a computer that is really unreachable still says so", async () => {
+    const transport = createComputerTransport({
+      fetchImpl: (() =>
+        Promise.reject(
+          new Error("connect ECONNREFUSED"),
+        )) as unknown as typeof fetch,
+    });
+
+    await expect(
+      transport.post("http://computer", "bot-1", "/click", {}),
+    ).rejects.toThrow("The assistant's computer is not running.");
   });
 });

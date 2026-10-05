@@ -1,15 +1,28 @@
 import type { AbstractAgent } from "@ag-ui/client";
+import type { AuditInitiator } from "../audit";
 import type { AgentFetch, StallGuard } from "../channels/stall-guard";
 import {
   type HandoffForRun,
   type LoadAgentsForActor,
+  type LoadAttachment,
+  type LoadInstructions,
   type LoadToolsForBot,
+  type MarkAttachmentsSent,
   type RuntimeModel,
   resolveRuntimeAgents,
   type SignRun,
   type ToolSelection,
 } from "../copilot";
+import type { AcquireLearnedSkills } from "../learning/runtime";
+import type { LoadPersonalMemory } from "../memory/tools";
 import type { AgentActor } from "./profile-types";
+
+export type AgentResolutionContext = {
+  initiator?: AuditInitiator;
+  depth?: number;
+};
+
+export class CoworkerUnavailableError extends Error {}
 
 export type ActorAgentResolver = {
   resolveAgentsForActor(
@@ -18,6 +31,7 @@ export type ActorAgentResolver = {
   resolveAgentForActor(
     actor: AgentActor,
     agentId: string,
+    context?: AgentResolutionContext,
   ): Promise<AbstractAgent>;
 };
 
@@ -26,8 +40,15 @@ export type ActorAgentResolverDependencies = {
   model: RuntimeModel;
   resolveModelApiKey: () => Promise<string | null>;
   stallGuard?: StallGuard;
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot;
-  signRunForActor?: (actorId: string) => SignRun;
+  loadToolsForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => LoadToolsForBot;
+  signRunForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+    depth?: number,
+  ) => SignRun;
   computerGuidance?: string;
   loadVendors?: () => Promise<readonly string[]>;
   selectionForActor?: (actorId: string) => ToolSelection;
@@ -38,7 +59,16 @@ export type ActorAgentResolverDependencies = {
    * Per actor for the same reason the tools are: which Bots may be reached is decided against the
    * roster that person can see, so a Bot must never be able to address one they cannot.
    */
-  handoffForActor?: (actorId: string) => HandoffForRun;
+  handoffForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+    depth?: number,
+  ) => HandoffForRun;
+  loadInstructionsForActor?: (actorId: string) => LoadInstructions;
+  loadAttachmentForActor?: (actorId: string) => LoadAttachment;
+  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent;
+  acquireLearnedSkills?: AcquireLearnedSkills;
+  loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory;
 };
 
 /**
@@ -61,20 +91,27 @@ export function createActorAgentResolver(
      * or a Slack thread has no use for.
      */
     onlyAgentId?: string,
+    context?: AgentResolutionContext,
   ) =>
     resolveRuntimeAgents(
       () => Promise.resolve(registered),
       deps.model,
       deps.resolveModelApiKey,
       deps.stallGuard,
-      deps.loadToolsForActor?.(actor.id),
-      deps.signRunForActor?.(actor.id),
+      deps.loadToolsForActor?.(actor.id, context?.initiator),
+      deps.signRunForActor?.(actor.id, context?.initiator, context?.depth),
       deps.computerGuidance,
       deps.loadVendors,
       deps.selectionForActor?.(actor.id),
       deps.agentFetch,
-      deps.handoffForActor?.(actor.id),
+      deps.handoffForActor?.(actor.id, context?.initiator, context?.depth),
       onlyAgentId,
+      deps.loadInstructionsForActor?.(actor.id),
+      context?.initiator,
+      deps.loadAttachmentForActor?.(actor.id),
+      deps.markAttachmentsSentForActor?.(actor.id),
+      deps.acquireLearnedSkills,
+      deps.loadPersonalMemoryForActor?.(actor.id),
     );
 
   const resolveAgentsForActor = async (actor: AgentActor) =>
@@ -82,18 +119,27 @@ export function createActorAgentResolver(
 
   return {
     resolveAgentsForActor,
-    async resolveAgentForActor(actor, agentId) {
+    async resolveAgentForActor(actor, agentId, context) {
       const registered = await deps.loadAgents(actor);
       if (!registered.some((agent) => agent.id === agentId)) {
-        throw new Error(`Coworker ${agentId} is unavailable to this user.`);
+        throw new CoworkerUnavailableError(
+          `Coworker ${agentId} is unavailable to this user.`,
+        );
       }
 
-      const agents = await resolveRegisteredAgents(actor, registered, agentId);
+      const agents = await resolveRegisteredAgents(
+        actor,
+        registered,
+        agentId,
+        context,
+      );
       const agent = Object.hasOwn(agents, agentId)
         ? agents[agentId]
         : undefined;
       if (!agent) {
-        throw new Error(`Coworker ${agentId} is unavailable to this user.`);
+        throw new CoworkerUnavailableError(
+          `Coworker ${agentId} is unavailable to this user.`,
+        );
       }
       return agent;
     },

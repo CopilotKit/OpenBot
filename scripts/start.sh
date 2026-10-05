@@ -3,6 +3,12 @@
 # Start the local OpenBot stack and verify each service answers as OpenBot.
 # Safe to rerun: matching services are left running, and unrelated port holders are reported.
 
+# Before anything else, and before the `set` line below, which is itself bash-only: this file is
+# bash, and being read by `sh` used to end it with exit 1 and no output at all. See that file.
+. "$(dirname "$0")/require-bash.sh"
+# `holder`, `running` and `stop_matching`, which also work in Git Bash on Windows. See that file.
+. "$(dirname "$0")/processes.sh"
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -20,7 +26,20 @@ fi
 setting() {
   local name="$1" fallback="$2" value="${!1:-}"
   if [ -z "$value" ]; then
-    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+    # `|| true`, BECAUSE A KEY THIS FUNCTION HAS A DEFAULT FOR IS ROUTINELY ABSENT FROM `.env`.
+    #
+    # That is the whole reason the second argument exists: `.env.example` does not list `APP_PORT`,
+    # so a perfectly ordinary `.env` has no line for it. `grep` finding nothing is an exit status of
+    # 1, `pipefail` makes it the pipeline's, and `set -e` then killed the script on the way to the
+    # fallback that was sitting right there — before the first line of output, so the failure
+    # named neither the key nor the file.
+    #
+    # Under bash that status did not escape the command substitution and the fallback won, which is
+    # why this stood for as long as it did: the bug was invisible until somebody ran the script with
+    # `sh`, where the same code exits 1 in silence. The refusal at the top of this file now names
+    # that, and this closes the trap underneath it — an absent key takes the default in either
+    # shell, which is what the argument always promised.
+    value="$(grep -E "^$name=" "$ROOT/.env" | tail -1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/" || true)"
   fi
   printf '%s' "${value:-$fallback}"
 }
@@ -30,8 +49,12 @@ SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
 BOT_PORT="$(setting BOT_PORT 4200)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
+BOT_PROVIDER="$(setting BOT_PROVIDER openai | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
-ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
+# Through `setting`, like every other key here, so `.env` counts as the comment above says and as
+# docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
+# was ignored: the supervisor was still started and the server still told to use it.
+ONE_COMPUTER_EACH="$(setting OPENBOT_ONE_COMPUTER_EACH true)"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
@@ -116,10 +139,6 @@ green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }
 
-holder() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fcn 2>/dev/null | awk '/^c/{c=substr($0,2)} /^n/{print c" ("substr($0,2)")"; exit}' || true
-}
-
 # Does whatever holds this port answer as OpenBot, rather than merely answer?
 #
 # `curl -f` proves something is listening and returned 2xx. That is not the same claim, and the gap
@@ -129,7 +148,7 @@ holder() {
 #
 # When that happened here the cost was not a wrong answer, it was a wrong answer three stages later.
 # `require_free_or_ours` reported "already up", the server was therefore never started, `wait_for`
-# printed a green "server ready", and the run died at stage 3 in `json.loads` on a mouthful of HTML —
+# printed a green "server ready", and the run died at stage 3 parsing a mouthful of HTML as JSON —
 # a JSON parse error standing in for "that port belongs to something else".
 #
 # So each surface is asked for something only it can produce.
@@ -162,7 +181,9 @@ require_free_or_ours() {
     return 0
   fi
   red "  $name: port $port is held by something that is not OpenBot: $who"
-  red "  Re-run with ${name^^}_PORT=<free port>, or stop that process yourself."
+  # `tr`, not `${name^^}`, which is bash 4. macOS ships bash 3.2, where that expansion is a "bad
+  # substitution" and the run ended on it instead of on this hint.
+  red "  Re-run with $(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')_PORT=<free port>, or stop that process yourself."
   exit 1
 }
 
@@ -190,6 +211,11 @@ wait_for() {
   exit 1
 }
 
+stop_server_processes_for_restart() {
+  stop_matching "bun --env-file=../.env src/production-entry.ts"
+  stop_matching "bun --env-file=../.env src/index.ts"
+}
+
 echo
 echo "OpenBot"
 echo "======="
@@ -200,7 +226,7 @@ if [ "$ONE_COMPUTER_EACH" = "true" ]; then
   SERVICES+=(supervisor)
 fi
 #
-# Every Bot service, every run, whether or not it is already answering.
+# Every selected Bot service, every run, whether or not it is already answering.
 #
 # This used to skip one that answered its health route, which sounds like an optimisation and is
 # actually a correctness bug: answering says the process is alive, not that its environment still
@@ -215,20 +241,33 @@ fi
 # `docker compose up -d` is declarative and does nothing for a service whose configuration has not
 # changed, so naming them all costs a comparison and buys the guarantee that what is running is what
 # this run configured.
-for svc in agent-computer agent-bot agent-langgraph; do
-  SERVICES+=("$svc")
-done
+SERVICES+=(agent-computer)
+# The managed coworker uses LangGraph. The separate legacy sample only accepts OpenAI keys,
+# so requiring it would prevent an Anthropic-only deployment from reaching its managed Bot.
+if [ "$BOT_PROVIDER" = "anthropic" ]; then
+  info "  agent-bot: skipped for Anthropic (OpenAI-only sample)"
+else
+  SERVICES+=(agent-bot)
+fi
+SERVICES+=(agent-langgraph)
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
-docker compose up -d --build "${SERVICES[@]}" >/dev/null
+# Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
+# terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
+# stdout, and stops with "failed to get console: provided file is not a console". An environment
+# variable rather than `--progress`, because a Compose too old to know the flag refuses it, and one
+# too old to know the variable ignores it.
+COMPOSE_PROGRESS=quiet docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   red "  Migrations did not apply. The database is not the schema this server expects."
   red "  Log: $LOGS/migrate.log"
   exit 1
 fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
-wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+if [ "$BOT_PROVIDER" != "anthropic" ]; then
+  wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+fi
 wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
 
 for table in agent_profiles agent_preferences; do
@@ -264,7 +303,7 @@ require_free_or_ours "$SERVER_PORT" server
 # rather than as an error.
 if [ "$SECRETS_ROTATED" = "true" ]; then
   info "  a secret was generated this run, so the server is restarted to pick it up"
-  pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+  stop_server_processes_for_restart
   sleep 1
 fi
 #
@@ -290,12 +329,12 @@ if identifies_as_openbot "$SERVER_PORT" server; then
   case "$HANDOFF_STATUS" in
     401)
       info "  server: up, but refuses the worker's secret (401), so it is restarted to pick it up"
-      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      stop_server_processes_for_restart
       sleep 1
       ;;
     404)
       info "  server: up, but has no /internal/routines/run (404: an older checkout), so it is restarted"
-      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      stop_server_processes_for_restart
       sleep 1
       ;;
   esac
@@ -307,11 +346,11 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
   else
     (cd server && PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/production-entry.ts >"$LOGS/server.log" 2>&1 &)
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
@@ -332,7 +371,7 @@ wait_for_openbot "$SERVER_PORT" server
 # The old pattern matched those containers, the guard false-positived, and the worker silently never
 # started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
 # relative imports resolve from the importing file, not from the process's cwd.
-if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+if ! running "bun worker/src/index.ts"; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
   (cd "$ROOT" && \
     DATABASE_URL="$WORKER_DATABASE_URL" \
@@ -341,7 +380,7 @@ if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
     bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
   info "  worker: started (routine sweep loop)"
   sleep 1
-  if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+  if ! running "bun worker/src/index.ts"; then
     red "  worker: did not stay up, check $LOGS/worker.log"
   fi
 else
@@ -350,20 +389,26 @@ fi
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
-python3 - "$INFO" <<'PY'
-import json, sys
-info = json.loads(sys.argv[1])
-status, agents = info.get("licenseStatus"), list(info.get("agents", {}))
-if status != "valid":
-    print(f"\033[31m  licence is '{status}', not 'valid'.\033[0m")
-    print("\033[31m  Run: npx copilotkit@latest login && npx copilotkit@latest license --write\033[0m")
-    print("\033[31m  See README.md for Intelligence setup.\033[0m")
-    raise SystemExit(1)
-if not agents:
-    print("\033[31m  No Bots registered.\033[0m")
-    raise SystemExit(1)
-print(f"\033[32m  licence valid · mode {info.get('mode')} · Bots: {', '.join(agents)}\033[0m")
-PY
+# Read with Bun, which every run of this script already needs, rather than python3, which not every
+# machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
+# found" and exits 49, so the run stopped here with the server and worker up and the app never
+# started.
+bun run - "$INFO" <<'JS'
+const info = JSON.parse(process.argv[2]);
+const status = info.licenseStatus;
+const agents = Object.keys(info.agents ?? {});
+if (status !== "valid") {
+  console.log(`\x1b[31m  licence is '${status}', not 'valid'.\x1b[0m`);
+  console.log("\x1b[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\x1b[0m");
+  console.log("\x1b[31m  See README.md for Intelligence setup.\x1b[0m");
+  process.exit(1);
+}
+if (agents.length === 0) {
+  console.log("\x1b[31m  No Bots registered.\x1b[0m");
+  process.exit(1);
+}
+console.log(`\x1b[32m  licence valid · mode ${info.mode} · Bots: ${agents.join(", ")}\x1b[0m`);
+JS
 
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
@@ -394,10 +439,9 @@ Try:
 
 Logs: $LOGS
   Routine sweep worker: $LOGS/worker.log
-Stop the routine worker: pkill -f 'bun worker/src/index.ts'
-Stop Docker services: docker compose down
-  A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
-  docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)
-  Its files and its browser profile are volumes and survive either way.
-Stop host app/server: kill the processes using ports $APP_PORT and $SERVER_PORT
+
+Stop all of it: bash scripts/stop.sh
+  The app, the worker, the API server, the Docker services, and each Bot's computer, which compose
+  does not own because the supervisor makes it. Pass --keep-computers to leave the browsers signed
+  in. Nothing is deleted either way: the database, the files and the browser profiles are volumes.
 EOF

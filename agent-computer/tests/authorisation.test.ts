@@ -85,6 +85,7 @@ describe("what an unauthenticated caller may reach", () => {
       "/snapshot",
       "/files/list",
       "/files/read",
+      "/files/download",
       "/stream",
       "/live",
       "/",

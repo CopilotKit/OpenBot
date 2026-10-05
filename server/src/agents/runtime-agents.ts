@@ -1,4 +1,6 @@
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { teamBotAccess } from "../team-bots/access";
+import type { ManagedAgentConfig } from "../config";
 import { type RegisteredAgent, registeredAgentFromRow } from "../copilot";
 import type { CredentialSecretReader } from "../credentials";
 import type { Database } from "../db/client";
@@ -7,6 +9,7 @@ import {
   agents,
   channelAgents,
   channelMemberships,
+  channels,
 } from "../db/schema";
 import { agentAuthHeaders, authFromConfiguration } from "./auth-header";
 import type { AgentActor } from "./profile-types";
@@ -23,7 +26,7 @@ export function createRuntimeAgentLoader(
   /** Resolves a customer agent's key at load time. Absent means no agent can carry one. */
   vault?: { reader: CredentialSecretReader; encryptionKey: string },
   /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
-  managedAgent?: { endpoint: URL; token: string },
+  managedAgent?: ManagedAgentConfig,
 ) {
   return async (actor: AgentActor): Promise<RegisteredAgent[]> => {
     const [active, tombstones] = await Promise.all([
@@ -37,9 +40,11 @@ export function createRuntimeAgentLoader(
     for (const row of active) {
       const agent = registeredAgentFromRow(row);
       if (!agent) continue;
+      const isRemoteAgent =
+        agent.type === "remote_ag_ui" || agent.type === "remote_mastra";
       // The key is resolved per load, rather than being cached on the row: revoking a
       // credential then takes effect on the next run rather than on the next restart.
-      if (agent.type === "remote_ag_ui" && vault) {
+      if (isRemoteAgent && vault) {
         const headers = await agentAuthHeaders({
           reader: vault.reader,
           encryptionKey: vault.encryptionKey,
@@ -47,15 +52,29 @@ export function createRuntimeAgentLoader(
         });
         if (headers) agent.headers = headers;
       }
-      if (
-        agent.type === "remote_ag_ui" &&
-        managedAgent &&
-        agent.endpoint === managedAgent.endpoint.toString()
-      ) {
-        agent.headers = {
-          ...agent.headers,
-          "x-openbot-agent-token": managedAgent.token,
-        };
+      /*
+       * Every endpoint this deployment runs gets the token, not just the first one.
+       *
+       * Matching a single endpoint left the harness picked during setup without it: registered,
+       * addressable, routed to, and answering `401 unauthorised` to everything. Its container is
+       * this deployment's own, started on a port this deployment chose with this token in its
+       * environment, so it is the same relationship the Bot in the box has.
+       */
+      if (isRemoteAgent && managedAgent) {
+        // Config parses URLs, while package rows retain their original spelling. Compare both
+        // in canonical form so scheme/host case cannot silently drop the deployment token.
+        const endpoint = managedEndpointIdentity(agent.endpoint);
+        const ours =
+          endpoint !== undefined &&
+          [managedAgent.endpoint, managedAgent.alsoRun]
+            .filter((url): url is URL => url !== undefined)
+            .some((url) => endpoint === managedEndpointIdentity(url));
+        if (ours) {
+          agent.headers = {
+            ...agent.headers,
+            "x-openbot-agent-token": managedAgent.token,
+          };
+        }
       }
       registered.set(agent.id, agent);
     }
@@ -71,6 +90,18 @@ export function createRuntimeAgentLoader(
 
     return [...registered.values()];
   };
+}
+
+/** Keep the existing pathname slash tolerance without erasing query or fragment differences. */
+function managedEndpointIdentity(value: string | URL): string | undefined {
+  try {
+    const endpoint = new URL(value);
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "");
+    return endpoint.toString();
+  } catch {
+    // An invalid stored URL is not a managed endpoint; it must not abort another agent's load.
+    return undefined;
+  }
 }
 
 function selectActiveAgents(database: Database, actor: AgentActor) {
@@ -93,6 +124,8 @@ function selectActiveAgents(database: Database, actor: AgentActor) {
           : or(
               eq(agentProfiles.visibility, "public"),
               eq(agentProfiles.ownerUserId, actor.id),
+              // The same Team Bot rule as the roster: see team-bots/access.ts.
+              teamBotAccess(actor.id, agentProfiles.agentId),
             ),
       ),
     );
@@ -111,6 +144,10 @@ function selectTombstoneAgents(database: Database, actor: AgentActor) {
     .from(agents)
     .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
     .innerJoin(channelAgents, eq(channelAgents.agentId, agents.id))
+    .innerJoin(
+      channels,
+      and(eq(channels.id, channelAgents.channelId), isNull(channels.deletedAt)),
+    )
     .innerJoin(
       channelMemberships,
       and(

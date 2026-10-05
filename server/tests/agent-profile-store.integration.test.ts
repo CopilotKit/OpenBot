@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
   AgentNotManageableError,
@@ -26,11 +27,9 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgres://openbot:openbot@localhost:5432/openbot";
+const databaseUrl = testDatabaseUrl();
 const database = createDatabase(databaseUrl, TEST_POOL);
 const managedAgentAgUiUrl = new URL("https://managed.example.test/ag-ui");
 const store: AgentProfileStore = createAgentProfileStore(
@@ -221,6 +220,31 @@ async function racePackageAttachment(
   }
 }
 
+/**
+ * The stored row behind a coworker, proven to exist before anything reads it.
+ *
+ * Asserted here rather than at each call site because a missing row and a missing field are
+ * different failures that an optional chain would collapse into the same one — "systemPrompt is
+ * undefined" reads as a prompt that was not written when it may be a coworker that is not there.
+ */
+async function agentRow(agentId: string): Promise<{
+  type: string;
+  configuration: { systemPrompt?: string; endpoint?: string };
+}> {
+  const [row] = await database
+    .select({ type: agents.type, configuration: agents.configuration })
+    .from(agents)
+    .where(eq(agents.id, agentId));
+  if (!row) throw new Error(`no agents row for ${agentId}`);
+  return {
+    type: row.type,
+    configuration: (row.configuration ?? {}) as {
+      systemPrompt?: string;
+      endpoint?: string;
+    },
+  };
+}
+
 describe("agent profile store integration", () => {
   test("refuses to create a coworker with no endpoint when this deployment has no managed Bot", async () => {
     const owner = await createUser();
@@ -234,6 +258,97 @@ describe("agent profile store integration", () => {
         visibility: "private",
       }),
     ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
+  });
+
+  /**
+   * The coworker with nowhere to send it, and the instruction it actually runs on.
+   *
+   * `registeredAgentFromRow` gives a `built_in` agent its `configuration.systemPrompt` and NO
+   * standing role message, so that column is the whole of what such a coworker is ever told —
+   * `agentProfiles.roleDescription` never reaches it. These two tests exist because the pair can
+   * drift silently: creating writes both, and an edit that wrote only the profile left every screen
+   * showing new instructions while the Bot went on following the old ones, for good, with nothing
+   * anywhere to say so.
+   */
+  test("creates a coworker that runs here when there is nowhere to send it", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+
+    const created = await withoutManaged.create(owner, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "Answer from the ledger and quote the line you used.",
+      visibility: "private",
+      systemPrompt: "Answer from the ledger and quote the line you used.",
+    });
+    createdAgentIds.push(created.id);
+
+    const row = await agentRow(created.id);
+    expect(row.type).toBe("built_in");
+    expect(row.configuration.systemPrompt).toBe(
+      "Answer from the ledger and quote the line you used.",
+    );
+    // No address was given and none was invented; that is what makes it built_in rather than remote.
+    expect(row.configuration.endpoint).toBeUndefined();
+  });
+
+  test("an edit moves the instruction such a coworker actually runs on", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+    const created = await withoutManaged.create(owner, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "The first instruction.",
+      visibility: "private",
+      systemPrompt: "The first instruction.",
+    });
+    createdAgentIds.push(created.id);
+
+    await withoutManaged.update(owner, created.id, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "The second instruction, which must be the live one.",
+      visibility: "private",
+    });
+
+    const row = await agentRow(created.id);
+    expect(row.type).toBe("built_in");
+    expect(row.configuration.systemPrompt).toBe(
+      "The second instruction, which must be the live one.",
+    );
+    // And the profile every screen reads agrees with it, rather than only the profile moving.
+    expect((await profileById(owner, created.id)).roleDescription).toBe(
+      "The second instruction, which must be the live one.",
+    );
+  });
+
+  /**
+   * The other half of the same rule: a remote coworker must not acquire a prompt it never had.
+   *
+   * Its instruction travels as the standing role message built from the profile, so a `systemPrompt`
+   * appearing in its configuration would be a second source for the same thing — and the one the
+   * runtime prefers for a `built_in` row, which is what this coworker would look like if its type
+   * ever changed.
+   */
+  test("an edit never gives a coworker at its own address a system prompt", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      visibility: "private",
+      configuration: { endpoint: "https://remote.example.test/ag-ui" },
+    });
+
+    await store.update(owner, source.agentId, {
+      name: "Still Remote",
+      title: "Elsewhere",
+      roleDescription: "Edited, and it still runs at its own address.",
+      visibility: "private",
+      endpoint: "https://remote.example.test/ag-ui",
+    });
+
+    const row = await agentRow(source.agentId);
+    expect(row.type).toBe("remote_ag_ui");
+    expect(row.configuration.systemPrompt).toBeUndefined();
   });
 
   test("lets an owner and admin get and list a private profile but hides it from another user", async () => {
@@ -278,6 +393,57 @@ describe("agent profile store integration", () => {
         ),
       );
     expect(preference?.hiddenAt).toBeNull();
+  });
+
+  test("stores pinning per user, independently of hiding", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const source = await createProfileFixture({ owner, visibility: "public" });
+    const pinnedFor = async (actor: AgentActor) =>
+      (await profileById(actor, source.agentId)).pinned;
+
+    expect(await pinnedFor(owner)).toBe(false);
+
+    await store.setPinned(owner, source.agentId, true);
+    expect(await pinnedFor(owner)).toBe(true);
+    expect(await pinnedFor(other)).toBe(false);
+
+    // The same preference row as hiding: each write must leave the other column alone.
+    await store.setHidden(owner, source.agentId, true);
+    const [hiddenWhilePinned] = await store.list(owner, true);
+    expect(hiddenWhilePinned?.pinned).toBe(true);
+    await store.setPinned(owner, source.agentId, false);
+    await store.setPinned(owner, source.agentId, true);
+    expectListed(await store.list(owner, true), source.agentId, true);
+
+    await store.setHidden(owner, source.agentId, false);
+    expect(await pinnedFor(owner)).toBe(true);
+    await store.setPinned(owner, source.agentId, false);
+    expect(await pinnedFor(owner)).toBe(false);
+    const [preference] = await database
+      .select()
+      .from(agentPreferences)
+      .where(
+        and(
+          eq(agentPreferences.userId, owner.id),
+          eq(agentPreferences.agentId, source.agentId),
+        ),
+      );
+    expect(preference?.pinnedAt).toBeNull();
+    expect(preference?.hiddenAt).toBeNull();
+  });
+
+  test("refuses to pin a coworker the caller cannot see", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const privateSource = await createProfileFixture({
+      owner,
+      visibility: "private",
+    });
+
+    await expect(
+      store.setPinned(other, privateSource.agentId, true),
+    ).rejects.toBeInstanceOf(AgentNotFoundError);
   });
 
   test("takes the endpoint and ignores every field a caller must not set", async () => {
@@ -589,6 +755,85 @@ describe("agent profile store integration", () => {
     expect(sourceMappings).not.toHaveLength(0);
     expect(duplicateChannelAgents).toHaveLength(0);
     expect(duplicateMappings).toHaveLength(0);
+  });
+
+  test("copies the source's own endpoint rather than repointing the copy at the managed Bot", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: { endpoint: "https://hosted.example.test/ag-ui" },
+    });
+
+    const duplicate = await store.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe("https://hosted.example.test/ag-ui");
+    expect(duplicate.endpoint).not.toBe(managedAgentAgUiUrl.toString());
+  });
+
+  test("gives a copy of an endpoint-less source the managed Bot, as its source had", async () => {
+    const owner = await createUser();
+    const created = await store.create(owner, {
+      name: `Created ${randomUUID()}`,
+      title: "Created Title",
+      roleDescription: "Created role description.",
+      visibility: "private",
+    } as CreateAgentInput);
+    createdAgentIds.push(created.id);
+
+    const duplicate = await store.duplicate(owner, created.id);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe(managedAgentAgUiUrl.toString());
+  });
+
+  test("does not carry the source's stored key onto the copy", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: {
+        endpoint: "https://hosted.example.test/ag-ui",
+        auth: { header: "Authorization", credentialId: "credential-1" },
+      },
+    });
+    expect((await profileById(owner, source.agentId)).hasAuth).toBe(true);
+
+    const duplicate = await store.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.hasAuth).toBe(false);
+    const [row] = await database
+      .select({ configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, duplicate.id));
+    expect(authFromConfiguration(row?.configuration)).toBeNull();
+  });
+
+  test("duplicates a coworker with its own endpoint on a deployment with no managed Bot", async () => {
+    const unmanagedStore = createAgentProfileStore(database, undefined);
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: { endpoint: "https://hosted.example.test/ag-ui" },
+    });
+
+    const duplicate = await unmanagedStore.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe("https://hosted.example.test/ag-ui");
+  });
+
+  test("refuses to duplicate an endpoint-less coworker with no managed Bot to fall back to", async () => {
+    const unmanagedStore = createAgentProfileStore(database, undefined);
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: {},
+    });
+
+    await expect(
+      unmanagedStore.duplicate(owner, source.agentId),
+    ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
   });
 
   test("soft deletes a profile from reads and lists while retaining its raw rows", async () => {

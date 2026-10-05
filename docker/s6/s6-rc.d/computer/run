@@ -17,6 +17,39 @@ if [ "${EMBEDDED_COMPUTER:-on}" != "on" ]; then
   exec /bin/true
 fi
 cd /app/agent-computer
-export PORT=4100
-export WORKSPACE_DIR=/workspace
-exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
+
+set --
+for name in \
+  PATH LANG LANGUAGE TERM TERMINFO COLORTERM DISPLAY \
+  HTTP_PROXY HTTPS_PROXY NO_PROXY ALL_PROXY FTP_PROXY \
+  http_proxy https_proxy no_proxy all_proxy ftp_proxy \
+  BUN_INSTALL PLAYWRIGHT_BROWSERS_PATH SPIFFE_ENDPOINT_SOCKET \
+  COMPUTER_TOKEN COMPUTER_BOT_ID COMPUTER_BROWSER_MODE COMPUTER_MAX_BROWSERS \
+  COMPUTER_BROWSER_IDLE_MS COMPUTER_SANDBOX COMPUTER_SHELL_ENV COMPUTER_STOPPED \
+  ACTION_TIMEOUT_MS NAVIGATION_TIMEOUT_MS AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS
+do
+  eval "isset=\${$name+x}"
+  [ -n "${isset:-}" ] && eval "set -- \"\$@\" \"$name=\${$name}\""
+done
+for name in $(printenv | sed -n 's/=.*//p' | grep -E '^(LC_[A-Za-z0-9_]+|EGRESS_PROXY_[A-Za-z0-9_]+)$' || true); do
+  eval "set -- \"\$@\" \"$name=\${$name}\""
+done
+if [ -n "${COMPUTER_SHELL_ENV:-}" ]; then
+  oldifs=$IFS
+  IFS=,
+  for name in $COMPUTER_SHELL_ENV; do
+    IFS=$oldifs
+    name=$(printf %s "$name" | tr -d '[:space:]')
+    case "$name" in
+      '' | *[!A-Za-z0-9_]*) IFS=, ; continue ;;
+    esac
+    eval "isset=\${$name+x}"
+    [ -n "${isset:-}" ] && eval "set -- \"\$@\" \"$name=\${$name}\""
+    IFS=,
+  done
+  IFS=$oldifs
+fi
+
+exec s6-setuidgid pwuser env -i "$@" \
+  HOME=/home/pwuser PORT=4100 WORKSPACE_DIR=/workspace PROFILES_DIR="${PROFILES_DIR:-/profiles}" \
+  /usr/local/bin/bun src/index.ts

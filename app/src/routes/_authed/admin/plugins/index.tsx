@@ -231,6 +231,57 @@ function RouteComponent() {
               </PageRows>
             )}
           </PageSection>
+
+          <PageSection
+            description="A directory this deployment has not reviewed, reached through Composio."
+            title="More apps"
+          >
+            <PageRows>
+              {/*
+               * The row states the setting rather than hiding the feature. A deployment with no
+               * Composio key still says that Composio is a thing this build can do and names the
+               * variable that turns it on — a section that simply vanished would leave an
+               * administrator with nothing to search for, and nothing to tell them the handful of
+               * connectors above is not the whole story.
+               */}
+              {plugins.data?.composioConfigured ? (
+                <Item
+                  data-testid="plugin-composio"
+                  render={<Link to="/admin/plugins/composio" />}
+                  size="sm"
+                >
+                  <RowMark>
+                    <IconPlug className="size-4" />
+                  </RowMark>
+                  <ItemContent>
+                    <ItemTitle>Browse Composio</ItemTitle>
+                    <ItemDescription>
+                      A few hundred apps, reached as whoever is asking. Each
+                      person connects their own account.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              ) : (
+                /* No chevron and no link: the row goes nowhere, because there is nowhere to go
+                   until the key is set. */
+                <Item data-testid="plugin-composio" size="sm">
+                  <RowMark>
+                    <IconPlug className="size-4" />
+                  </RowMark>
+                  <ItemContent>
+                    <ItemTitle>Composio</ItemTitle>
+                    <ItemDescription>
+                      Add your Composio key to enable a catalogue of tools. Set
+                      COMPOSIO_API_KEY on this deployment.
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+              )}
+            </PageRows>
+          </PageSection>
         </>
       )}
     </PageShell>

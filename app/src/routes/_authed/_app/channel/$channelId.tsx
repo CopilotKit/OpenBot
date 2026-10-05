@@ -1,22 +1,23 @@
-import { IconDeviceDesktop, IconSettings } from "@tabler/icons-react";
+import { IconSettings } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
 import { ChannelAvatar } from "@/components/channels/avatar";
+import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { ChannelChat } from "@/components/channels/channel-chat";
-import { ActivityLog } from "@/components/computer/activity-log";
-import { ComputerView } from "@/components/computer/computer-view";
-import { useNeedsYou } from "@/components/computer/needs-you";
+import { ComputerChatControls } from "@/components/computer/computer-controls";
+import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
 import {
@@ -45,36 +46,6 @@ export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   component: RouteComponent,
 });
 
-/**
- * What the Bot is looking at, and what it is doing.
- *
- * Two surfaces, stacked rather than tabbed. The screen was the only window into a Bot's computer,
- * so a Bot that spent two minutes in a terminal showed a blank browser and nothing else: the honest
- * answer to "what is it doing" was "something, on a machine holding your logins". The activity —
- * the shell and the workspace — sits below the screen, so watching one never costs the other and
- * nothing about what the Bot is doing hides behind a tab nobody clicked.
- */
-function ComputerViewPanel({
-  agentId,
-  name,
-}: {
-  agentId: string;
-  name?: string;
-}) {
-  return (
-    <div className="mt-4 px-4">
-      <div className="p-4">
-        <ComputerView active computerId={agentId} name={name} />
-
-        <div className="mt-10">
-          <h3 className="mb-2 font-medium text-sm">Activity</h3>
-          <ActivityLog computerId={agentId} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function RouteComponent() {
   const { channelId } = Route.useParams();
   const { settings, watch } = Route.useSearch();
@@ -85,8 +56,6 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
-  /** Only polled while the screen is closed; the screen panel polls control itself. */
-  const needsYou = useNeedsYou(agentId, !isWatching);
 
   const queryClient = useQueryClient();
   const markRead = useMutation(markChannelReadMutationOptions(queryClient));
@@ -116,16 +85,6 @@ function RouteComponent() {
       markReadMutate(channelId);
     }
   }, [channelId, unseen, markReadMutate]);
-
-  /*
-   * Needs-you prompts auto-open the screen panel, because the prompt with the reason on it — the
-   * amber "the assistant needs you" row, and the masked field for a credential — is drawn on the
-   * screen card in that panel. Nothing about a stuck Bot is actionable until this pane is open.
-   */
-  useEffect(() => {
-    if (!needsYou) return;
-    show("watch");
-  });
 
   // Browser activity may auto-open the screen once per run unless this run was dismissed.
   const dismissedEpoch = useRef<number | null>(null);
@@ -164,6 +123,7 @@ function RouteComponent() {
       onClose={() => show(null)}
       open={(isSettingsOpen || isWatching) && agentId !== undefined}
       detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
+      title={isWatching ? "Computer" : undefined}
       detail={
         agentId === undefined ? null : isWatching ? (
           // Manual watch remains active even when there is no current browser action.
@@ -174,9 +134,10 @@ function RouteComponent() {
       }
     >
       <div className="flex flex-col">
-        <div className="h-12 border-b border-border sticky top-0 flex flex-row items-center justify-between px-3 gap-2">
+        <div className="min-h-12 border-b border-border sticky top-0 flex flex-row flex-wrap items-center justify-between px-3 py-2 gap-2">
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
+            <SidebarToggle />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"
@@ -214,25 +175,11 @@ function RouteComponent() {
             </motion.span>
           </div>
           <div className="flex flex-row gap-1.5">
-            <Button
-              aria-label={
-                needsYou
-                  ? "This Bot is waiting for you. Open its screen"
-                  : "Watch this Bot's screen"
-              }
-              aria-pressed={isWatching}
-              className={`relative ${isWatching ? "bg-foreground/5" : ""}`}
-              disabled={agentId === undefined}
-              onClick={() => show(isWatching ? null : "watch")}
-              variant="ghost"
-              size="icon"
-            >
-              <IconDeviceDesktop className="size-4.5" />
-              {/* Mirrors needs-you state outside the hidden screen pane. */}
-              {needsYou ? (
-                <span className="absolute right-1 top-1 size-2 rounded-full bg-amber-500" />
-              ) : null}
-            </Button>
+            <ComputerChatControls
+              computerId={agentId}
+              open={isWatching}
+              onOpenChange={(open) => show(open ? "watch" : null)}
+            />
             <Button
               aria-label="Channel coworker"
               aria-pressed={isSettingsOpen}
@@ -247,6 +194,9 @@ function RouteComponent() {
           </div>
         </div>
       </div>
+      {agentId && channel.data?.agentIds.length === 1 ? (
+        <BotPausedBanner agentId={agentId} />
+      ) : null}
       <ChannelBody
         channel={channel.data}
         isPending={channel.isPending}
@@ -257,8 +207,8 @@ function RouteComponent() {
 }
 
 /**
- * A channel holds exactly one coworker. More than one is not supported yet, and rendering a shared
- * transcript for several agents before the runtime can route between them would look like it works.
+ * A channel with exactly one coworker is its CopilotKit chat. One with several is a group, which
+ * redirects to its shared transcript at `/group/$channelId`.
  */
 function ChannelBody({
   channel,
@@ -281,11 +231,15 @@ function ChannelBody({
 
   const runtimeAgentId =
     channel.agentIds.length === 1 ? channel.agentIds[0] : undefined;
+  // Two or more Bots is a group conversation, with its own shared transcript. Every link to a
+  // channel lands here, so this is the one redirect they all need.
   if (!runtimeAgentId) {
     return (
-      <p className="p-8 text-sm text-muted-foreground">
-        This channel has more than one coworker, which is not supported yet.
-      </p>
+      <Navigate
+        params={{ channelId: channel.id }}
+        replace
+        to="/group/$channelId"
+      />
     );
   }
 

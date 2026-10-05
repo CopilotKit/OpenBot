@@ -634,6 +634,42 @@ describe("private addresses named one at a time", () => {
     ).toBeFalse();
   });
 
+  test("an IPv6 address matches however the endpoint spells it", () => {
+    // The list holds the parser's spelling (config.ts canonicalises it); the endpoint may arrive
+    // uncompressed or upper-case and the parser folds both to the same name.
+    for (const address of [
+      "http://[0:0:0:0:0:0:0:1]:8443/ag-ui",
+      "http://[::1]:8443/ag-ui",
+      "http://[::1]:8443/ag-ui".toUpperCase().replace("HTTP", "http"),
+    ]) {
+      expect(
+        checkAgentEndpoint(address, { allowedHosts: named("[::1]:8443") })
+          .allowed,
+      ).toBeTrue();
+    }
+  });
+
+  test("an IPv6 address is not confused with an address and a port", () => {
+    // `[fd00::1:8443]` is an address on the private network, and `[fd00::1]:8443` is another one
+    // with a port. Naming either must not admit the other, which is what stripping the brackets
+    // from both did: each became `fd00::1:8443`.
+    expect(
+      checkAgentEndpoint("http://[fd00::1]:8443/ag-ui", {
+        allowedHosts: named("[fd00::1:8443]"),
+      }).allowed,
+    ).toBeFalse();
+    expect(
+      checkAgentEndpoint("http://[fd00::1:8443]/ag-ui", {
+        allowedHosts: named("[fd00::1]:8443"),
+      }).allowed,
+    ).toBeFalse();
+    expect(
+      checkAgentEndpoint("http://[fd00::1:8443]/ag-ui", {
+        allowedHosts: named("[fd00::1:8443]"),
+      }).allowed,
+    ).toBeTrue();
+  });
+
   test("the metadata address cannot be named back in", () => {
     /*
      * The property that makes this safe to ship. The never-allowed list is checked before the

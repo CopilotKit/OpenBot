@@ -6,7 +6,7 @@ import {
 } from "../src/computer/snapshot-store";
 import { createDatabase } from "../src/db/client";
 import { computerSnapshot } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * The snapshot a ref resolves against has to cross to another server.
@@ -23,11 +23,7 @@ import { TEST_POOL } from "./support/database";
  * remembers what it was told a moment ago, which is not the property in question.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 function snapshot(
   snapshotId: number,

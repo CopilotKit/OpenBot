@@ -41,7 +41,11 @@
  * RUN_ERROR at any point in a stream, including as the very first event, which is what a Bot that
  * never spoke produces.
  */
-import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  type AuditInitiator,
+  type AuditStore,
+  recordAuditEvent,
+} from "../audit";
 import { type StalledStream, TurnWatchdog } from "./turn-watchdog";
 
 /** The fetch an `HttpAgent` uses, as @ag-ui/client 0.0.57 declares it. */
@@ -51,7 +55,12 @@ export type AgentFetch = (
 ) => Promise<Response>;
 
 /** Which Bot a watched stream belongs to. The name is for the sentence a person reads. */
-export type WatchedBot = { id: string; name: string };
+export type WatchedBot = {
+  id: string;
+  name: string;
+  /** What started the run this stream belongs to, so a routine's stall is not filed as a person's. */
+  initiator?: AuditInitiator;
+};
 
 export type StallGuardOptions = {
   /** Silence this long ends the turn. Zero or less leaves every stream untouched. */
@@ -226,6 +235,7 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
         eventType: "agent.stream_stalled",
         targetType: "agent",
         targetId: stream.bot.id,
+        ...(stream.bot.initiator ? { initiator: stream.bot.initiator } : {}),
         payload: {
           bot: stream.bot.id,
           silentForMs: stalled.silentForMs,

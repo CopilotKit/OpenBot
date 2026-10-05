@@ -558,6 +558,60 @@ describe("registering this deployment as an OAuth client", () => {
       globalThis.fetch = realFetch;
     }
   });
+
+  /**
+   * A vendor that cannot be reached at all, which is not the same as one that refused.
+   *
+   * `!response.ok` needs a response, and there is none when the connection is refused, the name does
+   * not resolve, TLS will not agree or the fifteen-second timeout fires first. Unguarded, the fetch
+   * rejects straight through a function whose documented answer to a vendor that will not register
+   * us is null, and the caller that reads null to mean "try again later" never runs.
+   */
+  test("a vendor that cannot be reached is a refusal, not a thrown transport error", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError(
+        "Unable to connect. Is the computer able to access the url?",
+      );
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await registerDynamicClient({
+          registrationUrl: "https://vendor.example/register",
+          redirectUri: "https://openbot.example/cb",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
+   * The signal is checked, not just the catch. A stub that ignores `init.signal` would pass against
+   * code that had dropped the deadline entirely, which is the one thing a timeout test exists to
+   * notice. The fifteen seconds themselves stay unexercised; the literal is in the source and
+   * waiting it out is not a test.
+   */
+  test("a registration endpoint that never answers is the same refusal", async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined);
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await registerDynamicClient({
+          registrationUrl: "https://vendor.example/register",
+          redirectUri: "https://openbot.example/cb",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+    expect(seen[0]?.aborted).toBe(false);
+  });
 });
 
 describe("redeeming an authorization code", () => {
@@ -698,5 +752,63 @@ describe("redeeming an authorization code", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  /**
+   * A token endpoint that cannot be reached at all.
+   *
+   * The one failure with no response to inspect, so `!response.ok` never sees it: a refused
+   * connection, a name that does not resolve, TLS that will not agree, or the fifteen-second timeout
+   * firing. It is also the failure that lands at the worst moment, on somebody who has just consented
+   * at the vendor and is being sent back here. Unguarded it escapes the callback as a bare 500 with
+   * no Location, so instead of Settings saying it did not work, they get an error page.
+   */
+  test("a token endpoint that cannot be reached is a refusal, not a thrown transport error", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new TypeError(
+        "Unable to connect. Is the computer able to access the url?",
+      );
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await redeemAuthorizationCode({
+          tokenUrl: "https://vendor.example/token",
+          clientId: "client-id",
+          clientSecret: "",
+          code: "code-1",
+          redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+          verifier: "verifier-1",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /** Same reasoning as the registration side: the deadline is what is being tested, so it is read. */
+  test("a token endpoint that never answers is the same refusal", async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined);
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await redeemAuthorizationCode({
+          tokenUrl: "https://vendor.example/token",
+          clientId: "client-id",
+          clientSecret: "",
+          code: "code-1",
+          redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+          verifier: "verifier-1",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+    expect(seen[0]?.aborted).toBe(false);
   });
 });

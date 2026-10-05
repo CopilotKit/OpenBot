@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -10,9 +12,14 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { UserPreferences } from "../../../../shared/user-preferences";
 // NOT drizzle's `jsonb`: that one serialises, and so does the driver, so every object landed as a
 // JSON string and nothing in this database could be queried by a JSON field. See ./json.ts.
 import { jsonb } from "./json";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -20,7 +27,13 @@ const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
 export const role = pgEnum("role", ["admin", "user"]);
-export const agentType = pgEnum("agent_type", ["built_in", "remote_ag_ui"]);
+export const agentType = pgEnum("agent_type", [
+  "built_in",
+  "remote_ag_ui",
+  // A Mastra server, reached through `@ag-ui/mastra` rather than an AG-UI route of its own. Governed
+  // identically: the difference ends at `remoteTransport`. See migration 0028.
+  "remote_mastra",
+]);
 export const credentialKind = pgEnum("credential_kind", [
   "model",
   "connector",
@@ -54,6 +67,10 @@ export const users = pgTable("users", {
   name: text("name"),
   image: text("image"),
   emailVerified: boolean("email_verified").notNull().default(false),
+  preferences: jsonb("preferences")
+    .$type<Partial<UserPreferences>>()
+    .notNull()
+    .default({}),
   /**
    * The person's groups, for a group-based rule to be evaluated against.
    *
@@ -63,6 +80,17 @@ export const users = pgTable("users", {
    * list for everybody.
    */
   groups: text("groups").array().notNull().default([]),
+  /**
+   * Where this person is in first-run onboarding.
+   *
+   * The step is where the wizard resumes if they leave halfway; the null completion timestamp is
+   * what gates the app into /onboarding. Set once — finishing again keeps the first timestamp.
+   */
+  onboardingStep: integer("onboarding_step").notNull().default(0),
+  onboardingCompletedAt: timestamp("onboarding_completed_at", {
+    withTimezone: true,
+  }),
+  lastSignedInAt: timestamp("last_signed_in_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -147,6 +175,33 @@ export const userRoles = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.role] })],
 );
+
+/**
+ * One person's standing instructions, applied to every built-in coworker they run.
+ *
+ * The person-shaped half of a durable instruction. The other two carriers are both about the work
+ * rather than about the person: a coworker's role belongs to the coworker and is the same for
+ * everybody who talks to it, and a skill is invoked for one task. Neither can say "always write to
+ * me in British English" or "we are a two-person company, never call us a team", which is a fact
+ * about the person and true in every channel.
+ *
+ * The user id IS the primary key rather than a column beside a surrogate one. There is exactly one
+ * of these per person, and a table that allowed two would make "what are this person's standing
+ * instructions" depend on which row a query happened to order first.
+ *
+ * Empty is absence, not a row: the store deletes on an empty save rather than storing "". A row
+ * holding an empty string would be a person with standing instructions that say nothing, which the
+ * prompt seam then has to recognise and skip anyway — so there is one representation of "none", and
+ * it is having no row.
+ */
+export const userInstructions = pgTable("user_instructions", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  instructions: text("instructions").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
 
 /**
  * An enterprise identity provider this deployment has been told about.
@@ -248,6 +303,10 @@ export const channels = pgTable(
       onDelete: "set null",
     }),
     override: jsonb("override"),
+    /** A few words about the conversation. Channel grain like `last_message`; null is ordinary. */
+    summary: text("summary"),
+    /** When the summary above was written, so a later change can decide whether to redo it. */
+    summaryAt: timestamp("summary_at", { withTimezone: true }),
     /**
      * The last thing said in this channel, denormalised so a roster is one indexed read.
      *
@@ -259,6 +318,8 @@ export const channels = pgTable(
      * cache of what a client observed rather than an authoritative mirror of the thread.
      */
     lastMessage: text("last_message"),
+    /** Internal source identity for enriching a delayed preview without replacing other activity. */
+    lastMessageSourceId: text("last_message_source_id"),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     /** Which agent spoke, so a channel with several can show the right one. Null for a person. */
     lastMessageAgentId: text("last_message_agent_id").references(
@@ -291,6 +352,18 @@ export const channels = pgTable(
     index("channels_recent_activity_idx").on(
       sql`COALESCE(${table.lastMessageAt}, ${table.createdAt}) DESC`,
     ),
+    /**
+     * The channels still waiting for a summary.
+     *
+     * Partial, on the condition rather than the column, because the sweep that offers this work asks
+     * for exactly the rows this index holds and nothing else. Every channel that has been summarised
+     * leaves the index, so it shrinks as the deployment settles rather than growing with it: a
+     * question asked every couple of seconds on every replica should not be a scan of every
+     * conversation anybody has ever had.
+     */
+    index("channels_awaiting_summary_idx")
+      .on(table.id)
+      .where(sql`${table.summary} is null and ${table.deletedAt} is null`),
   ],
 );
 
@@ -365,6 +438,10 @@ export const auditEvents = pgTable(
      * user who had done anything could never be deleted.
      */
     actorUserId: text("actor_user_id"),
+    /** Defaulted rather than nullable, because every row written before this was a person's. */
+    initiatorKind: text("initiator_kind").notNull().default("person"),
+    /** Which routine, or which Bot handed the work on. Null when a person started it. */
+    initiatorId: text("initiator_id"),
     eventType: text("event_type").notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id"),
@@ -402,6 +479,11 @@ export const auditEvents = pgTable(
       table.createdAt.desc(),
       table.id.desc(),
     ),
+    index("audit_events_initiator_time_idx").on(
+      table.initiatorKind,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
   ],
 );
 
@@ -421,5 +503,99 @@ export const intelligenceChannelMappings = pgTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.channelId] }),
     uniqueIndex("intelligence_channel_mappings_thread_idx").on(table.threadId),
+  ],
+);
+
+/**
+ * A file somebody attached to a message in a channel.
+ *
+ * The bytes live here rather than on a disk or in a bucket because this deployment is a compose
+ * file: a volume would split the backup story in two, and an object store would put a bucket
+ * between a self-hoster and a working install. One `pg_dump` restores a deployment, and that stays
+ * true. Reads go through one endpoint, so moving the bytes later changes that endpoint and nothing
+ * else.
+ */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /**
+     * What the server decided this is, never what the client claimed.
+     *
+     * A browser will happily report `text/plain` for a file it dragged out of another application,
+     * and a client can send whatever it likes. This column is what the fetch endpoint serves as
+     * `Content-Type`, so a wrong value here is a security bug rather than a cosmetic one.
+     */
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    bytes: bytea("bytes").notNull(),
+    createdAt: createdAt(),
+    /**
+     * When this appeared in a sent message. Null means staged.
+     *
+     * Attach three files, change your mind and close the tab, and those rows would sit here forever
+     * with nothing referring to them. The sweeper deletes staged rows past a few hours; a row with a
+     * date is spoken for and is never swept.
+     */
+    attachedAt: timestamp("attached_at", { withTimezone: true }),
+    /**
+     * Which composer session staged this row, so the per-message cap counts the same set the
+     * composer does.
+     *
+     * NOT A DRAFT ID, and the name is the whole of the distinction. Nothing about the message is
+     * saved here: no text, no ordering, nothing that survives a reload. It is a grouping key over
+     * rows this table already held, minted fresh by each composer instance and thrown away with it.
+     *
+     * The cap it exists for is per message, and the client can only ever see what is on its own
+     * screen. Counted per channel instead — which is what this server did before this column — a
+     * closed tab, a stopped run or a removed queued message left staged rows nobody could see, and
+     * the client would then accept a pick the server refused with a 409 naming files that were on
+     * nobody's screen. Eight such orphans locked uploads in that channel until the sweeper's
+     * 24-hour window expired.
+     *
+     * NULLABLE, AND DELIBERATELY NOT BACKFILLED. Every row that predates this column has NULL here,
+     * `null = <anything>` is never true in SQL, and so those rows match no live group and block no
+     * upload. They are still the sweeper's to reclaim on its own schedule.
+     *
+     * `text` rather than `uuid` even though `newId()` mints a UUID: this value arrives as a form
+     * field the browser chose, and comparing text that is not uuid-shaped against a `uuid` column
+     * raises `22P02` and throws — the same trap `isUuidShaped` in channels/attachments.ts exists to
+     * step around. As text, a nonsense group is simply a group with nothing in it.
+     */
+    uploadGroup: text("upload_group"),
+  },
+  (table) => [
+    // Postgres does not index foreign key columns on its own. Deleting a
+    // channel cascades here, and without this index that cascade is a
+    // sequential scan of the one table in this deployment that holds blobs.
+    index("attachments_channel_idx").on(table.channelId),
+    // The same rationale as `attachments_channel_idx` above, for the other
+    // cascading foreign key on this table. Removing a person deletes their
+    // `users` row, and that cascade has to find every attachment they ever
+    // uploaded; unindexed, it is the same sequential scan over the same blob
+    // table, and it runs on the one operation a deployment cannot retry
+    // halfway through.
+    index("attachments_uploaded_by_idx").on(table.uploadedBy),
+    // The cap's own predicate, and every upload runs it. Partial for the same
+    // reason `attachments_staged_idx` below is: staged rows are a small,
+    // short-lived minority, and an index over every row would grow with the
+    // table for a query that only ever asks about the unstamped ones.
+    index("attachments_upload_group_idx")
+      .on(table.channelId, table.uploadedBy, table.uploadGroup)
+      .where(sql`${table.attachedAt} is null`),
+    // Partial, on the sweeper's own predicate rather than the whole column.
+    // The sweeper only ever asks for staged rows (`attached_at is null`),
+    // which are a small, short-lived minority of the table, so an index
+    // covering every row would grow with the table for no query that exists.
+    index("attachments_staged_idx")
+      .on(table.createdAt)
+      .where(sql`${table.attachedAt} is null`),
   ],
 );

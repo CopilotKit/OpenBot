@@ -15,6 +15,7 @@
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
  */
 import { evaluate } from "cel-js";
+import type { AuditInitiator, AuditInitiatorKind } from "../audit";
 
 export type PolicyMode = "dry-run" | "enforce";
 
@@ -77,7 +78,7 @@ export type PolicyContext = {
    * `type`, text going into a field, including any other keypress.
    * `navigate`, opening a page.
    * `read`, looking at the page or listing what is on it.
-   * `write_file` / `read_file` / `list_files`, the workspace.
+   * `write_file` / `read_file` / `download_file` / `list_files`, the workspace.
    *
    * It still cannot see whether a keypress will submit a form, only that one is coming: a type
    * carrying `submit` reports `activate` because it ends in Enter, but a browser submits
@@ -92,6 +93,7 @@ export type PolicyContext = {
     | "navigate"
     | "read"
     | "read_file"
+    | "download_file"
     | "write_file"
     | "list_files"
     // A tool on somebody else's MCP server. Split by effect for the same reason as the browser
@@ -101,7 +103,7 @@ export type PolicyContext = {
     | "write_tool"
     | "run_command";
   /**
-   * The file a `computer_read_file` or `computer_write_file` call is aimed at.
+   * The file a `computer_read_file`, `computer_download_file` or `computer_write_file` call is aimed at.
    *
    * The path is as the Bot asked for it, relative to its workspace. Containment is not policy: a path
    * that tries to escape is refused by the computer itself and is not negotiable. A rule here is about
@@ -150,7 +152,46 @@ export type PolicyContext = {
    * and no list catches them all. The boundary is the container the command runs in.
    */
   command?: string;
+  /**
+   * What caused this run, as distinct from whose authority it carries.
+   *
+   * `actor.id` answers "whose grants and connections is this spending", and for a routine that is
+   * its owner — asleep, at three in the morning, with the run going through exactly the path their
+   * own chat turn takes. That is the right design and it is also why `actor` cannot answer "was
+   * anybody there". The trail already draws the distinction: `AuditInitiator` is signed into the run
+   * assertion and written onto the row, with the docstring "what caused a row, where `actorUserId`
+   * is only whose authority it borrowed". A rule could not ask the same question.
+   *
+   * So `deny: initiator.kind == "routine" && intent == "run_command"` is now writable — a deployment
+   * that is happy for a Bot to run a shell while somebody watches, and not happy for it to do so
+   * unattended, can say so.
+   *
+   * REQUIRED, not optional, and flattened to two always-present strings. cel-js throws on an
+   * unbound identifier and a throw fails closed, so a rule naming this field would have refused
+   * every action built by a call site that forgot it — the failure #115 exists to prevent. `id` is
+   * `""` for `person` and `deployment`, which carry none, the same neutral `mcp.effect` uses.
+   */
+  initiator: { kind: AuditInitiatorKind; id: string };
 };
+
+/**
+ * The initiator as the policy sees it, defaulting to a person.
+ *
+ * A person is the honest default rather than a convenient one: every path that does not carry an
+ * initiator today is one a person drove. The computer gateway is the case worth naming — a Bot's
+ * computer is driven by frontend tools in the browser (`app/src/lib/copilot/computer-tools.tsx`), so
+ * every action reaching that gateway came from somebody's session. When that stops being true, the
+ * call site has to say so rather than inherit this.
+ */
+export function policyInitiator(
+  initiator?: AuditInitiator,
+): PolicyContext["initiator"] {
+  if (!initiator) return { kind: "person", id: "" };
+  return {
+    kind: initiator.kind,
+    id: "id" in initiator ? initiator.id : "",
+  };
+}
 
 export type PolicyDecision = {
   allowed: boolean;
@@ -250,10 +291,56 @@ function matches(
  * states its permissions explicitly rather than relying on a default, so that what a Bot may do is
  * always something somebody wrote down.
  */
+/**
+ * The enterprise controls, asked before the boundary's own rules.
+ *
+ * Installed by `admin/controls.ts` when the deployment runs with enterprise controls, and absent in
+ * a unit test or a script, where the boundary behaves exactly as it always did. Answering null means
+ * "nothing to say, carry on to the rules"; a decision is final, and is always a refusal that is
+ * enforced whatever this policy's mode, because a capability an administrator switched off is not a
+ * rule being trialled.
+ *
+ * Synchronous on purpose: every caller of `evaluateActionPolicy` is, and the controls answer from an
+ * in-memory snapshot kept current by LISTEN/NOTIFY. An overlay that throws refuses.
+ */
+export type PolicyOverlay = (context: PolicyContext) => PolicyDecision | null;
+
+let overlay: PolicyOverlay | null = null;
+
+export function setPolicyOverlay(next: PolicyOverlay | null): void {
+  overlay = next;
+}
+
+function enterpriseDecision(context: PolicyContext): PolicyDecision | null {
+  if (!overlay) return null;
+  try {
+    return overlay(context);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "enterprise-policy-overlay-error",
+        error: String(error),
+      }),
+    );
+    return {
+      allowed: false,
+      mode: "enforce",
+      matched: "enterprise:unavailable",
+      source: "deny",
+      forward: false,
+      reason:
+        "This deployment's enterprise controls could not be checked, so the action was refused.",
+    };
+  }
+}
+
 export function evaluateActionPolicy(
   policy: ActionPolicy | null | undefined,
   context: PolicyContext,
 ): PolicyDecision {
+  const enterprise = enterpriseDecision(context);
+  if (enterprise) return enterprise;
+
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
   const allow = policy?.allow ?? [];

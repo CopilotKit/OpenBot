@@ -12,7 +12,11 @@ const relativeFormat = new Intl.RelativeTimeFormat(undefined, {
 
 /** Locale-aware relative timestamp, e.g. "2 minutes ago". */
 export function relativeTime(iso: string): string {
-  const elapsed = Date.now() - new Date(iso).getTime();
+  const time = new Date(iso).getTime();
+  // An invalid date used to flow into `Math.abs(NaN)` comparisons and `format(-NaN)`, which
+  // answers "NaN weeks ago" or throws depending on ICU. Return the input unchanged instead.
+  if (!Number.isFinite(time)) return iso;
+  const elapsed = Date.now() - time;
   const scale =
     RELATIVE_UNITS.find(({ limit }) => Math.abs(elapsed) < limit) ??
     RELATIVE_UNITS[RELATIVE_UNITS.length - 1];

@@ -147,7 +147,12 @@ describe("a person's input, end to end", () => {
 
   test("the four gestures still reach their own endpoints", async () => {
     for (const kind of ["click", "type", "key", "scroll"]) {
-      const { received } = await drive(kind, { x: 1, y: 1, text: "hello" });
+      const { received } = await drive(kind, {
+        x: 1,
+        y: 1,
+        text: "hello",
+        key: "Enter",
+      });
 
       expect(received.map((request) => request.path)).toEqual([
         `/human/${kind}`,

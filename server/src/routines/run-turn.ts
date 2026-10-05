@@ -53,11 +53,28 @@ import type {
   BaseEvent,
   Message,
   RunAgentInput,
-  ToolCall,
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
+import { NOT_SHOWN } from "../../../shared/component-markers";
+import { frameFiring } from "../../../shared/routine-firing";
+import { headlessTurnRefusal } from "../admin/controls";
+import { sanitizeSeededHistory } from "../agents/history-sanitize";
+import { guardBotTurn } from "../agents/lifecycle";
+import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
+import type { AuditInitiator, AuditStore } from "../audit";
+import {
+  createHeadlessComponentTools,
+  HEADLESS_COMPONENTS,
+} from "../components/headless";
+import type { ComponentStore } from "../components/store";
+import {
+  type HeadlessTool,
+  HeadlessToolSuspension,
+  HeadlessToolsMiddleware,
+  type HeadlessWaiting,
+} from "../computer/headless-tools";
 import { historyOrEmpty } from "../copilot";
-import type { TurnRunner } from "./runner";
+import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
  * The gap between stopping a turn and giving up on it.
@@ -111,6 +128,7 @@ export type IntelligenceLike = {
     threadId: string;
     userId: string;
     agentId: string;
+    learningContainerId?: string;
   }): Promise<unknown>;
   getThreadMessages(params: {
     threadId: string;
@@ -122,6 +140,7 @@ export type IntelligenceLike = {
     userId: string;
     agentId: string;
     ttlSeconds?: number;
+    learningContainerId?: string;
   }): Promise<unknown>;
   /** NOTE: no `userId` and no `agentId` — renew is identified by the thread and the run alone. */
   ɵrenewThreadLock(params: {
@@ -196,104 +215,13 @@ function toAgentMessage(message: ThreadHistoryMessage): Message {
   } as Message;
 }
 
-/** Whether a message said nothing at all — no text, no parts, nothing to show a person. */
-function isSilent(message: Message): boolean {
-  const content = (message as { content?: unknown }).content;
-  if (content === undefined || content === null) return true;
-  if (typeof content === "string") return content.length === 0;
-  if (Array.isArray(content)) return content.length === 0;
-  return false;
-}
-
 /**
- * Refuse to re-present a conversation the model API will reject.
- *
- * FOUND IN PRODUCTION. Two firings of one routine, fifteen minutes apart, both failed with
- * `Tool result is missing for tool call call_TTbiXzJVNifQt8ioU1JJmj4S.` — the SAME call id both
- * times, so it did not come from the live turn: the channel's Intelligence thread held an assistant
- * message carrying a tool call whose result message never landed, because an earlier CHAT turn was
- * interrupted mid-call. The seeding below hands the whole converted history to the runner, the model
- * provider validates call/result pairing, and it rejects the conversation. One historical dangle
- * therefore poisons EVERY future firing in that channel until the fatigue rule disables the routine:
- * a permanent failure grown out of transient damage, and nothing the person did wrong.
- *
- * WHY DROPPING IS THE RIGHT ANSWER, and not repair. History here is CONTEXT for a turn, not a
- * transaction to resume. A dangling call is already permanently unanswerable — the tool run that
- * would have answered it ended when that chat turn did, and there is no result to invent. The only
- * two options are to seed a conversation the API refuses, or to seed the same conversation minus a
- * call that never completed. The second one loses a fragment of an interrupted exchange; the first
- * one disables a routine forever.
- *
- * WHAT THIS DOES NOT DO. It does not DELETE anything from the platform. The thread still holds every
- * row, the person still sees the interrupted exchange in their channel, and a browser turn is
- * unaffected. This is a read-side filter on one turn's input and nothing more.
- *
- * IDS ARE NEVER CHANGED, which is what keeps `persistedInputMessages`' id-subtraction below correct:
- * a message this pass stripped a tool call from keeps its id and is still subtracted out as historic,
- * and a message it dropped was never a candidate to persist. So sanitizing cannot turn a firing into
- * one that re-persists the transcript.
- *
- * The rules, in order:
- *  1. A tool call is ANSWERED if some later message carries it as `toolCallId`. Later, not merely
- *     present: a result ahead of its call is not a pairing any provider accepts either.
- *  2. An assistant message keeps only its answered calls. If that leaves it with no calls and
- *     nothing said, the message is dropped — an empty assistant husk is itself invalid for some
- *     providers, so stripping the call is not enough.
- *  3. A tool result whose `toolCallId` matches no surviving call is dropped: the mirror-image dangle,
- *     which is what an interruption between the two rows leaves behind in the other order.
- *
- * Order is preserved, the input array is not mutated, and a message the pass does not change is
- * returned as the same object — a healthy thread, which is nearly all of them, goes through
- * untouched rather than through a re-normalization that could quietly differ.
+ * Re-exported from `agents/history-sanitize.ts`, where it now lives, because a chat turn needs
+ * it too and this module cannot be imported from `copilot.ts`, since the import already runs the
+ * other way. Kept as a name on this module because this is where the reasoning was found and where the
+ * tests that cover the seeding path still reach for it.
  */
-export function sanitizeSeededHistory(history: Message[]): Message[] {
-  /** For each answered call id, the earliest position that answers it. */
-  const answeredAt = new Map<string, number>();
-  for (const [index, message] of history.entries()) {
-    const { toolCallId } = message as { toolCallId?: string };
-    if (toolCallId === undefined) continue;
-    if (!answeredAt.has(toolCallId)) answeredAt.set(toolCallId, index);
-  }
-
-  const surviving = new Set<string>();
-  const kept: (Message | undefined)[] = history.map((message, index) => {
-    const { toolCalls } = message as { toolCalls?: ToolCall[] };
-    if (toolCalls === undefined) return message;
-
-    const answered = toolCalls.filter((call) => {
-      const at = answeredAt.get(call.id);
-      return at !== undefined && at > index;
-    });
-    for (const call of answered) surviving.add(call.id);
-
-    // The husk check goes FIRST so it also catches a row that arrived with no calls and nothing
-    // said — the same invalid shape, reached without a dangle.
-    if (answered.length === 0 && isSilent(message)) return undefined;
-    // The healthy path, and the only one that returns the very same object.
-    if (answered.length === toolCalls.length) return message;
-
-    /*
-     * Cast for the same reason `toAgentMessage` casts: `Message` is a union discriminated on `role`,
-     * and a spread over the union widens past every branch of it. Neither rewrite here can change
-     * the role or the shape — one narrows the `toolCalls` array, the other removes the key — so
-     * there is nothing to narrow against and nothing that could stop being a `Message`.
-     */
-    if (answered.length > 0) {
-      return { ...message, toolCalls: answered } as Message;
-    }
-    // Text it did say, minus a call it cannot complete.
-    const { toolCalls: _dropped, ...rest } = message as Message & {
-      toolCalls?: ToolCall[];
-    };
-    return rest as Message;
-  });
-
-  return kept.filter((message): message is Message => {
-    if (message === undefined) return false;
-    const { toolCallId } = message as { toolCallId?: string };
-    return toolCallId === undefined || surviving.has(toolCallId);
-  });
-}
+export { sanitizeSeededHistory };
 
 /** What a message said out loud, or nothing if it did not say anything. */
 function assistantText(message: Message): string | undefined {
@@ -304,54 +232,77 @@ function assistantText(message: Message): string | undefined {
     : undefined;
 }
 
+const COMPONENT_NAMES = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
+
 /**
- * The stored instruction, wrapped in the sentences that tell the turn it IS a firing.
- *
- * FOUND ON A LIVE FIRING, and it recorded `succeeded`. The instruction read "Every run, append the
- * current date and time as a new bulleted list item to the Notion page …" and was sent to the model
- * verbatim as the turn's user message. The model read it as a question about routine MANAGEMENT
- * rather than as work: it called `list_routines`, found a routine that already said exactly that,
- * answered that it was already configured, and appended nothing. Nothing failed, so nothing was
- * reported — a routine telling somebody it is working while doing nothing at all, which is worse than
- * one that breaks.
- *
- * And the model was not being stupid. Instructions are WRITTEN in schedule-speak — "every run",
- * "every 15 minutes", "each morning" — because that is how a person asks for a standing thing, and
- * schedule-shaped prose arriving out of nowhere reads as a request to SET UP a schedule. The most
- * plausible reading of its own routine's text was "check whether this is set up"; it was, so it did
- * nothing, successfully. No wording of the stored instruction fixes that on its own, because the
- * sentence a person writes is the sentence that describes the schedule.
- *
- * So the frame says the three things the instruction cannot say about itself: that this is a
- * scheduled firing happening now, that the work belongs in this turn, and that managing routines is
- * not what was asked. It is PRESENTATION — which is why it lives here and not in the stored row or in
- * {@link TurnRunner}'s signature: the row keeps what the person asked for, and this is how it is put
- * to the model.
- *
- * ONLY THE NEW MESSAGE IS FRAMED, and that matters twice. The framed text is what
- * `persistedInputMessages` writes to the transcript — correctly, since the transcript should show
- * what the turn was actually asked — so it comes back as HISTORY on the next firing. History is
- * converted and seeded exactly as the platform handed it over and nothing re-frames it; a test holds
- * that, because the alternative is a message that grows a fresh paragraph of frame every night.
+ * The display components this turn drew, in order: a component call whose result is not a refusal.
+ * A chat surface that cannot open the conversation (Teams, Slack) draws them from this.
  */
-export function frameFiring(instruction: string): string {
-  return [
-    "One of your routines is firing right now, on its schedule, and this is that firing.",
-    "Carry out the instruction below in this turn: do the work now, then say what happened.",
-    "Do not create, list or change any routine unless the instruction itself asks you to.",
-    "",
-    instruction,
-  ].join("\n");
+export function drawnComponents(messages: Message[]): DrawnComponent[] {
+  const results = new Map<string, string>();
+  for (const message of messages)
+    if (message.role === "tool" && typeof message.content === "string")
+      results.set(message.toolCallId, message.content);
+  const drawn: DrawnComponent[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? []) {
+      if (!COMPONENT_NAMES.has(call.function.name)) continue;
+      const result = results.get(call.id);
+      if (result === undefined || result.startsWith(NOT_SHOWN)) continue;
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        if (args && typeof args === "object" && !Array.isArray(args))
+          drawn.push({ name: call.function.name, args });
+      } catch {
+        // A call whose arguments are not JSON was refused by the schema check, so nothing was drawn.
+      }
+    }
+  }
+  return drawn;
 }
+
+/*
+ * The frame is declared in `shared/` because the transcript has to recognise it again — see
+ * `readFiring` there. Imported AND re-exported, and it needs both: the turn runner below calls it to
+ * build this turn's message, and `server/tests/routine-run-turn.test.ts:7` imports it from this
+ * module, which is the right place for it to look because this is the module that decides a firing
+ * is framed at all. A bare `export … from` would satisfy the test and leave the call site
+ * unresolved.
+ *
+ * No line number for the call site on purpose. An intra-file reference shifts every time anything
+ * above it grows or shrinks — deleting the doc comment this replaced moved that call by thirty
+ * lines — so it would be stale on arrival. The cross-file citation above does not have that problem.
+ */
+export { frameFiring };
 
 export function createTurnRunner(options: {
   intelligence: IntelligenceLike;
   runner: RunnerLike;
+  learningContainerForThread?: (input: {
+    threadId: string;
+    agentId: string;
+    userId: string;
+  }) => Promise<string | undefined>;
   /** The owner's coworkers, resolved as the owner. Built per turn, keyed by registry id. */
   buildAgentFor: (input: {
     ownerUserId: string;
     agentId: string;
+    initiator: AuditInitiator;
+    depth?: number;
   }) => Promise<AbstractAgent>;
+  toolsForTurn?: (input: {
+    ownerUserId: string;
+    agentId: string;
+    initiator: AuditInitiator;
+    threadId: string;
+    runId: string;
+  }) => Promise<HeadlessTool[]>;
+  /**
+   * The governed gallery, so a turn with no browser can still answer with a chart. Offered and
+   * decided exactly as the browser would for this Bot; see `components/headless.ts`.
+   */
+  components?: { store: ComponentStore; auditStore?: AuditStore };
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
@@ -363,13 +314,48 @@ export function createTurnRunner(options: {
     intelligence,
     runner,
     buildAgentFor,
+    learningContainerForThread,
+    toolsForTurn,
+    components,
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
     lockTtlSeconds = DEFAULT_LOCK_TTL_SECONDS,
     heartbeatMs = DEFAULT_HEARTBEAT_MS,
     abortGraceMs = DEFAULT_ABORT_GRACE_MS,
   } = options;
 
-  return async ({ ownerUserId, agentId, threadId, instruction }) => {
+  return async ({
+    ownerUserId,
+    routineId,
+    agentId,
+    threadId,
+    instruction,
+    initiator: suppliedInitiator,
+    continuation,
+    signal,
+    userMessage,
+    runId: suppliedRunId,
+    depth,
+    onText,
+  }) => {
+    if (signal?.aborted) throw new Error("The headless turn was cancelled.");
+    // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
+    signal = await guardBotTurn({ ownerUserId, agentId, signal });
+    // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
+    // crosses that gate, so every one of them meets the same check here instead.
+    const refused = await headlessTurnRefusal({ ownerUserId, agentId });
+    if (refused) {
+      const error = new Error(refused);
+      error.name = "CapabilityRefusedError";
+      throw error;
+    }
+    if (continuation && continuation.snapshot.threadId !== threadId)
+      throw new Error(
+        "The interrupted conversation does not match this thread.",
+      );
+    const initiator = suppliedInitiator ?? {
+      kind: "routine" as const,
+      id: routineId,
+    };
     /*
      * One id for this turn, minted once.
      *
@@ -380,7 +366,9 @@ export function createTurnRunner(options: {
      * here and nowhere else. Re-minting or re-reading it is how a renew keeps a different lock alive
      * than the one the cleanup releases.
      */
-    const runId = crypto.randomUUID();
+    const runId = suppliedRunId ?? crypto.randomUUID();
+    if (!runId.trim())
+      throw new Error("The headless turn needs a non-empty run id.");
 
     /*
      * THE ONE ADDITION over `runCanonicalChannelAgent`.
@@ -391,10 +379,16 @@ export function createTurnRunner(options: {
      * of. `getOrCreateThread` is public API, idempotent, and already handles the 409 create-race
      * (`client.d.mts:603-621`), so it is safe on the thousandth firing as well as the first.
      */
+    const learningContainerId = await learningContainerForThread?.({
+      threadId,
+      agentId,
+      userId: ownerUserId,
+    });
     await intelligence.getOrCreateThread({
       threadId,
       userId: ownerUserId,
       agentId,
+      ...(learningContainerId ? { learningContainerId } : {}),
     });
 
     /*
@@ -420,12 +414,24 @@ export function createTurnRunner(options: {
      * firing it did nothing on. The seeded history above is untouched, which is what keeps a previous
      * firing's framed message (it persisted, so it is back here as history) from being framed twice.
      */
-    const turn = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: frameFiring(instruction),
-    } as Message;
-    const messages = [...seeded, turn];
+    const turn =
+      userMessage ??
+      ({
+        id: crypto.randomUUID(),
+        role: "user",
+        content: frameFiring(instruction),
+      } as Message);
+    const messages: Message[] = continuation
+      ? sanitizeSeededHistory([
+          ...continuation.snapshot.messages,
+          {
+            id: continuation.messageId,
+            role: "tool",
+            toolCallId: continuation.snapshot.toolCallId,
+            ...continuation.result,
+          },
+        ])
+      : [...seeded, turn];
 
     /*
      * WHAT THIS RUN IS ALLOWED TO PERSIST, and it is mandatory.
@@ -453,20 +459,60 @@ export function createTurnRunner(options: {
      * ownership on every event and pushes them to the gateway, which is the whole reason this file
      * exists rather than a bare `runAgent`.
      */
-    const agent = await buildAgentFor({ ownerUserId, agentId });
+    const agent = await buildAgentFor({
+      ownerUserId,
+      agentId,
+      initiator,
+      ...(depth ? { depth } : {}),
+    });
     agent.threadId = threadId;
     agent.setMessages(messages);
+    if (continuation) agent.setState(continuation.snapshot.state);
+    const headlessTools = [
+      ...((await toolsForTurn?.({
+        ownerUserId,
+        agentId,
+        initiator,
+        threadId,
+        runId,
+      })) ?? []),
+      ...(components
+        ? await createHeadlessComponentTools({
+            store: components.store,
+            botId: agentId,
+            ownerUserId,
+            initiator,
+            ...(components.auditStore
+              ? { auditStore: components.auditStore }
+              : {}),
+          })
+        : []),
+    ];
+    if (headlessTools.length > 0)
+      agent.use(new HeadlessToolsMiddleware(headlessTools, initiator));
+    if (signal?.aborted) throw new Error("The headless turn was cancelled.");
 
     const input: RunAgentInput = {
       threadId,
       runId,
       messages,
       state: agent.state,
-      // Empty because a headless turn has no browser to register frontend tools. What the Bot itself
-      // may call is decided where it is built, not here.
-      tools: [],
-      context: [],
-      forwardedProps: undefined,
+      tools: headlessTools
+        .filter((tool) => !tool.hidden)
+        .map((tool) => tool.definition),
+      context: continuation?.snapshot.context ?? [],
+      forwardedProps: continuation?.snapshot.forwardedProps,
+      ...(continuation
+        ? {
+            resume: [
+              {
+                interruptId: continuation.snapshot.toolCallId,
+                status: "resolved" as const,
+                payload: continuation.result.content,
+              },
+            ],
+          }
+        : {}),
     };
 
     /*
@@ -480,6 +526,22 @@ export function createTurnRunner(options: {
       onTextMessageEndEvent: ({ textMessageBuffer }) => {
         if (textMessageBuffer.length > 0) chunks.push(textMessageBuffer);
       },
+      // The buffer is the message before this delta, so the delta is appended to report it.
+      ...(onText
+        ? {
+            onTextMessageContentEvent: ({
+              event,
+              textMessageBuffer,
+            }: {
+              event: { delta: string };
+              textMessageBuffer: string;
+            }) => {
+              onText(
+                [...chunks, `${textMessageBuffer}${event.delta}`].join("\n\n"),
+              );
+            },
+          }
+        : {}),
     });
 
     await intelligence.ɵacquireThreadLock({
@@ -488,12 +550,14 @@ export function createTurnRunner(options: {
       userId: ownerUserId,
       agentId,
       ttlSeconds: lockTtlSeconds,
+      ...(learningContainerId ? { learningContainerId } : {}),
     });
 
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     let heartbeatError: unknown;
+    let waiting: HeadlessToolSuspension | undefined;
     /** Whether the deadline stopped this turn. See the throw below the `finally`. */
     let stopped = false;
     /**
@@ -505,6 +569,7 @@ export function createTurnRunner(options: {
      * way `run.mjs:94` does — `lock.threadId || threadId` — before trusting it, not use it bare.
      */
     let stopPromise: Promise<boolean | undefined> | undefined;
+    let cancelTurn: (() => void) | undefined;
 
     const clearHeartbeat = () => {
       if (heartbeat === undefined) return;
@@ -544,6 +609,14 @@ export function createTurnRunner(options: {
     heartbeat.unref?.();
 
     try {
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        cancelTurn = () => {
+          stopTurn();
+          reject(new Error("The headless turn was cancelled."));
+        };
+        signal?.addEventListener("abort", cancelTurn, { once: true });
+        if (signal?.aborted) cancelTurn();
+      });
       const completed = new Promise<void>((resolve, reject) => {
         let terminal: Error | undefined;
         runner
@@ -557,6 +630,18 @@ export function createTurnRunner(options: {
              * answered with nothing.
              */
             next: (event) => {
+              if (
+                event.type === EventType.CUSTOM &&
+                event.name === "openbot.headless.waiting"
+              ) {
+                const value = event.value as HeadlessWaiting & {
+                  message?: string;
+                };
+                waiting = new HeadlessToolSuspension(
+                  value.message ?? "The turn is waiting for human input.",
+                  value,
+                );
+              }
               if (event.type !== EventType.RUN_ERROR || terminal) return;
               const message =
                 "message" in event && typeof event.message === "string"
@@ -589,7 +674,7 @@ export function createTurnRunner(options: {
         backstop.unref?.();
       });
 
-      await Promise.race([completed, timeout]);
+      await Promise.race([completed, timeout, cancelled]);
     } finally {
       /*
        * THE SINGLE MOST IMPORTANT LINES IN THIS FILE, on every exit path — success, a thrown run, the
@@ -602,6 +687,8 @@ export function createTurnRunner(options: {
        * replace the real failure with a second one — the TTL is the backstop for that case.
        */
       clearHeartbeat();
+      if (cancelTurn) signal?.removeEventListener("abort", cancelTurn);
+      if (signal?.aborted) await stopPromise;
       if (deadline !== undefined) clearTimeout(deadline);
       if (backstop !== undefined) clearTimeout(backstop);
       spoken.unsubscribe();
@@ -631,9 +718,10 @@ export function createTurnRunner(options: {
         `The routine's turn was stopped after ${Math.round(turnTimeoutMs / 1000)}s.`,
       );
     }
+    if (waiting) throw waiting;
 
-    const said = agent.messages
-      .filter((message) => !before.has(message.id))
+    const added = agent.messages.filter((message) => !before.has(message.id));
+    const said = added
       .map(assistantText)
       .filter((text): text is string => text !== undefined);
     // The diff first, the streamed chunks as the fallback: the diff is what was persisted, which is
@@ -649,6 +737,20 @@ export function createTurnRunner(options: {
      * exchange. Posting it as the answer would be the worst of the options: the routine would read as
      * successful and the channel would carry a reply that is waiting on something.
      */
+    // The waiting details, when the CUSTOM event did not survive the trip, ride on the interrupt.
+    const carried = agent.pendingInterrupts
+      .map((interrupt) => interrupt.metadata?.[OPENBOT_WAITING_METADATA])
+      .find(
+        (value): value is HeadlessWaiting & { message?: string } =>
+          !!value &&
+          typeof value === "object" &&
+          typeof value.kind === "string",
+      );
+    if (carried)
+      throw new HeadlessToolSuspension(
+        carried.message ?? "The turn is waiting for human input.",
+        carried,
+      );
     if (agent.pendingInterrupts.length > 0) {
       throw new Error(
         "The turn stopped to ask a question, and a routine has nobody to ask.",
@@ -658,6 +760,7 @@ export function createTurnRunner(options: {
       throw new Error("The turn finished without saying anything.");
     }
 
-    return { replyText };
+    const drawn = drawnComponents(added);
+    return drawn.length > 0 ? { replyText, components: drawn } : { replyText };
   };
 }

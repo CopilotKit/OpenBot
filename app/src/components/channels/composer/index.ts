@@ -1,6 +1,12 @@
-export { Composer, type ComposerProps } from "./composer";
+export {
+  Composer,
+  type ComposerProps,
+  type DroppedAttachmentCause,
+  type DroppedAttachments,
+} from "./composer";
 export {
   AGENT_TRIGGER,
+  canSendDraft,
   COMMAND_TRIGGER,
   type CommandKind,
   type CommandOption,

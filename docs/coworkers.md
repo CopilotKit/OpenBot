@@ -4,13 +4,14 @@ A coworker is a Bot with a durable profile and standing role. The role is sent w
 
 ## Data model
 
-| Piece                | Table                           | Purpose                                                               |
-| -------------------- | ------------------------------- | --------------------------------------------------------------------- |
-| Runtime agent        | `agents`                        | AG-UI endpoint and optional key reference.                            |
-| Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion. |
-| Personal roster      | `agent_preferences`             | Per-user hidden state.                                                |
-| Channel              | `channels`                      | Conversation membership and coworker binding.                         |
-| Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                            |
+| Piece                | Table                           | Purpose                                                                                  |
+| -------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| Runtime agent        | `agents`                        | Type (built-in, remote AG-UI or remote Mastra), endpoint or prompt, optional key reference. |
+| Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion.                    |
+| Personal roster      | `agent_preferences`             | Per-user hidden and pinned state.                                                        |
+| Team publication     | `team_bot_publications`         | A Bot its owner has published to the whole team or to named people and groups.          |
+| Channel              | `channels`                      | Conversation membership and coworker binding.                                            |
+| Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                                               |
 
 Package-provided agents are public and ownerless. User-created coworkers are owned by the creator.
 
@@ -26,6 +27,12 @@ Review receipts, categorize expenses, and prepare reimbursement reports.
 This standing role applies in every channel. Treat channel messages as task-specific instructions within it.
 ```
 
+A further provenance block is appended by the deployment rather than the package: it tells the
+coworker to say where each answer came from, to mark plainly anything it answers from its own
+knowledge rather than from a source, and never to present the latter as the former. A second block
+tells it how to read the untrusted-content envelope its tool results carry. Being deployment-wide,
+both cannot be forgotten from the next coworker somebody adds.
+
 The message is ordinary AG-UI system content, so it works with any AG-UI-compatible backend. Editing the role affects the next run.
 
 ## Visibility
@@ -37,6 +44,11 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 
 Filtering happens in server/database queries. Package-provided agents cannot be edited or deleted through the product.
 
+An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
+(`/api/team-bots`, the **Team Bots** screen). Publishing is a separate, revocable record; the Bot's own
+visibility is unchanged by it. A published Bot stays invisible to teammates until it has a role
+description and a name other than a placeholder such as "New Bot".
+
 ## Channels
 
 Starting a channel creates a new conversation and Intelligence thread. Two channels with the same coworker stay separate.
@@ -47,7 +59,7 @@ Each channel routes through a channel-local proxy agent id, pinned to that chann
 
 Deleting is soft. The coworker stops running, but existing channels remain readable for their members and restore as tombstones.
 
-Hiding is personal roster state. It removes the coworker from one user's list without disabling the coworker for anyone else.
+Hiding and pinning are personal roster state. Hiding removes the coworker from one user's list without disabling the coworker for anyone else; pinning moves it into the **Pinned** section at the top of `/agents` for that user only.
 
 ## Default endpoint
 

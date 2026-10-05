@@ -2,4 +2,5 @@
 # The API, and the app it serves. Started after the browser so a Bot's first action does not race a
 # computer that is still coming up.
 cd /app/server
-exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
+export HOME=/home/apiuser
+exec s6-setuidgid apiuser /usr/local/bin/bun src/index.ts

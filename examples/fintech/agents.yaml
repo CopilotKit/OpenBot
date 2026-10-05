@@ -8,6 +8,18 @@ agents:
     avatar_seed: general-assistant
     type: built-in
     system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
+    # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
+    # any screen to say why.
+    #
+    # Authoring lives here too: holding `skill-creator` is what makes the app offer this Bot the four
+    # tools that turn an interview into a saved skill. Both are on the general assistant because it is
+    # the Bot somebody already has open, and the one with no specialism to dilute. Knowledge narrows
+    # to document tools per run, so putting either on it is how that narrowing stops working.
+    skills:
+      - bot-creator
+      - skill-creator
   - id: knowledge
     name: Knowledge
     title: Company Knowledge
@@ -56,3 +68,25 @@ agents:
     avatar_seed: risk-analyst
     type: remote-ag-ui
     endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
+
+  # The Bot somebody picked in setup.
+  #
+  # ONE ROW, AND IT EXISTS ONLY ONCE SOMETHING IS PICKED. A Bot whose endpoint interpolates to
+  # nothing is dropped by the loader, so this row removes itself until the shell writes an address.
+  # That is what makes registration need no API: the choice becomes a setting, and seeding does the
+  # rest.
+  #
+  # The KIND is interpolated too, and that is not a flourish. Written as a literal `remote-mastra`
+  # row it made this whole package fail to load on any server that predates that kind — the loader
+  # refuses an unknown `agent.type`, and refusing one Bot means refusing the file, so the deployment
+  # would not start at all. Interpolated, an older server sees `remote-ag-ui` and loads normally
+  # unless somebody actually picks Mastra.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: ${PICKED_HARNESS_KIND:-remote-ag-ui}
+    endpoint: ${PICKED_HARNESS_URL:-}
+    # Which agent on that server, for a Mastra roster. Blank means the only one there.
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}

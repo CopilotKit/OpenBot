@@ -14,7 +14,7 @@ import {
   components,
   sandboxedComponents,
 } from "../src/db/schema";
-import { TEST_POOL } from "./support/database";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
  * A component authored in a browser can be edited freely and still reach nobody until it is
@@ -26,11 +26,7 @@ import { TEST_POOL } from "./support/database";
  * capability, so that is asserted directly rather than inferred from the shape of the code.
  */
 
-const database = createDatabase(
-  process.env.DATABASE_URL ??
-    "postgres://openbot:openbot@localhost:5432/openbot",
-  TEST_POOL,
-);
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const suite = randomUUID().slice(0, 8).replace(/-/g, "");
 const slug = `test_card_${suite}`;

@@ -133,6 +133,39 @@ describe.skipIf(!asked)(
       await profiles.closeAll();
     }, 60_000);
 
+    test("a page asked for while a reset is closing the browser starts signed out", async () => {
+      process.env.COMPUTER_BROWSER_IDLE_MS = String(30 * 60_000);
+      const { createProfiles } = (await import(
+        `../src/profiles?reopening=${Date.now()}`
+      )) as typeof import("../src/profiles");
+      const root3 = join(root, "reopening");
+      const profiles = createProfiles(root3, () => undefined);
+      const site = "https://example.test";
+
+      const first = await profiles.page("keeper");
+      await first.context().addCookies([
+        {
+          name: "session",
+          value: "signed-in",
+          url: site,
+          expires: Math.floor(Date.now() / 1000) + 86_400,
+        },
+      ]);
+      await profiles.stop("keeper");
+      const reopened = await profiles.page("keeper");
+      expect(await reopened.context().cookies(site)).toHaveLength(1);
+
+      const resetting = profiles.reset("keeper");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const during = await profiles.page("keeper");
+      // Read at once, as an action would, since Chromium loads cookies on first use.
+      await during.context().cookies(site);
+      await resetting;
+
+      expect(await during.context().cookies(site)).toEqual([]);
+      await profiles.closeAll();
+    }, 60_000);
+
     test("the cap tells the Bot whose browser it closed", async () => {
       // One browser allowed, so the second Bot's launch is what closes the first Bot's browser. The
       // person watching the first one never asked for anything and is owed the message just the same.

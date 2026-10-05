@@ -35,10 +35,43 @@ export async function readScreenshot(
       } | null;
       return { error: body?.error ?? unavailable };
     }
-    return { frame: (await response.json()) as Screenshot };
+    return parseScreenshot(await response.json().catch(() => null));
   } catch {
     return { error: unavailable };
   }
+}
+
+function parseScreenshot(body: unknown): {
+  frame?: Screenshot;
+  error?: string;
+} {
+  const unavailable = "The screen is not available right now.";
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: unavailable };
+  }
+  const frame = (body as { frame?: unknown }).frame ?? body;
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
+    return { error: unavailable };
+  }
+  const { base64, width, height } = frame as {
+    base64?: unknown;
+    width?: unknown;
+    height?: unknown;
+  };
+  // A mistyped frame used to reach `atob` in the viewer and throw there. Refused here instead.
+  if (
+    typeof base64 !== "string" ||
+    !base64 ||
+    typeof width !== "number" ||
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    typeof height !== "number" ||
+    !Number.isFinite(height) ||
+    height <= 0
+  ) {
+    return { error: unavailable };
+  }
+  return { frame: frame as Screenshot };
 }
 
 /** The frame a page was showing when a Bot opened it. */
@@ -61,8 +94,15 @@ export async function readPageFrame(
       `/api/computers/${computerId}/page-frame/${encodeURIComponent(toolCallId)}`,
     );
     if (!response.ok) return null;
-    const body = (await response.json()) as { frame?: PageFrame | null };
-    return body.frame ?? null;
+    const body = (await response.json().catch(() => null)) as unknown;
+    if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+    const frame = (body as { frame?: unknown }).frame;
+    if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
+      return null;
+    }
+    const { frame: image } = frame as { frame?: unknown };
+    if (typeof image !== "string" || !image) return null;
+    return frame as PageFrame;
   } catch {
     // A missing picture is a smaller sentence, not a broken conversation.
     return null;

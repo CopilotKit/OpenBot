@@ -1,0 +1,5 @@
+ag-ui-claude-sdk==0.1.5
+claude-agent-sdk==0.2.152
+fastapi
+python-multipart
+uvicorn[standard]

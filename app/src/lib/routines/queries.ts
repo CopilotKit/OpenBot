@@ -12,6 +12,8 @@ import { client } from "@/lib/client";
  */
 export type RoutineRecord = {
   id: string;
+  /** Which Bot carries it out, so a Bot's own dialog can show only its routines. */
+  agentId: string;
   schedule: string;
   timezone: string;
   instruction: string;
@@ -29,10 +31,51 @@ export type RoutineRecord = {
   } | null;
 };
 
+export type SweepRecord = {
+  lastSweptAt: string | null;
+  working: boolean;
+};
+
+export type RoutinesPage = {
+  routines: RoutineRecord[];
+  sweep: SweepRecord;
+};
+
+export function nothingIsFiring(
+  sweep: SweepRecord | undefined,
+  routineCount: number,
+): boolean {
+  return sweep !== undefined && !sweep.working && routineCount > 0;
+}
+
 export const routineKeys = {
   all: ["routines"] as const,
   list: () => ["routines", "list"] as const,
+  runs: (id: string) => ["routines", id, "runs"] as const,
 };
+
+/** One firing of a routine, scheduled or Run now. */
+export type RoutineRunRecord = {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "skipped" | "waiting";
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  /** What started it: the schedule, a person's Run now, or an event trigger. */
+  source: "schedule" | "run_now" | "trigger";
+};
+
+export function routineRunsQueryOptions(id: string) {
+  return queryOptions({
+    queryKey: routineKeys.runs(id),
+    queryFn: (): Promise<RoutineRunRecord[]> =>
+      client(`/api/routines/${encodeURIComponent(id)}/runs`, "runs", {
+        fallback: "This routine's runs could not be loaded.",
+      }),
+    // A run in flight settles within minutes; poll so Running turns into its outcome.
+    refetchInterval: 5_000,
+  });
+}
 
 /**
  * The signed-in person's own routines.
@@ -43,9 +86,15 @@ export const routineKeys = {
 export function routinesQueryOptions() {
   return queryOptions({
     queryKey: routineKeys.list(),
-    queryFn: (): Promise<RoutineRecord[]> =>
-      client("/api/routines", "routines", {
+    queryFn: async (): Promise<RoutinesPage> => {
+      const response = await client("/api/routines", {
         fallback: "Your routines could not be loaded.",
-      }),
+      });
+      const body = (await response.json()) as Partial<RoutinesPage>;
+      return {
+        routines: body.routines ?? [],
+        sweep: body.sweep ?? { lastSweptAt: null, working: false },
+      };
+    },
   });
 }
