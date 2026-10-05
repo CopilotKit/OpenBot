@@ -337,6 +337,12 @@ export function createShell(
       // The person's Stop reaches the command, not just the request that started it.
       const onAbort = stop;
       input.signal?.addEventListener("abort", onAbort, { once: true });
+      // A listener added to an already-aborted signal never fires, so listening alone only honours a
+      // Stop that arrives from here on. The abort can beat the spawn above: the surface aborts, the
+      // server aborts the request it made to this computer, and Bun aborts this one in turn, which
+      // happens before this line whenever the person was quick. Reading the flag is what makes the
+      // Stop mean the same thing whenever it landed.
+      if (input.signal?.aborted) stop();
 
       const exitCode = await new Promise<number>((resolve) => {
         child.on("close", (code) => resolve(code ?? -1));

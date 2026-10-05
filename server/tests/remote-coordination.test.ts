@@ -174,7 +174,12 @@ describe("coordination run authority", () => {
 
 describe("the common coordination tools", () => {
   function tools(
-    options: { granted?: boolean; authorised?: boolean; depth?: number } = {},
+    options: {
+      granted?: boolean;
+      authorised?: boolean;
+      authoriseRun?: (run: RunAssertion) => Promise<boolean>;
+      depth?: number;
+    } = {},
   ) {
     const sent: RunAssertion[] = [];
     const questions: {
@@ -208,7 +213,8 @@ describe("the common coordination tools", () => {
           audit.push(event);
         },
       },
-      authoriseRun: async () => options.authorised ?? true,
+      authoriseRun:
+        options.authoriseRun ?? (async () => options.authorised ?? true),
     });
     return { coordinator, sent, questions, audit };
   }
@@ -279,4 +285,38 @@ describe("the common coordination tools", () => {
     expect(audit).toHaveLength(2);
     expect(audit[0]?.initiator).toEqual(RUN.initiator);
   });
+
+  test("offers no coordination tool to a run that may not coordinate", async () => {
+    const { coordinator } = tools({ authorised: false });
+    expect(await coordinator.toolsForRun(DELEGATED)).toEqual([]);
+  });
+
+  // A group peer turn is relayed at depth 1 with no handoff claim, the shape of RUN.
+  test.each([
+    ["a leased delivery", DELEGATED, ["message_bot", "ask_person"]],
+    [
+      "a direct run",
+      { ...RUN, depth: 0, botId: "source-bot" },
+      ["message_bot", "ask_person"],
+    ],
+    ["a group peer turn", RUN, []],
+  ])(
+    "every tool offered to %s is callable by it",
+    async (_label, run, names) => {
+      const { coordinator } = tools({
+        authoriseRun: (asserted) =>
+          authoriseCoordinationRun(asserted, authority()),
+      });
+      const offered = await coordinator.toolsForRun(run);
+      expect(offered.map((tool) => tool.name)).toEqual(names);
+      for (const tool of offered) {
+        const result = await coordinator.call({
+          name: tool.name,
+          args: {},
+          run,
+        });
+        expect(result?.text).not.toContain("no longer has permission");
+      }
+    },
+  );
 });

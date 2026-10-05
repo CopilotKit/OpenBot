@@ -389,6 +389,9 @@ export function createCoordinationTools(options: {
   };
   return {
     async toolsForRun(from: RunAssertion): Promise<GrantedTool[]> {
+      // Offered only when `call` would accept it: a group peer turn at depth 1 holds no handoff
+      // claim, so every call from it was refused and audited. `call` still checks, for stale schemas.
+      if (!(await options.authoriseRun(from))) return [];
       const canHandOn =
         options.caps.maxDepth > 0 &&
         options.caps.maxPerRun > 0 &&

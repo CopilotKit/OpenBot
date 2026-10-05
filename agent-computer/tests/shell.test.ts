@@ -363,6 +363,46 @@ describe("what a command cannot do to the computer", () => {
     expect(result.stdout.trim()).toBe("ran");
   }, 15_000);
 
+  test("a Stop that landed before the command started still stops it", async () => {
+    /*
+     * An abort listener added to an already-aborted signal never fires, so the Stop was only honoured
+     * when it arrived after the child spawned. This is the ordinary race: the surface aborts, the
+     * server aborts the request it made to this computer, and Bun aborts this one in turn, which can
+     * happen before `run` reaches the spawn. The command then ran to its own limit instead of being
+     * stopped, and the person was told nothing until it finished.
+     */
+    const started = Date.now();
+    const result = await createShell(root, source()).run({
+      command: "sleep 30",
+      timeoutMs: 20_000,
+      signal: AbortSignal.abort(),
+    });
+
+    // Ends on the Stop rather than running out the command or its own limit.
+    expect(Date.now() - started).toBeLessThan(10_000);
+    // A Stop is not a timeout, and must not be reported as one.
+    expect(result.timedOut).toBe(false);
+  }, 20_000);
+
+  test("a Stop that lands mid-command still stops it", async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 300);
+    const started = Date.now();
+
+    try {
+      const result = await createShell(root, source()).run({
+        command: "sleep 30",
+        timeoutMs: 20_000,
+        signal: controller.signal,
+      });
+
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(result.timedOut).toBe(false);
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 20_000);
+
   test.each([
     ["NaN", Number.NaN],
     ["Infinity", Number.POSITIVE_INFINITY],
