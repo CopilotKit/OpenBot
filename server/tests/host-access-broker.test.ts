@@ -398,4 +398,60 @@ describe("host access broker", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(broker.statusFor("user-a").pending).toEqual([]);
   }, 10_000);
+
+  test("a stop nobody collects does not stay pending for the life of the process", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      // Long enough that the lease is not what ends the operation, so this is the operation's
+      // own timeout giving up on the stop.
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 40,
+    });
+
+    broker.stop("user-a");
+    expect(broker.nextDesktopOperation()?.operations[0]).toMatchObject({
+      kind: "stop",
+      actorId: "user-a",
+    });
+
+    // That desktop never comes back for it. A stop is addressed to a worker that may never
+    // answer, exactly as a cancel is, so it cannot outlive the chance to deliver it: nothing else
+    // ever removed this entry, so `operations` grew by one per press of Stop and `statusFor` kept
+    // reporting it to the person as pending.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(broker.statusFor("user-a").pending).toEqual([]);
+  }, 10_000);
+
+  test("a second Stop neither drops the queued stop nor rejects a promise nobody holds", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 1_000,
+    });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      broker.stop("user-a");
+      broker.stop("user-a");
+
+      // Both stops are still queued for a desktop that has not collected either. The second must
+      // not fail the first: a stop is the instruction that makes the desktop stop, so failing it
+      // would withdraw the instruction the person just asked for.
+      const pending = broker.statusFor("user-a").pending;
+      expect(pending).toHaveLength(2);
+      expect(pending.every((operation) => operation.kind === "stop")).toBe(
+        true,
+      );
+
+      // And nothing rejects. The stop used to be built by `enqueue` and discarded with `void`, so
+      // the promise behind it had no handler attached, and failing it rejected that promise into
+      // the void -- which this process treats as fatal.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  }, 10_000);
 });

@@ -25,6 +25,32 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   download budget, so a computer reached through a proxy that re-chunks left a transfer running and a
   connection checked out of the pool on every attempt.
 
+- A conversation title cut at 60 characters no longer ends in half an emoji. `slice` counts UTF-16
+  code units and an emoji is two of them, so a title cut between the halves rendered a replacement
+  character in the sidebar and the picker, where the character itself should have been.
+
+- A tool result that arrives before the call it answers is now paired with that call by the LangGraph
+  Bot, as the sibling Bots already did. Read back from the durable thread store the result arrives
+  first, which is a payload no provider accepts: a tool message with no preceding call, then a call
+  with nothing following it. The model answers that with silence rather than an error, so the Bot
+  stopped responding for the rest of the conversation.
+
+- Pressing Stop now stops the computer even when the desktop worker never collects the instruction.
+  A stop was queued with no timeout and the worker was the only thing that could ever remove it, so a
+  worker that stopped polling left the entry in memory for the life of the process and the Host
+  access panel showed an operation that could never finish, growing by one per press. Pressing Stop a
+  second time also withdrew the first Stop before the desktop could collect it, and rejected a request
+  that nobody was waiting for, which the server treats as fatal. A desktop that reconnects within the
+  operation timeout is still told to stop.
+
+### A computer refuses the cloud metadata address written through the NAT64 prefix
+
+A Bot's computer is now refused the cloud metadata address when it is written through the NAT64
+prefix (`64:ff9b::a9fe:a9fe` is 169.254.169.254), under every network policy including allow-all.
+Only the plain and IPv4-mapped spellings were refused, so on a network with a NAT64 gateway the
+metadata endpoint was one rewrite away. Browsing already refused this spelling; the computer's
+filter now agrees.
+
 ### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
 
 A deployment pointed at RDS, Cloud SQL or Azure Database could not start. The server sent
