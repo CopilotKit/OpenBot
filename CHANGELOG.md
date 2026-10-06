@@ -15,6 +15,27 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   second time also withdrew the first Stop before the desktop could collect it, and rejected a request
   that nobody was waiting for, which the server treats as fatal. A desktop that reconnects within the
   operation timeout is still told to stop.
+
+### A computer refuses the cloud metadata address written through the NAT64 prefix
+
+A Bot's computer is now refused the cloud metadata address when it is written through the NAT64
+prefix (`64:ff9b::a9fe:a9fe` is 169.254.169.254), under every network policy including allow-all.
+Only the plain and IPv4-mapped spellings were refused, so on a network with a NAT64 gateway the
+metadata endpoint was one rewrite away. Browsing already refused this spelling; the computer's
+filter now agrees.
+
+### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
+
+A deployment pointed at RDS, Cloud SQL or Azure Database could not start. The server sent
+`sslmode` to Postgres as a connection parameter instead of turning TLS on, so the connection went
+out unencrypted and was refused with `no pg_hba.conf entry for host ... no encryption`, the very
+error the Helm chart's README says `?sslmode=require` avoids. Migrations were unaffected, which is
+why a deployment got as far as a migrated database and then crash-looped. `sslmode=require` now
+encrypts the connection, and `sslmode=disable` turns TLS off. `sslmode=verify-full`, with an
+optional `sslrootcert`, checks the certificate on Bun 1.4 and later and is refused on Bun 1.3,
+which connects to any certificate. `verify-ca`, `prefer` and `allow` are refused with a message
+naming the modes that work.
+
 ### A coworker the message speaks to is routed to without asking a model
 
 Addressing a coworker by name went to the intent router like any other message, so the deployment
