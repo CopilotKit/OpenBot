@@ -144,6 +144,37 @@ describe("history with a tool call nobody answered", () => {
 });
 
 /**
+ * A tool result is not guaranteed to arrive after the call it belongs to.
+ *
+ * Read back from the durable thread store it arrives the other way round, result first, which is a
+ * payload no provider accepts: a tool message with no preceding call, and then a call with nothing
+ * following it. The model answers that with silence rather than an error. The shape below is the one
+ * the sibling adapter's own test was written from; this adapter had the same gap.
+ */
+describe("a history that arrives out of order", () => {
+  test("pairs each call with its result, whatever order they arrived in", () => {
+    const messages = toLangChainMessages(
+      input([
+        { role: "user", content: "What is in the PRD?" },
+        { role: "tool", toolCallId: "call_1", content: "the document text" },
+        assistantAsking,
+      ]),
+    );
+
+    const asked = messages.findIndex((message) => message instanceof AIMessage);
+    expect(messages[asked + 1]).toBeInstanceOf(ToolMessage);
+    const answer = messages[asked + 1] as ToolMessage;
+    expect(answer.tool_call_id).toBe("call_1");
+    expect(String(answer.content)).toBe("the document text");
+
+    // The result is not also left where it arrived: no tool message precedes the call it belongs to.
+    expect(
+      messages.findIndex((message) => message instanceof ToolMessage),
+    ).toBe(asked + 1);
+  });
+});
+
+/**
  * A message somebody attached a file to.
  *
  * The composer sends it as a list of parts rather than a string: what the person typed, then the

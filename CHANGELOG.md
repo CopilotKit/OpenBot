@@ -15,6 +15,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   command is kept or exported. `curl -d '{"password":"x"}'` was recorded with the secret in clear,
   because only `NAME=value` and `--name value` forms were recognised and a quoted JSON key was
   neither. The key is still shown, so the command reads the same.
+
+- A Bot's browser is now refused names under `.localhost`, such as `http://admin.localhost:5432`, the
+  same as bare `localhost`. The whole `.localhost` zone is loopback and Chromium resolves it without
+  DNS, but only the exact name `localhost` was on the refused list, so a deployment that had not opted
+  into private hosts could still be pointed at its own services this way.
+
+- `OPENBOT_SINGLE_USER` is now refused with a public name that starts with `127.`, such as
+  `https://127.example.com` or `https://127.0.0.1.nip.io`. The check for a loopback address matched
+  any host beginning `127.`, so a public address like that read as this machine and the no-sign-in
+  administrator was allowed on it. Only a full 127.x.x.x address counts as loopback now.
 - A cancellation the native host never collected is now dropped instead of being reported as
   pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
   worker, and only that worker ever removed it: a worker that stopped polling left the entry in
@@ -27,6 +37,34 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the connection before reporting the refusal. The unread body could be as large as the whole
   download budget, so a computer reached through a proxy that re-chunks left a transfer running and a
   connection checked out of the pool on every attempt.
+
+
+
+- A conversation title cut at 60 characters no longer ends in half an emoji. `slice` counts UTF-16
+  code units and an emoji is two of them, so a title cut between the halves rendered a replacement
+  character in the sidebar and the picker, where the character itself should have been.
+
+- A tool result that arrives before the call it answers is now paired with that call by the LangGraph
+  Bot, as the sibling Bots already did. Read back from the durable thread store the result arrives
+  first, which is a payload no provider accepts: a tool message with no preceding call, then a call
+  with nothing following it. The model answers that with silence rather than an error, so the Bot
+  stopped responding for the rest of the conversation.
+
+- Pressing Stop now stops the computer even when the desktop worker never collects the instruction.
+  A stop was queued with no timeout and the worker was the only thing that could ever remove it, so a
+  worker that stopped polling left the entry in memory for the life of the process and the Host
+  access panel showed an operation that could never finish, growing by one per press. Pressing Stop a
+  second time also withdrew the first Stop before the desktop could collect it, and rejected a request
+  that nobody was waiting for, which the server treats as fatal. A desktop that reconnects within the
+  operation timeout is still told to stop.
+
+### A computer refuses the cloud metadata address written through the NAT64 prefix
+
+A Bot's computer is now refused the cloud metadata address when it is written through the NAT64
+prefix (`64:ff9b::a9fe:a9fe` is 169.254.169.254), under every network policy including allow-all.
+Only the plain and IPv4-mapped spellings were refused, so on a network with a NAT64 gateway the
+metadata endpoint was one rewrite away. Browsing already refused this spelling; the computer's
+filter now agrees.
 
 ### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
 
