@@ -61,6 +61,17 @@ const INTERNAL_HOSTNAMES = new Set([
   "::1",
 ]);
 
+/**
+ * Any name under `.localhost`.
+ *
+ * RFC 6761 reserves the whole `.localhost` zone for loopback, and Chromium resolves `app.localhost`
+ * to 127.0.0.1 without asking DNS, so `http://admin.localhost:5432` reaches the same service as
+ * `http://localhost:5432`. The exact-name list above only holds the bare `localhost`.
+ */
+function isLocalhostName(hostname: string): boolean {
+  return hostname === "localhost" || hostname.endsWith(".localhost");
+}
+
 export type TargetVerdict =
   | { allowed: true; url: string }
   | { allowed: false; reason: string };
@@ -272,6 +283,7 @@ export function checkNavigationTarget(
 
   if (
     INTERNAL_HOSTNAMES.has(hostname) ||
+    isLocalhostName(hostname) ||
     isPrivateIpv4(hostname) ||
     isPrivateIpv6(hostname)
   ) {

@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A Bot's browser is now refused names under `.localhost`, such as `http://admin.localhost:5432`, the
+  same as bare `localhost`. The whole `.localhost` zone is loopback and Chromium resolves it without
+  DNS, but only the exact name `localhost` was on the refused list, so a deployment that had not opted
+  into private hosts could still be pointed at its own services this way.
 - A cancellation the native host never collected is now dropped instead of being reported as
   pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
   worker, and only that worker ever removed it: a worker that stopped polling left the entry in
