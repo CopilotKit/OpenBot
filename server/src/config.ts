@@ -528,7 +528,7 @@ function reachOf(raw: string): Reach {
     bare === "localhost" ||
     bare === "::1" ||
     bare === "0:0:0:0:0:0:0:1" ||
-    /^127\./.test(bare)
+    /^127(\.\d{1,3}){3}$/.test(bare)
   ) {
     return "loopback";
   }
