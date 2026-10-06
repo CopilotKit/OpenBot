@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.1.1
+
 - A conversation title cut at 60 characters no longer ends in half an emoji. `slice` counts UTF-16
   code units and an emoji is two of them, so a title cut between the halves rendered a replacement
   character in the sidebar and the picker, where the character itself should have been.
