@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.1.1
+
 ### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
 
 A deployment pointed at RDS, Cloud SQL or Azure Database could not start. The server sent
