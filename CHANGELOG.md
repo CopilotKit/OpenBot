@@ -24,6 +24,32 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the connection before reporting the refusal. The unread body could be as large as the whole
   download budget, so a computer reached through a proxy that re-chunks left a transfer running and a
   connection checked out of the pool on every attempt.
+
+### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
+
+A deployment pointed at RDS, Cloud SQL or Azure Database could not start. The server sent
+`sslmode` to Postgres as a connection parameter instead of turning TLS on, so the connection went
+out unencrypted and was refused with `no pg_hba.conf entry for host ... no encryption`, the very
+error the Helm chart's README says `?sslmode=require` avoids. Migrations were unaffected, which is
+why a deployment got as far as a migrated database and then crash-looped. `sslmode=require` now
+encrypts the connection, and `sslmode=disable` turns TLS off. `sslmode=verify-full`, with an
+optional `sslrootcert`, checks the certificate on Bun 1.4 and later and is refused on Bun 1.3,
+which connects to any certificate. `verify-ca`, `prefer` and `allow` are refused with a message
+naming the modes that work.
+
+### A coworker the message speaks to is routed to without asking a model
+
+Addressing a coworker by name went to the intent router like any other message, so the deployment
+paid a model call to be told what the person had already said, and sometimes was told something
+else. A message that speaks to a coworker by its full name now routes straight to them: it opens
+with the name ("Risk Analyst, please check this"), names it with `@`, or asks it ("ask Risk Analyst
+to review this"). It is recorded as `matched a coworker’s name in the message` with
+`viaNameMatch: true` on the same `channel.routed` row. A name in passing ("don't send this to Risk
+Analyst") and a word that only ends a name ("review this contract", "my meeting notes") still go
+to the router. When the message addresses more than one coworker, or two share the addressed name,
+it is refused with distinct labels, and the composer keeps the draft and asks the person to choose
+instead of starting the default coworker. Explicit picker choices still use `viaMention: true`.
+
 ### A Bot's turn in a group is no longer offered coordination tools it cannot call
 
 A Bot answering another Bot in a group conversation was offered `ask_person`, and `message_bot`

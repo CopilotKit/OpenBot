@@ -15,7 +15,10 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
-import { routeMessage } from "@/lib/channels/route";
+import {
+  CoworkerRoutingRefusedError,
+  routeMessage,
+} from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
 import { appConfig } from "@/lib/generated/application-config";
 
@@ -72,7 +75,9 @@ function RouteComponent() {
                 let agentId: string | undefined;
                 try {
                   agentId = (await routeMessage(draft.text)).agentId;
-                } catch {
+                } catch (caught) {
+                  if (caught instanceof CoworkerRoutingRefusedError)
+                    throw caught;
                   agentId = fallback?.id;
                 }
                 if (!agentId) return;

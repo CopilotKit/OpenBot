@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type { AppVariables } from "../src/auth/guards";
+import type { AgentProfileStore } from "../src/agents/profile-store";
 import { createApp } from "../src/app";
-import { loadConfig } from "../src/config";
-import { createRoutingRoutes } from "../src/routing/routes";
+import type { AppVariables } from "../src/auth/guards";
 import { createComputerRoutes } from "../src/computer/routes";
+import { loadConfig } from "../src/config";
 import type { RoutineRunner } from "../src/routines/runner";
+import type { IntentRouter } from "../src/routing/classify";
+import { createRoutingRoutes } from "../src/routing/routes";
+import { createCoworkerRoutingService } from "../src/routing/service";
 import { testEnvironment } from "./support/environment";
 
 const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
@@ -38,7 +41,13 @@ describe("POST /api/route text cap", () => {
     const app = new Hono<{ Variables: AppVariables }>();
     app.route(
       "/",
-      createRoutingRoutes(store as never, router as never, requireUser),
+      createRoutingRoutes(
+        createCoworkerRoutingService({
+          store: store as unknown as AgentProfileStore,
+          router: router as unknown as IntentRouter,
+        }),
+        requireUser,
+      ),
     );
     return app;
   }

@@ -1,8 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
+import type { AgentProfile } from "../../server/src/agents/profile-types";
 import type { AuditStore } from "../../server/src/audit";
 import type { IntentRouter } from "../../server/src/routing/classify";
 import { createRoutingRoutes } from "../../server/src/routing/routes";
+import { createCoworkerRoutingService } from "../../server/src/routing/service";
 import { routeMessage } from "../src/lib/channels/route";
 
 /**
@@ -42,7 +44,7 @@ function serve() {
   const asked: string[] = [];
   const written: { eventType: string; payload: Record<string, unknown> }[] = [];
 
-  const asActor: Parameters<typeof createRoutingRoutes>[2] = async (
+  const asActor: Parameters<typeof createRoutingRoutes>[1] = async (
     context,
     next,
   ) => {
@@ -53,7 +55,23 @@ function serve() {
     });
     await next();
   };
-  const store = { list: async () => ROSTER } as unknown as AgentProfileStore;
+  const store = {
+    list: async (): Promise<AgentProfile[]> =>
+      ROSTER.map((item) => ({
+        ...item,
+        visibility: "public",
+        title: item.name,
+        avatarSeed: item.id,
+        ownerUserId: null,
+        deletedAt: null,
+        hidden: false,
+        pinned: false,
+        systemOwned: false,
+        endpoint: null,
+        hasAuth: false,
+        hasCallbackToken: false,
+      })),
+  } as unknown as AgentProfileStore;
   const router = {
     route: async (text: string) => {
       asked.push(text);
@@ -75,7 +93,10 @@ function serve() {
     },
   } as unknown as AuditStore;
 
-  const routes = createRoutingRoutes(store, router, asActor, auditStore);
+  const routes = createRoutingRoutes(
+    createCoworkerRoutingService({ store, router, auditStore }),
+    asActor,
+  );
   globalThis.fetch = Object.assign(
     async (
       path: Parameters<typeof fetch>[0],
