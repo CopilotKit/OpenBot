@@ -106,6 +106,38 @@ export function createHostAccessBroker(
     operations.set(cancelOperation.operationId, cancelState);
   }
 
+  function queueStopFor(actorId: string) {
+    const stopOperation: HostAccessDesktopOperation = {
+      operationId: randomUUID(),
+      kind: "stop",
+      botId: "*",
+      actorId,
+    };
+    const stopState: OperationState = {
+      operation: stopOperation,
+      actorId,
+      botId: stopOperation.botId,
+      leasedUntil: null,
+      expiresAt: now() + operationTtlMs,
+      expiryTimer: null,
+      resolve: () => {},
+      reject: () => {},
+      settled: false,
+    };
+    // A stop is addressed to a desktop that may never come back for it, for the same reason a
+    // cancel is: nothing but `resolveDesktopOperation` ever removed this entry, so a worker that
+    // never polled left it here for the life of the process, growing `operations` by one per press
+    // of Stop and leaving `statusFor` reporting it to the person as pending for ever. Deleted rather
+    // than failed, because a stop has nobody left to reject: it used to be built by `enqueue` and
+    // discarded with `void`, so it carried a promise nobody held, and a second Stop failed it
+    // through that promise with no handler attached.
+    stopState.expiryTimer = setTimeout(() => {
+      operations.delete(stopOperation.operationId);
+    }, operationTtlMs);
+    unrefTimer(stopState.expiryTimer);
+    operations.set(stopOperation.operationId, stopState);
+  }
+
   function failOperation(state: OperationState, reason: string) {
     if (state.settled) return;
     state.settled = true;
@@ -385,17 +417,14 @@ export function createHostAccessBroker(
       }
       const affected = [...operations.values()].filter(
         (state) =>
-          state.actorId === actorId && state.operation.kind !== "cancel",
+          state.actorId === actorId &&
+          state.operation.kind !== "cancel" &&
+          state.operation.kind !== "stop",
       );
       for (const state of affected) {
         failOperation(state, "Host access was stopped.");
       }
-      void enqueue({
-        operationId: randomUUID(),
-        kind: "stop",
-        botId: "*",
-        actorId,
-      });
+      queueStopFor(actorId);
     },
 
     statusFor(actorId: string): HostAccessStatus {
