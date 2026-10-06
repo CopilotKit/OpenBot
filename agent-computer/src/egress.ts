@@ -371,11 +371,39 @@ const alwaysDenied = new BlockList();
 for (const [address, prefix, family] of ALWAYS_DENIED)
   alwaysDenied.addSubnet(address, prefix, family);
 
-/** True for a metadata or link-local address, including one written as IPv4-mapped IPv6. */
+/** The NAT64 well-known prefix. On a network with a NAT64 gateway it reaches the IPv4 address in its last 32 bits. */
+const nat64 = new BlockList();
+nat64.addSubnet("64:ff9b::", 96, "ipv6");
+
+/** The IPv4 address a NAT64 address carries, or null when it is not one. */
+function nat64Ipv4(address: string): string | null {
+  if (isIP(address) !== 6 || !nat64.check(address, "ipv6")) return null;
+  // Let URL spell it in hex groups (`64:ff9b::1.2.3.4` becomes `64:ff9b::102:304`), then expand `::`
+  // so the last two groups are the IPv4 address however the address was written.
+  const hex = new URL(`http://[${address}]/`).hostname.slice(1, -1);
+  const [head = "", tail] = hex.split("::");
+  const groups = (part: string) => (part ? part.split(":") : []);
+  const all =
+    tail === undefined
+      ? groups(head)
+      : [
+          ...groups(head),
+          ...Array(8 - groups(head).length - groups(tail).length).fill("0"),
+          ...groups(tail),
+        ];
+  const high = Number.parseInt(all[6] ?? "0", 16);
+  const low = Number.parseInt(all[7] ?? "0", 16);
+  return [high >> 8, high & 255, low >> 8, low & 255].join(".");
+}
+
+/**
+ * True for a metadata or link-local address, including one written as IPv4-mapped IPv6 or reached
+ * through the NAT64 prefix.
+ */
 export function isAlwaysDenied(addressInput: string): boolean {
   const address = normalizeHost(addressInput);
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
-  const candidate = mapped ?? address;
+  const candidate = mapped ?? nat64Ipv4(address) ?? address;
   const version = isIP(candidate);
   if (version === 0) return false;
   return alwaysDenied.check(candidate, version === 4 ? "ipv4" : "ipv6");
