@@ -1,10 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import {
-  type Message,
-  type RunAgentInput,
-  RunAgentInputSchema,
-} from "@ag-ui/client";
+import type { Message, RunAgentInput } from "@ag-ui/client";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import type { AuditInitiator } from "../audit";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */

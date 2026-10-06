@@ -1,4 +1,5 @@
-import { type Message, MessageSchema } from "@ag-ui/core";
+import type { Message } from "@ag-ui/core";
+import { MessageSchema } from "@ag-ui/core/schemas";
 import { tryClient } from "@/lib/client";
 
 /**

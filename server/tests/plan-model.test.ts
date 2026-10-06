@@ -381,9 +381,8 @@ test("model input preserves user images and exact parallel tool-result IDs", () 
       role: "user",
       content: [
         {
-          type: "binary",
-          mimeType: "image/png",
-          url: "data:image/png;base64,AQID",
+          type: "image",
+          source: { type: "data", value: "AQID", mimeType: "image/png" },
         },
       ],
     },

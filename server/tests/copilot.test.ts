@@ -81,6 +81,9 @@ test("remote runs receive coordination tools and preserve the signed delivery sc
           name: "Risk",
           type: "remote_ag_ui",
           endpoint: "https://risk.test/ag-ui",
+          // Every registered remote agent carries one (`registeredAgentFromRow`); without it this
+          // fixture handed the AG-UI client an undefined message, which 1.0 no longer tolerates.
+          standingMessage: standingRoleMessage(riskRow),
         },
       ],
       { provider: "openai", defaultModel: "test" },

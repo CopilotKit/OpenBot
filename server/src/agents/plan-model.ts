@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
-import {
-  EventSchemas,
-  HttpAgent,
-  type Message,
-  type RunAgentInput,
-} from "@ag-ui/client";
+import { HttpAgent, type Message, type RunAgentInput } from "@ag-ui/client";
+import { EventSchemas } from "@ag-ui/core/schemas";
 import type { BuiltInAgentClassicConfig } from "@copilotkit/runtime/v2";
 import type { Subscription } from "rxjs";
 import {
@@ -97,11 +93,20 @@ export function planMessages(prompt: Options["prompt"]): Message[] {
               `Plan models cannot receive ${part.mediaType} attachments.`,
             );
           const data = part.data;
-          const url =
-            data instanceof URL
-              ? data.href
-              : `data:${part.mediaType};base64,${typeof data === "string" ? data : Buffer.from(data).toString("base64")}`;
-          return { type: "binary", mimeType: part.mediaType, url };
+          return {
+            type: "image",
+            source:
+              data instanceof URL
+                ? { type: "url", value: data.href, mimeType: part.mediaType }
+                : {
+                    type: "data",
+                    value:
+                      typeof data === "string"
+                        ? data
+                        : Buffer.from(data).toString("base64"),
+                    mimeType: part.mediaType,
+                  },
+          };
         }),
       });
     } else if (message.role === "assistant") {
@@ -150,37 +155,6 @@ export function planMessages(prompt: Options["prompt"]): Message[] {
     }
   }
   return messages;
-}
-
-/** The pinned JS client uses binary parts; current Python AG-UI uses image/source. */
-function planWireBody(
-  body: BodyInit | null | undefined,
-): BodyInit | null | undefined {
-  if (typeof body !== "string") return body;
-  const input = JSON.parse(body) as RunAgentInput;
-  return JSON.stringify({
-    ...input,
-    messages: input.messages.map((message) => {
-      if (message.role !== "user" || typeof message.content === "string")
-        return message;
-      return {
-        ...message,
-        content: message.content.map((part) => {
-          if (part.type !== "binary") return part;
-          if (!part.mimeType.startsWith("image/"))
-            throw new Error("The plan model only supports image media parts.");
-          const encoded = part.data ?? part.url?.split(";base64,", 2)[1];
-          return {
-            type: "image",
-            source:
-              encoded !== undefined
-                ? { type: "data", value: encoded, mimeType: part.mimeType }
-                : { type: "url", value: part.url, mimeType: part.mimeType },
-          };
-        }),
-      };
-    }),
-  });
 }
 
 /** Model transport only. BuiltInAgent still validates and executes every server tool. */
@@ -296,7 +270,6 @@ export class PlanModel implements PlanLanguageModel {
       fetch: (url, init) =>
         fetch(url, {
           ...init,
-          body: planWireBody(init?.body),
           redirect: "error",
           signal: AbortSignal.any([
             ...(init?.signal ? [init.signal] : []),

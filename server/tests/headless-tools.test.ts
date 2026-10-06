@@ -543,7 +543,7 @@ test("unknown computer tool calls become error results rather than commands", as
   expect(executions).toBe(0);
   expect(
     persisted.filter((event) => event.type === EventType.TOOL_CALL_RESULT),
-  ).toMatchObject([{ error: expect.stringContaining("unavailable") }]);
+  ).toMatchObject([{ content: expect.stringContaining("unavailable") }]);
   expect(remote.requests[1]?.messages).toContainEqual(
     expect.objectContaining({
       role: "tool",

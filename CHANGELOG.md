@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### CopilotKit 1.77 and AG-UI 1.0
+
+OpenBot now runs on CopilotKit 1.77.0 (`@copilotkit/runtime`, `react-core` and `a2ui-renderer`,
+from 1.73.1), which carries the Intelligence client, and on AG-UI 1.0 (`@ag-ui/core` and
+`@ag-ui/client` 1.0.1, from 0.0.59). A managed Intelligence project needs nothing changed; it is the
+client in the server that moved. Among what comes with it: thread naming falls back to the first
+message, the realtime connection keeps its place across a repeated checkpoint, an interrupt resume
+gets a run id of its own, and generated A2UI controls no longer submit the page's own forms.
+
+Bots served from their own endpoint keep working as they are. AG-UI 1.0 still accepts the earlier
+event shapes, so `agent-bot`, `agent-langgraph` and the Python Bots were not changed.
+
+A tool result's `error` field is gone from the `TOOL_CALL_RESULT` event, because AG-UI 1.0 does not
+define one. The refusal is still in the result's text and on the tool message, which is where a
+Bot's next turn reads it.
+
 ## 0.1.1
 
 - A password given to `curl` as `-uuser:password`, `--user=user:password` or `-u "user:pass word"` is

@@ -273,13 +273,14 @@ export class HeadlessToolsMiddleware extends Middleware {
             };
             messages = [...messages, message];
             results.set(call.id, content);
+            // AG-UI 1.0's TOOL_CALL_RESULT has no `error` field and validation strips one; the
+            // refusal travels in `content`, and on the tool message, which keeps `error`.
             subscriber.next({
               type: EventType.TOOL_CALL_RESULT,
               messageId: message.id,
               toolCallId: call.id,
               role: "tool",
               content,
-              ...(error ? { error } : {}),
             });
           }
           const interrupts =
