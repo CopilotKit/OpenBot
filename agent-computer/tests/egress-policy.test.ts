@@ -278,6 +278,9 @@ describe("the filter proxy", () => {
       "100.100.100.200:80",
       "[::ffff:169.254.169.254]:80",
       "[fe80::1]:80",
+      // The NAT64 prefix reaches the IPv4 address in its last 32 bits.
+      "[64:ff9b::a9fe:a9fe]:80",
+      "[64:ff9b::6464:64c8]:80",
     ]) {
       expect(
         await connectThrough(filter.port, target, "sales", secret),
