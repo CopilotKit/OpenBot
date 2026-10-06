@@ -8,6 +8,7 @@ import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY, lastValueFrom } from "rxjs";
 import { z } from "zod";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";
 import type { LoadAttachment } from "../src/copilot";
@@ -756,12 +757,14 @@ describe("standing agent roles", () => {
         seen.request = request;
         return { id: "user-7", role: "user" as const };
       },
-      async (actor) => {
-        seen.actors.push(actor);
-        return [remoteAgent("http://coworker.internal/ag-ui")];
-      },
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async (actor) => {
+          seen.actors.push(actor);
+          return [remoteAgent("http://coworker.internal/ag-ui")];
+        },
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
 
     const request = new Request("http://openbot.test/api/copilotkit");
@@ -790,9 +793,13 @@ describe("standing agent roles", () => {
     let roleDescription = "Review receipts.";
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
-      async () => [remoteAgent(endpoint.url, { roleDescription })],
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async () => [
+          remoteAgent(endpoint.url, { roleDescription }),
+        ],
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
     const request = new Request("http://openbot.test/api/copilotkit");
 
@@ -1443,21 +1450,15 @@ describe("a person's standing instructions", () => {
     const asked: string[] = [];
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
-      async () => [assistant],
-      model,
-      async () => "openai-secret",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (actorId) => async () => {
-        asked.push(actorId);
-        return "Write in British English.";
-      },
+      createActorAgentResolver({
+        loadAgents: async () => [assistant],
+        model,
+        resolveModelApiKey: async () => "openai-secret",
+        loadInstructionsForActor: (actorId) => async () => {
+          asked.push(actorId);
+          return "Write in British English.";
+        },
+      }),
     );
 
     await factory({

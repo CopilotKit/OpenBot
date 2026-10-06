@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { createStallGuard } from "../src/channels/stall-guard";
 import { loadConfig } from "../src/config";
 import { mountCopilotRuntime } from "../src/copilot";
@@ -48,24 +49,15 @@ test("delegation creates its scratch Thread with the addressed Bot's Learning as
     });
     const runtime = mountCopilotRuntime(
       loadConfig(testEnvironment()),
-      { provider: "openai", defaultModel: "unused" },
-      async () => [],
-      async () => null,
+      createActorAgentResolver({
+        model: { provider: "openai", defaultModel: "unused" },
+        loadAgents: async () => [],
+        resolveModelApiKey: async () => null,
+        stallGuard: guard,
+      }),
       async () => ({ id: "person", name: "Person" }),
       async () => ({ id: "person", role: "user" }),
-      guard,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      settings,
+      { learningSettings: settings },
     );
     expect(
       await runtime.threadLock.acquire({
