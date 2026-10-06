@@ -384,6 +384,18 @@ describe("scrubbing commands", () => {
       'curl -d "{\\"client_secret\\":\\"hunter2\\"}" https://x.test',
       'curl -d "{\\"client_secret\\":[REDACTED]}" https://x.test',
     ],
+    [
+      "curl -uadmin:s3cret https://x.test",
+      "curl -uadmin:[REDACTED] https://x.test",
+    ],
+    [
+      "curl --user=admin:s3cret https://x.test",
+      "curl --user=admin:[REDACTED] https://x.test",
+    ],
+    [
+      'curl -u "admin:s3 cret" https://x.test',
+      "curl -u admin:[REDACTED] https://x.test",
+    ],
   ];
   for (const [input, output] of cases) {
     test(input, () => expect(scrubCommand(input)).toBe(output));

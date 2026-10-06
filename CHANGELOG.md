@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A password given to `curl` as `-uuser:password`, `--user=user:password` or `-u "user:pass word"` is
+  now redacted in a Bot's recorded shell command. Only `-u user:password` with a space and no quotes
+  was recognised, so the other spellings kept the password in the command that was stored or exported.
 - A password, token or API key sent as a JSON field in a shell command is now redacted before the
   command is kept or exported. `curl -d '{"password":"x"}'` was recorded with the secret in clear,
   because only `NAME=value` and `--name value` forms were recognised and a quoted JSON key was
