@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.1.1
+
 - A password given to `curl` as `-uuser:password`, `--user=user:password` or `-u "user:pass word"` is
   now redacted in a Bot's recorded shell command. Only `-u user:password` with a space and no quotes
   was recognised, so the other spellings kept the password in the command that was stored or exported.
