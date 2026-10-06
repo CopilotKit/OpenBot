@@ -372,6 +372,18 @@ describe("scrubbing commands", () => {
       "curl -u admin:[REDACTED] https://x.test",
     ],
     ["echo sk-proj-abcdefghijklmnopqrstuvwxyz", "echo [REDACTED]"],
+    [
+      `curl -d '{"user":"ann","password":"hunter2"}' https://x.test`,
+      `curl -d '{"user":"ann","password":[REDACTED]}' https://x.test`,
+    ],
+    [
+      `curl -d '{"api_key": "abcd1234", "n": 1}' https://x.test`,
+      `curl -d '{"api_key": [REDACTED], "n": 1}' https://x.test`,
+    ],
+    [
+      'curl -d "{\\"client_secret\\":\\"hunter2\\"}" https://x.test',
+      'curl -d "{\\"client_secret\\":[REDACTED]}" https://x.test',
+    ],
   ];
   for (const [input, output] of cases) {
     test(input, () => expect(scrubCommand(input)).toBe(output));

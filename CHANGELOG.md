@@ -8,6 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A password, token or API key sent as a JSON field in a shell command is now redacted before the
+  command is kept or exported. `curl -d '{"password":"x"}'` was recorded with the secret in clear,
+  because only `NAME=value` and `--name value` forms were recognised and a quoted JSON key was
+  neither. The key is still shown, so the command reads the same.
 - A cancellation the native host never collected is now dropped instead of being reported as
   pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
   worker, and only that worker ever removed it: a worker that stopped polling left the entry in

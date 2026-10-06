@@ -42,6 +42,16 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
     /(x-api-key\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s'"]+)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
+  // A quoted key in a JSON body: `-d '{"password":"x"}'`, or `-d "{\\"password\\":\\"x\\"}"` once the
+  // shell quoting around it has escaped the inner quotes. The rule below stops at the closing quote
+  // of the key, so it never saw these.
+  [
+    new RegExp(
+      `(\\\\?["']${SECRET_NAME}\\\\?["']\\s*:\\s*)(\\\\"[^"\\\\]*\\\\"|"[^"]*"|'[^']*'|[^\\s,}'"\\\\]+)`,
+      "gi",
+    ),
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
   // `NAME=value`, `export NAME=value`, `--name=value`, `NAME: value`.
   [
     new RegExp(
