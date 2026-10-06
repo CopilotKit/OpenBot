@@ -121,7 +121,6 @@ describe("the markers the server and the transcript both use", () => {
   });
 });
 
-
 describe("telling a failed tool from a successful one", () => {
   test("vendor errors are failures, encoded or not", () => {
     const answer = "The vendor reported an error:\\npermission denied";
