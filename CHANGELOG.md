@@ -8,6 +8,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- A conversation title cut at 60 characters no longer ends in half an emoji. `slice` counts UTF-16
+  code units and an emoji is two of them, so a title cut between the halves rendered a replacement
+  character in the sidebar and the picker, where the character itself should have been.
 ### A coworker the message speaks to is routed to without asking a model
 
 Addressing a coworker by name went to the intent router like any other message, so the deployment
