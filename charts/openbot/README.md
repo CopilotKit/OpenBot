@@ -193,6 +193,12 @@ RDS has `rds.force_ssl` on by default, and Cloud SQL and Azure Database do the s
 migration fails with `no pg_hba.conf entry for host ... no encryption`, which names the host and the
 user and not the actual problem.
 
+The server accepts `disable`, `require` and `verify-full` (with `sslrootcert=/path/to/ca.pem`, or
+the system roots without it). `require` encrypts and checks nothing, as libpq's does. `verify-full`
+needs Bun 1.4 or later, because Bun 1.3 connects whatever certificate it is shown, so the server
+refuses it on 1.3 rather than appear to check. `verify-ca`, `prefer` and `allow` are refused: Bun
+can neither check the authority without the host name nor fall back between TLS and plain.
+
 **The migrating role has to OWN the `vector` extension, not just be able to see it.** The first
 migration runs `CREATE EXTENSION IF NOT EXISTS vector` and migration `0010` runs
 `DROP EXTENSION IF EXISTS "vector"` once the document index is gone. `DROP EXTENSION` is an ownership

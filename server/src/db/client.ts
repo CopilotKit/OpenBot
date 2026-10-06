@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/bun-sql";
 import * as schema from "./schema";
 
@@ -22,6 +23,82 @@ function decodePart(value: string, part: string): string {
   }
 }
 
+/** Whether `version` is at least `major.minor`. Pre-release suffixes are ignored. */
+function atLeast(version: string, major: number, minor: number): boolean {
+  const [have = 0, haveMinor = 0] = version
+    .split(".")
+    .map((part) => Number.parseInt(part, 10));
+  return have > major || (have === major && haveMinor >= minor);
+}
+
+/**
+ * `sslmode` and `sslrootcert`, turned into the `tls` option Bun reads instead.
+ *
+ * They are libpq's client settings, not Postgres parameters. Forwarded as connection parameters
+ * they were refused (`unrecognized configuration parameter "sslmode"`), and the connection was
+ * opened without TLS first, which a database that requires TLS answers with `no pg_hba.conf entry
+ * ... no encryption`. RDS, Cloud SQL and Azure Database all require it by default, and
+ * `?sslmode=require` is what the deployment docs tell them to carry.
+ *
+ * Only the modes Bun can honour are accepted, each checked against a real server:
+ *
+ * - `require` encrypts and checks nothing, which is libpq's meaning too.
+ * - `verify-full` checks the chain and the host name, against `sslrootcert` when given. Bun 1.3.x
+ *   connects regardless, to a self-signed server and to a certificate naming another host, so on
+ *   that Bun it is refused rather than allowed to look like verification.
+ * - `verify-ca` would check the chain and not the name, and Bun ignores the hook that skips the
+ *   name, so it is refused rather than quietly made stricter.
+ * - `prefer` and `allow` try one way and fall back to the other, which Bun cannot do, so they are
+ *   refused rather than quietly made one or the other.
+ */
+function tlsOf(params: URLSearchParams, bunVersion: string) {
+  const mode = params.get("sslmode");
+  const rootCert = params.get("sslrootcert");
+  if (rootCert !== null && mode !== "verify-full") {
+    throw new TypeError(
+      "DATABASE_URL has sslrootcert, which is only read with sslmode=verify-full.",
+    );
+  }
+  switch (mode) {
+    case null:
+      return {};
+    case "disable":
+      return { tls: false as const };
+    case "require":
+      return { tls: { rejectUnauthorized: false } };
+    case "verify-full": {
+      if (!atLeast(bunVersion, 1, 4)) {
+        throw new TypeError(
+          `DATABASE_URL has sslmode=verify-full, which needs Bun 1.4 or later to check the certificate. This is Bun ${bunVersion}. Use sslmode=require to encrypt without checking it.`,
+        );
+      }
+      if (rootCert === null) return { tls: { rejectUnauthorized: true } };
+      let ca: string;
+      try {
+        ca = readFileSync(rootCert, "utf8");
+      } catch {
+        throw new TypeError(
+          `DATABASE_URL: sslrootcert ${rootCert} could not be read.`,
+        );
+      }
+      return { tls: { rejectUnauthorized: true, ca } };
+    }
+    case "verify-ca":
+      throw new TypeError(
+        "DATABASE_URL has sslmode=verify-ca, which is not supported: Bun cannot check the certificate authority without the host name. Use sslmode=verify-full.",
+      );
+    case "prefer":
+    case "allow":
+      throw new TypeError(
+        `DATABASE_URL has sslmode=${mode}, which is not supported: Bun cannot fall back between TLS and plain connections. Use sslmode=require, or sslmode=disable.`,
+      );
+    default:
+      throw new TypeError(
+        `DATABASE_URL has sslmode=${mode}, which is not one of disable, require or verify-full.`,
+      );
+  }
+}
+
 /**
  * The address, taken apart, because Bun will not take it whole on every platform.
  *
@@ -34,8 +111,14 @@ function decodePart(value: string, part: string): string {
  *
  * Passing the parts leaves nothing to parse. The behaviour is identical where the URL already
  * worked, since these are the same values Bun would have derived.
+ *
+ * Exported for its tests. `bunVersion` is a parameter so they can check both sides of the Bun 1.4
+ * line from whichever Bun runs them.
  */
-function addressOf(databaseUrl: string) {
+export function addressOf(
+  databaseUrl: string,
+  bunVersion: string = Bun.version,
+) {
   let url: URL;
   try {
     url = new URL(databaseUrl);
@@ -65,9 +148,15 @@ function addressOf(databaseUrl: string) {
    * `?application_name=…` is the one that matters here: the profile store's serialization tests
    * name a session that way and then look for it in `pg_stat_activity`, so losing it turns a lock
    * test into a three second timeout with nothing to say why. Anything else Postgres accepts on a
-   * URL, `sslmode` and the rest, travels the same way.
+   * URL travels the same way. `sslmode` and `sslrootcert` do not: Postgres refuses them, and they
+   * become the `tls` option below.
    */
-  const connection = Object.fromEntries(url.searchParams);
+  const tls = tlsOf(url.searchParams, bunVersion);
+  const connection = Object.fromEntries(
+    [...url.searchParams].filter(
+      ([name]) => name !== "sslmode" && name !== "sslrootcert",
+    ),
+  );
 
   /*
    * A port that is not a port is refused before a socket is ever opened.
@@ -95,6 +184,7 @@ function addressOf(databaseUrl: string) {
     password: decodePart(url.password, "password"),
     database,
     ...(Object.keys(connection).length > 0 ? { connection } : {}),
+    ...tls,
   };
 }
 
