@@ -1,8 +1,14 @@
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { PageShell } from "@/components/layout/page-shell";
+import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +16,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { markdownComponents } from "@/lib/markdown";
+import { sharedUseKeys } from "@/lib/plugins/shared-use";
 import {
   createGithubBinding,
   createResponsibility,
@@ -718,6 +725,7 @@ function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       {adding && (
         <NewTrigger
           goalId={goal.id}
+          botId={goal.agentId}
           onCreated={async (created) => {
             setAdding(false);
             if (created.secret)
@@ -964,15 +972,18 @@ function TriggerRow({
 
 function NewTrigger({
   goalId,
+  botId,
   onCreated,
 }: {
   goalId: string;
+  botId: string;
   onCreated: (created: {
     trigger: TriggerRecord;
     secret: string | null;
   }) => Promise<void>;
 }) {
   const id = useId();
+  const queryClient = useQueryClient();
   const [kind, setKind] = useState<TriggerKind>("webhook");
   const [eventTypes, setEventTypes] = useState("");
   const [fieldPath, setFieldPath] = useState("");
@@ -1021,7 +1032,14 @@ function NewTrigger({
         config: config(),
         ...(VENDOR_SECRET.has(kind) && secret ? { secret } : {}),
       }),
-    onSuccess: onCreated,
+    onSuccess: async (created) => {
+      await onCreated(created);
+      /* A new trigger is a new way the shared app gets called, so the approval it needs may
+       * have changed: refresh the inbox and this Bot's shared-app notice alongside it. */
+      await queryClient.invalidateQueries({
+        queryKey: sharedUseKeys.requests(),
+      });
+    },
   });
   const placeholder: Record<TriggerKind, string> = {
     webhook: "deploy.finished (blank: any)",
@@ -1177,6 +1195,7 @@ function NewTrigger({
           )}
         </div>
       )}
+      <SharedAppNotice botId={botId} reason="trigger" />
       {create.error && (
         <p role="alert" className="text-destructive text-sm">
           {create.error.message}

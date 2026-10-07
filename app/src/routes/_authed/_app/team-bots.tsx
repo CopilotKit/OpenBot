@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ChannelAvatar } from "@/components/channels/avatar";
-import { PageShell, PageSection } from "@/components/layout/page-shell";
+import { PageSection, PageShell } from "@/components/layout/page-shell";
+import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
@@ -253,6 +254,7 @@ function PublishForm({ botId, current }: { botId: string; current?: TeamBot }) {
           />
         </div>
       ) : null}
+      <SharedAppNotice botId={botId} reason="publish" />
       <div className="flex items-center gap-2">
         <Button disabled={publish.isPending} size="sm" type="submit">
           {current ? "Update" : "Publish to team"}

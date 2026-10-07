@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { SharedUseRequests } from "@/components/approvals/shared-use-requests";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -331,6 +332,7 @@ export function ApprovalInbox() {
           ))
         )}
       </div>
+      <SharedUseRequests />
       <div className="space-y-3">
         <h2 className="font-medium">Rules</h2>
         <p className="text-sm text-muted-foreground">
