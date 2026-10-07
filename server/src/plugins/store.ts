@@ -5589,14 +5589,15 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async confirmBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }): Promise<{ connected: boolean }> {
       // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
       // no key has no broker to have connected anybody at, so there is nothing here to ask.
       if (!broker) throw new BrokerUnconfiguredError();
 
       const connected = await broker.isConnected({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
       });
       if (!connected) {
@@ -5605,13 +5606,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         // as nothing else, and a row that outlived it would go on saying yes about an account the
         // vendor has just denied.
         await database
-          .delete(composioConnections)
-          .where(
-            and(
-              eq(composioConnections.toolkit, input.toolkit),
-              eq(composioConnections.userId, input.userId),
-            ),
-          );
+          .delete(brokeredConnections)
+          .where(accountRow(input.toolkit, input.account));
         return { connected: false };
       }
 
@@ -5626,14 +5622,9 @@ export function createPluginStore(options: PluginStoreOptions) {
        * than through {@link brokeredConnection}, which answers with the connection date alone.
        */
       const [held] = await database
-        .select({ verified: composioConnections.verified })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .select({ verified: brokeredConnections.verified })
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
       const existing = held !== undefined;
 
@@ -5762,7 +5753,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         // {@link composioConnections.verified}.
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: true,
           // NOTHING WAS SPENT TO EARN THAT FLAG, and that is what the null records rather than an
           // absence of information. A consent connection is verified by the vendor's own yes at its
@@ -5789,7 +5781,8 @@ export function createPluginStore(options: PluginStoreOptions) {
          */
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: false,
           probeAction: null,
         });
@@ -5837,10 +5830,11 @@ export function createPluginStore(options: PluginStoreOptions) {
           // person's access to one app however it ended.
           targetId: input.toolkit,
           payload: {
-            actor: input.userId,
+            actor: input.by,
             server: input.toolkit,
             scope: "",
             reconnected: false,
+            holder: input.account.holder,
           },
         });
       }
@@ -5908,7 +5902,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async connectBrokeredWithFields(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
       values: Record<string, string>;
     }): Promise<{ connected: true; verified: boolean; probe: string | null }> {
       // First, and for `confirmBrokeredConnection`'s reason: a deployment with no key has nobody to
@@ -5954,7 +5949,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
 
       const { accountId } = await broker.connectWithFields({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
         authScheme,
         values: input.values,
@@ -5977,7 +5972,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       const probed = await this.probeBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
         /*
          * THE ACCOUNT THIS CALL JUST MADE, which is the only account this check is about. A person
          * and an app do not name one: Composio takes an account per key, somebody may hold several
@@ -6000,7 +5995,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       // checked.
       const existing = await this.brokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
       });
 
       /*
@@ -6029,7 +6024,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         // and however it ended.
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
           server: input.toolkit,
           /*
            * EMPTY, AND PRESENT, which is the whole of what this field does on a brokered row.
@@ -6047,6 +6042,7 @@ export function createPluginStore(options: PluginStoreOptions) {
            */
           scope: "",
           reconnected: existing !== null,
+          holder: input.account.holder,
           /*
            * THE NAMES AND NEVER THE VALUES. What a reader of the trail needs is which app somebody
            * connected and what it asked them for; the values are the credential itself, and an
@@ -6086,7 +6082,8 @@ export function createPluginStore(options: PluginStoreOptions) {
          */
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: false,
           // THE ACTION THAT WAS TRIED, which is the half of this state the flag cannot hold. It is
           // the whole of what separates this row on a later page load from a key nobody ever tried,
@@ -6112,7 +6109,8 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetType: "mcp_server",
           targetId: input.toolkit,
           payload: {
-            actor: input.userId,
+            actor: input.by,
+            holder: input.account.holder,
             action: probed.probe,
             verified: false,
           },
@@ -6164,7 +6162,8 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await this.recordBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
+        connectedBy: input.by,
         verified,
         // What was spent, which is the name on a probe that ran and the null that IS the first of
         // the three states: this app published nothing safe to try the key on. `verified` is
@@ -6224,7 +6223,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         targetType: "mcp_server",
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
+          holder: input.account.holder,
           action: probe,
           verified,
           ...(probed.outcome === "unreachable"
@@ -6303,7 +6303,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async recheckBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }): Promise<{
       verified: boolean;
       verifiedAt: string | null;
@@ -6353,16 +6354,11 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       const [held] = await database
         .select({
-          verified: composioConnections.verified,
-          verifiedAt: composioConnections.verifiedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
         })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
 
       if (!held) {
@@ -6372,7 +6368,10 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
-      const probed = await this.probeBrokeredConnection(input);
+      const probed = await this.probeBrokeredConnection({
+        toolkit: input.toolkit,
+        account: input.account,
+      });
 
       /*
        * THE VENDOR WAS NOT REACHED, SO THE RECORD OF THE LAST CHECK IS LEFT EXACTLY WHERE IT IS.
@@ -6432,7 +6431,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       const verified = probed.outcome === "answered";
       const { verifiedAt, wrote } = await this.recordBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
         verified,
         // The action this press spent. Never null on this path: the nothing-to-probe branch above
         // returns before reaching the writer, precisely so that a check which could try nothing
@@ -6489,7 +6488,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         targetType: "mcp_server",
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
+          holder: input.account.holder,
           action: probe,
           verified,
         },
