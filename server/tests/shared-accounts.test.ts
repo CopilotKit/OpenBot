@@ -7,7 +7,10 @@ import {
   mintDeploymentVendorUserId,
 } from "../src/plugins/shared-accounts";
 
-const brokered = (accountMode: string | null, authScheme: string | null = "OAUTH2") => ({
+const brokered = (
+  accountMode: string | null,
+  authScheme: string | null = "OAUTH2",
+) => ({
   title: "GitHub",
   provenance: "composio",
   authScheme,
@@ -16,17 +19,28 @@ const brokered = (accountMode: string | null, authScheme: string | null = "OAUTH
 
 describe("accountFor", () => {
   test("a personal app is reached as whoever the credential actor is", () => {
-    expect(accountFor(brokered("personal"), "user_a")).toEqual({ kind: "person", userId: "user_a" });
+    expect(accountFor(brokered("personal"), "user_a")).toEqual({
+      kind: "person",
+      userId: "user_a",
+    });
   });
 
   test("a shared app is reached as the deployment whatever the credential actor", () => {
-    expect(accountFor(brokered("shared"), "user_a")).toEqual({ kind: "deployment" });
-    expect(accountFor(brokered("shared"), "owner_of_team_bot")).toEqual({ kind: "deployment" });
+    expect(accountFor(brokered("shared"), "user_a")).toEqual({
+      kind: "deployment",
+    });
+    expect(accountFor(brokered("shared"), "owner_of_team_bot")).toEqual({
+      kind: "deployment",
+    });
   });
 
   test("an app needing no account has no account in either mode", () => {
-    expect(accountFor(brokered(null, "NO_AUTH"), "user_a")).toEqual({ kind: "none" });
-    expect(accountFor(brokered("shared", "NO_AUTH"), "user_a")).toEqual({ kind: "none" });
+    expect(accountFor(brokered(null, "NO_AUTH"), "user_a")).toEqual({
+      kind: "none",
+    });
+    expect(accountFor(brokered("shared", "NO_AUTH"), "user_a")).toEqual({
+      kind: "none",
+    });
   });
 
   test("a brokered app needing an account with no mode is refused, not guessed", () => {
@@ -57,7 +71,9 @@ describe("mintDeploymentVendorUserId", () => {
   });
 
   test("two mints for the same deployment differ", () => {
-    expect(mintDeploymentVendorUserId("acme")).not.toBe(mintDeploymentVendorUserId("acme"));
+    expect(mintDeploymentVendorUserId("acme")).not.toBe(
+      mintDeploymentVendorUserId("acme"),
+    );
   });
 
   test("refuses a blank deployment id rather than minting a shared namespace", () => {

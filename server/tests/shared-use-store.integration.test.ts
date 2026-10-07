@@ -5,10 +5,20 @@ import { eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import {
-  agentProfiles, agents, mcpServers, pluginGrants, responsibilities, sharedUseRequests, teamBotAudience,
-  teamBotPublications, users,
+  agentProfiles,
+  agents,
+  mcpServers,
+  pluginGrants,
+  responsibilities,
+  sharedUseRequests,
+  teamBotAudience,
+  teamBotPublications,
+  users,
 } from "../src/db/schema";
-import { createSharedUseGate, createSharedUseStore } from "../src/plugins/shared-use-store";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "../src/plugins/shared-use-store";
 import { expectOnlyRefusal } from "./helpers/refusals";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -22,41 +32,99 @@ const gate = createSharedUseGate(store, createAuditStore(database));
 
 async function seedUser(name: string, groups: string[] = []) {
   // users requires the NOT NULL columns in server/src/db/schema/core.ts:60-90; set each one here.
-  await database.insert(users).values({ id: id(name), email: `${id(name)}@example.test`, name, emailVerified: true, groups });
+  await database
+    .insert(users)
+    .values({
+      id: id(name),
+      email: `${id(name)}@example.test`,
+      name,
+      emailVerified: true,
+      groups,
+    });
 }
 
 beforeEach(async () => {
-  await database.delete(sharedUseRequests).where(eq(sharedUseRequests.agentId, bot));
+  await database
+    .delete(sharedUseRequests)
+    .where(eq(sharedUseRequests.agentId, bot));
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
-  await database.delete(users).where(inArray(users.id, ["owner", "admin", "named", "newhire", "stranger"].map(id)));
+  await database
+    .delete(users)
+    .where(
+      inArray(
+        users.id,
+        ["owner", "admin", "named", "newhire", "stranger"].map(id),
+      ),
+    );
   await seedUser("owner");
   await seedUser("named");
   await seedUser("newhire", ["platform"]);
   await seedUser("stranger");
   await database.insert(mcpServers).values({
-    id: app, title: "Team GitHub", vendor: "Composio", url: `composio://${app}`, provenance: "composio",
-    authScheme: "OAUTH2", accountMode: "shared", sharedVendorUserId: "openbot-deployment:x:R",
+    id: app,
+    title: "Team GitHub",
+    vendor: "Composio",
+    url: `composio://${app}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "shared",
+    sharedVendorUserId: "openbot-deployment:x:R",
   });
-  await database.insert(agents).values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database.insert(agentProfiles).values({ agentId: bot, ownerUserId: id("owner"), visibility: "private", title: "Triage", roleDescription: "Triage", avatarSeed: "x" });
-  await database.insert(pluginGrants).values({ kind: "mcp", ref: `${app}/GITHUB_LIST_ISSUES`, agentId: bot, grantedBy: "admin@example.test" });
+  await database
+    .insert(agents)
+    .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
+  await database
+    .insert(agentProfiles)
+    .values({
+      agentId: bot,
+      ownerUserId: id("owner"),
+      visibility: "private",
+      title: "Triage",
+      roleDescription: "Triage",
+      avatarSeed: "x",
+    });
+  await database
+    .insert(pluginGrants)
+    .values({
+      kind: "mcp",
+      ref: `${app}/GITHUB_LIST_ISSUES`,
+      agentId: bot,
+      grantedBy: "admin@example.test",
+    });
 });
 
 afterAll(async () => {
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
-  await database.delete(users).where(inArray(users.id, ["owner", "admin", "named", "newhire", "stranger"].map(id)));
+  await database
+    .delete(users)
+    .where(
+      inArray(
+        users.id,
+        ["owner", "admin", "named", "newhire", "stranger"].map(id),
+      ),
+    );
 });
 
-const call = (actor: string, initiator?: Parameters<typeof gate>[0]["initiator"]) =>
-  gate({ botId: bot, serverId: app, title: "Team GitHub", actorId: id(actor), initiator });
+const call = (
+  actor: string,
+  initiator?: Parameters<typeof gate>[0]["initiator"],
+) =>
+  gate({
+    botId: bot,
+    serverId: app,
+    title: "Team GitHub",
+    actorId: id(actor),
+    initiator,
+  });
 
 describe("the shared-use gate", () => {
   test("with no approval, even the owner is refused and one request is filed", async () => {
     const answer = await call("owner");
     expect(answer.allowed).toBe(false);
-    if (!answer.allowed) expectOnlyRefusal(answer.message, "sharedAudience", "Team GitHub");
+    if (!answer.allowed)
+      expectOnlyRefusal(answer.message, "sharedAudience", "Team GitHub");
     expect(await store.pendingFor(bot)).toHaveLength(1);
   });
 
@@ -67,53 +135,129 @@ describe("the shared-use gate", () => {
   });
 
   test("owner-only admits the owner and refuses a stranger", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: { audience: "owner", outsideInput: false, members: [] } });
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "owner", outsideInput: false, members: [] },
+    });
     expect((await call("owner")).allowed).toBe(true);
     expect((await call("stranger")).allowed).toBe(false);
   });
 
   test("people admits the approved list and group members, and refuses someone added later", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: {
-      audience: "people", outsideInput: false, members: [{ kind: "user", value: id("named") }, { kind: "group", value: "platform" }],
-    } });
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: {
+        audience: "people",
+        outsideInput: false,
+        members: [
+          { kind: "user", value: id("named") },
+          { kind: "group", value: "platform" },
+        ],
+      },
+    });
     expect((await call("named")).allowed).toBe(true);
     expect((await call("newhire")).allowed).toBe(true);
-    await database.insert(teamBotPublications).values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database.insert(teamBotAudience).values({ agentId: bot, kind: "user", value: id("stranger") });
+    await database
+      .insert(teamBotPublications)
+      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
+    await database
+      .insert(teamBotAudience)
+      .values({ agentId: bot, kind: "user", value: id("stranger") });
     expect((await call("stranger")).allowed).toBe(false);
   });
 
   test("a Bot that subscribed itself to email is refused on its next shared call", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: { audience: "team", outsideInput: false, members: [] } });
-    const [goal] = await database.insert(responsibilities).values({
-      id: id("goal"), ownerUserId: id("owner"), agentId: bot, title: "Watch mail", instruction: "x",
-      channelId: id("ch"), threadId: id("th"), successCriteria: "x",
-      subscriptions: [{ source: "email", eventType: "*" }],
-    }).returning({ id: responsibilities.id });
-    const answer = await call("owner", { kind: "responsibility", id: goal!.id });
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "team", outsideInput: false, members: [] },
+    });
+    const [goal] = await database
+      .insert(responsibilities)
+      .values({
+        id: id("goal"),
+        ownerUserId: id("owner"),
+        agentId: bot,
+        title: "Watch mail",
+        instruction: "x",
+        channelId: id("ch"),
+        threadId: id("th"),
+        successCriteria: "x",
+        subscriptions: [{ source: "email", eventType: "*" }],
+      })
+      .returning({ id: responsibilities.id });
+    const answer = await call("owner", {
+      kind: "responsibility",
+      id: goal!.id,
+    });
     expect(answer.allowed).toBe(false);
-    expect(await store.pendingFor(bot)).toEqual([expect.objectContaining({ reason: "refused_call", proposed: expect.objectContaining({ outsideInput: true }) })]);
+    expect(await store.pendingFor(bot)).toEqual([
+      expect.objectContaining({
+        reason: "refused_call",
+        proposed: expect.objectContaining({ outsideInput: true }),
+      }),
+    ]);
   });
 
   test("email → A → B → this Bot is refused when outside input was not approved", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: { audience: "team", outsideInput: false, members: [] } });
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "team", outsideInput: false, members: [] },
+    });
     await database.insert(responsibilities).values({
-      id: id("mailgoal"), ownerUserId: id("owner"), agentId: bot, title: "x", instruction: "x",
-      channelId: id("ch"), threadId: id("th"), successCriteria: "x",
+      id: id("mailgoal"),
+      ownerUserId: id("owner"),
+      agentId: bot,
+      title: "x",
+      instruction: "x",
+      channelId: id("ch"),
+      threadId: id("th"),
+      successCriteria: "x",
       subscriptions: [{ source: "email", eventType: "*" }],
     });
-    const answer = await call("owner", { kind: "handoff", id: "bot_b", origin: { kind: "responsibility", id: id("mailgoal") } });
+    const answer = await call("owner", {
+      kind: "handoff",
+      id: "bot_b",
+      origin: { kind: "responsibility", id: id("mailgoal") },
+    });
     expect(answer.allowed).toBe(false);
   });
 
   test("a person who reaches the Bot only through a handoff is checked as themselves", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: { audience: "owner", outsideInput: false, members: [] } });
-    expect((await call("stranger", { kind: "handoff", id: "public_a", origin: { kind: "person" } })).allowed).toBe(false);
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "owner", outsideInput: false, members: [] },
+    });
+    expect(
+      (
+        await call("stranger", {
+          kind: "handoff",
+          id: "public_a",
+          origin: { kind: "person" },
+        })
+      ).allowed,
+    ).toBe(false);
   });
 
   test("a handoff with no origin is refused", async () => {
-    await store.setApproval({ botId: bot, serverId: app, by: id("owner"), approval: { audience: "team", outsideInput: true, members: [] } });
-    expect((await call("owner", { kind: "handoff", id: "x" })).allowed).toBe(false);
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "team", outsideInput: true, members: [] },
+    });
+    expect((await call("owner", { kind: "handoff", id: "x" })).allowed).toBe(
+      false,
+    );
   });
 });
 
@@ -125,18 +269,32 @@ describe("decide", () => {
       store.decide({ id: pending!.id, by: id("admin1"), decision: "approve" }),
       store.decide({ id: pending!.id, by: id("admin2"), decision: "decline" }),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === "rejected"),
+    ).toHaveLength(1);
   });
 
   test("approving writes the proposed approval, members included", async () => {
-    await database.insert(teamBotPublications).values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
-    await database.insert(teamBotAudience).values({ agentId: bot, kind: "group", value: "platform" });
+    await database
+      .insert(teamBotPublications)
+      .values({ agentId: bot, publishedBy: id("owner"), audience: "people" });
+    await database
+      .insert(teamBotAudience)
+      .values({ agentId: bot, kind: "group", value: "platform" });
     await call("newhire");
     const [pending] = await store.pendingFor(bot);
-    await store.decide({ id: pending!.id, by: id("admin"), decision: "approve" });
+    await store.decide({
+      id: pending!.id,
+      by: id("admin"),
+      decision: "approve",
+    });
     expect(await store.approvalFor(bot, app)).toEqual({
-      audience: "people", outsideInput: false, members: [{ kind: "group", value: "platform" }],
+      audience: "people",
+      outsideInput: false,
+      members: [{ kind: "group", value: "platform" }],
     });
     expect((await call("newhire")).allowed).toBe(true);
   });

@@ -16,11 +16,14 @@ const violation = (run: () => PromiseLike<unknown>) =>
     .then(run)
     .then(
       () => "inserted",
-      (error: Error) => String((error.cause as Error | undefined)?.message ?? error.message),
+      (error: Error) =>
+        String((error.cause as Error | undefined)?.message ?? error.message),
     );
 
 afterAll(async () => {
-  await database.execute(sql`delete from brokered_connections where app = ${app}`);
+  await database.execute(
+    sql`delete from brokered_connections where app = ${app}`,
+  );
 });
 
 describe("brokered_connections", () => {
@@ -28,8 +31,11 @@ describe("brokered_connections", () => {
     expect(
       await violation(() =>
         database.insert(brokeredConnections).values({
-          provider: "composio", app, holder: "deployment",
-          userId: "someone", vendorUserId: `openbot-deployment:x:${suite}`,
+          provider: "composio",
+          app,
+          holder: "deployment",
+          userId: "someone",
+          vendorUserId: `openbot-deployment:x:${suite}`,
         }),
       ),
     ).toMatch(/brokered_connections_holder_check/);
@@ -39,7 +45,11 @@ describe("brokered_connections", () => {
     expect(
       await violation(() =>
         database.insert(brokeredConnections).values({
-          provider: "composio", app, holder: "person", userId: null, vendorUserId: "v",
+          provider: "composio",
+          app,
+          holder: "person",
+          userId: null,
+          vendorUserId: "v",
         }),
       ),
     ).toMatch(/brokered_connections_holder_check/);
@@ -47,12 +57,18 @@ describe("brokered_connections", () => {
 
   test("an app holds at most one deployment account", async () => {
     await database.insert(brokeredConnections).values({
-      provider: "composio", app, holder: "deployment", vendorUserId: `d1-${suite}`,
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: `d1-${suite}`,
     });
     expect(
       await violation(() =>
         database.insert(brokeredConnections).values({
-          provider: "composio", app, holder: "deployment", vendorUserId: `d2-${suite}`,
+          provider: "composio",
+          app,
+          holder: "deployment",
+          vendorUserId: `d2-${suite}`,
         }),
       ),
     ).toMatch(/brokered_connections_deployment_idx/);
@@ -60,13 +76,29 @@ describe("brokered_connections", () => {
 
   test("one person holds at most one account per app, and two people may each hold one", async () => {
     await database.insert(brokeredConnections).values([
-      { provider: "composio", app, holder: "person", userId: `a-${suite}`, vendorUserId: `a-${suite}` },
-      { provider: "composio", app, holder: "person", userId: `b-${suite}`, vendorUserId: `b-${suite}` },
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: `a-${suite}`,
+        vendorUserId: `a-${suite}`,
+      },
+      {
+        provider: "composio",
+        app,
+        holder: "person",
+        userId: `b-${suite}`,
+        vendorUserId: `b-${suite}`,
+      },
     ]);
     expect(
       await violation(() =>
         database.insert(brokeredConnections).values({
-          provider: "composio", app, holder: "person", userId: `a-${suite}`, vendorUserId: `a-${suite}`,
+          provider: "composio",
+          app,
+          holder: "person",
+          userId: `a-${suite}`,
+          vendorUserId: `a-${suite}`,
         }),
       ),
     ).toMatch(/brokered_connections_person_idx/);

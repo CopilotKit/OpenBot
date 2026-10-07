@@ -36,45 +36,76 @@ const broker: ConnectedAppBroker = {
 
 function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
   const store = createPluginStore({
-    database, auditStore: createAuditStore(database), credentials: {} as never,
-    encryptionKey: "x".repeat(44), policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
-    broker, deploymentId: `acme-${suite}`,
+    database,
+    auditStore: createAuditStore(database),
+    credentials: {} as never,
+    encryptionKey: "x".repeat(44),
+    policy: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
+    broker,
+    deploymentId: `acme-${suite}`,
   });
-  const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (context, next) => {
+  const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
+    context,
+    next,
+  ) => {
     context.set("actor", { id, email: `${id}@example.test`, role } as never);
     await next();
   };
   return new Hono().route(
     "/api/plugins",
-    createPluginRoutes(store, signedIn, async () => true, {
-      publicUrl: "https://openbot.example", appUrl: "https://app.example",
-      encryptionKey: "A".repeat(43) + "=", personHasAccess: async () => true,
-    }, { broker }),
+    createPluginRoutes(
+      store,
+      signedIn,
+      async () => true,
+      {
+        publicUrl: "https://openbot.example",
+        appUrl: "https://app.example",
+        encryptionKey: "A".repeat(43) + "=",
+        personHasAccess: async () => true,
+      },
+      { broker },
+    ),
   );
 }
 
 beforeEach(async () => {
   authorizedFor.length = 0;
   await database.insert(mcpServers).values({
-    id: app, title: "Team GitHub", vendor: "Composio", url: `composio://${app}`,
-    provenance: "composio", authScheme: "OAUTH2", accountMode: "shared", sharedVendorUserId: VENDOR_ID,
+    id: app,
+    title: "Team GitHub",
+    vendor: "Composio",
+    url: `composio://${app}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "shared",
+    sharedVendorUserId: VENDOR_ID,
   });
 });
 afterEach(async () => {
-  await database.delete(brokeredConnections).where(eq(brokeredConnections.app, app));
+  await database
+    .delete(brokeredConnections)
+    .where(eq(brokeredConnections.app, app));
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
 });
 
 describe("connecting a shared app", () => {
   test("a non-admin is refused before anything is asked of the vendor", async () => {
-    const response = await appAs("user").request(`/api/plugins/servers/${app}/connect`, { method: "POST" });
+    const response = await appAs("user").request(
+      `/api/plugins/servers/${app}/connect`,
+      { method: "POST" },
+    );
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "An administrator connects shared apps." });
+    expect(await response.json()).toEqual({
+      error: "An administrator connects shared apps.",
+    });
     expect(authorizedFor).toEqual([]);
   });
 
   test("an admin begins consent under the deployment's identity, not their own", async () => {
-    const response = await appAs("admin").request(`/api/plugins/servers/${app}/connect?returnTo=admin`, { method: "POST" });
+    const response = await appAs("admin").request(
+      `/api/plugins/servers/${app}/connect?returnTo=admin`,
+      { method: "POST" },
+    );
     expect(response.status).toBe(200);
     expect(authorizedFor).toEqual([VENDOR_ID]);
   });
@@ -89,16 +120,34 @@ describe("connecting a shared app", () => {
   });
 
   test("confirming writes the deployment row, recording who connected it", async () => {
-    const response = await appAs("admin", `admin-${suite}`).request(`/api/plugins/servers/${app}/connection/confirm`, { method: "POST" });
+    const response = await appAs("admin", `admin-${suite}`).request(
+      `/api/plugins/servers/${app}/connection/confirm`,
+      { method: "POST" },
+    );
     expect(response.status).toBe(200);
-    const [row] = await database.select().from(brokeredConnections).where(eq(brokeredConnections.app, app));
-    expect(row).toMatchObject({ holder: "deployment", userId: null, vendorUserId: VENDOR_ID, connectedBy: `admin-${suite}` });
+    const [row] = await database
+      .select()
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
+    expect(row).toMatchObject({
+      holder: "deployment",
+      userId: null,
+      vendorUserId: VENDOR_ID,
+      connectedBy: `admin-${suite}`,
+    });
   });
 
   test("a non-admin cannot confirm, re-check or disconnect it", async () => {
     const user = appAs("user");
-    for (const [path, method] of [["connection/confirm", "POST"], ["connection/recheck", "POST"], ["connection", "DELETE"]] as const) {
-      const response = await user.request(`/api/plugins/servers/${app}/${path}`, { method });
+    for (const [path, method] of [
+      ["connection/confirm", "POST"],
+      ["connection/recheck", "POST"],
+      ["connection", "DELETE"],
+    ] as const) {
+      const response = await user.request(
+        `/api/plugins/servers/${app}/${path}`,
+        { method },
+      );
       expect(response.status).toBe(403);
     }
   });
@@ -107,17 +156,37 @@ describe("connecting a shared app", () => {
 describe("GET /connections", () => {
   test("lists a shared app once as the deployment's, with its display name, for anyone", async () => {
     await database.insert(brokeredConnections).values({
-      provider: "composio", app, holder: "deployment", vendorUserId: VENDOR_ID, connectedBy: `admin-${suite}`, verified: true,
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: VENDOR_ID,
+      connectedBy: `admin-${suite}`,
+      verified: true,
     });
-    const body = (await (await appAs("user").request("/api/plugins/connections")).json()) as {
-      connections: { serverId: string; holder: string; displayName?: string | null; connected?: boolean }[];
+    const body = (await (
+      await appAs("user").request("/api/plugins/connections")
+    ).json()) as {
+      connections: {
+        serverId: string;
+        holder: string;
+        displayName?: string | null;
+        connected?: boolean;
+      }[];
     };
     const shared = body.connections.filter((row) => row.serverId === app);
-    expect(shared).toEqual([expect.objectContaining({ holder: "deployment", connected: true, displayName: "acme-bot" })]);
+    expect(shared).toEqual([
+      expect.objectContaining({
+        holder: "deployment",
+        connected: true,
+        displayName: "acme-bot",
+      }),
+    ]);
   });
 
   test("lists an unconnected shared app as not connected rather than leaving it out", async () => {
-    const body = (await (await appAs("user").request("/api/plugins/connections")).json()) as {
+    const body = (await (
+      await appAs("user").request("/api/plugins/connections")
+    ).json()) as {
       connections: { serverId: string; holder: string; connected?: boolean }[];
     };
     expect(body.connections.filter((row) => row.serverId === app)).toEqual([

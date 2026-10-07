@@ -4,7 +4,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { agents, brokeredConnections, mcpServers, mcpTools } from "../src/db/schema";
+import {
+  agents,
+  brokeredConnections,
+  mcpServers,
+  mcpTools,
+} from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
@@ -51,25 +56,52 @@ function freshStore() {
   });
 }
 
-async function seedShared(store: ReturnType<typeof freshStore>, connected: boolean) {
+async function seedShared(
+  store: ReturnType<typeof freshStore>,
+  connected: boolean,
+) {
   await database.insert(mcpServers).values({
-    id: app, title: "Team GitHub", vendor: "Composio", url: `composio://${app}`,
-    provenance: "composio", authScheme: "OAUTH2", accountMode: "shared", sharedVendorUserId: VENDOR_ID,
+    id: app,
+    title: "Team GitHub",
+    vendor: "Composio",
+    url: `composio://${app}`,
+    provenance: "composio",
+    authScheme: "OAUTH2",
+    accountMode: "shared",
+    sharedVendorUserId: VENDOR_ID,
   });
   await database.insert(mcpTools).values({
-    serverId: app, name: "GITHUB_LIST_ISSUES", description: "List issues.", effect: "read", version: "1",
+    serverId: app,
+    name: "GITHUB_LIST_ISSUES",
+    description: "List issues.",
+    effect: "read",
+    version: "1",
   });
-  await database.insert(agents).values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
-  await store.grant("mcp", `${app}/GITHUB_LIST_ISSUES`, bot, "admin@example.test");
+  await database
+    .insert(agents)
+    .values({ id: bot, name: "Helper", type: "built_in", configuration: {} });
+  await store.grant(
+    "mcp",
+    `${app}/GITHUB_LIST_ISSUES`,
+    bot,
+    "admin@example.test",
+  );
   if (connected) {
     await database.insert(brokeredConnections).values({
-      provider: "composio", app, holder: "deployment", vendorUserId: VENDOR_ID, connectedBy: admin, verified: true,
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: VENDOR_ID,
+      connectedBy: admin,
+      verified: true,
     });
   }
 }
 
 async function clean() {
-  await database.delete(brokeredConnections).where(eq(brokeredConnections.app, app));
+  await database
+    .delete(brokeredConnections)
+    .where(eq(brokeredConnections.app, app));
   await database.delete(mcpServers).where(eq(mcpServers.id, app));
   await database.delete(agents).where(eq(agents.id, bot));
 }
@@ -95,7 +127,12 @@ describe("a shared app", () => {
         return { successful: true, data: {} } as never;
       },
     });
-    await store.callTool({ ref: `${app}/GITHUB_LIST_ISSUES`, args: {}, botId: bot, actorId: asker });
+    await store.callTool({
+      ref: `${app}/GITHUB_LIST_ISSUES`,
+      args: {},
+      botId: bot,
+      actorId: asker,
+    });
     expect(sentAs).toEqual([VENDOR_ID]);
   });
 
@@ -111,7 +148,11 @@ describe("a shared app", () => {
       },
     });
     await store.callTool({
-      ref: `${app}/GITHUB_LIST_ISSUES`, args: {}, botId: bot, actorId: asker, credentialActorId: "the-owner",
+      ref: `${app}/GITHUB_LIST_ISSUES`,
+      args: {},
+      botId: bot,
+      actorId: asker,
+      credentialActorId: "the-owner",
     });
     expect(sentAs).toEqual([VENDOR_ID]);
   });
@@ -120,8 +161,16 @@ describe("a shared app", () => {
     const store = freshStore();
     await seedShared(store, false);
     const said = await store
-      .callTool({ ref: `${app}/GITHUB_LIST_ISSUES`, args: {}, botId: bot, actorId: asker })
-      .then(() => "called", (error: Error) => error.message);
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
     expectOnlyRefusal(said, "sharedNotConnected", "Team GitHub");
   });
 
@@ -129,7 +178,10 @@ describe("a shared app", () => {
     const store = freshStore();
     await seedShared(store, true);
     await store.retireConnectionsFor(admin, "hr@example.test");
-    const rows = await database.select().from(brokeredConnections).where(eq(brokeredConnections.app, app));
+    const rows = await database
+      .select()
+      .from(brokeredConnections)
+      .where(eq(brokeredConnections.app, app));
     expect(rows).toHaveLength(1);
     expect(revoked).toEqual([]);
   });
@@ -142,7 +194,8 @@ describe("a shared app", () => {
   });
 
   test("audits the call as reached by the deployment, naming who asked", async () => {
-    const events: { eventType: string; payload: Record<string, unknown> }[] = [];
+    const events: { eventType: string; payload: Record<string, unknown> }[] =
+      [];
     const store = createPluginStore({
       database,
       auditStore: { insert: async (event) => void events.push(event as never) },
@@ -153,10 +206,23 @@ describe("a shared app", () => {
       deploymentId: `acme-${suite}`,
     });
     await seedShared(store, true);
-    useComposioClient({ listActions: async () => [], execute: async () => ({ successful: true, data: {} }) as never });
-    await store.callTool({ ref: `${app}/GITHUB_LIST_ISSUES`, args: {}, botId: bot, actorId: asker });
-    const success = events.find((event) => event.eventType === "mcp.call_succeeded");
-    expect(success?.payload).toMatchObject({ actor: asker, reachedAs: "deployment" });
+    useComposioClient({
+      listActions: async () => [],
+      execute: async () => ({ successful: true, data: {} }) as never,
+    });
+    await store.callTool({
+      ref: `${app}/GITHUB_LIST_ISSUES`,
+      args: {},
+      botId: bot,
+      actorId: asker,
+    });
+    const success = events.find(
+      (event) => event.eventType === "mcp.call_succeeded",
+    );
+    expect(success?.payload).toMatchObject({
+      actor: asker,
+      reachedAs: "deployment",
+    });
   });
 });
 
@@ -164,23 +230,48 @@ describe("a personal app", () => {
   test("still refuses a person with no account with the personal sentence", async () => {
     const store = freshStore();
     await seedShared(store, false);
-    await database.update(mcpServers).set({ accountMode: "personal", sharedVendorUserId: null }).where(eq(mcpServers.id, app));
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
     const said = await store
-      .callTool({ ref: `${app}/GITHUB_LIST_ISSUES`, args: {}, botId: bot, actorId: asker })
-      .then(() => "called", (error: Error) => error.message);
+      .callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      })
+      .then(
+        () => "called",
+        (error: Error) => error.message,
+      );
     expectOnlyRefusal(said, "personalNotConnected", "Team GitHub");
   });
 
   test("offboarding a person revokes only their own rows", async () => {
     const store = freshStore();
     await seedShared(store, true);
-    await database.update(mcpServers).set({ accountMode: "personal" }).where(eq(mcpServers.id, app));
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal" })
+      .where(eq(mcpServers.id, app));
     await database.insert(brokeredConnections).values({
-      provider: "composio", app, holder: "person", userId: asker, vendorUserId: asker,
+      provider: "composio",
+      app,
+      holder: "person",
+      userId: asker,
+      vendorUserId: asker,
     });
     await store.retireConnectionsFor(asker, "hr@example.test");
-    const left = await database.select({ holder: brokeredConnections.holder }).from(brokeredConnections)
-      .where(and(eq(brokeredConnections.app, app), inArray(brokeredConnections.holder, ["person", "deployment"])));
+    const left = await database
+      .select({ holder: brokeredConnections.holder })
+      .from(brokeredConnections)
+      .where(
+        and(
+          eq(brokeredConnections.app, app),
+          inArray(brokeredConnections.holder, ["person", "deployment"]),
+        ),
+      );
     expect(left).toEqual([{ holder: "deployment" }]);
     expect(revoked).toEqual([asker]);
   });
