@@ -12,7 +12,7 @@ import {
   pluginGrants,
   workItems,
 } from "../src/db/schema";
-import type { ComposioBroker } from "../src/plugins/broker";
+import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -34,7 +34,7 @@ const OTHER_REMOTE = `remote-target-${suite}`;
 const ACTOR = `remote-handoff-actor-${suite}`;
 const ALL = [REMOTE, BUILT_IN, OTHER_REMOTE];
 
-const broker: ComposioBroker = {
+const broker: ConnectedAppBroker = {
   listApps: async () => [],
   ensureAuthConfig: async () => undefined,
   deleteAuthConfig: async () => undefined,
@@ -43,6 +43,7 @@ const broker: ComposioBroker = {
   },
   isConnected: async () => false,
   revoke: async () => true,
+  accountName: async () => null,
 };
 
 const auditStore = createAuditStore(database);
