@@ -3133,6 +3133,20 @@ export function createPluginStore(options: PluginStoreOptions) {
            * recorded failed check on the next page load. See the derivation of `scheme` above.
            */
           authScheme: scheme,
+          /*
+           * PERSONAL ON A NEW ROW, AND NULL WHERE THERE IS NO ACCOUNT TO HOLD.
+           *
+           * A freshly enabled app is reached through each asking person's own account until an
+           * administrator deliberately switches it to Shared — sharing one account across everyone
+           * a Bot reaches is a decision somebody makes, never a default this method makes for them.
+           * A `no-auth` app has no account at all, so it has no mode to choose between, and the
+           * column says so rather than claiming one; see {@link mcpServers.accountMode}.
+           *
+           * WRITTEN ON THE INSERT ONLY. The update below is the branch a second press of Add takes,
+           * and an app an administrator has already made Shared must not be quietly turned back
+           * into Personal by it.
+           */
+          accountMode: input.connection.kind === "no-auth" ? null : "personal",
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -3302,16 +3316,45 @@ export function createPluginStore(options: PluginStoreOptions) {
        * that does not exist for this app, and a Re-check button that will not press. A writer keyed
        * on a composed id has not recorded the fact; it has recorded it somewhere nothing looks.
        */
+      // Anyone at all, of either holder: a deployment's shared account was made against the
+      // standing config exactly as a person's was, and a rewrite would strand it the same way.
       const connections = await database
-        .select({ userId: composioConnections.userId })
-        .from(composioConnections)
-        .where(eq(composioConnections.toolkit, input.slug))
+        .select({ app: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, input.slug),
+          ),
+        )
         .limit(1);
 
       if (configured !== "standing" && connections.length === 0) {
+        /*
+         * MODE PICKED FOR THE PERSON ONLY WHERE THIS REWRITE IS WHAT GIVES THE APP AN ACCOUNT AT
+         * ALL, AND NEVER WHERE ONE WAS ALREADY CHOSEN. A row enabled `no-auth` has `accountMode`
+         * null — there was nothing to hold a mode about, see the insert above — and if this same
+         * re-add is what turns it into a key or consent app, it needs the ordinary default an
+         * insert would have given it, or every later read that asks "personal or shared" finds
+         * null and has no answer. An administrator who already chose Shared keeps that choice.
+         */
+        const [current] = await database
+          .select({ accountMode: mcpServers.accountMode })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, answering))
+          .limit(1);
+        const bumpAccountMode =
+          schemeKind(recorded) === "none" &&
+          schemeKind(scheme) !== "none" &&
+          (current?.accountMode ?? null) === null;
+
         await database
           .update(mcpServers)
-          .set({ authScheme: scheme, updatedAt: new Date() })
+          .set({
+            authScheme: scheme,
+            updatedAt: new Date(),
+            ...(bumpAccountMode ? { accountMode: "personal" as const } : {}),
+          })
           .where(eq(mcpServers.id, answering));
       }
 
