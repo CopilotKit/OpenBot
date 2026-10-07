@@ -30,6 +30,7 @@ import {
 import {
   agentProfiles,
   agents,
+  brokeredConnections,
   composioConnections,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
@@ -76,6 +77,12 @@ import { inspectToolArguments } from "./content-governance";
 import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { shareTargetOf } from "./share-target";
+import {
+  type AccountAnswer,
+  type AccountMode,
+  type AccountRef,
+  accountFor,
+} from "./shared-accounts";
 import { transportFor } from "./transport";
 
 /**
@@ -1155,6 +1162,11 @@ export type PluginStoreOptions = {
   broker?: ComposioBroker;
   /** Where the vendor sends people back; needed to (re)register a dynamic client. */
   redirectUri?: string;
+  /**
+   * What this deployment calls itself (`DEPLOYMENT_ID`, else the tenant package id). The prefix of
+   * a shared account's vendor identity, read only when an app is switched to Shared.
+   */
+  deploymentId?: string;
 };
 
 /**
@@ -1349,6 +1361,82 @@ export function createPluginStore(options: PluginStoreOptions) {
       throw error;
     }
   }
+
+  /**
+   * The account a call, a connect or a check acts for, from the row and the person — never from a
+   * request. A Shared app answers with the deployment's stored identity whoever asks.
+   */
+  async function accountRefFor(
+    serverId: string,
+    actorId: string,
+  ): Promise<
+    { ref: AccountRef; title: string; mode: AccountMode } | { refusal: string }
+  > {
+    const [row] = await database
+      .select({
+        title: mcpServers.title,
+        provenance: mcpServers.provenance,
+        authScheme: mcpServers.authScheme,
+        accountMode: mcpServers.accountMode,
+        sharedVendorUserId: mcpServers.sharedVendorUserId,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!row)
+      return {
+        refusal: `${serverId} is not an app this deployment has added.`,
+      };
+    const answer = accountFor(row, actorId);
+    type _RefDecides = Decides<
+      AccountAnswer["kind"],
+      {
+        none: "refused here — there is no account to connect, check or end";
+        person: "the actor, under their own id";
+        deployment: "the deployment, under the identity minted when the app became Shared";
+        ambiguous: "refused with accountFor's own sentence";
+      }
+    >;
+    if (answer.kind === "none")
+      return { refusal: `${row.title} needs no account.` };
+    if (answer.kind === "ambiguous") return { refusal: answer.message };
+    if (answer.kind === "person") {
+      if (!actorId)
+        return {
+          refusal: `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
+        };
+      return {
+        ref: { holder: "person", userId: actorId, vendorUserId: actorId },
+        title: row.title,
+        mode: "personal",
+      };
+    }
+    if (!row.sharedVendorUserId) {
+      throw new PluginInvariantError(
+        `${serverId} is Shared and holds no deployment identity; switch it to Personal and back.`,
+      );
+    }
+    return {
+      ref: { holder: "deployment", vendorUserId: row.sharedVendorUserId },
+      title: row.title,
+      mode: "shared",
+    };
+  }
+
+  /** The WHERE clause for one account's row, by holder. */
+  const accountRow = (toolkit: string, account: AccountRef) =>
+    account.holder === "person"
+      ? and(
+          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.app, toolkit),
+          eq(brokeredConnections.holder, "person"),
+          eq(brokeredConnections.userId, account.userId),
+        )
+      : and(
+          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.app, toolkit),
+          eq(brokeredConnections.holder, "deployment"),
+        );
 
   /**
    * The token one call goes out with, and whose it is — decided from `access.credential`, so that
@@ -2532,6 +2620,7 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   return {
+    accountRefFor,
     /**
      * Add a server from the catalogue.
      *
