@@ -4970,16 +4970,27 @@ export function createPluginStore(options: PluginStoreOptions) {
         checkable: boolean;
       }[]
     > {
+      /*
+       * THIS PERSON'S OWN ACCOUNTS AND NOTHING ELSE. `holder = 'person'` is said out loud rather
+       * than left to the user id, because a settings page listing "your connections" must never
+       * draw the deployment's shared account as one of them — a deployment row has no `user_id`,
+       * and the filter keeps that a fact this query states rather than one it happens to rely on.
+       */
       const connections = await database
         .select({
-          toolkit: composioConnections.toolkit,
-          connectedAt: composioConnections.connectedAt,
-          verified: composioConnections.verified,
-          verifiedAt: composioConnections.verifiedAt,
-          probeAction: composioConnections.probeAction,
+          toolkit: brokeredConnections.app,
+          connectedAt: brokeredConnections.connectedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
+          probeAction: brokeredConnections.probeAction,
         })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, userId));
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
+          ),
+        );
 
       /*
        * THE APP IS RESOLVED PER CONNECTION, NOT JOINED TO IT, BECAUSE THE URL IS NOT A KEY.
@@ -6725,8 +6736,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      * longer use.
      *
      * AND THE BROKERED CONNECTIONS, which are neither a credential nor a join row. Composio holds
-     * the account, so there is no secret in the vault to find and the `composio_connections` row is
-     * itself the permission — the only thing deciding whether a call may go out as this person.
+     * the account, so there is no secret in the vault to find and the person's `brokered_connections`
+     * row is itself the permission — the only thing deciding whether a call may go out as this person.
      * Sweeping the vault alone therefore left that gate passing for somebody who had been removed.
      *
      * NOT VENDOR-SIDE REVOCATION FOR THE VAULT HALF. That needs the OAuth client and the vendor's
@@ -6808,8 +6819,8 @@ export function createPluginStore(options: PluginStoreOptions) {
        * CRITERION. After this returns, no brokered call may go out on this person's behalf.
        *
        * REASON. A brokered connection is not a credential: Composio holds the account and this
-       * deployment sends a user id, so the vault sweep above finds nothing and `composio_connections`
-       * is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
+       * deployment sends a user id, so the vault sweep above finds nothing and the person's
+       * `brokered_connections` row is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
        * connector was brokered, reported that as a retirement, and left the `(toolkit, user_id)` gate
        * passing for a person who no longer exists — their access outliving them, which is the first
        * thing anybody asks about a per-person connector. The table's own docblock justifies its shape
@@ -6831,10 +6842,15 @@ export function createPluginStore(options: PluginStoreOptions) {
        * order.
        */
       const brokered = await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, userId))
-        .orderBy(asc(composioConnections.toolkit));
+        .select({ toolkit: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
+          ),
+        )
+        .orderBy(asc(brokeredConnections.app));
 
       /*
        * What the broker was actually asked for each app, kept so the trail below records the answer
@@ -6862,7 +6878,16 @@ export function createPluginStore(options: PluginStoreOptions) {
           withdrawn.push({
             toolkit: connection.toolkit,
             requested: broker
-              ? await broker.revoke({ userId, toolkit: connection.toolkit })
+              ? await broker.revoke({
+                  /*
+                   * THE PERSON'S OWN ACCOUNT, NAMED AS ONE. Offboarding somebody ends what they
+                   * held and never the deployment's shared account, whoever connected it — so the
+                   * holder is fixed here rather than read off anything, and the vendor id is the
+                   * person's own, which is what a personal account is filed under at Composio.
+                   */
+                  account: { holder: "person", userId, vendorUserId: userId },
+                  toolkit: connection.toolkit,
+                })
               : false,
           });
         } catch (error) {
@@ -6888,11 +6913,12 @@ export function createPluginStore(options: PluginStoreOptions) {
        * Composio, so the table claims a connection this person does not have.
        */
       if (withdrawn.length > 0) {
-        await database.delete(composioConnections).where(
+        await database.delete(brokeredConnections).where(
           and(
-            eq(composioConnections.userId, userId),
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
             inArray(
-              composioConnections.toolkit,
+              brokeredConnections.app,
               withdrawn.map((entry) => entry.toolkit),
             ),
           ),
