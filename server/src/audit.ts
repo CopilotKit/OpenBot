@@ -529,12 +529,32 @@ export type AuditInitiator =
   | { kind: "routine"; id: string }
   | { kind: "responsibility"; id: string }
   | { kind: "memory"; id: string }
-  | { kind: "handoff"; id: string };
+  | { kind: "handoff"; id: string; origin?: AuditInitiator };
 
 export const PERSON_INITIATOR: AuditInitiator = { kind: "person" };
 
 /** The deployment acting as itself: at start-up, or refusing a caller it could not identify. */
 export const DEPLOYMENT_INITIATOR: AuditInitiator = { kind: "deployment" };
+
+/**
+ * The initiator a hop from `fromBotId` runs under.
+ *
+ * `origin` IS ALWAYS THE ROOT — what started the first run in the chain — and never another hop, so
+ * a check that needs to know who is steering reads one field however deep the chain is. A source
+ * that is itself a hop with no origin passes none on: an origin made up here would be read as fact.
+ */
+export function handoffInitiator(
+  fromBotId: string,
+  source: AuditInitiator | undefined,
+): AuditInitiator {
+  const root = source ?? PERSON_INITIATOR;
+  if (root.kind === "handoff") {
+    return root.origin
+      ? { kind: "handoff", id: fromBotId, origin: root.origin }
+      : { kind: "handoff", id: fromBotId };
+  }
+  return { kind: "handoff", id: fromBotId, origin: root };
+}
 
 /*
  * The vocabulary, kept as the declaration of what a row's `initiator_kind` can be.
