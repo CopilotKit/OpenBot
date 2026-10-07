@@ -84,6 +84,7 @@ import {
   type AccountRef,
   accountFor,
 } from "./shared-accounts";
+import type { SharedUseGate } from "./shared-use-store";
 import { transportFor } from "./transport";
 
 /**
@@ -1115,6 +1116,8 @@ export type PluginStoreOptions = {
    * See plugins/share-target.ts and proactive/private-share.ts. Absent asks nothing.
    */
   privateShareCheck?: CheckPrivateShare;
+  /** Who may steer a run that uses a Shared app's account. Absent, every shared call is refused. */
+  sharedUse?: SharedUseGate;
   database: Database;
   auditStore: AuditStore;
   /**
@@ -7555,6 +7558,45 @@ export function createPluginStore(options: PluginStoreOptions) {
           if (shareVerdict.status === "pending" && currentApprovalContext())
             throw shareVerdict.suspension;
           throw new PluginRefusedError(shareVerdict.message, null);
+        }
+      }
+
+      /*
+       * A SHARED ACCOUNT ANSWERS TO WHOEVER CAN STEER THE BOT, and that is checked on every call.
+       *
+       * The grant says this Bot may use the app; it says nothing about who may reach the Bot. A
+       * Shared app acts as one team account for everyone, so a Bot opened to more people than an
+       * administrator approved would hand that account to all of them. The gate decides that here,
+       * at call time, so an audience widened a moment ago is caught on its next call. With no gate
+       * wired there is nothing that can answer the question, and the call is refused rather than
+       * assumed safe.
+       */
+      if (access.credential === "brokered" && row.accountMode === "shared") {
+        const verdict = options.sharedUse
+          ? await options.sharedUse({
+              botId: input.botId,
+              serverId,
+              title: row.title,
+              actorId: input.actorId,
+              ...(input.initiator ? { initiator: input.initiator } : {}),
+            })
+          : {
+              allowed: false as const,
+              message: `${row.title} is shared, and this deployment cannot check who may use it, so it was not called.`,
+            };
+        if (!verdict.allowed) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.call_rejected",
+            targetType: "mcp_tool",
+            targetId: input.ref,
+            ...(input.initiator ? { initiator: input.initiator } : {}),
+            payload: {
+              ...decided,
+              decision: { ...decided.decision, carriedOut: false },
+              refusal: "shared_audience",
+            },
+          });
+          throw new PluginRefusedError(verdict.message, null);
         }
       }
 
