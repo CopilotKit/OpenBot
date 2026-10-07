@@ -3585,10 +3585,43 @@ export function createPluginStore(options: PluginStoreOptions) {
          * order and write their trail rows in the same order.
          */
         const connected = await database
-          .select({ userId: composioConnections.userId })
-          .from(composioConnections)
-          .where(eq(composioConnections.toolkit, toolkit))
-          .orderBy(asc(composioConnections.userId));
+          .select({
+            holder: brokeredConnections.holder,
+            userId: brokeredConnections.userId,
+            vendorUserId: brokeredConnections.vendorUserId,
+          })
+          .from(brokeredConnections)
+          .where(
+            and(
+              eq(brokeredConnections.provider, "composio"),
+              eq(brokeredConnections.app, toolkit),
+            ),
+          )
+          .orderBy(
+            asc(brokeredConnections.holder),
+            asc(brokeredConnections.userId),
+          );
+
+        /*
+         * BOTH HOLDERS, EACH NAMED AS WHAT IT IS. Removing an app ends every account standing for
+         * it — every person's own, and the one the deployment holds if the app was ever Shared,
+         * which may still be standing after a switch back that has not retired it yet. Each is
+         * revoked as the account its row says it is, under the vendor id the row was filed under,
+         * so the deployment's account is asked for as the deployment's and never as whoever
+         * pressed "remove". A person row always carries its user id (the table's holder check),
+         * so the fallback to the deployment form below is the shape a corrupt row would need, not
+         * a reading anything here relies on.
+         */
+        const accountOf = (
+          connection: (typeof connected)[number],
+        ): AccountRef =>
+          connection.holder === "person" && connection.userId !== null
+            ? {
+                holder: "person",
+                userId: connection.userId,
+                vendorUserId: connection.vendorUserId,
+              }
+            : { holder: "deployment", vendorUserId: connection.vendorUserId };
 
         /*
          * What the broker was actually asked for each of them, kept so the trail below records the
@@ -3596,21 +3629,25 @@ export function createPluginStore(options: PluginStoreOptions) {
          * key has since been unset can still remove the app, and it could not have been calling it
          * either way — but nothing was asked of Composio and the row must not claim otherwise.
          */
-        const vendorRevocationRequested = new Map<string, boolean>();
+        const vendorRevocationRequested: boolean[] = [];
         for (const connection of connected) {
-          vendorRevocationRequested.set(
-            connection.userId,
+          vendorRevocationRequested.push(
             broker
-              ? await broker.revoke({ userId: connection.userId, toolkit })
+              ? await broker.revoke({ account: accountOf(connection), toolkit })
               : false,
           );
         }
 
         await database
-          .delete(composioConnections)
-          .where(eq(composioConnections.toolkit, toolkit));
+          .delete(brokeredConnections)
+          .where(
+            and(
+              eq(brokeredConnections.provider, "composio"),
+              eq(brokeredConnections.app, toolkit),
+            ),
+          );
 
-        for (const connection of connected) {
+        for (const [index, connection] of connected.entries()) {
           await recordAuditEvent(auditStore, {
             eventType: "mcp.account_disconnected",
             targetType: "mcp_server",
@@ -3637,7 +3674,13 @@ export function createPluginStore(options: PluginStoreOptions) {
             payload: {
               actor: by,
               server: toolkit,
-              owner: connection.userId,
+              // Whose account this was, by the rule {@link disconnectBrokered} names it by: a
+              // person's own under their id, the deployment's own as the deployment, never as
+              // the administrator who removed the app.
+              owner:
+                connection.holder === "person" && connection.userId !== null
+                  ? connection.userId
+                  : "deployment",
               // The same three-way distinction the vault loop above draws, and the same answer: an
               // administrator took the whole app away and the person did nothing.
               reason: "mcp_server_removed",
@@ -3652,7 +3695,7 @@ export function createPluginStore(options: PluginStoreOptions) {
                * the upstream withdrawal runs as a background job nothing here can poll.
                */
               vendorRevocationRequested:
-                vendorRevocationRequested.get(connection.userId) ?? false,
+                vendorRevocationRequested[index] ?? false,
             },
           });
         }
