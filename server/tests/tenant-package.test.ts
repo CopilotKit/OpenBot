@@ -459,6 +459,35 @@ describe("tenant YAML validation", () => {
     });
   });
 
+  test("starts a deployment with two coworkers, not the whole catalog", async () => {
+    /*
+     * The roster a fresh deployment opens on. The ten in `catalog/` used to load from `agents/`, so
+     * every new deployment met a dozen Bots at once. Risk Analyst and the picked harness only register
+     * with an endpoint, so they are switched off here to read the package as a bare install does.
+     */
+    const saved = {
+      managed: process.env.MANAGED_AGENT_AG_UI_URL,
+      picked: process.env.PICKED_HARNESS_URL,
+    };
+    delete process.env.MANAGED_AGENT_AG_UI_URL;
+    delete process.env.PICKED_HARNESS_URL;
+    try {
+      const tenantPackage = await loadTenantPackage(
+        fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
+      );
+      expect(tenantPackage.agents.map((agent) => agent.id)).toEqual([
+        "general-assistant",
+        "knowledge",
+      ]);
+    } finally {
+      if (saved.managed === undefined)
+        delete process.env.MANAGED_AGENT_AG_UI_URL;
+      else process.env.MANAGED_AGENT_AG_UI_URL = saved.managed;
+      if (saved.picked === undefined) delete process.env.PICKED_HARNESS_URL;
+      else process.env.PICKED_HARNESS_URL = saved.picked;
+    }
+  });
+
   test("accepts the complete fintech package and normalizes agent types", () => {
     const tenantPackage = validateTenantPackage({
       brand: `tenant:\n  id: fintech\n  product_name: Ledgerline\nskin:\n  stylesheet: theme.css`,

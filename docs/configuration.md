@@ -831,7 +831,8 @@ examples/fintech/
 ├── model.yaml
 ├── knowledge.yaml
 ├── skills.yaml      (optional)
-└── agents/          (optional)
+├── agents/          (optional, one coworker per file)
+└── catalog/         (not loaded: coworkers to copy into agents/)
     └── expense-review.yaml
 ```
 
@@ -913,8 +914,12 @@ message saying which file wanted it, rather than leaving a Bot pointed at an add
 A coworker may also be one file of its own, in an `agents/` directory beside `agents.yaml`. Both are
 read, and a package that keeps every coworker in `agents.yaml` is unchanged.
 
+The shipped package starts with two coworkers, General Assistant and Knowledge, both in `agents.yaml`.
+Its other two entries, Risk Analyst and the picked harness, register only when their endpoints are
+configured. Ten more are in `catalog/`, which is not read. Copy one into `agents/` to add it:
+
 ```yaml
-# examples/fintech/agents/expense-review.yaml
+# examples/fintech/agents/expense-review.yaml, copied from catalog/
 id: expense-review
 name: Expense Review
 title: Finance Operations
@@ -937,6 +942,12 @@ should not depend on what a directory listing happened to return.
 
 The directory is in the package checksum, so adding, editing or deleting a coworker there is a
 package change like any other and a running deployment notices it on the next boot.
+
+**Deleting a file does not remove the Bot from a deployment that already registered it.** The next
+boot stops declaring it, but its row stays, still owned by the package, so it is still listed and
+still refused by delete as protected. Only a remote coworker whose `endpoint` is blank is retired
+automatically. Retire one that is gone from the package by setting `deleted_at` on its
+`agent_profiles` row, which is what delete does for a Bot somebody made.
 
 ### `channels.yaml`
 

@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A new deployment starts with two coworkers, not twelve
+
+The example package loaded every coworker in `examples/fintech/agents/`, so a fresh deployment opened
+with General Assistant, Knowledge and ten more at once. The ten now live in `examples/fintech/catalog/`,
+which is not loaded, and a new deployment starts with General Assistant and Knowledge. Risk Analyst
+and the picked harness still register when their endpoints are configured. To keep any of the ten,
+copy its file from `catalog/` into `agents/`.
+
+A deployment that already registered them keeps them. A coworker dropped from the package is not
+retired on the next boot: its row stays, still listed and still refused by delete as protected,
+because only a remote coworker with a blank endpoint is retired automatically. To remove the ten
+from such a deployment, set `deleted_at` on their `agent_profiles` rows after upgrading (see
+[configuration.md](docs/configuration.md#agents)).
+
 ## 0.1.2
 
 ### CopilotKit 1.77 and AG-UI 1.0
