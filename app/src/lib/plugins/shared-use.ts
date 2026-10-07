@@ -12,6 +12,11 @@ export type SharedUseApproval = {
   outsideInput: boolean;
   members: ApprovalMember[];
 };
+export type SharedUseRequestReason =
+  | "refused_call"
+  | "publish"
+  | "trigger"
+  | "grant";
 export type SharedUseRequest = {
   id: string;
   botId: string;
@@ -21,7 +26,7 @@ export type SharedUseRequest = {
   title: string;
   proposed: SharedUseApproval;
   current: SharedUseApproval | null;
-  reason: string;
+  reason: SharedUseRequestReason;
   requestedBy: string;
   status: string;
   createdAt: string;

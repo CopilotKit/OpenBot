@@ -26,6 +26,7 @@ import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
+  personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
@@ -96,8 +97,15 @@ function RouteComponent() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
 
+  /*
+   * PERSONAL ONLY: a Shared app's connection is the deployment's standing account, not something
+   * the signed-in admin connected themselves. Reading it into this set would mark that row "you
+   * connected" on a deployment-wide list where nobody connected anything personally.
+   */
   const connected = new Set(
-    (connections.data?.connections ?? []).map((row) => row.serverId),
+    personalConnections(connections.data?.connections ?? []).map(
+      (row) => row.serverId,
+    ),
   );
   const added = new Set((plugins.data?.servers ?? []).map((s) => s.id));
   const explore = (plugins.data?.catalogue ?? []).filter(

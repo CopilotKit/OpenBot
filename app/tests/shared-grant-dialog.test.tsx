@@ -34,7 +34,7 @@ describe("sharedSectionSentence", () => {
 
 describe("SharedApprovalFields", () => {
   test("starts at the Bot's exposure and can be narrowed to its owner", async () => {
-    let seen: SharedUseApproval | null = null;
+    let seen = null as SharedUseApproval | null;
     function Harness() {
       const [value, setValue] = useState<SharedUseApproval>({
         audience: "team",
