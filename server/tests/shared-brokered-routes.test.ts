@@ -229,6 +229,34 @@ describe("connecting a shared app", () => {
       await database.delete(mcpServers).where(eq(mcpServers.id, keyApp));
     }
   });
+
+  test("a non-admin cannot connect a personal account through a duplicate row saying personal", async () => {
+    // `zz-` sorts after `team-gh-`, so the Shared row above stays the one that answers for the app.
+    const duplicate = `zz-dup-${suite}`;
+    await database.insert(mcpServers).values({
+      id: duplicate,
+      title: "Team GitHub (copy)",
+      vendor: "Composio",
+      url: `composio://${app}`,
+      provenance: "composio",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+    });
+    try {
+      const response = await appAs("user").request(
+        `/api/plugins/servers/${duplicate}/connect`,
+        { method: "POST" },
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "An administrator connects shared apps.",
+      });
+      expect(authorizedFor).toEqual([]);
+      expect(connectWithFieldsCalls).toBe(0);
+    } finally {
+      await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+    }
+  });
 });
 
 describe("GET /connections", () => {

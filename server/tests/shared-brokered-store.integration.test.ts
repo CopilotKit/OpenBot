@@ -23,6 +23,12 @@ const bot = `bot-${suite}`;
 const admin = `admin-${suite}`;
 const asker = `asker-${suite}`;
 const VENDOR_ID = `openbot-deployment:acme-${suite}:R`;
+/*
+ * A second row at the app's url. `zz-` sorts after `team-gh-` in any collation, so the seeded row
+ * stays the one `brokeredAppRow` answers with — `order by id`, first row per url — and this is
+ * always the duplicate.
+ */
+const duplicate = `zz-dup-${suite}`;
 
 const revoked: string[] = [];
 const broker: ConnectedAppBroker = {
@@ -103,7 +109,9 @@ async function clean() {
   await database
     .delete(brokeredConnections)
     .where(eq(brokeredConnections.app, app));
-  await database.delete(mcpServers).where(eq(mcpServers.id, app));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, [app, duplicate]));
   await database.delete(agents).where(eq(agents.id, bot));
 }
 
@@ -326,5 +334,158 @@ describe("a personal app", () => {
       );
     expect(left).toEqual([{ holder: "deployment" }]);
     expect(revoked).toEqual([asker]);
+  });
+});
+
+describe("a duplicate row at an app's url", () => {
+  async function seedDuplicate(
+    store: ReturnType<typeof createPluginStore>,
+    columns: {
+      accountMode: "personal" | "shared";
+      sharedVendorUserId: string | null;
+    },
+  ) {
+    await database.insert(mcpServers).values({
+      id: duplicate,
+      title: "Team GitHub (copy)",
+      vendor: "Composio",
+      url: `composio://${app}`,
+      provenance: "composio",
+      authScheme: "OAUTH2",
+      ...columns,
+    });
+    await database.insert(mcpTools).values({
+      serverId: duplicate,
+      name: "GITHUB_LIST_ISSUES",
+      description: "List issues.",
+      effect: "read",
+      version: "1",
+    });
+    await store.grant(
+      "mcp",
+      `${duplicate}/GITHUB_LIST_ISSUES`,
+      bot,
+      "admin@example.test",
+    );
+  }
+
+  test("saying personal does not take a call to a Shared app round the audience gate", async () => {
+    const gateSaw: { serverId: string }[] = [];
+    const events: { eventType: string; payload: Record<string, unknown> }[] =
+      [];
+    const store = createPluginStore({
+      database,
+      auditStore: { insert: async (event) => void events.push(event as never) },
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+      broker,
+      deploymentId: `acme-${suite}`,
+      sharedUse: async (input) => {
+        gateSaw.push({ serverId: input.serverId });
+        return { allowed: false, message: "Not for this audience." };
+      },
+    });
+    await seedShared(store, true);
+    await seedDuplicate(store, {
+      accountMode: "personal",
+      sharedVendorUserId: null,
+    });
+    const sentAs: string[] = [];
+    useComposioClient({
+      listActions: async () => [],
+      execute: async ({ userId }) => {
+        sentAs.push(userId);
+        return { successful: true, data: {}, error: null } as never;
+      },
+    });
+    await expect(
+      store.callTool({
+        ref: `${duplicate}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      }),
+    ).rejects.toThrow("Not for this audience.");
+    expect(gateSaw).toEqual([{ serverId: app }]);
+    expect(sentAs).toEqual([]);
+    expect(
+      events.find((event) => event.eventType === "mcp.call_rejected")?.payload,
+    ).toMatchObject({ refusal: "shared_audience", reachedAs: "deployment" });
+  });
+
+  test("saying shared does not send a Personal app's call out as the deployment", async () => {
+    const gateSaw: string[] = [];
+    const events: { eventType: string; payload: Record<string, unknown> }[] =
+      [];
+    const store = createPluginStore({
+      database,
+      auditStore: { insert: async (event) => void events.push(event as never) },
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+      broker,
+      deploymentId: `acme-${suite}`,
+      sharedUse: async (input) => {
+        gateSaw.push(input.serverId);
+        return { allowed: true };
+      },
+    });
+    // The deployment account exists, so taking the Shared branch would succeed rather than refuse.
+    await seedShared(store, true);
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "person",
+      userId: asker,
+      vendorUserId: asker,
+      verified: true,
+    });
+    await seedDuplicate(store, {
+      accountMode: "shared",
+      sharedVendorUserId: VENDOR_ID,
+    });
+    const sentAs: string[] = [];
+    useComposioClient({
+      listActions: async () => [],
+      execute: async ({ userId }) => {
+        sentAs.push(userId);
+        return { successful: true, data: {}, error: null } as never;
+      },
+    });
+    await store.callTool({
+      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
+      args: {},
+      botId: bot,
+      actorId: asker,
+    });
+    expect(sentAs).toEqual([asker]);
+    expect(gateSaw).toEqual([]);
+    expect(
+      events.find((event) => event.eventType === "mcp.call_succeeded")?.payload,
+    ).toMatchObject({ reachedAs: asker });
+  });
+
+  test("a mode written through the duplicate lands on the row that answers", async () => {
+    const store = freshStore();
+    await seedShared(store, false);
+    await seedDuplicate(store, {
+      accountMode: "shared",
+      sharedVendorUserId: VENDOR_ID,
+    });
+    await store.setAccountModeColumns(duplicate, "personal", null);
+    const rows = await database
+      .select({ id: mcpServers.id, accountMode: mcpServers.accountMode })
+      .from(mcpServers)
+      .where(inArray(mcpServers.id, [app, duplicate]))
+      .orderBy(mcpServers.id);
+    expect(rows).toEqual([
+      { id: app, accountMode: "personal" },
+      { id: duplicate, accountMode: "shared" },
+    ]);
   });
 });

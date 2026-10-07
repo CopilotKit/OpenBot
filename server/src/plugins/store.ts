@@ -1387,12 +1387,14 @@ export function createPluginStore(options: PluginStoreOptions) {
     serverId: string,
     actorId: string,
   ): Promise<
-    { ref: AccountRef; title: string; mode: AccountMode } | { refusal: string }
+    | { ref: AccountRef; title: string; mode: AccountMode; appId: string }
+    | { refusal: string }
   > {
-    const [row] = await database
+    const [dialled] = await database
       .select({
         title: mcpServers.title,
         provenance: mcpServers.provenance,
+        url: mcpServers.url,
         authScheme: mcpServers.authScheme,
         accountMode: mcpServers.accountMode,
         sharedVendorUserId: mcpServers.sharedVendorUserId,
@@ -1400,10 +1402,45 @@ export function createPluginStore(options: PluginStoreOptions) {
       .from(mcpServers)
       .where(eq(mcpServers.id, serverId))
       .limit(1);
-    if (!row)
+    if (!dialled)
       return {
         refusal: `${serverId} is not an app this deployment has added.`,
       };
+    /*
+     * THE NAME IS THE DIALLED ROW'S; THE ACCOUNT IS THE APP'S.
+     *
+     * CRITERION. For a brokered row whose url names an app, the scheme, the mode and the deployment
+     * identity are read off the row {@link brokeredAppRow} answers for that app, and `appId` names
+     * that row. Only the title — the words a person is shown — comes from the row they dialled.
+     *
+     * REASON. The url carries no unique index, so a second row can sit at an app's url carrying
+     * account columns of its own. Read off the dialled row, those columns let a duplicate decide
+     * the account for the app: `personal` at a Shared app's url took a non-administrator through
+     * Connect to a personal account on the team's app and took calls round the audience gate, and
+     * `shared` at a Personal app's url sent a person's call out as the deployment. The connection
+     * this decides is then looked up by toolkit, which is the app — so the decision has to be the
+     * app's too, or its two halves are about different rows.
+     *
+     * A BROKERED ROW WITH NO ANSWERING ROW IS NOT AN APP ANY MORE. The dialled row sits at the url,
+     * so only a removal racing this read gets here, and it is refused as the missing row is above.
+     */
+    const toolkit =
+      dialled.provenance === "composio" ? toolkitOf(dialled.url) : null;
+    const app = toolkit ? await brokeredAppRow(toolkit) : null;
+    if (toolkit && !app)
+      return {
+        refusal: `${serverId} is not an app this deployment has added.`,
+      };
+    const row = app
+      ? {
+          title: dialled.title,
+          provenance: dialled.provenance,
+          authScheme: app.authScheme,
+          accountMode: app.accountMode,
+          sharedVendorUserId: app.sharedVendorUserId,
+        }
+      : dialled;
+    const appId = app?.id ?? serverId;
     const answer = accountFor(row, actorId);
     type _RefDecides = Decides<
       AccountAnswer["kind"],
@@ -1426,17 +1463,19 @@ export function createPluginStore(options: PluginStoreOptions) {
         ref: { holder: "person", userId: actorId, vendorUserId: actorId },
         title: row.title,
         mode: "personal",
+        appId,
       };
     }
     if (!row.sharedVendorUserId) {
       throw new PluginInvariantError(
-        `${serverId} is Shared and holds no deployment identity; switch it to Personal and back.`,
+        `${appId} is Shared and holds no deployment identity; switch it to Personal and back.`,
       );
     }
     return {
       ref: { holder: "deployment", vendorUserId: row.sharedVendorUserId },
       title: row.title,
       mode: "shared",
+      appId,
     };
   }
 
@@ -1501,6 +1540,11 @@ export function createPluginStore(options: PluginStoreOptions) {
     entry: CatalogueEntry | null,
     actorId: string,
     access: ServerAccess,
+    /**
+     * The mode a call's audience gate was decided about, where one was; see the check beside
+     * {@link accountRefFor} below. Absent for a path with no such gate, the tool refresh.
+     */
+    gatedMode?: AccountMode | null,
   ): Promise<{ token?: string; vendorUserId?: string }> {
     /*
      * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
@@ -1623,6 +1667,19 @@ export function createPluginStore(options: PluginStoreOptions) {
       const resolved = await accountRefFor(row.id, actorId);
       if ("refusal" in resolved)
         throw new PluginRefusedError(resolved.refusal, null);
+      /*
+       * THE ACCOUNT MUST BE THE ONE THE AUDIENCE GATE WAS ASKED ABOUT.
+       *
+       * `callTool` decides whether to run the Shared audience gate off the app's mode as it read it,
+       * and this reads the mode again. An administrator switching the app to Shared between the two
+       * reads would otherwise send an ungated call out on the team account. Refused rather than
+       * re-gated: the switch is rare, asking again is cheap, and a refusal cannot be the hole.
+       */
+      if (gatedMode && resolved.mode !== gatedMode)
+        throw new PluginRefusedError(
+          `${row.title} changed how it is shared while this call was being checked, so it was not called. Ask again.`,
+          null,
+        );
       const [connected] = await database
         .select({ vendorUserId: brokeredConnections.vendorUserId })
         .from(brokeredConnections)
@@ -2532,12 +2589,46 @@ export function createPluginStore(options: PluginStoreOptions) {
      * Three call sites used to derive their own — the transport, the credential and the audit row —
      * and a Composio app made all three of them wrong at once. One derivation means they cannot
      * disagree, and `access.ts` is the only place a new kind of server has to be taught about.
+     *
+     * AND RESOLVED AGAINST THE APP'S ACCOUNT COLUMNS, NOT THE DIALLED ROW'S. `reachedAs` is read off
+     * the scheme and the mode, both of which belong to the app — see {@link BrokeredAppRow} — so a
+     * brokered row is handed to {@link accessFor} carrying the answering row's two columns. Done
+     * here rather than at each consumer because this is the one resolution every store path reads,
+     * which is fewer places to remember than the callers; `listServers` reports the same two columns
+     * off the same row for the one reader outside the store, the memory ingestion. `app` goes back
+     * with it, so the audience gate decides on and keys its approval by the row that answers rather
+     * than the one that was dialled. Null for every row that is not a brokered app.
      */
-    return { row, entry, access: accessFor(row, entry) };
+    const toolkit = row.provenance === "composio" ? toolkitOf(row.url) : null;
+    const app = toolkit ? await brokeredAppRow(toolkit) : null;
+    const access = accessFor(
+      app
+        ? { ...row, authScheme: app.authScheme, accountMode: app.accountMode }
+        : row,
+      entry,
+    );
+    return { row, entry, access, app };
   }
 
-  /** What a row that answers for an app is asked for: which row it is, and how the app connects. */
-  type BrokeredAppRow = { id: string; authScheme: string | null };
+  /**
+   * What a row that answers for an app is asked for: which row it is, how the app connects, and
+   * whose account it runs in.
+   *
+   * THE ACCOUNT COLUMNS TRAVEL WITH THE SCHEME FOR THE SCHEME'S OWN REASON. Whether an app is Shared
+   * and which deployment identity it holds are facts about the APP, exactly as its scheme is, and a
+   * duplicate row at the same url is not a second app. Read off whichever row a call was dialled
+   * through, a duplicate recording `personal` at a Shared app's url skipped the audience gate and
+   * let anybody connect a personal account to the team's app, and one recording `shared` at a
+   * Personal app's url sent a person's call out as the deployment. Every account decision —
+   * {@link accountRefFor}, the audience gate in `callTool`, the trail's `reachedAs`, the listing —
+   * now reads these from here, so none of them can be about a different row than the others.
+   */
+  type BrokeredAppRow = {
+    id: string;
+    authScheme: string | null;
+    accountMode: AccountMode | null;
+    sharedVendorUserId: string | null;
+  };
 
   /**
    * The one `mcp_servers` row that answers for the app a url names: its id, and its scheme.
@@ -2606,14 +2697,14 @@ export function createPluginStore(options: PluginStoreOptions) {
         id: mcpServers.id,
         url: mcpServers.url,
         authScheme: mcpServers.authScheme,
+        accountMode: mcpServers.accountMode,
+        sharedVendorUserId: mcpServers.sharedVendorUserId,
       })
       .from(mcpServers)
       .where(inArray(mcpServers.url, urls))
       .orderBy(asc(mcpServers.id));
-    for (const row of rows) {
-      if (!answering.has(row.url)) {
-        answering.set(row.url, { id: row.id, authScheme: row.authScheme });
-      }
+    for (const { url, ...row } of rows) {
+      if (!answering.has(url)) answering.set(url, row);
     }
     return answering;
   }
@@ -4280,13 +4371,20 @@ export function createPluginStore(options: PluginStoreOptions) {
             entry.auth.clientRegistration === "dynamic",
           // The app's, for a row whose url names one; this row's own column for everything else,
           // which is a null on every server that is not brokered. See the read above.
-          authScheme: toolkitOf(row.url)
+          authScheme: toolkit
             ? (brokeredApps.get(row.url)?.authScheme ?? null)
             : row.authScheme,
-          accountMode: row.accountMode,
+          /*
+           * The app's mode for the same reason as its scheme: a duplicate row at a Shared app's url
+           * is the Shared app, and the memory ingestion decides whose account a source reads from
+           * exactly these two fields.
+           */
+          accountMode: toolkit
+            ? (brokeredApps.get(row.url)?.accountMode ?? null)
+            : row.accountMode,
           sharedVendorConnected:
-            row.accountMode === "shared" &&
             toolkit !== null &&
+            brokeredApps.get(row.url)?.accountMode === "shared" &&
             deploymentHeld.has(toolkit),
           tools: tools
             .filter((tool) => tool.serverId === row.id)
@@ -4439,15 +4537,31 @@ export function createPluginStore(options: PluginStoreOptions) {
       };
     },
 
+    /**
+     * Write an app's mode and deployment identity — onto the row that ANSWERS for the app.
+     *
+     * Every reader takes these two columns off {@link brokeredAppRow}, so a write landing on a
+     * duplicate row at the same url would be a switch nobody reads: the page would say Shared and
+     * every call would go on running as it did. The id given is resolved to its url, the url to its
+     * app, and the app to its answering row; a row that names no app is written as itself, which is
+     * the only row there is to write.
+     */
     async setAccountModeColumns(
       serverId: string,
       mode: AccountMode,
       sharedVendorUserId: string | null,
     ) {
+      const [dialled] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = dialled ? toolkitOf(dialled.url) : null;
+      const app = toolkit ? await brokeredAppRow(toolkit) : null;
       await database
         .update(mcpServers)
         .set({ accountMode: mode, sharedVendorUserId })
-        .where(eq(mcpServers.id, serverId));
+        .where(eq(mcpServers.id, app?.id ?? serverId));
     },
 
     /**
@@ -5354,11 +5468,24 @@ export function createPluginStore(options: PluginStoreOptions) {
         displayName: string | null;
       }[]
     > {
-      const shared = await database
+      /*
+       * ONE ENTRY PER SHARED APP, under the row that answers for it. A row marked `shared` that is
+       * a duplicate at some app's url is not the app — the app is Shared only if its answering row
+       * says so — and listing it would offer a Connect for an account no call would use.
+       */
+      const marked = await database
         .select({ id: mcpServers.id, url: mcpServers.url })
         .from(mcpServers)
         .where(eq(mcpServers.accountMode, "shared"))
         .orderBy(asc(mcpServers.id));
+      const answering = await brokeredAppRowsAt(
+        marked
+          .filter((row) => toolkitOf(row.url) !== null)
+          .map((row) => row.url),
+      );
+      const shared = marked.filter(
+        (row) => answering.get(row.url)?.id === row.id,
+      );
 
       return await Promise.all(
         shared.map(async (server) => {
@@ -7365,7 +7492,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(decision.reason, null);
       }
 
-      const { row, entry, access } = await requireServer(serverId);
+      const { row, entry, access, app } = await requireServer(serverId);
 
       const advertised = await database
         .select({
@@ -7621,11 +7748,24 @@ export function createPluginStore(options: PluginStoreOptions) {
        * wired there is nothing that can answer the question, and the call is refused rather than
        * assumed safe.
        */
-      if (access.credential === "brokered" && row.accountMode === "shared") {
+      /*
+       * DECIDED ON, AND KEYED BY, THE APP'S ANSWERING ROW — never the dialled one. A duplicate row
+       * at a Shared app's url saying `personal` must not take the call round this gate, and an
+       * approval is a fact about the app, so it is asked for under the app's id whichever row the
+       * grant happens to name. `gatedMode` then travels to {@link connectionTokenFor}, which
+       * refuses if the account it resolves is not the one this gate was decided about.
+       */
+      const gatedMode: AccountMode | null =
+        access.credential !== "brokered"
+          ? null
+          : app?.accountMode === "shared"
+            ? "shared"
+            : "personal";
+      if (gatedMode === "shared" && app) {
         const verdict = options.sharedUse
           ? await options.sharedUse({
               botId: input.botId,
-              serverId,
+              serverId: app.id,
               title: row.title,
               actorId: input.actorId,
               ...(input.initiator ? { initiator: input.initiator } : {}),
@@ -7683,6 +7823,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           entry,
           input.credentialActorId ?? input.actorId,
           access,
+          gatedMode,
         );
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
