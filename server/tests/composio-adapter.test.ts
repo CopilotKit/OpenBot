@@ -3,6 +3,7 @@ import { Composio, telemetry } from "@composio/core";
 import {
   type BrokerConnection,
   BrokerRefusalError,
+  BrokerUnconfiguredError,
   brokerSentence,
   type ComposioBroker,
 } from "../src/plugins/broker";
@@ -8115,4 +8116,116 @@ describe("taking back the one account a verification just made", () => {
       expect(deleted).toEqual([["ca_new", { revoke_on_delete: true }]]);
     });
   }
+});
+
+/**
+ * Which account a request is about, named by WHO HOLDS IT rather than by whose request it is.
+ *
+ * A deployment's own account and a person's account are each asked for under the `AccountRef`'s
+ * `vendorUserId` — never under whoever's `userId` happens to be making the request — so the vendor
+ * id behind a `deployment` holder, `openbot-deployment:<deploymentId>:...`, is what goes out for a
+ * deployment, and a person's own vendor id goes out for a person. And when a connected-account
+ * listing comes back, only its published `displayName` is ever read for a name; nothing in that
+ * listing's tokens is touched or decoded.
+ */
+describe("accounts named by holder", () => {
+  const deployment = {
+    holder: "deployment" as const,
+    vendorUserId: "openbot-deployment:acme:R1",
+  };
+  const person = {
+    holder: "person" as const,
+    userId: "user_1",
+    vendorUserId: "user_1",
+  };
+
+  test("the deployment's account is asked for under its vendor id, never a person's", async () => {
+    const asked: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async (query: unknown) => {
+            asked.push(query);
+            return { items: [{ id: "ca_1" }] };
+          },
+        },
+      }),
+    );
+    expect(
+      await broker.isConnected({ account: deployment, toolkit: "github" }),
+    ).toBe(true);
+    expect(asked).toEqual([
+      expect.objectContaining({ userIds: ["openbot-deployment:acme:R1"] }),
+    ]);
+  });
+
+  test("a person's account is asked for under their vendor id", async () => {
+    const asked: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async (query: unknown) => {
+            asked.push(query);
+            return { items: [] };
+          },
+        },
+      }),
+    );
+    expect(
+      await broker.isConnected({ account: person, toolkit: "github" }),
+    ).toBe(false);
+    expect(asked).toEqual([expect.objectContaining({ userIds: ["user_1"] })]);
+  });
+
+  test("only the display name leaves a listing that carries the account's tokens", async () => {
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async () => ({
+            items: [
+              {
+                id: "ca_1",
+                data: {
+                  displayName: "acme-bot",
+                  access_token: "gho_SECRET",
+                  refresh_token: "r_SECRET",
+                  client_secret: "cs_SECRET",
+                  id_token: "eyJ.SECRET",
+                },
+                state: { val: { access_token: "gho_SECRET" } },
+              },
+            ],
+          }),
+        },
+      }),
+    );
+    const name = await broker.accountName({
+      account: deployment,
+      toolkit: "github",
+    });
+    expect(name).toBe("acme-bot");
+    expect(JSON.stringify(name)).not.toMatch(/SECRET/);
+  });
+
+  test("no display name is no name, and nothing is decoded from tokens", async () => {
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async () => ({
+            items: [{ id: "ca_1", data: { id_token: "eyJhbGciOi.e30.x" } }],
+          }),
+        },
+      }),
+    );
+    expect(
+      await broker.accountName({ account: deployment, toolkit: "gmail" }),
+    ).toBeNull();
+  });
+
+  test("an unconfigured broker names the provider it is missing", () => {
+    expect(new BrokerUnconfiguredError("Acme").message).toMatch(/Acme/);
+    expect(new BrokerUnconfiguredError().message).toMatch(
+      /COMPOSIO_API_KEY/,
+    );
+  });
 });
