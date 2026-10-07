@@ -15,6 +15,7 @@ import type { PluginServer } from "../src/lib/plugins/queries";
 import { brokeredFor } from "../src/routes/_authed/settings/connected-accounts/$key";
 import {
   brokeredAccountsListedOn,
+  connectedAccountSections,
   sharedAccountsListedOn,
 } from "../src/routes/_authed/settings/connected-accounts/index";
 
@@ -42,6 +43,24 @@ describe("Settings for a Shared app", () => {
     expect(sharedAccountsListedOn(servers).map((row) => row.id)).toEqual([
       "s-shared",
     ]);
+  });
+
+  test("a deployment whose apps are all Shared still shows the Shared section", () => {
+    const servers = [server("shared")];
+    expect(connectedAccountSections(0, servers)).toEqual(["empty", "shared"]);
+  });
+
+  test("a personal account list and a Shared section can both draw", () => {
+    const servers = [server("personal"), server("shared")];
+    expect(connectedAccountSections(1, servers)).toEqual([
+      "personal",
+      "shared",
+    ]);
+  });
+
+  test("no Shared apps means no Shared section", () => {
+    const servers = [server("personal")];
+    expect(connectedAccountSections(1, servers)).toEqual(["personal"]);
   });
 
   test("the account page does not treat a Shared app as the reader's to confirm", () => {

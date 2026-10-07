@@ -92,6 +92,34 @@ export function sharedAccountsListedOn(
   );
 }
 
+/** Which of this page's sections are worth drawing, for a given personal-account count and server list. */
+export type ConnectedAccountSection = "personal" | "empty" | "shared";
+
+/**
+ * The "which sections show" decision, pinned once rather than left as two conditions that happen
+ * to agree.
+ *
+ * "personal" and "empty" are mutually exclusive: either there is at least one account of this
+ * person's own to search and connect, or there is the empty-state copy saying so. "shared" is
+ * independent of both — a deployment whose only brokered apps are all Shared has `accountCount`
+ * zero (nothing personal to connect) and still has rows the Shared section must draw, because
+ * those rows exist to tell a person a Bot acts as the team there, not as them. Dropping "shared"
+ * whenever "empty" is chosen would hide that fact for exactly the deployments where it is the
+ * only thing on this page worth saying.
+ */
+export function connectedAccountSections(
+  accountCount: number,
+  servers: PluginServer[],
+): ConnectedAccountSection[] {
+  const sections: ConnectedAccountSection[] = [
+    accountCount > 0 ? "personal" : "empty",
+  ];
+  if (sharedAccountsListedOn(servers).length > 0) {
+    sections.push("shared");
+  }
+  return sections;
+}
+
 function RouteComponent() {
   const { connected: outcome } = Route.useSearch();
   const [search, setSearch] = React.useState("");
@@ -148,6 +176,10 @@ function RouteComponent() {
    * person can see that a Bot calling this app acts as the team, not as them.
    */
   const shared = sharedAccountsListedOn(plugins.data?.servers ?? []);
+  const sectionsToShow = connectedAccountSections(
+    yours.length + brokered.length,
+    plugins.data?.servers ?? [],
+  );
   const accounts = [
     ...yours.map((entry) => {
       const Mark = markFor(entry.key);
@@ -218,7 +250,7 @@ function RouteComponent() {
           rather than a list that may be wrong. Reload the page, and tell an
           administrator if it persists.
         </p>
-      ) : accounts.length === 0 ? (
+      ) : sectionsToShow.includes("empty") ? (
         <PageSection>
           <PageEmpty>
             Nothing to connect yet. These appear once an administrator enables a
@@ -312,18 +344,19 @@ function RouteComponent() {
        * section is the opposite of the one above it — to say plainly that a Bot calling this app
        * acts as the organisation, not as whoever is looking at this page.
        *
-       * RENDERED OUTSIDE THE `accounts.length === 0` BRANCH, deliberately: a deployment whose only
-       * brokered apps are all Shared has an empty `accounts` list — there is nothing personal to
-       * connect — but that is not the same as having nothing to show. Nesting this inside that
-       * branch's `<>…</>` used to mean the empty-state copy ("Nothing to connect yet") replaced this
-       * section outright instead of sitting above it. The gating condition matches the one guarding
-       * that branch so this section never draws while the reads are pending or failed.
+       * RENDERED OUTSIDE THE EMPTY-STATE BRANCH, deliberately: `connectedAccountSections` can
+       * choose "empty" and "shared" together, because a deployment whose only brokered apps are
+       * all Shared has an empty `accounts` list — there is nothing personal to connect — but that
+       * is not the same as having nothing to show. Nesting this inside the empty branch's `<>…</>`
+       * used to mean the empty-state copy ("Nothing to connect yet") replaced this section outright
+       * instead of sitting above it. The gating condition matches the one guarding that branch so
+       * this section never draws while the reads are pending or failed.
        */}
       {!plugins.isPending &&
       !connections.isPending &&
       !plugins.error &&
       !connections.error &&
-      shared.length > 0 ? (
+      sectionsToShow.includes("shared") ? (
         <PageSection title="Shared by your organisation">
           <div className="grid grid-cols-1 gap-x-6 gap-y-2 @min-[36rem]:grid-cols-2">
             {shared.map((server) => (
