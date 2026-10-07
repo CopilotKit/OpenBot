@@ -73,7 +73,6 @@ import {
   parseApprovalContinuation,
   parseApprovalResult,
 } from "./approvals/types";
-import { streamPathBotId } from "./computer/stream-path";
 import {
   type AuditInitiator,
   createAuditReader,
@@ -134,6 +133,7 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
+import { streamPathBotId } from "./computer/stream-path";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -177,7 +177,6 @@ import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
-import { createSelfHostBanner } from "./self-host-banner";
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryIngestion } from "./memory/ingestion";
@@ -241,6 +240,7 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { createSelfHostBanner } from "./self-host-banner";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
   createPackageStatusReader,
@@ -719,6 +719,7 @@ const signInService = computerGateway
 
 const pluginStore = createPluginStore({
   database,
+  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
   auditStore: bootAuditStore,
   credentials: credentialStore,
   encryptionKey: config.keyEncryptionKey,

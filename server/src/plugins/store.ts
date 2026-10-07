@@ -1484,7 +1484,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     entry: CatalogueEntry | null,
     actorId: string,
     access: ServerAccess,
-  ): Promise<{ token?: string }> {
+  ): Promise<{ token?: string; vendorUserId?: string }> {
     /*
      * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
      *
@@ -1538,10 +1538,11 @@ export function createPluginStore(options: PluginStoreOptions) {
       /*
        * AN APP THAT NEEDS NO AUTHENTICATION HAS NO ROW TO FIND, AND CANNOT EVER HAVE ONE.
        *
-       * `composio_connections` is the whole of the permission for a brokered call, and every row in
-       * it means one thing: this person granted this deployment access to their account at this
-       * app. A `NO_AUTH` app has no account and no consent — Composio refuses even to hold an
-       * authorization config for one — so nobody presses Connect and nothing could write the row.
+       * `brokered_connections` is the whole of the permission for a brokered call, and every row in
+       * it means one thing: an account at this app was granted to this deployment — a person's own,
+       * or for a Shared app the team account an administrator connected. A `NO_AUTH` app has no
+       * account and no consent — Composio refuses even to hold an authorization config for one — so
+       * nobody presses Connect and nothing could write the row.
        *
        * THE ALTERNATIVE WAS WRITING ONE ANYWAY, and it is worse than it looks. Offboarding reads
        * this table to find what to revoke, the audit trail reads it to say what somebody had, and
@@ -1595,31 +1596,35 @@ export function createPluginStore(options: PluginStoreOptions) {
       >;
 
       /*
-       * Keyed on the app the call will run in, which is the one the url names.
+       * Keyed on the app the call will run in, which is the one the url names, and on the account
+       * the ROW says acts — the asker's own for a Personal app, the deployment's for a Shared one.
        *
        * `row.id` is a display key and nothing holds it equal to the slug in the url, so a row named
        * `gmail` at `composio://slack` passed this gate on a Gmail connection and then ran a Slack
        * action — the person having connected an app they were never asked about.
        */
+      const resolved = await accountRefFor(row.id, actorId);
+      if ("refusal" in resolved)
+        throw new PluginRefusedError(resolved.refusal, null);
       const [connected] = await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, access.toolkit),
-            eq(composioConnections.userId, actorId),
-          ),
-        )
+        .select({ vendorUserId: brokeredConnections.vendorUserId })
+        .from(brokeredConnections)
+        .where(accountRow(access.toolkit, resolved.ref))
         .limit(1);
-
       if (!connected) {
         throw new PluginRefusedError(
-          `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+          resolved.ref.holder === "deployment"
+            ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
+            : `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
           null,
         );
       }
-
-      return {};
+      /*
+       * THE ROW'S IDENTITY, NOT A RECOMPUTED ONE. A shared account was connected under the id minted
+       * when the app became Shared; reading it back here is what makes a later change to
+       * DEPLOYMENT_ID unable to move the account a call lands in.
+       */
+      return { vendorUserId: connected.vendorUserId };
     }
 
     if (access.credential !== "person-oauth") {
@@ -7273,7 +7278,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * it did.
        */
       try {
-        const { token } = await connectionTokenFor(
+        const { token, vendorUserId } = await connectionTokenFor(
           row,
           entry,
           input.credentialActorId ?? input.actorId,
@@ -7285,7 +7290,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           {
             url: effectiveUrl(row, entry),
             token,
-            actorId: input.credentialActorId ?? input.actorId,
+            actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },
           toolName,

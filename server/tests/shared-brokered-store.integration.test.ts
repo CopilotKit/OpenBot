@@ -124,7 +124,7 @@ describe("a shared app", () => {
       listActions: async () => [],
       execute: async ({ userId }) => {
         sentAs.push(userId);
-        return { successful: true, data: {} } as never;
+        return { successful: true, data: {}, error: null } as never;
       },
     });
     await store.callTool({
@@ -144,7 +144,7 @@ describe("a shared app", () => {
       listActions: async () => [],
       execute: async ({ userId }) => {
         sentAs.push(userId);
-        return { successful: true, data: {} } as never;
+        return { successful: true, data: {}, error: null } as never;
       },
     });
     await store.callTool({
@@ -208,7 +208,8 @@ describe("a shared app", () => {
     await seedShared(store, true);
     useComposioClient({
       listActions: async () => [],
-      execute: async () => ({ successful: true, data: {} }) as never,
+      execute: async () =>
+        ({ successful: true, data: {}, error: null }) as never,
     });
     await store.callTool({
       ref: `${app}/GITHUB_LIST_ISSUES`,
