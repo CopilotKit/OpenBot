@@ -57,8 +57,9 @@ function build(options: { shared: boolean }) {
     audit: auditStore,
   });
   /*
-   * Positional, 37 long. Placed by index rather than by a run of `undefined`s, so a parameter added
-   * in the middle moves a type error onto the wrong index here instead of silently shifting `shared`.
+   * Positional, 36 long. Placed by index rather than by a run of `undefined`s, so a parameter added
+   * in the middle moves a type error onto the wrong index here rather than shifting an argument
+   * silently. `shared` itself is a field on the `coworker` bag, which is why it needs no index.
    */
   const args = new Array(createApp.length) as unknown as Parameters<
     typeof createApp
@@ -79,7 +80,7 @@ function build(options: { shared: boolean }) {
   args[2] = { rolesForUser: async () => ["admin"] } as never;
   args[12] = auditStore;
   args[14] = pluginStore;
-  if (options.shared) args[36] = { modes, use };
+  args[34] = options.shared ? { shared: { modes, use } } : {};
   return createApp(...args);
 }
 

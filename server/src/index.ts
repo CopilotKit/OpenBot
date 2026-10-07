@@ -3025,6 +3025,7 @@ const app = createApp(
   },
   {
     approvals: approvalService,
+    shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
     demonstrations: {
       store: demonstrationStore,
@@ -3082,7 +3083,6 @@ const app = createApp(
     enabled: config.selfHostBanner,
     entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
   }),
-  { modes: accountModes, use: sharedUseStore },
 );
 
 /**
