@@ -32,15 +32,13 @@ const gate = createSharedUseGate(store, createAuditStore(database));
 
 async function seedUser(name: string, groups: string[] = []) {
   // users requires the NOT NULL columns in server/src/db/schema/core.ts:60-90; set each one here.
-  await database
-    .insert(users)
-    .values({
-      id: id(name),
-      email: `${id(name)}@example.test`,
-      name,
-      emailVerified: true,
-      groups,
-    });
+  await database.insert(users).values({
+    id: id(name),
+    email: `${id(name)}@example.test`,
+    name,
+    emailVerified: true,
+    groups,
+  });
 }
 
 beforeEach(async () => {
@@ -74,24 +72,20 @@ beforeEach(async () => {
   await database
     .insert(agents)
     .values({ id: bot, name: "Triage", type: "built_in", configuration: {} });
-  await database
-    .insert(agentProfiles)
-    .values({
-      agentId: bot,
-      ownerUserId: id("owner"),
-      visibility: "private",
-      title: "Triage",
-      roleDescription: "Triage",
-      avatarSeed: "x",
-    });
-  await database
-    .insert(pluginGrants)
-    .values({
-      kind: "mcp",
-      ref: `${app}/GITHUB_LIST_ISSUES`,
-      agentId: bot,
-      grantedBy: "admin@example.test",
-    });
+  await database.insert(agentProfiles).values({
+    agentId: bot,
+    ownerUserId: id("owner"),
+    visibility: "private",
+    title: "Triage",
+    roleDescription: "Triage",
+    avatarSeed: "x",
+  });
+  await database.insert(pluginGrants).values({
+    kind: "mcp",
+    ref: `${app}/GITHUB_LIST_ISSUES`,
+    agentId: bot,
+    grantedBy: "admin@example.test",
+  });
 });
 
 afterAll(async () => {
@@ -297,5 +291,129 @@ describe("decide", () => {
       members: [{ kind: "group", value: "platform" }],
     });
     expect((await call("newhire")).allowed).toBe(true);
+  });
+});
+
+describe("an app with a duplicate row at its url", () => {
+  /*
+   * THE DUPLICATE SORTS AFTER THE ANSWERING ROW (`gh-<suite>` < `gh-<suite>-dup`), so `app` stays
+   * the row that answers for `composio://<app>` and the duplicate is the one a grant can be made
+   * through without being the authority.
+   */
+  const duplicate = `${app}-dup`;
+  const other = id("otherbot");
+
+  beforeEach(async () => {
+    await database.delete(agents).where(eq(agents.id, other));
+    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+    await database.insert(mcpServers).values({
+      id: duplicate,
+      title: "Team GitHub (copy)",
+      vendor: "Composio",
+      url: `composio://${app}`,
+      provenance: "composio",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+    });
+  });
+
+  afterAll(async () => {
+    await database.delete(agents).where(eq(agents.id, other));
+    await database.delete(mcpServers).where(eq(mcpServers.id, duplicate));
+  });
+
+  test("appIdOf names the answering row for either id", async () => {
+    expect(await store.appIdOf(duplicate)).toBe(app);
+    expect(await store.appIdOf(app)).toBe(app);
+  });
+
+  test("an approval written through the duplicate is the one the gate reads by the answering id", async () => {
+    await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
+    await database.insert(pluginGrants).values({
+      kind: "mcp",
+      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
+      agentId: bot,
+      grantedBy: "admin@example.test",
+    });
+    await store.setApproval({
+      botId: bot,
+      serverId: duplicate,
+      by: id("owner"),
+      approval: { audience: "owner", outsideInput: false, members: [] },
+    });
+    expect(await store.approvalFor(bot, app)).toEqual({
+      audience: "owner",
+      outsideInput: false,
+      members: [],
+    });
+    expect((await call("owner")).allowed).toBe(true);
+    expect(await store.pendingFor(bot)).toHaveLength(0);
+  });
+
+  test("sharedAppsHeldBy lists the app once, by its answering row, when both rows are granted", async () => {
+    await database.insert(pluginGrants).values({
+      kind: "mcp",
+      ref: `${duplicate}/GITHUB_CREATE_ISSUE`,
+      agentId: bot,
+      grantedBy: "admin@example.test",
+    });
+    expect(await store.sharedAppsHeldBy(bot)).toEqual([
+      { serverId: app, title: "Team GitHub" },
+    ]);
+  });
+
+  test("botsHolding the answering id includes a Bot granted only through the duplicate", async () => {
+    await database.insert(agents).values({
+      id: other,
+      name: "Other",
+      type: "built_in",
+      configuration: {},
+    });
+    await database.insert(pluginGrants).values({
+      kind: "mcp",
+      ref: `${duplicate}/GITHUB_LIST_ISSUES`,
+      agentId: other,
+      grantedBy: "admin@example.test",
+    });
+    const holding = await store.botsHolding(app);
+    expect(holding).toContain(other);
+    expect(holding).toContain(bot);
+  });
+
+  test("a row at the app's url with a trailing slash still answers through the canonical row", async () => {
+    const slashy = `${app}-slash`;
+    await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
+    await database.insert(mcpServers).values({
+      id: slashy,
+      title: "Team GitHub (slash)",
+      vendor: "Composio",
+      url: `composio://${app}/`,
+      provenance: "composio",
+      authScheme: "OAUTH2",
+      accountMode: "personal",
+    });
+    try {
+      await database.delete(pluginGrants).where(eq(pluginGrants.agentId, bot));
+      await database.insert(pluginGrants).values({
+        kind: "mcp",
+        ref: `${slashy}/GITHUB_LIST_ISSUES`,
+        agentId: bot,
+        grantedBy: "admin@example.test",
+      });
+      await store.setApproval({
+        botId: bot,
+        serverId: slashy,
+        by: id("owner"),
+        approval: { audience: "owner", outsideInput: false, members: [] },
+      });
+      expect(await store.approvalFor(bot, app)).toEqual({
+        audience: "owner",
+        outsideInput: false,
+        members: [],
+      });
+      expect(await store.botsHolding(app)).toContain(bot);
+    } finally {
+      await database.delete(mcpServers).where(eq(mcpServers.id, slashy));
+    }
   });
 });
