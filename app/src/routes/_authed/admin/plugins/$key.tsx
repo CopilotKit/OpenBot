@@ -13,6 +13,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
   BrokeredAccountRow,
   useBrokeredAccount,
@@ -219,6 +220,10 @@ function RouteComponent() {
 
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  /** Which way the mode-switch confirmation is asking, or null while it is closed. */
+  const [modeTarget, setModeTarget] = useState<"personal" | "shared" | null>(
+    null,
+  );
   const [token, setToken] = useState("");
   const [instanceHost, setInstanceHost] = useState("");
   const [client, setClient] = useState({ clientId: "", clientSecret: "" });
@@ -303,6 +308,18 @@ function RouteComponent() {
     name: agent.name,
     hidden: agent.hidden,
   }));
+  /*
+   * Every Bot this admin can see, hidden ones included. The mode-switch dialog's dry run can name
+   * a Bot that holds no grant on this app today — the default team rule a Shared switch writes
+   * reaches `*` — or a Bot hidden from the roster that still holds one of this app's grants, so the
+   * lookup has to cover both.
+   */
+  const botNames = Object.fromEntries(
+    [...(agents ?? []), ...(hiddenAgents ?? [])].map((agent) => [
+      agent.id,
+      agent.name,
+    ]),
+  );
 
   const auth = connectionKindFor(server, entry?.auth);
   const title = entry?.title ?? server?.title ?? key;
@@ -524,8 +541,55 @@ function RouteComponent() {
               />
             </ItemActions>
           </Item>
+
+          {/*
+           * ONLY A BROKERED APP THAT HAS AN ACCOUNT TO MAKE. `NO_AUTH` is the Composio scheme with
+           * nothing to connect at all — see `brokeredAccountsListedOn` — so there is no personal/
+           * shared choice to offer for it, and a row here could only open a dialog that refuses.
+           */}
+          {server?.provenance === "composio" &&
+          server.authScheme !== "NO_AUTH" ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Whose account</ItemTitle>
+                  <ItemDescription>
+                    {server.accountMode === "shared"
+                      ? "One shared account for everyone."
+                      : "Each person connects their own."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    onClick={() =>
+                      setModeTarget(
+                        server.accountMode === "shared" ? "personal" : "shared",
+                      )
+                    }
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {server.accountMode === "shared"
+                      ? "Make personal"
+                      : "Make shared"}
+                  </Button>
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
         </PageRows>
       </PageSection>
+
+      <AccountModeDialog
+        names={botNames}
+        onOpenChange={(open) => !open && setModeTarget(null)}
+        open={modeTarget !== null}
+        serverId={key}
+        target={modeTarget ?? "shared"}
+        title={title}
+      />
 
       {server ? (
         <PageSection
