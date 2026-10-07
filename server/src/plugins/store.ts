@@ -41,6 +41,7 @@ import {
   pluginGrants,
   skills,
   skillTools,
+  users,
 } from "../db/schema";
 import type { CheckPrivateShare } from "../proactive/private-share";
 import {
@@ -196,6 +197,19 @@ export type ServerRecord = {
    * Null is not an older brokered row. It is a row that is not brokered at all.
    */
   authScheme: string | null;
+  /**
+   * Whose account a brokered app acts in: each person's own, or the one the deployment holds.
+   * Null on a row that needs no account at all, and on every row that is not brokered.
+   */
+  accountMode: "personal" | "shared" | null;
+  /**
+   * Whether a Shared app's deployment-held account is connected yet.
+   *
+   * ALWAYS FALSE WHILE {@link accountMode} IS NOT `"shared"`, even where a deployment row happens
+   * to stand at the app's url: a Personal app never acts in that account, so reporting it as
+   * connected would tell the page something that changes nothing a call does.
+   */
+  sharedVendorConnected: boolean;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.
@@ -4223,8 +4237,28 @@ export function createPluginStore(options: PluginStoreOptions) {
         rows.filter((row) => toolkitOf(row.url) !== null).map((row) => row.url),
       );
 
+      /*
+       * WHICH APPS THE DEPLOYMENT HOLDS AN ACCOUNT AT, IN ONE READ FOR THE WHOLE LIST. Keyed by
+       * app rather than by server, because the account belongs to the app's url and not to a row:
+       * two rows at one url are one Composio app with one deployment account behind it.
+       */
+      const deploymentHeld = new Set(
+        (
+          await database
+            .select({ app: brokeredConnections.app })
+            .from(brokeredConnections)
+            .where(
+              and(
+                eq(brokeredConnections.provider, "composio"),
+                eq(brokeredConnections.holder, "deployment"),
+              ),
+            )
+        ).map((held) => held.app),
+      );
+
       return rows.map((row) => {
         const entry = catalogueEntry(row.id);
+        const toolkit = toolkitOf(row.url);
         return {
           id: row.id,
           title: row.title,
@@ -4246,6 +4280,11 @@ export function createPluginStore(options: PluginStoreOptions) {
           authScheme: toolkitOf(row.url)
             ? (brokeredApps.get(row.url)?.authScheme ?? null)
             : row.authScheme,
+          accountMode: row.accountMode,
+          sharedVendorConnected:
+            row.accountMode === "shared" &&
+            toolkit !== null &&
+            deploymentHeld.has(toolkit),
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {
@@ -5162,6 +5201,136 @@ export function createPluginStore(options: PluginStoreOptions) {
            */
           checkable: (await this.probeActionFor(row.serverId)) !== null,
         })),
+      );
+    },
+
+    /**
+     * The deployment's one account at a brokered app, as the admin page draws it; null where none
+     * is connected, and null for a server that is not brokered at all.
+     *
+     * `connectedBy` IS THE ADMINISTRATOR'S EMAIL, because an id is not something a page can show
+     * anybody. It falls back to the stored id when that person has since been removed, so the row
+     * still says somebody connected it rather than claiming nobody did.
+     *
+     * `displayName` IS ASKED OF THE BROKER AND NEVER FAILS THE READ. It is the vendor's name for
+     * the account — the one thing that tells an administrator WHICH team account is behind the app
+     * — and a vendor that will not say is a page missing a label, not a page that cannot load.
+     */
+    async deploymentConnectionFor(serverId: string): Promise<{
+      connectedAt: string;
+      connectedBy: string | null;
+      verified: boolean;
+      verifiedAt: string | null;
+      probe: string | null;
+      displayName: string | null;
+    } | null> {
+      const [server] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = server ? toolkitOf(server.url) : null;
+      if (!toolkit) return null;
+
+      const [row] = await database
+        .select({
+          vendorUserId: brokeredConnections.vendorUserId,
+          connectedBy: brokeredConnections.connectedBy,
+          connectedByEmail: users.email,
+          connectedAt: brokeredConnections.connectedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
+          probeAction: brokeredConnections.probeAction,
+        })
+        .from(brokeredConnections)
+        .leftJoin(users, eq(users.id, brokeredConnections.connectedBy))
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, toolkit),
+            eq(brokeredConnections.holder, "deployment"),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+
+      const displayName = broker
+        ? await broker
+            .accountName({
+              account: { holder: "deployment", vendorUserId: row.vendorUserId },
+              toolkit,
+            })
+            .catch(() => null)
+        : null;
+
+      return {
+        connectedAt: iso(row.connectedAt) ?? "",
+        connectedBy: row.connectedByEmail ?? row.connectedBy,
+        verified: row.verified,
+        verifiedAt: iso(row.verifiedAt),
+        probe: row.probeAction,
+        displayName,
+      };
+    },
+
+    /**
+     * Every Shared app, connected or not, as `GET /connections` lists it beside a person's own.
+     *
+     * A SHARED APP WITH NOTHING CONNECTED IS STILL LISTED, as `connected: false`. Its absence would
+     * read as "this app needs nothing", when it is the one state an administrator has to act on —
+     * the page offers its Connect action off exactly this entry.
+     *
+     * `checkable` IS TRUE ONLY WHEN AN ACCOUNT IS CONNECTED AND THE APP IS A KEY APP WITH A PROBE
+     * ACTION, because a re-check spends a key on a safe read and there is no key to spend without
+     * a connected account, nor on a consent app, which has no key at all. Where it is a connected
+     * key app the answer is {@link probeActionFor}'s, asked of the app, for the reason
+     * {@link brokeredConnectionsFor} gives for keeping `checkable` apart from `probe`.
+     */
+    async sharedConnections(): Promise<
+      {
+        serverId: string;
+        scope: "";
+        holder: "deployment";
+        connected: boolean;
+        connectedAt: string | null;
+        connectedBy: string | null;
+        verified: boolean;
+        verifiedAt: string | null;
+        probe: string | null;
+        checkable: boolean;
+        displayName: string | null;
+      }[]
+    > {
+      const shared = await database
+        .select({ id: mcpServers.id, url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.accountMode, "shared"))
+        .orderBy(asc(mcpServers.id));
+
+      return await Promise.all(
+        shared.map(async (server) => {
+          const toolkit = toolkitOf(server.url);
+          const [connection, kind] = await Promise.all([
+            this.deploymentConnectionFor(server.id),
+            toolkit ? brokeredAppKind(toolkit) : null,
+          ]);
+          return {
+            serverId: server.id,
+            scope: "" as const,
+            holder: "deployment" as const,
+            connected: connection !== null,
+            connectedAt: connection?.connectedAt ?? null,
+            connectedBy: connection?.connectedBy ?? null,
+            verified: connection?.verified ?? false,
+            verifiedAt: connection?.verifiedAt ?? null,
+            probe: connection?.probe ?? null,
+            checkable:
+              connection !== null &&
+              kind === "key" &&
+              (await this.probeActionFor(server.id)) !== null,
+            displayName: connection?.displayName ?? null,
+          };
+        }),
       );
     },
 
