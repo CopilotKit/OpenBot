@@ -249,6 +249,17 @@ export type ServerAddress = {
    * is a row that is not brokered.
    */
   authScheme: string | null;
+  /**
+   * Whose account the app this row names is used under: each person's own, or one the deployment
+   * holds for everybody.
+   *
+   * THE APP'S, READ OFF THE ROW THAT ANSWERS FOR IT, exactly as {@link authScheme} is. Two rows may
+   * name one app and only one of them decides whose account it is, so a page that drew the Shared
+   * treatment off the row it opened could show one answer while every connect, grant and call
+   * behind its buttons acted on the other. Null is a row that is not brokered, and also a brokered
+   * row whose app has no answering row left to say.
+   */
+  accountMode: AccountMode | null;
 };
 
 export type SkillRecord = {
@@ -4457,6 +4468,9 @@ export function createPluginStore(options: PluginStoreOptions) {
      * that way. The id and the title stay this row's own, because those name the row the page
      * opened; the scheme is a fact about the app, and the app has one answer.
      *
+     * `accountMode` IS THE APP'S FOR THE SAME REASON, off the same answering row and in the same
+     * read, never this row's own column; a row that names no app has no mode and answers null.
+     *
      * ONE EXTRA READ, AND ONLY FOR A BROKERED URL. A row that names no app takes the read it always
      * took.
      */
@@ -4473,8 +4487,13 @@ export function createPluginStore(options: PluginStoreOptions) {
         .limit(1);
       if (!row) return undefined;
       const toolkit = toolkitOf(row.url);
-      if (!toolkit) return row;
-      return { ...row, authScheme: await brokeredAppScheme(toolkit) };
+      if (!toolkit) return { ...row, accountMode: null };
+      const app = await brokeredAppRow(toolkit);
+      return {
+        ...row,
+        authScheme: app?.authScheme ?? null,
+        accountMode: app?.accountMode ?? null,
+      };
     },
 
     /**
