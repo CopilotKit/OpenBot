@@ -79,6 +79,7 @@ import {
   createAuditReader,
   createAuditStore,
   DEPLOYMENT_INITIATOR,
+  handoffInitiator,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "./audit";
@@ -2642,7 +2643,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
        * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
        * agreed to, and the person was told it never answered.
        */
-      agentFor: async ({ actorId, botId, fromBotId }) => {
+      agentFor: async ({ actorId, botId, fromBotId, initiator }) => {
         const actor = await actorFor(actorId).catch(() => null);
         if (!actor) {
           throw new Error(
@@ -2652,7 +2653,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
         return copilotRuntime.agentFor({
           actor,
           botId,
-          initiator: { kind: "handoff", id: fromBotId },
+          initiator: handoffInitiator(fromBotId, initiator),
         });
       },
       history: copilotRuntime.history,

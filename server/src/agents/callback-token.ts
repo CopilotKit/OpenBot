@@ -211,6 +211,24 @@ export function readRunAssertion(
 }
 
 /**
+ * Where a hop's run started, read STRICTLY.
+ *
+ * `readInitiator` turns anything it cannot read into a person, which is right for the Audit screen
+ * and wrong here: an origin is what decides whether outside input is steering a run that may use a
+ * shared account, and "unreadable" read as "a person" would open exactly that. Unreadable is
+ * `undefined`, and a hop with no origin is refused wherever one is needed.
+ */
+export function readOrigin(value: unknown): AuditInitiator | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "person" || kind === "deployment") return { kind };
+  if (kind !== "routine" && kind !== "responsibility" && kind !== "memory")
+    return undefined;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id ? { kind, id } : undefined;
+}
+
+/**
  * The initiator a signed payload carries, narrowed back to the union.
  *
  * A kind that is not one this deployment writes is read as a person rather than kept, so a field
@@ -228,7 +246,12 @@ function readInitiator(value: unknown): AuditInitiator {
   )
     return PERSON_INITIATOR;
   const id = (value as { id?: unknown }).id;
-  return typeof id === "string" && id ? { kind, id } : PERSON_INITIATOR;
+  if (typeof id !== "string" || !id) return PERSON_INITIATOR;
+  if (kind === "handoff") {
+    const origin = readOrigin((value as { origin?: unknown }).origin);
+    return origin ? { kind, id, origin } : { kind, id };
+  }
+  return { kind, id };
 }
 
 export type CallVerdict =
