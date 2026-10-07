@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** Two things change for an existing deployment:
+- Migration `0052_shared_brokered_accounts` copies every Composio connection into a new
+  `brokered_connections` table and leaves `composio_connections` in place, unwritten. Rolling back to
+  0.1.0 works, but accounts connected after the upgrade are invisible to it.
+- A handoff now records what started the run it came from. Older remote Bots' signed runs carry no
+  such record for up to ten minutes after the upgrade, and calls they make to a Shared app in that
+  window are refused.
+
+### An app's account can belong to the team
+
+An administrator can make a Composio app Shared: one account, connected once, that every Bot granted
+the app acts as. Who may use it through each Bot is approved per Bot — owner only, named people and
+groups, or everyone, and separately whether email, Slack or webhook input may — and checked on every
+call. Requests to widen it wait in the Approvals inbox. Writes through a Shared app ask the person
+first.
+
 ## 0.1.0
 
 **Before upgrading.** Six things change for an existing deployment:
