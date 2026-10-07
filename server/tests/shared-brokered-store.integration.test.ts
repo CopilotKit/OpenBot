@@ -53,6 +53,7 @@ function freshStore() {
     policy: () => policy,
     broker,
     deploymentId: `acme-${suite}`,
+    sharedUse: async () => ({ allowed: true }),
   });
 }
 
@@ -232,6 +233,7 @@ describe("a shared app", () => {
       policy: () => policy,
       broker,
       deploymentId: `acme-${suite}`,
+      sharedUse: async () => ({ allowed: true }),
     });
     await seedShared(store, true);
     useComposioClient({
@@ -252,6 +254,27 @@ describe("a shared app", () => {
       actor: asker,
       reachedAs: "deployment",
     });
+  });
+
+  test("with no audience gate configured, a shared call is refused rather than allowed", async () => {
+    const store = createPluginStore({
+      database,
+      auditStore: createAuditStore(database),
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+      broker,
+      deploymentId: `acme-${suite}`,
+    });
+    await seedShared(store, true);
+    await expect(
+      store.callTool({
+        ref: `${app}/GITHUB_LIST_ISSUES`,
+        args: {},
+        botId: bot,
+        actorId: asker,
+      }),
+    ).rejects.toThrow(/cannot check who may use it/);
   });
 });
 

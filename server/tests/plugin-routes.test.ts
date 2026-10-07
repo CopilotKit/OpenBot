@@ -8,7 +8,9 @@ import {
   type BrokerConnection,
   type BrokerField,
   BrokerRefusalError,
+  schemeKind,
 } from "../src/plugins/broker";
+import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
@@ -1319,6 +1321,8 @@ function connectionsApp(
       brokered
         .filter((connection) => connection.userId === userId)
         .map((connection) => connection.row),
+    // No Shared app in this fixture: every connection here is somebody's own.
+    sharedConnections: async () => [],
   });
 
   const app = createApp(
@@ -1430,7 +1434,12 @@ describe("a person's own connections", () => {
     expect(response.status).toBe(200);
     const connections = ((await response.json()) as { connections: unknown[] })
       .connections;
-    expect(connections).toEqual([BROKERED_SLACK, HELD_NOTION]);
+    // `holder: "person"` is the route's own addition, over both reads alike: a personal
+    // connection, brokered or held, is always the asker's own account.
+    expect(connections).toEqual([
+      { ...BROKERED_SLACK, holder: "person" },
+      { ...HELD_NOTION, holder: "person" },
+    ]);
   });
 
   test("and is nobody else's", async () => {
@@ -1456,6 +1465,24 @@ describe("a person's own connections", () => {
  * mostly where it does NOT appear: it is handed to the browser that asked and to nothing else.
  */
 const AUTHORIZATION_URL = "https://backend.composio.dev/s/a-bearer-capability";
+
+/**
+ * The account `brokeredApp`'s fixture resolves ADMIN to for a Personal app, which is every row in
+ * this file but the one added for the Shared case: `holder: "person"`, and `vendorUserId` the same
+ * as `userId` because nothing here has ever renamed ADMIN at the vendor.
+ */
+const ADMIN_ACCOUNT: AccountRef = {
+  holder: "person",
+  userId: ADMIN.id,
+  vendorUserId: ADMIN.id,
+};
+
+/** The same, for the single-user deployment's own {@link DEV_ACTOR}. */
+const DEV_ACTOR_ACCOUNT: AccountRef = {
+  holder: "person",
+  userId: DEV_ACTOR.id,
+  vendorUserId: DEV_ACTOR.id,
+};
 
 /**
  * Where this deployment tells Composio to send somebody back to, written out rather than composed.
@@ -1560,17 +1587,22 @@ function brokeredApp(
   } = {},
 ) {
   const authorized: Array<{
-    userId: string;
+    account: AccountRef;
     toolkit: string;
     returnUrl: string;
   }> = [];
-  const queried: Array<{ toolkit: string; userId: string }> = [];
-  const confirmed: Array<{ toolkit: string; userId: string }> = [];
+  const queried: Array<{ toolkit: string; account: AccountRef }> = [];
+  const confirmed: Array<{ toolkit: string; account: AccountRef; by: string }> =
+    [];
   /** Every re-check that reached the store, so who it was made about is an assertion. */
-  const rechecked: Array<{ toolkit: string; userId: string }> = [];
+  const rechecked: Array<{
+    toolkit: string;
+    account: AccountRef;
+    by: string;
+  }> = [];
   const disconnected: Array<{
     toolkit: string;
-    userId: string;
+    account: AccountRef;
     by: string;
     reason: string;
   }> = [];
@@ -1585,11 +1617,19 @@ function brokeredApp(
    */
   const submitted: Array<{
     toolkit: string;
-    userId: string;
+    account: AccountRef;
+    by: string;
     values: Record<string, string>;
   }> = [];
 
-  const rows = [
+  const rows: Array<{
+    id: string;
+    title: string;
+    url: string;
+    authScheme: string | null;
+    /** Absent is Personal, which is every row below but the one added for the Shared case. */
+    accountMode?: "shared";
+  }> = [
     {
       id: "composio-linear",
       // The app's name, which is the one of the two a person has ever seen. The refusal below
@@ -1688,6 +1728,18 @@ function brokeredApp(
       url: "composio://trello",
       authScheme: "OAUTH1",
     },
+    /*
+     * A KEY-TYPE APP SWITCHED TO SHARED, for the one case below where whose account this is
+     * matters before the form is even drawn: a non-admin pressing Connect on it must be refused
+     * for want of an administrator, never answered the fields a personal app would be.
+     */
+    {
+      id: "composio-firecrawl-shared",
+      title: "Firecrawl",
+      url: "composio://firecrawl",
+      authScheme: "API_KEY",
+      accountMode: "shared",
+    },
   ];
 
   const store = pluginStore({
@@ -1701,13 +1753,53 @@ function brokeredApp(
     serverAddress: async (serverId: string) =>
       rows.find((row) => row.id === serverId),
     listSkills: async () => [],
-    brokeredConnection: async (input: { toolkit: string; userId: string }) => {
+    /**
+     * Whose account a row acts for, the same way the real one answers it: the actor's own for a
+     * Personal app, the deployment's for a Shared one, and a refusal for one needing no account
+     * at all — read off this fixture's `accountMode` and `authScheme` rather than off a request,
+     * which is the one property every route calling this depends on.
+     */
+    accountRefFor: async (serverId: string, actorId: string) => {
+      const row = rows.find((candidate) => candidate.id === serverId);
+      if (!row) {
+        return {
+          refusal: `${serverId} is not an app this deployment has added.`,
+        };
+      }
+      if (schemeKind(row.authScheme) === "none") {
+        return { refusal: `${row.title} needs no account.` };
+      }
+      if (row.accountMode === "shared") {
+        return {
+          ref: {
+            holder: "deployment" as const,
+            vendorUserId: `${row.id}-deployment-account`,
+          },
+          title: row.title,
+          mode: "shared" as const,
+        };
+      }
+      return {
+        ref: {
+          holder: "person" as const,
+          userId: actorId,
+          vendorUserId: actorId,
+        },
+        title: row.title,
+        mode: "personal" as const,
+      };
+    },
+    brokeredConnection: async (input: {
+      toolkit: string;
+      account: AccountRef;
+    }) => {
       queried.push(input);
       return connection;
     },
     confirmBrokeredConnection: async (input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }) => {
       confirmed.push(input);
       // Thrown from where the store asks the broker, because that is where it throws in the
@@ -1717,7 +1809,8 @@ function brokeredApp(
     },
     recheckBrokeredConnection: async (input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }) => {
       rechecked.push(input);
       // Thrown from where the store raises it in the product: a probe that ran and was refused is a
@@ -1737,7 +1830,8 @@ function brokeredApp(
     },
     connectBrokeredWithFields: async (input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
       values: Record<string, string>;
     }) => {
       submitted.push(input);
@@ -1755,7 +1849,7 @@ function brokeredApp(
     },
     disconnectBrokered: async (input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
       by: string;
       reason: string;
     }) => {
@@ -1785,7 +1879,7 @@ function brokeredApp(
       ? ({
           broker: {
             authorize: async (request: {
-              userId: string;
+              account: AccountRef;
               toolkit: string;
               returnUrl: string;
             }) => {
@@ -1958,10 +2052,10 @@ describe("connecting a brokered app", () => {
       authorizationUrl: AUTHORIZATION_URL,
     });
     expect(authorized).toEqual([
-      { userId: ADMIN.id, toolkit: "linear", returnUrl: RETURN_URL },
+      { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
-    // And the read that decided there was no connection yet asked about the same person.
-    expect(queried).toEqual([{ toolkit: "linear", userId: ADMIN.id }]);
+    // And the read that decided there was no connection yet asked about the same account.
+    expect(queried).toEqual([{ toolkit: "linear", account: ADMIN_ACCOUNT }]);
   });
 
   test("a brokered row never reaches the checks that belong to the OAuth flow", async () => {
@@ -2086,7 +2180,7 @@ describe("connecting a brokered app", () => {
 
     expect(response.status).toBe(200);
     expect(authorized).toEqual([
-      { userId: ADMIN.id, toolkit: "linear", returnUrl: RETURN_URL },
+      { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
   });
 
@@ -2102,7 +2196,11 @@ describe("connecting a brokered app", () => {
     await connect({}, "?returnTo=admin");
 
     expect(authorized).toEqual([
-      { userId: ADMIN.id, toolkit: "linear", returnUrl: ADMIN_RETURN_URL },
+      {
+        account: ADMIN_ACCOUNT,
+        toolkit: "linear",
+        returnUrl: ADMIN_RETURN_URL,
+      },
     ]);
   });
 
@@ -2114,7 +2212,7 @@ describe("connecting a brokered app", () => {
     await connect({}, "?returnTo=https%3A%2F%2Fevil.test");
 
     expect(authorized).toEqual([
-      { userId: ADMIN.id, toolkit: "linear", returnUrl: RETURN_URL },
+      { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
   });
 
@@ -2258,7 +2356,8 @@ describe("connecting an app whose secret a person types", () => {
     expect(submitted).toEqual([
       {
         toolkit: "firecrawl",
-        userId: ADMIN.id,
+        account: ADMIN_ACCOUNT,
+        by: ADMIN.id,
         values: { api_key: "fc-live-a-secret" },
       },
     ]);
@@ -2366,7 +2465,8 @@ describe("connecting an app whose secret a person types", () => {
     expect(submitted).toEqual([
       {
         toolkit: "firecrawl",
-        userId: ADMIN.id,
+        account: ADMIN_ACCOUNT,
+        by: ADMIN.id,
         values: { api_key: "fc-live-a-secret", base_url: "" },
       },
     ]);
@@ -2592,7 +2692,7 @@ describe("connecting an app whose secret a person types", () => {
       authorizationUrl: AUTHORIZATION_URL,
     });
     expect(authorized).toEqual([
-      { userId: ADMIN.id, toolkit: "linear", returnUrl: RETURN_URL },
+      { account: ADMIN_ACCOUNT, toolkit: "linear", returnUrl: RETURN_URL },
     ]);
     expect(asked).toEqual([]);
     expect(submitted).toEqual([]);
@@ -2644,7 +2744,8 @@ describe("connecting an app whose secret a person types", () => {
     expect(submitted).toEqual([
       {
         toolkit: "firecrawl",
-        userId: DEV_ACTOR.id,
+        account: DEV_ACTOR_ACCOUNT,
+        by: DEV_ACTOR.id,
         values: { api_key: "fc-live-a-secret" },
       },
     ]);
@@ -2685,6 +2786,36 @@ describe("connecting an app whose secret a person types", () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error).toContain("401 unauthorized");
+  });
+});
+
+/**
+ * A key-type app switched to Shared, pressed by somebody who is not an administrator.
+ *
+ * CRITERION. Whose account a Shared app's connection belongs to is settled by `brokeredAccountFor`
+ * before the key-app branch ever asks Composio what to draw a form from: a non-admin's first press
+ * is refused 403, in the same words every other route refuses a non-admin reaching a Shared app's
+ * account, and nothing is asked of the broker on the way.
+ *
+ * REASON. `connectionFields` is a call to the vendor made on behalf of a press that is going to be
+ * refused anyway once whose account this is is known — the same waste the "account already
+ * connected" case above exists to avoid, and the sharper case here: an app switched to Shared
+ * cannot be connected by anybody but an administrator at all, so asking the broker first would
+ * draw a form for a press nobody may ever complete.
+ */
+describe("connecting a key-type Shared app", () => {
+  test("a non-admin's first press is refused before the broker is ever asked", async () => {
+    const { asked, submitted, connectAt } = brokeredApp();
+
+    const response = await connectAt("composio-firecrawl-shared");
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toBe(
+      "An administrator connects shared apps.",
+    );
+    // Nothing was asked of Composio and nothing was sent: the refusal happens before either.
+    expect(asked).toEqual([]);
+    expect(submitted).toEqual([]);
   });
 });
 
@@ -2746,10 +2877,12 @@ describe("connecting an app that needs no account", () => {
     expect(submitted).toEqual([]);
     expect(authorized).toEqual([]);
     /*
-     * The one-account guard still ran first, which is the ordering both other branches sit after
-     * on purpose: whose press this is has to be settled before what the app is.
+     * The no-auth answer comes before any account lookup, which is the opposite ordering from
+     * the other two branches: `schemeKind(row.authScheme) === "none"` is answered straight off
+     * the row, before `brokeredAccountFor` — and so `accountRefFor`, and the one-account guard
+     * it resolves through — is ever asked whose press this is. Nothing was queried.
      */
-    expect(queried).toEqual([{ toolkit: "hackernews", userId: ADMIN.id }]);
+    expect(queried).toEqual([]);
   });
 
   test("a deployment with no app URL answers the same way, because there is no return leg", async () => {
@@ -2834,7 +2967,9 @@ describe("confirming and ending a brokered connection", () => {
     expect(response.status).toBe(200);
     // The store's answer, passed through rather than restated: `connected` is what the vendor said.
     expect(await response.json()).toEqual({ connected: true });
-    expect(confirmed).toEqual([{ toolkit: "linear", userId: ADMIN.id }]);
+    expect(confirmed).toEqual([
+      { toolkit: "linear", account: ADMIN_ACCOUNT, by: ADMIN.id },
+    ]);
   });
 
   test("disconnect ends the session's own account, whatever the caller says", async () => {
@@ -2858,7 +2993,7 @@ describe("confirming and ending a brokered connection", () => {
     expect(disconnected).toEqual([
       {
         toolkit: "linear",
-        userId: ADMIN.id,
+        account: ADMIN_ACCOUNT,
         by: ADMIN.id,
         reason: "self",
       },
@@ -3002,7 +3137,9 @@ describe("re-checking a brokered connection", () => {
       verifiedAt: "2026-09-13T10:00:00.000Z",
       probe: "LINEAR_GET_ME",
     });
-    expect(rechecked).toEqual([{ toolkit: "linear", userId: ADMIN.id }]);
+    expect(rechecked).toEqual([
+      { toolkit: "linear", account: ADMIN_ACCOUNT, by: ADMIN.id },
+    ]);
   });
 
   test("a probe that ran and failed is a failure, not an answer saying not verified", async () => {
