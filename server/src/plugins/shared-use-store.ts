@@ -199,6 +199,17 @@ export function createSharedUseStore(database: Database) {
     ];
   }
 
+  async function botForResponsibility(
+    responsibilityId: string,
+  ): Promise<string | null> {
+    const [goal] = await database
+      .select({ agentId: responsibilities.agentId })
+      .from(responsibilities)
+      .where(eq(responsibilities.id, responsibilityId))
+      .limit(1);
+    return goal?.agentId ?? null;
+  }
+
   async function botFacts(botId: string): Promise<BotFacts> {
     const [profile] = await database
       .select({
@@ -466,6 +477,7 @@ export function createSharedUseStore(database: Database) {
     botFacts,
     actorFacts,
     sourcesOf,
+    botForResponsibility,
     sharedAppsHeldBy,
     botsHolding,
     shortfall,
