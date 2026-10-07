@@ -6610,17 +6610,20 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async disconnectBrokered(input: {
       toolkit: string;
-      userId: string;
+      /** Whose account ends — a person's own, or the one the deployment holds for a Shared app. */
+      account: AccountRef;
       by: string;
       /**
-       * Why the account ended, which is the closed pair and not free text. A brokered account ends
-       * in exactly two ways — the person disconnecting their own, and the person being removed
-       * from the People screen, which is the word {@link retireConnectionsFor} already files its
-       * own rows under. A reader asking the trail which of the two happened can be answered only
-       * if it is the same word every time, so the type is the pair rather than whatever sentence a
-       * caller happened to spell.
+       * Why the account ended, which is a closed set and not free text. A brokered account ends
+       * in exactly four ways — the person disconnecting their own; the person being removed from
+       * the People screen, which is the word {@link retireConnectionsFor} already files its own
+       * rows under; an administrator disconnecting the deployment's account for a Shared app; and
+       * the app being switched between Personal and Shared, which retires the accounts the old
+       * mode held. A reader asking the trail which of them happened can be answered only if it is
+       * the same word every time, so the type is the set rather than whatever sentence a caller
+       * happened to spell.
        */
-      reason: "self" | "person_removed";
+      reason: "self" | "person_removed" | "admin" | "mode_switched";
     }): Promise<{ vendorRevocationRequested: boolean }> {
       if (!broker) throw new BrokerUnconfiguredError();
 
@@ -6662,7 +6665,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       // disconnected. Named apart from the field below because for a key the two differ: something
       // ended, and nothing was asked of the provider.
       const ended = await broker.revoke({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
       });
 
@@ -6671,14 +6674,9 @@ export function createPluginStore(options: PluginStoreOptions) {
       // `returning` because whether a row was here is half of what decides if anybody was
       // disconnected, and a delete that answered nothing would leave the two cases indistinguishable.
       const [deleted] = await database
-        .delete(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
-        .returning({ toolkit: composioConnections.toolkit });
+        .delete(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
+        .returning({ app: brokeredConnections.app });
 
       if (deleted || ended) {
         await recordAuditEvent(auditStore, {
@@ -6690,8 +6688,12 @@ export function createPluginStore(options: PluginStoreOptions) {
             server: input.toolkit,
             // Whose account this was, which is not always who ended it: an administrator
             // offboarding somebody and a person disconnecting themselves write the same shape of
-            // row, and only these two fields tell them apart.
-            owner: input.userId,
+            // row, and only these two fields tell them apart. The deployment's own account has no
+            // person behind it, so it is named as the deployment rather than as whoever pressed.
+            owner:
+              input.account.holder === "person"
+                ? input.account.userId
+                : "deployment",
             reason: input.reason,
             vendorRevocationRequested,
           },
