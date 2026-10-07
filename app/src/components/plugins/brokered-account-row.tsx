@@ -816,6 +816,8 @@ export function BrokeredAccountRow({
   connectedDescription,
   disconnectedDescription,
   disconnectedReassurance,
+  heading,
+  notice,
   title,
 }: {
   account: BrokeredAccount;
@@ -832,6 +834,21 @@ export function BrokeredAccountRow({
    * right for both. A screen with nothing of the second kind to say passes nothing.
    */
   disconnectedReassurance?: string;
+  /**
+   * The row's own title, where "Your account" is wrong for it.
+   *
+   * A shared app is nobody's own account, so the screen that draws one passes its own heading
+   * rather than live with the row's default sense of ownership.
+   */
+  heading?: string;
+  /**
+   * A sentence beneath the row's description, for what the description itself is not about.
+   *
+   * Separate from `connectedDescription`/`disconnectedDescription` because those two already carry
+   * everything the connection state decides; a notice is the screen's own fact about the row —
+   * that it is shared, say — which holds regardless of which of those two is showing.
+   */
+  notice?: string;
   /**
    * The app's own name, for the sentences that name it.
    *
@@ -868,7 +885,7 @@ export function BrokeredAccountRow({
         <ItemContent>
           {/* Not "Connect your account": the row is also the connected state, and a title has to
               read for both. */}
-          <ItemTitle>Your account</ItemTitle>
+          <ItemTitle>{heading ?? "Your account"}</ItemTitle>
           {/* Unclamped where the key is missing: that sentence is the only place the setting is
               named, so it is the point rather than a hint. */}
           <ItemDescription
@@ -882,6 +899,13 @@ export function BrokeredAccountRow({
               title,
             })}
           </ItemDescription>
+          {/* A fact about the row itself rather than about the connection, so it holds under
+              either of the sentences above and is never clamped away. */}
+          {notice ? (
+            <ItemDescription className="line-clamp-none">
+              {notice}
+            </ItemDescription>
+          ) : null}
         </ItemContent>
         {/*
          * AN APP THAT NEEDS NO ACCOUNT HAS NOTHING HERE AT ALL — no Connect, and not a disabled one
