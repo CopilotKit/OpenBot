@@ -990,10 +990,12 @@ export function createPluginRoutes(
   });
 
   /**
-   * Begin connecting one person's own account.
+   * Begin connecting an account: a person's own, or, for a Shared app, the deployment's team
+   * account.
    *
    * Answers with a URL rather than redirecting, so the browser decides when to leave the page. The
-   * state is minted here, from the session, and the person's identity never comes off the callback.
+   * state is minted here, from the session and the row's mode, and never from anything the request
+   * carries.
    */
   routes.post("/servers/:id/connect", requireUser, async (context) => {
     const serverId = context.req.param("id");
@@ -1028,6 +1030,56 @@ export function createPluginRoutes(
     const row = await store.serverAddress(serverId);
     const toolkit = row ? toolkitOf(row.url) : null;
     if (row && toolkit) {
+      /*
+       * AN APP THAT NEEDS NO CREDENTIAL IS ANSWERED HERE, BEFORE `brokeredAccountFor` IS EVER
+       * ASKED WHOSE ACCOUNT THIS IS.
+       *
+       * `accountRefFor` — which that resolver calls — refuses a `none` scheme too, but in the one
+       * sentence it can write for all three routes that share it: "needs no account", with nothing
+       * about what that means or what the app can still do. That function speaks for confirm,
+       * re-check and end as well as connect, so it cannot know which of them is asking or reach for
+       * this route's fuller wording. Asked first and answered here instead, the sentence this route
+       * has always had for a no-auth app — naming what the app is and that a Bot can use it as it
+       * is — stays the one a person pressing Connect reads, rather than going dead code behind the
+       * resolver's terser refusal.
+       */
+      if (schemeKind(row.authScheme) === "none") {
+        return context.json(
+          {
+            error: `${row.title} needs no account, so there is nothing to connect. A Bot granted its tools can use it as it is.`,
+          },
+          400,
+        );
+      }
+
+      /*
+       * WHOSE ACCOUNT THIS IS COMES FROM `brokeredAccountFor`, THE SAME RESOLVER THE OTHER THREE
+       * BROKERED ROUTES CALL, AND FIRST IN THIS BRANCH SO NOTHING BELOW CAN ACT BEFORE IT HAS
+       * ANSWERED. A Personal app's account is the actor's own; a Shared app's is the deployment's,
+       * and only an administrator may reach that one — both decided there, once, rather than
+       * re-derived here. Its refusal already covers no broker being configured and a row that
+       * `accountRefFor` cannot resolve, in the same words this branch used to write itself. The
+       * `none` scheme is the one member of that refusal's vocabulary this branch now answers
+       * itself, for the reason just given — everything `accountRefFor` can still be asked about a
+       * row that reaches this call is never `none`.
+       */
+      const resolved = await brokeredAccountFor(context, serverId);
+      if (resolved.refusal) {
+        return context.json(
+          { error: resolved.refusal.error },
+          resolved.refusal.status,
+        );
+      }
+      const { account } = resolved;
+
+      /*
+       * `composio` IS CHECKED AGAIN HERE FOR `tsc`'S BENEFIT AND NOT FOR THE REFUSAL. The function
+       * above closes over the same binding and has already returned for everybody it is unset for
+       * — this can only be reached once it answered — but that is a fact about the function's
+       * body and not one the type checker can see across the call above. Without this, every
+       * `composio.broker` read below the field and consent branches would be a `possibly
+       * undefined` it cannot actually be.
+       */
       if (!composio) {
         return context.json(
           { error: new BrokerUnconfiguredError().message },
@@ -1036,19 +1088,17 @@ export function createPluginRoutes(
       }
 
       /*
-       * THE PERSON IS THE SESSION'S, HERE AND IN THE READ ABOVE IT.
+       * THE ACCOUNT IS `brokeredAccountFor`'S, HERE AND IN THE READ ABOVE IT.
        *
        * Nothing in this branch reads a user id out of the body or the query, and that is the
        * property rather than an implementation detail: the link minted below attaches an account
-       * to whichever person it names, so a user id a caller could choose would let one POST hang
+       * to whichever one is passed in, so a user id a caller could choose would let one POST hang
        * somebody else's mailbox off this deployment. It is the defect the prior art this design
        * follows shipped three separate times, and it is structural here — there is no line that
-       * could break it.
+       * could break it. For a Shared app the account is the deployment's rather than whoever is
+       * signed in, decided above and never by anything the request carries.
        */
-      const existing = await store.brokeredConnection({
-        toolkit,
-        userId: context.var.actor.id,
-      });
+      const existing = await store.brokeredConnection({ toolkit, account });
       if (existing) {
         /*
          * Named with the step to take rather than only refused: a second link would attach a
@@ -1059,10 +1109,18 @@ export function createPluginRoutes(
          * table row; "Linear" is the name of the thing the person connected and the only one of
          * the two they have ever seen on a screen. An internal key in a sentence addressed to a
          * person is both unhelpful and a small leak of how the rows are keyed.
+         *
+         * WHOSE ALREADY, SAID PLAINLY FOR A SHARED APP. "You already have an account" is true for
+         * a Personal app and false for a Shared one — nobody signed in holds that account, the
+         * deployment does — so a deployment account's refusal names the deployment's connection
+         * rather than putting the actor's own claim on it.
          */
         return context.json(
           {
-            error: `You already have an account connected to ${row.title}. Disconnect it first if you want to connect a different one.`,
+            error:
+              account.holder === "deployment"
+                ? `${row.title} already has a shared account connected. Disconnect it first if you want to connect a different one.`
+                : `You already have an account connected to ${row.title}. Disconnect it first if you want to connect a different one.`,
           },
           409,
         );
@@ -1099,12 +1157,18 @@ export function createPluginRoutes(
       const authScheme = row.authScheme;
 
       /**
-       * WHAT THIS FORK ANSWERS FOR EACH KIND OF APP, AND EVERY ARM IS REACHED BY DECIDING.
+       * WHAT THIS FORK ANSWERS FOR EACH KIND OF APP STILL REACHABLE HERE, AND EVERY ARM IS REACHED
+       * BY DECIDING.
        *
-       * Type-only and erased; see {@link Decides} in `./broker`. A fourth {@link SchemeKind} fails
-       * `tsc` here by name, which is what this roster is for: the fork below reads a three-member
-       * vocabulary with a chain of `if`s, and an `if` chain has no opinion about the answers it was
-       * not written for.
+       * Type-only and erased; see {@link Decides} in `./broker`. A member of this three-name
+       * vocabulary left unanswered fails `tsc` here by name, which is what this roster is for: the
+       * fork below reads it with a chain of `if`s, and an `if` chain has no opinion about the
+       * answers it was not written for.
+       *
+       * `none` IS NOT A MEMBER OF IT, AND IS EXCLUDED RATHER THAN ANSWERED `unreachable`. The
+       * branch above — before `brokeredAccountFor` is ever called — already refused a `none`
+       * scheme in the route's own words, so `authScheme` read here can never be one: this fork is
+       * about the three kinds of app that branch does not already dispose of.
        *
        * CRITERION. Every arm below is entered because {@link schemeKind} said so. No arm is the
        * fall-through of the others.
@@ -1120,65 +1184,14 @@ export function createPluginRoutes(
        * fail closed on that value; this one was the last that did not.
        */
       type _ConnectForkDecides = Decides<
-        SchemeKind,
+        Exclude<SchemeKind, "none">,
         {
           key: "answers with the form the app publishes, and connects what is typed into it";
           consent: "mints a link at Composio for the person to finish at the vendor's own screen";
-          none: "refuses with the fact about the app — there is no account to connect and nothing is asked of Composio";
           unreadable: "refuses, and asks Composio nothing — it is not a consent app and there is no link to mint";
         }
       >;
       const kind = schemeKind(authScheme);
-
-      /*
-       * AN APP THAT NEEDS NO CREDENTIAL IS ANSWERED WITH WHAT IS TRUE OF IT, AND ASKS COMPOSIO
-       * NOTHING.
-       *
-       * ITS OWN KIND, AND THE ONE THIS FORK USED TO HAVE NO ARM FOR. `NO_AUTH` is what
-       * `connectionOf` resolves thirty-four of Composio's toolkits to and what `addBrokeredApp`
-       * records on their rows. It is not a field scheme, so without this it fell through into the
-       * consent arm below and met one of two dead ends: a 503 demanding `OPENBOT_APP_URL` for a
-       * return leg this flow does not have, or `broker.authorize` — which can only fail, because
-       * `ensureAuthConfig` deliberately creates NO authorization config for a no-auth app, Composio
-       * having refused to hold one. The sentence that failure produces tells the person to remove
-       * the app and add it again, and adding it again writes the identical row and fails
-       * identically. That is one of the five connection kinds broken end to end, in the arm reached
-       * by elimination rather than by decision.
-       *
-       * ASKED OF {@link schemeKind} RATHER THAN COMPARED AS A STRING, which is the second half of
-       * that fix and arrived later than the first. The literal comparison here was right about the
-       * app and silent about the vocabulary: `schemeKind` went on calling `NO_AUTH` a CONSENT
-       * scheme, so this route and the per-person gate disagreed with the classifier — and with the
-       * one consumer that did ask it, which wrote a `verified: true` connection row on every page
-       * load for exactly the apps this branch refuses to make one for. `none` is now its own member
-       * and this reads it.
-       *
-       * REFUSED RATHER THAN ANSWERED `connected`, AND THE DIFFERENCE IS A ROW. `composio_connections`
-       * is the whole of the permission for a brokered call, and every row in it means one thing: this
-       * person granted this deployment access to their account at this app. There is no account here
-       * and there is no consent, so nothing may be written — which is exactly what
-       * the store's own `connectionTokenFor` already acts on, letting a `NO_AUTH` call through with
-       * no connection row at all rather than looking for one. A 200 claiming a connection would put
-       * this app in front of every reader of that table — offboarding, the trail, the Disconnect
-       * button — as an account somebody has to end.
-       *
-       * AND THE SENTENCE NAMES NO REMEDY, BECAUSE NOTHING IS WRONG. It says what the app is and that
-       * its tools already work, which is the whole of what the person can act on. 400 for the reason
-       * the OAuth branch below gives a row that is not connected as an individual person one: the act
-       * does not apply to this kind of row.
-       *
-       * THE APP'S TITLE, NOT THE ROW'S ID, for the reason the one-account refusal above says it:
-       * `composio-hackernews` is how this deployment keys a table and "Hacker News" is the name of
-       * the thing on the screen.
-       */
-      if (kind === "none") {
-        return context.json(
-          {
-            error: `${row.title} needs no account, so there is nothing to connect. A Bot granted its tools can use it as it is.`,
-          },
-          400,
-        );
-      }
 
       if (isFieldScheme(authScheme)) {
         /*
@@ -1452,7 +1465,8 @@ export function createPluginRoutes(
           return context.json(
             await store.connectBrokeredWithFields({
               toolkit,
-              userId: context.var.actor.id,
+              account,
+              by: context.var.actor.id,
               values,
             }),
           );
@@ -1555,21 +1569,33 @@ export function createPluginRoutes(
        * Both pages confirm on load, which is what makes either of them a correct destination: the
        * return trip carries nothing signed, so arriving proves nothing, and the page asks Composio
        * whether the account is really attached before anything here says it is.
+       *
+       * FORCED TO "admin" FOR A DEPLOYMENT ACCOUNT, AND NOT LEFT TO THE QUERY. A Shared app's
+       * settings page shows nobody's own connection — the account the consent is about belongs to
+       * the deployment — so "settings" would land an administrator who just granted it back on a
+       * page with nothing of theirs to confirm. The admin screen is the one that reads a Shared
+       * app's row, and it is where this consent began.
        */
       const returnTo: ConnectOrigin =
-        context.req.query("returnTo") === "admin" ? "admin" : "settings";
+        account.holder === "deployment"
+          ? "admin"
+          : context.req.query("returnTo") === "admin"
+            ? "admin"
+            : "settings";
 
       /*
-       * THE URL IS A BEARER CAPABILITY. Whoever opens it attaches an account to this person's
-       * connection, so it is answered to the browser that asked and to nothing else: not logged,
-       * not audited, not put in an error body. A redirect url in a log line is somebody else's
-       * mailbox for as long as it stays valid — which is why the failure below answers with the
-       * vendor's sentence and never with what was being minted when it failed.
+       * THE URL IS A BEARER CAPABILITY. Whoever opens it attaches an account to the connection
+       * resolved above — this person's own for a Personal app, or the deployment's for a Shared
+       * one — so it is answered to the browser that asked and to nothing else: not logged, not
+       * audited, not put in an error body. A redirect url in a log line is somebody else's mailbox,
+       * or the deployment's shared one, for as long as it stays valid — which is why the failure
+       * below answers with the vendor's sentence and never with what was being minted when it
+       * failed.
        */
       let redirectUrl: string;
       try {
         ({ redirectUrl } = await composio.broker.authorize({
-          userId: context.var.actor.id,
+          account,
           toolkit,
           /*
            * THE REFUSAL ABOVE CHECKS THAT A SETTING IS SET; THIS CHECKS THAT IT IS AN ADDRESS.
@@ -1688,13 +1714,13 @@ export function createPluginRoutes(
   });
 
   /**
-   * Which app, and whose account in it, one of the three routes below is about, or the refusal that
+   * Which app, and whose account in it, one of the four routes below is about, or the refusal that
    * ends it — decided by the row's mode and the signed-in person, never by anything in the request.
    *
    * Each of them acts on a brokered connection and on nothing else, so each asks the same questions
    * in the same order and answers them in the same words. It is one function because the sentence
    * somebody reads when they aim any of those routes at an ordinary OAuth row, or at a Shared app
-   * they have no business touching, should not be able to drift into three sentences.
+   * they have no business touching, should not be able to drift into four sentences.
    *
    * THE APP COMES OFF THE ROW'S URL AND NEVER OFF ITS ID, for the reason the directory route and
    * the connect branch above both give: the url is where the transport reads which app a call is
@@ -1717,11 +1743,15 @@ export function createPluginRoutes(
    * NEVER THE REQUEST. A Personal app answers with the actor's own identity; a Shared app answers
    * with the deployment's — one account, decided here, rather than whatever a caller could name in
    * a body. A Shared app's account belongs to the deployment and not to whoever is signed in, so an
-   * actor who is not an administrator is refused here, once, instead of in three routes below.
+   * actor who is not an administrator is refused here, once, instead of in four routes below.
    *
-   * The connect route's brokered branch does not come through this function, deliberately: a row
-   * that is not brokered has an OAuth flow below it to fall through to, so refusing there would be
-   * wrong.
+   * THE CONNECT ROUTE'S BROKERED BRANCH IS THE FOURTH, CALLED ONLY ONCE IT ALREADY KNOWS THE
+   * BRANCH IS TAKEN. That route still asks `toolkitOf` itself before this function is ever reached
+   * — a row that is not brokered has an OAuth flow below it to fall through to, and refusing it
+   * here, where there is no such flow to fall through to, would be wrong. Once that question is
+   * settled and the answer is yes, whose account the connection is for is exactly the question
+   * this function exists to answer once, rather than a fourth place a Shared app's account could
+   * be decided differently from the other three.
    */
   const brokeredAccountFor = async (
     context: { var: AppVariables },

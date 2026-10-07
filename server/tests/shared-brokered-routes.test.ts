@@ -17,19 +17,25 @@ const suite = randomUUID().slice(0, 8);
 const app = `team-gh-${suite}`;
 const VENDOR_ID = `openbot-deployment:acme-${suite}:R`;
 const authorizedFor: string[] = [];
+const returnUrlsSeen: string[] = [];
+let connectWithFieldsCalls = 0;
 
 const broker: ConnectedAppBroker = {
   listApps: async () => [],
   ensureAuthConfig: async () => "standing",
   deleteAuthConfig: async () => {},
-  authorize: async ({ account }) => {
+  authorize: async ({ account, returnUrl }) => {
     authorizedFor.push(account.vendorUserId);
+    returnUrlsSeen.push(returnUrl);
     return { redirectUrl: "https://vendor.example/consent" };
   },
   isConnected: async () => true,
   revoke: async () => true,
   connectionFields: async () => [],
-  connectWithFields: async () => ({ accountId: "ca_1" }),
+  connectWithFields: async () => {
+    connectWithFieldsCalls += 1;
+    return { accountId: "ca_1" };
+  },
   revokeAccount: async () => {},
   accountName: async () => "acme-bot",
 };
@@ -70,6 +76,8 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
 
 beforeEach(async () => {
   authorizedFor.length = 0;
+  returnUrlsSeen.length = 0;
+  connectWithFieldsCalls = 0;
   await database.insert(mcpServers).values({
     id: app,
     title: "Team GitHub",
@@ -149,6 +157,67 @@ describe("connecting a shared app", () => {
         { method },
       );
       expect(response.status).toBe(403);
+    }
+  });
+
+  test("an existing deployment account refuses a second connect, naming the app rather than the person", async () => {
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: VENDOR_ID,
+      connectedBy: `admin-${suite}`,
+      verified: true,
+    });
+    const response = await appAs("admin").request(
+      `/api/plugins/servers/${app}/connect`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "Team GitHub already has a shared account connected. Disconnect it first if you want to connect a different one.",
+    });
+  });
+
+  test("an admin lands back on the admin page even without ?returnTo=admin", async () => {
+    const response = await appAs("admin").request(
+      `/api/plugins/servers/${app}/connect`,
+      { method: "POST" },
+    );
+    expect(response.status).toBe(200);
+    expect(returnUrlsSeen).toHaveLength(1);
+    expect(returnUrlsSeen[0]).toContain("/admin/plugins/");
+  });
+
+  test("a non-admin cannot connect a key-type shared app either, and nothing is sent to the vendor", async () => {
+    const keyApp = `${app}-key`;
+    await database.insert(mcpServers).values({
+      id: keyApp,
+      title: "Team GitHub Key",
+      vendor: "Composio",
+      url: `composio://${keyApp}`,
+      provenance: "composio",
+      authScheme: "API_KEY",
+      accountMode: "shared",
+      sharedVendorUserId: `openbot-deployment:acme-${suite}:K`,
+    });
+    try {
+      const response = await appAs("user").request(
+        `/api/plugins/servers/${keyApp}/connect`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ values: { api_key: "secret" } }),
+        },
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "An administrator connects shared apps.",
+      });
+      expect(connectWithFieldsCalls).toBe(0);
+    } finally {
+      await database.delete(mcpServers).where(eq(mcpServers.id, keyApp));
     }
   });
 });
