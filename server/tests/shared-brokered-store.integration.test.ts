@@ -470,6 +470,56 @@ describe("a duplicate row at an app's url", () => {
     ).toMatchObject({ reachedAs: asker });
   });
 
+  test("asks the approval gate under the app's id for a write granted through it", async () => {
+    const gateSaw: { toolRef: string; scope: string }[] = [];
+    const store = createPluginStore({
+      database,
+      auditStore: createAuditStore(database),
+      credentials: credentialsStub,
+      encryptionKey: "x".repeat(44),
+      policy: () => policy,
+      broker,
+      deploymentId: `acme-${suite}`,
+      sharedUse: async () => ({ allowed: true }),
+      approvalGate: async (candidate) => {
+        gateSaw.push({ toolRef: candidate.toolRef, scope: candidate.scope });
+        return undefined;
+      },
+    });
+    await seedShared(store, true);
+    await seedDuplicate(store, {
+      accountMode: "shared",
+      sharedVendorUserId: VENDOR_ID,
+    });
+    await database.insert(mcpTools).values({
+      serverId: duplicate,
+      name: "GITHUB_CREATE_ISSUE",
+      description: "Create an issue.",
+      effect: "write",
+      version: "1",
+    });
+    await store.grant(
+      "mcp",
+      `${duplicate}/GITHUB_CREATE_ISSUE`,
+      bot,
+      "admin@example.test",
+    );
+    useComposioClient({
+      listActions: async () => [],
+      execute: async () =>
+        ({ successful: true, data: {}, error: null }) as never,
+    });
+    await store.callTool({
+      ref: `${duplicate}/GITHUB_CREATE_ISSUE`,
+      args: {},
+      botId: bot,
+      actorId: asker,
+    });
+    expect(gateSaw).toEqual([
+      { toolRef: `${app}/GITHUB_CREATE_ISSUE`, scope: app },
+    ]);
+  });
+
   test("a mode written through the duplicate lands on the row that answers", async () => {
     const store = freshStore();
     await seedShared(store, false);

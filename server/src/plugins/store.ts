@@ -7809,12 +7809,21 @@ export function createPluginStore(options: PluginStoreOptions) {
         }
       }
 
+      /*
+       * THE APPROVAL GATE IS ASKED UNDER THE APP'S ID TOO, for a brokered row whose app has an
+       * answering row. Rules are written against the app — the Shared default is `${appId}/*`
+       * scoped to the app's id — so a write granted through a duplicate row has to be judged as
+       * the app's, or it matches no rule and walks past the ask an administrator set. `target`
+       * still names the dialled row, which is what the call itself goes to; every other row is
+       * asked about exactly as before.
+       */
+      const gateApp = access.credential === "brokered" ? app : null;
       const approval = await options.approvalGate?.({
         actorId: input.actorId,
         botId: input.botId,
-        toolRef: input.ref,
+        toolRef: gateApp ? `${gateApp.id}/${toolName}` : input.ref,
         effect,
-        scope: serverId,
+        scope: gateApp ? gateApp.id : serverId,
         args: vendorArgs,
         target: { serverId, toolName, url: row.url, effect },
         continuation: currentApprovalContext(),
