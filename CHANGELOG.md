@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.1.2
+
 ### CopilotKit 1.77 and AG-UI 1.0
 
 OpenBot now runs on CopilotKit 1.77.0 (`@copilotkit/runtime`, `react-core` and `a2ui-renderer`,
