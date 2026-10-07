@@ -5073,29 +5073,28 @@ export function createPluginStore(options: PluginStoreOptions) {
      *
      * THE ROW IS A CACHE OF COMPOSIO'S ANSWER, not a record of a flow this deployment watched
      * finish. Nothing here holds a secret for a brokered app: the vendor keeps the account, and
-     * what {@link composioConnections} holds is the sentence "Composio said yes when we asked",
+     * what {@link brokeredConnections} holds is the sentence "Composio said yes when we asked",
      * written down so that every later call can be gated without a round trip. That makes drift
      * possible by construction — somebody can end the connection in Composio's own dashboard, and
      * this row would go on saying yes — and it is why {@link confirmBrokeredConnection} asks the
      * vendor again rather than trusting what is here. Calling confirm on any page load is
      * therefore how a row that drifted heals.
      *
-     * Read by the pair, because the pair is the primary key: an app has many people's connections
-     * and a person has many apps, and the only question anybody asks is about one of each.
+     * Read by the pair, because the pair is what the partial unique indexes enforce one row per:
+     * (provider, app) among deployment rows and (provider, app, user_id) among person rows —
+     * `holder` is each partial index's WHERE predicate, not a key column, so an ON CONFLICT
+     * target must name exactly those columns with the matching WHERE. An app has many people's
+     * connections and a person has many apps, and the only question anybody asks is about one of
+     * each.
      */
     async brokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
     }): Promise<{ connectedAt: string } | null> {
       const [row] = await database
-        .select({ connectedAt: composioConnections.connectedAt })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .select({ connectedAt: brokeredConnections.connectedAt })
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
 
       if (!row) return null;
@@ -5249,7 +5248,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      * seconds, and nothing held the row still across it. A person pressing Re-check and then
      * Disconnect in another tab — or a concurrent {@link confirmBrokeredConnection} getting `false`
      * from Composio and deleting the row — had the revoke complete at Composio and the row deleted,
-     * and then this in-flight upsert PUT IT BACK. `composio_connections` is the whole of the
+     * and then this in-flight upsert PUT IT BACK. `brokered_connections` is the whole of the
      * permission a brokered call is decided on, so what the re-insert restores is access to an
      * account the person has just disconnected, drawn on every screen as connected.
      *
@@ -5274,7 +5273,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async recordBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      connectedBy?: string;
       verified: boolean;
       probeAction: string | null;
       /** See the paragraph on `only` above. Absent is the ordinary upsert. */
@@ -5299,31 +5299,47 @@ export function createPluginStore(options: PluginStoreOptions) {
          * deleted while the vendor was being asked — and the caller has a sentence for that.
          */
         const written = await database
-          .update(composioConnections)
+          .update(brokeredConnections)
           .set(set)
-          .where(
-            and(
-              eq(composioConnections.toolkit, input.toolkit),
-              eq(composioConnections.userId, input.userId),
-            ),
-          )
-          .returning({ userId: composioConnections.userId });
+          .where(accountRow(input.toolkit, input.account))
+          .returning({ vendorUserId: brokeredConnections.vendorUserId });
         return { verifiedAt, wrote: written.length > 0 };
       }
 
       await database
-        .insert(composioConnections)
+        .insert(brokeredConnections)
         .values({
-          toolkit: input.toolkit,
-          userId: input.userId,
+          provider: "composio",
+          app: input.toolkit,
+          holder: input.account.holder,
+          userId:
+            input.account.holder === "person" ? input.account.userId : null,
+          vendorUserId: input.account.vendorUserId,
+          connectedBy:
+            input.account.holder === "deployment"
+              ? (input.connectedBy ?? null)
+              : null,
           verified: input.verified,
           verifiedAt,
           probeAction: input.probeAction,
         })
-        .onConflictDoUpdate({
-          target: [composioConnections.toolkit, composioConnections.userId],
-          set,
-        });
+        .onConflictDoUpdate(
+          input.account.holder === "person"
+            ? {
+                target: [
+                  brokeredConnections.provider,
+                  brokeredConnections.app,
+                  brokeredConnections.userId,
+                ],
+                targetWhere: sql`${brokeredConnections.holder} = 'person'`,
+                set,
+              }
+            : {
+                target: [brokeredConnections.provider, brokeredConnections.app],
+                targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
+                set,
+              },
+        );
       return { verifiedAt, wrote: true };
     },
 
@@ -5365,7 +5381,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async probeBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
       /**
        * THE ACCOUNT TO SPEND IT IN, where the caller has one in mind.
        *
@@ -5375,9 +5391,10 @@ export function createPluginStore(options: PluginStoreOptions) {
        * other, working account — and the same defect the other way round condemned a good key, and
        * deleted the account it made, on the strength of some other account of theirs being broken.
        *
-       * ABSENT FOR A RE-CHECK, AND THAT IS A GAP RATHER THAN A CHOICE. `composio_connections`
-       * records no account id — the row is keyed on the person and the app — so a press of Re-check
-       * has nothing to pin to and asks the vendor the same app-level question it always did. It is
+       * ABSENT FOR A RE-CHECK, AND THAT IS A GAP RATHER THAN A CHOICE. `brokered_connections`
+       * records no account id — a person's row is keyed on the person and the app, a deployment
+       * row on the app alone — so a press of Re-check has nothing to pin to and asks the vendor
+       * the same app-level question it always did. It is
        * the milder half: a re-check writes a verdict but takes nothing away, and its refusal tells
        * the person their key is wrong rather than removing anything they hold.
        */
@@ -5453,7 +5470,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       const { result, answered } = await composioAskAction(
         {
           url: `composio://${input.toolkit}`,
-          actorId: input.userId,
+          actorId: input.account.vendorUserId,
           // Spread rather than passed as `undefined`, so "any account of theirs" reaches the wire
           // as a body with no such key. See {@link ComposioActions.execute}.
           ...(input.accountId === undefined
