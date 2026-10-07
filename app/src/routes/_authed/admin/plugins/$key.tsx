@@ -55,6 +55,7 @@ import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
+  personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
@@ -186,10 +187,14 @@ function RouteComponent() {
    * The row itself rather than whether there is one, because the brokered row below wants what the
    * last re-check found and that is written on this same row. Asking a second time for it would be
    * a second answer to a question this read already carried.
+   *
+   * ONLY THIS PERSON'S OWN ROWS. A Shared app's deployment row arrives on the same read, and taking
+   * it for "you connected" would tell an administrator their own account is live when the one live
+   * account is the team's.
    */
-  const connection = (connections.data?.connections ?? []).find(
-    (row) => row.serverId === key,
-  );
+  const connection = personalConnections(
+    connections.data?.connections ?? [],
+  ).find((row) => row.serverId === key);
   const youConnected = connection !== undefined;
   /*
    * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
@@ -308,6 +313,19 @@ function RouteComponent() {
     "Setup is complete without it, and it reaches your documents only.";
 
   /*
+   * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
+   *
+   * The deployment row is listed whether or not anything is connected to it, so its presence is not
+   * the answer — its `connected` field is. The hook below is still called once and unconditionally,
+   * per the rules of hooks; what changes is which row feeds it.
+   */
+  const shared = server?.accountMode === "shared";
+  const sharedConnection = (connections.data?.connections ?? []).find(
+    (row) => row.serverId === key && row.holder === "deployment",
+  );
+  const accountRow = shared ? sharedConnection : connection;
+
+  /*
    * Everything the brokered row below reads and does, shared with the personal connected-accounts
    * screen that draws the same row. See `brokered-account-row.tsx`.
    *
@@ -318,7 +336,7 @@ function RouteComponent() {
     authScheme: server?.authScheme ?? null,
     brokered: auth === "brokered",
     configured: plugins.data?.composioConfigured ?? false,
-    recorded: youConnected,
+    recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
     report: setError,
     // Back to this page afterwards, not to the personal settings screen.
     returnTo: "admin",
@@ -329,15 +347,15 @@ function RouteComponent() {
      * columns default to. The three are optional on the type because that endpoint concatenates two
      * reads and only a brokered row carries them.
      */
-    verified: connection?.verified ?? false,
-    verifiedAt: connection?.verifiedAt ?? null,
+    verified: accountRow?.verified ?? false,
+    verifiedAt: accountRow?.verifiedAt ?? null,
     /*
      * AND THIS ONE IS NOT FLATTENED, for the reason the personal screen gives: the two above fall
      * back on the server's own column defaults, while a null here is the server's record that the
      * last check spent nothing — not the absence of a record. The row draws a different sentence
      * for each, so the difference has to reach it.
      */
-    probe: connection?.probe,
+    probe: accountRow?.probe,
     /*
      * WHILE THIS ONE IS, for the reason that screen gives too: it is the Re-check button's gate and
      * not a sentence. The record above says what was spent and this says whether the app has
@@ -345,7 +363,7 @@ function RouteComponent() {
      * was tried on with no way to ever have anything tried on it. Absent and false are the same
      * closed gate, so the fallback costs nothing here.
      */
-    checkable: connection?.checkable ?? false,
+    checkable: accountRow?.checkable ?? false,
   });
 
   /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
@@ -693,6 +711,15 @@ function RouteComponent() {
                 <Separator />
                 {connectionsUnreadable ? (
                   <ConnectionStateUnreadable />
+                ) : shared ? (
+                  <BrokeredAccountRow
+                    account={brokeredAccount}
+                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot granted these tools acts as this account.`}
+                    disconnectedDescription="No team account is connected, so Bots granted these tools are refused."
+                    heading="Team account"
+                    notice="Sign in as the team account, not your own."
+                    title={title}
+                  />
                 ) : (
                   <BrokeredAccountRow
                     account={brokeredAccount}

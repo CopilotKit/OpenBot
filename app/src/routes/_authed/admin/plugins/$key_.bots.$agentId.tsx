@@ -8,7 +8,19 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import {
+  SharedApprovalFields,
+  sharedSectionSentence,
+} from "@/components/plugins/shared-approval-fields";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -30,6 +42,11 @@ import {
   type PluginTool,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import {
+  botSharedAppsQueryOptions,
+  type SharedUseApproval,
+  sharedUseKeys,
+} from "@/lib/plugins/shared-use";
 
 /**
  * One Bot and one app: every action the app offers, and which of them this Bot holds.
@@ -105,6 +122,29 @@ function RouteComponent() {
   });
 
   const server = plugins.data?.servers.find((row) => row.id === key);
+  /*
+   * Shared only once the server itself says so. `exposure` is fetched for exactly that case — it is
+   * this Bot's whole shared-apps picture, and here it is read for one app's current approval, so a
+   * switched-on action never asks twice for the same consent.
+   */
+  const shared = server?.accountMode === "shared";
+  const exposure = useQuery({
+    ...botSharedAppsQueryOptions(agentId),
+    enabled: shared,
+  });
+  /*
+   * The row whose switch a shared grant is waiting on, and the approval the dialog for it is
+   * showing. Not scoped per-row because only one dialog is ever open at a time.
+   */
+  const [pendingGrant, setPendingGrant] = useState<{ ref: string } | null>(
+    null,
+  );
+  const [approval, setApproval] = useState<SharedUseApproval>({
+    audience: "team",
+    outsideInput: false,
+    members: [],
+  });
+  const [grantingShared, setGrantingShared] = useState(false);
   const appTitle =
     plugins.data?.catalogue.find((item) => item.key === key)?.title ??
     server?.title ??
@@ -247,6 +287,44 @@ function RouteComponent() {
     (tool) => held(tool) || tool.effect === "read",
   ).length;
 
+  /*
+   * The approval already standing for THIS app, read off the Bot's own exposure rather than off any
+   * one tool — a grant is per-action but the account behind a Shared app is one account, approved or
+   * not for the whole of it. `undefined` while `exposure` has not answered yet, which is exactly what
+   * routes a switch flipped mid-load to the dialog: see the comment on `onCheckedChange` below.
+   */
+  const sharedApp = exposure.data?.apps.find((app) => app.serverId === key);
+
+  /*
+   * The confirm button on the shared-grant dialog: the one write a switched-on Switch is still
+   * waiting for once somebody has set the audience they want. `grantPlugin` takes the approval
+   * directly — this is the one request in the app allowed to set one, being an administrator's own
+   * narrowing of it — and the dialog closes only once the grant is in and the page has refetched, so
+   * it never reports done while the switch underneath it is still off.
+   */
+  const confirmSharedGrant = async () => {
+    if (!pendingGrant) return;
+    setError(null);
+    setGrantingShared(true);
+    try {
+      await grantPlugin({
+        agentId,
+        kind: "mcp",
+        ref: pendingGrant.ref,
+        approval,
+      });
+      await invalidatePlugins(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: sharedUseKeys.bot(agentId),
+      });
+      setPendingGrant(null);
+    } catch (thrown) {
+      setError((thrown as Error).message);
+    } finally {
+      setGrantingShared(false);
+    }
+  };
+
   /** One card of switchable rows. Both sections are the same row, so they are the same code. */
   const rows = (tools: PluginTool[]) => (
     <PageRows>
@@ -286,10 +364,31 @@ function RouteComponent() {
                 checked={held(tool)}
                 disabled={
                   granting !== null ||
+                  pendingGrant?.ref === tool.ref ||
                   (setGrant.isPending && setGrant.variables?.ref === tool.ref)
                 }
                 onCheckedChange={(next) => {
                   setError(null);
+                  /*
+                   * A Shared app has one account behind every action on it, so switching one on is
+                   * consent for what that account can do, not just for this row — and that consent
+                   * is asked for once per app, not once per action. Already held for this app (an
+                   * approval `exposure` already carries) takes the switch straight through below; not
+                   * yet held — including while `exposure` is still loading, which is exactly when a
+                   * stale "no approval yet" must not be trusted as the final answer — stops here and
+                   * asks first.
+                   */
+                  if (next && shared && !sharedApp?.approval) {
+                    setPendingGrant({ ref: tool.ref });
+                    setApproval(
+                      sharedApp?.needed ?? {
+                        audience: "team",
+                        outsideInput: false,
+                        members: [],
+                      },
+                    );
+                    return;
+                  }
                   setGrant.mutate({
                     agentId,
                     granted: next,
@@ -364,7 +463,10 @@ function RouteComponent() {
           ) : null}
 
           <PageSection
-            description="These only read. A boundary written about writes does not apply to them."
+            description={
+              sharedSectionSentence("read", shared) ??
+              "These only read. A boundary written about writes does not apply to them."
+            }
             title="Reads"
           >
             {reads.length === 0 ? (
@@ -379,7 +481,10 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="These change something at the vendor. A boundary written about writes applies to them, and each call is refused when one matches."
+            description={
+              sharedSectionSentence("write", shared) ??
+              "These change something at the vendor. A boundary written about writes applies to them, and each call is refused when one matches."
+            }
             title="Changes things"
           >
             {writes.length === 0 ? (
@@ -392,6 +497,55 @@ function RouteComponent() {
               rows(writes)
             )}
           </PageSection>
+
+          {/*
+           * Stacked over the switch it came from, same pattern as the delete confirmation in
+           * `agent-dialog.tsx`: the consent a Shared app needs is its own moment, not a row that
+           * happens to have grown a form. Closing without confirming — the backdrop, Escape, or
+           * Cancel — leaves `pendingGrant` behind and the Switch stays exactly where it was; nothing
+           * is granted until the confirm button below runs.
+           */}
+          <Dialog
+            onOpenChange={(next) => !next && setPendingGrant(null)}
+            open={pendingGrant !== null}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  Let {botName} use the shared {appTitle} account?
+                </DialogTitle>
+              </DialogHeader>
+              <DialogBody className="mt-4">
+                <SharedApprovalFields onChange={setApproval} value={approval} />
+              </DialogBody>
+              {/*
+               * The same `error` the rest of the screen reports a refused write with, shown here too:
+               * the dialog stays open on a refusal rather than closing over it, so whoever is looking
+               * at the form that was refused is where the reason has to be.
+               */}
+              {error ? (
+                <p className="mt-4 text-destructive text-sm" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <DialogFooter className="mt-4">
+                <Button
+                  onClick={() => setPendingGrant(null)}
+                  size="sm"
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={grantingShared}
+                  onClick={() => void confirmSharedGrant()}
+                  size="sm"
+                >
+                  {grantingShared ? "Granting…" : "Let it in"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </PageShell>
