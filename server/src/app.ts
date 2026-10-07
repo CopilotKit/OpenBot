@@ -81,7 +81,6 @@ import { createDictationRoutes } from "./dictation/routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { createIntelligenceClient } from "./intelligence-client";
-import type { SelfHostBanner } from "./self-host-banner";
 import {
   createLearningRoutes,
   type LearningAdminDependencies,
@@ -94,8 +93,11 @@ import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
 import type { SignInService } from "./passwords/service";
 import type { OnboardingStore } from "./people/onboarding";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
+import type { AccountModeSwitch } from "./plugins/account-mode";
 import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
+import { createSharedUseRoutes } from "./plugins/shared-use-routes";
+import type { SharedUseStore } from "./plugins/shared-use-store";
 import {
   isDeploymentFault,
   PluginRefusedError,
@@ -119,6 +121,7 @@ import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
+import type { SelfHostBanner } from "./self-host-banner";
 import { createTeamBotRoutes } from "./team-bots/routes";
 import type { TeamBots } from "./team-bots/team-bots";
 import type { PackageStatusReader } from "./tenant-package";
@@ -420,6 +423,15 @@ export function createApp(
    * resolver still answers from `config.selfHostBanner` rather than asking the network.
    */
   selfHostBanner?: SelfHostBanner,
+  /**
+   * Shared apps: who may use an app's one team account, and the switch that makes an app Shared.
+   *
+   * Appended last, like `composio` was. One object carries both because every surface that needs
+   * one needs the other's store: the plugin routes switch modes and record approvals, the approvals
+   * inbox answers requests, and publishing or assigning a Bot re-checks what it was approved for.
+   * Absent, none of those surfaces exists — and nothing can turn an app Shared either.
+   */
+  shared?: { modes: AccountModeSwitch; use: SharedUseStore },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -1329,6 +1341,7 @@ export function createApp(
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
         config.managedAgent?.endpoint?.toString(),
+        shared?.use,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -1474,7 +1487,17 @@ export function createApp(
   if (coworker?.teamBots)
     app.route(
       "/api/team-bots",
-      createTeamBotRoutes(coworker.teamBots, requireUser),
+      createTeamBotRoutes(coworker.teamBots, requireUser, shared?.use),
+    );
+  /*
+   * BEFORE `/api/approvals`, which would otherwise take every path under it and answer 404 for
+   * these. Needs the trail as well as the store: approving a Bot's use of a team account is a
+   * decision somebody must be able to find later.
+   */
+  if (shared && auditStore)
+    app.route(
+      "/api/approvals/shared-use",
+      createSharedUseRoutes(shared.use, requireUser, auditStore),
     );
   if (coworker?.approvals)
     app.route(
@@ -1524,6 +1547,7 @@ export function createApp(
         requireUser,
         bindings,
         coworker.responsibilities.triggers,
+        shared?.use,
       ),
     );
     if (coworker.responsibilities.triggers) {
@@ -1594,6 +1618,7 @@ export function createApp(
           appUrl: config.appUrl,
         },
         composio,
+        shared,
       ),
     );
   }

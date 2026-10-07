@@ -187,6 +187,7 @@ import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
+import { createAccountModeSwitch } from "./plugins/account-mode";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
@@ -760,6 +761,19 @@ const pluginStore = createPluginStore({
    * attempted.
    */
   broker: composio?.broker,
+});
+
+/*
+ * Personal ⇄ Shared for a brokered app. Built here because it needs the plugin store, the shared-use
+ * store and the approval policy at once: making an app Shared ends people's accounts, approves each
+ * Bot that holds it and adds an ask-before-write rule for its writes.
+ */
+const accountModes = createAccountModeSwitch({
+  store: pluginStore,
+  sharedUse: sharedUseStore,
+  teamRules: approvalService.store.policy,
+  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+  audit: bootAuditStore,
 });
 
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
@@ -3068,6 +3082,7 @@ const app = createApp(
     enabled: config.selfHostBanner,
     entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
   }),
+  { modes: accountModes, use: sharedUseStore },
 );
 
 /**
