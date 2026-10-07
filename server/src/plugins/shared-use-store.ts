@@ -628,7 +628,18 @@ export function createSharedUseStore(database: Database) {
       });
     }
     const [row] = await rows(eq(sharedUseRequests.id, input.id));
-    return row!;
+    /*
+     * THE CLAIM ABOVE PROVES THE REQUEST ROW IS THERE, and this read still has to be checked: `rows`
+     * inner-joins the Bot's profile and the app, so a Bot or an app deleted between the claim and
+     * this line drops the request out of the listing entirely. Returning it as though it were read
+     * would hand back a decided request nobody can see; saying so names the one thing that happened.
+     */
+    if (!row) {
+      throw new Error(
+        `Shared-account request ${input.id} was ${input.decision}d, but its Bot or its app is no longer here to read it back.`,
+      );
+    }
+    return row;
   }
 
   return {

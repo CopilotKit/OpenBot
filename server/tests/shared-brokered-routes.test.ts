@@ -106,7 +106,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
       {
         publicUrl: "https://openbot.example",
         appUrl: "https://app.example",
-        encryptionKey: "A".repeat(43) + "=",
+        encryptionKey: `${"A".repeat(43)}=`,
         personHasAccess: async () => true,
       },
       { broker },

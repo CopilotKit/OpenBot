@@ -100,14 +100,12 @@ beforeEach(async () => {
   await database
     .insert(agents)
     .values({ id: bot, name: "Ops", type: "built_in", configuration: {} });
-  await database
-    .insert(pluginGrants)
-    .values({
-      kind: "mcp",
-      ref: `${app}/LINEAR_LIST`,
-      agentId: bot,
-      grantedBy: "admin@example.test",
-    });
+  await database.insert(pluginGrants).values({
+    kind: "mcp",
+    ref: `${app}/LINEAR_LIST`,
+    agentId: bot,
+    grantedBy: "admin@example.test",
+  });
   await database.insert(brokeredConnections).values([
     {
       provider: "composio",
@@ -248,14 +246,12 @@ describe("switching back to Personal", () => {
       .select()
       .from(mcpServers)
       .where(eq(mcpServers.id, app));
-    await database
-      .insert(brokeredConnections)
-      .values({
-        provider: "composio",
-        app,
-        holder: "deployment",
-        vendorUserId: row!.sharedVendorUserId!,
-      });
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: row!.sharedVendorUserId!,
+    });
     revoked.length = 0;
     expect(
       await modes.switchMode({

@@ -7,7 +7,7 @@ import {
 } from "../src/agents/callback-token";
 import { delegatedWork } from "../src/agents/handoff-tool";
 
-const KEY = "A".repeat(43) + "=";
+const KEY = `${"A".repeat(43)}=`;
 
 describe("handoffInitiator", () => {
   test("a hop from a run a trigger started carries the trigger as its origin", () => {
