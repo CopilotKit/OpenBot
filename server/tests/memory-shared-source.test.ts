@@ -66,7 +66,7 @@ describe("a memory source on a Shared app", () => {
         toolRef: tool.ref,
       }),
     ).rejects.toThrow(
-      /Team GitHub is shared and no account is connected to it yet/,
+      /Team GitHub is shared across this deployment and no account is connected to it yet/,
     );
   });
 
