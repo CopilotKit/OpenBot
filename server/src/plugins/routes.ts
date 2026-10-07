@@ -970,11 +970,16 @@ export function createPluginRoutes(
      * strings rather than by `localeCompare`, because the order only has to be the SAME one every
      * time, and a collation that varies with the deployment's locale is not that.
      */
-    const [held, brokered] = await Promise.all([
+    const [held, brokered, shared] = await Promise.all([
       store.connectionsFor(context.var.actor.id),
       store.brokeredConnectionsFor(context.var.actor.id),
+      store.sharedConnections(),
     ]);
-    const connections = [...held, ...brokered].sort((left, right) => {
+    const connections = [
+      ...held.map((row) => ({ ...row, holder: "person" as const })),
+      ...brokered.map((row) => ({ ...row, holder: "person" as const })),
+      ...shared,
+    ].sort((left, right) => {
       if (left.serverId < right.serverId) return -1;
       return left.serverId > right.serverId ? 1 : 0;
     });
