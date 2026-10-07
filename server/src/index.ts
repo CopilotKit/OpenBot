@@ -192,6 +192,10 @@ import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillComposioLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "./plugins/shared-use-store";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -717,6 +721,15 @@ const signInService = computerGateway
     })
   : undefined;
 
+/*
+ * Whether a Bot may act through a Shared app at all, kept apart from the policy boundary above
+ * because it answers a different question: not "is this action allowed" but "is this Bot's
+ * audience narrow enough for what an administrator approved for the shared account." Kept in
+ * module scope because the publication, assignment and grant routes below also need to reapprove
+ * or refile against it when a Bot's exposure changes.
+ */
+const sharedUseStore = createSharedUseStore(database);
+
 const pluginStore = createPluginStore({
   database,
   deploymentId: config.deploymentId ?? tenantPackage.tenantId,
@@ -725,6 +738,7 @@ const pluginStore = createPluginStore({
   encryptionKey: config.keyEncryptionKey,
   policy: () => policyStore.get(),
   approvalGate: approvalService.gate,
+  sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
   // A connector send to other people asks the owner first. See plugins/share-target.ts.
   privateShareCheck: createPrivateShareCheck({
     approvals: approvalService.store,
