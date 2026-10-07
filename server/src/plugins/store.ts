@@ -4400,6 +4400,56 @@ export function createPluginStore(options: PluginStoreOptions) {
       return rows.map((row) => row.url);
     },
 
+    /** Every account any holder has on a brokered app, as the broker would be asked to end it. */
+    async accountsOn(
+      serverId: string,
+    ): Promise<{ toolkit: string; accounts: AccountRef[] } | null> {
+      const [row] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = row ? toolkitOf(row.url) : null;
+      if (!toolkit) return null;
+      const held = await database
+        .select({
+          holder: brokeredConnections.holder,
+          userId: brokeredConnections.userId,
+          vendorUserId: brokeredConnections.vendorUserId,
+        })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, toolkit),
+          ),
+        );
+      return {
+        toolkit,
+        accounts: held.map(
+          (row): AccountRef =>
+            row.holder === "person"
+              ? {
+                  holder: "person",
+                  userId: row.userId ?? "",
+                  vendorUserId: row.vendorUserId,
+                }
+              : { holder: "deployment", vendorUserId: row.vendorUserId },
+        ),
+      };
+    },
+
+    async setAccountModeColumns(
+      serverId: string,
+      mode: AccountMode,
+      sharedVendorUserId: string | null,
+    ) {
+      await database
+        .update(mcpServers)
+        .set({ accountMode: mode, sharedVendorUserId })
+        .where(eq(mcpServers.id, serverId));
+    },
+
     /**
      * The skills this person may see: the deployment's, plus their own.
      *
