@@ -29,6 +29,7 @@ import {
   redirectUriFor,
   sealConnectState,
 } from "./oauth";
+import type { AccountRef } from "./shared-accounts";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
@@ -1687,12 +1688,13 @@ export function createPluginRoutes(
   });
 
   /**
-   * Which app one of the three routes below is about, or the refusal that ends it.
+   * Which app, and whose account in it, one of the three routes below is about, or the refusal that
+   * ends it — decided by the row's mode and the signed-in person, never by anything in the request.
    *
-   * Each of them acts on a brokered connection and on nothing else, so each asks the same two
-   * questions in the same order and answers them in the same words. It is one function because the
-   * sentence somebody reads when they aim any of those routes at an ordinary OAuth row should not
-   * be able to drift into three sentences.
+   * Each of them acts on a brokered connection and on nothing else, so each asks the same questions
+   * in the same order and answers them in the same words. It is one function because the sentence
+   * somebody reads when they aim any of those routes at an ordinary OAuth row, or at a Shared app
+   * they have no business touching, should not be able to drift into three sentences.
    *
    * THE APP COMES OFF THE ROW'S URL AND NEVER OFF ITS ID, for the reason the directory route and
    * the connect branch above both give: the url is where the transport reads which app a call is
@@ -1711,15 +1713,32 @@ export function createPluginRoutes(
    * NO BROKER IS A 503 NAMING THE SETTING, as it is on the directory and on connect, and it is
    * {@link BrokerUnconfiguredError}'s own message rather than a sentence written here.
    *
+   * THE ACCOUNT ITSELF COMES FROM `store.accountRefFor`, WHICH READS THE ROW AND THE ACTOR AND
+   * NEVER THE REQUEST. A Personal app answers with the actor's own identity; a Shared app answers
+   * with the deployment's — one account, decided here, rather than whatever a caller could name in
+   * a body. A Shared app's account belongs to the deployment and not to whoever is signed in, so an
+   * actor who is not an administrator is refused here, once, instead of in three routes below.
+   *
    * The connect route's brokered branch does not come through this function, deliberately: a row
    * that is not brokered has an OAuth flow below it to fall through to, so refusing there would be
    * wrong.
    */
-  const brokeredAppFor = async (
+  const brokeredAccountFor = async (
+    context: { var: AppVariables },
     serverId: string,
   ): Promise<
-    | { toolkit: string; refusal?: undefined }
-    | { toolkit?: undefined; refusal: { error: string; status: 400 | 503 } }
+    | {
+        toolkit: string;
+        account: AccountRef;
+        title: string;
+        refusal?: undefined;
+      }
+    | {
+        toolkit?: undefined;
+        account?: undefined;
+        title?: undefined;
+        refusal: { error: string; status: 400 | 403 | 503 };
+      }
   > => {
     const row = await store.serverAddress(serverId);
     const toolkit = row ? toolkitOf(row.url) : null;
@@ -1736,7 +1755,22 @@ export function createPluginRoutes(
         refusal: { error: new BrokerUnconfiguredError().message, status: 503 },
       };
     }
-    return { toolkit };
+    const resolved = await store.accountRefFor(serverId, context.var.actor.id);
+    if ("refusal" in resolved) {
+      return { refusal: { error: resolved.refusal, status: 400 } };
+    }
+    if (
+      resolved.ref.holder === "deployment" &&
+      context.var.actor.role !== "admin"
+    ) {
+      return {
+        refusal: {
+          error: "An administrator connects shared apps.",
+          status: 403,
+        },
+      };
+    }
+    return { toolkit, account: resolved.ref, title: resolved.title };
   };
 
   /**
@@ -1756,14 +1790,19 @@ export function createPluginRoutes(
    * deleted where it says no. Repeating it files no trail rows and moves no timestamps; the store
    * is where that is settled.
    *
-   * BEHIND `requireUser` AND NOT ADMIN-GATED. An administrator adds the app once; confirming one's
-   * own connection to it is not an administrative act.
+   * BEHIND `requireUser` AND NOT ADMIN-GATED AT THE ROUTE — `brokeredAccountFor` is where that
+   * happens instead. A Personal app's confirm is not an administrative act, so the route itself
+   * stays open to anybody signed in; a Shared app's is, and it is the resolver that tells the two
+   * apart by the account it resolves rather than this route carrying `requireAdmin` unconditionally.
    */
   routes.post(
     "/servers/:id/connection/confirm",
     requireUser,
     async (context) => {
-      const resolved = await brokeredAppFor(context.req.param("id"));
+      const resolved = await brokeredAccountFor(
+        context,
+        context.req.param("id"),
+      );
       if (resolved.refusal) {
         return context.json(
           { error: resolved.refusal.error },
@@ -1772,12 +1811,14 @@ export function createPluginRoutes(
       }
 
       /*
-       * THE PERSON IS THE SESSION'S, AND THERE IS NO SECOND SOURCE FOR THEM. Nothing here reads a
-       * user id out of the body or the query, and that is the property rather than an
-       * implementation detail: a confirm writes the row every later brokered call is gated on, so
-       * a caller who could name somebody else would be one POST away from recording a connection
-       * under a person who never made one — or, the same defect turned around, from deleting the
-       * row of a person the vendor answers no for.
+       * WHOSE ACCOUNT THIS IS COMES FROM `brokeredAccountFor`, AND THERE IS NO SECOND SOURCE FOR IT.
+       * Nothing here reads a user id out of the body or the query, and that is the property rather
+       * than an implementation detail: a confirm writes the row every later brokered call is gated
+       * on, so a caller who could name somebody else would be one POST away from recording a
+       * connection under a person who never made one — or, the same defect turned around, from
+       * deleting the row of a person the vendor answers no for. `by` is the session's actor, for the
+       * trail, and is the same id for a Personal app's own account and an administrator confirming a
+       * Shared app's.
        *
        * The store's answer is passed straight back rather than restated here. `connected` is what
        * Composio said, and a shape invented at this layer would be a second opinion about a fact
@@ -1787,7 +1828,8 @@ export function createPluginRoutes(
         return context.json(
           await store.confirmBrokeredConnection({
             toolkit: resolved.toolkit,
-            userId: context.var.actor.id,
+            account: resolved.account,
+            by: context.var.actor.id,
           }),
         );
       } catch (error) {
@@ -1835,19 +1877,23 @@ export function createPluginRoutes(
    * through as a refusal the browser surfaces. The only `verified: false` that arrives as an answer
    * is the one carrying `probe: null`, which says there was nothing to check with.
    *
-   * THE PERSON IS THE SESSION'S, as on the two routes around it and for the sharper reason this one
-   * adds: a user id a caller could name would let one POST spend a stranger's rate limit at the
-   * vendor and rewrite the verification on their row. Nothing here reads a user id out of the body
-   * or the query.
+   * WHOSE ACCOUNT THIS IS COMES FROM `brokeredAccountFor`, as on the two routes around it and for
+   * the sharper reason this one adds: an account a caller could name would let one POST spend a
+   * stranger's rate limit at the vendor and rewrite the verification on their row. Nothing here
+   * reads a user id out of the body or the query.
    *
-   * BEHIND `requireUser` AND NOT ADMIN-GATED, for confirm's reason: this is somebody checking their
-   * own account, not an administrator checking anybody's.
+   * BEHIND `requireUser` AND NOT ADMIN-GATED AT THE ROUTE, for confirm's reason: `brokeredAccountFor`
+   * is where a Shared app's account is told apart from a Personal one's, and only the former needs
+   * an administrator.
    */
   routes.post(
     "/servers/:id/connection/recheck",
     requireUser,
     async (context) => {
-      const resolved = await brokeredAppFor(context.req.param("id"));
+      const resolved = await brokeredAccountFor(
+        context,
+        context.req.param("id"),
+      );
       if (resolved.refusal) {
         return context.json(
           { error: resolved.refusal.error },
@@ -1862,7 +1908,8 @@ export function createPluginRoutes(
         return context.json(
           await store.recheckBrokeredConnection({
             toolkit: resolved.toolkit,
-            userId: context.var.actor.id,
+            account: resolved.account,
+            by: context.var.actor.id,
           }),
         );
       } catch (error) {
@@ -1894,24 +1941,29 @@ export function createPluginRoutes(
   );
 
   /**
-   * End this person's own brokered account, at the vendor first and here after.
+   * End this account — this person's own, or the deployment's for a Shared app — at the vendor
+   * first and here after.
    *
    * The order is the store's and the argument for it is made there: the row is the only thing that
-   * says which app this person connected, so a delete that ran before the revoke could leave a live
+   * says which account this app held, so a delete that ran before the revoke could leave a live
    * grant on somebody's mailbox that nothing here can reach. What comes back is what was asked for
    * — `vendorRevocationRequested` false is a grant that was already gone — and it is passed through
    * rather than rewritten, because telling those two apart is the whole value of the field.
    *
-   * `reason` IS "self" BECAUSE OF WHO IS ASKING. The other word the store takes is
-   * `person_removed`, which belongs to an administrator offboarding somebody from the People
-   * screen. The trail tells the two acts apart by this word and by whether `by` and the owner
-   * differ, and on this route they are the same person by construction.
+   * `reason` IS "self" OR "admin" BECAUSE OF WHOSE ACCOUNT `brokeredAccountFor` RESOLVED, not
+   * because of who is asking in general: a Personal app's account is always the actor's own, so it
+   * ends as "self"; a Shared app's account is the deployment's, and only an administrator reaches
+   * this route for one, so it ends as "admin". The other word the store takes is `person_removed`,
+   * which belongs to an administrator offboarding somebody from the People screen, and
+   * `mode_switched`, filed when an app moves between Personal and Shared. The trail tells these
+   * apart by this word and by whether `by` and the account's own id differ.
    *
-   * BEHIND `requireUser` AND NOT ADMIN-GATED, for the reason confirm gives: this is somebody
-   * ending their own account, not an administrator ending anybody's.
+   * BEHIND `requireUser` AND NOT ADMIN-GATED AT THE ROUTE, for confirm's reason:
+   * `brokeredAccountFor` is where a Shared app's account is told apart from a Personal one's and
+   * refused to anybody but an administrator.
    */
   routes.delete("/servers/:id/connection", requireUser, async (context) => {
-    const resolved = await brokeredAppFor(context.req.param("id"));
+    const resolved = await brokeredAccountFor(context, context.req.param("id"));
     if (resolved.refusal) {
       return context.json(
         { error: resolved.refusal.error },
@@ -1920,18 +1972,19 @@ export function createPluginRoutes(
     }
 
     /*
-     * WHOSE ACCOUNT THIS IS COMES FROM THE SESSION, here as on confirm and for a sharper reason: a
-     * user id a caller could name would be a DELETE that revokes somebody else's grant at the
-     * vendor. It is read once, from `context.var.actor`, and used for both the owner and the actor
-     * — nothing in the body or the query is looked at at all.
+     * WHOSE ACCOUNT THIS IS COMES FROM `brokeredAccountFor`, here as on confirm and for a sharper
+     * reason: an account a caller could name would be a DELETE that revokes somebody else's grant
+     * at the vendor. `by` is read once, from `context.var.actor`, and is the acting administrator
+     * for a Shared app's account rather than the account's own id — nothing in the body or the
+     * query is looked at at all.
      */
     try {
       return context.json(
         await store.disconnectBrokered({
           toolkit: resolved.toolkit,
-          userId: context.var.actor.id,
+          account: resolved.account,
           by: context.var.actor.id,
-          reason: "self",
+          reason: resolved.account.holder === "deployment" ? "admin" : "self",
         }),
       );
     } catch (error) {
