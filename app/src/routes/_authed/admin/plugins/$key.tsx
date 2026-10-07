@@ -59,6 +59,10 @@ import {
   personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import {
+  botSharedAppsQueryOptions,
+  describeApproval,
+} from "@/lib/plugins/shared-use";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -109,6 +113,32 @@ function heldSummary(held: number, total: number): string {
   if (held === 0) return "No tools";
   if (held === total) return total === 1 ? "1 tool" : "Every tool";
   return `${held} of ${total} tools`;
+}
+
+/**
+ * One Bot's standing with the shared account behind THIS app, read off its own exposure.
+ *
+ * Nothing when the Bot does not hold this app at all — `sharedAppsHeldBy` only lists apps a Bot has
+ * at least one grant on, so there is no shared account for it to stand with yet — and nothing while
+ * the fetch is still open, so no stale answer flashes ahead of the real one. "Not approved" matches
+ * the word the shared-use inbox uses for the same absence (`shared-use-requests.tsx`), so an
+ * administrator reads the same two words for the same fact wherever it comes up.
+ */
+function BotApprovalText({
+  botId,
+  serverId,
+}: {
+  botId: string;
+  serverId: string;
+}) {
+  const exposure = useQuery(botSharedAppsQueryOptions(botId));
+  const app = exposure.data?.apps.find((one) => one.serverId === serverId);
+  if (!app) return null;
+  return (
+    <span className="text-muted-foreground text-xs">
+      {app.approval ? describeApproval(app.approval) : "Not approved"}
+    </span>
+  );
 }
 
 /**
@@ -1077,6 +1107,13 @@ function RouteComponent() {
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>
+                        {/*
+                         * Only on a Shared app: a Personal one has no one account behind it for a
+                         * Bot to stand with, so there is nothing here to approve.
+                         */}
+                        {shared ? (
+                          <BotApprovalText botId={bot.id} serverId={key} />
+                        ) : null}
                         <span className="text-muted-foreground text-xs">
                           {heldSummary(
                             server.tools.filter((tool) =>
