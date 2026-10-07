@@ -4,6 +4,7 @@ import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { reasonWithoutStatement } from "../db/query-failure";
+import type { AccountModeSwitch } from "./account-mode";
 import {
   type BrokerApp,
   type BrokerField,
@@ -29,7 +30,13 @@ import {
   redirectUriFor,
   sealConnectState,
 } from "./oauth";
-import type { AccountRef } from "./shared-accounts";
+import { type AccountRef, asAccountMode } from "./shared-accounts";
+import {
+  asSharedUseApproval,
+  exposureOf,
+  type SharedUseApproval,
+} from "./shared-use";
+import type { SharedUseStore } from "./shared-use-store";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
@@ -194,6 +201,14 @@ export function createPluginRoutes(
    * position on is optional, so a misplaced one typechecks and quietly does nothing.
    */
   composio?: { broker: ComposioBroker },
+  /**
+   * Who may use an app's one shared account, and the switch that makes an app Shared or Personal.
+   *
+   * Optional and last, for the reason `composio` is. Absent, the mode switch answers 503 and a
+   * grant records no approval — which is only safe because without it nothing can turn an app
+   * Shared in the first place.
+   */
+  shared?: { modes: AccountModeSwitch; use: SharedUseStore },
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -524,6 +539,14 @@ export function createPluginRoutes(
     if (forbidden) return forbidden;
 
     const serverId = context.req.param("id");
+    /*
+     * READ BEFORE THE ROW GOES. The ask-before-write rule a Shared app was given lives in the
+     * approval policy, not on the row, so nothing cascades it away; asked afterwards, the mode is
+     * gone with the row and the rule would outlive the account it guarded.
+     */
+    const wasShared =
+      shared !== undefined &&
+      (await store.serverAddress(serverId))?.accountMode === "shared";
     try {
       await store.removeServer(serverId, actorEmail(context));
     } catch (error) {
@@ -562,7 +585,90 @@ export function createPluginRoutes(
       );
       return context.json({ error: refusal.error }, refusal.status);
     }
+    if (wasShared)
+      await shared?.modes.forgetRule(serverId, context.var.actor.id);
     return context.json({ ok: true });
+  });
+
+  /**
+   * Personal ⇄ Shared. Without `confirm`, a preview of what the switch would end and approve; with
+   * it, the switch itself, which changes nothing unless every old account was ended at the vendor.
+   */
+  routes.put("/servers/:id/account-mode", requireUser, async (context) => {
+    const forbidden = requireAdmin(context);
+    if (forbidden) return forbidden;
+    if (!shared) {
+      return context.json(
+        { error: "Shared accounts are not available on this deployment." },
+        503,
+      );
+    }
+    const body = (await context.req.json().catch(() => null)) as {
+      mode?: unknown;
+      confirm?: unknown;
+      approvals?: unknown;
+    } | null;
+    const mode = asAccountMode(body?.mode);
+    if (!mode)
+      return context.json({ error: "Choose personal or shared." }, 400);
+    const serverId = context.req.param("id");
+    const row = await store.serverAddress(serverId);
+    if (!row || !toolkitOf(row.url)) {
+      return context.json(
+        { error: "That app is not reached through a broker." },
+        400,
+      );
+    }
+    if (schemeKind(row.authScheme) === "none") {
+      return context.json(
+        {
+          error: `${row.title} needs no account, so there is nothing to share.`,
+        },
+        400,
+      );
+    }
+    const approvals: Record<string, SharedUseApproval> = {};
+    if (body?.approvals && typeof body.approvals === "object") {
+      for (const [botId, value] of Object.entries(
+        body.approvals as Record<string, unknown>,
+      )) {
+        const approval = asSharedUseApproval(value);
+        if (!approval) {
+          return context.json(
+            {
+              error: `The approval for ${botId} is not one this deployment can read.`,
+            },
+            400,
+          );
+        }
+        approvals[botId] = approval;
+      }
+    }
+    try {
+      const result = await shared.modes.switchMode({
+        serverId,
+        mode,
+        by: context.var.actor.id,
+        confirm: body?.confirm === true,
+        approvals,
+      });
+      if ("failures" in result) {
+        return context.json(
+          {
+            ...result,
+            error: result.failures.map((failure) => failure.error).join(" "),
+          },
+          502,
+        );
+      }
+      return context.json(result);
+    } catch (error) {
+      const refusal = brokerRefusal(
+        error,
+        "The switch did not finish, and nothing was changed.",
+      );
+      return context.json({ error: refusal.error }, refusal.status);
+    }
   });
 
   /** Ask a server what it offers now. Reported rather than thrown, so the page can say what broke. */
@@ -2498,6 +2604,7 @@ export function createPluginRoutes(
       kind?: unknown;
       ref?: string;
       agentId?: string;
+      approval?: unknown;
     } | null;
     const kind = asGrantKind(body?.kind);
     /*
@@ -2533,7 +2640,41 @@ export function createPluginRoutes(
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
+    /*
+     * A SHARED APP'S ACTION IS GRANTED WITH WHO MAY USE IT, in the one request. Without an approval
+     * the gate refuses every call the grant just allowed, so a grant with none sent approves the
+     * Bot's exposure as it stands now — unless an approval is already recorded, which is an
+     * administrator's earlier decision and not this request's to widen. "Is Shared" is the app's
+     * answer (its answering row), never the granted row's own column.
+     */
+    let approval: SharedUseApproval | null = null;
+    let appId = "";
+    if (kind === "mcp" && shared) {
+      const [serverId] = grantRef.split("/");
+      appId = await shared.use.appIdOf(serverId ?? "");
+      if ((await store.serverAddress(appId))?.accountMode === "shared") {
+        if (body?.approval !== undefined) {
+          approval = asSharedUseApproval(body.approval);
+          if (!approval) {
+            return context.json(
+              { error: "That approval is not one this deployment can read." },
+              400,
+            );
+          }
+        } else if (!(await shared.use.approvalFor(grantAgentId, appId))) {
+          approval = exposureOf(await shared.use.botFacts(grantAgentId));
+        }
+      }
+    }
     await store.grant(kind, grantRef, grantAgentId, actorEmail(context));
+    if (approval && shared) {
+      await shared.use.setApproval({
+        botId: grantAgentId,
+        serverId: appId,
+        approval,
+        by: context.var.actor.id,
+      });
+    }
     return context.json({ ok: true });
   });
 

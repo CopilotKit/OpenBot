@@ -13,6 +13,7 @@ import {
   mcpServers,
   mcpTools,
 } from "../src/db/schema";
+import { createAccountModeSwitch } from "../src/plugins/account-mode";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createSharedUseStore } from "../src/plugins/shared-use-store";
@@ -26,6 +27,16 @@ const VENDOR_ID = `openbot-deployment:acme-${suite}:R`;
 const authorizedFor: string[] = [];
 const returnUrlsSeen: string[] = [];
 let connectWithFieldsCalls = 0;
+const revokedFor: string[] = [];
+const rules: {
+  id: string;
+  botId: string;
+  toolRef: string;
+  scope: string;
+  effect: string;
+  behaviour: string;
+  revokedAt: Date | null;
+}[] = [];
 
 const broker: ConnectedAppBroker = {
   listApps: async () => [],
@@ -37,7 +48,10 @@ const broker: ConnectedAppBroker = {
     return { redirectUrl: "https://vendor.example/consent" };
   },
   isConnected: async () => true,
-  revoke: async () => true,
+  revoke: async ({ account }) => {
+    revokedFor.push(account.vendorUserId);
+    return true;
+  },
   connectionFields: async () => [],
   connectWithFields: async () => {
     connectWithFieldsCalls += 1;
@@ -58,6 +72,24 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
     deploymentId: `acme-${suite}`,
   });
   const sharedUseStore = createSharedUseStore(database);
+  const modes = createAccountModeSwitch({
+    store,
+    sharedUse: sharedUseStore,
+    deploymentId: `acme-${suite}`,
+    audit: createAuditStore(database),
+    teamRules: {
+      createTeamRule: async (_by, input) => {
+        const rule = { id: randomUUID(), ...input, revokedAt: null };
+        rules.push(rule as never);
+        return rule as never;
+      },
+      teamRules: async () => rules as never,
+      revokeTeamRule: async (_by, ruleId) => {
+        const rule = rules.find((row) => row.id === ruleId);
+        if (rule) rule.revokedAt = new Date();
+      },
+    },
+  });
   const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
     context,
     next,
@@ -78,7 +110,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
         personHasAccess: async () => true,
       },
       { broker },
-      { modes: undefined as never, use: sharedUseStore },
+      { modes, use: sharedUseStore },
     ),
   );
 }
@@ -87,6 +119,8 @@ beforeEach(async () => {
   authorizedFor.length = 0;
   returnUrlsSeen.length = 0;
   connectWithFieldsCalls = 0;
+  revokedFor.length = 0;
+  rules.length = 0;
   await database.insert(mcpServers).values({
     id: app,
     title: "Team GitHub",
@@ -373,5 +407,105 @@ describe("granting a shared app's action", () => {
       }),
     });
     expect(response.status).toBe(400);
+  });
+});
+
+describe("PUT /servers/:id/account-mode", () => {
+  const put = (role: "admin" | "user", body: unknown) =>
+    appAs(role).request(`/api/plugins/servers/${app}/account-mode`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  test("a non-admin is refused, and nothing changes", async () => {
+    const response = await put("user", { mode: "personal", confirm: true });
+    expect(response.status).toBe(403);
+    const [row] = await database
+      .select({ accountMode: mcpServers.accountMode })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, app));
+    expect(row?.accountMode).toBe("shared");
+  });
+
+  test("a mode nobody can read is refused", async () => {
+    const response = await put("admin", { mode: "team", confirm: true });
+    expect(response.status).toBe(400);
+  });
+
+  test("without confirm, previews what would be ended and changes nothing", async () => {
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: VENDOR_ID,
+    });
+    const response = await put("admin", { mode: "personal" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      changed: false,
+      preview: {
+        mode: "personal",
+        wouldRevoke: { holder: "deployment", count: 1 },
+      },
+    });
+    expect(revokedFor).toEqual([]);
+  });
+
+  test("confirmed, ends the team account and makes the app Personal", async () => {
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app,
+      holder: "deployment",
+      vendorUserId: VENDOR_ID,
+    });
+    const response = await put("admin", { mode: "personal", confirm: true });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ changed: true, revoked: 1 });
+    expect(revokedFor).toEqual([VENDOR_ID]);
+    const [row] = await database
+      .select({ accountMode: mcpServers.accountMode })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, app));
+    expect(row?.accountMode).toBe("personal");
+  });
+
+  test("a Bot's approval that cannot be read is refused before anything is ended", async () => {
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    const response = await put("admin", {
+      mode: "shared",
+      confirm: true,
+      approvals: { someBot: { audience: "everyone" } },
+    });
+    expect(response.status).toBe(400);
+    const [row] = await database
+      .select({ accountMode: mcpServers.accountMode })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, app));
+    expect(row?.accountMode).toBe("personal");
+  });
+});
+
+describe("removing a Shared app", () => {
+  test("revokes the ask-before-write rule it was given when it became Shared", async () => {
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "personal", sharedVendorUserId: null })
+      .where(eq(mcpServers.id, app));
+    await appAs("admin").request(`/api/plugins/servers/${app}/account-mode`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "shared", confirm: true }),
+    });
+    expect(rules.filter((rule) => rule.revokedAt === null)).toHaveLength(1);
+    const response = await appAs("admin").request(
+      `/api/plugins/servers/${app}`,
+      { method: "DELETE" },
+    );
+    expect(response.status).toBe(200);
+    expect(rules.filter((rule) => rule.revokedAt === null)).toEqual([]);
   });
 });
