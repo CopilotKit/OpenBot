@@ -6,9 +6,16 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { createDatabase } from "../src/db/client";
-import { brokeredConnections, mcpServers } from "../src/db/schema";
+import {
+  agentProfiles,
+  agents,
+  brokeredConnections,
+  mcpServers,
+  mcpTools,
+} from "../src/db/schema";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginRoutes } from "../src/plugins/routes";
+import { createSharedUseStore } from "../src/plugins/shared-use-store";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -50,6 +57,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
     broker,
     deploymentId: `acme-${suite}`,
   });
+  const sharedUseStore = createSharedUseStore(database);
   const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
     context,
     next,
@@ -70,6 +78,7 @@ function appAs(role: "admin" | "user", id = `${role}-${suite}`) {
         personHasAccess: async () => true,
       },
       { broker },
+      { modes: undefined as never, use: sharedUseStore },
     ),
   );
 }
@@ -261,5 +270,80 @@ describe("GET /connections", () => {
     expect(body.connections.filter((row) => row.serverId === app)).toEqual([
       expect.objectContaining({ holder: "deployment", connected: false }),
     ]);
+  });
+});
+
+describe("granting a shared app's action", () => {
+  const botId = `grantbot-${suite}`;
+  beforeEach(async () => {
+    await database
+      .insert(agents)
+      .values({ id: botId, name: "Ops", type: "built_in", configuration: {} });
+    await database.insert(agentProfiles).values({
+      agentId: botId,
+      ownerUserId: null,
+      visibility: "public",
+      title: "Ops",
+      roleDescription: "Ops",
+      avatarSeed: "x",
+    });
+    await database.insert(mcpTools).values({
+      serverId: app,
+      name: "GITHUB_CREATE_ISSUE",
+      description: "x",
+      effect: "write",
+      version: "1",
+    });
+  });
+  afterEach(async () => {
+    await database.delete(agents).where(eq(agents.id, botId));
+  });
+
+  // The Bot in this test is public with no owner, so its exposure is the whole team.
+
+  test("with no approval sent, approves the Bot's exposure now", async () => {
+    const response = await appAs("admin").request("/api/plugins/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "mcp",
+        ref: `${app}/GITHUB_CREATE_ISSUE`,
+        agentId: botId,
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(
+      await createSharedUseStore(database).approvalFor(botId, app),
+    ).toEqual({ audience: "team", outsideInput: false, members: [] });
+  });
+
+  test("an admin's narrower approval is the one recorded", async () => {
+    await appAs("admin").request("/api/plugins/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "mcp",
+        ref: `${app}/GITHUB_CREATE_ISSUE`,
+        agentId: botId,
+        approval: { audience: "owner", outsideInput: false },
+      }),
+    });
+    expect(
+      await createSharedUseStore(database).approvalFor(botId, app),
+    ).toEqual({ audience: "owner", outsideInput: false, members: [] });
+  });
+
+  test("an approval nobody can read is refused, and nothing is granted", async () => {
+    const response = await appAs("admin").request("/api/plugins/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "mcp",
+        ref: `${app}/GITHUB_CREATE_ISSUE`,
+        agentId: botId,
+        approval: { audience: "everyone" },
+      }),
+    });
+    expect(response.status).toBe(400);
   });
 });
