@@ -5337,7 +5337,15 @@ export function createPluginStore(options: PluginStoreOptions) {
             : {
                 target: [brokeredConnections.provider, brokeredConnections.app],
                 targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
-                set,
+                // WHO CONNECTED IT MEANS THE LATEST CONNECTION. A deployment account is
+                // shared, so a second administrator reconnecting it supersedes the first —
+                // which `set` otherwise never said, leaving the row crediting whoever
+                // connected it the first time. Added only when this call names a
+                // `connectedBy` at all, so a re-check or a confirm that passes none does not
+                // blank out the administrator an earlier connect already recorded.
+                set: input.connectedBy
+                  ? { ...set, connectedBy: input.connectedBy ?? null }
+                  : set,
               },
         );
       return { verifiedAt, wrote: true };

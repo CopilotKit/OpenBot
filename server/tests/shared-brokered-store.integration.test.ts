@@ -186,6 +186,34 @@ describe("a shared app", () => {
     expect(revoked).toEqual([]);
   });
 
+  test("reconnecting a shared account records the latest administrator", async () => {
+    const store = freshStore();
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-a",
+      verified: true,
+      probeAction: null,
+    });
+    await store.recordBrokeredConnection({
+      toolkit: app,
+      account: { holder: "deployment", vendorUserId: VENDOR_ID },
+      connectedBy: "admin-b",
+      verified: true,
+      probeAction: null,
+    });
+    const rows = await database
+      .select({ connectedBy: brokeredConnections.connectedBy })
+      .from(brokeredConnections)
+      .where(
+        and(
+          eq(brokeredConnections.app, app),
+          eq(brokeredConnections.holder, "deployment"),
+        ),
+      );
+    expect(rows).toEqual([{ connectedBy: "admin-b" }]);
+  });
+
   test("removing the app revokes the deployment account too", async () => {
     const store = freshStore();
     await seedShared(store, true);
