@@ -234,6 +234,15 @@ export const auditEventTypes = [
    * while the grant at Google stood untouched.
    */
   "mcp.account_disconnected",
+  // An administrator switched a brokered app between each person's account and one shared account.
+  "mcp.account_mode_changed",
+  // A Bot's use of a Shared app needs an administrator's approval: filed by a refused call or by the
+  // Bot's owner.
+  "shared_use.requested",
+  // An administrator answered a request to use a Shared app through a Bot.
+  "shared_use.approved",
+  // An administrator answered a request to use a Shared app through a Bot.
+  "shared_use.declined",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",
