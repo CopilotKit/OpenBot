@@ -146,6 +146,7 @@ test("each account type that can be linked gets its own card to connect from", (
       { kind: "available", provider: "github", title: "GitHub" },
     ],
     error: null,
+    providersError: null,
   });
   expect(
     linkedAccountsSectionState({
@@ -156,6 +157,7 @@ test("each account type that can be linked gets its own card to connect from", (
   ).toEqual({
     entries: [{ kind: "available", provider: "github", title: "GitHub" }],
     error: null,
+    providersError: null,
   });
 });
 
@@ -172,6 +174,7 @@ test("a linked account takes the place of its connect card", () => {
       { kind: "linked", account: row },
     ],
     error: null,
+    providersError: null,
   });
 });
 
@@ -188,6 +191,7 @@ test("links stay listed, in Slack then GitHub order, even when linking is off", 
       { kind: "linked", account: row },
     ],
     error: null,
+    providersError: null,
   });
 });
 
@@ -198,7 +202,11 @@ test("a failed refetch keeps stale rows on screen and shows the error with them"
       error: new Error("boom"),
       providers: none,
     }),
-  ).toEqual({ entries: [{ kind: "linked", account: row }], error: "boom" });
+  ).toEqual({
+    entries: [{ kind: "linked", account: row }],
+    error: "boom",
+    providersError: null,
+  });
 });
 
 test("an error with no data, or with an empty cached list, still shows", () => {
@@ -209,8 +217,51 @@ test("an error with no data, or with an empty cached list, still shows", () => {
         error: new Error("boom"),
         providers: none,
       }),
-    ).toEqual({ entries: [], error: "boom" });
+    ).toEqual({ entries: [], error: "boom", providersError: null });
   }
+});
+
+test("a providers failure keeps the section on screen even with no links", () => {
+  for (const data of [undefined, []]) {
+    expect(
+      linkedAccountsSectionState({
+        data,
+        error: null,
+        providers: undefined,
+        providersError: new Error("providers down"),
+      }),
+    ).toEqual({ entries: [], error: null, providersError: "providers down" });
+  }
+});
+
+test("a providers failure keeps existing links and reports beside them", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [row],
+      error: null,
+      providers: undefined,
+      providersError: new Error("providers down"),
+    }),
+  ).toEqual({
+    entries: [{ kind: "linked", account: row }],
+    error: null,
+    providersError: "providers down",
+  });
+});
+
+test("no providers failure leaves the providers error empty", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [row],
+      error: null,
+      providers: none,
+      providersError: null,
+    }),
+  ).toEqual({
+    entries: [{ kind: "linked", account: row }],
+    error: null,
+    providersError: null,
+  });
 });
 
 test("a 204 disconnect succeeds", async () => {

@@ -79,17 +79,24 @@ export type LinkedAccountsEntry =
  * can no longer be linked, so they can still be disconnected; links of a type this build does not
  * know come last. Connect cards need the list: with no list loaded there is no knowing whether the
  * account is already linked. Hidden when there is nothing to list, nothing to connect and nothing
- * to report. A failed refetch keeps the stale entries on screen with the error under them.
+ * to report. A failed refetch keeps the stale entries on screen with the error under them. A failed
+ * providers check is reported too, so a missing Connect card is never unexplained.
  */
 export function linkedAccountsSectionState({
   data,
   error,
   providers,
+  providersError = null,
 }: {
   data: LinkedAccount[] | undefined;
   error: Error | null;
   providers?: IdentityProviders;
-}): { entries: LinkedAccountsEntry[]; error: string | null } | null {
+  providersError?: Error | null;
+}): {
+  entries: LinkedAccountsEntry[];
+  error: string | null;
+  providersError: string | null;
+} | null {
   const links = data ?? [];
   const entries: LinkedAccountsEntry[] = [];
   for (const { provider, title } of linkableProviders) {
@@ -105,8 +112,12 @@ export function linkedAccountsSectionState({
     )
       entries.push({ kind: "linked", account });
   }
-  if (entries.length === 0 && !error) return null;
-  return { entries, error: error ? error.message : null };
+  if (entries.length === 0 && !error && !providersError) return null;
+  return {
+    entries,
+    error: error ? error.message : null,
+    providersError: providersError ? providersError.message : null,
+  };
 }
 
 /**
@@ -134,6 +145,7 @@ export function LinkedAccountsSection() {
     data: links.data,
     error: links.error,
     providers: providers.data,
+    providersError: providers.error,
   });
   if (!state) return null;
   const connect = {
@@ -176,6 +188,11 @@ export function LinkedAccountsSection() {
       {state.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
           Your linked accounts could not be loaded: {state.error}
+        </p>
+      ) : null}
+      {state.providersError ? (
+        <p className="mt-2 text-destructive text-sm" role="alert">
+          Could not check which accounts can be linked: {state.providersError}
         </p>
       ) : null}
       {issueCode.error ? (
