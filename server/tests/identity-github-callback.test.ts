@@ -307,7 +307,10 @@ describe("GitHub sign-in callback", () => {
         new Error(
           'Failed query: insert into audit params: user-id-77,link-id-88 {"actor":"user-id-77"}',
         ),
-        { name: "DrizzleQueryError", cause: { errno: "08006" } },
+        {
+          name: "DrizzleQueryError",
+          cause: { name: "PostgresError", errno: "08006" },
+        },
       ),
     });
     expect(
