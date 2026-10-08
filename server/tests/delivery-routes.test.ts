@@ -332,6 +332,73 @@ test("a Reachability code still links from a shared conversation", async () => {
   expect(redeemed).toEqual([]);
   expect(discarded).toEqual([]);
 });
+const observedMessage = (content: string) => ({
+  context: [
+    {
+      description: "openbot.sender",
+      value: JSON.stringify({
+        user: "slack:T1:U1",
+        event: "Ev50",
+        conversation: { id: "C0123456789", kind: "channel" },
+        observe: "message",
+      }),
+    },
+  ],
+  messages: [{ id: "m1", role: "user", content }],
+});
+const triggersOf = (f: ReturnType<typeof fixture>) =>
+  f.calls
+    .map((c) => (c as { trigger?: Record<string, unknown> }).trigger)
+    .filter(Boolean);
+test("an identity code pasted in a channel without a mention is cancelled quietly and kept out of triggers", async () => {
+  for (const content of [
+    `link ${IDENTITY_CODE.toUpperCase()}`,
+    `here: link ${IDENTITY_CODE.toUpperCase()} thanks`,
+  ]) {
+    const { f, redeemed, discarded } = identityFixture("linked");
+    const result = await run(f, observedMessage(content));
+    expect(said(result.events)).toBe("");
+    expect(discarded).toEqual([IDENTITY_CODE]);
+    expect(redeemed).toEqual([]);
+    const triggers = triggersOf(f);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]).toMatchObject({ type: "message", eventId: "Ev50" });
+    expect(JSON.stringify(triggers[0]).toLowerCase()).not.toContain(
+      IDENTITY_CODE,
+    );
+  }
+});
+test("an ordinary observed channel message reaches triggers unchanged and discards nothing", async () => {
+  const { f, discarded } = identityFixture("linked");
+  const result = await run(f, observedMessage("deploy is broken"));
+  expect(said(result.events)).toBe("");
+  expect(discarded).toEqual([]);
+  expect(triggersOf(f)).toEqual([
+    expect.objectContaining({ type: "message", text: "deploy is broken" }),
+  ]);
+});
+test("a failed discard of an observed channel code still feeds triggers quietly", async () => {
+  const f = fixture({
+    bound: false,
+    identity: {
+      redeem: async () => "invalid",
+      discard: async () => {
+        throw new Error("db down");
+      },
+    },
+  });
+  const error = console.error;
+  console.error = () => {};
+  try {
+    const result = await run(f, observedMessage(`link ${IDENTITY_CODE}`));
+    expect(said(result.events)).toBe("");
+  } finally {
+    console.error = error;
+  }
+  const triggers = triggersOf(f);
+  expect(triggers).toHaveLength(1);
+  expect(JSON.stringify(triggers[0])).not.toContain(IDENTITY_CODE);
+});
 test("an identity code conflict gets the already-linked reply", async () => {
   const { f } = identityFixture("conflict");
   const result = await run(f, {

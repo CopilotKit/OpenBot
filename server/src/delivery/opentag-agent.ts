@@ -98,7 +98,8 @@ export type OpenTagAgentDeps = {
    * Reachability code falls through too, matches no account code, and gets the usual expired reply).
    * An account code is redeemed only in a direct message. One posted in a shared conversation is
    * cancelled (`discard`), since anyone there could send it first and bind their own Slack account
-   * to its issuer; the issuer is told to make a new one.
+   * to its issuer: with a mention the issuer is told to make a new one; without one (an observed
+   * post) it is cancelled quietly and redacted before the Slack triggers see the message.
    */
   identity?: {
     redeem(
@@ -112,6 +113,37 @@ export type OpenTagAgentDeps = {
 
 const LINK =
   /\blink\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i;
+const LINKS = new RegExp(LINK.source, "gi");
+
+/**
+ * A channel post the app was not mentioned in: everyone there has seen any account code in it, so
+ * each one is cancelled, quietly (an observe run never replies). The codes are redacted rather than
+ * the message dropped, so the post still fires the owners' message triggers without carrying a
+ * code. A failed cancel is logged and never stops the triggers.
+ */
+async function withoutLinkCodes(
+  deps: OpenTagAgentDeps,
+  sender: { transport: ChatTransport },
+  text: string,
+) {
+  const codes = [...text.matchAll(LINKS)].map((m) => m[1]?.toLowerCase());
+  if (!codes.length) return text;
+  if (sender.transport === "slack" && deps.identity)
+    for (const code of codes) {
+      if (!code) continue;
+      try {
+        await deps.identity.discard(code);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "opentag-link-code-discard-error",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+          }),
+        );
+      }
+    }
+  return text.replace(LINKS, "link [code removed]");
+}
 const platformName = (transport: ChatTransport) =>
   transport === "teams" ? "Microsoft Teams" : "Slack";
 
@@ -230,12 +262,11 @@ async function answer(
     };
   // Something to watch, not to answer: feed the owner's Slack triggers and stay quiet.
   if (sender.observe) {
+    const text =
+      sender.observe === "message" ? latestUserMessage(input)?.text : undefined;
     await feedSlackTriggers(deps, sender, {
       type: sender.observe,
-      text:
-        sender.observe === "message"
-          ? latestUserMessage(input)?.text
-          : undefined,
+      text: text && (await withoutLinkCodes(deps, sender, text)),
     });
     return { text: "" };
   }
@@ -380,7 +411,8 @@ async function link(
   if (!challenge && sender.transport === "slack" && deps.identity) {
     // Anyone else in a shared conversation has now seen the code and could send it first, binding
     // their own Slack account to its issuer, so an account code is only redeemed in a direct
-    // message and one posted here is cancelled.
+    // message and one posted here is cancelled (an unmentioned channel post is cancelled in
+    // `withoutLinkCodes`).
     if (!sender.private) {
       if (await deps.identity.discard(code))
         return {
