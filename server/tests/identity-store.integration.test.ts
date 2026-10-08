@@ -210,3 +210,42 @@ test("identitiesFor skips a link whose provider the registry does not know", asy
   const links = await store.identitiesFor(person);
   expect(links.map((link) => link.id)).toEqual([valid.id]);
 });
+
+test("a credential that does not exist is refused and no link is written", async () => {
+  const identity = github();
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "oauth",
+      credentialId: randomUUID(),
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await store.linkedUser(identity)).toBeNull();
+});
+
+test("a revoked credential is refused and no link is written", async () => {
+  const identity = github();
+  const id = await credential();
+  await vault.revoke(id);
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "oauth",
+      credentialId: id,
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await store.linkedUser(identity)).toBeNull();
+});
+
+test("a challenge link refuses a credential", async () => {
+  const identity: Identity = {
+    provider: "slack",
+    realm,
+    subject: randomUUID(),
+  };
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "challenge",
+      credentialId: await credential(),
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await store.linkedUser(identity)).toBeNull();
+});

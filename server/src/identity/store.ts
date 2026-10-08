@@ -17,6 +17,7 @@ import {
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Revoke = Pick<CredentialStore, "revoke">;
+type Vault = Pick<CredentialStore, "revoke" | "isLive">;
 
 const identityMatches = (identity: Identity) =>
   and(
@@ -186,7 +187,7 @@ function codeHash(code: string) {
   return createHash("sha256").update(code.toLowerCase()).digest("hex");
 }
 
-export function createIdentityStore(database: Database, credentials: Revoke) {
+export function createIdentityStore(database: Database, credentials: Vault) {
   return {
     async linkedUser(
       value: Identity,
@@ -232,6 +233,15 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       return links;
     },
 
+    /**
+     * Link `value` to `userId` on proof the caller has already verified.
+     *
+     * A `credentialId`, when given, must name a live credential: it is checked in the link's own
+     * transaction, so a missing or revoked id is refused rather than stored as a token the link
+     * does not have. A "challenge" link proves control by code and carries no credential, so it
+     * refuses one. An "oauth" link is not required to carry one: GitHub sign-in may link before
+     * a token is stored.
+     */
     async linkVerified(
       value: Identity,
       userId: string,
@@ -247,9 +257,20 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         throw new IdentityInputError(
           "This provider does not accept that kind of proof.",
         );
-      return database.transaction((transaction) =>
-        writeLink(transaction, credentials, identity, userId, proof),
-      );
+      if (proof.credentialId && proof.method === "challenge")
+        throw new IdentityInputError(
+          "A challenge link does not carry a credential.",
+        );
+      return database.transaction(async (transaction) => {
+        if (
+          proof.credentialId &&
+          !(await credentials.isLive(proof.credentialId, transaction))
+        )
+          throw new IdentityInputError(
+            "The credential for this link is not available.",
+          );
+        return writeLink(transaction, credentials, identity, userId, proof);
+      });
     },
 
     async markNeedsReconnect(linkId: string): Promise<void> {
