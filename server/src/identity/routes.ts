@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { z } from "zod";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { PROVIDERS } from "./providers";
@@ -18,7 +19,7 @@ export type IdentityRouteOptions = {
  */
 export function identityRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
-  store?: Pick<IdentityStore, "identitiesFor" | "unlink">,
+  store?: Pick<IdentityStore, "identitiesFor" | "unlink" | "issueChallenge">,
   auditStore?: AuditStore,
   options: IdentityRouteOptions = {},
 ) {
@@ -54,6 +55,39 @@ export function identityRoutes(
       },
     }),
   );
+
+  app.post("/challenges", async (context) => {
+    if (!options.slackLinking)
+      return context.json(
+        {
+          error: "That account type cannot be linked here.",
+          code: "identity_provider_unavailable",
+        },
+        404,
+      );
+    const parsed = z
+      .strictObject({ provider: z.literal("slack") })
+      .safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success)
+      return context.json(
+        {
+          error: "Choose an account type to link.",
+          code: "identity_invalid_request",
+        },
+        400,
+      );
+    const { code, expiresAt } = await live.issueChallenge(
+      context.var.actor.id,
+      "slack",
+    );
+    return context.json({
+      challenge: {
+        code,
+        expiresAt: expiresAt.toISOString(),
+        instruction: PROVIDERS.slack.instruction?.(code) ?? "",
+      },
+    });
+  });
 
   app.get("/links", async (context) => {
     const links = await live.identitiesFor(context.var.actor.id);

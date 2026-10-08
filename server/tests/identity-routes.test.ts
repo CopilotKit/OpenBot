@@ -36,6 +36,7 @@ const link: IdentityLink = {
 function fixture(removedProvider = "github", options?: IdentityRouteOptions) {
   const calls: string[] = [];
   const events: AuditEventInput[] = [];
+  const issued: [string, string][] = [];
   const app = identityRoutes(
     signedIn,
     {
@@ -46,11 +47,18 @@ function fixture(removedProvider = "github", options?: IdentityRouteOptions) {
           ? { provider: removedProvider }
           : null;
       },
+      issueChallenge: async (userId, provider) => {
+        issued.push([userId, provider]);
+        return {
+          code: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          expiresAt: new Date("2026-10-08T00:10:00Z"),
+        };
+      },
     },
     { insert: async (event) => void events.push(event) },
     options,
   );
-  return { app, calls, events };
+  return { app, calls, events, issued };
 }
 
 test("links lists the asker's links without subject, realm or credential", async () => {
@@ -188,4 +196,66 @@ test("GET /providers without a store is 503", async () => {
     error: "Linked accounts are not available.",
     code: "identity_unavailable",
   });
+});
+
+function postChallenge(app: ReturnType<typeof fixture>["app"], body: string) {
+  return app.request("/challenges", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+}
+
+test("POST /challenges issues a Slack link code", async () => {
+  const f = fixture("github", { slackLinking: true });
+  const response = await postChallenge(f.app, '{"provider":"slack"}');
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    challenge: { code: string; expiresAt: string; instruction: string };
+  };
+  expect(body.challenge.code).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  expect(body.challenge.expiresAt).toBe("2026-10-08T00:10:00.000Z");
+  expect(body.challenge.instruction).toContain(
+    "link aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  );
+  expect(f.issued).toEqual([["person", "slack"]]);
+});
+
+test("POST /challenges is 404 unless Slack linking is on", async () => {
+  for (const options of [undefined, {}, { slackLinking: false }]) {
+    const f = fixture("github", options);
+    const response = await postChallenge(f.app, '{"provider":"slack"}');
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: expect.any(String),
+      code: "identity_provider_unavailable",
+    });
+    expect(f.issued).toEqual([]);
+  }
+});
+
+test("POST /challenges rejects any other body", async () => {
+  for (const raw of [
+    '{"provider":"github"}',
+    '{"provider":"slack","x":1}',
+    "not json",
+  ]) {
+    const f = fixture("github", { slackLinking: true });
+    const response = await postChallenge(f.app, raw);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Choose an account type to link.",
+      code: "identity_invalid_request",
+    });
+    expect(f.issued).toEqual([]);
+  }
+});
+
+test("POST /challenges without a store is 503", async () => {
+  const response = await postChallenge(
+    identityRoutes(signedIn, undefined, undefined, { slackLinking: true }),
+    '{"provider":"slack"}',
+  );
+  expect(response.status).toBe(503);
+  expect((await response.json()).code).toBe("identity_unavailable");
 });
