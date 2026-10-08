@@ -23,8 +23,18 @@ export function identityRoutes(
   });
   app.use("*", requireUser);
   if (!store) {
+    /*
+     * The code is what tells the settings page "this deployment has no identity store" apart from a
+     * proxy or platform 503, which must surface as an error rather than hide the section.
+     */
     app.all("*", (context) =>
-      context.json({ error: "Linked accounts are not available." }, 503),
+      context.json(
+        {
+          error: "Linked accounts are not available.",
+          code: "identity_unavailable",
+        },
+        503,
+      ),
     );
     return app;
   }

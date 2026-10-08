@@ -100,7 +100,15 @@ test("responses are not cached", async () => {
 
 test("without a store every route is 503", async () => {
   const app = identityRoutes(signedIn);
-  expect((await app.request("/links")).status).toBe(503);
+  const response = await app.request("/links");
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({
+    error: "Linked accounts are not available.",
+    code: "identity_unavailable",
+  });
+  const removal = await app.request("/links/x", { method: "DELETE" });
+  expect(removal.status).toBe(503);
+  expect((await removal.json()).code).toBe("identity_unavailable");
 });
 
 test("auth runs before the missing-store 503 and responses are never cached", async () => {
