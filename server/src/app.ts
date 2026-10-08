@@ -685,7 +685,14 @@ export function createApp(
    * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
    * administrator view and no linking on somebody else's behalf.
    */
-  app.route("/api/identity", identityRoutes(requireUser, identity));
+  const trustedAppOrigins = [
+    ...(config.auth?.trustedOrigins ?? []),
+    ...(config.appUrl ? [config.appUrl] : []),
+  ];
+  app.route(
+    "/api/identity",
+    identityRoutes(requireUser, identity, trustedAppOrigins),
+  );
 
   app.get("/api/settings/instructions", requireUser, async (context) => {
     if (!userInstructions) {
@@ -766,10 +773,7 @@ export function createApp(
       createLearningRoutes(
         learning,
         requireUser,
-        [
-          ...(config.auth?.trustedOrigins ?? []),
-          ...(config.appUrl ? [config.appUrl] : []),
-        ],
+        trustedAppOrigins,
         auditStore,
       ),
     );

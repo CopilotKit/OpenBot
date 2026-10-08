@@ -30,21 +30,25 @@ const link: IdentityLink = {
   updatedAt: new Date("2026-10-08T00:00:00Z"),
 };
 
-function fixture() {
+function fixture(trustedOrigins: readonly string[] = []) {
   const calls: string[] = [];
-  const app = identityRoutes(signedIn, {
-    identitiesFor: async (userId) => (userId === "person" ? [link] : []),
-    unlink: async (userId, id) => {
-      calls.push(`unlink:${userId}:${id}`);
-      return userId === "person" && id === "link-1";
+  const app = identityRoutes(
+    signedIn,
+    {
+      identitiesFor: async (userId) => (userId === "person" ? [link] : []),
+      unlink: async (userId, id) => {
+        calls.push(`unlink:${userId}:${id}`);
+        return userId === "person" && id === "link-1";
+      },
+      peekChallenge: async (t) =>
+        t === token ? { provider: "slack", handle: "dana" } : null,
+      confirmChallenge: async (t, userId) => {
+        calls.push(`confirm:${userId}`);
+        if (t !== token) throw new IdentityLinkError();
+      },
     },
-    peekChallenge: async (t) =>
-      t === token ? { provider: "slack", handle: "dana" } : null,
-    confirmChallenge: async (t, userId) => {
-      calls.push(`confirm:${userId}`);
-      if (t !== token) throw new IdentityLinkError();
-    },
-  });
+    trustedOrigins,
+  );
   return { app, calls };
 }
 
@@ -174,6 +178,38 @@ test("confirm accepts same-origin requests", async () => {
   );
   expect(response.status).toBe(200);
   expect(f.calls).toEqual(["confirm:person"]);
+});
+
+test("confirm accepts a trusted app origin behind a proxy", async () => {
+  const f = fixture(["https://openbot.example"]);
+  const response = await f.app.request(
+    "http://openbot.test/challenges/confirm",
+    {
+      ...post({ token }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://openbot.example",
+      },
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(f.calls).toEqual(["confirm:person"]);
+});
+
+test("confirm refuses an untrusted origin that differs from the request", async () => {
+  const f = fixture();
+  const response = await f.app.request(
+    "http://openbot.test/challenges/confirm",
+    {
+      ...post({ token }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://openbot.example",
+      },
+    },
+  );
+  expect(response.status).toBe(403);
+  expect(f.calls).toEqual([]);
 });
 
 test("responses are not cached", async () => {

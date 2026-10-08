@@ -22,6 +22,7 @@ export function identityRoutes(
     IdentityStore,
     "identitiesFor" | "unlink" | "peekChallenge" | "confirmChallenge"
   >,
+  trustedOrigins: readonly string[] = [],
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   app.use("*", async (context, next) => {
@@ -87,7 +88,9 @@ export function identityRoutes(
     const origin = context.req.header("origin");
     if (
       origin
-        ? origin !== new URL(context.req.url).origin
+        ? !new Set([new URL(context.req.url).origin, ...trustedOrigins]).has(
+            origin,
+          )
         : context.req.header("sec-fetch-site") === "cross-site"
     ) {
       return context.json(
