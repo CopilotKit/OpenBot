@@ -26,6 +26,16 @@ export type GithubCallbackDeps = {
   now?: () => Date;
 };
 
+function logLinkAuditFailure(provider: string, error: unknown): void {
+  console.error(
+    JSON.stringify({
+      type: "identity-link-audit-failed",
+      provider,
+      error: String(error),
+    }),
+  );
+}
+
 /**
  * Finishes linking a GitHub account when GitHub sends the person back.
  *
@@ -108,6 +118,8 @@ export function githubCallbackRoutes(
         throw error;
       }
 
+      // The link and its token are live from here on. A failed audit write is logged and does not
+      // turn the redirect into `?linked=failed`, whose notice says nothing was saved.
       if (deps.auditStore) {
         await recordAuditEvent(deps.auditStore, {
           eventType: "identity.linked",
@@ -115,7 +127,7 @@ export function githubCallbackRoutes(
           targetId: link.id,
           actorUserId: state.userId,
           payload: { actor: state.userId, provider: "github" },
-        });
+        }).catch((error) => logLinkAuditFailure("github", error));
       }
       return context.redirect(`${base}github`, 302);
     } catch (error) {

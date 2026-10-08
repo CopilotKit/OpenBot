@@ -23,6 +23,7 @@ function build(
     tokenFails?: boolean;
     linkError?: Error;
     revokeError?: Error;
+    auditError?: Error;
     nowAt?: Date;
   } = {},
 ) {
@@ -75,7 +76,12 @@ function build(
         return { id: "link-1", userId: "person" } as never;
       },
     },
-    auditStore: { insert: async (event) => void audits.push(event) },
+    auditStore: {
+      insert: async (event) => {
+        if (options.auditError) throw options.auditError;
+        audits.push(event);
+      },
+    },
     fetchImpl,
     now: () => options.nowAt ?? now,
   });
@@ -285,6 +291,30 @@ describe("GitHub sign-in callback", () => {
     ).toBe(FAILED);
     expect(harness.created).toHaveLength(0);
     expect(harness.linked).toHaveLength(0);
+  });
+
+  test("an audit write that fails after the link committed still reports linked, and logs", async () => {
+    const harness = build({ auditError: new Error("audit db down") });
+    expect(
+      await call(harness, `code=the-code&state=${await validState()}`),
+    ).toBe(OK);
+    expect(harness.linked).toHaveLength(1);
+    expect(harness.revoked).toHaveLength(0);
+    const logged = errors.mock.calls.map((args: unknown[]) => String(args[0]));
+    expect(logged).toHaveLength(1);
+    expect(JSON.parse(logged[0] as string)).toEqual({
+      type: "identity-link-audit-failed",
+      provider: "github",
+      error: "Error: audit db down",
+    });
+    for (const secret of [
+      "the-code",
+      "gho_secret",
+      "ghr_secret",
+      "client-secret",
+      clientSecret,
+    ])
+      expect(output()).not.toContain(secret);
   });
 
   test("an identity conflict revokes the new credential and does not audit", async () => {

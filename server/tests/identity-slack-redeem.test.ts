@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { slackCodeRedeemer } from "../src/identity/slack-redeem";
 import type { IdentityStore } from "../src/identity/store";
@@ -110,6 +110,34 @@ describe("slackCodeRedeemer", () => {
     await expect(
       slackCodeRedeemer(store, auditStore).redeem("X", sender),
     ).rejects.toThrow("db down");
+  });
+
+  test("an audit write that fails after the link committed still reports linked, and logs", async () => {
+    const { store } = setup(async () => link);
+    const errors = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const failing: AuditStore = {
+        insert: async () => {
+          throw new Error("audit db down");
+        },
+      };
+      expect(
+        await slackCodeRedeemer(store, failing).redeem("CODE-1", sender),
+      ).toBe("linked");
+      const logged = errors.mock.calls.map((args: unknown[]) =>
+        String(args[0]),
+      );
+      expect(logged).toHaveLength(1);
+      expect(JSON.parse(logged[0] as string)).toEqual({
+        type: "identity-link-audit-failed",
+        provider: "slack",
+        error: "Error: audit db down",
+      });
+      expect(logged[0]).not.toContain("CODE-1");
+      expect(logged[0]).not.toContain("U1");
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   test("works without an audit store", async () => {

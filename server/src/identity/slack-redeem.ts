@@ -9,8 +9,8 @@ import {
 
 /**
  * Redeems a link code a person sent from Slack. Failures a person can cause become a result; any
- * other error propagates. The audit event is written after the link commits and is not caught, as
- * for unlinking: it names the link and provider, never the realm or Slack subject.
+ * other error propagates. The audit event is written after the link commits; a failed write is
+ * logged and the person is still told they are linked. It names the link and provider, never the realm or Slack subject.
  */
 export function slackCodeRedeemer(
   store: Pick<IdentityStore, "redeemChallenge">,
@@ -51,7 +51,15 @@ export function slackCodeRedeemer(
           targetId: link.id,
           actorUserId: link.userId,
           payload: { actor: link.userId, provider: "slack" },
-        });
+        }).catch((error) =>
+          console.error(
+            JSON.stringify({
+              type: "identity-link-audit-failed",
+              provider: "slack",
+              error: String(error),
+            }),
+          ),
+        );
       }
       return "linked";
     },
