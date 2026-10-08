@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
+import { openGithubState } from "../src/identity/github-oauth";
 import {
   type IdentityRouteOptions,
   identityRoutes,
@@ -256,6 +257,58 @@ test("POST /challenges without a store is 503", async () => {
     identityRoutes(signedIn, undefined, undefined, { slackLinking: true }),
     '{"provider":"slack"}',
   );
+  expect(response.status).toBe(503);
+  expect((await response.json()).code).toBe("identity_unavailable");
+});
+
+const githubKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const githubOptions = {
+  github: {
+    clientId: "Iv1.x",
+    publicUrl: "https://o.test",
+    encryptionKey: githubKey,
+  },
+};
+
+test("POST /github/connect returns the GitHub authorization URL for the asker", async () => {
+  const response = await fixture("github", githubOptions).app.request(
+    "/github/connect",
+    { method: "POST" },
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    connect: { authorizationUrl: string };
+  };
+  const url = new URL(body.connect.authorizationUrl);
+  expect(url.origin + url.pathname).toBe(
+    "https://github.com/login/oauth/authorize",
+  );
+  expect(url.searchParams.get("client_id")).toBe("Iv1.x");
+  expect(url.searchParams.get("redirect_uri")).toBe(
+    "https://o.test/api/identity/github/callback",
+  );
+  expect(
+    await openGithubState(url.searchParams.get("state") ?? "", githubKey),
+  ).toEqual({ userId: "person" });
+});
+
+test("POST /github/connect is 404 unless GitHub is configured", async () => {
+  const f = fixture("github");
+  const response = await f.app.request("/github/connect", { method: "POST" });
+  expect(response.status).toBe(404);
+  expect(await response.json()).toEqual({
+    error: expect.any(String),
+    code: "identity_provider_unavailable",
+  });
+});
+
+test("POST /github/connect without a store is 503", async () => {
+  const response = await identityRoutes(
+    signedIn,
+    undefined,
+    undefined,
+    githubOptions,
+  ).request("/github/connect", { method: "POST" });
   expect(response.status).toBe(503);
   expect((await response.json()).code).toBe("identity_unavailable");
 });

@@ -2,6 +2,11 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import {
+  githubAuthorizationUrl,
+  githubRedirectUri,
+  sealGithubState,
+} from "./github-oauth";
 import { PROVIDERS } from "./providers";
 import type { IdentityStore } from "./store";
 
@@ -87,6 +92,24 @@ export function identityRoutes(
         instruction: PROVIDERS.slack.instruction?.(code) ?? "",
       },
     });
+  });
+
+  app.post("/github/connect", async (context) => {
+    const github = options.github;
+    if (!github)
+      return context.json(
+        {
+          error: "That account type cannot be linked here.",
+          code: "identity_provider_unavailable",
+        },
+        404,
+      );
+    const authorizationUrl = githubAuthorizationUrl({
+      clientId: github.clientId,
+      redirectUri: githubRedirectUri(github.publicUrl),
+      state: await sealGithubState(context.var.actor.id, github.encryptionKey),
+    });
+    return context.json({ connect: { authorizationUrl } });
   });
 
   app.get("/links", async (context) => {
