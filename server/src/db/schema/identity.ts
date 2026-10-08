@@ -1,4 +1,3 @@
-// server/src/db/schema/identity.ts
 /**
  * Accounts at outside providers, linked to OpenBot users.
  *

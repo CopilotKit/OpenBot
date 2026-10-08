@@ -1,4 +1,3 @@
-// server/tests/identity-providers.test.ts
 import { expect, test } from "bun:test";
 import {
   acceptsMethod,

@@ -1,4 +1,3 @@
-// server/tests/identity-schema.integration.test.ts
 import { afterAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
