@@ -61,17 +61,21 @@ export const identityLinks = pgTable(
   ],
 );
 
-/** Neither possession of the token nor the signed-in confirmation alone establishes a link. */
+/**
+ * One-time link codes OpenBot issues to a signed-in person. The link is made when the code arrives
+ * from that person's chat account, so the code only ever links to the user it was issued to. Only
+ * the sha256 of the code is stored. `user_id` is not a foreign key, for the same reason as above.
+ */
 export const identityLinkChallenges = pgTable(
   "identity_link_challenges",
   {
     tokenHash: text("token_hash").primaryKey(),
     provider: text("provider").notNull(),
-    realm: text("realm").notNull(),
-    subject: text("subject").notNull(),
-    handle: text("handle"),
-    confirmedUserId: text("confirmed_user_id"),
+    userId: text("user_id").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
-  (table) => [index("identity_link_challenges_expiry_idx").on(table.expiresAt)],
+  (table) => [
+    index("identity_link_challenges_expiry_idx").on(table.expiresAt),
+    index("identity_link_challenges_user_idx").on(table.userId, table.provider),
+  ],
 );

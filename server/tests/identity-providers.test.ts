@@ -9,7 +9,7 @@ import {
 } from "../src/identity/providers";
 import { IdentityInputError } from "../src/identity/types";
 
-test("slackRealm keeps the three parts the Slack branch matched on", () => {
+test("slackRealm keeps connection, installation and workspace", () => {
   expect(
     slackRealm({
       connectionId: "openbot",
@@ -50,8 +50,12 @@ test("each provider declares the proofs it accepts", () => {
   expect(acceptsMethod("github", "challenge")).toBe(false);
 });
 
-test("Slack tells the person how to finish from Slack", () => {
-  expect(PROVIDERS.slack.completionHint?.("tok")).toContain("/link tok");
+test("Slack tells the person to send the code to the bot", () => {
+  const code = "123e4567-e89b-42d3-a456-426614174000";
+  expect(PROVIDERS.slack.instruction?.(code)).toBe(
+    `Send this message to the OpenBot bot in Slack: link ${code}`,
+  );
+  expect(PROVIDERS.github.instruction).toBeUndefined();
 });
 
 test("isIdentityProvider", () => {

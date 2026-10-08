@@ -22,7 +22,7 @@ export type IdentityLink = Identity & {
 
 /** No caller-controlled identifiers, tokens, or database parameters appear in these errors. */
 export class IdentityLinkError extends Error {
-  constructor(message = "Link challenge is invalid, expired, or unconfirmed.") {
+  constructor(message = "Link code is invalid, expired, or already used.") {
     super(message);
     this.name = "IdentityLinkError";
   }

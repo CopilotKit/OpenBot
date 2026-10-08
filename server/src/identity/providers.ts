@@ -10,8 +10,8 @@ type ProviderSpec = {
   title: string;
   /** The proofs this provider's links may be made with. Anything else is refused by the store. */
   methods: readonly LinkMethod[];
-  /** For challenge providers: what the person does at the provider to finish. */
-  completionHint?: (token: string) => string;
+  /** For challenge providers: what the person sends from their account there, carrying the code. */
+  instruction?: (code: string) => string;
 };
 
 export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
@@ -19,8 +19,8 @@ export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
     slack: {
       title: "Slack",
       methods: ["challenge"],
-      completionHint: (token) =>
-        `From the Slack account that asked for this link, mention the same bot with: /link ${token}`,
+      instruction: (code) =>
+        `Send this message to the OpenBot bot in Slack: link ${code}`,
     },
     github: { title: "GitHub", methods: ["oauth"] },
   });
@@ -36,8 +36,9 @@ export function acceptsMethod(provider: IdentityProvider, method: LinkMethod) {
 }
 
 /**
- * The Slack branch matched a sender on connection, installation and workspace. The realm keeps
- * exactly that, each part escaped so a colon inside one part cannot imitate the separator.
+ * A Slack user id is only unique within one workspace reached through one installation of one
+ * connection, so the realm is those three parts, each escaped so a colon inside one part cannot
+ * imitate the separator.
  */
 export function slackRealm(parts: {
   connectionId: string;

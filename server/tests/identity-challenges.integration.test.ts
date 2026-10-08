@@ -1,184 +1,230 @@
 import { afterAll, expect, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { identityLinkChallenges, identityLinks } from "../src/db/schema";
 import { createIdentityStore } from "../src/identity/store";
 import {
   type Identity,
+  IdentityConflictError,
   IdentityInputError,
   IdentityLinkError,
+  type IdentityProvider,
 } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const store = createIdentityStore(database, createCredentialStore(database));
 const realm = `test-${randomUUID()}`;
+const users: string[] = [];
 
 afterAll(async () => {
-  await database
-    .delete(identityLinkChallenges)
-    .where(eq(identityLinkChallenges.realm, realm));
+  if (users.length)
+    await database
+      .delete(identityLinkChallenges)
+      .where(inArray(identityLinkChallenges.userId, users));
   await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
   await database.$client.close();
 });
 
+const user = () => {
+  const id = `user-${randomUUID()}`;
+  users.push(id);
+  return id;
+};
 const slack = (subject = randomUUID()): Identity => ({
   provider: "slack",
   realm,
   subject,
 });
-
-test("extra identity properties cannot pre-confirm an application account", async () => {
-  const sender = { ...slack(), confirmedUserId: "forged-user" };
-  const { token } = await store.beginChallenge(sender);
-  await expect(store.completeChallenge(token, sender)).rejects.toThrow(
-    IdentityLinkError,
-  );
-  expect(await store.linkedUser(sender)).toBeNull();
-});
-
-test("a provider that does not accept challenges cannot begin one", async () => {
-  await expect(
-    store.beginChallenge({ provider: "github", realm, subject: "1" }),
-  ).rejects.toThrow(IdentityInputError);
-});
-
-test("linking needs both confirmations, stores only a hash, and consumes once", async () => {
-  const sender = slack();
-  const before = Date.now();
-  const challenge = await store.beginChallenge(sender, "dana");
-  expect(Buffer.from(challenge.token, "base64url").length).toBe(32);
-  expect(challenge.expiresAt.getTime()).toBeGreaterThanOrEqual(
-    before + 599_000,
-  );
-  expect(challenge.expiresAt.getTime()).toBeLessThanOrEqual(
-    Date.now() + 600_000,
-  );
-  const [saved] = await database
-    .select()
-    .from(identityLinkChallenges)
-    .where(
-      eq(
-        identityLinkChallenges.tokenHash,
-        createHash("sha256").update(challenge.token).digest("hex"),
-      ),
-    );
-  expect(saved).toBeDefined();
-  expect(JSON.stringify(saved)).not.toContain(challenge.token);
-  expect(await store.peekChallenge(challenge.token)).toEqual({
-    provider: "slack",
-    handle: "dana",
-  });
-  await expect(
-    store.completeChallenge(challenge.token, sender),
-  ).rejects.toThrow(IdentityLinkError);
-  await store.confirmChallenge(challenge.token, "user-a");
-  await store.confirmChallenge(challenge.token, "user-a");
-  expect(await store.linkedUser(sender)).toBeNull();
-  const link = await store.completeChallenge(challenge.token, sender);
-  expect(link.verifiedBy).toBe("challenge");
-  expect(link.handle).toBe("dana");
-  expect((await store.linkedUser(sender))?.userId).toBe("user-a");
-  await expect(
-    store.completeChallenge(challenge.token, sender),
-  ).rejects.toThrow(IdentityLinkError);
-  await expect(
-    store.confirmChallenge(challenge.token, "user-a"),
-  ).rejects.toThrow(IdentityLinkError);
-  expect(await store.peekChallenge(challenge.token)).toBeNull();
-});
-
-test("confirmation cannot change the signed-in application user", async () => {
-  const sender = slack();
-  const { token } = await store.beginChallenge(sender);
-  const results = await Promise.allSettled([
-    store.confirmChallenge(token, "user-a"),
-    store.confirmChallenge(token, "user-b"),
-  ]);
-  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-  await store.completeChallenge(token, sender);
-  expect(["user-a", "user-b"]).toContain(
-    (await store.linkedUser(sender))?.userId,
-  );
-});
-
-test.each(["provider", "realm", "subject"] as const)(
-  "a challenge refuses a different %s without consuming it",
-  async (field) => {
-    const sender = slack();
-    const { token } = await store.beginChallenge(sender);
-    await store.confirmChallenge(token, "user-a");
-    const other =
-      field === "provider"
-        ? { ...sender, provider: "github" as const }
-        : { ...sender, [field]: "other" };
-    await expect(store.completeChallenge(token, other)).rejects.toThrow();
-    await store.completeChallenge(token, sender);
-    expect((await store.linkedUser(sender))?.userId).toBe("user-a");
-  },
-);
-
-const hashOf = (token: string) =>
-  createHash("sha256").update(token).digest("hex");
-const expire = (token: string) =>
+const hashOf = (code: string) =>
+  createHash("sha256").update(code).digest("hex");
+const rowFor = async (code: string) =>
+  (
+    await database
+      .select()
+      .from(identityLinkChallenges)
+      .where(eq(identityLinkChallenges.tokenHash, hashOf(code)))
+  )[0];
+const expire = (code: string, by = "1 second") =>
   database
     .update(identityLinkChallenges)
-    .set({ expiresAt: sql`clock_timestamp() - interval '1 second'` })
-    .where(eq(identityLinkChallenges.tokenHash, hashOf(token)));
+    .set({ expiresAt: sql`clock_timestamp() - ${by}::interval` })
+    .where(eq(identityLinkChallenges.tokenHash, hashOf(code)));
+const dbNow = async () => {
+  const result = await database.execute<{ now: string | Date }>(
+    sql`select clock_timestamp() as now`,
+  );
+  const rows = Array.isArray(result)
+    ? result
+    : (result as { rows: unknown[] }).rows;
+  return new Date((rows[0] as { now: string | Date }).now).getTime();
+};
 
-test("an expired challenge can be neither peeked, confirmed nor completed", async () => {
-  const sender = slack();
-  const confirmed = await store.beginChallenge(sender);
-  await store.confirmChallenge(confirmed.token, "user-a");
-  await expire(confirmed.token);
-  expect(await store.peekChallenge(confirmed.token)).toBeNull();
-  await expect(
-    store.completeChallenge(confirmed.token, sender),
-  ).rejects.toThrow(IdentityLinkError);
-
-  const unconfirmed = await store.beginChallenge(slack());
-  await expire(unconfirmed.token);
-  expect(await store.peekChallenge(unconfirmed.token)).toBeNull();
-  await expect(
-    store.confirmChallenge(unconfirmed.token, "user-a"),
-  ).rejects.toThrow(IdentityLinkError);
-});
-
-test("beginning a challenge clears challenges that expired over a day ago", async () => {
-  const stale = `stale-${randomUUID()}`;
-  await database.insert(identityLinkChallenges).values({
-    tokenHash: stale,
+test("a code is a UUID, only its hash is stored, and it lasts ten minutes", async () => {
+  const owner = user();
+  const before = await dbNow();
+  const { code, expiresAt } = await store.issueChallenge(owner, "slack");
+  const after = await dbNow();
+  expect(code).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + 600_000);
+  expect(expiresAt.getTime()).toBeLessThanOrEqual(after + 600_000);
+  const saved = await rowFor(code);
+  expect(saved).toEqual({
+    tokenHash: hashOf(code),
     provider: "slack",
-    realm,
-    subject: randomUUID(),
-    expiresAt: sql`clock_timestamp() - interval '2 days'`,
+    userId: owner,
+    expiresAt,
   });
-  await store.beginChallenge(slack());
-  const rows = await database
-    .select()
-    .from(identityLinkChallenges)
-    .where(eq(identityLinkChallenges.tokenHash, stale));
-  expect(rows).toEqual([]);
+  expect(JSON.stringify(saved)).not.toContain(code);
 });
 
-test("a malformed token is refused before any query", async () => {
-  await expect(store.confirmChallenge("short", "user-a")).rejects.toThrow(
+test("a provider that does not accept challenges cannot issue a code", async () => {
+  await expect(store.issueChallenge(user(), "github")).rejects.toThrow(
+    IdentityInputError,
+  );
+  await expect(
+    store.issueChallenge(user(), "myspace" as IdentityProvider),
+  ).rejects.toThrow(IdentityInputError);
+  await expect(store.issueChallenge(" ", "slack")).rejects.toThrow(
+    IdentityInputError,
+  );
+});
+
+test("redeeming links the chat account to the person the code was issued to", async () => {
+  // The fixation regression: whoever sends the code, the link belongs to the issuer.
+  const owner = user();
+  const sender = slack();
+  const { code } = await store.issueChallenge(owner, "slack");
+  const link = await store.redeemChallenge(code, sender, "dana");
+  expect(link.userId).toBe(owner);
+  expect(link.verifiedBy).toBe("challenge");
+  expect(link.handle).toBe("dana");
+  expect(await store.linkedUser(sender)).toEqual({
+    userId: owner,
+    status: "active",
+  });
+  expect(await rowFor(code)).toBeUndefined();
+});
+
+test("extra properties on the chat identity cannot redirect the link", async () => {
+  const owner = user();
+  const sender = { ...slack(), userId: "forged-user" };
+  const { code } = await store.issueChallenge(owner, "slack");
+  expect((await store.redeemChallenge(code, sender)).userId).toBe(owner);
+});
+
+test("a code is consumed once", async () => {
+  const { code } = await store.issueChallenge(user(), "slack");
+  await store.redeemChallenge(code, slack());
+  const other = slack();
+  await expect(store.redeemChallenge(code, other)).rejects.toThrow(
     IdentityLinkError,
   );
-  expect(await store.peekChallenge("short")).toBeNull();
+  expect(await store.linkedUser(other)).toBeNull();
 });
 
-test("completing a second challenge in the same realm replaces the person's older link", async () => {
+test("a code from another provider is refused without consuming it", async () => {
+  const owner = user();
+  const { code } = await store.issueChallenge(owner, "slack");
+  const wrong: Identity = { provider: "github", realm, subject: randomUUID() };
+  await expect(store.redeemChallenge(code, wrong)).rejects.toThrow(
+    IdentityLinkError,
+  );
+  expect(await store.linkedUser(wrong)).toBeNull();
+  expect(await rowFor(code)).toBeDefined();
+  expect((await store.redeemChallenge(code, slack())).userId).toBe(owner);
+});
+
+test("an expired code is refused", async () => {
+  const { code } = await store.issueChallenge(user(), "slack");
+  await expire(code);
+  const sender = slack();
+  await expect(store.redeemChallenge(code, sender)).rejects.toThrow(
+    IdentityLinkError,
+  );
+  expect(await store.linkedUser(sender)).toBeNull();
+});
+
+test.each([
+  "",
+  "short",
+  "link 123e4567-e89b-42d3-a456-426614174000",
+  "123e4567e89b42d3a456426614174000",
+  "' or 1=1 --",
+])("a malformed code %p is refused", async (code) => {
+  await expect(store.redeemChallenge(code, slack())).rejects.toThrow(
+    IdentityLinkError,
+  );
+});
+
+test("an unknown but well-formed code is refused", async () => {
+  await expect(store.redeemChallenge(randomUUID(), slack())).rejects.toThrow(
+    IdentityLinkError,
+  );
+});
+
+test("issuing again invalidates the person's previous code for that provider", async () => {
+  const owner = user();
+  const first = await store.issueChallenge(owner, "slack");
+  const second = await store.issueChallenge(owner, "slack");
+  expect(await rowFor(first.code)).toBeUndefined();
+  await expect(store.redeemChallenge(first.code, slack())).rejects.toThrow(
+    IdentityLinkError,
+  );
+  expect((await store.redeemChallenge(second.code, slack())).userId).toBe(
+    owner,
+  );
+});
+
+test("issuing for one person leaves other people's codes alone", async () => {
+  const mine = await store.issueChallenge(user(), "slack");
+  await store.issueChallenge(user(), "slack");
+  expect(await rowFor(mine.code)).toBeDefined();
+});
+
+test("issuing sweeps codes expired over a day ago and keeps recently expired ones", async () => {
+  const staleOwner = user();
+  const recentOwner = user();
+  const stale = await store.issueChallenge(staleOwner, "slack");
+  const recent = await store.issueChallenge(recentOwner, "slack");
+  await expire(stale.code, "2 days");
+  await expire(recent.code, "1 hour");
+  await store.issueChallenge(user(), "slack");
+  expect(await rowFor(stale.code)).toBeUndefined();
+  expect(await rowFor(recent.code)).toBeDefined();
+});
+
+test("a chat account linked to somebody else is refused and the code stays unused", async () => {
+  const sender = slack();
+  const first = user();
+  const second = user();
+  const one = await store.issueChallenge(first, "slack");
+  await store.redeemChallenge(one.code, sender);
+  const two = await store.issueChallenge(second, "slack");
+  await expect(store.redeemChallenge(two.code, sender)).rejects.toThrow(
+    IdentityConflictError,
+  );
+  expect((await store.linkedUser(sender))?.userId).toBe(first);
+  expect(await rowFor(two.code)).toBeDefined();
+  expect((await store.redeemChallenge(two.code, slack())).userId).toBe(second);
+});
+
+test("redeeming a second code in the same realm replaces the person's older link", async () => {
+  const owner = user();
   const first = slack();
-  const one = await store.beginChallenge(first);
-  await store.confirmChallenge(one.token, "user-z");
-  await store.completeChallenge(one.token, first);
   const second = slack();
-  const two = await store.beginChallenge(second);
-  await store.confirmChallenge(two.token, "user-z");
-  await store.completeChallenge(two.token, second);
+  await store.redeemChallenge(
+    (await store.issueChallenge(owner, "slack")).code,
+    first,
+  );
+  await store.redeemChallenge(
+    (await store.issueChallenge(owner, "slack")).code,
+    second,
+  );
   expect(await store.linkedUser(first)).toBeNull();
-  expect((await store.linkedUser(second))?.userId).toBe("user-z");
+  expect((await store.linkedUser(second))?.userId).toBe(owner);
 });

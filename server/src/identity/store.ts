@@ -1,9 +1,9 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { createHash, randomUUID } from "node:crypto";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges, identityLinks } from "../db/schema";
-import { acceptsMethod, parseIdentity } from "./providers";
+import { acceptsMethod, isIdentityProvider, parseIdentity } from "./providers";
 import {
   type Identity,
   IdentityConflictError,
@@ -167,9 +167,13 @@ export async function writeLink(
   }
 }
 
-function tokenHash(token: string) {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new IdentityLinkError();
-  return createHash("sha256").update(token).digest("hex");
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Refuses anything that is not a code OpenBot could have issued before it reaches a query. */
+function codeHash(code: string) {
+  if (typeof code !== "string" || !UUID.test(code))
+    throw new IdentityLinkError();
+  return createHash("sha256").update(code.toLowerCase()).digest("hex");
 }
 
 export function createIdentityStore(database: Database, credentials: Revoke) {
@@ -245,108 +249,75 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       });
     },
 
-    async beginChallenge(
-      value: Identity,
-      handle: string | null = null,
-    ): Promise<{ token: string; expiresAt: Date }> {
-      const identity = parseIdentity(value);
-      if (!acceptsMethod(identity.provider, "challenge"))
+    /**
+     * A one-time code for the signed-in `userId`. The link is made when the code arrives from the
+     * person's account at `provider` (redeemChallenge), and always links to the user it was issued
+     * to, so a code started by somebody else can never attach their account to this person.
+     */
+    async issueChallenge(
+      userId: string,
+      provider: IdentityProvider,
+    ): Promise<{ code: string; expiresAt: Date }> {
+      if (!userId.trim()) throw new IdentityInputError();
+      if (
+        !isIdentityProvider(provider) ||
+        !acceptsMethod(provider, "challenge")
+      )
         throw new IdentityInputError(
           "This provider does not accept that kind of proof.",
         );
-      const token = randomBytes(32).toString("base64url");
-      // No sweep exists, so chat-started links that were never opened would otherwise accumulate.
-      await database
-        .delete(identityLinkChallenges)
-        .where(
-          lt(
-            identityLinkChallenges.expiresAt,
-            sql`clock_timestamp() - interval '1 day'`,
-          ),
-        );
-      const [challenge] = await database
-        .insert(identityLinkChallenges)
-        .values({
-          tokenHash: tokenHash(token),
-          provider: identity.provider,
-          realm: identity.realm,
-          subject: identity.subject,
-          handle: handle?.slice(0, 256) ?? null,
-          expiresAt: sql`clock_timestamp() + interval '10 minutes'`,
-        })
-        .returning({ expiresAt: identityLinkChallenges.expiresAt });
-      if (!challenge) throw new IdentityLinkError();
-      return { token, expiresAt: challenge.expiresAt };
-    },
-
-    async peekChallenge(
-      token: string,
-    ): Promise<{ provider: IdentityProvider; handle: string | null } | null> {
-      let hash: string;
-      try {
-        hash = tokenHash(token);
-      } catch {
-        return null;
-      }
-      const [challenge] = await database
-        .select({
-          provider: identityLinkChallenges.provider,
-          handle: identityLinkChallenges.handle,
-        })
-        .from(identityLinkChallenges)
-        .where(
-          and(
-            eq(identityLinkChallenges.tokenHash, hash),
-            gt(identityLinkChallenges.expiresAt, sql`clock_timestamp()`),
-          ),
-        );
-      return challenge
-        ? {
-            provider: challenge.provider as IdentityProvider,
-            handle: challenge.handle,
-          }
-        : null;
-    },
-
-    /** The route authenticates this user; no link exists until completeChallenge. */
-    async confirmChallenge(token: string, userId: string): Promise<void> {
-      if (!userId.trim()) throw new IdentityLinkError();
-      const [challenge] = await database
-        .update(identityLinkChallenges)
-        .set({ confirmedUserId: userId })
-        .where(
-          and(
-            eq(identityLinkChallenges.tokenHash, tokenHash(token)),
-            gt(identityLinkChallenges.expiresAt, sql`clock_timestamp()`),
-            or(
-              isNull(identityLinkChallenges.confirmedUserId),
-              eq(identityLinkChallenges.confirmedUserId, userId),
+      const code = randomUUID();
+      return database.transaction(async (transaction) => {
+        // One live code per person per provider: a new one replaces any earlier one.
+        await transaction
+          .delete(identityLinkChallenges)
+          .where(
+            and(
+              eq(identityLinkChallenges.userId, userId),
+              eq(identityLinkChallenges.provider, provider),
             ),
-          ),
-        )
-        .returning({ tokenHash: identityLinkChallenges.tokenHash });
-      if (!challenge) throw new IdentityLinkError();
+          );
+        // No sweep exists, so codes that were never sent would otherwise accumulate.
+        await transaction
+          .delete(identityLinkChallenges)
+          .where(
+            lt(
+              identityLinkChallenges.expiresAt,
+              sql`clock_timestamp() - interval '1 day'`,
+            ),
+          );
+        const [challenge] = await transaction
+          .insert(identityLinkChallenges)
+          .values({
+            tokenHash: codeHash(code),
+            provider,
+            userId,
+            expiresAt: sql`clock_timestamp() + interval '10 minutes'`,
+          })
+          .returning({ expiresAt: identityLinkChallenges.expiresAt });
+        if (!challenge) throw new IdentityLinkError();
+        return { code, expiresAt: challenge.expiresAt };
+      });
     },
 
-    /** Consumption and link creation in one transaction, so competing challenges serialize. */
-    async completeChallenge(
-      token: string,
+    /**
+     * Link `value`, the chat account the code arrived from, to the user the code was issued to.
+     * Consumption and link creation share one transaction: a refused link leaves the code unused.
+     */
+    async redeemChallenge(
+      code: string,
       value: Identity,
+      handle: string | null = null,
     ): Promise<IdentityLink> {
+      const hash = codeHash(code);
       const identity = parseIdentity(value);
-      const hash = tokenHash(token);
       return database.transaction(async (transaction) => {
         const [challenge] = await transaction
           .select()
           .from(identityLinkChallenges)
           .where(eq(identityLinkChallenges.tokenHash, hash))
           .for("update");
-        if (
-          !challenge?.confirmedUserId ||
-          challenge.provider !== identity.provider ||
-          challenge.realm !== identity.realm ||
-          challenge.subject !== identity.subject
-        )
+        if (!challenge || challenge.provider !== identity.provider)
           throw new IdentityLinkError();
         // The real clock after the row lock, not the transaction's start time.
         const [consumed] = await transaction
@@ -357,15 +328,12 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
               gt(identityLinkChallenges.expiresAt, sql`clock_timestamp()`),
             ),
           )
-          .returning({ tokenHash: identityLinkChallenges.tokenHash });
+          .returning({ userId: identityLinkChallenges.userId });
         if (!consumed) throw new IdentityLinkError();
-        return writeLink(
-          transaction,
-          credentials,
-          identity,
-          challenge.confirmedUserId,
-          { method: "challenge", handle: challenge.handle },
-        );
+        return writeLink(transaction, credentials, identity, consumed.userId, {
+          method: "challenge",
+          handle: handle?.slice(0, 256) ?? null,
+        });
       });
     },
   };

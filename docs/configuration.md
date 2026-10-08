@@ -489,10 +489,16 @@ number opted out, later messages show `opted_out` in the delivery history instea
 
 A person's accounts at outside providers — their Slack user, their GitHub account — are linked to
 their OpenBot user in one place, `identity_links`, and listed under **Linked accounts** on
-`/settings/connected-accounts`, where they can disconnect any of them. A link is proven by the
-provider's own sign-in (GitHub) or by a two-sided challenge a person starts in a chat app and
-confirms at `/settings/link` (Slack). Nobody can link an account on somebody else's behalf, and an
-outside account links to one OpenBot user at most.
+`/settings/connected-accounts`, where they can disconnect any of them. A link is proven one of two
+ways: by the provider's own sign-in (GitHub, when that integration is configured), or by a one-time
+code OpenBot issues to the signed-in person, which they send from their chat account (Slack). A
+code always links to the person it was issued to, so nobody can link an account on somebody else's
+behalf, and an outside account links to one OpenBot user at most. Linking providers are added by
+their integrations; until one is configured, the list is empty.
+
+This complements, rather than replaces, the OpenTag **Reachability** pairing above: that pairing
+binds a conversation and Bot for delivery, while a linked account records who a person is at the
+provider.
 
 ## Text messages and push notifications
 
