@@ -489,12 +489,12 @@ number opted out, later messages show `opted_out` in the delivery history instea
 ## Linked accounts
 
 OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
-or their Slack user. When a person has any, they appear under **Linked accounts** on
-`/settings/connected-accounts`, and each can be disconnected there. Disconnecting revokes any token
-stored with the link, and is audited. A person with none sees no such section.
+or their Slack user. Whenever the deployment has an identity store, the section appears under
+**Linked accounts** on `/settings/connected-accounts`. It lists the person's links and offers only
+the actions this deployment can complete, and each link can be disconnected there. Disconnecting
+revokes any token stored with the link, and is audited.
 
-Links are created by the integrations that support them. Until one is configured, the list stays
-empty. An integration proves an account in one of two ways: by the provider's own
+See "Linking Slack and GitHub accounts" below for setting up each provider. An integration proves an account in one of two ways: by the provider's own
 sign-in, or by a one-time code that OpenBot issues to the signed-in person and that they send from
 their chat account. Whoever sends the code gets that chat account linked to the person it was issued
 to, so treat it like a password and do not share it. It is valid for ten minutes and works once, and
@@ -508,9 +508,26 @@ marked as needing reconnection. The links are kept, not deleted, so the outside 
 resolves to the removed person and is refused rather than treated as an unlinked guest. Each retired
 link is recorded in the audit trail.
 
-This is separate from the OpenTag **Reachability** pairing above. That pairing binds a conversation
-for delivery and uses its own `link <code>` messages, shown on the **Reachability** screen; it is not
-recorded as a linked account.
+### Linking Slack and GitHub accounts
+
+Slack requires the OpenTag pairing above, so `OPENTAG_SHARED_SECRET` must be set. The person clicks
+**Link Slack**, which shows a message of the form `link <code>`, and sends it to the OpenBot app in
+Slack within ten minutes. Teams cannot be linked this way.
+
+GitHub uses a GitHub App. Create one under GitHub Settings, Developer settings, GitHub Apps, and set:
+
+- The callback URL to `<public URL>/api/identity/github/callback`, where the public URL is
+  `OPENBOT_PUBLIC_URL` or, if that is unset, `BETTER_AUTH_URL`.
+- "Expire user authorization tokens" on. A webhook is not required for linking.
+- A client secret, generated on the App's page.
+
+Then set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`; set both or neither. `GITHUB_APP_SLUG`
+is optional. People then use **Connect GitHub** while signed in to OpenBot in the same browser. The
+GitHub user token is stored encrypted with the link.
+
+Reachability codes and Linked accounts codes look alike, and Reachability's are checked first. A
+Reachability `link <code>` binds a conversation for delivery and is not recorded as a linked
+account; a `link <code>` from **Linked accounts** links the Slack user.
 
 ## Text messages and push notifications
 
