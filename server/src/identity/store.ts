@@ -88,6 +88,21 @@ async function revokeQuietly(
   }
 }
 
+const HANDLE_MAX = 256;
+
+/**
+ * One rule for a display handle on every path: omitted (`undefined`) keeps what the link has,
+ * null clears it, a string is trimmed and capped at 256 code points (never splitting a surrogate
+ * pair), and a blank one becomes null. Anything else is refused.
+ */
+function normalizeHandle(handle: unknown): string | null | undefined {
+  if (handle === undefined || handle === null) return handle;
+  if (typeof handle !== "string") throw new IdentityInputError();
+  const trimmed = handle.trim();
+  if (!trimmed) return null;
+  return Array.from(trimmed).slice(0, HANDLE_MAX).join("");
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
@@ -377,9 +392,11 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
       // Lowercase: uuid columns read back lowercase, and keep/move compare ids as strings.
       const credentialId = proof.credentialId?.toLowerCase() ?? undefined;
+      const handle = normalizeHandle(proof.handle);
       return database.transaction((transaction) =>
         writeLink(transaction, credentials, identity, userId, {
-          ...proof,
+          method: proof.method,
+          handle,
           credentialId,
         }),
       );
@@ -470,14 +487,16 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
     /**
      * Link `value`, the chat account the code arrived from, to the user the code was issued to.
      * Consumption and link creation share one transaction: a refused link leaves the code unused.
+     * `handle` follows the same rule as linkVerified: omitted keeps the stored one, null clears.
      */
     async redeemChallenge(
       code: string,
       value: Identity,
-      handle: string | null = null,
+      handle?: string | null,
     ): Promise<IdentityLink> {
       const hash = codeHash(code);
       const identity = parseIdentity(value);
+      const normalized = normalizeHandle(handle);
       return database.transaction(async (transaction) => {
         const [challenge] = await transaction
           .select()
@@ -499,7 +518,7 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         if (!consumed) throw new IdentityLinkError();
         return writeLink(transaction, credentials, identity, consumed.userId, {
           method: "challenge",
-          handle: handle?.slice(0, 256) ?? null,
+          handle: normalized,
         });
       });
     },

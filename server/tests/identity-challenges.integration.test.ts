@@ -251,3 +251,45 @@ test("concurrent requests still leave one live code per person and provider", as
     (await store.redeemChallenge(live[0]?.code ?? "", slack())).userId,
   ).toBe(owner);
 });
+
+test("redeeming again without a handle keeps the stored one; an explicit null clears it", async () => {
+  const owner = user();
+  const sender = slack();
+  const issue = async () => (await store.issueChallenge(owner, "slack")).code;
+  await store.redeemChallenge(await issue(), sender, "dana");
+  expect((await store.redeemChallenge(await issue(), sender)).handle).toBe(
+    "dana",
+  );
+  expect(
+    (await store.redeemChallenge(await issue(), sender, undefined)).handle,
+  ).toBe("dana");
+  expect(
+    (await store.redeemChallenge(await issue(), sender, null)).handle,
+  ).toBeNull();
+});
+
+test("a redeemed handle is capped at 256 code points without splitting a pair", async () => {
+  const owner = user();
+  const link = await store.redeemChallenge(
+    (await store.issueChallenge(owner, "slack")).code,
+    slack(),
+    "\u{1F600}".repeat(300),
+  );
+  expect(Array.from(link.handle ?? "")).toHaveLength(256);
+  expect(link.handle).toBe("\u{1F600}".repeat(256));
+});
+
+test("a blank redeemed handle is stored as none, and a non-string one is refused", async () => {
+  const owner = user();
+  const link = await store.redeemChallenge(
+    (await store.issueChallenge(owner, "slack")).code,
+    slack(),
+    "   ",
+  );
+  expect(link.handle).toBeNull();
+  const { code } = await store.issueChallenge(owner, "slack");
+  await expect(
+    store.redeemChallenge(code, slack(), 42 as unknown as string),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await rowFor(code)).toBeDefined();
+});

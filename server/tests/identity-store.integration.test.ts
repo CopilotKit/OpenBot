@@ -372,3 +372,27 @@ test("a connector credential for another provider is refused and stays live", as
   expect(await vault.isLive(other)).toBe(true);
   expect(await vault.isLive(own)).toBe(true);
 });
+
+test("a linked handle is capped at 256 code points like a redeemed one", async () => {
+  const link = await store.linkVerified(github(), user(), {
+    method: "oauth",
+    handle: `${"a".repeat(255)}\u{1F600}\u{1F600}`,
+  });
+  expect(link.handle).toBe(`${"a".repeat(255)}\u{1F600}`);
+});
+
+test("a blank linked handle is stored as none, and a non-string one is refused", async () => {
+  const blank = await store.linkVerified(github(), user(), {
+    method: "oauth",
+    handle: " ",
+  });
+  expect(blank.handle).toBeNull();
+  const identity = github();
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "oauth",
+      handle: { name: "dana" } as unknown as string,
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await store.linkedUser(identity)).toBeNull();
+});
