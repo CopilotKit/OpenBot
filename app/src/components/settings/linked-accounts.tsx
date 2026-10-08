@@ -1,4 +1,4 @@
-import { IconBrandGithub, IconBrandSlack } from "@tabler/icons-react";
+import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -19,10 +19,25 @@ import {
 import { queryClient } from "@/query-client";
 
 export function linkedAccountDescription(account: LinkedAccount): string {
-  const who = account.handle ? `@${account.handle}` : "Linked";
-  return account.status === "needs_reconnect"
-    ? `Needs reconnecting · ${who}`
-    : who;
+  if (account.status === "needs_reconnect") {
+    return account.handle
+      ? `Needs reconnecting · @${account.handle}`
+      : "Needs reconnecting";
+  }
+  return account.handle ? `@${account.handle}` : "Linked";
+}
+
+const providerIcons = {
+  slack: IconBrandSlack,
+  github: IconBrandGithub,
+} as const;
+
+/** A provider this build has no mark for gets a neutral link icon rather than someone else's logo. */
+export function providerIcon(provider: string) {
+  return (
+    (providerIcons as Record<string, typeof IconLink | undefined>)[provider] ??
+    IconLink
+  );
 }
 
 /**
@@ -44,45 +59,50 @@ export function LinkedAccountsSection() {
       </PageSection>
     );
   }
-  // Deliberately hidden when nothing is linked.
+  const failedTitle = links.data.find(
+    (account) => account.id === unlink.variables,
+  )?.title;
+  // Deliberately hidden when nothing is linked, or when this deployment has no identity store.
   if (links.data.length === 0) return null;
   return (
     <PageSection title="Linked accounts">
       <PageRows>
-        {links.data.map((account, index) => (
-          <div key={account.id}>
-            {index > 0 ? <Separator /> : null}
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                {account.provider === "slack" ? (
-                  <IconBrandSlack />
-                ) : (
-                  <IconBrandGithub />
-                )}
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{account.title}</ItemTitle>
-                <ItemDescription>
-                  {linkedAccountDescription(account)}
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Button
-                  aria-label={`Disconnect ${account.title}`}
-                  size="sm"
-                  variant="outline"
-                  disabled={unlink.isPending}
-                  onClick={() => unlink.mutate(account.id)}
-                >
-                  Disconnect
-                </Button>
-              </ItemActions>
-            </Item>
-          </div>
-        ))}
+        {links.data.map((account, index) => {
+          const Icon = providerIcon(account.provider);
+          return (
+            <div key={account.id}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <Icon />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{account.title}</ItemTitle>
+                  <ItemDescription>
+                    {linkedAccountDescription(account)}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    aria-label={`Disconnect ${account.title}`}
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      unlink.isPending && unlink.variables === account.id
+                    }
+                    onClick={() => unlink.mutate(account.id)}
+                  >
+                    Disconnect
+                  </Button>
+                </ItemActions>
+              </Item>
+            </div>
+          );
+        })}
       </PageRows>
       {unlink.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
+          Could not disconnect {failedTitle ?? "that account"}:{" "}
           {unlink.error.message}
         </p>
       ) : null}

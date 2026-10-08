@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { tryClient } from "@/lib/client";
 
 export type LinkedAccount = {
   id: string;
@@ -15,12 +15,34 @@ export const identityKeys = {
   links: () => [...identityKeys.all, "links"] as const,
 };
 
+const LOAD_FALLBACK = "Could not load your linked accounts";
+
+/**
+ * A deployment without an identity store answers 503 "not available". That is the feature being
+ * absent, not the server breaking, so it reads as no links and the section hides itself.
+ */
+export async function linksFromResponse(
+  response: Response,
+): Promise<LinkedAccount[]> {
+  if (response.status === 503) return [];
+  if (!response.ok) {
+    const message = await response
+      .json()
+      .then((body: { error?: string }) => body.error)
+      .catch(() => undefined);
+    throw new Error(message ?? LOAD_FALLBACK);
+  }
+  const body = (await response.json().catch(() => null)) as {
+    links?: LinkedAccount[];
+  } | null;
+  if (!body || !Array.isArray(body.links)) throw new Error(LOAD_FALLBACK);
+  return body.links;
+}
+
 export function linkedAccountsQueryOptions() {
   return queryOptions({
     queryKey: identityKeys.links(),
     queryFn: async (): Promise<LinkedAccount[]> =>
-      client<LinkedAccount[]>("/api/identity/links", "links", {
-        fallback: "Could not load your linked accounts",
-      }),
+      linksFromResponse(await tryClient("/api/identity/links")),
   });
 }
