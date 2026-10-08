@@ -30,7 +30,7 @@ const link: IdentityLink = {
   updatedAt: new Date("2026-10-08T00:00:00Z"),
 };
 
-function fixture() {
+function fixture(removedProvider = "github") {
   const calls: string[] = [];
   const events: AuditEventInput[] = [];
   const app = identityRoutes(
@@ -39,7 +39,9 @@ function fixture() {
       identitiesFor: async (userId) => (userId === "person" ? [link] : []),
       unlink: async (userId, id) => {
         calls.push(`unlink:${userId}:${id}`);
-        return userId === "person" && id === "link-1";
+        return userId === "person" && id === "link-1"
+          ? { provider: removedProvider }
+          : null;
       },
     },
     { insert: async (event) => void events.push(event) },
@@ -129,4 +131,16 @@ test("a 404 DELETE records nothing", async () => {
   const f = fixture();
   await f.app.request("/links/someone-elses", { method: "DELETE" });
   expect(f.events).toEqual([]);
+});
+
+test("the audit names the provider the store removed, even one outside the registry", async () => {
+  const f = fixture("retired-provider");
+  expect(
+    (await f.app.request("/links/link-1", { method: "DELETE" })).status,
+  ).toBe(204);
+  expect(f.events).toHaveLength(1);
+  expect(f.events[0]?.payload).toEqual({
+    actor: "person",
+    provider: "retired-provider",
+  });
 });

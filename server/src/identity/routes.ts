@@ -47,16 +47,14 @@ export function identityRoutes(
   app.delete("/links/:id", async (context) => {
     const actorId = context.var.actor.id;
     const id = context.req.param("id");
-    const link = (await live.identitiesFor(actorId)).find(
-      (candidate) => candidate.id === id,
-    );
     const removed = await live.unlink(actorId, id);
     if (!removed)
       return context.json({ error: "Linked account not found." }, 404);
     /*
      * After the removal, and not caught: the same order and the same failure as the connected-account
      * disconnect (`mcp.account_disconnected`), where an audit write that throws fails the request.
-     * Repeating it is safe because the link is already gone and answers 404.
+     * The audit is written after the unlink commits, so such a failure leaves the link already gone
+     * and the request failed; a retry answers 404 and writes no audit row.
      *
      * Names the link and its provider only. The subject, realm and credential id stay out of the
      * trail, as they stay out of every response here.
@@ -67,7 +65,7 @@ export function identityRoutes(
         targetType: "identity_link",
         targetId: id,
         actorUserId: actorId,
-        payload: { actor: actorId, provider: link?.provider },
+        payload: { actor: actorId, provider: removed.provider },
       });
     }
     return context.body(null, 204);

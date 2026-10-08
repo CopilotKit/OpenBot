@@ -252,12 +252,14 @@ test("unlink removes only the asker's own link and revokes its credential", asyn
     method: "oauth",
     credentialId: token,
   });
-  expect(await store.unlink(user(), link.id)).toBe(false);
+  expect(await store.unlink(user(), link.id)).toBeNull();
   expect(await store.linkedUser(identity)).not.toBeNull();
-  expect(await store.unlink(person, link.id)).toBe(true);
+  expect(await store.unlink(person, link.id)).toEqual({
+    provider: "github",
+  });
   expect(await store.linkedUser(identity)).toBeNull();
   expect(await vault.isLive(token)).toBe(false);
-  expect(await store.unlink(person, link.id)).toBe(false);
+  expect(await store.unlink(person, link.id)).toBeNull();
 });
 
 test("a link outlives its user: nothing cascades from users", async () => {

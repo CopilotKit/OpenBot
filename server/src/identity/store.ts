@@ -374,17 +374,24 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         .where(eq(identityLinks.id, linkId));
     },
 
-    async unlink(userId: string, linkId: string): Promise<boolean> {
+    /** The removed link's provider as stored, or null when the asker has no such link. */
+    async unlink(
+      userId: string,
+      linkId: string,
+    ): Promise<{ provider: string } | null> {
       return database.transaction(async (transaction) => {
         const [removed] = await transaction
           .delete(identityLinks)
           .where(
             and(eq(identityLinks.id, linkId), eq(identityLinks.userId, userId)),
           )
-          .returning({ credentialId: identityLinks.credentialId });
-        if (!removed) return false;
+          .returning({
+            credentialId: identityLinks.credentialId,
+            provider: identityLinks.provider,
+          });
+        if (!removed) return null;
         await revokeQuietly(credentials, removed.credentialId, transaction);
-        return true;
+        return { provider: removed.provider };
       });
     },
 
