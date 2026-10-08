@@ -82,6 +82,19 @@ export function identityRoutes(
   });
 
   app.post("/challenges/confirm", async (context) => {
+    // Confirming binds a chat identity to the signed-in person, so a page on another site must not
+    // be able to trigger it with the person's cookies.
+    const origin = context.req.header("origin");
+    if (
+      origin
+        ? origin !== new URL(context.req.url).origin
+        : context.req.header("sec-fetch-site") === "cross-site"
+    ) {
+      return context.json(
+        { error: "Confirm this link from the OpenBot app." },
+        403,
+      );
+    }
     const parsed = tokenBody.safeParse(
       await context.req.json().catch(() => null),
     );

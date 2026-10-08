@@ -141,6 +141,41 @@ test("confirm surfaces an unexpected failure instead of answering 409", async ()
   expect(response.status).toBe(500);
 });
 
+test("confirm refuses cross-site requests without confirming", async () => {
+  for (const headers of [
+    { "sec-fetch-site": "cross-site" },
+    { origin: "https://evil.example" },
+  ]) {
+    const f = fixture();
+    const response = await f.app.request(
+      "http://openbot.test/challenges/confirm",
+      {
+        ...post({ token }),
+        headers: { "content-type": "application/json", ...headers },
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(f.calls).toEqual([]);
+  }
+});
+
+test("confirm accepts same-origin requests", async () => {
+  const f = fixture();
+  const response = await f.app.request(
+    "http://openbot.test/challenges/confirm",
+    {
+      ...post({ token }),
+      headers: {
+        "content-type": "application/json",
+        origin: "http://openbot.test",
+        "sec-fetch-site": "same-origin",
+      },
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(f.calls).toEqual(["confirm:person"]);
+});
+
 test("responses are not cached", async () => {
   const response = await fixture().app.request("/links");
   expect(response.headers.get("cache-control")).toBe("no-store");
