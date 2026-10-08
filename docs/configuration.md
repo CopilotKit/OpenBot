@@ -435,8 +435,9 @@ A person the directory creates gets the `user` role, or `admin` when their addre
 `INITIAL_ADMIN_EMAILS`, and still signs in through the company's identity provider: SCIM creates no
 password. Their directory groups become their OpenBot groups, which per-group capability switches
 and network policies read. Deactivating or deleting someone in the directory ends their sessions,
-deny-lists the address, retires the connector credentials they granted and stops their Bots'
-computers. Reactivating them lifts a deny-list entry SCIM wrote, never one an administrator wrote.
+deny-lists the address, retires the connector credentials they granted and their linked accounts
+(see Linked accounts), and stops their Bots' computers. Reactivating them lifts a deny-list entry
+SCIM wrote, never one an administrator wrote.
 
 ## One Bot handing work to another
 
@@ -490,16 +491,22 @@ number opted out, later messages show `opted_out` in the delivery history instea
 OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
 or their Slack user. When a person has any, they appear under **Linked accounts** on
 `/settings/connected-accounts`, and each can be disconnected there. Disconnecting revokes any token
-stored with the link, and is audited. A person with none sees no such section, and a deployment
-without an identity store does not show it at all.
+stored with the link, and is audited. A person with none sees no such section.
 
-Links are created by the integrations that support them, and none ship enabled yet, so the list is
-empty until one is. An integration proves an account in one of two ways: by the provider's own
+Links are created by the integrations that support them. Until one is configured, the list stays
+empty. An integration proves an account in one of two ways: by the provider's own
 sign-in, or by a one-time code that OpenBot issues to the signed-in person and that they send from
 their chat account. Whoever sends the code gets that chat account linked to the person it was issued
 to, so treat it like a password and do not share it. It is valid for ten minutes and works once, and
 issuing a new code for the same provider invalidates the earlier one. An outside account links to
-one OpenBot user at most.
+one OpenBot user at most. Linking a new account at a provider and workspace replaces the person's
+earlier link there and revokes its token.
+
+Removing a person, whether an administrator does it or a SCIM deactivation does, retires their
+links. Their unused link codes are deleted, any token stored with a link is revoked, and each link is
+marked as needing reconnection. The links are kept, not deleted, so the outside account still
+resolves to the removed person and is refused rather than treated as an unlinked guest. Each retired
+link is recorded in the audit trail.
 
 This is separate from the OpenTag **Reachability** pairing above. That pairing binds a conversation
 for delivery and uses its own `link <code>` messages, shown on the **Reachability** screen; it is not
