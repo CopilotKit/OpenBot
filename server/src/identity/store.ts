@@ -25,10 +25,14 @@ const identityMatches = (identity: Identity) =>
     eq(identityLinks.subject, identity.subject),
   );
 
-function toLink(row: typeof identityLinks.$inferSelect): IdentityLink {
+/** `provider` is the row's provider, already checked against the registry by the caller. */
+function toLink(
+  row: typeof identityLinks.$inferSelect,
+  provider: IdentityProvider,
+): IdentityLink {
   return {
     id: row.id,
-    provider: row.provider as IdentityProvider,
+    provider,
     realm: row.realm,
     subject: row.subject,
     userId: row.userId,
@@ -123,7 +127,10 @@ export async function writeLink(
       })
       .where(eq(identityLinks.id, existing.id))
       .returning();
-    return toLink(updated as typeof identityLinks.$inferSelect);
+    return toLink(
+      updated as typeof identityLinks.$inferSelect,
+      identity.provider,
+    );
   }
   const [previous] = await transaction
     .select()
@@ -159,7 +166,10 @@ export async function writeLink(
         updatedAt: now,
       })
       .returning();
-    return toLink(inserted as typeof identityLinks.$inferSelect);
+    return toLink(
+      inserted as typeof identityLinks.$inferSelect,
+      identity.provider,
+    );
   } catch (error) {
     if (uniqueViolationConstraint(error) === "identity_links_identity_idx")
       throw new IdentityConflictError();
@@ -205,7 +215,21 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
             : eq(identityLinks.userId, userId),
         )
         .orderBy(identityLinks.provider, identityLinks.createdAt);
-      return rows.map(toLink);
+      // `provider` is free text, so a row written by a removed or future integration can carry one
+      // this build does not know. Skip it rather than hand callers a provider they cannot render.
+      const links: IdentityLink[] = [];
+      for (const row of rows) {
+        if (isIdentityProvider(row.provider))
+          links.push(toLink(row, row.provider));
+        else
+          console.warn(
+            JSON.stringify({
+              type: "identity-link-unknown-provider",
+              linkId: row.id,
+            }),
+          );
+      }
+      return links;
     },
 
     async linkVerified(

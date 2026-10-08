@@ -192,3 +192,21 @@ test("a link outlives its user: nothing cascades from users", async () => {
     "user-that-never-existed",
   );
 });
+
+test("identitiesFor skips a link whose provider the registry does not know", async () => {
+  const person = user();
+  const valid = await store.linkVerified(github(), person, {
+    method: "oauth",
+  });
+  await database.insert(identityLinks).values({
+    id: randomUUID(),
+    provider: "myspace",
+    realm,
+    subject: randomUUID(),
+    userId: person,
+    verifiedBy: "oauth",
+    status: "active",
+  });
+  const links = await store.identitiesFor(person);
+  expect(links.map((link) => link.id)).toEqual([valid.id]);
+});
