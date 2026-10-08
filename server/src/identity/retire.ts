@@ -140,8 +140,9 @@ export async function retireIdentityLinks(
  *
  * Both halves always run: the plugin half rethrows on purpose (a broker refusal), and stopping there
  * left every linked account's token live, with a retry hitting the same refusal first. The failure
- * is still thrown afterwards — the first one alone, or an AggregateError of both — so the caller's
- * error handling sees it. On success, the count is both halves together.
+ * is still thrown afterwards — the first one alone, or an AggregateError of both whose message
+ * names both causes (callers log `String(error)`, which shows the message and not `.errors`) — so
+ * the caller's error handling sees it. On success, the count is both halves together.
  */
 export async function retireOwnedAccounts(retirers: {
   plugins: () => Promise<{ retired: number }>;
@@ -163,7 +164,10 @@ export async function retireOwnedAccounts(retirers: {
   if (failures.length > 1)
     throw new AggregateError(
       failures,
-      "Retiring a removed person's accounts failed in more than one place.",
+      `Retiring a removed person's accounts failed in both halves: plugins: ${messageOf(failures[0])}; linked accounts: ${messageOf(failures[1])}`,
     );
   return { retired };
 }
+
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);

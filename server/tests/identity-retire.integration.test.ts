@@ -435,6 +435,9 @@ test("both failing surfaces both", async () => {
   }).catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(AggregateError);
   expect((error as AggregateError).errors).toEqual([first, second]);
+  // Callers log String(error), which must name both causes.
+  expect(String(error)).toContain("plugins");
+  expect(String(error)).toContain("identities");
 });
 
 test("both succeeding counts both", async () => {

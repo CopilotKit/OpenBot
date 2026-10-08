@@ -394,16 +394,16 @@ const peopleStore = createPeopleStore(
   database,
   config.auth?.initialAdminEmails ?? [],
   /*
-   * Removing somebody retires the credentials they granted this deployment.
+   * Removing somebody retires what they connected: their plugin credentials and connections, and
+   * their linked outside accounts (which keep resolving to them, now refused; the tokens are revoked
+   * and every link needs reconnecting). Both halves run whichever fails, and the failure is rethrown
+   * after (see retireOwnedAccounts).
    *
-   * A closure rather than the method itself, because the plugin store is built further down: this
-   * has to exist before `auth` does, and that one needs the vault and the policy. Nothing calls this
-   * during module initialisation — it runs when an administrator removes somebody, over HTTP — so by
-   * then the binding is there.
-   */
-  /*
-   * Both halves run whichever fails, and the failure is rethrown after. Their linked outside
-   * accounts keep resolving to them, now refused; the tokens go and every link needs reconnecting.
+   * A closure, because `pluginStore` is built further down: this has to exist before `auth` does,
+   * and that one needs the vault and the policy. `pluginStore` is read only when the closure runs —
+   * an administrator or the directory removing somebody, never during module initialisation — so by
+   * then the binding is there. The linked-account half writes its audit rows through a store made
+   * on its own transaction, so it reads no later binding (`bootAuditStore` included).
    */
   (userId, by) =>
     retireOwnedAccounts({
