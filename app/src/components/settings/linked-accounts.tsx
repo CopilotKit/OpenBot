@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import {
+  connectGithubMutationOptions,
   issueSlackCodeMutationOptions,
   type SlackLinkCode,
   unlinkMutationOptions,
@@ -96,6 +97,7 @@ export function LinkedAccountsSection() {
   const links = useQuery(linkedAccountsQueryOptions());
   const providers = useQuery(identityProvidersQueryOptions());
   const issueCode = useMutation(issueSlackCodeMutationOptions());
+  const connectGithub = useMutation(connectGithubMutationOptions());
   const [issued, setIssued] = useState<SlackLinkCode | null>(null);
   const [copied, setCopied] = useState(false);
   const closeDialog = () => {
@@ -131,6 +133,20 @@ export function LinkedAccountsSection() {
               Link Slack
             </Button>
           ) : null}
+          {providers.data?.github ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={connectGithub.isPending}
+              onClick={() =>
+                connectGithub.mutate(undefined, {
+                  onSuccess: (url) => window.location.assign(url),
+                })
+              }
+            >
+              Connect GitHub
+            </Button>
+          ) : null}
         </div>
       }
     >
@@ -155,6 +171,11 @@ export function LinkedAccountsSection() {
       {issueCode.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
           Could not create a Slack link code: {issueCode.error.message}
+        </p>
+      ) : null}
+      {connectGithub.error ? (
+        <p className="mt-2 text-destructive text-sm" role="alert">
+          Could not connect GitHub: {connectGithub.error.message}
         </p>
       ) : null}
       <Dialog
