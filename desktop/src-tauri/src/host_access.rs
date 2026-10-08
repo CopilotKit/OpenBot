@@ -240,7 +240,8 @@ impl CommandPolicy {
 pub enum CommandApproval {
     /// Refused on this machine too, whatever the server let through.
     Refuse,
-    /// The person chose "always allow" for this Bot in this folder on this computer.
+    /// The person chose "always allow" for this Bot in this folder on this computer, and the
+    /// command leaves the folder read-only.
     Proceed,
     /// Show the dialog. `offer_always` adds "Always allow in this folder".
     Ask { offer_always: bool },
@@ -248,9 +249,18 @@ pub enum CommandApproval {
 
 /// The member's server setting gates the local one: a folder the person always allowed here is
 /// only honoured while their setting (after the team cap) is still "always allow".
-pub fn command_approval(policy: CommandPolicy, allowed_here: bool) -> CommandApproval {
+///
+/// "Always allow" covers read-only commands. A command that can edit the folder asks every time.
+pub fn command_approval(
+    policy: CommandPolicy,
+    allowed_here: bool,
+    writable: bool,
+) -> CommandApproval {
     match policy {
         CommandPolicy::Never => CommandApproval::Refuse,
+        CommandPolicy::Allow if writable => CommandApproval::Ask {
+            offer_always: false,
+        },
         CommandPolicy::Allow if allowed_here => CommandApproval::Proceed,
         CommandPolicy::Allow => CommandApproval::Ask { offer_always: true },
         CommandPolicy::Ask => CommandApproval::Ask {
@@ -1765,23 +1775,49 @@ mod command_policy_tests {
     #[test]
     fn local_always_allow_only_counts_while_the_server_setting_allows() {
         assert_eq!(
-            command_approval(CommandPolicy::Never, true),
+            command_approval(CommandPolicy::Never, true, false),
             CommandApproval::Refuse
         );
         assert_eq!(
-            command_approval(CommandPolicy::Allow, true),
+            command_approval(CommandPolicy::Allow, true, false),
             CommandApproval::Proceed
         );
         assert_eq!(
-            command_approval(CommandPolicy::Allow, false),
+            command_approval(CommandPolicy::Allow, false, false),
             CommandApproval::Ask { offer_always: true }
         );
         // An admin cap of "ask" pauses a folder the person always allowed.
         assert_eq!(
-            command_approval(CommandPolicy::Ask, true),
+            command_approval(CommandPolicy::Ask, true, false),
             CommandApproval::Ask {
                 offer_always: false
             }
+        );
+    }
+
+    #[test]
+    fn a_command_that_can_edit_the_folder_asks_even_where_always_allowed() {
+        assert_eq!(
+            command_approval(CommandPolicy::Allow, true, true),
+            CommandApproval::Ask {
+                offer_always: false
+            }
+        );
+        assert_eq!(
+            command_approval(CommandPolicy::Allow, false, true),
+            CommandApproval::Ask {
+                offer_always: false
+            }
+        );
+        assert_eq!(
+            command_approval(CommandPolicy::Ask, true, true),
+            CommandApproval::Ask {
+                offer_always: false
+            }
+        );
+        assert_eq!(
+            command_approval(CommandPolicy::Never, true, true),
+            CommandApproval::Refuse
         );
     }
 
