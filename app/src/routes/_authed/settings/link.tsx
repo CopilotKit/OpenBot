@@ -33,7 +33,10 @@ function RouteComponent() {
   });
 
   return (
-    <PageShell title="Link an account">
+    <PageShell
+      title="Link an account"
+      description="Confirm an account you are linking from a chat app."
+    >
       <PageSection>
         {state.kind === "invalid" && (
           <p className="text-muted-foreground text-sm">
@@ -73,7 +76,9 @@ function RouteComponent() {
               {state.title ?? "the app you started from"}.
             </p>
             {state.hint && (
-              <pre className="whitespace-pre-wrap">{state.hint}</pre>
+              <pre className="whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-xs">
+                {state.hint}
+              </pre>
             )}
           </>
         )}
