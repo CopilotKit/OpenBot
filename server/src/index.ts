@@ -176,6 +176,7 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { createIdentityStore } from "./identity/store";
 import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
@@ -338,6 +339,7 @@ await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
+const identityStore = createIdentityStore(database, credentialStore);
 const agentVault = {
   store: credentialStore,
   reader: credentialStore,
@@ -3021,6 +3023,8 @@ const app = createApp(
     enabled: config.selfHostBanner,
     entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
   }),
+
+  identityStore,
 );
 
 /**

@@ -80,6 +80,8 @@ import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
+import { identityRoutes } from "./identity/routes";
+import type { IdentityStore } from "./identity/store";
 import { createIntelligenceClient } from "./intelligence-client";
 import {
   createLearningRoutes,
@@ -421,6 +423,8 @@ export function createApp(
    * resolver still answers from `config.selfHostBanner` rather than asking the network.
    */
   selfHostBanner?: SelfHostBanner,
+  /** A person's own linked accounts. Absent answers 503 on /api/identity. */
+  identity?: IdentityStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -676,6 +680,12 @@ export function createApp(
     "/api/settings/preferences",
     userPreferencesRoutes(requireUser, userPreferences),
   );
+
+  /*
+   * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
+   * administrator view and no linking on somebody else's behalf.
+   */
+  app.route("/api/identity", identityRoutes(requireUser, identity));
 
   app.get("/api/settings/instructions", requireUser, async (context) => {
     if (!userInstructions) {
