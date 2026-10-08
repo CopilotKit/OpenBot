@@ -192,3 +192,74 @@ test("the GitHub callback is reachable with a session and redirects to the app",
   );
   expect(fetchImpl).not.toHaveBeenCalled();
 });
+
+/** A real callback router whose GitHub is a stub that answers the token exchange and GET /user. */
+function workingCallbackFor(environment: Record<string, string | undefined>) {
+  const fetchImpl = mock(async (url: string | URL | Request) =>
+    String(url).includes("access_token")
+      ? Response.json({
+          access_token: "gho_wired",
+          refresh_token: "gho_wired-refresh",
+          expires_in: 28800,
+          refresh_token_expires_in: 15897600,
+        })
+      : Response.json({ id: 4242, login: "octo" }),
+  );
+  const linkVerified = mock(async () => ({ id: "link-1" }));
+  const audited: unknown[] = [];
+  const encryptionKey = loadConfig(
+    testEnvironment(environment),
+  ).keyEncryptionKey;
+  const router = githubCallbackRoutes({
+    clientId: "Iv1.x",
+    clientSecret: "s",
+    publicUrl: "https://api.test",
+    appUrl: "https://app.test",
+    encryptionKey,
+    personIsActive: async () => true,
+    credentials: {
+      create: async () => ({ id: "credential-1" }),
+      revoke: async () => undefined,
+    } as never,
+    identity: { linkVerified } as never,
+    auditStore: { insert: async (event: unknown) => void audited.push(event) },
+    fetchImpl: fetchImpl as never,
+  });
+  return { router, fetchImpl, linkVerified, audited, encryptionKey };
+}
+
+test("the signed-in person's session reaches the callback and completes the link", async () => {
+  const { router, fetchImpl, linkVerified, audited, encryptionKey } =
+    workingCallbackFor(GITHUB_ENVIRONMENT);
+  const state = await sealGithubState("person", encryptionKey);
+  const response = await appFor(GITHUB_ENVIRONMENT, {
+    githubCallback: router,
+  }).request(
+    `http://openbot.test/api/identity/github/callback?code=c&state=${encodeURIComponent(state)}`,
+  );
+  expect(response.status).toBe(302);
+  expect(response.headers.get("location")).toBe(
+    "https://app.test/settings/connected-accounts?linked=github",
+  );
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(linkVerified).toHaveBeenCalledTimes(1);
+  expect((linkVerified.mock.calls[0] as unknown[])[1]).toBe("person");
+  expect(audited).toHaveLength(1);
+});
+
+test("a session for a different person than the state's fails and never reaches GitHub", async () => {
+  const { router, fetchImpl, linkVerified, encryptionKey } =
+    workingCallbackFor(GITHUB_ENVIRONMENT);
+  const state = await sealGithubState("someone-else", encryptionKey);
+  const response = await appFor(GITHUB_ENVIRONMENT, {
+    githubCallback: router,
+  }).request(
+    `http://openbot.test/api/identity/github/callback?code=c&state=${encodeURIComponent(state)}`,
+  );
+  expect(response.status).toBe(302);
+  expect(response.headers.get("location")).toBe(
+    "https://app.test/settings/connected-accounts?linked=failed",
+  );
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(linkVerified).not.toHaveBeenCalled();
+});

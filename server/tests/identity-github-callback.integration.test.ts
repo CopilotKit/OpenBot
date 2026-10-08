@@ -26,7 +26,13 @@ afterAll(async () => {
   if (usedSubjects.length)
     await database
       .delete(identityLinks)
-      .where(inArray(identityLinks.subject, usedSubjects));
+      .where(
+        and(
+          eq(identityLinks.provider, "github"),
+          eq(identityLinks.realm, "github.com"),
+          inArray(identityLinks.subject, usedSubjects),
+        ),
+      );
   if (usedKeyPrefixes.length)
     await database
       .delete(credentials)
@@ -250,6 +256,7 @@ test("an account already linked to someone else fails and revokes the new token"
     userId: owner,
     credentialId: before?.credentialId,
   });
+  expect((await credentialById(before?.credentialId))?.revokedAt).toBeNull();
   const stranded = await credentialsUnder(intruderKey);
   expect(stranded).toHaveLength(1);
   expect(stranded[0]?.revokedAt).not.toBeNull();
