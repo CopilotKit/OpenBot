@@ -176,6 +176,7 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { retireIdentityLinks } from "./identity/retire";
 import { createIdentityStore } from "./identity/store";
 import {
   createIntelligenceClient,
@@ -400,7 +401,12 @@ const peopleStore = createPeopleStore(
    * during module initialisation — it runs when an administrator removes somebody, over HTTP — so by
    * then the binding is there.
    */
-  (userId, by) => pluginStore.retireConnectionsFor(userId, by),
+  async (userId, by) => {
+    const plugins = await pluginStore.retireConnectionsFor(userId, by);
+    // Their linked outside accounts keep resolving to them, now refused; only the tokens go.
+    await retireIdentityLinks(database, credentialStore, userId);
+    return plugins;
+  },
 );
 const identityProviderStore = createIdentityProviderStore(database);
 /*
