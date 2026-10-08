@@ -15,10 +15,14 @@ import { identityRealmLock, identityUserLock } from "./store";
  * into an unlinked guest. The person's pending link challenges are deleted, so a code issued before
  * the removal cannot be redeemed into a fresh active link afterwards.
  *
- * One transaction, so a failure leaves nothing half-retired. One `identity.link_retired` audit row
- * per link that changed, written after the commit (the audit store has its own handle — the same
- * order `retireConnectionsFor` uses): actor `by`, target the link id, and the provider, the reason
- * and whether a credential was revoked. Never the subject, realm or credential id.
+ * One transaction, the audit rows included: `auditFor` is handed the transaction and returns the
+ * store that writes into it (`createAuditStore(transaction)`, as approvals do), so a link is retired
+ * exactly when its `identity.link_retired` row is written. A failure anywhere, an audit row
+ * included, rolls the whole retirement back and a retry starts over and audits every link; writing
+ * the rows after the commit instead lost the rest for good when one failed, because the retry found
+ * every link already retired. One row per link that changed: actor `by`, target the link id, and the
+ * provider, the reason and whether a credential was revoked. Never the subject, realm or credential
+ * id.
  *
  * Concurrency. Locks are taken in this order: `identityUserLock`, the lock `issueChallenge` takes, so
  * no code is issued alongside the removal; then the challenges are deleted, which waits for a
@@ -37,11 +41,12 @@ import { identityRealmLock, identityUserLock } from "./store";
 export async function retireIdentityLinks(
   database: Database,
   credentials: Pick<CredentialStore, "revoke">,
-  auditStore: AuditStore,
+  auditFor: (executor: Database) => AuditStore,
   userId: string,
   by: string,
 ): Promise<number> {
-  const retired = await database.transaction(async (transaction) => {
+  return database.transaction(async (transaction) => {
+    const auditStore = auditFor(transaction as unknown as Database);
     await identityUserLock(transaction, userId);
     await transaction
       .delete(identityLinkChallenges)
@@ -70,11 +75,7 @@ export async function retireIdentityLinks(
       .orderBy(asc(identityLinks.id))
       .for("update");
 
-    const changed: {
-      id: string;
-      provider: string;
-      credentialRevoked: boolean;
-    }[] = [];
+    let changed = 0;
     for (const link of links) {
       if (!link.credentialId && link.status === "needs_reconnect") continue;
       if (link.credentialId) {
@@ -93,30 +94,22 @@ export async function retireIdentityLinks(
           updatedAt: new Date(),
         })
         .where(eq(identityLinks.id, link.id));
-      changed.push({
-        id: link.id,
-        provider: link.provider,
-        credentialRevoked: Boolean(link.credentialId),
+      await recordAuditEvent(auditStore, {
+        eventType: "identity.link_retired",
+        targetType: "identity_link",
+        targetId: link.id,
+        actorUserId: by,
+        payload: {
+          actor: by,
+          provider: link.provider,
+          reason: "person_removed",
+          credentialRevoked: Boolean(link.credentialId),
+        },
       });
+      changed += 1;
     }
     return changed;
   });
-
-  for (const link of retired) {
-    await recordAuditEvent(auditStore, {
-      eventType: "identity.link_retired",
-      targetType: "identity_link",
-      targetId: link.id,
-      actorUserId: by,
-      payload: {
-        actor: by,
-        provider: link.provider,
-        reason: "person_removed",
-        credentialRevoked: link.credentialRevoked,
-      },
-    });
-  }
-  return retired.length;
 }
 
 /**

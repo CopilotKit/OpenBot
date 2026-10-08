@@ -412,7 +412,7 @@ const peopleStore = createPeopleStore(
         retireIdentityLinks(
           database,
           credentialStore,
-          bootAuditStore,
+          (executor) => createAuditStore(executor),
           userId,
           by,
         ),

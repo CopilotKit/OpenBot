@@ -1,10 +1,15 @@
 import { afterAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
-import type { AuditEventInput, AuditStore } from "../src/audit";
+import { eq, inArray, like } from "drizzle-orm";
+import {
+  type AuditEventInput,
+  type AuditStore,
+  createAuditStore,
+} from "../src/audit";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
+  auditEvents,
   credentials,
   identityLinkChallenges,
   identityLinks,
@@ -25,7 +30,9 @@ const users: string[] = [];
 const ADMIN = "admin-remover";
 
 afterAll(async () => {
-  await database.delete(identityLinks).where(eq(identityLinks.realm, realm));
+  await database
+    .delete(identityLinks)
+    .where(like(identityLinks.realm, `${realm}%`));
   if (users.length)
     await database
       .delete(identityLinkChallenges)
@@ -86,7 +93,13 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
   const audit = recorder();
 
   expect(
-    await retireIdentityLinks(database, vault, audit.store, userId, ADMIN),
+    await retireIdentityLinks(
+      database,
+      vault,
+      () => audit.store,
+      userId,
+      ADMIN,
+    ),
   ).toBe(1);
 
   expect(await vault.isLive(credential.id)).toBe(false);
@@ -114,7 +127,13 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
 
   // A second pass changes nothing and records nothing.
   expect(
-    await retireIdentityLinks(database, vault, audit.store, userId, ADMIN),
+    await retireIdentityLinks(
+      database,
+      vault,
+      () => audit.store,
+      userId,
+      ADMIN,
+    ),
   ).toBe(0);
   expect(audit.rows).toHaveLength(1);
 });
@@ -135,7 +154,13 @@ test("a link without a credential is also marked needs_reconnect, and audited wi
   const audit = recorder();
 
   expect(
-    await retireIdentityLinks(database, vault, audit.store, userId, ADMIN),
+    await retireIdentityLinks(
+      database,
+      vault,
+      () => audit.store,
+      userId,
+      ADMIN,
+    ),
   ).toBe(1);
 
   const row = await statusOf(linkId);
@@ -157,12 +182,92 @@ test("a link without a credential is also marked needs_reconnect, and audited wi
   expect(payload).not.toContain(realm);
 });
 
+test("an audit row that fails to write rolls the retirement back, so a retry retires and audits every link", async () => {
+  const userId = user();
+  const linkIds = [randomUUID(), randomUUID()];
+  for (const id of linkIds)
+    await database.insert(identityLinks).values({
+      id,
+      provider: "slack",
+      realm: `${realm}-${id}`,
+      subject: randomUUID(),
+      userId,
+      verifiedBy: "challenge",
+      status: "active",
+    });
+  let written = 0;
+  const failing: AuditStore = {
+    insert: async () => {
+      written += 1;
+      if (written === 2) throw new Error("audit store down");
+    },
+  };
+
+  await expect(
+    retireIdentityLinks(database, vault, () => failing, userId, ADMIN),
+  ).rejects.toThrow("audit store down");
+  for (const id of linkIds) expect((await statusOf(id))?.status).toBe("active");
+
+  const audit = recorder();
+  expect(
+    await retireIdentityLinks(
+      database,
+      vault,
+      () => audit.store,
+      userId,
+      ADMIN,
+    ),
+  ).toBe(2);
+  expect(audit.rows.map((row) => row.targetId).sort()).toEqual(
+    [...linkIds].sort(),
+  );
+  for (const id of linkIds)
+    expect((await statusOf(id))?.status).toBe("needs_reconnect");
+});
+
+test("the audit trail's own store writes the rows inside the retirement's transaction", async () => {
+  const userId = user();
+  const linkId = randomUUID();
+  await database.insert(identityLinks).values({
+    id: linkId,
+    provider: "slack",
+    realm,
+    subject: randomUUID(),
+    userId,
+    verifiedBy: "challenge",
+    status: "active",
+  });
+
+  expect(
+    await retireIdentityLinks(
+      database,
+      vault,
+      (executor) => createAuditStore(executor),
+      userId,
+      ADMIN,
+    ),
+  ).toBe(1);
+
+  const rows = await database
+    .select()
+    .from(auditEvents)
+    .where(eq(auditEvents.targetId, linkId));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.eventType).toBe("identity.link_retired");
+});
+
 test("a pending challenge cannot be redeemed after the person is removed", async () => {
   const userId = user();
   const identities = createIdentityStore(database, vault);
   const { code } = await identities.issueChallenge(userId, "slack");
 
-  await retireIdentityLinks(database, vault, recorder().store, userId, ADMIN);
+  await retireIdentityLinks(
+    database,
+    vault,
+    () => recorder().store,
+    userId,
+    ADMIN,
+  );
 
   const pending = await database
     .select()
@@ -198,7 +303,7 @@ test("retirement waits on the per-person identity lock that issuing a code takes
   const retiring = retireIdentityLinks(
     database,
     vault,
-    recorder().store,
+    () => recorder().store,
     userId,
     ADMIN,
   ).then((count) => {
