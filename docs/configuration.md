@@ -485,6 +485,15 @@ SMS through Twilio honours Advanced Opt-Out: `STOP` (and Twilio's other opt-out 
 number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
 `START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
 
+### Linked accounts
+
+A person's accounts at outside providers — their Slack user, their GitHub account — are linked to
+their OpenBot user in one place, `identity_links`, and listed under **Linked accounts** on
+`/settings/connected-accounts`, where they can disconnect any of them. A link is proven by the
+provider's own sign-in (GitHub) or by a two-sided challenge a person starts in a chat app and
+confirms at `/settings/link` (Slack). Nobody can link an account on somebody else's behalf, and an
+outside account links to one OpenBot user at most.
+
 ## Text messages and push notifications
 
 A provider is switched on by setting its variables and is off while none of them are set. Setting
