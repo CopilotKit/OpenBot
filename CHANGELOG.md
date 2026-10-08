@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop asks before every command that can edit a folder
+
+"Always allow in this folder" now covers a Bot's read-only commands. A command that can edit or
+delete files in an approved folder shows the desktop prompt every time, and the prompt no longer
+offers to stop asking for it. Folders already set to always allow keep that setting for read-only
+commands.
+
 ### A new deployment starts with two coworkers, not twelve
 
 The example package loaded every coworker in `examples/fintech/agents/`, so a fresh deployment opened

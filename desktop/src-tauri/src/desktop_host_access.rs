@@ -1,7 +1,8 @@
 //! Owner approval is collected by native dialogs, never by an app/tool-provided answer.
 use openbot_desktop_lib::host_access::{
-    command_approval, ApprovedFolder, ChooseFolderPrompt, CommandApproval, CommandPrompt,
-    HostAccessError, HostAccessResult, HostApprovalUi, LocalCommandAllowList, WritePrompt,
+    command_approval, ApprovedFolder, ChooseFolderPrompt, CommandApproval, CommandPolicy,
+    CommandPrompt, HostAccessError, HostAccessResult, HostApprovalUi, LocalCommandAllowList,
+    WritePrompt,
 };
 use tauri::Manager;
 use tauri_plugin_dialog::{
@@ -148,13 +149,14 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         reviewable(&request.command)?;
         let list = self.allow_list()?;
         let allowed_here = list.allows(&request.bot_id, &request.root);
-        let offer_always = match command_approval(request.command_policy, allowed_here) {
-            CommandApproval::Refuse => {
-                return Err(refused("Commands on this computer are set to never run."))
-            }
-            CommandApproval::Proceed => return Ok(()),
-            CommandApproval::Ask { offer_always } => offer_always,
-        };
+        let offer_always =
+            match command_approval(request.command_policy, allowed_here, request.writable) {
+                CommandApproval::Refuse => {
+                    return Err(refused("Commands on this computer are set to never run."))
+                }
+                CommandApproval::Proceed => return Ok(()),
+                CommandApproval::Ask { offer_always } => offer_always,
+            };
         let bot = bot_label(request.bot_name.as_deref(), &request.bot_id);
         let access = if request.writable {
             "This command may edit or delete files in the approved folder. Commands cannot be undone automatically."
@@ -163,7 +165,12 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
         };
         let setting = if offer_always {
             format!(
-                "Your OpenBot setting: {}. Choose \"{ALWAYS_HERE}\" to stop asking about {bot}'s commands in this folder on this computer.",
+                "Your OpenBot setting: {}. Choose \"{ALWAYS_HERE}\" to stop asking about {bot}'s read-only commands in this folder on this computer.",
+                request.command_policy.label()
+            )
+        } else if request.writable && request.command_policy == CommandPolicy::Allow {
+            format!(
+                "Your OpenBot setting: {}. Commands that can edit files still ask every time.",
                 request.command_policy.label()
             )
         } else {
