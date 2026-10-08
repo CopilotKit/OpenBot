@@ -16,6 +16,7 @@ import {
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts";
+import { linkedNotice } from "@/components/settings/linked-notice";
 import {
   InputGroup,
   InputGroupAddon,
@@ -52,8 +53,14 @@ export const Route = createFileRoute("/_authed/settings/connected-accounts/")({
    * The key is omitted rather than set to undefined. Present-but-undefined makes `search` a required
    * prop on every Link to this route, which is a lot of ripple for a parameter only the callback sets.
    */
-  validateSearch: (search: Record<string, unknown>): { connected?: string } =>
-    typeof search.connected === "string" ? { connected: search.connected } : {},
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { connected?: string; linked?: string } => ({
+    ...(typeof search.connected === "string"
+      ? { connected: search.connected }
+      : {}),
+    ...(typeof search.linked === "string" ? { linked: search.linked } : {}),
+  }),
 });
 
 /** The same marks the admin connector list uses: these are the same vendors seen from your side. */
@@ -81,7 +88,15 @@ export function brokeredAccountsListedOn(
 }
 
 function RouteComponent() {
-  const { connected: outcome } = Route.useSearch();
+  const { connected: outcome, linked } = Route.useSearch();
+  /* Read once, then dropped from the URL, so a refresh does not repeat the news. */
+  const [notice] = React.useState(() => linkedNotice(linked));
+  const navigate = Route.useNavigate();
+  React.useEffect(() => {
+    if (linked !== undefined) {
+      navigate({ search: ({ linked: _l, ...rest }) => rest, replace: true });
+    }
+  }, [linked, navigate]);
   const [search, setSearch] = React.useState("");
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
@@ -173,6 +188,17 @@ function RouteComponent() {
         <p className="text-destructive text-sm" role="alert">
           That account could not be connected. Nothing was saved — try again.
         </p>
+      ) : null}
+      {notice ? (
+        notice.tone === "error" ? (
+          <p className="text-destructive text-sm" role="alert">
+            {notice.text}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground" role="status">
+            {notice.text}
+          </p>
+        )
       ) : null}
       {/*
        * BOTH READS DECIDE THIS, AND ONLY ONE OF THEM USED TO. The waits were already paired here;
