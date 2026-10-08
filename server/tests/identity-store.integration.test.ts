@@ -131,6 +131,32 @@ test("linkVerified replaces a person's older link in the same realm and revokes 
   expect(await vault.isLive(oldCredential)).toBe(false);
 });
 
+test("concurrent links by one person in one realm: the later replaces the earlier", async () => {
+  const person = user();
+  const [first, second] = [await credential(), await credential()] as [
+    string,
+    string,
+  ];
+  const [a, b] = [github(), github()];
+  const [linkA, linkB] = await Promise.all([
+    store.linkVerified(a, person, { method: "oauth", credentialId: first }),
+    store.linkVerified(b, person, { method: "oauth", credentialId: second }),
+  ]);
+  const mine = (await store.identitiesFor(person, "github")).filter(
+    (row) => row.realm === realm,
+  );
+  expect(mine).toHaveLength(1);
+  const [remaining] = mine;
+  expect([linkA.id, linkB.id]).toContain(remaining?.id);
+  const live = [first, second].filter((id) => id === remaining?.credentialId);
+  expect(live).toHaveLength(1);
+  const liveness = await Promise.all(
+    [first, second].map((id) => vault.isLive(id)),
+  );
+  expect(liveness.filter(Boolean)).toHaveLength(1);
+  expect(await vault.isLive(remaining?.credentialId as string)).toBe(true);
+});
+
 test("markNeedsReconnect is visible to linkedUser; relinking makes it active again", async () => {
   const person = user();
   const identity = github();

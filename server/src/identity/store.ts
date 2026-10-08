@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinks } from "../db/schema";
@@ -40,15 +40,24 @@ function toLink(row: typeof identityLinks.$inferSelect): IdentityLink {
   };
 }
 
-/** Postgres unique_violation. Bun's driver puts the SQLSTATE in `errno`; drizzle wraps it as `cause`. */
-function isUniqueViolation(error: unknown) {
-  const sqlState = (value: unknown) =>
-    (value as { errno?: unknown } | null | undefined)?.errno;
-  return (
-    sqlState(error) === "23505" ||
-    sqlState((error as { cause?: unknown } | null | undefined)?.cause) ===
-      "23505"
-  );
+/**
+ * The violated constraint's name when `error` is a Postgres unique_violation (SQLSTATE 23505), else
+ * null. Bun's driver puts the SQLSTATE in `errno` and the name in `constraint`; drizzle wraps the
+ * driver error as `cause`.
+ */
+function uniqueViolationConstraint(error: unknown): string | null {
+  type Driver = { errno?: unknown; constraint?: unknown };
+  const candidates = [
+    error as Driver | null | undefined,
+    (error as { cause?: Driver } | null | undefined)?.cause,
+  ];
+  for (const candidate of candidates) {
+    if (candidate?.errno === "23505")
+      return typeof candidate.constraint === "string"
+        ? candidate.constraint
+        : "";
+  }
+  return null;
 }
 
 async function revokeQuietly(
@@ -68,10 +77,15 @@ async function revokeQuietly(
 /**
  * Link `identity` to `userId` inside `transaction`.
  *
- * The identity row is locked first. Linked to somebody else: refused. Linked to this person: updated
- * in place. Otherwise this person's older link in the same realm, if any, is removed with its
- * credential, and the new link inserted. A racing insert of the same identity surfaces as a unique
- * violation, which is the same refusal.
+ * Two races are handled. Two people racing for one identity: the identity row is locked first, and a
+ * racing insert surfaces as a unique violation on the identity index, which is a refusal
+ * (IdentityConflictError). One person racing two identities in one realm: serialized by a
+ * per-person-per-realm advisory lock taken before any row lock, so the later link sees the earlier
+ * one as `previous` and replaces it.
+ *
+ * Under the lock: linked to somebody else: refused. Linked to this person: updated in place.
+ * Otherwise this person's older link in the same realm, if any, is removed with its credential, and
+ * the new link inserted.
  */
 export async function writeLink(
   transaction: Transaction,
@@ -84,6 +98,9 @@ export async function writeLink(
     credentialId?: string | null;
   },
 ): Promise<IdentityLink> {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`${userId}\u001f${identity.provider}\u001f${identity.realm}`}, 0))`,
+  );
   const [existing] = await transaction
     .select()
     .from(identityLinks)
@@ -143,7 +160,8 @@ export async function writeLink(
       .returning();
     return toLink(inserted as typeof identityLinks.$inferSelect);
   } catch (error) {
-    if (isUniqueViolation(error)) throw new IdentityConflictError();
+    if (uniqueViolationConstraint(error) === "identity_links_identity_idx")
+      throw new IdentityConflictError();
     throw error;
   }
 }
