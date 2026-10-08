@@ -3,6 +3,7 @@ import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { unlinkOutcome } from "@/lib/identity/mutations";
 import { linksFromResponse } from "@/lib/identity/queries";
 import {
+  copyText,
   linkedAccountDescription,
   linkedAccountsSectionState,
   providerIcon,
@@ -308,4 +309,28 @@ test("a disconnect failure without a message throws the fallback", async () => {
   await expect(
     unlinkOutcome(new Response("nope", { status: 502 })),
   ).rejects.toThrow("The account could not be disconnected");
+});
+
+test("copying succeeds when the clipboard accepts the text", async () => {
+  const written: string[] = [];
+  const ok = await copyText("link abc", {
+    writeText: async (text: string) => {
+      written.push(text);
+    },
+  });
+  expect(ok).toBe(true);
+  expect(written).toEqual(["link abc"]);
+});
+
+test("copying reports failure when the clipboard API is missing", async () => {
+  expect(await copyText("link abc", undefined)).toBe(false);
+});
+
+test("copying reports failure when the write is rejected", async () => {
+  const ok = await copyText("link abc", {
+    writeText: async () => {
+      throw new Error("denied");
+    },
+  });
+  expect(ok).toBe(false);
 });

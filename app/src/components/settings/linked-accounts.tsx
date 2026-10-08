@@ -133,9 +133,11 @@ export function LinkedAccountsSection() {
   const connectGithub = useMutation(connectGithubMutationOptions());
   const [issued, setIssued] = useState<SlackLinkCode | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const closeDialog = () => {
     setIssued(null);
     setCopied(false);
+    setCopyFailed(false);
     // A link may have completed while the dialog was open.
     queryClient.invalidateQueries({ queryKey: identityKeys.links() });
   };
@@ -227,15 +229,22 @@ export function LinkedAccountsSection() {
                     size="sm"
                     variant="outline"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(
+                      const ok = await copyText(
                         `link ${issued.code}`,
+                        navigator.clipboard,
                       );
-                      setCopied(true);
+                      setCopied(ok);
+                      setCopyFailed(!ok);
                     }}
                   >
                     {copied ? "Copied" : "Copy"}
                   </Button>
                 </div>
+                {copyFailed ? (
+                  <p className="text-destructive" role="alert">
+                    Couldn't copy. Select the code and copy it yourself.
+                  </p>
+                ) : null}
                 <p className="text-muted-foreground">
                   The code works once and expires in 10 minutes.
                 </p>
@@ -326,4 +335,21 @@ function LinkedAccountRow({ account }: { account: LinkedAccount }) {
       ) : null}
     </>
   );
+}
+
+/**
+ * Write text to the clipboard, answering whether it landed. The clipboard is missing on plain-http
+ * hosts and a write is refused when permission is denied; both are a "no", not an exception.
+ */
+export async function copyText(
+  text: string,
+  clipboard: Pick<Clipboard, "writeText"> | undefined,
+): Promise<boolean> {
+  if (!clipboard) return false;
+  try {
+    await clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
