@@ -176,6 +176,7 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { githubCallbackRoutes } from "./identity/github-callback";
 import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
 import { slackCodeRedeemer } from "./identity/slack-redeem";
 import { createIdentityStore } from "./identity/store";
@@ -2857,6 +2858,24 @@ const selfHostBannerIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
 
+const identityGithubCallback =
+  config.githubApp && config.publicUrl
+    ? githubCallbackRoutes({
+        clientId: config.githubApp.clientId,
+        clientSecret: config.githubApp.clientSecret,
+        publicUrl: config.publicUrl,
+        appUrl: config.appUrl,
+        encryptionKey: config.keyEncryptionKey,
+        personIsActive: async (userId) => {
+          const person = await peopleStore.find(userId);
+          return person !== undefined && !person.revoked;
+        },
+        credentials: credentialStore,
+        identity: identityStore,
+        auditStore: bootAuditStore,
+      })
+    : undefined;
+
 const app = createApp(
   config,
   auth,
@@ -3043,6 +3062,7 @@ const app = createApp(
   }),
 
   identityStore,
+  identityGithubCallback,
 );
 
 /**
