@@ -113,14 +113,15 @@ test("retiring a removed person's links revokes their tokens and keeps the rows"
     eventType: "identity.link_retired",
     targetType: "identity_link",
     targetId: linkId,
-    actorUserId: ADMIN,
     payload: {
       actor: ADMIN,
+      owner: userId,
       provider: "github",
       reason: "person_removed",
       credentialRevoked: true,
     },
   });
+  expect(audit.rows[0]?.actorUserId).toBeUndefined();
   const payload = JSON.stringify(audit.rows[0]?.payload);
   expect(payload).not.toContain(realm);
   expect(payload).not.toContain(credential.id);
@@ -170,8 +171,9 @@ test("a link without a credential is also marked needs_reconnect, and audited wi
   expect(audit.rows[0]).toMatchObject({
     eventType: "identity.link_retired",
     targetId: linkId,
-    actorUserId: ADMIN,
     payload: {
+      actor: ADMIN,
+      owner: userId,
       provider: "slack",
       reason: "person_removed",
       credentialRevoked: false,
@@ -180,6 +182,73 @@ test("a link without a credential is also marked needs_reconnect, and audited wi
   const payload = JSON.stringify(audit.rows[0]?.payload);
   expect(payload).not.toContain(subject);
   expect(payload).not.toContain(realm);
+});
+
+test("a credential revoked before the removal is not reported as revoked by it", async () => {
+  const userId = user();
+  const credential = await vault.create({
+    kind: "connector",
+    provider: "github-user-token",
+    keyId: randomUUID(),
+    metadata: {},
+    encryptedValue: "x",
+  });
+  createdCredentials.push(credential.id);
+  await vault.revoke(credential.id);
+  const linkId = randomUUID();
+  await database.insert(identityLinks).values({
+    id: linkId,
+    provider: "github",
+    realm,
+    subject: randomUUID(),
+    userId,
+    verifiedBy: "oauth",
+    credentialId: credential.id,
+    status: "active",
+  });
+  const audit = recorder();
+
+  expect(
+    await retireIdentityLinks(
+      database,
+      vault,
+      () => audit.store,
+      userId,
+      ADMIN,
+    ),
+  ).toBe(1);
+
+  expect((await statusOf(linkId))?.credentialId).toBeNull();
+  expect(audit.rows[0]?.payload).toMatchObject({ credentialRevoked: false });
+});
+
+test("a directory remover is recorded in the payload only, never as the acting user", async () => {
+  const userId = user();
+  await database.insert(identityLinks).values({
+    id: randomUUID(),
+    provider: "slack",
+    realm,
+    subject: randomUUID(),
+    userId,
+    verifiedBy: "challenge",
+    status: "active",
+  });
+  const audit = recorder();
+
+  await retireIdentityLinks(
+    database,
+    vault,
+    () => audit.store,
+    userId,
+    "scim:directory",
+  );
+
+  expect(audit.rows).toHaveLength(1);
+  expect(audit.rows[0]?.actorUserId).toBeUndefined();
+  expect(audit.rows[0]?.payload).toMatchObject({
+    actor: "scim:directory",
+    owner: userId,
+  });
 });
 
 test("an audit row that fails to write rolls the retirement back, so a retry retires and audits every link", async () => {

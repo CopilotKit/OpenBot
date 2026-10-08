@@ -1,9 +1,30 @@
 import { asc, eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
-import { CredentialRefusedError, type CredentialStore } from "../credentials";
+import {
+  type CredentialExecutor,
+  CredentialRefusedError,
+  type CredentialStore,
+} from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges, identityLinks } from "../db/schema";
 import { identityRealmLock, identityUserLock } from "./store";
+
+/** Revokes a live credential; false when there is none or it was already revoked. */
+async function revokeIfLive(
+  credentials: Pick<CredentialStore, "revoke">,
+  id: string | null,
+  executor: CredentialExecutor,
+): Promise<boolean> {
+  if (!id) return false;
+  try {
+    await credentials.revoke(id, executor);
+    return true;
+  } catch (error) {
+    // Already revoked is the outcome wanted, but not this call's doing.
+    if (error instanceof CredentialRefusedError) return false;
+    throw error;
+  }
+}
 
 /**
  * Retires a removed person's identity links.
@@ -20,16 +41,21 @@ import { identityRealmLock, identityUserLock } from "./store";
  * exactly when its `identity.link_retired` row is written. A failure anywhere, an audit row
  * included, rolls the whole retirement back and a retry starts over and audits every link; writing
  * the rows after the commit instead lost the rest for good when one failed, because the retry found
- * every link already retired. One row per link that changed: actor `by`, target the link id, and the
- * provider, the reason and whether a credential was revoked. Never the subject, realm or credential
- * id.
+ * every link already retired.
+ *
+ * One row per link that changed, shaped like `retireConnectionsFor`'s `mcp.account_disconnected`
+ * rows: target the link id; payload `actor` (the remover, `by`), `owner` (the removed person),
+ * `provider`, `reason` ("person_removed") and `credentialRevoked`, true only when this call revoked
+ * a live credential (one already revoked is detached but not reported as revoked). The remover goes
+ * in the payload and not in `actorUserId`, because `by` need not be a user id: a SCIM removal passes
+ * "scim:directory". Never the subject, realm or credential id.
  *
  * Concurrency. Locks are taken in this order: `identityUserLock`, the lock `issueChallenge` takes, so
  * no code is issued alongside the removal; then the challenges are deleted, which waits for a
  * `redeemChallenge` in flight (it holds its challenge row) to commit, so the link it wrote is seen
  * below; then `identityRealmLock` for every `(provider, realm)` the person has a link in, in sorted
- * order (writeLink takes the one key for the realm it writes, so sorting only keeps two retirements
- * of one person from deadlocking each other); then the link rows. A writeLink into one of those realms
+ * order (defensive: writeLink takes only the one key for the realm it writes, and two retirements of
+ * one person already queue on the user lock); then the link rows. A writeLink into one of those realms
  * that is already running finishes first and is retired here. One that arrives later waits, and once
  * this commits it goes ahead: it re-links that realm for the removed person, active again, so
  * refusing it is left to linkedUser's callers, which refuse a removed person. The same holds for a
@@ -78,14 +104,11 @@ export async function retireIdentityLinks(
     let changed = 0;
     for (const link of links) {
       if (!link.credentialId && link.status === "needs_reconnect") continue;
-      if (link.credentialId) {
-        try {
-          await credentials.revoke(link.credentialId, transaction);
-        } catch (error) {
-          // Already revoked is the outcome we wanted.
-          if (!(error instanceof CredentialRefusedError)) throw error;
-        }
-      }
+      const credentialRevoked = await revokeIfLive(
+        credentials,
+        link.credentialId,
+        transaction,
+      );
       await transaction
         .update(identityLinks)
         .set({
@@ -98,12 +121,12 @@ export async function retireIdentityLinks(
         eventType: "identity.link_retired",
         targetType: "identity_link",
         targetId: link.id,
-        actorUserId: by,
         payload: {
           actor: by,
+          owner: userId,
           provider: link.provider,
           reason: "person_removed",
-          credentialRevoked: Boolean(link.credentialId),
+          credentialRevoked,
         },
       });
       changed += 1;
