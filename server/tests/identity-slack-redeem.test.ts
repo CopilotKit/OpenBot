@@ -126,7 +126,12 @@ describe("slackCodeRedeemer", () => {
     try {
       const failing: AuditStore = {
         insert: async () => {
-          throw new Error("audit db down");
+          throw Object.assign(
+            new Error(
+              'Failed query: insert into audit params: user-id-77,link-id-88 {"actor":"user-id-77"}',
+            ),
+            { name: "DrizzleQueryError", cause: { errno: "08006" } },
+          );
         },
       };
       expect(
@@ -139,8 +144,12 @@ describe("slackCodeRedeemer", () => {
       expect(JSON.parse(logged[0] as string)).toEqual({
         type: "identity-link-audit-failed",
         provider: "slack",
-        error: "Error: audit db down",
+        errorName: "DrizzleQueryError",
+        errorCode: "08006",
       });
+      expect(logged[0]).not.toContain("user-id-77");
+      expect(logged[0]).not.toContain("link-id-88");
+      expect(logged[0]).not.toContain("Failed query");
       expect(logged[0]).not.toContain("CODE-1");
       expect(logged[0]).not.toContain("U1");
     } finally {

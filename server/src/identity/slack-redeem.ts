@@ -1,4 +1,5 @@
 import { type AuditStore, recordAuditEvent } from "../audit";
+import { logLinkAuditFailure } from "./audit-failure";
 import { slackRealm } from "./providers";
 import type { IdentityStore } from "./store";
 import {
@@ -54,15 +55,7 @@ export function slackCodeRedeemer(
           targetId: link.id,
           actorUserId: link.userId,
           payload: { actor: link.userId, provider: "slack" },
-        }).catch((error) =>
-          console.error(
-            JSON.stringify({
-              type: "identity-link-audit-failed",
-              provider: "slack",
-              error: String(error),
-            }),
-          ),
-        );
+        }).catch((error) => logLinkAuditFailure("slack", error));
       }
       return "linked";
     },

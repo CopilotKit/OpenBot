@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { type CredentialStore, encryptSecret } from "../credentials";
+import { logLinkAuditFailure } from "./audit-failure";
 import {
   exchangeGithubCode,
   fetchGithubUser,
@@ -27,16 +28,6 @@ export type GithubCallbackDeps = {
   fetchImpl?: typeof fetch;
   now?: () => Date;
 };
-
-function logLinkAuditFailure(provider: string, error: unknown): void {
-  console.error(
-    JSON.stringify({
-      type: "identity-link-audit-failed",
-      provider,
-      error: String(error),
-    }),
-  );
-}
 
 function logRefused(reason: string): void {
   console.warn(

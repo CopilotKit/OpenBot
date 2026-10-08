@@ -302,7 +302,14 @@ describe("GitHub sign-in callback", () => {
   });
 
   test("an audit write that fails after the link committed still reports linked, and logs", async () => {
-    const harness = build({ auditError: new Error("audit db down") });
+    const harness = build({
+      auditError: Object.assign(
+        new Error(
+          'Failed query: insert into audit params: user-id-77,link-id-88 {"actor":"user-id-77"}',
+        ),
+        { name: "DrizzleQueryError", cause: { errno: "08006" } },
+      ),
+    });
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(OK);
@@ -313,8 +320,12 @@ describe("GitHub sign-in callback", () => {
     expect(JSON.parse(logged[0] as string)).toEqual({
       type: "identity-link-audit-failed",
       provider: "github",
-      error: "Error: audit db down",
+      errorName: "DrizzleQueryError",
+      errorCode: "08006",
     });
+    expect(logged[0]).not.toContain("user-id-77");
+    expect(logged[0]).not.toContain("link-id-88");
+    expect(logged[0]).not.toContain("Failed query");
     for (const secret of [
       "the-code",
       "gho_secret",
