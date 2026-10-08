@@ -513,6 +513,11 @@ export const auditEventTypes = [
   "delivery.unlinked",
   /* A person removing their own linked account at an outside provider (Slack, GitHub). */
   "identity.unlinked",
+  /*
+   * A removed person's linked account retired by the removal: marked `needs_reconnect`, its token (if
+   * any) revoked. Names the link, its provider and the remover only.
+   */
+  "identity.link_retired",
   /* Routines, however they were made: by a person on the screen or by a Bot through its tools. */
   "routine.created",
   "routine.updated",
