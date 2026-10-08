@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { tryClient } from "@/lib/client";
+import { client, tryClient } from "@/lib/client";
 import { identityKeys } from "./queries";
 
 const UNLINK_FALLBACK = "The account could not be disconnected";
@@ -37,5 +37,43 @@ export function unlinkMutationOptions(queryClient: QueryClient) {
       ),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: identityKeys.links() }),
+  });
+}
+
+/** A one-time code the person sends to the bot in Slack to link their account. */
+export type SlackLinkCode = {
+  code: string;
+  expiresAt: string;
+  instruction: string;
+};
+
+export function issueSlackCodeMutationOptions() {
+  return mutationOptions({
+    mutationFn: (): Promise<SlackLinkCode> =>
+      client<SlackLinkCode>("/api/identity/challenges", "challenge", {
+        method: "POST",
+        body: { provider: "slack" },
+        fallback: "Could not create a Slack link code",
+      }),
+  });
+}
+
+/** Resolves to the GitHub consent URL; the caller navigates, not this factory. */
+export function connectGithubMutationOptions() {
+  return mutationOptions({
+    mutationFn: async (): Promise<string> => {
+      const { authorizationUrl } = await client<{ authorizationUrl: unknown }>(
+        "/api/identity/github/connect",
+        "connect",
+        {
+          method: "POST",
+          fallback: "Could not start connecting GitHub",
+        },
+      );
+      if (typeof authorizationUrl !== "string") {
+        throw new Error("Could not start connecting GitHub");
+      }
+      return authorizationUrl;
+    },
   });
 }
