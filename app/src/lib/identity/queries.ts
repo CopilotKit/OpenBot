@@ -45,5 +45,6 @@ export function challengeQueryOptions(token: string) {
         fallback: "This link expired or was already used",
       }),
     retry: false,
+    staleTime: Infinity,
   });
 }

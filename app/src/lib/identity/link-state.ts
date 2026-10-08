@@ -27,6 +27,13 @@ export function confirmLinkState(input: {
 }): ConfirmLinkState {
   if (!input.token || !/^[A-Za-z0-9_-]{43}$/.test(input.token))
     return { kind: "invalid" };
+  // A confirmed link stays done: the challenge is spent, so a later peek refetch would only 404.
+  if (input.confirm.status === "success")
+    return {
+      kind: "done",
+      title: input.peek.data?.title,
+      hint: input.confirm.hint ?? null,
+    };
   if (input.peek.status === "pending") return { kind: "loading" };
   if (input.peek.status === "error" || !input.peek.data)
     return { kind: "expired" };
@@ -36,8 +43,6 @@ export function confirmLinkState(input: {
       return { kind: "confirming" };
     case "error":
       return { kind: "failed" };
-    case "success":
-      return { kind: "done", title, hint: input.confirm.hint ?? null };
     default:
       return { kind: "ready", title };
   }

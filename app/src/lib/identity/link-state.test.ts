@@ -57,3 +57,20 @@ test("confirm states", () => {
     }),
   ).toEqual({ kind: "done", title: "Slack", hint: "do X" });
 });
+
+test("a confirmed link stays done when the peek later errors", () => {
+  expect(
+    confirmLinkState({
+      token,
+      peek: { status: "error" },
+      confirm: { status: "success", hint: "do X" },
+    }),
+  ).toEqual({ kind: "done", title: undefined, hint: "do X" });
+  expect(
+    confirmLinkState({
+      token,
+      peek: { status: "error", data: { title: "Slack" } },
+      confirm: { status: "success" },
+    }),
+  ).toEqual({ kind: "done", title: "Slack", hint: null });
+});

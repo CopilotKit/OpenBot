@@ -70,7 +70,7 @@ function RouteComponent() {
           <>
             <p className="text-muted-foreground text-sm">
               Confirmed. The link is not active until you finish from{" "}
-              {state.title}.
+              {state.title ?? "the app you started from"}.
             </p>
             {state.hint && (
               <pre className="whitespace-pre-wrap">{state.hint}</pre>
