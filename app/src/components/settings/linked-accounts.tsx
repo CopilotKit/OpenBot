@@ -1,6 +1,10 @@
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { PageRows, PageSection } from "@/components/layout/page-shell";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -13,6 +17,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { unlinkMutationOptions } from "@/lib/identity/mutations";
 import {
+  type IdentityProviders,
+  identityProvidersQueryOptions,
   type LinkedAccount,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
@@ -43,7 +49,8 @@ export function providerIcon(provider: string) {
 /**
  * What the section draws: nothing, rows, an error, or rows with an error under them.
  *
- * Hidden while loading and when nothing is linked (or the deployment has no identity store). A
+ * Hidden while loading and when nothing is linked and nothing can be (no identity store, or no
+ * provider available to link); shown empty when a provider is available. A
  * failed refetch keeps the rows already on screen — stale but visible — and says the list could not
  * be refreshed, so a removed account that is still drawn is never shown without that warning. An
  * error with no rows to keep, including over a cached empty list, shows on its own.
@@ -51,13 +58,18 @@ export function providerIcon(provider: string) {
 export function linkedAccountsSectionState({
   data,
   error,
+  providers,
 }: {
   data: LinkedAccount[] | undefined;
   error: Error | null;
+  providers?: IdentityProviders;
 }): { rows: LinkedAccount[]; error: string | null } | null {
   const rows = data ?? [];
   if (error) return { rows, error: error.message };
-  return rows.length > 0 ? { rows, error: null } : null;
+  if (rows.length > 0 || providers?.slack || providers?.github) {
+    return { rows, error: null };
+  }
+  return null;
 }
 
 /**
@@ -68,13 +80,21 @@ export function linkedAccountsSectionState({
  */
 export function LinkedAccountsSection() {
   const links = useQuery(linkedAccountsQueryOptions());
+  const providers = useQuery(identityProvidersQueryOptions());
   const state = linkedAccountsSectionState({
     data: links.data,
     error: links.error,
+    providers: providers.data,
   });
   if (!state) return null;
   return (
-    <PageSection title="Linked accounts">
+    <PageSection
+      title="Linked accounts"
+      action={<div className="flex gap-2">{/* actions */}</div>}
+    >
+      {state.rows.length === 0 && !state.error ? (
+        <PageEmpty>No linked accounts yet.</PageEmpty>
+      ) : null}
       {state.rows.length > 0 ? (
         <PageRows>
           {state.rows.map((account, index) => (

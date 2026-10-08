@@ -120,6 +120,32 @@ test("the section hides while loading and when nothing is linked", () => {
   expect(linkedAccountsSectionState({ data: [], error: null })).toBe(null);
 });
 
+test("the section shows an empty list whenever linking is available", () => {
+  for (const providers of [
+    { slack: true, github: false },
+    { slack: false, github: true },
+  ]) {
+    for (const data of [undefined, []]) {
+      expect(
+        linkedAccountsSectionState({ data, error: null, providers }),
+      ).toEqual({ rows: [], error: null });
+    }
+  }
+});
+
+test("the section stays hidden when no provider is available", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [],
+      error: null,
+      providers: { slack: false, github: false },
+    }),
+  ).toBe(null);
+  expect(
+    linkedAccountsSectionState({ data: [], error: null, providers: undefined }),
+  ).toBe(null);
+});
+
 test("rows show on their own when the list loaded", () => {
   expect(linkedAccountsSectionState({ data: [row], error: null })).toEqual({
     rows: [row],
