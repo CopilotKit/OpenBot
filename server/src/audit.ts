@@ -512,6 +512,11 @@ export const auditEventTypes = [
   "delivery.linked",
   "delivery.unlinked",
   /*
+   * A person linking an outside account to themselves (a Slack link code, a GitHub sign-in). Target
+   * the link id; payload `actor` and `provider` only, never the subject, realm or credential id.
+   */
+  "identity.linked",
+  /*
    * A person removing their own link to an outside account (Slack, GitHub). The link and its stored
    * token go here; nothing is changed at the provider.
    */
