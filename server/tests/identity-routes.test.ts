@@ -185,3 +185,12 @@ test("without a store every route is 503", async () => {
   const app = identityRoutes(signedIn);
   expect((await app.request("/links")).status).toBe(503);
 });
+
+test("auth runs before the missing-store 503 and responses are never cached", async () => {
+  const app = identityRoutes(async (context) =>
+    context.json({ error: "Sign in." }, 401),
+  );
+  const response = await app.request("/links");
+  expect(response.status).toBe(401);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+});
