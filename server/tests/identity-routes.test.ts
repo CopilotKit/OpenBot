@@ -127,6 +127,20 @@ test("confirm of a bad token is 409 with a sentence, and a malformed body is 400
   );
 });
 
+test("confirm surfaces an unexpected failure instead of answering 409", async () => {
+  const app = identityRoutes(signedIn, {
+    identitiesFor: async () => [],
+    unlink: async () => false,
+    peekChallenge: async () => ({ provider: "slack", handle: "dana" }),
+    confirmChallenge: async () => {
+      throw new Error("db down");
+    },
+  });
+  const response = await app.request("/challenges/confirm", post({ token }));
+  expect(response.status).not.toBe(409);
+  expect(response.status).toBe(500);
+});
+
 test("responses are not cached", async () => {
   const response = await fixture().app.request("/links");
   expect(response.headers.get("cache-control")).toBe("no-store");

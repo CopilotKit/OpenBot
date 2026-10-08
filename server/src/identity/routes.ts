@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppVariables } from "../auth/guards";
 import { PROVIDERS } from "./providers";
 import type { IdentityStore } from "./store";
-import type { IdentityProvider } from "./types";
+import { IdentityLinkError } from "./types";
 
 const tokenBody = z.strictObject({
   token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
@@ -75,7 +75,7 @@ export function identityRoutes(
     return context.json({
       challenge: {
         provider: challenge.provider,
-        title: PROVIDERS[challenge.provider as IdentityProvider].title,
+        title: PROVIDERS[challenge.provider].title,
         handle: challenge.handle,
       },
     });
@@ -89,7 +89,8 @@ export function identityRoutes(
     const challenge = await live.peekChallenge(parsed.data.token);
     try {
       await live.confirmChallenge(parsed.data.token, context.var.actor.id);
-    } catch {
+    } catch (error) {
+      if (!(error instanceof IdentityLinkError)) throw error;
       return context.json(
         {
           error:
