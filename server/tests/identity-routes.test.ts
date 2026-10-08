@@ -2,7 +2,10 @@ import { expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
-import { identityRoutes } from "../src/identity/routes";
+import {
+  type IdentityRouteOptions,
+  identityRoutes,
+} from "../src/identity/routes";
 import type { IdentityLink } from "../src/identity/types";
 
 const signedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
@@ -30,7 +33,7 @@ const link: IdentityLink = {
   updatedAt: new Date("2026-10-08T00:00:00Z"),
 };
 
-function fixture(removedProvider = "github") {
+function fixture(removedProvider = "github", options?: IdentityRouteOptions) {
   const calls: string[] = [];
   const events: AuditEventInput[] = [];
   const app = identityRoutes(
@@ -45,6 +48,7 @@ function fixture(removedProvider = "github") {
       },
     },
     { insert: async (event) => void events.push(event) },
+    options,
   );
   return { app, calls, events };
 }
@@ -154,5 +158,34 @@ test("the audit names the provider the store removed, even one outside the regis
   expect(f.events[0]?.payload).toEqual({
     actor: "person",
     provider: "retired-provider",
+  });
+});
+
+const github = {
+  clientId: "Iv1.x",
+  publicUrl: "https://o.test",
+  encryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+};
+
+test("GET /providers reports which account types can be linked", async () => {
+  const cases: [IdentityRouteOptions, { slack: boolean; github: boolean }][] = [
+    [{}, { slack: false, github: false }],
+    [{ slackLinking: true }, { slack: true, github: false }],
+    [{ github }, { slack: false, github: true }],
+  ];
+  for (const [options, providers] of cases) {
+    const response = await fixture("github", options).app.request("/providers");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ providers });
+  }
+});
+
+test("GET /providers without a store is 503", async () => {
+  const response = await identityRoutes(signedIn).request("/providers");
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({
+    error: "Linked accounts are not available.",
+    code: "identity_unavailable",
   });
 });

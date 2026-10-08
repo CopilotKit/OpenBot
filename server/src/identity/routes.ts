@@ -4,6 +4,11 @@ import type { AppVariables } from "../auth/guards";
 import { PROVIDERS } from "./providers";
 import type { IdentityStore } from "./store";
 
+export type IdentityRouteOptions = {
+  slackLinking?: boolean;
+  github?: { clientId: string; publicUrl: string; encryptionKey: string };
+};
+
 /**
  * A person's own linked accounts.
  *
@@ -15,6 +20,7 @@ export function identityRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   store?: Pick<IdentityStore, "identitiesFor" | "unlink">,
   auditStore?: AuditStore,
+  options: IdentityRouteOptions = {},
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   app.use("*", async (context, next) => {
@@ -39,6 +45,15 @@ export function identityRoutes(
     return app;
   }
   const live = store;
+
+  app.get("/providers", (context) =>
+    context.json({
+      providers: {
+        slack: Boolean(options.slackLinking),
+        github: Boolean(options.github),
+      },
+    }),
+  );
 
   app.get("/links", async (context) => {
     const links = await live.identitiesFor(context.var.actor.id);
