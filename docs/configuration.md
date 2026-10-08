@@ -485,20 +485,23 @@ SMS through Twilio honours Advanced Opt-Out: `STOP` (and Twilio's other opt-out 
 number opted out, later messages show `opted_out` in the delivery history instead of being sent, and
 `START` resumes. Twilio sends the confirmation reply itself, so OpenBot does not.
 
-### Linked accounts
+## Linked accounts
 
-A person's accounts at outside providers — their Slack user, their GitHub account — are linked to
-their OpenBot user in one place, `identity_links`, and listed under **Linked accounts** on
-`/settings/connected-accounts`, where they can disconnect any of them. A link is proven one of two
-ways: by the provider's own sign-in (GitHub, when that integration is configured), or by a one-time
-code OpenBot issues to the signed-in person, which they send from their chat account (Slack). A
-code always links to the person it was issued to, so nobody can link an account on somebody else's
-behalf, and an outside account links to one OpenBot user at most. Linking providers are added by
-their integrations; until one is configured, the list is empty.
+OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
+or their Slack user. When a person has any, they appear under **Linked accounts** on
+`/settings/connected-accounts`, and each can be disconnected there. Disconnecting revokes any token
+stored with the link, and is audited. A person with none sees no such section, and a deployment
+without an identity store does not show it at all.
 
-This complements, rather than replaces, the OpenTag **Reachability** pairing above: that pairing
-binds a conversation and Bot for delivery, while a linked account records who a person is at the
-provider.
+Links are created by the integrations that support them, and none ship enabled yet, so the list is
+empty until one is. An integration proves an account in one of two ways: by the provider's own
+sign-in, or by a one-time code that OpenBot issues to the signed-in person and that they send from
+their chat account. A code links only to the person it was issued to, and an outside account links to
+one OpenBot user at most.
+
+This is separate from the OpenTag **Reachability** pairing above. That pairing binds a conversation
+for delivery and uses its own `link <code>` messages, shown on the **Reachability** screen; it is not
+recorded as a linked account.
 
 ## Text messages and push notifications
 
