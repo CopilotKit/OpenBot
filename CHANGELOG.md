@@ -10,10 +10,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### The desktop asks before every command that can edit a folder
 
-"Always allow in this folder" now covers a Bot's read-only commands. A command that can edit or
-delete files in an approved folder shows the desktop prompt every time, and the prompt no longer
-offers to stop asking for it. Folders already set to always allow keep that setting for read-only
-commands.
+When a Bot runs a command in a folder shared from the desktop app, the person sees a prompt that can
+offer "Always allow in this folder". That choice now covers commands that only read the folder. A
+command that can change or delete files in it shows the prompt every time, without the "Always
+allow" option. Folders already set to "Always allow" work as before for read-only commands.
 
 ### A new deployment starts with two coworkers, not twelve
 
