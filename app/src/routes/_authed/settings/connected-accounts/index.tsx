@@ -16,7 +16,10 @@ import {
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { LinkedAccountsSection } from "@/components/settings/linked-accounts";
-import { linkedNotice } from "@/components/settings/linked-notice";
+import {
+  linkedNotice,
+  visibleLinkedNotice,
+} from "@/components/settings/linked-notice";
 import {
   InputGroup,
   InputGroupAddon,
@@ -29,6 +32,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { linkedAccountsQueryOptions } from "@/lib/identity/queries";
 import {
   connectionsQueryOptions,
   type PluginServer,
@@ -92,7 +96,10 @@ export function brokeredAccountsListedOn(
 function RouteComponent() {
   const { connected: outcome, linked } = Route.useSearch();
   /* Read once, then dropped from the URL, so a refresh does not repeat the news. */
-  const [notice] = React.useState(() => linkedNotice(linked));
+  const [arrival] = React.useState(() => linkedNotice(linked));
+  /* The same cached list the Linked accounts section reads, so a Disconnect there retracts a success here. */
+  const links = useQuery(linkedAccountsQueryOptions());
+  const notice = visibleLinkedNotice(arrival, links.data);
   const navigate = Route.useNavigate();
   React.useEffect(() => {
     if (linked !== undefined) {

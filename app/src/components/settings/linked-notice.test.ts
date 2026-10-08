@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { linkedNotice } from "./linked-notice";
+import { linkedNotice, visibleLinkedNotice } from "./linked-notice";
 
 describe("linkedNotice", () => {
   test("reports a linked GitHub account", () => {
@@ -29,4 +29,36 @@ describe("linkedNotice", () => {
       expect(linkedNotice(value)).toBeNull();
     },
   );
+});
+
+describe("visibleLinkedNotice", () => {
+  const success = linkedNotice("github");
+  const github = { provider: "github" as const };
+  const slack = { provider: "slack" as const };
+
+  test("shows the success notice while a GitHub link exists", () => {
+    expect(visibleLinkedNotice(success, [slack, github])).toEqual(success);
+  });
+
+  test("hides the success notice once the GitHub link is gone", () => {
+    expect(visibleLinkedNotice(success, [slack])).toBeNull();
+    expect(visibleLinkedNotice(success, [])).toBeNull();
+  });
+
+  test("hides the success notice until the links have loaded", () => {
+    expect(visibleLinkedNotice(success, undefined)).toBeNull();
+  });
+
+  test.each(["failed", "github-taken"])(
+    "leaves the %s error notice alone whatever the links say",
+    (value) => {
+      const notice = linkedNotice(value);
+      expect(visibleLinkedNotice(notice, [])).toEqual(notice);
+      expect(visibleLinkedNotice(notice, undefined)).toEqual(notice);
+    },
+  );
+
+  test("passes no notice through as none", () => {
+    expect(visibleLinkedNotice(null, [github])).toBeNull();
+  });
 });
