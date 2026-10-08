@@ -425,6 +425,8 @@ export function createApp(
   selfHostBanner?: SelfHostBanner,
   /** A person's own linked accounts. Absent answers 503 on /api/identity. */
   identity?: IdentityStore,
+  /** The GitHub sign-in callback, built by the caller; mounted behind requireUser ahead of /api/identity. */
+  identityGithubCallback?: Hono<{ Variables: AppVariables }>,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -681,6 +683,16 @@ export function createApp(
     userPreferencesRoutes(requireUser, userPreferences),
   );
 
+  /*
+   * The session must match the sealed state's person, otherwise a link started by one person could
+   * attach another person's GitHub account (login CSRF), so the callback requires the same session
+   * as the rest of /api/identity; a missing session answers 401 rather than a redirect. Mounted
+   * before the identity router so that router never sees this path.
+   */
+  if (identityGithubCallback) {
+    app.use("/api/identity/github/callback", requireUser);
+    app.route("/api/identity/github/callback", identityGithubCallback);
+  }
   /*
    * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
    * administrator view and no linking on somebody else's behalf.
