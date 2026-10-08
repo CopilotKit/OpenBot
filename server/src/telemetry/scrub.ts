@@ -42,6 +42,16 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
     /(x-api-key\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s'"]+)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
+  // A quoted key in a JSON body: `-d '{"password":"x"}'`, or `-d "{\\"password\\":\\"x\\"}"` once the
+  // shell quoting around it has escaped the inner quotes. The rule below stops at the closing quote
+  // of the key, so it never saw these.
+  [
+    new RegExp(
+      `(\\\\?["']${SECRET_NAME}\\\\?["']\\s*:\\s*)(\\\\"[^"\\\\]*\\\\"|"[^"]*"|'[^']*'|[^\\s,}'"\\\\]+)`,
+      "gi",
+    ),
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
   // `NAME=value`, `export NAME=value`, `--name=value`, `NAME: value`.
   [
     new RegExp(
@@ -63,10 +73,14 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
     /(\bmysql(?:dump)?\b[^|;&]*?\s-p)(\S+)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
-  // `curl -u user:password`.
+  // `curl -u user:password`, and the other ways curl takes it: `-uuser:password`,
+  // `--user=user:password`, and either of them with the pair in quotes.
   [
-    /(\s(?:-u|--user)\s+)([^\s:]+):(\S+)/g,
-    (_m, lead, user) => `${lead}${user}:${REDACTED}`,
+    /(\s(?:-u\s*|--user(?:=|\s+)))(?:"([^":]*):[^"]*"|'([^':]*):[^']*'|([^\s:"']+):\S+)/g,
+    (_m, lead, doubleQuoted, singleQuoted, bare) => {
+      const user = doubleQuoted ?? singleQuoted ?? bare;
+      return `${lead}${user}:${REDACTED}`;
+    },
   ],
   // Userinfo in any URL: `https://user:pass@host`.
   [

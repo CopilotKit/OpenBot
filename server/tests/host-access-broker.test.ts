@@ -358,4 +358,100 @@ describe("host access broker", () => {
       actorId: "user-a",
     });
   });
+
+  test("a cancel nobody collects does not stay pending for the life of the process", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      // Long enough that the lease is not what ends the operation, so this is the operation's
+      // own timeout queuing the cancel.
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 40,
+    });
+    broker.rememberGrant({
+      id: "grant-1",
+      botId: "bot-a",
+      actorId: "user-a",
+      displayName: "Project",
+      revoked: false,
+    });
+
+    const running = broker.callHost({
+      kind: "read_file",
+      botId: "bot-a",
+      actorId: "user-a",
+      grantId: "grant-1",
+      relativePath: "notes.txt",
+    });
+    expect(broker.nextDesktopOperation()?.operations[0]).toMatchObject({
+      kind: "read_file",
+    });
+
+    // It runs out its own time, which queues a cancel for the desktop that has to stop
+    // working on it.
+    await Promise.allSettled([running]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(broker.statusFor("user-a").pending).toHaveLength(1);
+    expect(broker.statusFor("user-a").pending[0]?.kind).toBe("cancel");
+
+    // That desktop never comes back for it. The cancel cannot outlive the chance to deliver
+    // it: nothing else ever removes this entry, so `operations` grew by one per abandoned
+    // operation and `statusFor` kept reporting it to the person as pending.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(broker.statusFor("user-a").pending).toEqual([]);
+  }, 10_000);
+
+  test("a stop nobody collects does not stay pending for the life of the process", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      // Long enough that the lease is not what ends the operation, so this is the operation's
+      // own timeout giving up on the stop.
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 40,
+    });
+
+    broker.stop("user-a");
+    expect(broker.nextDesktopOperation()?.operations[0]).toMatchObject({
+      kind: "stop",
+      actorId: "user-a",
+    });
+
+    // That desktop never comes back for it. A stop is addressed to a worker that may never
+    // answer, exactly as a cancel is, so it cannot outlive the chance to deliver it: nothing else
+    // ever removed this entry, so `operations` grew by one per press of Stop and `statusFor` kept
+    // reporting it to the person as pending.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(broker.statusFor("user-a").pending).toEqual([]);
+  }, 10_000);
+
+  test("a second Stop neither drops the queued stop nor rejects a promise nobody holds", async () => {
+    const broker = createHostAccessBroker(Date.now, {
+      desktopLeaseMs: 60_000,
+      operationTtlMs: 1_000,
+    });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      broker.stop("user-a");
+      broker.stop("user-a");
+
+      // Both stops are still queued for a desktop that has not collected either. The second must
+      // not fail the first: a stop is the instruction that makes the desktop stop, so failing it
+      // would withdraw the instruction the person just asked for.
+      const pending = broker.statusFor("user-a").pending;
+      expect(pending).toHaveLength(2);
+      expect(pending.every((operation) => operation.kind === "stop")).toBe(
+        true,
+      );
+
+      // And nothing rejects. The stop used to be built by `enqueue` and discarded with `void`, so
+      // the promise behind it had no handler attached, and failing it rejected that promise into
+      // the void -- which this process treats as fatal.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  }, 10_000);
 });

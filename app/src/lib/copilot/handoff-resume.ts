@@ -14,12 +14,25 @@ export type HandoffAgent = {
   setMessages: (messages: Message[]) => void;
 };
 
+/**
+ * A tool result as text. AG-UI 1.0 lets a tool message carry content parts as well as a string;
+ * the placeholders and transport failures this file looks for are only ever text.
+ */
+function toolText(message: Extract<Message, { role: "tool" }>): string {
+  return typeof message.content === "string"
+    ? message.content
+    : message.content
+        .map((part) => (part.type === "text" ? part.text : ""))
+        .join("");
+}
+
 /** These are transport placeholders / retryable transport failures, never accepted results. */
 function needsAnswer(message: Message): boolean {
   if (message.role !== "tool") return false;
-  if (message.content.trim() === "Forwarded to client") return true;
+  const content = toolText(message);
+  if (content.trim() === "Forwarded to client") return true;
   try {
-    const result: unknown = JSON.parse(message.content);
+    const result: unknown = JSON.parse(content);
     if (result === "Forwarded to client") return true;
     return Boolean(
       result &&

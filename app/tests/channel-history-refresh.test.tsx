@@ -1,9 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import {
-  type Message,
-  type RunAgentInput,
-  RunAgentInputSchema,
-} from "@ag-ui/core";
+import type { Message, RunAgentInput } from "@ag-ui/core";
+import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";

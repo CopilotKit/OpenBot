@@ -168,3 +168,35 @@ test("/ keeps a successful route decision ahead of the fallback", async () => {
 
   await waitFor(() => expect(starts).toEqual([["shared-public"]]));
 });
+
+for (const refusal of [
+  {
+    status: 409,
+    body: {
+      error: "More than one coworker matches that name.",
+      names: ["Data Analyst", "Risk Analyst"],
+    },
+    message: "Data Analyst, Risk Analyst",
+  },
+]) {
+  test(`routing refusal ${refusal.status} preserves the draft and shows the explanation without starting a fallback`, async () => {
+    const starts: string[][] = [];
+    installHomeRoutingFetch({
+      routeResponse: Response.json(refusal.body, { status: refusal.status }),
+      starts,
+    });
+    const view = renderHome(
+      queryClientWithAgents([
+        agent({ id: "default", name: "Default", visibility: "public" }),
+      ]),
+    );
+    await submitHomeMessage(view, "ask analyst");
+    await waitFor(() =>
+      expect(view.getByRole("alert").textContent).toContain(refusal.message),
+    );
+    expect(starts).toEqual([]);
+    expect(view.getByRole("textbox", { name: "Message" }).textContent).toBe(
+      "ask analyst",
+    );
+  });
+}

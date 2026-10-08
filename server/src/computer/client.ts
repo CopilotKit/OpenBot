@@ -293,6 +293,10 @@ export function createComputerTransport(
     const bytes =
       length !== null && /^\d+$/.test(length) ? Number(length) : Number.NaN;
     if (!response.body || !Number.isSafeInteger(bytes) || bytes < 0) {
+      // Nothing else will ever read this body, so release it here rather than
+      // leaving the whole download budget checked out of the pool. A cancel that
+      // fails must not replace the refusal the caller is told about.
+      await response.body?.cancel().catch(() => undefined);
       throw new ComputerUnavailableError(
         "The assistant's computer returned an invalid file download.",
       );

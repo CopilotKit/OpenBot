@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import type { AbstractAgent } from "@ag-ui/client";
 import {
   CopilotKitIntelligence,
   IntelligenceAgentRunner,
@@ -20,6 +21,10 @@ import {
   headlessTurnRefusal,
   installEnterpriseControls,
 } from "./admin/controls";
+import {
+  CoworkerUnavailableError,
+  createActorAgentResolver,
+} from "./agents/agent-resolver";
 import {
   mintRunAssertion,
   type RunAssertion,
@@ -140,7 +145,6 @@ import {
   type IdentifyUser,
   mountCopilotRuntime,
   normalizeModelBaseUrls,
-  resolveRuntimeAgents,
   runtimeModelForEnvironment,
   type ToolSelection,
 } from "./copilot";
@@ -1032,16 +1036,7 @@ const chooseSkills = createModelCompleter({
     }),
 });
 
-/*
- * WHY THESE ARE NAMED CONSTANTS RATHER THAN ARGUMENTS WRITTEN INLINE.
- *
- * Two callers now build a Bot: a person's chat request, through `mountCopilotRuntime` below, and a
- * routine's headless turn, through `buildAgentFor` further down. They have to build the SAME Bot. A
- * routine that resolved its tools, its run assertion or its endpoint dialling through a second,
- * slightly different set of collaborators would be a Bot that behaves one way when a person asks and
- * another way at three in the morning, with nothing to point at. So each of these is written once and
- * passed to both.
- */
+// Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
 
 /** The deployment's model key, resolved per call so a credential rotated a moment ago is used next. */
 const resolveRuntimeModelApiKey = () =>
@@ -1626,44 +1621,15 @@ const buildAgentFor = async ({
   depth?: number;
 }) => {
   const actor = await actorFor(ownerUserId);
-  const agents = await resolveRuntimeAgents(
-    () => loadAgentsForActor(actor),
-    runtimeModel,
-    resolveRuntimeModelApiKey,
-    stallGuard,
-    restrictToolsForRun(
+  let agent: AbstractAgent | undefined;
+  try {
+    agent = await actorAgentResolver.resolveAgentForActor(actor, agentId, {
       initiator,
-      loadToolsForActor(actor.id, initiator),
-      proactiveReadOnlyRefs,
-    ),
-    signRunForActor(actor.id, initiator, depth),
-    config.computer ? COMPUTER_GUIDANCE : undefined,
-    loadVendors,
-    selectionForActor(actor.id),
-    agentFetch,
-    restrictCoordinationForRun(
-      initiator,
-      coordinationForActor(actor.id, initiator, depth),
-    ),
-    // Only the Bot this routine names. Same reason as the hop delivery: the roster is still read in
-    // full so a Bot this owner cannot see is still absent, but the other Bots are neither built nor
-    // asked what they hold.
-    agentId,
-    // The owner's own standing instructions. A routine is their work done while they are asleep, so
-    // it is written the way they asked for it to be written, exactly as their chat turn would be.
-    loadInstructionsForActor(actor.id),
-    initiator,
-    // The same reader the request path gets, bound to the owner the routine runs as, so a file
-    // attached in a channel reads the same way on a routine's turn as it does on the person's own —
-    // and is refused the same way when the owner is not in that channel.
-    loadAttachmentForActor(actor.id),
-    // And the same recorder, so the files on a routine's own message stop counting as staged the
-    // moment it sends them, exactly as a person's do.
-    markAttachmentsSentForActor(actor.id),
-    copilotRuntime.learning?.acquire,
-    loadPersonalMemoryForActor(actor.id),
-  );
-  const agent = agents[agentId];
+      depth,
+    });
+  } catch (error) {
+    if (!(error instanceof CoworkerUnavailableError)) throw error;
+  }
   if (!agent) {
     /*
      * Named, and raised rather than swallowed. The routine's Bot was deleted, or made private by
@@ -1746,45 +1712,48 @@ const routineRunner = createRoutineRunner({
  * invisible: it runs, and quietly holds different tools or a different role from the one the person
  * is talking to.
  */
-const copilotRuntime = mountCopilotRuntime(
-  config,
-  runtimeModel,
-  loadAgentsForActor,
-  resolveRuntimeModelApiKey,
-  identifyUser,
-  identifyActor,
+const actorAgentResolver = createActorAgentResolver({
+  loadAgents: loadAgentsForActor,
+  model: runtimeModel,
+  resolveModelApiKey: resolveRuntimeModelApiKey,
   stallGuard,
-  loadToolsForActor,
+  loadToolsForActor: (actorId, initiator) =>
+    restrictToolsForRun(
+      initiator,
+      loadToolsForActor(actorId, initiator),
+      proactiveReadOnlyRefs,
+    ),
   signRunForActor,
-  undefined,
+  computerGuidance: config.computer ? COMPUTER_GUIDANCE : undefined,
   loadVendors,
   selectionForActor,
   agentFetch,
-  /*
-   * What a Bot may reach past itself for: another Bot, and a person. Made per run and per person.
-   *
-   * Per person because which Bots may be reached is decided against the roster that person can
-   * see: a Bot must never be able to address one they cannot, or this becomes a way around agent
-   * visibility. Per run because the caps need to know how deep the chain already is and where an
-   * answer belongs, and both of those are the deployment's own statement about the run rather than
-   * anything the model can edit.
-   */
-  coordinationForActor,
-  // A run started or ended on a thread; light the channel it belongs to. Fire-and-forget, keyed by
-  // thread, and a scratch thread maps to no channel and signals nowhere.
-  (input) => {
-    void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
-  },
-  // What this person has told every coworker of theirs, in every channel. See user-instructions.ts.
+  handoffForActor: (actorId, initiator, depth) =>
+    restrictCoordinationForRun(
+      initiator,
+      coordinationForActor(actorId, initiator, depth),
+    ),
   loadInstructionsForActor,
-  // The files on a message, put in front of the model rather than left as links it cannot follow —
-  // and only the ones the person whose run this is could open themselves.
   loadAttachmentForActor,
-  // And that those files went out in a send, written by the person who sent them and only for rows
-  // they uploaded. See markAttachmentsSentForActor.
   markAttachmentsSentForActor,
-  learningSettings,
+  // The runtime owns Learning. Resolve its reader only when a turn is built, after boot wiring.
+  get acquireLearnedSkills() {
+    return copilotRuntime.learning?.acquire;
+  },
   loadPersonalMemoryForActor,
+});
+
+const copilotRuntime = mountCopilotRuntime(
+  config,
+  actorAgentResolver,
+  identifyUser,
+  identifyActor,
+  {
+    onRunBusy: (input) => {
+      void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
+    },
+    learningSettings,
+  },
 );
 
 const responsibilityQueue = createWorkQueue(database);

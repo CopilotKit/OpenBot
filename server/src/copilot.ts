@@ -10,10 +10,11 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
 import { z } from "zod";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import {
-  COMPUTER_GUIDANCE,
-  PROVENANCE_GUIDANCE,
-} from "../../shared/bot-prompt";
+  type ActorAgentResolver,
+  CoworkerUnavailableError,
+} from "./agents/agent-resolver";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import {
   PLAN_RUN_COMPLETED,
@@ -1944,101 +1945,10 @@ export type LoadAgentsForActor = (
  */
 export function createRequestAgents(
   identifyActor: IdentifyActor,
-  loadAgents: LoadAgentsForActor,
-  model: RuntimeModel,
-  resolveModelApiKey: () => Promise<string | null>,
-  /**
-   * Shared across every request rather than built per run, because it is the thing that has to
-   * outlive one: the sweep that notices a silent stream has to still be running after the request
-   * that opened it has been answered.
-   */
-  stallGuard?: StallGuard,
-  /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
-  loadToolsForActor?: (
-    actorId: string,
-    initiator?: AuditInitiator,
-  ) => LoadToolsForBot,
-  /** Resolved per request, because what it signs is who this request turned out to be. */
-  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
-  /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
-  computerGuidance?: string,
-  /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
-  loadVendors?: () => Promise<readonly string[]>,
-  /**
-   * How a run's tools are narrowed, resolved for whoever is asking.
-   *
-   * Per actor like the tools themselves, because the skills a Bot holds are read through the same
-   * grants, and because the discovery row has to name the person the run belongs to.
-   */
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /**
-   * How a run gets its tool for handing work to another Bot, resolved for whoever is asking.
-   *
-   * Per actor for the same reason the tools are: which Bots may be reached is decided against the
-   * roster that person can see, so a Bot must never be able to address one they cannot.
-   */
-  handoffForActor?: (actorId: string) => HandoffForRun,
-  /**
-   * What this person has told every coworker they run, resolved for whoever is asking.
-   *
-   * Per actor, and through `identifyActor` rather than anything in the request body, for the same
-   * reason the grants are: this text goes into a prompt that then speaks as that person's coworker,
-   * so which person it belongs to has to be decided by the session and never by the caller.
-   */
-  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
-  /**
-   * How the files on a person's message are put in front of the model, resolved for whoever is
-   * asking.
-   *
-   * Per actor, and through `identifyActor` rather than anything in the request body, for the reason
-   * `loadInstructionsForActor` is: the ids arrive inside `input.messages`, which the browser wrote,
-   * so a turn can name an attachment in a channel the asker was never in. Which rows this may read
-   * has to be decided by the session, exactly as the fetch route decides it. Appended last for the
-   * positional reason above. Absent means nothing is inlined, which is what every deployment did
-   * before this existed.
-   */
-  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
-  /**
-   * How a send is recorded against the files it carried, resolved for whoever is asking.
-   *
-   * Per actor for a stricter reason than the reader beside it: this one WRITES `attachedAt`, and
-   * `markAttachmentsSent` will only stamp rows the acting person uploaded themselves. Deciding who
-   * that is from the session rather than from the request body is what keeps one member from
-   * recording a send against a colleague's staged file. Appended last, positionally. Absent means
-   * nothing is recorded.
-   */
-  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
-  acquireLearnedSkills?: AcquireLearnedSkills,
-  loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory,
+  resolver: ActorAgentResolver,
 ) {
-  return async ({ request }: { request: Request }) => {
-    const actor = await identifyActor(request);
-    return resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id),
-      signRunForActor?.(actor.id),
-      computerGuidance,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-      // Every Bot this person can see, so no `onlyBotId` here; the instructions follow it.
-      undefined,
-      loadInstructionsForActor?.(actor.id),
-      // No initiator: a request is a person asking, which is the default this path has always
-      // carried. Named only so the attachments after it land in the right position.
-      undefined,
-      loadAttachmentForActor?.(actor.id),
-      markAttachmentsSentForActor?.(actor.id),
-      acquireLearnedSkills,
-      loadPersonalMemoryForActor?.(actor.id),
-    );
-  };
+  return async ({ request }: { request: Request }) =>
+    resolver.resolveAgentsForActor(await identifyActor(request));
 }
 
 /**
@@ -2127,71 +2037,17 @@ const THREAD_LOCK_TTL_SECONDS = 120;
 
 export function mountCopilotRuntime(
   config: DeploymentConfig,
-  model: RuntimeModel,
-  loadAgents: LoadAgentsForActor,
-  resolveModelApiKey: () => Promise<string | null>,
+  resolver: ActorAgentResolver,
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
-  /**
-   * The watch on Bot streams. Not optional, unlike the parameter it forwards to: a guard built from
-   * a timeout of zero already watches nothing, so an unconfigured deployment has one to hand and
-   * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
-   */
-  stallGuard: StallGuard,
-  loadToolsForActor?: (
-    actorId: string,
-    initiator?: AuditInitiator,
-  ) => LoadToolsForBot,
-  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
-  basePath = "/api/copilotkit",
-  loadVendors?: () => Promise<readonly string[]>,
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
-  handoffForActor?: (actorId: string) => HandoffForRun,
-  /**
-   * Told when a run starts and ends on a thread, so a channel can show it is working.
-   *
-   * The universal seam: every run the runtime processes — a person's own turn, a headless hop —
-   * takes and gives back the thread lock, and it does so on the server, so a person who sends a
-   * message and navigates away still lights the channel they left. A side effect only: it is never
-   * awaited in the lock path and a failure in it never touches whether the lock was taken.
-   */
-  onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
-  /**
-   * What the person asking has told every built-in coworker they run, resolved per person.
-   *
-   * Given to both the request path and `agentFor` below, so a hop delivered to a Bot at three in the
-   * morning carries the same standing instructions the Bot in front of the person does. A seam wired
-   * into only one of them would be the drift `agentFor` exists to prevent.
-   */
-  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
-  /**
-   * How the files on a message are put in front of the model, resolved per person, on both paths
-   * below.
-   *
-   * Given to the request path and to `agentFor` alike, for the reason `loadInstructionsForActor` is:
-   * a routine's turn at three in the morning has to inline exactly as a person's chat turn does, and
-   * a seam wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed for
-   * the same reason every other collaborator here is — the ids come out of browser-supplied message
-   * content, so the person the run belongs to is what decides which attachments it may read.
-   * Appended last because these are positional. Absent means nothing is inlined.
-   */
-  loadAttachmentForActor?: (actorId: string) => LoadAttachment,
-  /**
-   * How a send is recorded against the files it carried, resolved per person, on both paths below.
-   *
-   * Given to the request path and to `agentFor` alike, for the reason `loadAttachmentForActor` is:
-   * a routine's turn at three in the morning sends exactly as a person's chat turn does, and a seam
-   * wired into only one of them is the drift `agentFor` exists to prevent. Actor-keyed because the
-   * write is scoped to rows that person uploaded. Appended last. Absent means nothing is recorded.
-   */
-  markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
-  learningSettings?: LearningSettingsStore,
-  loadPersonalMemoryForActor?: (actorId: string) => LoadPersonalMemory,
+  options: {
+    basePath?: string;
+    onRunBusy?: (input: { threadId: string; busy: boolean }) => void;
+    learningSettings?: LearningSettingsStore;
+  } = {},
 ) {
   const { intelligence } = config.runtime;
+  const { basePath = "/api/copilotkit", onRunBusy, learningSettings } = options;
 
   /**
    * The same Bot a person's run would get, built without a request.
@@ -2216,31 +2072,14 @@ export function mountCopilotRuntime(
     botId: string;
     initiator?: AuditInitiator;
   }): Promise<AbstractAgent | null> => {
-    const { actor } = input;
-    const agents = await resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id, input.initiator),
-      signRunForActor?.(actor.id, input.initiator),
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-      // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
-      // see is still absent; what this skips is constructing the other Bots and asking the database
-      // what each of them was granted, on every delivery and again on every retry.
-      input.botId,
-      loadInstructionsForActor?.(actor.id),
-      input.initiator,
-      loadAttachmentForActor?.(actor.id),
-      markAttachmentsSentForActor?.(actor.id),
-      learning?.acquire,
-      loadPersonalMemoryForActor?.(actor.id),
-    );
-    return agents[input.botId] ?? null;
+    try {
+      return await resolver.resolveAgentForActor(input.actor, input.botId, {
+        initiator: input.initiator,
+      });
+    } catch (error) {
+      if (error instanceof CoworkerUnavailableError) return null;
+      throw error;
+    }
   };
 
   /*
@@ -2317,31 +2156,7 @@ export function mountCopilotRuntime(
     a2ui: { enabled: config.generativeUi },
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
-    agents: createRequestAgents(
-      identifyActor,
-      loadAgents,
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor,
-      signRunForActor,
-      /*
-       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
-       * offered them without this and the guidance is what tells it how they go together: snapshot
-       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
-       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
-       */
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor,
-      agentFetch,
-      handoffForActor,
-      loadInstructionsForActor,
-      loadAttachmentForActor,
-      markAttachmentsSentForActor,
-      learning?.acquire,
-      loadPersonalMemoryForActor,
-    ) as never,
+    agents: createRequestAgents(identifyActor, resolver) as never,
   });
 
   return {

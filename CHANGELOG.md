@@ -11,7 +11,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 **Before upgrading.** Two things change for an existing deployment:
 - Migration `0052_shared_brokered_accounts` copies every Composio connection into a new
   `brokered_connections` table and leaves `composio_connections` in place, unwritten. Rolling back to
-  0.1.0 works, but accounts connected after the upgrade are invisible to it.
+  0.1.2 works, but accounts connected after the upgrade are invisible to it.
 - A handoff now records what started the run it came from. Older remote Bots' signed runs carry no
   such record for up to ten minutes after the upgrade, and calls they make to a Shared app in that
   window are refused.
@@ -23,6 +23,117 @@ the app acts as. Who may use it through each Bot is approved per Bot — owner o
 groups, or everyone, and separately whether email, Slack or webhook input may — and checked on every
 call. Requests to widen it wait in the Approvals inbox. Writes through a Shared app ask the person
 first.
+
+## 0.1.2
+
+### CopilotKit 1.77 and AG-UI 1.0
+
+OpenBot now runs on CopilotKit 1.77.0 (`@copilotkit/runtime`, `react-core` and `a2ui-renderer`,
+from 1.73.1), which carries the Intelligence client, and on AG-UI 1.0 (`@ag-ui/core` and
+`@ag-ui/client` 1.0.1, from 0.0.59). A managed Intelligence project needs nothing changed; it is the
+client in the server that moved. Among what comes with it: thread naming falls back to the first
+message, the realtime connection keeps its place across a repeated checkpoint, an interrupt resume
+gets a run id of its own, and generated A2UI controls no longer submit the page's own forms.
+
+Bots served from their own endpoint keep working as they are. AG-UI 1.0 still accepts the earlier
+event shapes, so `agent-bot`, `agent-langgraph` and the Python Bots were not changed.
+
+A tool result's `error` field is gone from the `TOOL_CALL_RESULT` event, because AG-UI 1.0 does not
+define one. The refusal is still in the result's text and on the tool message, which is where a
+Bot's next turn reads it.
+
+## 0.1.1
+
+- A password given to `curl` as `-uuser:password`, `--user=user:password` or `-u "user:pass word"` is
+  now redacted in a Bot's recorded shell command. Only `-u user:password` with a space and no quotes
+  was recognised, so the other spellings kept the password in the command that was stored or exported.
+- A password, token or API key sent as a JSON field in a shell command is now redacted before the
+  command is kept or exported. `curl -d '{"password":"x"}'` was recorded with the secret in clear,
+  because only `NAME=value` and `--name value` forms were recognised and a quoted JSON key was
+  neither. The key is still shown, so the command reads the same.
+
+- A Bot's browser is now refused names under `.localhost`, such as `http://admin.localhost:5432`, the
+  same as bare `localhost`. The whole `.localhost` zone is loopback and Chromium resolves it without
+  DNS, but only the exact name `localhost` was on the refused list, so a deployment that had not opted
+  into private hosts could still be pointed at its own services this way.
+
+- `OPENBOT_SINGLE_USER` is now refused with a public name that starts with `127.`, such as
+  `https://127.example.com` or `https://127.0.0.1.nip.io`. The check for a loopback address matched
+  any host beginning `127.`, so a public address like that read as this machine and the no-sign-in
+  administrator was allowed on it. Only a full 127.x.x.x address counts as loopback now.
+- A cancellation the native host never collected is now dropped instead of being reported as
+  pending forever. Every timed-out, stopped or revoked host operation queues a cancel for the desktop
+  worker, and only that worker ever removed it: a worker that stopped polling left the entry in
+  memory for the life of the process, so the Host access panel showed an operation that could never
+  finish. A desktop that reconnects within the operation timeout is still told to stop.
+- A Bot's shell now honours a Stop that landed before the command was spawned, not only one that
+  arrives afterwards. A person who pressed Stop in the window between the request reaching the
+  computer and the command starting got no answer until that command finished on its own.
+- A file download refused because the computer's response carried no usable byte length now releases
+  the connection before reporting the refusal. The unread body could be as large as the whole
+  download budget, so a computer reached through a proxy that re-chunks left a transfer running and a
+  connection checked out of the pool on every attempt.
+
+
+
+- A conversation title cut at 60 characters no longer ends in half an emoji. `slice` counts UTF-16
+  code units and an emoji is two of them, so a title cut between the halves rendered a replacement
+  character in the sidebar and the picker, where the character itself should have been.
+
+- A tool result that arrives before the call it answers is now paired with that call by the LangGraph
+  Bot, as the sibling Bots already did. Read back from the durable thread store the result arrives
+  first, which is a payload no provider accepts: a tool message with no preceding call, then a call
+  with nothing following it. The model answers that with silence rather than an error, so the Bot
+  stopped responding for the rest of the conversation.
+
+- Pressing Stop now stops the computer even when the desktop worker never collects the instruction.
+  A stop was queued with no timeout and the worker was the only thing that could ever remove it, so a
+  worker that stopped polling left the entry in memory for the life of the process and the Host
+  access panel showed an operation that could never finish, growing by one per press. Pressing Stop a
+  second time also withdrew the first Stop before the desktop could collect it, and rejected a request
+  that nobody was waiting for, which the server treats as fatal. A desktop that reconnects within the
+  operation timeout is still told to stop.
+
+### A computer refuses the cloud metadata address written through the NAT64 prefix
+
+A Bot's computer is now refused the cloud metadata address when it is written through the NAT64
+prefix (`64:ff9b::a9fe:a9fe` is 169.254.169.254), under every network policy including allow-all.
+Only the plain and IPv4-mapped spellings were refused, so on a network with a NAT64 gateway the
+metadata endpoint was one rewrite away. Browsing already refused this spelling; the computer's
+filter now agrees.
+
+### `?sslmode=require` on `DATABASE_URL` now connects to a managed database
+
+A deployment pointed at RDS, Cloud SQL or Azure Database could not start. The server sent
+`sslmode` to Postgres as a connection parameter instead of turning TLS on, so the connection went
+out unencrypted and was refused with `no pg_hba.conf entry for host ... no encryption`, the very
+error the Helm chart's README says `?sslmode=require` avoids. Migrations were unaffected, which is
+why a deployment got as far as a migrated database and then crash-looped. `sslmode=require` now
+encrypts the connection, and `sslmode=disable` turns TLS off. `sslmode=verify-full`, with an
+optional `sslrootcert`, checks the certificate on Bun 1.4 and later and is refused on Bun 1.3,
+which connects to any certificate. `verify-ca`, `prefer` and `allow` are refused with a message
+naming the modes that work.
+
+### A coworker the message speaks to is routed to without asking a model
+
+Addressing a coworker by name went to the intent router like any other message, so the deployment
+paid a model call to be told what the person had already said, and sometimes was told something
+else. A message that speaks to a coworker by its full name now routes straight to them: it opens
+with the name ("Risk Analyst, please check this"), names it with `@`, or asks it ("ask Risk Analyst
+to review this"). It is recorded as `matched a coworker’s name in the message` with
+`viaNameMatch: true` on the same `channel.routed` row. A name in passing ("don't send this to Risk
+Analyst") and a word that only ends a name ("review this contract", "my meeting notes") still go
+to the router. When the message addresses more than one coworker, or two share the addressed name,
+it is refused with distinct labels, and the composer keeps the draft and asks the person to choose
+instead of starting the default coworker. Explicit picker choices still use `viaMention: true`.
+
+### A Bot's turn in a group is no longer offered coordination tools it cannot call
+
+A Bot answering another Bot in a group conversation was offered `ask_person`, and `message_bot`
+when hops allowed it, but every call was refused with "This run no longer has permission to
+coordinate work in this conversation" and an `mcp.callback_refused` row nobody had caused. A run is
+now offered these tools only when a call from it would be allowed, so that turn is offered neither.
+A call that is refused anyway, from a schema offered earlier, is still refused and audited.
 
 ## 0.1.0
 
