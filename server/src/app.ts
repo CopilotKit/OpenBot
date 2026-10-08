@@ -685,7 +685,20 @@ export function createApp(
    * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
    * administrator view and no linking on somebody else's behalf.
    */
-  app.route("/api/identity", identityRoutes(requireUser, identity, auditStore));
+  app.route(
+    "/api/identity",
+    identityRoutes(requireUser, identity, auditStore, {
+      slackLinking: Boolean(coworker?.delivery?.webhooks.slack),
+      github:
+        config.githubApp && config.publicUrl
+          ? {
+              clientId: config.githubApp.clientId,
+              publicUrl: config.publicUrl,
+              encryptionKey: config.keyEncryptionKey,
+            }
+          : undefined,
+    }),
+  );
 
   app.get("/api/settings/instructions", requireUser, async (context) => {
     if (!userInstructions) {
