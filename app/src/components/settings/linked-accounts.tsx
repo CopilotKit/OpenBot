@@ -121,6 +121,19 @@ export function linkedAccountsSectionState({
 }
 
 /**
+ * Whether the GitHub Connect button is disabled.
+ *
+ * The mutation settles before the browser has left for GitHub, so a success keeps the button
+ * disabled too: the page is about to navigate away and a second click would start a second sign-in.
+ */
+export function connectGithubPending(mutation: {
+  isPending: boolean;
+  isSuccess: boolean;
+}): boolean {
+  return mutation.isPending || mutation.isSuccess;
+}
+
+/**
  * Who you are in the chat apps and code hosts this deployment talks to.
  *
  * Separate from the connector rows above it: those are services a Bot reads as you, these are how
@@ -157,7 +170,7 @@ export function LinkedAccountsSection() {
         issueCode.mutate(undefined, { onSuccess: (code) => setIssued(code) }),
     },
     github: {
-      pending: connectGithub.isPending,
+      pending: connectGithubPending(connectGithub),
       start: () =>
         connectGithub.mutate(undefined, {
           onSuccess: (url) => window.location.assign(url),

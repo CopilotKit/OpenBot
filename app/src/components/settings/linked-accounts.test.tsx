@@ -3,6 +3,7 @@ import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { unlinkOutcome } from "@/lib/identity/mutations";
 import { linksFromResponse } from "@/lib/identity/queries";
 import {
+  connectGithubPending,
   copyText,
   linkedAccountDescription,
   linkedAccountsSectionState,
@@ -333,4 +334,16 @@ test("copying reports failure when the write is rejected", async () => {
     },
   });
   expect(ok).toBe(false);
+});
+
+test("the GitHub Connect button stays disabled from the request until the page leaves", () => {
+  expect(connectGithubPending({ isPending: false, isSuccess: false })).toBe(
+    false,
+  );
+  expect(connectGithubPending({ isPending: true, isSuccess: false })).toBe(
+    true,
+  );
+  expect(connectGithubPending({ isPending: false, isSuccess: true })).toBe(
+    true,
+  );
 });
