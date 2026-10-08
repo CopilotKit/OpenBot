@@ -26,6 +26,34 @@ import {
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Revoke = Pick<CredentialStore, "revoke">;
+type Locker = Pick<Transaction, "execute">;
+
+/**
+ * The per-person identity lock: a transaction-scoped advisory lock on `userId`. issueChallenge
+ * takes it, and person removal (retireIdentityLinks) is meant to take the same key, so a link code
+ * is issued wholly before a removal (which then deletes it) or wholly after, never alongside.
+ */
+export async function identityUserLock(transaction: Locker, userId: string) {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`identity-user\u001f${userId}`}, 0))`,
+  );
+}
+
+/**
+ * The per-person-per-realm lock writeLink takes before any row lock, serializing one person's
+ * links in one `(provider, realm)`. `provider` is text so a caller reading stored rows, whose
+ * provider may be one this build does not know, can take the same key.
+ */
+export async function identityRealmLock(
+  transaction: Locker,
+  userId: string,
+  provider: string,
+  realm: string,
+) {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`${userId}\u001f${provider}\u001f${realm}`}, 0))`,
+  );
+}
 
 const identityMatches = (identity: Identity) =>
   and(
@@ -213,8 +241,11 @@ async function writeLinkLocked(
     credentialId?: string;
   },
 ): Promise<IdentityLink> {
-  await transaction.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`${userId}\u001f${identity.provider}\u001f${identity.realm}`}, 0))`,
+  await identityRealmLock(
+    transaction,
+    userId,
+    identity.provider,
+    identity.realm,
   );
   const [existing] = await transaction
     .select()
@@ -307,6 +338,12 @@ function codeHash(code: string) {
 
 export function createIdentityStore(database: Database, credentials: Revoke) {
   return {
+    /**
+     * Who `value` is linked to, and the link's status. A removed person's links persist by design
+     * (retirement marks them needs_reconnect rather than deleting them, so the outside account
+     * keeps resolving to the removed person and is refused rather than becoming a guest), so
+     * callers must also check the returned user is still an active person before acting for them.
+     */
     async linkedUser(
       value: Identity,
     ): Promise<{ userId: string; status: LinkStatus } | null> {
@@ -434,6 +471,11 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
      * A one-time code for the signed-in `userId`. The link is made when the code arrives from the
      * person's account at `provider` (redeemChallenge), and always links to the user it was issued
      * to, so a code started by somebody else can never attach their account to this person.
+     *
+     * Issued under identityUserLock, the lock person removal takes, so a code is never issued
+     * alongside a removal: one issued before it is deleted by it. A code issued after a removal
+     * (by a caller that skipped its session check) can still link, but only to the removed person,
+     * whom linkedUser's callers must refuse.
      */
     async issueChallenge(
       userId: string,
@@ -449,6 +491,7 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         );
       const code = randomUUID();
       return database.transaction(async (transaction) => {
+        await identityUserLock(transaction, userId);
         // No sweep exists, so codes that were never sent would otherwise accumulate.
         await transaction
           .delete(identityLinkChallenges)

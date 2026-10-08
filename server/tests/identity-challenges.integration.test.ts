@@ -4,7 +4,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { identityLinkChallenges, identityLinks } from "../src/db/schema";
-import { createIdentityStore } from "../src/identity/store";
+import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import {
   type Identity,
   IdentityConflictError,
@@ -291,5 +291,34 @@ test("a blank redeemed handle is stored as none, and a non-string one is refused
   await expect(
     store.redeemChallenge(code, slack(), 42 as unknown as string),
   ).rejects.toThrow(IdentityInputError);
+  expect(await rowFor(code)).toBeDefined();
+});
+
+test("issuing a code waits for the person's identity lock, which removal holds", async () => {
+  const owner = user();
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked = () => {};
+  const isLocked = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const holder = database.transaction(async (transaction) => {
+    await identityUserLock(transaction, owner);
+    locked();
+    await released;
+  });
+  await isLocked;
+  let issued = false;
+  const issuing = store.issueChallenge(owner, "slack").then((result) => {
+    issued = true;
+    return result;
+  });
+  await Bun.sleep(200);
+  expect(issued).toBe(false);
+  release();
+  await holder;
+  const { code } = await issuing;
   expect(await rowFor(code)).toBeDefined();
 });
