@@ -94,9 +94,9 @@ test("identity routes require a session", async () => {
 });
 
 test("GitHub is offered when the app and a public URL are configured", async () => {
-  const response = await appFor(GITHUB_ENVIRONMENT).request(
-    "http://openbot.test/api/identity/providers",
-  );
+  const response = await appFor(GITHUB_ENVIRONMENT, {
+    githubCallback: callbackFor(GITHUB_ENVIRONMENT).router,
+  }).request("http://openbot.test/api/identity/providers");
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
     providers: { slack: false, github: true },
@@ -104,10 +104,11 @@ test("GitHub is offered when the app and a public URL are configured", async () 
 });
 
 test("connecting GitHub redirects back to this deployment's callback", async () => {
-  const response = await appFor(GITHUB_ENVIRONMENT).request(
-    "http://openbot.test/api/identity/github/connect",
-    { method: "POST" },
-  );
+  const response = await appFor(GITHUB_ENVIRONMENT, {
+    githubCallback: callbackFor(GITHUB_ENVIRONMENT).router,
+  }).request("http://openbot.test/api/identity/github/connect", {
+    method: "POST",
+  });
   expect(response.status).toBe(200);
   const body = (await response.json()) as {
     connect: { authorizationUrl: string };
@@ -116,6 +117,37 @@ test("connecting GitHub redirects back to this deployment's callback", async () 
   expect(url.searchParams.get("redirect_uri")).toBe(
     "https://api.test/api/identity/github/callback",
   );
+});
+
+test("configured GitHub is not offered while its callback is not mounted", async () => {
+  const app = appFor(GITHUB_ENVIRONMENT);
+  const providers = await app.request(
+    "http://openbot.test/api/identity/providers",
+  );
+  expect(await providers.json()).toEqual({
+    providers: { slack: false, github: false },
+  });
+  const connect = await app.request(
+    "http://openbot.test/api/identity/github/connect",
+    { method: "POST" },
+  );
+  expect(connect.status).toBe(404);
+});
+
+async function slackOffered(webhooks: Record<string, unknown>) {
+  const response = await appFor(
+    {},
+    { coworker: { delivery: { webhooks } } },
+  ).request("http://openbot.test/api/identity/providers");
+  const body = (await response.json()) as { providers: { slack: boolean } };
+  return body.providers.slack;
+}
+
+test("Slack linking needs both the Slack webhook and the identity redeemer", async () => {
+  const handler = async () => new Response(null, { status: 204 });
+  expect(await slackOffered({ slack: handler })).toBe(false);
+  expect(await slackOffered({ identity: handler })).toBe(false);
+  expect(await slackOffered({ slack: handler, identity: handler })).toBe(true);
 });
 
 test("without a GitHub app, GitHub is not offered and cannot be connected", async () => {

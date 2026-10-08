@@ -695,14 +695,19 @@ export function createApp(
   }
   /*
    * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
-   * administrator view and no linking on somebody else's behalf.
+   * administrator view and no linking on somebody else's behalf. A provider is offered only when
+   * its return path is wired: Slack needs the identity redeemer for the codes it issues, and GitHub
+   * needs the callback mounted above, otherwise people would be sent away and back to nothing.
    */
   app.route(
     "/api/identity",
     identityRoutes(requireUser, identity, auditStore, {
-      slackLinking: Boolean(coworker?.delivery?.webhooks.slack),
+      slackLinking: Boolean(
+        coworker?.delivery?.webhooks.slack &&
+          coworker.delivery.webhooks.identity,
+      ),
       github:
-        config.githubApp && config.publicUrl
+        identityGithubCallback && config.githubApp && config.publicUrl
           ? {
               clientId: config.githubApp.clientId,
               publicUrl: config.publicUrl,
