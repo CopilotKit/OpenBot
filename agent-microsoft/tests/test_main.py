@@ -187,15 +187,21 @@ def test_an_anthropic_key_uses_the_official_endpoint_when_compose_sets_a_blank_u
     provider_seen = []
     provider_app = _provider_app(provider_seen)
 
-    async def respond(transport, request):
-        seen.append(
-            (request.url.scheme, request.url.host, request.url.path, request.headers.get("x-api-key"))
-        )
-        async with httpx.ASGITransport(app=provider_app) as local_provider:
-            return await local_provider.handle_async_request(request)
+    def answer_with(stack):
+        async def respond(transport, request):
+            seen.append(
+                (request.url.scheme, request.url.host, request.url.path, request.headers.get("x-api-key"))
+            )
+            async with stack.ASGITransport(app=provider_app) as local_provider:
+                return await local_provider.handle_async_request(request)
 
-    # Keep the real framework and Anthropic clients; replace only the network transport.
-    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", respond)
+        return respond
+
+    # Keep the real framework and Anthropic clients; replace only the network transport. Both HTTP
+    # stacks, because the Anthropic SDK sends through httpx2 from 1.x and through httpx before it, and
+    # the adapter's release decides which one is installed.
+    for stack in (httpx, httpx2):
+        monkeypatch.setattr(stack.AsyncHTTPTransport, "handle_async_request", answer_with(stack))
     monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
     monkeypatch.setenv("BOT_PROVIDER", "anthropic")
     monkeypatch.setenv("BOT_MODEL", "claude-sonnet-4-5")
