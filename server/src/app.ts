@@ -687,7 +687,8 @@ export function createApp(
    * The session must match the sealed state's person, otherwise a link started by one person could
    * attach another person's GitHub account (login CSRF), so the callback requires the same session
    * as the rest of /api/identity; a missing session answers 401 rather than a redirect. Mounted
-   * before the identity router so that router never sees this path.
+   * before the identity router so that router never sees a GET to this path; other methods fall
+   * through to it and get its own 401/404.
    */
   if (identityGithubCallback) {
     app.use("/api/identity/github/callback", requireUser);

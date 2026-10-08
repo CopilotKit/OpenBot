@@ -94,7 +94,9 @@ export type OpenTagAgentDeps = {
   ingestSlack?: (event: SlackTriggerEvent) => Promise<unknown>;
   /**
    * Redeems OpenBot linked-account codes (Settings → Connected accounts) for a Slack sender.
-   * Reachability codes are always checked first; this only sees codes that are not one.
+   * Reachability codes are checked first; this is tried for any code that is not a live one (an
+   * expired or used Reachability code falls through too, matches no account code, and gets the usual
+   * expired reply). Account codes are honoured only in direct messages.
    */
   identity?: {
     redeem(

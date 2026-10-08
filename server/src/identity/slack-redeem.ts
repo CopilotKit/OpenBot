@@ -8,8 +8,8 @@ import {
 } from "./types";
 
 /**
- * Redeems a link code a person sent from Slack. Failures a person can cause become a result; any
- * other error propagates. The audit event is written after the link commits; a failed write is
+ * Redeems a link code a person sent from Slack. Failures a person can cause (a bad or used code, or a
+ * blank or rejected team id, all reported as "invalid") become a result; any other error propagates. The audit event is written after the link commits; a failed write is
  * logged and the person is still told they are linked. It names the link and provider, never the realm or Slack subject.
  */
 export function slackCodeRedeemer(

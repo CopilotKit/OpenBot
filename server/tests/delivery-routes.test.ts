@@ -305,7 +305,7 @@ test("a Reachability code still links from a shared conversation", async () => {
   expect(said(result.events)).toContain("Linked.");
   expect(redeemed).toEqual([]);
 });
-test("an identity code conflict names the other user", async () => {
+test("an identity code conflict gets the already-linked reply", async () => {
   const { f } = identityFixture("conflict");
   const result = await run(f, {
     context: [sender()],

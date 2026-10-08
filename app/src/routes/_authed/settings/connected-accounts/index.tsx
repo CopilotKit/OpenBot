@@ -47,8 +47,10 @@ export const Route = createFileRoute("/_authed/settings/connected-accounts/")({
   component: RouteComponent,
   /*
    * `?connected=` is how the OAuth callback reports back, carrying a server key on success and
-   * `failed` otherwise. It is the only channel available: the callback is a redirect from another
-   * company's server, so there is no response body to read.
+   * `failed` otherwise. `?linked=` is the same for the GitHub account-link callback: `github` on
+   * success, `failed` otherwise (see linked-notice.ts). Each is the only
+   * channel available: the callback is a redirect from another company's server, so there is no
+   * response body to read.
    *
    * The key is omitted rather than set to undefined. Present-but-undefined makes `search` a required
    * prop on every Link to this route, which is a lot of ripple for a parameter only the callback sets.
@@ -181,8 +183,9 @@ function RouteComponent() {
       title="Connected accounts"
     >
       {/*
-       * Only the failure is worth saying. A success needs no sentence: the row it came back to now
-       * reads "Connected", which is the same news told by the thing it is news about.
+       * For `?connected=` only the failure is worth saying. A success needs no sentence: the row it
+       * came back to now reads "Connected", which is the same news told by the thing it is news
+       * about. `?linked=` is different and says both outcomes, through `linkedNotice` below.
        */}
       {outcome === "failed" ? (
         <p className="text-destructive text-sm" role="alert">
