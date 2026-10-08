@@ -7,7 +7,12 @@ import {
   identityLinkChallenges,
   identityLinks,
 } from "../db/schema";
-import { acceptsMethod, isIdentityProvider, parseIdentity } from "./providers";
+import {
+  acceptsMethod,
+  isIdentityProvider,
+  PROVIDERS,
+  parseIdentity,
+} from "./providers";
 import {
   type Identity,
   IdentityConflictError,
@@ -89,16 +94,21 @@ const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
 
 /**
  * Claim `credentialId` for the link being written, inside its transaction: the credential row is
- * locked live (`for update`, so a concurrent revoke waits for this link to commit or sees it), and
- * it must not already belong to a link other than `own` (the identity's own link and the person's
- * older link in the realm, which this write replaces). The partial unique index
- * identity_links_credential_idx is the backstop.
+ * locked live (`for update`, so a concurrent revoke waits for this link to commit or sees it), it
+ * must be this provider's own user token (kind "connector", vault provider equal to the registry's
+ * `credentialProvider`) so a link can never adopt, and a later unlink or replace never revoke, some
+ * other secret such as an operator key, and it must not already belong to a link other than `own`
+ * (the identity's own link and the person's older link in the realm, which this write replaces).
+ * The partial unique index identity_links_credential_idx is the backstop.
  */
 async function claimCredential(
   transaction: Transaction,
+  provider: IdentityProvider,
   credentialId: string,
   own: string[],
 ) {
+  const credentialProvider = PROVIDERS[provider].credentialProvider;
+  if (!credentialProvider) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
   const [live] = await transaction
     .select({ id: credentialRows.id })
     .from(credentialRows)
@@ -106,6 +116,8 @@ async function claimCredential(
       and(
         eq(credentialRows.id, credentialId),
         isNull(credentialRows.revokedAt),
+        eq(credentialRows.kind, "connector"),
+        eq(credentialRows.provider, credentialProvider),
       ),
     )
     .for("update");
@@ -198,7 +210,12 @@ async function writeLinkLocked(
   const now = new Date();
   if (existing) {
     if (proof.credentialId)
-      await claimCredential(transaction, proof.credentialId, [existing.id]);
+      await claimCredential(
+        transaction,
+        identity.provider,
+        proof.credentialId,
+        [existing.id],
+      );
     const credentialId = proof.credentialId ?? existing.credentialId;
     if (existing.credentialId && existing.credentialId !== credentialId)
       await revokeQuietly(credentials, existing.credentialId, transaction);
@@ -232,6 +249,7 @@ async function writeLinkLocked(
   if (proof.credentialId)
     await claimCredential(
       transaction,
+      identity.provider,
       proof.credentialId,
       previous ? [previous.id] : [],
     );
@@ -321,9 +339,9 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
     /**
      * Link `value` to `userId` on proof the caller has already verified.
      *
-     * A `credentialId`, when given, must be a UUID naming a live credential that no other link
-     * holds: it is checked and locked in the link's own transaction, so a malformed, missing,
-     * revoked or already-owned id is refused rather than stored as a token the link does not
+     * A `credentialId`, when given, must be a UUID naming a live credential that is this
+     * provider's own user token (see `credentialProvider`) and that no other link holds: it is checked and locked in the link's own transaction, so a malformed, missing,
+     * revoked, foreign or already-owned id is refused rather than stored as a token the link does not
      * have. Omitting it keeps the credential an existing link already has (a re-sign-in that mints
      * no token must not kill the working one); a different id replaces it and revokes the old one.
      * Only unlink clears a credential. `handle` likewise: omitted keeps, null clears.

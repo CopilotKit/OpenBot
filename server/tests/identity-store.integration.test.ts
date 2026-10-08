@@ -34,10 +34,13 @@ const github = (subject = randomUUID()): Identity => ({
 });
 const user = () => `user-${randomUUID()}`;
 
-async function credential() {
+async function credential(
+  kind: "connector" | "model" = "connector",
+  provider = "github-user-token",
+) {
   const { id } = await vault.create({
-    kind: "connector",
-    provider: "github-user-token",
+    kind,
+    provider,
     keyId: randomUUID(),
     metadata: {},
     encryptedValue: "not-a-real-ciphertext",
@@ -327,4 +330,45 @@ test("a challenge link refuses a credential", async () => {
     }),
   ).rejects.toThrow(IdentityInputError);
   expect(await store.linkedUser(identity)).toBeNull();
+});
+
+test("a live credential of another kind is refused and stays live", async () => {
+  const identity = github();
+  const operatorKey = await credential("model");
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "oauth",
+      credentialId: operatorKey,
+    }),
+  ).rejects.toThrow("The credential for this link is not available.");
+  expect(await store.linkedUser(identity)).toBeNull();
+  expect(await vault.isLive(operatorKey)).toBe(true);
+});
+
+test("a connector credential for another provider is refused and stays live", async () => {
+  const identity = github();
+  const person = user();
+  const other = await credential("connector", "slack-bot-token");
+  await expect(
+    store.linkVerified(identity, person, {
+      method: "oauth",
+      credentialId: other,
+    }),
+  ).rejects.toThrow("The credential for this link is not available.");
+  expect(await store.linkedUser(identity)).toBeNull();
+  expect(await vault.isLive(other)).toBe(true);
+  // Relinking an existing link with it is refused too, and the link's own token survives.
+  const own = await credential();
+  await store.linkVerified(identity, person, {
+    method: "oauth",
+    credentialId: own,
+  });
+  await expect(
+    store.linkVerified(identity, person, {
+      method: "oauth",
+      credentialId: other,
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await vault.isLive(other)).toBe(true);
+  expect(await vault.isLive(own)).toBe(true);
 });

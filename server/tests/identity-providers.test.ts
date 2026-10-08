@@ -119,3 +119,8 @@ test("slackRealm refuses a realm longer than parseIdentity accepts", () => {
     }),
   ).toThrow(IdentityInputError);
 });
+
+test("only a provider that stores a token names the credential its links may hold", () => {
+  expect(PROVIDERS.github.credentialProvider).toBe("github-user-token");
+  expect(PROVIDERS.slack.credentialProvider).toBeUndefined();
+});

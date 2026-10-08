@@ -12,6 +12,12 @@ type ProviderSpec = {
   methods: readonly LinkMethod[];
   /** For challenge providers: what the person sends from their account there, carrying the code. */
   instruction?: (code: string) => string;
+  /**
+   * The vault `provider` of the connector credential this provider's links hold (its user token).
+   * A link may only carry a live connector credential with exactly this provider; a provider
+   * without one stores no token, so its links refuse any credential.
+   */
+  credentialProvider?: string;
 };
 
 export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
@@ -22,7 +28,11 @@ export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
       instruction: (code) =>
         `Send this message to the OpenBot bot in Slack: link ${code}`,
     },
-    github: { title: "GitHub", methods: ["oauth"] },
+    github: {
+      title: "GitHub",
+      methods: ["oauth"],
+      credentialProvider: "github-user-token",
+    },
   });
 
 const REALM_MAX = 512;
