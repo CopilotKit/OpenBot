@@ -21,6 +21,9 @@ function build(
     actorId?: string | null;
     active?: boolean;
     tokenFails?: boolean;
+    userFails?: boolean;
+    createError?: Error;
+    activeError?: Error;
     linkError?: Error;
     revokeError?: Error;
     auditError?: Error;
@@ -45,6 +48,7 @@ function build(
         refresh_token_expires_in: 15897600,
       });
     }
+    if (options.userFails) return new Response("{}", { status: 401 });
     return Response.json({ id: 42, login: "dana" });
   }) as unknown as typeof fetch;
 
@@ -56,10 +60,12 @@ function build(
     encryptionKey: key,
     personIsActive: async () => {
       activeChecks += 1;
+      if (options.activeError) throw options.activeError;
       return options.active ?? true;
     },
     credentials: {
       create: async (value) => {
+        if (options.createError) throw options.createError;
         created.push(value);
         return { id: "cred-new", revokedAt: null };
       },
@@ -337,6 +343,7 @@ describe("GitHub sign-in callback", () => {
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(FAILED);
     expect(harness.audits).toHaveLength(0);
+    expect(harness.revoked).toEqual(["cred-new"]);
   });
 
   test("nothing secret is ever logged", async () => {
@@ -353,6 +360,8 @@ describe("GitHub sign-in callback", () => {
       await call(harness, `code=the-code&state=${state}`);
     }
     const text = output();
+    expect(text).not.toBe("");
+    expect(errors.mock.calls.length).toBeGreaterThan(0);
     for (const secret of [
       "the-code",
       "gho_secret",
@@ -363,5 +372,103 @@ describe("GitHub sign-in callback", () => {
     ]) {
       expect(text).not.toContain(secret);
     }
+  });
+
+  describe("diagnostics", () => {
+    function lines() {
+      return [
+        ...errors.mock.calls.map((args: unknown[]) => String(args[0])),
+        ...warns.mock.calls.map((args: unknown[]) => String(args[0])),
+      ].map((line) => JSON.parse(line));
+    }
+
+    const refusals: [string, () => Promise<[Harness, string]>][] = [
+      [
+        "declined",
+        async () => [
+          build(),
+          `error=access_denied&state=${await validState()}`,
+        ],
+      ],
+      ["no-code", async () => [build(), `state=${await validState()}`]],
+      ["state-invalid", async () => [build(), "code=the-code"]],
+      [
+        "session-mismatch",
+        async () => [
+          build({ actorId: "someone-else" }),
+          `code=the-code&state=${await validState()}`,
+        ],
+      ],
+      [
+        "inactive-person",
+        async () => [
+          build({ active: false }),
+          `code=the-code&state=${await validState()}`,
+        ],
+      ],
+    ];
+    for (const [reason, setup] of refusals) {
+      test(`logs a refusal: ${reason}`, async () => {
+        const [harness, query] = await setup();
+        expect(await call(harness, query)).toBe(FAILED);
+        expect(lines()).toEqual([
+          { type: "identity-github-callback-refused", reason },
+        ]);
+      });
+    }
+
+    const failures: [string, Parameters<typeof build>[0], object][] = [
+      [
+        "exchange",
+        { tokenFails: true },
+        {
+          reason: "GithubOAuthError",
+          message: "GitHub refused the authorization code",
+        },
+      ],
+      [
+        "user",
+        { userFails: true },
+        {
+          reason: "GithubOAuthError",
+          message: "GitHub refused to identify the account",
+        },
+      ],
+      [
+        "store",
+        { createError: new TypeError("db down") },
+        { reason: "TypeError" },
+      ],
+      [
+        "link",
+        { linkError: new IdentityConflictError() },
+        { reason: "IdentityConflictError" },
+      ],
+      [
+        "person",
+        { activeError: new RangeError("x") },
+        { reason: "RangeError" },
+      ],
+    ];
+    for (const [stage, options, extra] of failures) {
+      test(`logs a failure at stage ${stage}`, async () => {
+        const harness = build(options);
+        expect(
+          await call(harness, `code=the-code&state=${await validState()}`),
+        ).toBe(FAILED);
+        expect(lines()).toEqual([
+          { type: "identity-github-callback-failed", stage, ...extra },
+        ]);
+      });
+    }
+
+    test("logs a revoke cleanup that fails, besides the link failure", async () => {
+      const harness = build({
+        linkError: new IdentityConflictError(),
+        revokeError: new Error("already revoked"),
+      });
+      await call(harness, `code=the-code&state=${await validState()}`);
+      expect(lines().map((line) => line.stage)).toEqual(["revoke", "link"]);
+    });
   });
 });

@@ -6,6 +6,7 @@ import { type CredentialStore, encryptSecret } from "../credentials";
 import {
   exchangeGithubCode,
   fetchGithubUser,
+  GithubOAuthError,
   githubRedirectUri,
   openGithubState,
 } from "./github-oauth";
@@ -36,11 +37,32 @@ function logLinkAuditFailure(provider: string, error: unknown): void {
   );
 }
 
+function logRefused(reason: string): void {
+  console.warn(
+    JSON.stringify({ type: "identity-github-callback-refused", reason }),
+  );
+}
+
+// Only GithubOAuthError messages are logged: they are fixed sentences. Any other error's message
+// could carry vendor or database text, so it contributes its name alone.
+function logFailed(stage: string, error: unknown): void {
+  console.error(
+    JSON.stringify({
+      type: "identity-github-callback-failed",
+      stage,
+      reason: error instanceof Error ? error.name : "unknown",
+      ...(error instanceof GithubOAuthError ? { message: error.message } : {}),
+    }),
+  );
+}
+
 /**
  * Finishes linking a GitHub account when GitHub sends the person back.
  *
- * Every exit is a redirect to the connected-accounts page, `?linked=github` or `?linked=failed`;
- * nothing the vendor or the request carried (code, tokens, secret, state) is logged or returned.
+ * Every exit this router reaches is a redirect to the connected-accounts page, `?linked=github` or
+ * `?linked=failed`. A request with no session never gets here: requireUser answers it with a 401
+ * first. Each failed exit logs one line saying which refusal or stage it was; nothing the vendor
+ * or the request carried (code, tokens, secret, state, account or session ids) is logged or returned.
  */
 export function githubCallbackRoutes(
   deps: GithubCallbackDeps,
@@ -51,24 +73,43 @@ export function githubCallbackRoutes(
 
   routes.get("/", async (context) => {
     const failed = () => context.redirect(`${base}failed`, 302);
+    let stage = "state";
     try {
       const code = context.req.query("code");
-      if (context.req.query("error") || !code) return failed();
+      if (context.req.query("error")) {
+        logRefused("declined");
+        return failed();
+      }
+      if (!code) {
+        logRefused("no-code");
+        return failed();
+      }
 
       const state = await openGithubState(
         context.req.query("state"),
         deps.encryptionKey,
         now(),
       );
-      if (!state) return failed();
+      if (!state) {
+        logRefused("state-invalid");
+        return failed();
+      }
 
       // The signed-in session must be the person who started the link; otherwise a link started by
       // one person could attach another person's GitHub account to this session (login CSRF).
       const sessionUserId = context.var.actor?.id;
-      if (!sessionUserId || sessionUserId !== state.userId) return failed();
+      if (!sessionUserId || sessionUserId !== state.userId) {
+        logRefused("session-mismatch");
+        return failed();
+      }
 
-      if (!(await deps.personIsActive(state.userId))) return failed();
+      stage = "person";
+      if (!(await deps.personIsActive(state.userId))) {
+        logRefused("inactive-person");
+        return failed();
+      }
 
+      stage = "exchange";
       const tokens = await exchangeGithubCode(
         {
           clientId: deps.clientId,
@@ -79,6 +120,7 @@ export function githubCallbackRoutes(
         deps.fetchImpl,
         now(),
       );
+      stage = "user";
       const user = await fetchGithubUser(tokens.accessToken, deps.fetchImpl);
 
       // Every connection stores its token under a key of its own, so it never collides with the
@@ -86,6 +128,7 @@ export function githubCallbackRoutes(
       // the link names it by id, and linkVerified revokes the token the link named before in the
       // same transaction that repoints it. That keeps one live token per person and account, and
       // a link write that fails leaves the existing link and its token exactly as they were.
+      stage = "store";
       const stored = await deps.credentials.create({
         kind: "connector",
         provider: "github-user-token",
@@ -97,6 +140,7 @@ export function githubCallbackRoutes(
         ),
       });
 
+      stage = "link";
       let link: Awaited<ReturnType<IdentityStore["linkVerified"]>>;
       try {
         link = await deps.identity.linkVerified(
@@ -112,8 +156,9 @@ export function githubCallbackRoutes(
         // Only the token this attempt stored; the existing link's token was never touched.
         try {
           await deps.credentials.revoke(stored.id);
-        } catch {
+        } catch (revokeError) {
           // Already revoked or unreachable: the redirect below is the answer either way.
+          logFailed("revoke", revokeError);
         }
         throw error;
       }
@@ -131,12 +176,7 @@ export function githubCallbackRoutes(
       }
       return context.redirect(`${base}github`, 302);
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          type: "identity-github-callback-failed",
-          reason: error instanceof Error ? error.name : "unknown",
-        }),
-      );
+      logFailed(stage, error);
       return failed();
     }
   });
