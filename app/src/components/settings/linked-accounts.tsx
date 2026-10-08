@@ -1,11 +1,20 @@
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   PageEmpty,
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -15,9 +24,14 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { unlinkMutationOptions } from "@/lib/identity/mutations";
+import {
+  issueSlackCodeMutationOptions,
+  type SlackLinkCode,
+  unlinkMutationOptions,
+} from "@/lib/identity/mutations";
 import {
   type IdentityProviders,
+  identityKeys,
   identityProvidersQueryOptions,
   type LinkedAccount,
   linkedAccountsQueryOptions,
@@ -49,8 +63,8 @@ export function providerIcon(provider: string) {
 /**
  * What the section draws: nothing, rows, an error, or rows with an error under them.
  *
- * Hidden while loading and when nothing is linked and nothing can be (no identity store, or no
- * provider available to link); shown empty when a provider is available. A
+ * Hidden until the list has loaded, and when nothing is linked and nothing can be (no identity
+ * store, or no provider available to link); shown empty when a provider is available. A
  * failed refetch keeps the rows already on screen — stale but visible — and says the list could not
  * be refreshed, so a removed account that is still drawn is never shown without that warning. An
  * error with no rows to keep, including over a cached empty list, shows on its own.
@@ -81,6 +95,17 @@ export function linkedAccountsSectionState({
 export function LinkedAccountsSection() {
   const links = useQuery(linkedAccountsQueryOptions());
   const providers = useQuery(identityProvidersQueryOptions());
+  const issueCode = useMutation(issueSlackCodeMutationOptions());
+  const [issued, setIssued] = useState<SlackLinkCode | null>(null);
+  const [copied, setCopied] = useState(false);
+  const closeDialog = () => {
+    setIssued(null);
+    setCopied(false);
+    // A link may have completed while the dialog was open.
+    queryClient.invalidateQueries({ queryKey: identityKeys.links() });
+  };
+  // Wait for the list so people with links never see the empty state while /providers answers first.
+  if (links.isPending) return null;
   const state = linkedAccountsSectionState({
     data: links.data,
     error: links.error,
@@ -90,7 +115,24 @@ export function LinkedAccountsSection() {
   return (
     <PageSection
       title="Linked accounts"
-      action={<div className="flex gap-2">{/* actions */}</div>}
+      action={
+        <div className="flex gap-2">
+          {providers.data?.slack ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={issueCode.isPending}
+              onClick={() =>
+                issueCode.mutate(undefined, {
+                  onSuccess: (code) => setIssued(code),
+                })
+              }
+            >
+              Link Slack
+            </Button>
+          ) : null}
+        </div>
+      }
     >
       {state.rows.length === 0 && !state.error ? (
         <PageEmpty>No linked accounts yet.</PageEmpty>
@@ -110,6 +152,55 @@ export function LinkedAccountsSection() {
           Your linked accounts could not be loaded: {state.error}
         </p>
       ) : null}
+      {issueCode.error ? (
+        <p className="mt-2 text-destructive text-sm" role="alert">
+          Could not create a Slack link code: {issueCode.error.message}
+        </p>
+      ) : null}
+      <Dialog
+        open={issued !== null}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link your Slack account</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="mt-4">
+            {issued ? (
+              <div className="grid gap-3 text-sm">
+                <p>{issued.instruction}</p>
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded bg-muted px-2 py-1">
+                    link {issued.code}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(
+                        `link ${issued.code}`,
+                      );
+                      setCopied(true);
+                    }}
+                  >
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <p className="text-muted-foreground">
+                  The code works once and expires in 10 minutes.
+                </p>
+              </div>
+            ) : null}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button size="sm" onClick={closeDialog}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageSection>
   );
 }
