@@ -496,7 +496,9 @@ without an identity store does not show it at all.
 Links are created by the integrations that support them, and none ship enabled yet, so the list is
 empty until one is. An integration proves an account in one of two ways: by the provider's own
 sign-in, or by a one-time code that OpenBot issues to the signed-in person and that they send from
-their chat account. A code links only to the person it was issued to, and an outside account links to
+their chat account. Whoever sends the code gets that chat account linked to the person it was issued
+to, so treat it like a password and do not share it. It is valid for ten minutes and works once, and
+issuing a new code for the same provider invalidates the earlier one. An outside account links to
 one OpenBot user at most.
 
 This is separate from the OpenTag **Reachability** pairing above. That pairing binds a conversation
