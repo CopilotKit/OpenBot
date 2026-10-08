@@ -92,6 +92,16 @@ export type OpenTagAgentDeps = {
   approvals?: PairedApprovals;
   /** Slack trigger ingest; defaults to the responsibilities lane's `ingestSlackEvent`. */
   ingestSlack?: (event: SlackTriggerEvent) => Promise<unknown>;
+  /**
+   * Redeems OpenBot linked-account codes (Settings → Connected accounts) for a Slack sender.
+   * Reachability codes are always checked first; this only sees codes that are not one.
+   */
+  identity?: {
+    redeem(
+      code: string,
+      sender: { teamId: string; userId: string },
+    ): Promise<"linked" | "conflict" | "invalid">;
+  };
 };
 
 const LINK =
@@ -356,6 +366,20 @@ async function link(
   code: string,
 ) {
   const challenge = await deps.store.readChallenge(code);
+  if (!challenge && sender.transport === "slack" && deps.identity) {
+    const outcome = await deps.identity.redeem(code, {
+      teamId: sender.realm,
+      userId: sender.identity,
+    });
+    if (outcome === "linked")
+      return {
+        text: "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+      };
+    if (outcome === "conflict")
+      return {
+        text: "This Slack account is already linked to another OpenBot user.",
+      };
+  }
   if (!challenge || challenge.transport !== sender.transport)
     return {
       text: "That link code expired, was already used, or is for another app. Create a new one in OpenBot.",

@@ -20,7 +20,19 @@ const bound: DeliveryBinding = {
   address: "U1",
   enabled: true,
 };
-function fixture(options: { converse?: ConverseResult; bound?: boolean } = {}) {
+type IdentityAdapter = {
+  redeem(
+    code: string,
+    sender: { teamId: string; userId: string },
+  ): Promise<"linked" | "conflict" | "invalid">;
+};
+function fixture(
+  options: {
+    converse?: ConverseResult;
+    bound?: boolean;
+    identity?: IdentityAdapter;
+  } = {},
+) {
   const calls: unknown[] = [];
   const decisions: unknown[] = [];
   const twilio = createTwilioTransport({
@@ -97,6 +109,7 @@ function fixture(options: { converse?: ConverseResult; bound?: boolean } = {}) {
       return { matched: 0, deliveries: [] };
     },
     twilio,
+    ...(options.identity ? { identity: options.identity } : {}),
     approvals: {
       store: {
         get: async (owner, id) => {
@@ -222,6 +235,87 @@ test("a link code binds the verified sender to the challenge's own scope", async
       },
     },
   ]);
+});
+const IDENTITY_CODE = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const EXPIRED =
+  "That link code expired, was already used, or is for another app. Create a new one in OpenBot.";
+function identityFixture(outcome?: "linked" | "conflict" | "invalid") {
+  const redeemed: unknown[] = [];
+  const f = fixture({
+    bound: false,
+    ...(outcome
+      ? {
+          identity: {
+            redeem: async (code, who) => {
+              redeemed.push([code, who]);
+              return outcome;
+            },
+          },
+        }
+      : {}),
+  });
+  return { f, redeemed };
+}
+const linkMessage = (code: string) => ({
+  messages: [
+    { id: "m1", role: "user", content: `<@UBOT> link ${code.toUpperCase()}` },
+  ],
+});
+test("a Reachability code is checked before the identity adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage("11111111-2222-4333-8444-555555555555"),
+  });
+  expect(said(result.events)).toContain("Linked");
+  expect(f.calls).toHaveLength(1);
+  expect(redeemed).toEqual([]);
+});
+test("an identity code from a Slack sender is redeemed through the adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(
+    "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+  );
+  expect(redeemed).toEqual([[IDENTITY_CODE, { teamId: "T1", userId: "U1" }]]);
+});
+test("an identity code conflict names the other user", async () => {
+  const { f } = identityFixture("conflict");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(
+    "This Slack account is already linked to another OpenBot user.",
+  );
+});
+test("an invalid identity code gets the expired reply", async () => {
+  const { f } = identityFixture("invalid");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+});
+test("a Teams sender never reaches the identity adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender("teams:tenant1:user1")],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+  expect(redeemed).toEqual([]);
+});
+test("without an identity adapter an unknown code gets the expired reply", async () => {
+  const { f } = identityFixture();
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
 });
 test("bound sender runs the canonical turn and an approval becomes an OpenTag card", async () => {
   const f = fixture({
