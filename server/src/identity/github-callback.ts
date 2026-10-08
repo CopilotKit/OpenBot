@@ -12,6 +12,7 @@ import {
 } from "./github-oauth";
 import { GITHUB_DOTCOM_REALM } from "./providers";
 import type { IdentityStore } from "./store";
+import { IdentityConflictError } from "./types";
 
 export type GithubCallbackDeps = {
   clientId: string;
@@ -59,8 +60,8 @@ function logFailed(stage: string, error: unknown): void {
 /**
  * Finishes linking a GitHub account when GitHub sends the person back.
  *
- * Every exit this router reaches is a redirect to the connected-accounts page, `?linked=github` or
- * `?linked=failed`. A request with no session never gets here: requireUser answers it with a 401
+ * Every exit this router reaches is a redirect to the connected-accounts page, `?linked=github`,
+ * `?linked=github-taken` (the account is already linked to another person) or `?linked=failed`. A request with no session never gets here: requireUser answers it with a 401
  * first. Each failed exit logs one line saying which refusal or stage it was; nothing the vendor
  * or the request carried (code, tokens, secret, state, account or session ids) is logged or returned.
  */
@@ -159,6 +160,12 @@ export function githubCallbackRoutes(
         } catch (revokeError) {
           // Already revoked or unreachable: the redirect below is the answer either way.
           logFailed("revoke", revokeError);
+        }
+        // The account belongs to a different person. Say so, without saying whose: retrying can
+        // never work, so `?linked=failed` ("try again") would mislead.
+        if (error instanceof IdentityConflictError) {
+          logFailed("link", error);
+          return context.redirect(`${base}github-taken`, 302);
         }
         throw error;
       }

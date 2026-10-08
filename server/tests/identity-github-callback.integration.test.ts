@@ -14,6 +14,8 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 const encryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const OK = "https://app.test/settings/connected-accounts?linked=github";
 const FAILED = "https://app.test/settings/connected-accounts?linked=failed";
+const TAKEN =
+  "https://app.test/settings/connected-accounts?linked=github-taken";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 const vault = createCredentialStore(database);
@@ -233,7 +235,7 @@ test("a reconnect whose link write fails leaves the existing link and its token 
   expect(live.map((row) => row.id)).toEqual([before?.credentialId as string]);
 });
 
-test("an account already linked to someone else fails and revokes the new token", async () => {
+test("an account already linked to someone else says so and revokes the new token", async () => {
   const account = githubAccount();
   const owner = person();
   const intruder = person();
@@ -250,7 +252,7 @@ test("an account already linked to someone else fails and revokes the new token"
   );
 
   expect(response.status).toBe(302);
-  expect(response.headers.get("location")).toBe(FAILED);
+  expect(response.headers.get("location")).toBe(TAKEN);
   const after = await linkFor(account);
   expect(after).toMatchObject({
     userId: owner,

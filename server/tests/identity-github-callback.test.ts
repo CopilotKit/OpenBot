@@ -13,6 +13,8 @@ const now = new Date("2026-01-01T00:00:00.000Z");
 const clientSecret = "client-secret-value";
 const OK = "https://app.test/settings/connected-accounts?linked=github";
 const FAILED = "https://app.test/settings/connected-accounts?linked=failed";
+const TAKEN =
+  "https://app.test/settings/connected-accounts?linked=github-taken";
 
 type Harness = ReturnType<typeof build>;
 
@@ -329,19 +331,27 @@ describe("GitHub sign-in callback", () => {
     });
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
-    ).toBe(FAILED);
+    ).toBe(TAKEN);
     expect(harness.revoked).toEqual(["cred-new"]);
     expect(harness.audits).toHaveLength(0);
   });
 
-  test("a revoke that throws still redirects failed", async () => {
+  test("any other link failure still redirects failed and revokes the new credential", async () => {
+    const harness = build({ linkError: new Error("database unreachable") });
+    expect(
+      await call(harness, `code=the-code&state=${await validState()}`),
+    ).toBe(FAILED);
+    expect(harness.revoked).toEqual(["cred-new"]);
+  });
+
+  test("a revoke that throws still redirects github-taken", async () => {
     const harness = build({
       linkError: new IdentityConflictError(),
       revokeError: new Error("already revoked"),
     });
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
-    ).toBe(FAILED);
+    ).toBe(TAKEN);
     expect(harness.audits).toHaveLength(0);
     expect(harness.revoked).toEqual(["cred-new"]);
   });
@@ -455,7 +465,7 @@ describe("GitHub sign-in callback", () => {
         const harness = build(options);
         expect(
           await call(harness, `code=the-code&state=${await validState()}`),
-        ).toBe(FAILED);
+        ).toBe(stage === "link" ? TAKEN : FAILED);
         expect(lines()).toEqual([
           { type: "identity-github-callback-failed", stage, ...extra },
         ]);
