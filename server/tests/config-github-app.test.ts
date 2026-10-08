@@ -47,7 +47,7 @@ describe("GitHub App sign-in configuration", () => {
     });
   });
 
-  test("includes the slug when set", () => {
+  test("ignores GITHUB_APP_SLUG: the config carries only the pair", () => {
     const config = loadConfig({
       ...baseEnvironment,
       GITHUB_APP_CLIENT_ID: "gh-id",
@@ -57,8 +57,8 @@ describe("GitHub App sign-in configuration", () => {
     expect(config.githubApp).toEqual({
       clientId: "gh-id",
       clientSecret: "gh-secret",
-      slug: "openbot",
     });
+    expect(config.githubApp).not.toHaveProperty("slug");
   });
 
   test.each([

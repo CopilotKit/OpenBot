@@ -521,8 +521,8 @@ GitHub uses a GitHub App. Create one under GitHub Settings, Developer settings, 
 - "Expire user authorization tokens" on. A webhook is not required for linking.
 - A client secret, generated on the App's page.
 
-Then set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`; set both or neither. `GITHUB_APP_SLUG`
-is optional. People then use **Connect GitHub** while signed in to OpenBot in the same browser. The
+Then set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`; set both or neither. People
+then use **Connect GitHub** while signed in to OpenBot in the same browser. The
 GitHub user token is stored encrypted with the link.
 
 Reachability codes and Linked accounts codes look alike, and Reachability's are checked first. A

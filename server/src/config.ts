@@ -93,7 +93,6 @@ export type OAuthClient = { clientId: string; clientSecret: string };
 export type GithubAppConfig = {
   clientId: string;
   clientSecret: string;
-  slug?: string;
 };
 
 export type AuthConfig = {
@@ -677,7 +676,6 @@ function githubAppConfig(
 ): GithubAppConfig | undefined {
   const clientId = optional(environment, "GITHUB_APP_CLIENT_ID");
   const clientSecret = optional(environment, "GITHUB_APP_CLIENT_SECRET");
-  const slug = optional(environment, "GITHUB_APP_SLUG");
 
   // Both or neither. One alone is a half-configured sign-in that fails at the first attempt rather
   // than at start-up, which is the worst moment to discover it.
@@ -687,9 +685,7 @@ function githubAppConfig(
     );
   }
 
-  return clientId && clientSecret
-    ? { clientId, clientSecret, ...(slug ? { slug } : {}) }
-    : undefined;
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
 }
 
 function commaSeparated(environment: Environment, name: string): string[] {
