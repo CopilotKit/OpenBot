@@ -1298,6 +1298,16 @@ export function loadConfig(
     : undefined;
   const managedAgent = managedAgentConfig(environment);
   const githubApp = githubAppConfig(environment);
+  const publicUrl = (
+    optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
+  )?.replace(/\/+$/, "");
+  // GitHub sends people back to this address after they approve. Without it linking is silently
+  // switched off, so say so at start-up instead.
+  if (githubApp && !publicUrl) {
+    throw new Error(
+      "GITHUB_APP_CLIENT_ID needs OPENBOT_PUBLIC_URL (or BETTER_AUTH_URL) so GitHub can send people back to this server.",
+    );
+  }
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -1311,9 +1321,7 @@ export function loadConfig(
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
-    publicUrl: (
-      optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
-    )?.replace(/\/+$/, ""),
+    publicUrl,
     appUrl: (
       optional(environment, "OPENBOT_APP_URL") ??
       commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??
