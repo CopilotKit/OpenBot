@@ -1,6 +1,6 @@
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,6 +147,16 @@ export function LinkedAccountsSection() {
   const [issued, setIssued] = useState<SlackLinkCode | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  // Back from GitHub can restore this page from the back/forward cache with the successful
+  // connect still in memory, which would leave Connect disabled; a restored page starts over.
+  const resetConnect = connectGithub.reset;
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) resetConnect();
+    };
+    window.addEventListener("pageshow", restored);
+    return () => window.removeEventListener("pageshow", restored);
+  }, [resetConnect]);
   const closeDialog = () => {
     setIssued(null);
     setCopied(false);
