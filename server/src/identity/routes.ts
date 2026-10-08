@@ -58,8 +58,15 @@ export function identityRoutes(
     const actorId = context.var.actor.id;
     const id = context.req.param("id");
     const removed = await live.unlink(actorId, id);
+    /*
+     * The code is what tells the settings page "this link is already gone" apart from a proxy,
+     * missing-route or SPA-fallback 404, which must surface as a failed disconnect.
+     */
     if (!removed)
-      return context.json({ error: "Linked account not found." }, 404);
+      return context.json(
+        { error: "Linked account not found.", code: "identity_link_not_found" },
+        404,
+      );
     /*
      * After the removal, and not caught: the same order and the same failure as the connected-account
      * disconnect (`mcp.account_disconnected`), where an audit write that throws fails the request.

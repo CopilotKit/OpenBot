@@ -74,11 +74,15 @@ test("DELETE of the asker's own link is 204", async () => {
   expect(f.calls).toEqual(["unlink:person:link-1"]);
 });
 
-test("DELETE of another person's link is 404", async () => {
-  expect(
-    (await fixture().app.request("/links/someone-elses", { method: "DELETE" }))
-      .status,
-  ).toBe(404);
+test("DELETE of another person's link is a tagged 404", async () => {
+  const response = await fixture().app.request("/links/someone-elses", {
+    method: "DELETE",
+  });
+  expect(response.status).toBe(404);
+  expect(await response.json()).toEqual({
+    error: "Linked account not found.",
+    code: "identity_link_not_found",
+  });
 });
 
 test("the chat-started confirmation routes are gone", async () => {
