@@ -1,8 +1,9 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges, identityLinks } from "../db/schema";
+import { identityRealmLock, identityUserLock } from "./store";
 
 /**
  * Retires a removed person's identity links.
@@ -19,15 +20,17 @@ import { identityLinkChallenges, identityLinks } from "../db/schema";
  * order `retireConnectionsFor` uses): actor `by`, target the link id, and the provider, the reason
  * and whether a credential was revoked. Never the subject, realm or credential id.
  *
- * Concurrency. The challenges are deleted first: a `redeemChallenge` in flight holds its challenge
- * row, so the delete waits for it to commit and the link it wrote is then seen below. Then, for
- * every realm the person has a link in, the exact advisory key `writeLink` takes for
- * `(userId, provider, realm)` is taken — in sorted order, before any row lock, the order `writeLink`
- * uses — so a concurrent re-link in a known realm finishes first or waits for this. The residual
- * window: a `writeLink` that is not a challenge redemption (an OAuth link) into a realm this person
- * had no link in, still uncommitted when the realms are read, commits an active link after this
- * returns. The person's sessions are already gone by then, so that needs a callback already past
- * its session check.
+ * Concurrency. Locks are taken in this order: `identityUserLock`, the lock `issueChallenge` takes, so
+ * no code is issued alongside the removal; then the challenges are deleted, which waits for a
+ * `redeemChallenge` in flight (it holds its challenge row) to commit, so the link it wrote is seen
+ * below; then `identityRealmLock` for every `(provider, realm)` the person has a link in, in sorted
+ * order (writeLink takes the one key for the realm it writes, so sorting only keeps two retirements
+ * of one person from deadlocking each other); then the link rows. A writeLink into one of those realms
+ * that is already running finishes first and is retired here. One that arrives later waits, and once
+ * this commits it goes ahead: it re-links that realm for the removed person, active again, so
+ * refusing it is left to linkedUser's callers, which refuse a removed person. The same holds for a
+ * writeLink (an OAuth link) into a realm the person had no link in when the realms were read. Both
+ * need a callback already past its session check, since the person's sessions are gone by then.
  *
  * Returns how many links changed; a second call returns 0 and writes no audit rows.
  */
@@ -39,6 +42,7 @@ export async function retireIdentityLinks(
   by: string,
 ): Promise<number> {
   const retired = await database.transaction(async (transaction) => {
+    await identityUserLock(transaction, userId);
     await transaction
       .delete(identityLinkChallenges)
       .where(eq(identityLinkChallenges.userId, userId));
@@ -51,12 +55,8 @@ export async function retireIdentityLinks(
       .from(identityLinks)
       .where(eq(identityLinks.userId, userId))
       .orderBy(asc(identityLinks.provider), asc(identityLinks.realm));
-    for (const { provider, realm } of realms) {
-      // writeLink's key, character for character (server/src/identity/store.ts).
-      await transaction.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`${userId}\u001f${provider}\u001f${realm}`}, 0))`,
-      );
-    }
+    for (const { provider, realm } of realms)
+      await identityRealmLock(transaction, userId, provider, realm);
 
     const links = await transaction
       .select({

@@ -13,7 +13,7 @@ import {
   retireIdentityLinks,
   retireOwnedAccounts,
 } from "../src/identity/retire";
-import { createIdentityStore } from "../src/identity/store";
+import { createIdentityStore, identityUserLock } from "../src/identity/store";
 import { IdentityLinkError } from "../src/identity/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
@@ -176,6 +176,40 @@ test("a pending challenge cannot be redeemed after the person is removed", async
       subject: randomUUID(),
     }),
   ).rejects.toBeInstanceOf(IdentityLinkError);
+});
+
+test("retirement waits on the per-person identity lock that issuing a code takes", async () => {
+  const userId = user();
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked = () => {};
+  const isLocked = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const holder = database.transaction(async (transaction) => {
+    await identityUserLock(transaction, userId);
+    locked();
+    await released;
+  });
+  await isLocked;
+  let finished = false;
+  const retiring = retireIdentityLinks(
+    database,
+    vault,
+    recorder().store,
+    userId,
+    ADMIN,
+  ).then((count) => {
+    finished = true;
+    return count;
+  });
+  await Bun.sleep(200);
+  expect(finished).toBe(false);
+  release();
+  await holder;
+  expect(await retiring).toBe(0);
 });
 
 test("a plugin refusal still retires identity links, and is rethrown", async () => {
