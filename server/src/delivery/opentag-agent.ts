@@ -362,11 +362,23 @@ export async function answerOpenQuestion(
 
 async function link(
   deps: OpenTagAgentDeps,
-  sender: { transport: ChatTransport; realm: string; identity: string },
+  sender: {
+    transport: ChatTransport;
+    realm: string;
+    identity: string;
+    private: boolean;
+  },
   code: string,
 ) {
   const challenge = await deps.store.readChallenge(code);
   if (!challenge && sender.transport === "slack" && deps.identity) {
+    // Anyone else in a shared conversation could send the pasted code first and bind their own
+    // Slack account to its issuer, so an account code is only redeemed in a direct message and is
+    // left unspent here for its owner.
+    if (!sender.private)
+      return {
+        text: "Send your link code to me in a direct message, not in a channel. It still works until it expires.",
+      };
     const outcome = await deps.identity.redeem(code, {
       teamId: sender.realm,
       userId: sender.identity,
