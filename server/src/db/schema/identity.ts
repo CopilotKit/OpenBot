@@ -50,6 +50,11 @@ export const identityLinks = pgTable(
       table.provider,
       table.realm,
     ),
+    // One link per credential: unlinking, replacing or retiring a link revokes its credential, so a
+    // shared one would kill the other link's token.
+    uniqueIndex("identity_links_credential_idx")
+      .on(table.credentialId)
+      .where(sql`${table.credentialId} IS NOT NULL`),
     check(
       "identity_links_verified_by_check",
       sql`${table.verifiedBy} IN ('challenge', 'oauth')`,

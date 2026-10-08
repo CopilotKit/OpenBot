@@ -148,13 +148,90 @@ test("concurrent links by one person in one realm: the later replaces the earlie
   expect(mine).toHaveLength(1);
   const [remaining] = mine;
   expect([linkA.id, linkB.id]).toContain(remaining?.id);
-  const live = [first, second].filter((id) => id === remaining?.credentialId);
-  expect(live).toHaveLength(1);
-  const liveness = await Promise.all(
-    [first, second].map((id) => vault.isLive(id)),
-  );
-  expect(liveness.filter(Boolean)).toHaveLength(1);
+  expect([first, second]).toContain(remaining?.credentialId as string);
+  const loser = remaining?.credentialId === first ? second : first;
   expect(await vault.isLive(remaining?.credentialId as string)).toBe(true);
+  expect(await vault.isLive(loser)).toBe(false);
+});
+
+test("relinking without a credentialId keeps the stored token live and on the link", async () => {
+  const person = user();
+  const identity = github();
+  const token = await credential();
+  await store.linkVerified(identity, person, {
+    method: "oauth",
+    handle: "dana",
+    credentialId: token,
+  });
+  const link = await store.linkVerified(identity, person, { method: "oauth" });
+  expect(link.credentialId).toBe(token);
+  expect(link.handle).toBe("dana");
+  expect(await vault.isLive(token)).toBe(true);
+});
+
+test("relinking with an explicit null handle clears it", async () => {
+  const person = user();
+  const identity = github();
+  await store.linkVerified(identity, person, {
+    method: "oauth",
+    handle: "dana",
+  });
+  const link = await store.linkVerified(identity, person, {
+    method: "oauth",
+    handle: null,
+  });
+  expect(link.handle).toBeNull();
+});
+
+test("a credential already on another link is refused and stays live", async () => {
+  const token = await credential();
+  const owner = await store.linkVerified(github(), user(), {
+    method: "oauth",
+    credentialId: token,
+  });
+  const identity = github();
+  await expect(
+    store.linkVerified(identity, user(), {
+      method: "oauth",
+      credentialId: token,
+    }),
+  ).rejects.toThrow(IdentityInputError);
+  expect(await store.linkedUser(identity)).toBeNull();
+  expect(await vault.isLive(token)).toBe(true);
+  const [still] = await database
+    .select({ credentialId: identityLinks.credentialId })
+    .from(identityLinks)
+    .where(eq(identityLinks.id, owner.id));
+  expect(still?.credentialId).toBe(token);
+});
+
+test("a credentialId that is not a UUID is refused before any query", async () => {
+  const identity = github();
+  const attempt = store.linkVerified(identity, user(), {
+    method: "oauth",
+    credentialId: "not-a-uuid",
+  });
+  await expect(attempt).rejects.toThrow(IdentityInputError);
+  await expect(attempt).rejects.not.toThrow(/not-a-uuid/);
+  expect(await store.linkedUser(identity)).toBeNull();
+});
+
+test("replacing a person's older link while moving its credential to the new one keeps it live", async () => {
+  const person = user();
+  const old = github();
+  const token = await credential();
+  await store.linkVerified(old, person, {
+    method: "oauth",
+    credentialId: token,
+  });
+  const replacement = github();
+  const link = await store.linkVerified(replacement, person, {
+    method: "oauth",
+    credentialId: token,
+  });
+  expect(await store.linkedUser(old)).toBeNull();
+  expect(link.credentialId).toBe(token);
+  expect(await vault.isLive(token)).toBe(true);
 });
 
 test("markNeedsReconnect is visible to linkedUser; relinking makes it active again", async () => {

@@ -1,8 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, notInArray, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
-import { identityLinkChallenges, identityLinks } from "../db/schema";
+import {
+  credentials as credentialRows,
+  identityLinkChallenges,
+  identityLinks,
+} from "../db/schema";
 import { acceptsMethod, isIdentityProvider, parseIdentity } from "./providers";
 import {
   type Identity,
@@ -17,7 +21,6 @@ import {
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Revoke = Pick<CredentialStore, "revoke">;
-type Vault = Pick<CredentialStore, "revoke" | "isLive">;
 
 const identityMatches = (identity: Identity) =>
   and(
@@ -80,8 +83,51 @@ async function revokeQuietly(
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
+
 /**
- * Link `identity` to `userId` inside `transaction`.
+ * Claim `credentialId` for the link being written, inside its transaction: the credential row is
+ * locked live (`for update`, so a concurrent revoke waits for this link to commit or sees it), and
+ * it must not already belong to a link other than `own` (the identity's own link and the person's
+ * older link in the realm, which this write replaces). The partial unique index
+ * identity_links_credential_idx is the backstop.
+ */
+async function claimCredential(
+  transaction: Transaction,
+  credentialId: string,
+  own: string[],
+) {
+  const [live] = await transaction
+    .select({ id: credentialRows.id })
+    .from(credentialRows)
+    .where(
+      and(
+        eq(credentialRows.id, credentialId),
+        isNull(credentialRows.revokedAt),
+      ),
+    )
+    .for("update");
+  if (!live) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+  const [taken] = await transaction
+    .select({ id: identityLinks.id })
+    .from(identityLinks)
+    .where(
+      own.length
+        ? and(
+            eq(identityLinks.credentialId, credentialId),
+            notInArray(identityLinks.id, own),
+          )
+        : eq(identityLinks.credentialId, credentialId),
+    )
+    .limit(1);
+  if (taken) throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+}
+
+/**
+ * Link `identity` to `userId` inside `transaction`. Module-private: only `linkVerified` (which
+ * validates the proof first) and `redeemChallenge` (no credential) call it.
  *
  * Two races are handled. Two people racing for one identity: the identity row is locked first, and a
  * racing insert surfaces as a unique violation on the identity index, which is a refusal
@@ -89,11 +135,18 @@ async function revokeQuietly(
  * per-person-per-realm advisory lock taken before any row lock, so the later link sees the earlier
  * one as `previous` and replaces it.
  *
- * Under the lock: linked to somebody else: refused. Linked to this person: updated in place.
- * Otherwise this person's older link in the same realm, if any, is removed with its credential, and
- * the new link inserted.
+ * Locks are taken advisory lock, then link rows, then the credential row: the order
+ * retireIdentityLinks uses, so the two cannot deadlock.
+ *
+ * Under the lock: linked to somebody else: refused. Linked to this person: re-verified. Otherwise
+ * this person's older link in the same realm, if any, is removed and the new link inserted.
+ *
+ * Credential and handle: `undefined` keeps what the link has; a new credential replaces the old
+ * one, which is revoked; there is no clearing a credential here (unlink does that). An explicit
+ * null handle clears it. A replaced older link's credential is revoked unless the new link is
+ * taking that same credential.
  */
-export async function writeLink(
+async function writeLink(
   transaction: Transaction,
   credentials: Revoke,
   identity: Identity,
@@ -101,7 +154,36 @@ export async function writeLink(
   proof: {
     method: LinkMethod;
     handle?: string | null;
-    credentialId?: string | null;
+    credentialId?: string;
+  },
+): Promise<IdentityLink> {
+  try {
+    return await writeLinkLocked(
+      transaction,
+      credentials,
+      identity,
+      userId,
+      proof,
+    );
+  } catch (error) {
+    const constraint = uniqueViolationConstraint(error);
+    if (constraint === "identity_links_identity_idx")
+      throw new IdentityConflictError();
+    if (constraint === "identity_links_credential_idx")
+      throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+    throw error;
+  }
+}
+
+async function writeLinkLocked(
+  transaction: Transaction,
+  credentials: Revoke,
+  identity: Identity,
+  userId: string,
+  proof: {
+    method: LinkMethod;
+    handle?: string | null;
+    credentialId?: string;
   },
 ): Promise<IdentityLink> {
   await transaction.execute(
@@ -115,14 +197,17 @@ export async function writeLink(
   if (existing && existing.userId !== userId) throw new IdentityConflictError();
   const now = new Date();
   if (existing) {
-    if (existing.credentialId && existing.credentialId !== proof.credentialId)
+    if (proof.credentialId)
+      await claimCredential(transaction, proof.credentialId, [existing.id]);
+    const credentialId = proof.credentialId ?? existing.credentialId;
+    if (existing.credentialId && existing.credentialId !== credentialId)
       await revokeQuietly(credentials, existing.credentialId, transaction);
     const [updated] = await transaction
       .update(identityLinks)
       .set({
-        handle: proof.handle ?? existing.handle,
+        handle: proof.handle === undefined ? existing.handle : proof.handle,
         verifiedBy: proof.method,
-        credentialId: proof.credentialId ?? null,
+        credentialId,
         status: "active",
         updatedAt: now,
       })
@@ -144,41 +229,41 @@ export async function writeLink(
       ),
     )
     .for("update");
+  if (proof.credentialId)
+    await claimCredential(
+      transaction,
+      proof.credentialId,
+      previous ? [previous.id] : [],
+    );
   if (previous) {
     await transaction
       .delete(identityLinks)
       .where(eq(identityLinks.id, previous.id));
-    await revokeQuietly(credentials, previous.credentialId, transaction);
+    // The new link may be taking this very credential: then it is moved, not revoked.
+    if (previous.credentialId !== proof.credentialId)
+      await revokeQuietly(credentials, previous.credentialId, transaction);
   }
-  try {
-    const [inserted] = await transaction
-      .insert(identityLinks)
-      .values({
-        id: randomUUID(),
-        provider: identity.provider,
-        realm: identity.realm,
-        subject: identity.subject,
-        userId,
-        handle: proof.handle ?? null,
-        verifiedBy: proof.method,
-        credentialId: proof.credentialId ?? null,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-    return toLink(
-      inserted as typeof identityLinks.$inferSelect,
-      identity.provider,
-    );
-  } catch (error) {
-    if (uniqueViolationConstraint(error) === "identity_links_identity_idx")
-      throw new IdentityConflictError();
-    throw error;
-  }
+  const [inserted] = await transaction
+    .insert(identityLinks)
+    .values({
+      id: randomUUID(),
+      provider: identity.provider,
+      realm: identity.realm,
+      subject: identity.subject,
+      userId,
+      handle: proof.handle ?? null,
+      verifiedBy: proof.method,
+      credentialId: proof.credentialId ?? null,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+  return toLink(
+    inserted as typeof identityLinks.$inferSelect,
+    identity.provider,
+  );
 }
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Refuses anything that is not a code OpenBot could have issued before it reaches a query. */
 function codeHash(code: string) {
@@ -187,7 +272,7 @@ function codeHash(code: string) {
   return createHash("sha256").update(code.toLowerCase()).digest("hex");
 }
 
-export function createIdentityStore(database: Database, credentials: Vault) {
+export function createIdentityStore(database: Database, credentials: Revoke) {
   return {
     async linkedUser(
       value: Identity,
@@ -236,11 +321,15 @@ export function createIdentityStore(database: Database, credentials: Vault) {
     /**
      * Link `value` to `userId` on proof the caller has already verified.
      *
-     * A `credentialId`, when given, must name a live credential: it is checked in the link's own
-     * transaction, so a missing or revoked id is refused rather than stored as a token the link
-     * does not have. A "challenge" link proves control by code and carries no credential, so it
-     * refuses one. An "oauth" link is not required to carry one: GitHub sign-in may link before
-     * a token is stored.
+     * A `credentialId`, when given, must be a UUID naming a live credential that no other link
+     * holds: it is checked and locked in the link's own transaction, so a malformed, missing,
+     * revoked or already-owned id is refused rather than stored as a token the link does not
+     * have. Omitting it keeps the credential an existing link already has (a re-sign-in that mints
+     * no token must not kill the working one); a different id replaces it and revokes the old one.
+     * Only unlink clears a credential. `handle` likewise: omitted keeps, null clears.
+     *
+     * A "challenge" link proves control by code and carries no credential, so it refuses one. An
+     * "oauth" link is not required to carry one: GitHub sign-in may link before a token is stored.
      */
     async linkVerified(
       value: Identity,
@@ -248,7 +337,7 @@ export function createIdentityStore(database: Database, credentials: Vault) {
       proof: {
         method: LinkMethod;
         handle?: string | null;
-        credentialId?: string | null;
+        credentialId?: string;
       },
     ): Promise<IdentityLink> {
       const identity = parseIdentity(value);
@@ -257,20 +346,25 @@ export function createIdentityStore(database: Database, credentials: Vault) {
         throw new IdentityInputError(
           "This provider does not accept that kind of proof.",
         );
-      if (proof.credentialId && proof.method === "challenge")
+      if (proof.credentialId != null && proof.method === "challenge")
         throw new IdentityInputError(
           "A challenge link does not carry a credential.",
         );
-      return database.transaction(async (transaction) => {
-        if (
-          proof.credentialId &&
-          !(await credentials.isLive(proof.credentialId, transaction))
-        )
-          throw new IdentityInputError(
-            "The credential for this link is not available.",
-          );
-        return writeLink(transaction, credentials, identity, userId, proof);
-      });
+      // Shape first, so a malformed id never reaches Postgres (and its error never echoes it).
+      if (
+        proof.credentialId != null &&
+        (typeof proof.credentialId !== "string" ||
+          !UUID.test(proof.credentialId))
+      )
+        throw new IdentityInputError(CREDENTIAL_UNAVAILABLE);
+      // Lowercase: uuid columns read back lowercase, and keep/move compare ids as strings.
+      const credentialId = proof.credentialId?.toLowerCase() ?? undefined;
+      return database.transaction((transaction) =>
+        writeLink(transaction, credentials, identity, userId, {
+          ...proof,
+          credentialId,
+        }),
+      );
     },
 
     async markNeedsReconnect(linkId: string): Promise<void> {

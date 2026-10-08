@@ -1,5 +1,5 @@
 {
-  "id": "54122071-85f2-4f2b-a125-703090a744a2",
+  "id": "a5c96b02-0eca-4def-bcc4-590cdb66fb28",
   "prevId": "b4bb328d-1308-403f-a2ac-f8a291aaabc5",
   "version": "7",
   "dialect": "postgresql",
@@ -9110,6 +9110,22 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "identity_links_credential_idx": {
+          "name": "identity_links_credential_idx",
+          "columns": [
+            {
+              "expression": "credential_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"identity_links\".\"credential_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
