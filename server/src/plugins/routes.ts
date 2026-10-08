@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
+import { PERSON_INITIATOR } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { reasonWithoutStatement } from "../db/query-failure";
@@ -2792,6 +2793,9 @@ export function createPluginRoutes(
          * being written down, and the two are not interchangeable.
          */
         actorId: context.var.actor.id,
+        // A signed-in person calling the tool themselves: say so, because a shared account refuses a
+        // call that does not say what started it.
+        initiator: PERSON_INITIATOR,
       });
       return context.json(result);
     } catch (error) {

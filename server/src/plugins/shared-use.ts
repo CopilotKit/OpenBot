@@ -32,7 +32,15 @@ export async function steeringOf(
   initiator: AuditInitiator | undefined,
   sourcesOf: (responsibilityId: string) => Promise<readonly string[]>,
 ): Promise<Steering> {
-  if (!initiator) return { kind: "actor", outside: false };
+  /*
+   * NO INITIATOR IS NOT A PERSON. Every path that runs a Bot says what started the run — a person's
+   * chat, a routine, a responsibility, a memory sync, a handoff — so a call that arrives without one
+   * is a path that forgot, and a shared account must not guess who is steering it. Refused, rather
+   * than read as the actor, so a background caller added later cannot reach the team account by
+   * omission.
+   */
+  if (!initiator)
+    return { kind: "refuse", why: "the run does not say what started it" };
   type _SteeringDecides = Decides<
     AuditInitiatorKind,
     {

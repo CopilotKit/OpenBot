@@ -137,6 +137,9 @@ const TABLE = {
     new RegExp(
       `${app} is shared across this deployment and no account is connected to it yet\\. Ask an administrator to connect it\\.`,
     ),
+  /** Shared-mode guard: the run does not say what started it, or what did cannot steer a shared account. */
+  sharedSteering: (app: string = "[^.]+") =>
+    new RegExp(`The shared ${app} account was not used, because [^.]+\\.`),
   /** Shared-mode guard: this Bot's audience reaches further than an administrator approved for the shared account. */
   sharedAudience: (app: string = "[^.]+") =>
     new RegExp(

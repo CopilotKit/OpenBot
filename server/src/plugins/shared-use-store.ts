@@ -60,7 +60,15 @@ export type SharedUseGate = (input: {
   title: string;
   actorId: string;
   initiator?: AuditInitiator;
-}) => Promise<{ allowed: true } | { allowed: false; message: string }>;
+}) => Promise<
+  | { allowed: true }
+  | {
+      allowed: false;
+      message: string;
+      /** Why, for the audit row: the audience reaches too far, or the run's steering is unknown. */
+      refusal?: "shared_audience" | "shared_steering";
+    }
+>;
 
 const sameApproval = (left: SharedUseApproval, right: SharedUseApproval) =>
   covers(left, right) && covers(right, left);
@@ -671,9 +679,21 @@ export function createSharedUseGate(
   return async ({ botId, serverId, title, actorId, initiator }) => {
     const message = `This Bot is reachable by more people than an administrator approved for the shared ${title} account. An administrator has been asked to approve it.`;
     const steering = await steeringOf(initiator, store.sourcesOf);
+    /*
+     * A RUN WHOSE STEERING CANNOT BE TOLD IS REFUSED WITHOUT A REQUEST. No approval an administrator
+     * could give would let it through — the question is who is behind the run, not how wide the
+     * audience is — so filing one would only put a request in the inbox that cannot be answered.
+     */
+    if (steering.kind === "refuse") {
+      return {
+        allowed: false,
+        refusal: "shared_steering",
+        message: `The shared ${title} account was not used, because ${steering.why}.`,
+      };
+    }
     const facts = await store.botFacts(botId);
     const approval = await store.approvalFor(botId, serverId);
-    if (steering.kind === "actor" && approval) {
+    if (approval) {
       if (
         admits(
           approval,

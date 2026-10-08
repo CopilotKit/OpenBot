@@ -103,14 +103,16 @@ afterAll(async () => {
 
 const call = (
   actor: string,
-  initiator?: Parameters<typeof gate>[0]["initiator"],
+  initiator: Parameters<typeof gate>[0]["initiator"] | null = {
+    kind: "person",
+  },
 ) =>
   gate({
     botId: bot,
     serverId: app,
     title: "Team GitHub",
     actorId: id(actor),
-    initiator,
+    ...(initiator ? { initiator } : {}),
   });
 
 describe("the shared-use gate", () => {
@@ -240,6 +242,22 @@ describe("the shared-use gate", () => {
         })
       ).allowed,
     ).toBe(false);
+  });
+
+  test("a call that does not say what started its run is refused, and files no request", async () => {
+    await store.setApproval({
+      botId: bot,
+      serverId: app,
+      by: id("owner"),
+      approval: { audience: "team", outsideInput: true, members: [] },
+    });
+    const answer = await call("owner", null);
+    expect(answer.allowed).toBe(false);
+    if (!answer.allowed) {
+      expectOnlyRefusal(answer.message, "sharedSteering", "Team GitHub");
+      expect(answer.refusal).toBe("shared_steering");
+    }
+    expect(await store.pendingFor(bot)).toHaveLength(0);
   });
 
   test("a handoff with no origin is refused", async () => {

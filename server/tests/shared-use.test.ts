@@ -28,7 +28,6 @@ const approval = (over: Partial<SharedUseApproval>): SharedUseApproval => ({
 describe("steeringOf", () => {
   test("a person, a routine and a memory sync are steered by the actor, from inside", async () => {
     for (const initiator of [
-      undefined,
       { kind: "person" } as const,
       { kind: "routine", id: "x" } as const,
       { kind: "memory", id: "m" } as const,
@@ -77,8 +76,9 @@ describe("steeringOf", () => {
     ).toEqual({ kind: "actor", outside: false });
   });
 
-  test("a handoff that lost its origin, the deployment, and anything unknown are refused", async () => {
+  test("no initiator, a handoff that lost its origin, the deployment, and anything unknown are refused", async () => {
     for (const initiator of [
+      undefined,
       { kind: "handoff", id: "b" },
       { kind: "deployment" },
       { kind: "robot" },

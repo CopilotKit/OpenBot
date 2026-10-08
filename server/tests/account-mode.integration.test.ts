@@ -22,6 +22,7 @@ const suite = randomUUID().slice(0, 8);
 const app = `mode-${suite}`;
 const bot = `modebot-${suite}`;
 let failRevokeFor: string | null = null;
+let failCreateRule = false;
 const revoked: string[] = [];
 const rules: {
   id: string;
@@ -66,6 +67,7 @@ const modes = createAccountModeSwitch({
   audit: createAuditStore(database),
   teamRules: {
     createTeamRule: async (_by, input) => {
+      if (failCreateRule) throw new Error("The approval store is unavailable.");
       const rule = {
         id: randomUUID(),
         ...input,
@@ -86,6 +88,7 @@ const modes = createAccountModeSwitch({
 
 beforeEach(async () => {
   failRevokeFor = null;
+  failCreateRule = false;
   revoked.length = 0;
   rules.length = 0;
   await database.insert(mcpServers).values({
@@ -231,6 +234,104 @@ describe("switching to Shared", () => {
       .from(mcpServers)
       .where(eq(mcpServers.id, app));
     expect(row?.accountMode).toBe("personal");
+  });
+});
+
+describe("a switch that fails between its steps", () => {
+  const modeNow = async () =>
+    (await database.select().from(mcpServers).where(eq(mcpServers.id, app)))[0]
+      ?.accountMode;
+  const standingRules = () =>
+    rules.filter(
+      (rule) =>
+        rule.revokedAt === null &&
+        rule.toolRef === `${app}/*` &&
+        rule.behaviour === "ask",
+    );
+
+  test("a write rule that cannot be made leaves the app Personal, and a retry finishes the switch", async () => {
+    failCreateRule = true;
+    await expect(
+      modes.switchMode({
+        serverId: app,
+        mode: "shared",
+        by: "admin",
+        confirm: true,
+      }),
+    ).rejects.toThrow("The approval store is unavailable.");
+    // Never Shared without its ask-before-write rule, not even between the steps.
+    expect(await modeNow()).toBe("personal");
+
+    failCreateRule = false;
+    expect(
+      (
+        await modes.switchMode({
+          serverId: app,
+          mode: "shared",
+          by: "admin",
+          confirm: true,
+        })
+      ).changed,
+    ).toBe(true);
+    expect(await modeNow()).toBe("shared");
+    expect(standingRules()).toHaveLength(1);
+    expect(await sharedUse.approvalFor(bot, app)).not.toBeNull();
+  });
+
+  test("an app already Shared with no write rule gets it back, and keeps the approval an admin set", async () => {
+    await modes.switchMode({
+      serverId: app,
+      mode: "shared",
+      by: "admin",
+      confirm: true,
+      approvals: {
+        [bot]: { audience: "owner", outsideInput: false, members: [] },
+      },
+    });
+    // As a switch from before the steps were ordered could have left it.
+    rules.length = 0;
+    expect(
+      await modes.switchMode({
+        serverId: app,
+        mode: "shared",
+        by: "admin",
+        confirm: true,
+      }),
+    ).toEqual({ changed: true, revoked: 0 });
+    expect(standingRules()).toHaveLength(1);
+    expect(await sharedUse.approvalFor(bot, app)).toEqual({
+      audience: "owner",
+      outsideInput: false,
+      members: [],
+    });
+    // Asked again, nothing is duplicated.
+    await modes.switchMode({
+      serverId: app,
+      mode: "shared",
+      by: "admin",
+      confirm: true,
+    });
+    expect(standingRules()).toHaveLength(1);
+  });
+
+  test("a Personal app left holding the switch's rule loses it on the next switch to Personal", async () => {
+    await modes.switchMode({
+      serverId: app,
+      mode: "shared",
+      by: "admin",
+      confirm: true,
+    });
+    // As a switch back that stopped after the mode could have left it.
+    await store.setAccountModeColumns(app, "personal", null);
+    expect(standingRules()).toHaveLength(1);
+    await modes.switchMode({
+      serverId: app,
+      mode: "personal",
+      by: "admin",
+      confirm: true,
+    });
+    expect(standingRules()).toHaveLength(0);
+    expect(await sharedUse.approvalFor(bot, app)).toBeNull();
   });
 });
 

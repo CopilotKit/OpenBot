@@ -7802,7 +7802,7 @@ export function createPluginStore(options: PluginStoreOptions) {
             payload: {
               ...decided,
               decision: { ...decided.decision, carriedOut: false },
-              refusal: "shared_audience",
+              refusal: verdict.refusal ?? "shared_audience",
             },
           });
           throw new PluginRefusedError(verdict.message, null);
