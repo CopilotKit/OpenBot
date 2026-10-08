@@ -177,6 +177,7 @@ import {
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
 import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
+import { slackCodeRedeemer } from "./identity/slack-redeem";
 import { createIdentityStore } from "./identity/store";
 import {
   createIntelligenceClient,
@@ -3010,6 +3011,7 @@ const app = createApp(
         scopeFor: deliveryScopeFor,
         slack: deliveryProviders.slack,
         twilio: deliveryProviders.sms,
+        identity: slackCodeRedeemer(identityStore, bootAuditStore),
       },
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
