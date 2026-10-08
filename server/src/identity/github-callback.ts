@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
@@ -18,10 +19,7 @@ export type GithubCallbackDeps = {
   appUrl: string | undefined;
   encryptionKey: string;
   personIsActive(userId: string): Promise<boolean>;
-  credentials: Pick<
-    CredentialStore,
-    "create" | "rotate" | "revoke" | "findLiveByKey"
-  >;
+  credentials: Pick<CredentialStore, "create" | "revoke">;
   identity: Pick<IdentityStore, "linkVerified">;
   auditStore?: AuditStore;
   fetchImpl?: typeof fetch;
@@ -73,26 +71,21 @@ export function githubCallbackRoutes(
       );
       const user = await fetchGithubUser(tokens.accessToken, deps.fetchImpl);
 
-      const key = {
-        kind: "connector" as const,
+      // Every connection stores its token under a key of its own, so it never collides with the
+      // token a reconnect replaces (one live credential per key). Nothing reads this token by key:
+      // the link names it by id, and linkVerified revokes the token the link named before in the
+      // same transaction that repoints it. That keeps one live token per person and account, and
+      // a link write that fails leaves the existing link and its token exactly as they were.
+      const stored = await deps.credentials.create({
+        kind: "connector",
         provider: "github-user-token",
-        keyId: `${state.userId}:${user.id}`,
-      };
-      const value = {
-        ...key,
+        keyId: `${state.userId}:${user.id}:${randomUUID()}`,
         metadata: { login: user.login },
         encryptedValue: await encryptSecret(
           deps.encryptionKey,
           JSON.stringify(tokens),
         ),
-      };
-      const live = await deps.credentials.findLiveByKey(key);
-      const stored = live
-        ? await deps.credentials.rotate({
-            ...value,
-            previousCredentialId: live.id,
-          })
-        : await deps.credentials.create(value);
+      });
 
       let link: Awaited<ReturnType<IdentityStore["linkVerified"]>>;
       try {
@@ -106,6 +99,7 @@ export function githubCallbackRoutes(
           { method: "oauth", handle: user.login, credentialId: stored.id },
         );
       } catch (error) {
+        // Only the token this attempt stored; the existing link's token was never touched.
         try {
           await deps.credentials.revoke(stored.id);
         } catch {

@@ -20,7 +20,6 @@ function build(
   options: {
     actorId?: string | null;
     active?: boolean;
-    live?: { id: string } | null;
     tokenFails?: boolean;
     linkError?: Error;
     revokeError?: Error;
@@ -29,7 +28,6 @@ function build(
 ) {
   const fetchCalls: string[] = [];
   const created: unknown[] = [];
-  const rotated: unknown[] = [];
   const revoked: string[] = [];
   const linked: unknown[][] = [];
   const audits: AuditEventInput[] = [];
@@ -64,16 +62,11 @@ function build(
         created.push(value);
         return { id: "cred-new", revokedAt: null };
       },
-      rotate: async (value) => {
-        rotated.push(value);
-        return { id: "cred-new", revokedAt: null };
-      },
       revoke: async (id) => {
         revoked.push(id);
         if (options.revokeError) throw options.revokeError;
         return new Date();
       },
-      findLiveByKey: async () => options.live ?? null,
     },
     identity: {
       linkVerified: async (...args: unknown[]) => {
@@ -101,7 +94,6 @@ function build(
     app,
     fetchCalls,
     created,
-    rotated,
     revoked,
     linked,
     audits,
@@ -159,9 +151,9 @@ describe("GitHub sign-in callback", () => {
     expect(stored).toMatchObject({
       kind: "connector",
       provider: "github-user-token",
-      keyId: "person:42",
       metadata: { login: "dana" },
     });
+    expect(stored.keyId).toMatch(/^person:42:[0-9a-f-]{36}$/);
     expect(JSON.parse(await decryptSecret(key, stored.encryptedValue))).toEqual(
       {
         accessToken: "gho_secret",
@@ -191,17 +183,35 @@ describe("GitHub sign-in callback", () => {
     ]);
   });
 
-  test("a reconnect rotates the live credential instead of inserting", async () => {
-    const harness = build({ live: { id: "cred-old" } });
+  test("a reconnect stores a new credential under its own key and rotates nothing", async () => {
+    // Retiring the old credential is the link write's job, in the same transaction that repoints
+    // the link, so a reconnect never touches the live credential up front.
+    const harness = build();
     expect(
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(OK);
-    expect(harness.created).toHaveLength(0);
-    expect(harness.rotated).toHaveLength(1);
-    expect(harness.rotated[0]).toMatchObject({
-      previousCredentialId: "cred-old",
-      keyId: "person:42",
+    expect(
+      await call(harness, `code=the-code&state=${await validState()}`),
+    ).toBe(OK);
+    expect(harness.revoked).toHaveLength(0);
+    expect(harness.created).toHaveLength(2);
+    const [first, second] = harness.created as { keyId: string }[];
+    expect(first?.keyId).toMatch(/^person:42:[0-9a-f-]{36}$/);
+    expect(second?.keyId).toMatch(/^person:42:[0-9a-f-]{36}$/);
+    expect(first?.keyId).not.toBe(second?.keyId);
+  });
+
+  test("a re-link whose link write throws leaves the old credential live and unrevoked", async () => {
+    const harness = build({
+      linkError: new Error("database unreachable"),
     });
+    expect(
+      await call(harness, `code=the-code&state=${await validState()}`),
+    ).toBe(FAILED);
+    // The callback holds no handle on the old credential at all (no rotate, no lookup by key):
+    // the only revoke it issues is for the token this attempt stored.
+    expect(harness.revoked).toEqual(["cred-new"]);
+    expect(harness.audits).toHaveLength(0);
   });
 
   test("a denied authorization fails without calling GitHub", async () => {
@@ -274,7 +284,6 @@ describe("GitHub sign-in callback", () => {
       await call(harness, `code=the-code&state=${await validState()}`),
     ).toBe(FAILED);
     expect(harness.created).toHaveLength(0);
-    expect(harness.rotated).toHaveLength(0);
     expect(harness.linked).toHaveLength(0);
   });
 
