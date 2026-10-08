@@ -120,22 +120,47 @@ test.each(["provider", "realm", "subject"] as const)(
   },
 );
 
-test("an expired challenge can be neither peeked, confirmed nor completed", async () => {
-  const sender = slack();
-  const { token } = await store.beginChallenge(sender);
-  await database
+const hashOf = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
+const expire = (token: string) =>
+  database
     .update(identityLinkChallenges)
     .set({ expiresAt: sql`clock_timestamp() - interval '1 second'` })
-    .where(
-      eq(
-        identityLinkChallenges.tokenHash,
-        createHash("sha256").update(token).digest("hex"),
-      ),
-    );
-  expect(await store.peekChallenge(token)).toBeNull();
-  await expect(store.confirmChallenge(token, "user-a")).rejects.toThrow(
-    IdentityLinkError,
-  );
+    .where(eq(identityLinkChallenges.tokenHash, hashOf(token)));
+
+test("an expired challenge can be neither peeked, confirmed nor completed", async () => {
+  const sender = slack();
+  const confirmed = await store.beginChallenge(sender);
+  await store.confirmChallenge(confirmed.token, "user-a");
+  await expire(confirmed.token);
+  expect(await store.peekChallenge(confirmed.token)).toBeNull();
+  await expect(
+    store.completeChallenge(confirmed.token, sender),
+  ).rejects.toThrow(IdentityLinkError);
+
+  const unconfirmed = await store.beginChallenge(slack());
+  await expire(unconfirmed.token);
+  expect(await store.peekChallenge(unconfirmed.token)).toBeNull();
+  await expect(
+    store.confirmChallenge(unconfirmed.token, "user-a"),
+  ).rejects.toThrow(IdentityLinkError);
+});
+
+test("beginning a challenge clears challenges that expired over a day ago", async () => {
+  const stale = `stale-${randomUUID()}`;
+  await database.insert(identityLinkChallenges).values({
+    tokenHash: stale,
+    provider: "slack",
+    realm,
+    subject: randomUUID(),
+    expiresAt: sql`clock_timestamp() - interval '2 days'`,
+  });
+  await store.beginChallenge(slack());
+  const rows = await database
+    .select()
+    .from(identityLinkChallenges)
+    .where(eq(identityLinkChallenges.tokenHash, stale));
+  expect(rows).toEqual([]);
 });
 
 test("a malformed token is refused before any query", async () => {

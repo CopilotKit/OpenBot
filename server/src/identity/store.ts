@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { CredentialRefusedError, type CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { identityLinkChallenges, identityLinks } from "../db/schema";
@@ -255,6 +255,15 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
           "This provider does not accept that kind of proof.",
         );
       const token = randomBytes(32).toString("base64url");
+      // No sweep exists, so chat-started links that were never opened would otherwise accumulate.
+      await database
+        .delete(identityLinkChallenges)
+        .where(
+          lt(
+            identityLinkChallenges.expiresAt,
+            sql`clock_timestamp() - interval '1 day'`,
+          ),
+        );
       const [challenge] = await database
         .insert(identityLinkChallenges)
         .values({
