@@ -489,18 +489,20 @@ number opted out, later messages show `opted_out` in the delivery history instea
 ## Linked accounts
 
 OpenBot keeps a record of a person's accounts at outside providers, such as their GitHub account
-or their Slack user. Whenever the deployment has an identity store, the section appears under
-**Linked accounts** on `/settings/connected-accounts`. It lists the person's links and offers only
-the actions this deployment can complete, and each link can be disconnected there. Disconnecting
-revokes any token stored with the link, and is audited.
+or their Slack user. They appear under **Linked accounts** on `/settings/connected-accounts`, one
+card per account type: the person's link with a **Disconnect** button, or, where this deployment can
+link that type, a "Not linked" card with **Connect**. The section is hidden when nothing is linked,
+nothing can be linked and nothing failed to load. Disconnecting removes the link and revokes
+OpenBot's stored copy of any token kept with it, and is audited. For GitHub, the grant itself stays
+at GitHub until the person revokes it under GitHub, Settings, Applications.
 
-See "Linking Slack and GitHub accounts" below for setting up each provider. An integration proves an account in one of two ways: by the provider's own
-sign-in, or by a one-time code that OpenBot issues to the signed-in person and that they send from
-their chat account. Whoever sends the code gets that chat account linked to the person it was issued
-to, so treat it like a password and do not share it. It is valid for ten minutes and works once, and
-issuing a new code for the same provider invalidates the earlier one. An outside account links to
-one OpenBot user at most. Linking a new account at a provider and workspace replaces the person's
-earlier link there and revokes its token.
+See "Linking Slack and GitHub accounts" below for setting up each provider. An integration proves an
+account in one of two ways: by the provider's own sign-in, or by a one-time code that OpenBot issues
+to the signed-in person and that they send from their chat account. Whoever sends the code gets that
+chat account linked to the person it was issued to, so treat it like a password and do not share it.
+It is valid for ten minutes and works once, and issuing a new code for the same provider invalidates
+the earlier one. An outside account links to one OpenBot user at most. Linking a new account at a
+provider and workspace replaces the person's earlier link there and revokes its token.
 
 Removing a person, whether an administrator does it or a SCIM deactivation does, retires their
 links. Their unused link codes are deleted, any token stored with a link is revoked, and each link is
@@ -510,20 +512,27 @@ link is recorded in the audit trail.
 
 ### Linking Slack and GitHub accounts
 
-Slack requires the OpenTag pairing above, so `OPENTAG_SHARED_SECRET` must be set. The person clicks
-**Link Slack**, which shows a message of the form `link <code>`, and sends it to the OpenBot app in
-Slack within ten minutes. Teams cannot be linked this way.
+Slack is offered only where the OpenTag Slack webhook is set up (the pairing above, so
+`OPENTAG_SHARED_SECRET` must be set) and the server can redeem identity codes. The person clicks
+**Connect** on the Slack card, which shows a message of the form `link <code>`, and sends it to the
+OpenBot app in a direct message within ten minutes. A code sent in a channel is refused and stays
+valid until it expires. Teams cannot be linked this way.
 
 GitHub uses a GitHub App. Create one under GitHub Settings, Developer settings, GitHub Apps, and set:
 
 - The callback URL to `<public URL>/api/identity/github/callback`, where the public URL is
-  `OPENBOT_PUBLIC_URL` or, if that is unset, `BETTER_AUTH_URL`.
+  `OPENBOT_PUBLIC_URL` or, if that is unset, `BETTER_AUTH_URL`. With neither set, the server
+  refuses to start when `GITHUB_APP_CLIENT_ID` is present.
 - "Expire user authorization tokens" on. A webhook is not required for linking.
 - A client secret, generated on the App's page.
 
 Then set `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`; set both or neither. People
-then use **Connect GitHub** while signed in to OpenBot in the same browser. The
-GitHub user token is stored encrypted with the link.
+then use **Connect** on the GitHub card while signed in to OpenBot in the same browser. The GitHub
+user token is stored encrypted with the link.
+
+After GitHub, the browser is sent back to `OPENBOT_APP_URL`, else the first `TRUSTED_ORIGINS` entry,
+else the public URL. Set `OPENBOT_APP_URL` when the app and the server are on different origins, as
+in local development (app on `3010`, server on `3001`); one origin needs nothing.
 
 Reachability codes and Linked accounts codes look alike, and Reachability's are checked first. A
 Reachability `link <code>` binds a conversation for delivery and is not recorded as a linked
