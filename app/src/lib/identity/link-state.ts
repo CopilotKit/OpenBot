@@ -1,4 +1,3 @@
-// app/src/lib/identity/link-state.ts
 type Peek = {
   status: "pending" | "error" | "success";
   data?: { title: string };

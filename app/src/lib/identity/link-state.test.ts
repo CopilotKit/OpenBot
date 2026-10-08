@@ -1,4 +1,3 @@
-// app/src/lib/identity/link-state.test.ts
 import { expect, test } from "bun:test";
 import { confirmLinkState } from "./link-state";
 
