@@ -15,6 +15,7 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { LinkedAccountsSection } from "@/components/settings/linked-accounts";
 import {
   InputGroup,
   InputGroupAddon,
@@ -281,6 +282,7 @@ function RouteComponent() {
           )}
         </>
       )}
+      <LinkedAccountsSection />
     </PageShell>
   );
 }
