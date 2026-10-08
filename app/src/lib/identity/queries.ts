@@ -13,6 +13,7 @@ export type LinkedAccount = {
 export const identityKeys = {
   all: ["identity"] as const,
   links: () => [...identityKeys.all, "links"] as const,
+  providers: () => [...identityKeys.all, "providers"] as const,
 };
 
 const LOAD_FALLBACK = "Could not load your linked accounts";
@@ -52,5 +53,48 @@ export function linkedAccountsQueryOptions() {
     queryKey: identityKeys.links(),
     queryFn: async (): Promise<LinkedAccount[]> =>
       linksFromResponse(await tryClient("/api/identity/links")),
+  });
+}
+
+/** Which account types this deployment can link a person to. */
+export type IdentityProviders = { slack: boolean; github: boolean };
+
+const PROVIDERS_FALLBACK = "Could not load the account types you can link";
+
+/** The tagged 503 means no identity store, so nothing is linkable; other failures throw. */
+export async function providersFromResponse(
+  response: Response,
+): Promise<IdentityProviders> {
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: unknown;
+      code?: unknown;
+    } | null;
+    if (response.status === 503 && body?.code === IDENTITY_UNAVAILABLE) {
+      return { slack: false, github: false };
+    }
+    throw new Error(
+      typeof body?.error === "string" ? body.error : PROVIDERS_FALLBACK,
+    );
+  }
+  const body = (await response.json().catch(() => null)) as {
+    providers?: { slack?: unknown; github?: unknown };
+  } | null;
+  const providers = body?.providers;
+  if (
+    !providers ||
+    typeof providers.slack !== "boolean" ||
+    typeof providers.github !== "boolean"
+  ) {
+    throw new Error(PROVIDERS_FALLBACK);
+  }
+  return { slack: providers.slack, github: providers.github };
+}
+
+export function identityProvidersQueryOptions() {
+  return queryOptions({
+    queryKey: identityKeys.providers(),
+    queryFn: async (): Promise<IdentityProviders> =>
+      providersFromResponse(await tryClient("/api/identity/providers")),
   });
 }
