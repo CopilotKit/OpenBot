@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { PROVIDERS } from "./providers";
 import type { IdentityStore } from "./store";
@@ -13,6 +14,7 @@ import type { IdentityStore } from "./store";
 export function identityRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   store?: Pick<IdentityStore, "identitiesFor" | "unlink">,
+  auditStore?: AuditStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   app.use("*", async (context, next) => {
@@ -43,12 +45,31 @@ export function identityRoutes(
   });
 
   app.delete("/links/:id", async (context) => {
-    const removed = await live.unlink(
-      context.var.actor.id,
-      context.req.param("id"),
+    const actorId = context.var.actor.id;
+    const id = context.req.param("id");
+    const link = (await live.identitiesFor(actorId)).find(
+      (candidate) => candidate.id === id,
     );
+    const removed = await live.unlink(actorId, id);
     if (!removed)
       return context.json({ error: "Linked account not found." }, 404);
+    /*
+     * After the removal, and not caught: the same order and the same failure as the connected-account
+     * disconnect (`mcp.account_disconnected`), where an audit write that throws fails the request.
+     * Repeating it is safe because the link is already gone and answers 404.
+     *
+     * Names the link and its provider only. The subject, realm and credential id stay out of the
+     * trail, as they stay out of every response here.
+     */
+    if (auditStore) {
+      await recordAuditEvent(auditStore, {
+        eventType: "identity.unlinked",
+        targetType: "identity_link",
+        targetId: id,
+        actorUserId: actorId,
+        payload: { actor: actorId, provider: link?.provider },
+      });
+    }
     return context.body(null, 204);
   });
 

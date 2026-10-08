@@ -511,6 +511,8 @@ export const auditEventTypes = [
   /* A Bot connected to, or disconnected from, a Slack, Teams or SMS conversation. */
   "delivery.linked",
   "delivery.unlinked",
+  /* A person removing their own linked account at an outside provider (Slack, GitHub). */
+  "identity.unlinked",
   /* Routines, however they were made: by a person on the screen or by a Bot through its tools. */
   "routine.created",
   "routine.updated",

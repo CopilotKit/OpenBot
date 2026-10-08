@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
+import type { AuditEventInput } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { identityRoutes } from "../src/identity/routes";
 import type { IdentityLink } from "../src/identity/types";
@@ -31,14 +32,19 @@ const link: IdentityLink = {
 
 function fixture() {
   const calls: string[] = [];
-  const app = identityRoutes(signedIn, {
-    identitiesFor: async (userId) => (userId === "person" ? [link] : []),
-    unlink: async (userId, id) => {
-      calls.push(`unlink:${userId}:${id}`);
-      return userId === "person" && id === "link-1";
+  const events: AuditEventInput[] = [];
+  const app = identityRoutes(
+    signedIn,
+    {
+      identitiesFor: async (userId) => (userId === "person" ? [link] : []),
+      unlink: async (userId, id) => {
+        calls.push(`unlink:${userId}:${id}`);
+        return userId === "person" && id === "link-1";
+      },
     },
-  });
-  return { app, calls };
+    { insert: async (event) => void events.push(event) },
+  );
+  return { app, calls, events };
 }
 
 test("links lists the asker's links without subject, realm or credential", async () => {
@@ -102,4 +108,25 @@ test("auth runs before the missing-store 503 and responses are never cached", as
   const response = await app.request("/links");
   expect(response.status).toBe(401);
   expect(response.headers.get("cache-control")).toBe("no-store");
+});
+
+test("a successful DELETE records one event naming actor, link and provider only", async () => {
+  const f = fixture();
+  await f.app.request("/links/link-1", { method: "DELETE" });
+  expect(f.events).toHaveLength(1);
+  expect(f.events[0]).toMatchObject({
+    eventType: "identity.unlinked",
+    targetId: "link-1",
+    actorUserId: "person",
+    payload: { actor: "person", provider: "github" },
+  });
+  const text = JSON.stringify(f.events[0]);
+  for (const secret of ["secret-credential-id", "github.com", "42"])
+    expect(text).not.toContain(`"${secret}"`);
+});
+
+test("a 404 DELETE records nothing", async () => {
+  const f = fixture();
+  await f.app.request("/links/someone-elses", { method: "DELETE" });
+  expect(f.events).toEqual([]);
 });
