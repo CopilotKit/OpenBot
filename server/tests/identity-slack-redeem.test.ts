@@ -11,21 +11,29 @@ import {
 
 const sender = { teamId: "T1", userId: "U1" };
 
-function setup(behavior: () => Promise<IdentityLink>) {
+function setup(
+  behavior: () => Promise<IdentityLink>,
+  discarded: () => Promise<boolean> = async () => true,
+) {
   const calls: unknown[][] = [];
+  const discards: unknown[][] = [];
   const events: AuditEventInput[] = [];
   const store = {
     redeemChallenge: async (...args: unknown[]) => {
       calls.push(args);
       return behavior();
     },
-  } as unknown as Pick<IdentityStore, "redeemChallenge">;
+    discardChallenge: async (...args: unknown[]) => {
+      discards.push(args);
+      return discarded();
+    },
+  } as unknown as Pick<IdentityStore, "redeemChallenge" | "discardChallenge">;
   const auditStore: AuditStore = {
     insert: async (event) => {
       events.push(event);
     },
   };
-  return { calls, events, store, auditStore };
+  return { calls, discards, events, store, auditStore };
 }
 
 const link = {
@@ -143,5 +151,32 @@ describe("slackCodeRedeemer", () => {
   test("works without an audit store", async () => {
     const { store } = setup(async () => link);
     expect(await slackCodeRedeemer(store).redeem("X", sender)).toBe("linked");
+  });
+
+  test("discard cancels a Slack code and reports whether one existed", async () => {
+    for (const existed of [true, false]) {
+      const { calls, discards, events, store, auditStore } = setup(
+        async () => link,
+        async () => existed,
+      );
+      expect(await slackCodeRedeemer(store, auditStore).discard("CODE")).toBe(
+        existed,
+      );
+      expect(discards).toEqual([["CODE", "slack"]]);
+      expect(calls).toHaveLength(0);
+      expect(events).toHaveLength(0);
+    }
+  });
+
+  test("discard propagates a store failure", async () => {
+    const { store } = setup(
+      async () => link,
+      async () => {
+        throw new Error("db down");
+      },
+    );
+    await expect(slackCodeRedeemer(store).discard("CODE")).rejects.toThrow(
+      "db down",
+    );
   });
 });

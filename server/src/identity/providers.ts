@@ -26,7 +26,7 @@ export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
       title: "Slack",
       methods: ["challenge"],
       instruction: (code) =>
-        `Send this message to the OpenBot bot in Slack: link ${code}`,
+        `Send this message to the OpenBot app in a direct message in Slack: link ${code}`,
     },
     github: {
       title: "GitHub",

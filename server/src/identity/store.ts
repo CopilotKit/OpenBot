@@ -538,6 +538,30 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
     },
 
     /**
+     * Cancel a live `provider` code without linking anything, for a code exposed where others could
+     * read it. Returns whether a live code was removed: false for a malformed, unknown, expired or
+     * other-provider code, which is left as it was.
+     */
+    async discardChallenge(
+      code: string,
+      provider: IdentityProvider,
+    ): Promise<boolean> {
+      if (typeof code !== "string" || !UUID.test(code)) return false;
+      const hash = codeHash(code);
+      const removed = await database
+        .delete(identityLinkChallenges)
+        .where(
+          and(
+            eq(identityLinkChallenges.tokenHash, hash),
+            eq(identityLinkChallenges.provider, provider),
+            gt(identityLinkChallenges.expiresAt, sql`clock_timestamp()`),
+          ),
+        )
+        .returning({ provider: identityLinkChallenges.provider });
+      return removed.length > 0;
+    },
+
+    /**
      * Link `value`, the chat account the code arrived from, to the user the code was issued to.
      * Consumption and link creation share one transaction: a refused link leaves the code unused.
      * `handle` follows the same rule as linkVerified: omitted keeps the stored one, null clears.

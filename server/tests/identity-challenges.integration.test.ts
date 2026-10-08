@@ -339,3 +339,33 @@ test.each([42, undefined, " user-padded", "user-padded "])(
     ).rejects.toThrow(IdentityInputError);
   },
 );
+
+test("discarding a live code removes it, so it can no longer link", async () => {
+  const { code } = await store.issueChallenge(user(), "slack");
+  expect(await store.discardChallenge(code.toUpperCase(), "slack")).toBe(true);
+  expect(await rowFor(code)).toBeUndefined();
+  const sender = slack();
+  await expect(store.redeemChallenge(code, sender)).rejects.toThrow(
+    IdentityLinkError,
+  );
+  expect(await store.linkedUser(sender)).toBeNull();
+  expect(await store.discardChallenge(code, "slack")).toBe(false);
+});
+
+test("discarding an unknown, malformed or expired code finds nothing", async () => {
+  expect(await store.discardChallenge(randomUUID(), "slack")).toBe(false);
+  expect(await store.discardChallenge("not-a-code", "slack")).toBe(false);
+  const { code } = await store.issueChallenge(user(), "slack");
+  await expire(code);
+  expect(await store.discardChallenge(code, "slack")).toBe(false);
+});
+
+test("discarding for another provider leaves the code working", async () => {
+  const owner = user();
+  const { code } = await store.issueChallenge(owner, "slack");
+  expect(await store.discardChallenge(code, "github" as IdentityProvider)).toBe(
+    false,
+  );
+  expect(await rowFor(code)).toBeDefined();
+  expect((await store.redeemChallenge(code, slack())).userId).toBe(owner);
+});

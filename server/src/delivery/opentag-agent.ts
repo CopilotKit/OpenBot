@@ -93,16 +93,20 @@ export type OpenTagAgentDeps = {
   /** Slack trigger ingest; defaults to the responsibilities lane's `ingestSlackEvent`. */
   ingestSlack?: (event: SlackTriggerEvent) => Promise<unknown>;
   /**
-   * Redeems OpenBot linked-account codes (Settings → Connected accounts) for a Slack sender.
-   * Reachability codes are checked first; this is tried for any code that is not a live one (an
-   * expired or used Reachability code falls through too, matches no account code, and gets the usual
-   * expired reply). Account codes are honoured only in direct messages.
+   * OpenBot linked-account codes (Settings → Connected accounts) from a Slack sender. Reachability
+   * codes are checked first; this is used for any code that is not a live one (an expired or used
+   * Reachability code falls through too, matches no account code, and gets the usual expired reply).
+   * An account code is redeemed only in a direct message. One posted in a shared conversation is
+   * cancelled (`discard`), since anyone there could send it first and bind their own Slack account
+   * to its issuer; the issuer is told to make a new one.
    */
   identity?: {
     redeem(
       code: string,
       sender: { teamId: string; userId: string },
     ): Promise<"linked" | "conflict" | "invalid">;
+    /** Cancels a live account code; true when one was cancelled. */
+    discard(code: string): Promise<boolean>;
   };
 };
 
@@ -374,13 +378,18 @@ async function link(
 ) {
   const challenge = await deps.store.readChallenge(code);
   if (!challenge && sender.transport === "slack" && deps.identity) {
-    // Anyone else in a shared conversation could send the pasted code first and bind their own
-    // Slack account to its issuer, so an account code is only redeemed in a direct message and is
-    // left unspent here for its owner.
-    if (!sender.private)
+    // Anyone else in a shared conversation has now seen the code and could send it first, binding
+    // their own Slack account to its issuer, so an account code is only redeemed in a direct
+    // message and one posted here is cancelled.
+    if (!sender.private) {
+      if (await deps.identity.discard(code))
+        return {
+          text: "That code was posted where others could see it, so I cancelled it. Create a new one in OpenBot and send it to me in a direct message.",
+        };
       return {
-        text: "Send your link code to me in a direct message, not in a channel. It still works until it expires.",
+        text: "That link code expired, was already used, or is for another app. Create a new one in OpenBot.",
       };
+    }
     const outcome = await deps.identity.redeem(code, {
       teamId: sender.realm,
       userId: sender.identity,

@@ -25,6 +25,7 @@ type IdentityAdapter = {
     code: string,
     sender: { teamId: string; userId: string },
   ): Promise<"linked" | "conflict" | "invalid">;
+  discard(code: string): Promise<boolean>;
 };
 function fixture(
   options: {
@@ -239,8 +240,12 @@ test("a link code binds the verified sender to the challenge's own scope", async
 const IDENTITY_CODE = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const EXPIRED =
   "That link code expired, was already used, or is for another app. Create a new one in OpenBot.";
-function identityFixture(outcome?: "linked" | "conflict" | "invalid") {
+function identityFixture(
+  outcome?: "linked" | "conflict" | "invalid",
+  live = true,
+) {
   const redeemed: unknown[] = [];
+  const discarded: string[] = [];
   const f = fixture({
     bound: false,
     ...(outcome
@@ -250,11 +255,15 @@ function identityFixture(outcome?: "linked" | "conflict" | "invalid") {
               redeemed.push([code, who]);
               return outcome;
             },
+            discard: async (code) => {
+              discarded.push(code);
+              return live;
+            },
           },
         }
       : {}),
   });
-  return { f, redeemed };
+  return { f, redeemed, discarded };
 }
 const linkMessage = (code: string) => ({
   messages: [
@@ -282,28 +291,46 @@ test("an identity code from a Slack sender is redeemed through the adapter", asy
   );
   expect(redeemed).toEqual([[IDENTITY_CODE, { teamId: "T1", userId: "U1" }]]);
 });
-test("an identity code sent where others can read it is not redeemed", async () => {
+const CANCELLED =
+  "That code was posted where others could see it, so I cancelled it. Create a new one in OpenBot and send it to me in a direct message.";
+test("an identity code sent where others can read it is cancelled, never redeemed", async () => {
   for (const conversation of [{ id: "C0123456789", kind: "channel" }, null]) {
-    const { f, redeemed } = identityFixture("linked");
+    const { f, redeemed, discarded } = identityFixture("linked");
     const result = await run(f, {
       context: [sender("slack:T1:U1", conversation)],
       ...linkMessage(IDENTITY_CODE),
     });
-    expect(said(result.events)).toBe(
-      "Send your link code to me in a direct message, not in a channel. It still works until it expires.",
-    );
+    expect(said(result.events)).toBe(CANCELLED);
+    expect(said(result.events)).not.toContain("still works");
+    expect(discarded).toEqual([IDENTITY_CODE]);
     expect(redeemed).toEqual([]);
     expect(f.calls).toEqual([]);
   }
 });
+test("an unknown or expired code in a shared conversation gets the expired reply", async () => {
+  const { f, redeemed, discarded } = identityFixture("linked", false);
+  const result = await run(f, {
+    context: [sender("slack:T1:U1", { id: "C0123456789", kind: "channel" })],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+  expect(discarded).toEqual([IDENTITY_CODE]);
+  expect(redeemed).toEqual([]);
+});
+test("an identity code in a direct message is never discarded", async () => {
+  const { f, discarded } = identityFixture("linked");
+  await run(f, { context: [sender()], ...linkMessage(IDENTITY_CODE) });
+  expect(discarded).toEqual([]);
+});
 test("a Reachability code still links from a shared conversation", async () => {
-  const { f, redeemed } = identityFixture("linked");
+  const { f, redeemed, discarded } = identityFixture("linked");
   const result = await run(f, {
     context: [sender("slack:T1:U1", { id: "C0123456789", kind: "channel" })],
     ...linkMessage("11111111-2222-4333-8444-555555555555"),
   });
   expect(said(result.events)).toContain("Linked.");
   expect(redeemed).toEqual([]);
+  expect(discarded).toEqual([]);
 });
 test("an identity code conflict gets the already-linked reply", async () => {
   const { f } = identityFixture("conflict");

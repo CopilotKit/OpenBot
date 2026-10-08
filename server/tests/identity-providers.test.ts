@@ -50,10 +50,10 @@ test("each provider declares the proofs it accepts", () => {
   expect(acceptsMethod("github", "challenge")).toBe(false);
 });
 
-test("Slack tells the person to send the code to the bot", () => {
+test("Slack tells the person to send the code to the app in a direct message", () => {
   const code = "123e4567-e89b-42d3-a456-426614174000";
   expect(PROVIDERS.slack.instruction?.(code)).toBe(
-    `Send this message to the OpenBot bot in Slack: link ${code}`,
+    `Send this message to the OpenBot app in a direct message in Slack: link ${code}`,
   );
   expect(PROVIDERS.github.instruction).toBeUndefined();
 });
