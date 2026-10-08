@@ -34,10 +34,10 @@ const providerIcons = {
 
 /** A provider this build has no mark for gets a neutral link icon rather than someone else's logo. */
 export function providerIcon(provider: string) {
-  return (
-    (providerIcons as Record<string, typeof IconLink | undefined>)[provider] ??
-    IconLink
-  );
+  // Own keys only: "constructor" or "toString" would otherwise find an Object prototype member.
+  return Object.hasOwn(providerIcons, provider)
+    ? providerIcons[provider as keyof typeof providerIcons]
+    : IconLink;
 }
 
 /**

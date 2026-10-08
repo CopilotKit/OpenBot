@@ -53,6 +53,17 @@ test("providers map to their own icon with a neutral fallback", () => {
   expect(providerIcon("gitlab")).toBe(IconLink);
 });
 
+test("Object prototype keys are unknown providers, not icons", () => {
+  for (const key of [
+    "constructor",
+    "toString",
+    "hasOwnProperty",
+    "__proto__",
+  ]) {
+    expect(providerIcon(key)).toBe(IconLink);
+  }
+});
+
 test("the not-configured 503 means the feature is absent, so no links", async () => {
   const response = Response.json(
     {
