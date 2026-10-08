@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { unlinkOutcome } from "@/lib/identity/mutations";
 import { linksFromResponse } from "@/lib/identity/queries";
-import { linkedAccountDescription, providerIcon } from "./linked-accounts";
+import {
+  linkedAccountDescription,
+  linkedAccountsSectionState,
+  providerIcon,
+} from "./linked-accounts";
 
 const base = {
   id: "1",
@@ -85,6 +89,45 @@ test("other failures still throw the server message", async () => {
 test("a success unwraps the links", async () => {
   const links = [{ ...base, handle: "dana", status: "active" as const }];
   expect(await linksFromResponse(Response.json({ links }))).toEqual(links);
+});
+
+test("a 200 whose body has no links array throws the fallback", async () => {
+  await expect(
+    linksFromResponse(Response.json({ accounts: [] })),
+  ).rejects.toThrow("Could not load your linked accounts");
+  await expect(
+    linksFromResponse(new Response("<!doctype html>", { status: 200 })),
+  ).rejects.toThrow("Could not load your linked accounts");
+});
+
+const row = { ...base, handle: "dana", status: "active" as const };
+
+test("the section hides while loading and when nothing is linked", () => {
+  expect(linkedAccountsSectionState({ data: undefined, error: null })).toBe(
+    null,
+  );
+  expect(linkedAccountsSectionState({ data: [], error: null })).toBe(null);
+});
+
+test("rows show on their own when the list loaded", () => {
+  expect(linkedAccountsSectionState({ data: [row], error: null })).toEqual({
+    rows: [row],
+    error: null,
+  });
+});
+
+test("a failed refetch keeps stale rows on screen and shows the error with them", () => {
+  expect(
+    linkedAccountsSectionState({ data: [row], error: new Error("boom") }),
+  ).toEqual({ rows: [row], error: "boom" });
+});
+
+test("an error with no data, or with an empty cached list, still shows", () => {
+  for (const data of [undefined, []]) {
+    expect(
+      linkedAccountsSectionState({ data, error: new Error("boom") }),
+    ).toEqual({ rows: [], error: "boom" });
+  }
 });
 
 test("a 204 disconnect succeeds", async () => {

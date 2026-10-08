@@ -41,6 +41,26 @@ export function providerIcon(provider: string) {
 }
 
 /**
+ * What the section draws: nothing, rows, an error, or rows with an error under them.
+ *
+ * Hidden while loading and when nothing is linked (or the deployment has no identity store). A
+ * failed refetch keeps the rows already on screen — stale but visible — and says the list could not
+ * be refreshed, so a removed account that is still drawn is never shown without that warning. An
+ * error with no rows to keep, including over a cached empty list, shows on its own.
+ */
+export function linkedAccountsSectionState({
+  data,
+  error,
+}: {
+  data: LinkedAccount[] | undefined;
+  error: Error | null;
+}): { rows: LinkedAccount[]; error: string | null } | null {
+  const rows = data ?? [];
+  if (error) return { rows, error: error.message };
+  return rows.length > 0 ? { rows, error: null } : null;
+}
+
+/**
  * Who you are in the chat apps and code hosts this deployment talks to.
  *
  * Separate from the connector rows above it: those are services a Bot reads as you, these are how
@@ -48,33 +68,30 @@ export function providerIcon(provider: string) {
  */
 export function LinkedAccountsSection() {
   const links = useQuery(linkedAccountsQueryOptions());
-  // Rows win over the error: a failed background refetch must not replace a list already on screen.
-  if (links.data) {
-    // Deliberately hidden when nothing is linked, or when this deployment has no identity store.
-    if (links.data.length === 0) return null;
-    return (
-      <PageSection title="Linked accounts">
+  const state = linkedAccountsSectionState({
+    data: links.data,
+    error: links.error,
+  });
+  if (!state) return null;
+  return (
+    <PageSection title="Linked accounts">
+      {state.rows.length > 0 ? (
         <PageRows>
-          {links.data.map((account, index) => (
+          {state.rows.map((account, index) => (
             <div key={account.id}>
               {index > 0 ? <Separator /> : null}
               <LinkedAccountRow account={account} />
             </div>
           ))}
         </PageRows>
-      </PageSection>
-    );
-  }
-  if (links.error) {
-    return (
-      <PageSection title="Linked accounts">
-        <p className="text-destructive text-sm" role="alert">
-          Your linked accounts could not be loaded: {links.error.message}
+      ) : null}
+      {state.error ? (
+        <p className="mt-2 text-destructive text-sm" role="alert">
+          Your linked accounts could not be loaded: {state.error}
         </p>
-      </PageSection>
-    );
-  }
-  return null;
+      ) : null}
+    </PageSection>
+  );
 }
 
 /**
