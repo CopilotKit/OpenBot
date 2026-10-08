@@ -25,6 +25,8 @@ export const PROVIDERS: Readonly<Record<IdentityProvider, ProviderSpec>> =
     github: { title: "GitHub", methods: ["oauth"] },
   });
 
+const REALM_MAX = 512;
+
 export const GITHUB_DOTCOM_REALM = "github.com";
 
 export function isIdentityProvider(value: unknown): value is IdentityProvider {
@@ -46,15 +48,21 @@ export function slackRealm(parts: {
   workspaceId: string;
 }): string {
   const values = [parts.connectionId, parts.installationId, parts.workspaceId];
-  if (values.some((value) => !value.trim()))
+  if (values.some((value) => !value.trim() || value !== value.trim()))
     throw new IdentityInputError("Slack identity is incomplete.");
-  return values.map(encodeURIComponent).join(":");
+  const realm = values.map(encodeURIComponent).join(":");
+  if (realm.length > REALM_MAX)
+    throw new IdentityInputError("Slack identity is too long.");
+  return realm;
 }
+
+// Provider ids never contain whitespace: reject blank values but keep others exactly as given.
+const nonBlank = (value: string) => value.trim().length > 0;
 
 const identitySchema = z.object({
   provider: z.string().refine(isIdentityProvider),
-  realm: z.string().min(1).max(512),
-  subject: z.string().min(1).max(256),
+  realm: z.string().max(REALM_MAX).refine(nonBlank),
+  subject: z.string().max(256).refine(nonBlank),
 });
 
 /** Explicit fields only, so extra runtime properties never reach the persistence contract. */

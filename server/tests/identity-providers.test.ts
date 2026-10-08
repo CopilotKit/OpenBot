@@ -83,3 +83,39 @@ test("parseIdentity strips extra properties and bounds sizes", () => {
     parseIdentity({ provider: "slack", realm: "", subject: "s" }),
   ).toThrow(IdentityInputError);
 });
+
+test("parseIdentity refuses a whitespace-only realm or subject", () => {
+  expect(() =>
+    parseIdentity({ provider: "slack", realm: "   ", subject: "U1" }),
+  ).toThrow(IdentityInputError);
+  expect(() =>
+    parseIdentity({ provider: "slack", realm: "T1", subject: " \t" }),
+  ).toThrow(IdentityInputError);
+});
+
+test("slackRealm refuses parts with surrounding whitespace", () => {
+  expect(() =>
+    slackRealm({
+      connectionId: "C1",
+      installationId: "I1",
+      workspaceId: " T1",
+    }),
+  ).toThrow(IdentityInputError);
+  expect(() =>
+    slackRealm({
+      connectionId: "C1 ",
+      installationId: "I1",
+      workspaceId: "T1",
+    }),
+  ).toThrow(IdentityInputError);
+});
+
+test("slackRealm refuses a realm longer than parseIdentity accepts", () => {
+  expect(() =>
+    slackRealm({
+      connectionId: "C".repeat(200),
+      installationId: "I".repeat(200),
+      workspaceId: "T".repeat(200),
+    }),
+  ).toThrow(IdentityInputError);
+});
