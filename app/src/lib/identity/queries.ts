@@ -17,20 +17,28 @@ export const identityKeys = {
 
 const LOAD_FALLBACK = "Could not load your linked accounts";
 
+/** The machine-readable code on the server's own "no identity store here" 503. */
+export const IDENTITY_UNAVAILABLE = "identity_unavailable";
+
 /**
- * A deployment without an identity store answers 503 "not available". That is the feature being
- * absent, not the server breaking, so it reads as no links and the section hides itself.
+ * A deployment without an identity store answers 503 with `code: "identity_unavailable"`. That is
+ * the feature being absent, not the server breaking, so it reads as no links and the section hides
+ * itself. Any other failure, including a 503 from a proxy or the platform, throws so it is shown.
  */
 export async function linksFromResponse(
   response: Response,
 ): Promise<LinkedAccount[]> {
-  if (response.status === 503) return [];
   if (!response.ok) {
-    const message = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => undefined);
-    throw new Error(message ?? LOAD_FALLBACK);
+    const body = (await response.json().catch(() => null)) as {
+      error?: unknown;
+      code?: unknown;
+    } | null;
+    if (response.status === 503 && body?.code === IDENTITY_UNAVAILABLE) {
+      return [];
+    }
+    throw new Error(
+      typeof body?.error === "string" ? body.error : LOAD_FALLBACK,
+    );
   }
   const body = (await response.json().catch(() => null)) as {
     links?: LinkedAccount[];

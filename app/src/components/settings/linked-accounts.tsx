@@ -48,64 +48,69 @@ export function providerIcon(provider: string) {
  */
 export function LinkedAccountsSection() {
   const links = useQuery(linkedAccountsQueryOptions());
-  const unlink = useMutation(unlinkMutationOptions(queryClient));
-  if (links.isPending) return null;
+  // Rows win over the error: a failed background refetch must not replace a list already on screen.
+  if (links.data) {
+    // Deliberately hidden when nothing is linked, or when this deployment has no identity store.
+    if (links.data.length === 0) return null;
+    return (
+      <PageSection title="Linked accounts">
+        <PageRows>
+          {links.data.map((account, index) => (
+            <div key={account.id}>
+              {index > 0 ? <Separator /> : null}
+              <LinkedAccountRow account={account} />
+            </div>
+          ))}
+        </PageRows>
+      </PageSection>
+    );
+  }
   if (links.error) {
     return (
       <PageSection title="Linked accounts">
         <p className="text-destructive text-sm" role="alert">
-          Your linked accounts could not be loaded.
+          Your linked accounts could not be loaded: {links.error.message}
         </p>
       </PageSection>
     );
   }
-  const failedTitle = links.data.find(
-    (account) => account.id === unlink.variables,
-  )?.title;
-  // Deliberately hidden when nothing is linked, or when this deployment has no identity store.
-  if (links.data.length === 0) return null;
+  return null;
+}
+
+/**
+ * One linked account with its own disconnect, so a second click elsewhere neither re-enables this
+ * row mid-request nor overwrites its error.
+ */
+function LinkedAccountRow({ account }: { account: LinkedAccount }) {
+  const unlink = useMutation(unlinkMutationOptions(queryClient));
+  const Icon = providerIcon(account.provider);
   return (
-    <PageSection title="Linked accounts">
-      <PageRows>
-        {links.data.map((account, index) => {
-          const Icon = providerIcon(account.provider);
-          return (
-            <div key={account.id}>
-              {index > 0 ? <Separator /> : null}
-              <Item size="sm">
-                <ItemMedia variant="icon">
-                  <Icon />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{account.title}</ItemTitle>
-                  <ItemDescription>
-                    {linkedAccountDescription(account)}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button
-                    aria-label={`Disconnect ${account.title}`}
-                    size="sm"
-                    variant="outline"
-                    disabled={
-                      unlink.isPending && unlink.variables === account.id
-                    }
-                    onClick={() => unlink.mutate(account.id)}
-                  >
-                    Disconnect
-                  </Button>
-                </ItemActions>
-              </Item>
-            </div>
-          );
-        })}
-      </PageRows>
+    <>
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <Icon />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{account.title}</ItemTitle>
+          <ItemDescription>{linkedAccountDescription(account)}</ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Button
+            aria-label={`Disconnect ${account.title}`}
+            size="sm"
+            variant="outline"
+            disabled={unlink.isPending}
+            onClick={() => unlink.mutate(account.id)}
+          >
+            Disconnect
+          </Button>
+        </ItemActions>
+      </Item>
       {unlink.error ? (
-        <p className="mt-2 text-destructive text-sm" role="alert">
-          Could not disconnect {failedTitle ?? "that account"}:{" "}
-          {unlink.error.message}
+        <p className="px-3 pb-2 text-destructive text-sm" role="alert">
+          Could not disconnect {account.title}: {unlink.error.message}
         </p>
       ) : null}
-    </PageSection>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
+import { unlinkOutcome } from "@/lib/identity/mutations";
 import { linksFromResponse } from "@/lib/identity/queries";
 import { linkedAccountDescription, providerIcon } from "./linked-accounts";
 
@@ -48,12 +49,32 @@ test("providers map to their own icon with a neutral fallback", () => {
   expect(providerIcon("gitlab")).toBe(IconLink);
 });
 
-test("a 503 means the feature is absent, so no links", async () => {
+test("the not-configured 503 means the feature is absent, so no links", async () => {
   const response = Response.json(
-    { error: "Linked accounts are not available." },
+    {
+      error: "Linked accounts are not available.",
+      code: "identity_unavailable",
+    },
     { status: 503 },
   );
   expect(await linksFromResponse(response)).toEqual([]);
+});
+
+test("any other 503 is an outage and throws its message", async () => {
+  const response = Response.json(
+    { error: "Service Unavailable" },
+    { status: 503 },
+  );
+  await expect(linksFromResponse(response)).rejects.toThrow(
+    "Service Unavailable",
+  );
+});
+
+test("a 503 with no JSON body throws the fallback", async () => {
+  const response = new Response("upstream down", { status: 503 });
+  await expect(linksFromResponse(response)).rejects.toThrow(
+    "Could not load your linked accounts",
+  );
 });
 
 test("other failures still throw the server message", async () => {
@@ -64,4 +85,30 @@ test("other failures still throw the server message", async () => {
 test("a success unwraps the links", async () => {
   const links = [{ ...base, handle: "dana", status: "active" as const }];
   expect(await linksFromResponse(Response.json({ links }))).toEqual(links);
+});
+
+test("a 204 disconnect succeeds", async () => {
+  await expect(
+    unlinkOutcome(new Response(null, { status: 204 })),
+  ).resolves.toBeUndefined();
+});
+
+test("a 404 disconnect means the link is already gone, which is success", async () => {
+  await expect(
+    unlinkOutcome(
+      Response.json({ error: "Linked account not found." }, { status: 404 }),
+    ),
+  ).resolves.toBeUndefined();
+});
+
+test("any other disconnect failure throws the server message", async () => {
+  await expect(
+    unlinkOutcome(Response.json({ error: "boom" }, { status: 500 })),
+  ).rejects.toThrow("boom");
+});
+
+test("a disconnect failure without a message throws the fallback", async () => {
+  await expect(
+    unlinkOutcome(new Response("nope", { status: 502 })),
+  ).rejects.toThrow("The account could not be disconnected");
 });
