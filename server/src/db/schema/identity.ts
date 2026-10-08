@@ -81,6 +81,10 @@ export const identityLinkChallenges = pgTable(
   },
   (table) => [
     index("identity_link_challenges_expiry_idx").on(table.expiresAt),
-    index("identity_link_challenges_user_idx").on(table.userId, table.provider),
+    // One live code per person per provider, enforced here rather than by the code that issues them.
+    uniqueIndex("identity_link_challenges_user_provider_idx").on(
+      table.userId,
+      table.provider,
+    ),
   ],
 );

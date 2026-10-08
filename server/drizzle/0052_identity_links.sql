@@ -23,7 +23,7 @@ CREATE TABLE "identity_links" (
 --> statement-breakpoint
 ALTER TABLE "identity_links" ADD CONSTRAINT "identity_links_credential_id_credentials_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."credentials"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "identity_link_challenges_expiry_idx" ON "identity_link_challenges" USING btree ("expires_at");--> statement-breakpoint
-CREATE INDEX "identity_link_challenges_user_idx" ON "identity_link_challenges" USING btree ("user_id","provider");--> statement-breakpoint
+CREATE UNIQUE INDEX "identity_link_challenges_user_provider_idx" ON "identity_link_challenges" USING btree ("user_id","provider");--> statement-breakpoint
 CREATE UNIQUE INDEX "identity_links_identity_idx" ON "identity_links" USING btree ("provider","realm","subject");--> statement-breakpoint
 CREATE UNIQUE INDEX "identity_links_user_realm_idx" ON "identity_links" USING btree ("user_id","provider","realm");--> statement-breakpoint
 CREATE UNIQUE INDEX "identity_links_credential_idx" ON "identity_links" USING btree ("credential_id") WHERE "identity_links"."credential_id" IS NOT NULL;

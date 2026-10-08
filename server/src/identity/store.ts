@@ -407,15 +407,6 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
         );
       const code = randomUUID();
       return database.transaction(async (transaction) => {
-        // One live code per person per provider: a new one replaces any earlier one.
-        await transaction
-          .delete(identityLinkChallenges)
-          .where(
-            and(
-              eq(identityLinkChallenges.userId, userId),
-              eq(identityLinkChallenges.provider, provider),
-            ),
-          );
         // No sweep exists, so codes that were never sent would otherwise accumulate.
         await transaction
           .delete(identityLinkChallenges)
@@ -432,6 +423,18 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
             provider,
             userId,
             expiresAt: sql`clock_timestamp() + interval '10 minutes'`,
+          })
+          // One live code per person per provider, enforced by the unique index: a new code
+          // replaces any earlier one, even when two requests race.
+          .onConflictDoUpdate({
+            target: [
+              identityLinkChallenges.userId,
+              identityLinkChallenges.provider,
+            ],
+            set: {
+              tokenHash: sql`excluded.token_hash`,
+              expiresAt: sql`excluded.expires_at`,
+            },
           })
           .returning({ expiresAt: identityLinkChallenges.expiresAt });
         if (!challenge) throw new IdentityLinkError();

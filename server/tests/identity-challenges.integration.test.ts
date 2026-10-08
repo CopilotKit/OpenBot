@@ -228,3 +228,26 @@ test("redeeming a second code in the same realm replaces the person's older link
   expect(await store.linkedUser(first)).toBeNull();
   expect((await store.linkedUser(second))?.userId).toBe(owner);
 });
+
+test("concurrent requests still leave one live code per person and provider", async () => {
+  const owner = user();
+  const issued = await Promise.all(
+    Array.from({ length: 10 }, () => store.issueChallenge(owner, "slack")),
+  );
+  const rows = await database
+    .select()
+    .from(identityLinkChallenges)
+    .where(eq(identityLinkChallenges.userId, owner));
+  expect(rows).toHaveLength(1);
+  const live = issued.filter(({ code }) => hashOf(code) === rows[0]?.tokenHash);
+  expect(live).toHaveLength(1);
+  for (const { code } of issued) {
+    if (code === live[0]?.code) continue;
+    await expect(store.redeemChallenge(code, slack())).rejects.toBeInstanceOf(
+      IdentityLinkError,
+    );
+  }
+  expect(
+    (await store.redeemChallenge(live[0]?.code ?? "", slack())).userId,
+  ).toBe(owner);
+});

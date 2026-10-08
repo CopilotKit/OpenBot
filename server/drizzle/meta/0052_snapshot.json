@@ -1,5 +1,5 @@
 {
-  "id": "a5c96b02-0eca-4def-bcc4-590cdb66fb28",
+  "id": "f5896210-489f-45e4-a318-4056d4d88cf3",
   "prevId": "b4bb328d-1308-403f-a2ac-f8a291aaabc5",
   "version": "7",
   "dialect": "postgresql",
@@ -8956,8 +8956,8 @@
           "method": "btree",
           "with": {}
         },
-        "identity_link_challenges_user_idx": {
-          "name": "identity_link_challenges_user_idx",
+        "identity_link_challenges_user_provider_idx": {
+          "name": "identity_link_challenges_user_provider_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -8972,7 +8972,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
