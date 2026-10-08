@@ -1,11 +1,7 @@
 import { IconBrandGithub, IconBrandSlack, IconLink } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  PageEmpty,
-  PageRows,
-  PageSection,
-} from "@/components/layout/page-shell";
+import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -61,14 +57,29 @@ export function providerIcon(provider: string) {
     : IconLink;
 }
 
+/** The account types a person can link from here, in the order their cards are drawn. */
+const linkableProviders = [
+  { provider: "slack", title: "Slack" },
+  { provider: "github", title: "GitHub" },
+] as const;
+
+export type LinkedAccountsEntry =
+  | { kind: "linked"; account: LinkedAccount }
+  | {
+      kind: "available";
+      provider: (typeof linkableProviders)[number]["provider"];
+      title: string;
+    };
+
 /**
- * What the section draws: nothing, rows, an error, or rows with an error under them.
+ * What the section draws: one card per account type, then an error if the list failed.
  *
- * Hidden until the list has loaded, and when nothing is linked and nothing can be (no identity
- * store, or no provider available to link); shown empty when a provider is available. A
- * failed refetch keeps the rows already on screen — stale but visible — and says the list could not
- * be refreshed, so a removed account that is still drawn is never shown without that warning. An
- * error with no rows to keep, including over a cached empty list, shows on its own.
+ * Each account type is either the account linked there, with its disconnect, or — when this
+ * deployment can link it — an unlinked card to connect from. Links stay listed even when their type
+ * can no longer be linked, so they can still be disconnected; links of a type this build does not
+ * know come last. Connect cards need the list: with no list loaded there is no knowing whether the
+ * account is already linked. Hidden when there is nothing to list, nothing to connect and nothing
+ * to report. A failed refetch keeps the stale entries on screen with the error under them.
  */
 export function linkedAccountsSectionState({
   data,
@@ -78,13 +89,24 @@ export function linkedAccountsSectionState({
   data: LinkedAccount[] | undefined;
   error: Error | null;
   providers?: IdentityProviders;
-}): { rows: LinkedAccount[]; error: string | null } | null {
-  const rows = data ?? [];
-  if (error) return { rows, error: error.message };
-  if (rows.length > 0 || providers?.slack || providers?.github) {
-    return { rows, error: null };
+}): { entries: LinkedAccountsEntry[]; error: string | null } | null {
+  const links = data ?? [];
+  const entries: LinkedAccountsEntry[] = [];
+  for (const { provider, title } of linkableProviders) {
+    const linked = links.filter((account) => account.provider === provider);
+    for (const account of linked) entries.push({ kind: "linked", account });
+    if (linked.length === 0 && data !== undefined && providers?.[provider]) {
+      entries.push({ kind: "available", provider, title });
+    }
   }
-  return null;
+  for (const account of links) {
+    if (
+      !linkableProviders.some(({ provider }) => provider === account.provider)
+    )
+      entries.push({ kind: "linked", account });
+  }
+  if (entries.length === 0 && !error) return null;
+  return { entries, error: error ? error.message : null };
 }
 
 /**
@@ -114,51 +136,39 @@ export function LinkedAccountsSection() {
     providers: providers.data,
   });
   if (!state) return null;
+  const connect = {
+    slack: {
+      pending: issueCode.isPending,
+      start: () =>
+        issueCode.mutate(undefined, { onSuccess: (code) => setIssued(code) }),
+    },
+    github: {
+      pending: connectGithub.isPending,
+      start: () =>
+        connectGithub.mutate(undefined, {
+          onSuccess: (url) => window.location.assign(url),
+        }),
+    },
+  };
   return (
-    <PageSection
-      title="Linked accounts"
-      action={
-        <div className="flex gap-2">
-          {providers.data?.slack ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={issueCode.isPending}
-              onClick={() =>
-                issueCode.mutate(undefined, {
-                  onSuccess: (code) => setIssued(code),
-                })
-              }
-            >
-              Link Slack
-            </Button>
-          ) : null}
-          {providers.data?.github ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={connectGithub.isPending}
-              onClick={() =>
-                connectGithub.mutate(undefined, {
-                  onSuccess: (url) => window.location.assign(url),
-                })
-              }
-            >
-              Connect GitHub
-            </Button>
-          ) : null}
-        </div>
-      }
-    >
-      {state.rows.length === 0 && !state.error ? (
-        <PageEmpty>No linked accounts yet.</PageEmpty>
-      ) : null}
-      {state.rows.length > 0 ? (
+    <PageSection title="Linked accounts">
+      {state.entries.length > 0 ? (
         <PageRows>
-          {state.rows.map((account, index) => (
-            <div key={account.id}>
+          {state.entries.map((entry, index) => (
+            <div
+              key={entry.kind === "linked" ? entry.account.id : entry.provider}
+            >
               {index > 0 ? <Separator /> : null}
-              <LinkedAccountRow account={account} />
+              {entry.kind === "linked" ? (
+                <LinkedAccountRow account={entry.account} />
+              ) : (
+                <AvailableAccountRow
+                  provider={entry.provider}
+                  title={entry.title}
+                  pending={connect[entry.provider].pending}
+                  onConnect={connect[entry.provider].start}
+                />
+              )}
             </div>
           ))}
         </PageRows>
@@ -223,6 +233,43 @@ export function LinkedAccountsSection() {
         </DialogContent>
       </Dialog>
     </PageSection>
+  );
+}
+
+/** An account type this deployment can link and the person has not linked yet. */
+function AvailableAccountRow({
+  provider,
+  title,
+  pending,
+  onConnect,
+}: {
+  provider: string;
+  title: string;
+  pending: boolean;
+  onConnect: () => void;
+}) {
+  const Icon = providerIcon(provider);
+  return (
+    <Item size="sm">
+      <ItemMedia variant="icon">
+        <Icon />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{title}</ItemTitle>
+        <ItemDescription>Not linked</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          aria-label={`Connect ${title}`}
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={onConnect}
+        >
+          Connect
+        </Button>
+      </ItemActions>
+    </Item>
   );
 }
 

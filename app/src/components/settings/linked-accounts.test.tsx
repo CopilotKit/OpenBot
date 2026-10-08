@@ -112,58 +112,104 @@ test("a 200 whose body has no links array throws the fallback", async () => {
 });
 
 const row = { ...base, handle: "dana", status: "active" as const };
+const slackRow = {
+  ...base,
+  id: "2",
+  provider: "slack" as const,
+  title: "Slack",
+  handle: null,
+  status: "active" as const,
+};
+const none = { slack: false, github: false };
 
-test("the section hides while loading and when nothing is linked", () => {
-  expect(linkedAccountsSectionState({ data: undefined, error: null })).toBe(
-    null,
-  );
-  expect(linkedAccountsSectionState({ data: [], error: null })).toBe(null);
-});
-
-test("the section shows an empty list whenever linking is available", () => {
-  for (const providers of [
-    { slack: true, github: false },
-    { slack: false, github: true },
-  ]) {
-    for (const data of [undefined, []]) {
-      expect(
-        linkedAccountsSectionState({ data, error: null, providers }),
-      ).toEqual({ rows: [], error: null });
-    }
+test("the section hides when nothing is linked and nothing can be", () => {
+  for (const providers of [undefined, none]) {
+    expect(
+      linkedAccountsSectionState({ data: [], error: null, providers }),
+    ).toBe(null);
+    expect(
+      linkedAccountsSectionState({ data: undefined, error: null, providers }),
+    ).toBe(null);
   }
 });
 
-test("the section stays hidden when no provider is available", () => {
+test("each account type that can be linked gets its own card to connect from", () => {
   expect(
     linkedAccountsSectionState({
       data: [],
       error: null,
-      providers: { slack: false, github: false },
+      providers: { slack: true, github: true },
     }),
-  ).toBe(null);
+  ).toEqual({
+    entries: [
+      { kind: "available", provider: "slack", title: "Slack" },
+      { kind: "available", provider: "github", title: "GitHub" },
+    ],
+    error: null,
+  });
   expect(
-    linkedAccountsSectionState({ data: [], error: null, providers: undefined }),
-  ).toBe(null);
+    linkedAccountsSectionState({
+      data: [],
+      error: null,
+      providers: { slack: false, github: true },
+    }),
+  ).toEqual({
+    entries: [{ kind: "available", provider: "github", title: "GitHub" }],
+    error: null,
+  });
 });
 
-test("rows show on their own when the list loaded", () => {
-  expect(linkedAccountsSectionState({ data: [row], error: null })).toEqual({
-    rows: [row],
+test("a linked account takes the place of its connect card", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [row],
+      error: null,
+      providers: { slack: true, github: true },
+    }),
+  ).toEqual({
+    entries: [
+      { kind: "available", provider: "slack", title: "Slack" },
+      { kind: "linked", account: row },
+    ],
+    error: null,
+  });
+});
+
+test("links stay listed, in Slack then GitHub order, even when linking is off", () => {
+  expect(
+    linkedAccountsSectionState({
+      data: [row, slackRow],
+      error: null,
+      providers: none,
+    }),
+  ).toEqual({
+    entries: [
+      { kind: "linked", account: slackRow },
+      { kind: "linked", account: row },
+    ],
     error: null,
   });
 });
 
 test("a failed refetch keeps stale rows on screen and shows the error with them", () => {
   expect(
-    linkedAccountsSectionState({ data: [row], error: new Error("boom") }),
-  ).toEqual({ rows: [row], error: "boom" });
+    linkedAccountsSectionState({
+      data: [row],
+      error: new Error("boom"),
+      providers: none,
+    }),
+  ).toEqual({ entries: [{ kind: "linked", account: row }], error: "boom" });
 });
 
 test("an error with no data, or with an empty cached list, still shows", () => {
   for (const data of [undefined, []]) {
     expect(
-      linkedAccountsSectionState({ data, error: new Error("boom") }),
-    ).toEqual({ rows: [], error: "boom" });
+      linkedAccountsSectionState({
+        data,
+        error: new Error("boom"),
+        providers: none,
+      }),
+    ).toEqual({ entries: [], error: "boom" });
   }
 });
 
