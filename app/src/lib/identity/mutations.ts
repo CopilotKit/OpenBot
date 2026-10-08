@@ -58,22 +58,45 @@ export function issueSlackCodeMutationOptions() {
   });
 }
 
+const CONNECT_GITHUB_FAILED = "Could not start connecting GitHub. Try again.";
+
+/**
+ * The only address the browser will follow after asking to connect GitHub: the OAuth authorize page
+ * on github.com over https. Anything else — a missing envelope, `javascript:`, another host — is a
+ * broken or tampered response, and navigating to it would hand the person to somewhere else.
+ */
+export function githubAuthorizationUrl(value: unknown): string {
+  const candidate =
+    value && typeof value === "object"
+      ? (value as { authorizationUrl?: unknown }).authorizationUrl
+      : undefined;
+  if (typeof candidate !== "string") throw new Error(CONNECT_GITHUB_FAILED);
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error(CONNECT_GITHUB_FAILED);
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.host !== "github.com" ||
+    url.pathname !== "/login/oauth/authorize"
+  ) {
+    throw new Error(CONNECT_GITHUB_FAILED);
+  }
+  return candidate;
+}
+
 /** Resolves to the GitHub consent URL; the caller navigates, not this factory. */
 export function connectGithubMutationOptions() {
   return mutationOptions({
-    mutationFn: async (): Promise<string> => {
-      const { authorizationUrl } = await client<{ authorizationUrl: unknown }>(
-        "/api/identity/github/connect",
-        "connect",
-        {
+    mutationFn: async (): Promise<string> =>
+      // `client` yields undefined when the envelope key is absent; the validator handles that.
+      githubAuthorizationUrl(
+        await client<unknown>("/api/identity/github/connect", "connect", {
           method: "POST",
-          fallback: "Could not start connecting GitHub",
-        },
-      );
-      if (typeof authorizationUrl !== "string") {
-        throw new Error("Could not start connecting GitHub");
-      }
-      return authorizationUrl;
-    },
+          fallback: CONNECT_GITHUB_FAILED,
+        }),
+      ),
   });
 }
