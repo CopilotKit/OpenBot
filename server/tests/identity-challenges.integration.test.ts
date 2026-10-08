@@ -322,3 +322,20 @@ test("issuing a code waits for the person's identity lock, which removal holds",
   const { code } = await issuing;
   expect(await rowFor(code)).toBeDefined();
 });
+
+test("an uppercase code redeems", async () => {
+  const owner = user();
+  const { code } = await store.issueChallenge(owner, "slack");
+  expect(
+    (await store.redeemChallenge(code.toUpperCase(), slack())).userId,
+  ).toBe(owner);
+});
+
+test.each([42, undefined, " user-padded", "user-padded "])(
+  "issuing for a userId of %p is refused as input",
+  async (userId) => {
+    await expect(
+      store.issueChallenge(userId as unknown as string, "slack"),
+    ).rejects.toThrow(IdentityInputError);
+  },
+);

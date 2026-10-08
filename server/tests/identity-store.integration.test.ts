@@ -396,3 +396,32 @@ test("a blank linked handle is stored as none, and a non-string one is refused",
   ).rejects.toThrow(IdentityInputError);
   expect(await store.linkedUser(identity)).toBeNull();
 });
+
+test("an uppercase credentialId is kept on relink, not revoked as a different token", async () => {
+  const person = user();
+  const identity = github();
+  const token = await credential();
+  await store.linkVerified(identity, person, {
+    method: "oauth",
+    credentialId: token.toUpperCase(),
+  });
+  const link = await store.linkVerified(identity, person, {
+    method: "oauth",
+    credentialId: token.toUpperCase(),
+  });
+  expect(link.credentialId).toBe(token);
+  expect(await vault.isLive(token)).toBe(true);
+});
+
+test.each([42, null, " user-padded", "user-padded "])(
+  "a userId of %p is refused as input",
+  async (userId) => {
+    const identity = github();
+    await expect(
+      store.linkVerified(identity, userId as unknown as string, {
+        method: "oauth",
+      }),
+    ).rejects.toThrow(IdentityInputError);
+    expect(await store.linkedUser(identity)).toBeNull();
+  },
+);

@@ -131,6 +131,12 @@ function normalizeHandle(handle: unknown): string | null | undefined {
   return Array.from(trimmed).slice(0, HANDLE_MAX).join("");
 }
 
+/** A user id is an opaque, non-blank string with no surrounding whitespace, never coerced. */
+function requireUserId(userId: unknown): asserts userId is string {
+  if (typeof userId !== "string" || !userId.trim() || userId !== userId.trim())
+    throw new IdentityInputError();
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
@@ -140,8 +146,9 @@ const CREDENTIAL_UNAVAILABLE = "The credential for this link is not available.";
  * locked live (`for update`, so a concurrent revoke waits for this link to commit or sees it), it
  * must be this provider's own user token (kind "connector", vault provider equal to the registry's
  * `credentialProvider`) so a link can never adopt, and a later unlink or replace never revoke, some
- * other secret such as an operator key, and it must not already belong to a link other than `own`
- * (the identity's own link and the person's older link in the realm, which this write replaces).
+ * other secret such as an operator key, and it must not already belong to any link outside `own`
+ * (the one link this write updates or replaces: the identity's own link on a relink, else the
+ * person's older link in the realm, if any).
  * The partial unique index identity_links_credential_idx is the backstop.
  */
 async function claimCredential(
@@ -182,7 +189,8 @@ async function claimCredential(
 
 /**
  * Link `identity` to `userId` inside `transaction`. Module-private: only `linkVerified` (which
- * validates the proof first) and `redeemChallenge` (no credential) call it.
+ * checks the proof's method against the provider and the credential id's shape first; the proof
+ * itself is the caller's to verify) and `redeemChallenge` (no credential) call it.
  *
  * Two races are handled. Two people racing for one identity: the identity row is locked first, and a
  * racing insert surfaces as a unique violation on the identity index, which is a refusal
@@ -411,7 +419,7 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       },
     ): Promise<IdentityLink> {
       const identity = parseIdentity(value);
-      if (!userId.trim()) throw new IdentityInputError();
+      requireUserId(userId);
       if (!acceptsMethod(identity.provider, proof.method))
         throw new IdentityInputError(
           "This provider does not accept that kind of proof.",
@@ -481,7 +489,7 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       userId: string,
       provider: IdentityProvider,
     ): Promise<{ code: string; expiresAt: Date }> {
-      if (!userId.trim()) throw new IdentityInputError();
+      requireUserId(userId);
       if (
         !isIdentityProvider(provider) ||
         !acceptsMethod(provider, "challenge")
@@ -492,7 +500,8 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
       const code = randomUUID();
       return database.transaction(async (transaction) => {
         await identityUserLock(transaction, userId);
-        // No sweep exists, so codes that were never sent would otherwise accumulate.
+        // Nothing else deletes an expired code (a person has at most one per provider, but one
+        // never redeemed stays forever), so each issue clears those over a day stale.
         await transaction
           .delete(identityLinkChallenges)
           .where(
@@ -522,7 +531,8 @@ export function createIdentityStore(database: Database, credentials: Revoke) {
             },
           })
           .returning({ expiresAt: identityLinkChallenges.expiresAt });
-        if (!challenge) throw new IdentityLinkError();
+        // An upsert always returns its row; this only narrows the type.
+        if (!challenge) throw new Error("The link code was not stored.");
         return { code, expiresAt: challenge.expiresAt };
       });
     },
