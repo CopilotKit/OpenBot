@@ -93,12 +93,32 @@ test("a 204 disconnect succeeds", async () => {
   ).resolves.toBeUndefined();
 });
 
-test("a 404 disconnect means the link is already gone, which is success", async () => {
+test("the server's own 404 means the link is already gone, which is success", async () => {
   await expect(
     unlinkOutcome(
-      Response.json({ error: "Linked account not found." }, { status: 404 }),
+      Response.json(
+        { error: "Linked account not found.", code: "identity_link_not_found" },
+        { status: 404 },
+      ),
     ),
   ).resolves.toBeUndefined();
+});
+
+test("a 404 without the server's code is a failed disconnect", async () => {
+  await expect(
+    unlinkOutcome(Response.json({ error: "Not Found" }, { status: 404 })),
+  ).rejects.toThrow("Not Found");
+});
+
+test("an HTML 404 from a proxy or SPA fallback throws the fallback", async () => {
+  await expect(
+    unlinkOutcome(
+      new Response("<!doctype html><html></html>", {
+        status: 404,
+        headers: { "content-type": "text/html" },
+      }),
+    ),
+  ).rejects.toThrow("The account could not be disconnected");
 });
 
 test("any other disconnect failure throws the server message", async () => {
