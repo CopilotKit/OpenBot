@@ -14,18 +14,3 @@ export function unlinkMutationOptions(queryClient: QueryClient) {
       queryClient.invalidateQueries({ queryKey: identityKeys.links() }),
   });
 }
-
-export function confirmChallengeMutationOptions() {
-  return mutationOptions({
-    mutationFn: (token: string): Promise<{ hint: string | null }> =>
-      client<{ hint: string | null }>(
-        "/api/identity/challenges/confirm",
-        "confirmation",
-        {
-          method: "POST",
-          body: { token },
-          fallback: "This link could not be confirmed",
-        },
-      ),
-  });
-}
