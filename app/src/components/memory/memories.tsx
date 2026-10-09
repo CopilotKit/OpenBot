@@ -52,7 +52,16 @@ export function RememberFact() {
   const remember = useMutation(createMemoryMutationOptions(queryClient));
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" variant="ghost">
+      <Button
+        onClick={() => {
+          // Opening starts clean: no draft or failure left from an earlier attempt.
+          setContent("");
+          remember.reset();
+          setOpen(true);
+        }}
+        size="sm"
+        variant="ghost"
+      >
         <IconPlus />
         Remember a fact
       </Button>
@@ -244,7 +253,7 @@ function MemoryRow({
       <ItemActions>
         {/* Binary and immediate: Bots stop or start using it when switched. */}
         <Switch
-          aria-label="Enabled"
+          aria-label={`Use this memory: ${clip(memory.content)}`}
           checked={memory.enabled}
           disabled={save.isPending}
           onCheckedChange={(enabled) => update({ enabled })}
@@ -266,6 +275,12 @@ function MemoryRow({
       ) : null}
     </Item>
   );
+}
+
+/** A memory's words, cut short enough to name the switch beside them. */
+function clip(content: string) {
+  const line = content.replace(/\s+/g, " ").trim();
+  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
 }
 
 /** The memory's words in a dialog. Saving rewrites them; the server records it as edited. */

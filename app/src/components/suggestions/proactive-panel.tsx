@@ -463,7 +463,16 @@ function SettingRow({
   return (
     <>
       <Item
-        render={<button onClick={() => setOpen(true)} type="button" />}
+        render={
+          <button
+            onClick={() => {
+              // Opening starts clean: the last change's failure is not this visit's.
+              change.reset();
+              setOpen(true);
+            }}
+            type="button"
+          />
+        }
         size="sm"
       >
         <ItemMedia variant="icon">

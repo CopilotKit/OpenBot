@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemorySources } from "@/components/memory/sources";
 import { ProactiveResearchSettings } from "@/components/suggestions/proactive-panel";
@@ -46,11 +47,25 @@ const research = (id: string, agentId: string, focus: string) => ({
 });
 
 const requested: string[] = [];
+/** A refusal the server gives the next write, or none. */
+let refuseWrite: string | null = null;
+/** The settings the Drive search action takes. */
+let searchSettings: Record<string, unknown> = {};
 function serving() {
   requested.length = 0;
-  global.fetch = (async (input: RequestInfo | URL) => {
+  refuseWrite = null;
+  searchSettings = {};
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     requested.push(url);
+    if (init?.method && init.method !== "GET") {
+      if (refuseWrite) {
+        const error = refuseWrite;
+        refuseWrite = null;
+        return Response.json({ error }, { status: 400 });
+      }
+      return Response.json({ ok: true });
+    }
     if (url === "/api/memory/sources") {
       return Response.json({
         sources: [
@@ -66,7 +81,7 @@ function serving() {
             ref: "mcp/drive/search",
             title: "Search Drive",
             description: "",
-            inputSchema: {},
+            inputSchema: { properties: searchSettings },
           },
         ],
       });
@@ -117,4 +132,60 @@ test("only this Bot's background research is listed, with no Bot to pick", async
   expect(await view.findByText(/Unpaid invoices/)).toBeTruthy();
   expect(view.queryByText(/Stale pages/)).toBeNull();
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
+});
+
+/** Opens Add source for the Expenses Bot and chooses its one read action. */
+async function openAddSource(view: ReturnType<typeof draw>) {
+  const user = userEvent.setup({ document });
+  await view.findByText("Receipts folder");
+  await user.click(view.getByRole("button", { name: "Add source" }));
+  await user.click(
+    await view.findByRole("combobox", { name: "Connected app action" }),
+  );
+  await user.click(await view.findByRole("option", { name: "Search Drive" }));
+  return user;
+}
+
+test("an action setting called name is its own field, not the source name", async () => {
+  serving();
+  searchSettings = { name: { type: "string" } };
+  const view = draw(<MemorySources agentId="expenses" />);
+  await openAddSource(view);
+  const setting = await view.findByLabelText("name");
+  expect(setting).not.toBe(view.getByLabelText("Source name"));
+});
+
+test("reopening Add source after a failure keeps the draft but not the failure", async () => {
+  serving();
+  const view = draw(<MemorySources agentId="expenses" />);
+  const user = await openAddSource(view);
+  await user.type(view.getByLabelText("Source name"), "Invoices");
+  refuseWrite = "That folder cannot be read.";
+  await user.click(view.getByRole("button", { name: "Add and sync source" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "That folder cannot be read.",
+  );
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "Add source" }));
+  const name = (await view.findByLabelText("Source name")) as HTMLInputElement;
+  expect(name.value).toBe("Invoices");
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("reopening a research row after a failure starts without it", async () => {
+  serving();
+  const view = draw(<ProactiveResearchSettings agentId="expenses" />);
+  const user = userEvent.setup({ document });
+  await user.click(await view.findByRole("button", { name: /Expenses/ }));
+  refuseWrite = "Research is paused.";
+  await user.click(await view.findByRole("button", { name: "Run now" }));
+  expect((await view.findByRole("alert")).textContent).toBe(
+    "Research is paused.",
+  );
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: /Expenses/ }));
+  await view.findByRole("button", { name: "Run now" });
+  expect(view.queryByRole("alert")).toBeNull();
 });

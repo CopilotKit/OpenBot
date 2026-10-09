@@ -120,7 +120,16 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
   return (
     <PageSection
       action={
-        <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
+        <Button
+          onClick={() => {
+            // The draft is kept on purpose; the last attempt's failure is not.
+            setError("");
+            add.reset();
+            setAdding(true);
+          }}
+          size="sm"
+          variant="ghost"
+        >
           <IconPlus />
           Add source
         </Button>
@@ -339,7 +348,8 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                 </Field>
                 {settings.map(({ name, schema }) => (
                   <Field key={name}>
-                    <FieldLabel htmlFor={`${id}-${name}`}>
+                    {/* `arg-` keeps a setting called `name` or `bot` off the fixed fields' ids. */}
+                    <FieldLabel htmlFor={`${id}-arg-${name}`}>
                       {schema.title || name.replaceAll("_", " ")}
                       {required.includes(name) ? " *" : ""}
                     </FieldLabel>
@@ -351,7 +361,10 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                         required={required.includes(name)}
                         value={args[name] || null}
                       >
-                        <SelectTrigger className="w-full" id={`${id}-${name}`}>
+                        <SelectTrigger
+                          className="w-full"
+                          id={`${id}-arg-${name}`}
+                        >
                           <SelectValue placeholder="Choose a value" />
                         </SelectTrigger>
                         <SelectContent>
@@ -367,7 +380,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                       </Select>
                     ) : (
                       <Input
-                        id={`${id}-${name}`}
+                        id={`${id}-arg-${name}`}
                         type={
                           schema.type === "number" || schema.type === "integer"
                             ? "number"

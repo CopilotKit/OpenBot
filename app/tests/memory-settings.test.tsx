@@ -38,8 +38,11 @@ const memory = (overrides: Record<string, unknown>) => ({
 });
 
 const writes: { request: string; body: unknown }[] = [];
+/** A refusal the server gives the next write, or none. */
+let refuseWrite: string | null = null;
 function serving() {
   writes.length = 0;
+  refuseWrite = null;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -48,6 +51,11 @@ function serving() {
         request: `${method} ${url}`,
         body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
       });
+      if (refuseWrite) {
+        const error = refuseWrite;
+        refuseWrite = null;
+        return Response.json({ error }, { status: 400 });
+      }
       return Response.json({ ok: true });
     }
     if (url.startsWith("/api/agents")) {
@@ -105,4 +113,43 @@ test("remembering a fact saves it", async () => {
       body: { content: "I work from Lisbon." },
     }),
   );
+});
+
+test("each memory's switch is named for the memory it turns on or off", async () => {
+  serving();
+  const view = draw(<MemoryList />);
+  expect(
+    await view.findByRole("switch", {
+      name: "Use this memory: I prefer mornings.",
+    }),
+  ).toBeTruthy();
+  expect(
+    view.getByRole("switch", {
+      name: "Use this memory: Receipts go to finance@.",
+    }),
+  ).toBeTruthy();
+});
+
+test("reopening Remember a fact after a failure starts clean", async () => {
+  serving();
+  refuseWrite = "Memory is full.";
+  const view = draw(<RememberFact />);
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: "Remember a fact" }));
+  await user.type(
+    await view.findByRole("textbox", {
+      name: "Something you want your Bots to know",
+    }),
+    "I work from Lisbon.",
+  );
+  await user.click(view.getByRole("button", { name: "Remember" }));
+  expect((await view.findByRole("alert")).textContent).toBe("Memory is full.");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  await user.click(view.getByRole("button", { name: "Remember a fact" }));
+  const field = (await view.findByRole("textbox", {
+    name: "Something you want your Bots to know",
+  })) as HTMLTextAreaElement;
+  expect(field.value).toBe("");
+  expect(view.queryByRole("alert")).toBeNull();
 });
