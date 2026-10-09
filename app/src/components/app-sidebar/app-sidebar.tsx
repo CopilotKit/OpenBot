@@ -1,5 +1,4 @@
 import {
-  IconBolt,
   IconBox,
   IconBrain,
   IconChecks,
@@ -11,7 +10,6 @@ import {
   IconSettings,
   IconShieldLock,
   IconTargetArrow,
-  IconUsers,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import {
@@ -61,8 +59,6 @@ import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { ChannelAvatar } from "@/components/channels/avatar";
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
@@ -231,10 +227,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const channels = useInfiniteQuery(channelListQueryOptions());
-  // Read off the roster the app already holds, so the sidebar makes no request of its own for it.
-  const assignedTeamBots =
-    useQuery(agentListQueryOptions()).data?.filter((bot) => bot.assignedToMe) ??
-    [];
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
@@ -396,7 +388,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            {/* Beside Agents rather than inside Admin: writing a skill is something anybody does. */}
+            {/* Beside Bots rather than inside Admin: writing a skill is something anybody does. */}
             <SidebarMenuButton
               className="hover:bg-foreground/5 h-10"
               render={(props) => (
@@ -421,62 +413,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               render={(props) => (
                 <Link
                   {...props}
-                  to="/agents"
-                  activeProps={{
-                    className: "bg-foreground/5",
-                  }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconBolt />
-              </div>
-              <span className="text-sm trackint-tight">Agents</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/team-bots"
-                  activeProps={{ className: "bg-foreground/5" }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconUsers />
-              </div>
-              <span className="text-sm">Team Bots</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          {/* Team Bots an administrator assigned to this person: always here, never hidden. */}
-          {assignedTeamBots.map((bot) => (
-            <SidebarMenuItem key={bot.id}>
-              <SidebarMenuButton
-                className="hover:bg-foreground/5 h-10"
-                render={(props) => (
-                  <Link
-                    {...props}
-                    search={{ agent: bot.id }}
-                    to="/channel/new"
-                  />
-                )}
-              >
-                <div className="size-[28px] flex items-center justify-center">
-                  <ChannelAvatar participantIds={[bot.id]} size={22} />
-                </div>
-                <span className="text-sm">{bot.name}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
                   to="/reachability"
                   activeProps={{ className: "bg-foreground/5" }}
                 />
@@ -488,9 +424,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <span className="text-sm">Reachability</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-          {/* Routines live on each coworker's own dialog now, not as a nav destination: the
-              question "what does this Bot do on a schedule" is asked while looking at the Bot.
-              The /routines route still answers a direct link. */}
+          {/* Routines live on each Bot's own page now, not as a nav destination: the question
+              "what does this Bot do on a schedule" is asked while looking at the Bot. The
+              /routines route still answers a direct link. */}
           <SidebarMenuItem>
             <SidebarMenuButton
               className="hover:bg-foreground/5 h-10"
