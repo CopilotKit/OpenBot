@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
+import { NativeDevices, RecentDeliveries } from "@/components/settings/devices";
 import { UpdateRoutingSection } from "@/components/settings/update-routing";
 
 export const Route = createFileRoute("/_authed/settings/notifications")({
@@ -14,6 +15,8 @@ function NotificationsPage() {
       title="Notifications"
     >
       <UpdateRoutingSection />
+      <NativeDevices />
+      <RecentDeliveries />
     </PageShell>
   );
 }

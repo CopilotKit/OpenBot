@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "./client";
 export type Reachability = {
   bindings: {
@@ -83,5 +87,12 @@ export function removePushDevice(id: string) {
   return client(`/api/delivery/devices/${encodeURIComponent(id)}`, {
     method: "DELETE",
     fallback: "Could not remove this device",
+  });
+}
+
+export function removePushDeviceMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: removePushDevice,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: deliveryKey }),
   });
 }

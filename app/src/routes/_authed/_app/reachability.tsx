@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,6 @@ import {
   deliveryKey,
   deliveryQueryOptions,
   removeDeliveryBinding,
-  removePushDevice,
   startChatLink,
   startSms,
 } from "@/lib/delivery";
@@ -82,10 +81,6 @@ function ReachabilityPage() {
     mutationFn: removeDeliveryBinding,
     onSuccess: refresh,
   });
-  const deviceRemove = useMutation({
-    mutationFn: removePushDevice,
-    onSuccess: refresh,
-  });
   const selected = channels.data?.find((channel) => channel.id === channelId);
   const error =
     reach.error ??
@@ -93,14 +88,24 @@ function ReachabilityPage() {
     link.error ??
     sms.error ??
     confirm.error ??
-    remove.error ??
-    deviceRemove.error;
+    remove.error;
   return (
     <PageShell
       title="Reachability"
       description="Continue a conversation in Slack, Microsoft Teams, by text message, or on your phone. Questions and approval requests reach the same person who owns the conversation."
     >
       <div className="grid gap-5">
+        <p className="text-muted-foreground text-sm">
+          Your devices, recent deliveries, and where each kind of update goes
+          are in{" "}
+          <Link
+            className="underline underline-offset-4"
+            to="/settings/notifications"
+          >
+            Settings → Notifications
+          </Link>
+          .
+        </p>
         {error && (
           <p role="alert" className="text-destructive">
             {error.message}
@@ -288,43 +293,6 @@ function ReachabilityPage() {
             <p className="text-sm text-muted-foreground">
               No destinations connected.
             </p>
-          )}
-        </section>
-        <section className="grid gap-3 rounded-lg border p-4">
-          <h2 className="font-semibold">Native devices</h2>
-          <p className="text-sm text-muted-foreground">
-            Sign in to the OpenBot native app and enable notifications to
-            register your device.
-          </p>
-          {reach.data?.devices.map((device) => (
-            <div key={device.id} className="flex items-center justify-between">
-              <p>{device.platform}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={deviceRemove.isPending}
-                onClick={() => deviceRemove.mutate(device.id)}
-              >
-                Remove device
-              </Button>
-            </div>
-          ))}
-        </section>
-        <section className="grid gap-2 rounded-lg border p-4">
-          <h2 className="font-semibold">Recent deliveries</h2>
-          {reach.data?.deliveries.map((delivery) => (
-            <div key={delivery.id} className="border-t pt-2 text-sm">
-              <p>
-                {delivery.transport} · {delivery.kind} · {delivery.state} ·{" "}
-                {new Date(delivery.createdAt).toLocaleString()}
-              </p>
-              {delivery.error && (
-                <p className="text-destructive">{delivery.error}</p>
-              )}
-            </div>
-          ))}
-          {reach.data?.deliveries.length === 0 && (
-            <p className="text-sm text-muted-foreground">No deliveries yet.</p>
           )}
         </section>
       </div>
