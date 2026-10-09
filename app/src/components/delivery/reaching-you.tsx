@@ -44,6 +44,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
+  type ChatLink,
   confirmSms,
   deliveryKey,
   deliveryQueryOptions,
@@ -79,6 +80,14 @@ function writePending(id: string) {
 }
 
 type Transport = Reachability["bindings"][number]["transport"];
+type ChatPlatform = ChatLink["platform"];
+
+/** A one-time link message, the conversation and Bot it links, and when it stops working. */
+type HeldLink = ChatLink & {
+  channelId: string;
+  agentId: string;
+  expiresAt: number;
+};
 
 const TRANSPORT: Record<
   Transport,
@@ -120,6 +129,19 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const [challengeId, setChallengeId] = useState(readPending);
   useEffect(() => writePending(challengeId), [challengeId]);
   const [connecting, setConnecting] = useState<Transport | null>(null);
+  /*
+   * The last link message per platform, held here rather than in the dialog: the dialog unmounts
+   * when it closes, and the code is only useful once it has been sent from Slack or Teams, which is
+   * exactly when somebody closes it to go and do that. Dropped once it has expired.
+   */
+  const [links, setLinks] = useState<Partial<Record<ChatPlatform, HeldLink>>>(
+    {},
+  );
+  const heldLink = (transport: Transport) => {
+    if (transport === "sms") return undefined;
+    const held = links[transport];
+    return held && held.expiresAt > Date.now() ? held : undefined;
+  };
   const remove = useMutation({
     mutationFn: removeDeliveryBinding,
     onSuccess: refresh,
@@ -141,6 +163,9 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const summary = (transport: Transport) => {
     if (transport === "sms" && challengeId) {
       return "A verification code is on its way. Enter it to finish.";
+    }
+    if (heldLink(transport)) {
+      return "A link code is waiting to be sent. Open this to see it again.";
     }
     if (open(transport)) return TRANSPORT[transport].summary;
     return transport === "sms"
@@ -262,8 +287,12 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           botName={botName}
           challengeId={challengeId}
           fixedBot={fixedBot}
+          linked={heldLink(connecting)}
           onChallenge={setChallengeId}
           onClose={() => setConnecting(null)}
+          onLinked={(link) =>
+            setLinks((prior) => ({ ...prior, [link.platform]: link }))
+          }
           transport={connecting}
         />
       ) : null}
@@ -282,7 +311,9 @@ function ConnectDialog({
   fixedBot,
   botName,
   challengeId,
+  linked,
   onChallenge,
+  onLinked,
   onClose,
 }: {
   transport: Transport;
@@ -290,13 +321,17 @@ function ConnectDialog({
   fixedBot: string | undefined;
   botName: (id: string) => string;
   challengeId: string;
+  /** The link message this platform last answered with, while it still works. */
+  linked: HeldLink | undefined;
   onChallenge: (id: string) => void;
+  onLinked: (link: HeldLink) => void;
   onClose: () => void;
 }) {
   const formId = useId();
   const channels = useInfiniteQuery(channelListQueryOptions());
-  const [channelId, setChannelId] = useState("");
-  const [pickedBot, setAgentId] = useState("");
+  // Reopened with a link message still held, the dialog shows the conversation it links.
+  const [channelId, setChannelId] = useState(linked?.channelId ?? "");
+  const [pickedBot, setAgentId] = useState(linked?.agentId ?? "");
   const agentId = fixedBot ?? pickedBot;
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -304,7 +339,15 @@ function ConnectDialog({
   const link = useMutation({
     mutationFn: (platform: "slack" | "teams") =>
       startChatLink({ channelId, agentId, platform }),
-    onSuccess: () => setCopied(false),
+    onSuccess: (result) => {
+      onLinked({
+        ...result,
+        channelId,
+        agentId,
+        expiresAt: Date.now() + result.expiresInMinutes * 60_000,
+      });
+      setCopied(false);
+    },
   });
   const sms = useMutation({
     mutationFn: () => startSms({ channelId, agentId, phone }),
@@ -468,25 +511,23 @@ function ConnectDialog({
                 </form>
               ) : null}
             </>
-          ) : link.data ? (
+          ) : linked ? (
             <Item size="sm" variant="muted">
               <ItemContent>
                 <ItemDescription className="line-clamp-none">
                   Send this message to the OpenBot app in{" "}
-                  {link.data.platform === "teams" ? "Microsoft Teams" : "Slack"}{" "}
-                  within {link.data.expiresInMinutes} minutes. It links that
-                  account to this conversation and Bot.
+                  {linked.platform === "teams" ? "Microsoft Teams" : "Slack"}{" "}
+                  within {Math.ceil((linked.expiresAt - Date.now()) / 60_000)}{" "}
+                  minutes. It links that account to this conversation and Bot.
                 </ItemDescription>
                 <ItemTitle className="break-all font-mono">
-                  {link.data.command}
+                  {linked.command}
                 </ItemTitle>
               </ItemContent>
               <ItemActions>
                 <Button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(
-                      link.data?.command ?? "",
-                    );
+                    await navigator.clipboard.writeText(linked.command);
                     setCopied(true);
                   }}
                   size="sm"

@@ -152,6 +152,30 @@ test("linking Slack needs only a conversation, and warns that it moves the accou
   expect(await view.findByText("link abc")).toBeTruthy();
 });
 
+test("closing the dialog keeps the link code, so reopening the row shows it again", async () => {
+  serving();
+  const view = draw();
+  const user = await openSlackLink(view);
+  await chooseConversation(view, user, "Finance desk");
+  await user.click(view.getByRole("button", { name: "Link Slack" }));
+  expect(await view.findByText("link abc")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  // The row says a code is waiting, and opening it shows that code without asking for another.
+  expect(view.getByText(/A link code is waiting/)).toBeTruthy();
+  await user.click(view.getByRole("button", { name: /^Link Slack/ }));
+  expect(await view.findByText("link abc")).toBeTruthy();
+  // With the conversation it links, so "this conversation" still names one.
+  expect(
+    view.getByRole("combobox", { name: /^Conversation/ }).textContent,
+  ).toContain("Finance desk");
+  expect(
+    writes.filter(
+      (write) => write.request === "POST /api/delivery/opentag/start",
+    ),
+  ).toHaveLength(1);
+});
+
 test("nothing can be linked until a conversation is chosen", async () => {
   serving();
   const view = draw();
