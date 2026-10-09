@@ -284,18 +284,16 @@ function TurnOnResearchDialog({
             is in.
           </DialogDescription>
         </DialogHeader>
-        {/*
-         * `contents`, so the body is still DialogContent's own flex child and keeps its
-         * `flex-1 min-h-0` chain, while the submit in the footer stays inside the form.
-         */}
-        <form
-          className="contents"
-          onSubmit={(event) => {
-            event.preventDefault();
-            add.mutate({ agentId, channelId, focus, intervalMinutes });
-          }}
-        >
-          <DialogBody className="mt-4 overflow-y-auto">
+        <DialogBody className="mt-4 overflow-y-auto">
+          {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+              direct child of DialogContent and keeps scrolling. */}
+          <form
+            id={id}
+            onSubmit={(event) => {
+              event.preventDefault();
+              add.mutate({ agentId, channelId, focus, intervalMinutes });
+            }}
+          >
             <FieldGroup>
               {fixedBot === undefined ? (
                 <Field>
@@ -387,25 +385,26 @@ function TurnOnResearchDialog({
                 />
               </Field>
             </FieldGroup>
-            {add.error && (
-              <p role="alert" className="text-destructive text-sm">
-                {add.error.message}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter className="mt-4">
-            <Button onClick={onClose} size="sm" variant="outline">
-              Cancel
-            </Button>
-            <Button
-              disabled={add.isPending || !agentId || !channelId}
-              size="sm"
-              type="submit"
-            >
-              Turn on background research
-            </Button>
-          </DialogFooter>
-        </form>
+          </form>
+          {add.error && (
+            <p role="alert" className="text-destructive text-sm">
+              {add.error.message}
+            </p>
+          )}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" variant="outline">
+            Cancel
+          </Button>
+          <Button
+            disabled={add.isPending || !agentId || !channelId}
+            form={id}
+            size="sm"
+            type="submit"
+          >
+            Turn on background research
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -1,7 +1,7 @@
 import { IconBuildingBank, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -63,6 +63,7 @@ function IdentityProvidersPage() {
   );
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(EMPTY);
+  const formId = useId();
 
   // A removal failure belongs on the page: there is no dialog to put it in. A registration failure
   // is shown inside the dialog instead, where the person who caused it is looking.
@@ -164,8 +165,15 @@ function IdentityProvidersPage() {
           <DialogHeader>
             <DialogTitle>Add an identity provider</DialogTitle>
           </DialogHeader>
-          <form onSubmit={submit}>
-            <DialogBody className="mt-4 space-y-4 overflow-y-auto">
+          <DialogBody className="mt-4 space-y-4 overflow-y-auto">
+            {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+                direct child of DialogContent and keeps scrolling. The form repeats the body's gap and
+                space-y so the fields keep their spacing. */}
+            <form
+              className="flex flex-col gap-4 space-y-4"
+              id={formId}
+              onSubmit={submit}
+            >
               <div className="flex gap-2">
                 {(["saml", "oidc"] as const).map((protocol) => (
                   <Button
@@ -288,32 +296,36 @@ function IdentityProvidersPage() {
                   </div>
                 </>
               )}
-
-              {/*
+            </form>
+            {/*
                 Here as well as on the page behind, because while this is open the page behind it is
                 not visible. A registration refused by the identity provider or by Better Auth left
                 the dialog sitting there unchanged, which reads as the button not working.
               */}
-              {register.error ? (
-                <p className="text-destructive text-sm" role="alert">
-                  {register.error.message}
-                </p>
-              ) : null}
-            </DialogBody>
-            <DialogFooter className="mt-4">
-              <Button
-                onClick={() => setOpen(false)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Cancel
-              </Button>
-              <Button disabled={register.isPending} size="sm" type="submit">
-                {register.isPending ? "Adding…" : "Add"}
-              </Button>
-            </DialogFooter>
-          </form>
+            {register.error ? (
+              <p className="text-destructive text-sm" role="alert">
+                {register.error.message}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => setOpen(false)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={register.isPending}
+              form={formId}
+              size="sm"
+              type="submit"
+            >
+              {register.isPending ? "Adding…" : "Add"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </PageShell>

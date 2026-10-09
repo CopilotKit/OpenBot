@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -101,10 +101,6 @@ export function GithubSources() {
 
 /**
  * A repository and the webhook secret GitHub will sign its events with.
- *
- * The form wraps the header, body and footer so the footer's button submits it, and Enter in either
- * field does too. It is `contents`, drawing no box of its own, so the body still lays out as a direct
- * child of the dialog and keeps its scrolling.
  */
 function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
   const formId = useId();
@@ -114,70 +110,79 @@ function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
-        <form
-          className="contents"
-          onSubmit={(event) => {
-            event.preventDefault();
-            create.mutate(
-              { repository, secret },
-              {
-                onSuccess: () => {
-                  setSecret("");
-                  setRepository("");
-                  onClose();
+        <DialogHeader>
+          <DialogTitle>Add a repository</DialogTitle>
+          <DialogDescription>
+            Use the same secret when you add the webhook in GitHub.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+              direct child of DialogContent and keeps scrolling. */}
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate(
+                { repository, secret },
+                {
+                  onSuccess: () => {
+                    setSecret("");
+                    setRepository("");
+                    onClose();
+                  },
                 },
-              },
-            );
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Add a repository</DialogTitle>
-            <DialogDescription>
-              Use the same secret when you add the webhook in GitHub.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody className="mt-4">
-            <Field>
-              <FieldLabel htmlFor={`${formId}-repository`}>
-                Repository
-              </FieldLabel>
-              <Input
-                autoFocus
-                id={`${formId}-repository`}
-                onChange={(event) => setRepository(event.target.value)}
-                placeholder="owner/repository"
-                required
-                value={repository}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${formId}-secret`}>
-                Webhook secret
-              </FieldLabel>
-              <Input
-                autoComplete="new-password"
-                id={`${formId}-secret`}
-                onChange={(event) => setSecret(event.target.value)}
-                required
-                type="password"
-                value={secret}
-              />
-            </Field>
-            {create.error ? (
-              <p className="text-destructive text-sm" role="alert">
-                {create.error.message}
-              </p>
-            ) : null}
-          </DialogBody>
-          <DialogFooter className="mt-4">
-            <Button onClick={onClose} size="sm" variant="outline">
-              Cancel
-            </Button>
-            <Button disabled={create.isPending} size="sm" type="submit">
-              Connect events
-            </Button>
-          </DialogFooter>
-        </form>
+              );
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-repository`}>
+                  Repository
+                </FieldLabel>
+                <Input
+                  autoFocus
+                  id={`${formId}-repository`}
+                  onChange={(event) => setRepository(event.target.value)}
+                  placeholder="owner/repository"
+                  required
+                  value={repository}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-secret`}>
+                  Webhook secret
+                </FieldLabel>
+                <Input
+                  autoComplete="new-password"
+                  id={`${formId}-secret`}
+                  onChange={(event) => setSecret(event.target.value)}
+                  required
+                  type="password"
+                  value={secret}
+                />
+              </Field>
+            </FieldGroup>
+          </form>
+          {create.error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {create.error.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" variant="outline">
+            Cancel
+          </Button>
+          <Button
+            disabled={create.isPending}
+            form={formId}
+            size="sm"
+            type="submit"
+          >
+            Connect events
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

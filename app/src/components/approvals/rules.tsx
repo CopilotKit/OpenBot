@@ -234,21 +234,7 @@ export function RuleForm({
         onOpenChange={(next) => (next ? setOpen(true) : close())}
         open={open}
       >
-        {/*
-         * The popup is the form, so Save in the footer submits it and Enter in any field does too,
-         * while the body stays a direct child of the popup and keeps scrolling between the two.
-         */}
-        <DialogContent
-          render={
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                onSave(rule);
-                close();
-              }}
-            />
-          }
-        >
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
             <DialogDescription>
@@ -257,27 +243,38 @@ export function RuleForm({
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
-            <FieldGroup>
-              {field(
-                "toolRef",
-                "Tool or app",
-                "mcp/gmail/*, computer_click, host/*",
-              )}
-              {field("effect", "Kind of action", "* , write, read, delegate")}
-              {field("scope", "Target", "*, a site, a folder, a Bot name")}
-              {botField ? field("botId", "Bot", "* for every Bot") : null}
-              <Field>
-                <FieldLabel htmlFor={`${id}-behaviour`}>Behaviour</FieldLabel>
-                <LabelSelect
-                  id={`${id}-behaviour`}
-                  labels={BEHAVIOUR_LABELS}
-                  onChange={(behaviour) =>
-                    setRule((prior) => ({ ...prior, behaviour }))
-                  }
-                  value={rule.behaviour}
-                />
-              </Field>
-            </FieldGroup>
+            {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+                direct child of DialogContent and keeps scrolling. */}
+            <form
+              id={id}
+              onSubmit={(event) => {
+                event.preventDefault();
+                onSave(rule);
+                close();
+              }}
+            >
+              <FieldGroup>
+                {field(
+                  "toolRef",
+                  "Tool or app",
+                  "mcp/gmail/*, computer_click, host/*",
+                )}
+                {field("effect", "Kind of action", "* , write, read, delegate")}
+                {field("scope", "Target", "*, a site, a folder, a Bot name")}
+                {botField ? field("botId", "Bot", "* for every Bot") : null}
+                <Field>
+                  <FieldLabel htmlFor={`${id}-behaviour`}>Behaviour</FieldLabel>
+                  <LabelSelect
+                    id={`${id}-behaviour`}
+                    labels={BEHAVIOUR_LABELS}
+                    onChange={(behaviour) =>
+                      setRule((prior) => ({ ...prior, behaviour }))
+                    }
+                    value={rule.behaviour}
+                  />
+                </Field>
+              </FieldGroup>
+            </form>
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button onClick={close} size="sm" variant="outline">
@@ -285,6 +282,7 @@ export function RuleForm({
             </Button>
             <Button
               disabled={pending || !rule.toolRef.trim()}
+              form={id}
               size="sm"
               type="submit"
             >

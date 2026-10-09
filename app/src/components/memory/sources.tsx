@@ -217,57 +217,55 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
               It is read now, and then every 15 minutes while it is enabled.
             </DialogDescription>
           </DialogHeader>
-          {/*
-           * `contents`, so the body is still DialogContent's own flex child and keeps its
-           * `flex-1 min-h-0` chain, while the submit in the footer stays inside the form.
-           */}
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              try {
-                const values: Record<string, unknown> = {};
-                for (const setting of settings) {
-                  const value = args[setting.name];
-                  if (!value) continue;
-                  if (
-                    setting.schema.type === "number" ||
-                    setting.schema.type === "integer"
-                  ) {
-                    const number = Number(value);
-                    if (!Number.isFinite(number))
-                      throw new Error(`Enter a number for ${setting.name}.`);
-                    values[setting.name] = number;
-                  } else if (setting.schema.type === "boolean")
-                    values[setting.name] = value === "true";
-                  else if (setting.schema.type === "array")
-                    values[setting.name] = value
-                      .split("\n")
-                      .map((entry) => entry.trim())
-                      .filter(Boolean);
-                  else if (setting.schema.type === "object")
-                    throw new Error(
-                      "Choose an action with simple search settings.",
-                    );
-                  else values[setting.name] = value;
+          <DialogBody className="mt-4 overflow-y-auto">
+            {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+                direct child of DialogContent and keeps scrolling. */}
+            <form
+              id={id}
+              onSubmit={(event) => {
+                event.preventDefault();
+                try {
+                  const values: Record<string, unknown> = {};
+                  for (const setting of settings) {
+                    const value = args[setting.name];
+                    if (!value) continue;
+                    if (
+                      setting.schema.type === "number" ||
+                      setting.schema.type === "integer"
+                    ) {
+                      const number = Number(value);
+                      if (!Number.isFinite(number))
+                        throw new Error(`Enter a number for ${setting.name}.`);
+                      values[setting.name] = number;
+                    } else if (setting.schema.type === "boolean")
+                      values[setting.name] = value === "true";
+                    else if (setting.schema.type === "array")
+                      values[setting.name] = value
+                        .split("\n")
+                        .map((entry) => entry.trim())
+                        .filter(Boolean);
+                    else if (setting.schema.type === "object")
+                      throw new Error(
+                        "Choose an action with simple search settings.",
+                      );
+                    else values[setting.name] = value;
+                  }
+                  setError("");
+                  add.mutate({
+                    agentId,
+                    toolRef,
+                    title,
+                    args: values,
+                  });
+                } catch (cause) {
+                  setError(
+                    cause instanceof Error
+                      ? cause.message
+                      : "Check the source settings.",
+                  );
                 }
-                setError("");
-                add.mutate({
-                  agentId,
-                  toolRef,
-                  title,
-                  args: values,
-                });
-              } catch (cause) {
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : "Check the source settings.",
-                );
-              }
-            }}
-          >
-            <DialogBody className="mt-4 overflow-y-auto">
+              }}
+            >
               <FieldGroup>
                 {fixedBot === undefined ? (
                   <Field>
@@ -388,29 +386,30 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   </Field>
                 ))}
               </FieldGroup>
-              {(error || add.error || tools.error) && (
-                <p role="alert" className="text-destructive text-sm">
-                  {error || add.error?.message || tools.error?.message}
-                </p>
-              )}
-            </DialogBody>
-            <DialogFooter className="mt-4">
-              <Button
-                onClick={() => setAdding(false)}
-                size="sm"
-                variant="outline"
-              >
-                Cancel
-              </Button>
-              <Button
-                disabled={add.isPending || !toolRef}
-                size="sm"
-                type="submit"
-              >
-                {add.isPending ? "Reading source…" : "Add and sync source"}
-              </Button>
-            </DialogFooter>
-          </form>
+            </form>
+            {(error || add.error || tools.error) && (
+              <p role="alert" className="text-destructive text-sm">
+                {error || add.error?.message || tools.error?.message}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button
+              onClick={() => setAdding(false)}
+              size="sm"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={add.isPending || !toolRef}
+              form={id}
+              size="sm"
+              type="submit"
+            >
+              {add.isPending ? "Reading source…" : "Add and sync source"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </PageSection>

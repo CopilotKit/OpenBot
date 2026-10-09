@@ -14,7 +14,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -854,6 +854,7 @@ function NetworkDialog({
   const save = useMutation(setNetworkPolicyMutationOptions(queryClient));
   const remove = useMutation(removeNetworkPolicyMutationOptions(queryClient));
   const scopeId = initial.scopeKind === "group" ? group : "";
+  const formId = useId();
 
   return (
     <Dialog onOpenChange={(open) => (open ? undefined : onClose())} open>
@@ -865,22 +866,27 @@ function NetworkDialog({
               : "Group network policy"}
           </DialogTitle>
         </DialogHeader>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            save.mutate(
-              {
-                scopeKind: initial.scopeKind,
-                scopeId,
-                mode,
-                rules: rulesFromText(rules),
-                locked,
-              },
-              { onSuccess: onClose },
-            );
-          }}
-        >
-          <DialogBody className="mt-4 space-y-4 overflow-y-auto">
+        <DialogBody className="mt-4 space-y-4 overflow-y-auto">
+          {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+              direct child of DialogContent and keeps scrolling. The form repeats the body's gap and
+              space-y so the fields keep their spacing. */}
+          <form
+            className="flex flex-col gap-4 space-y-4"
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              save.mutate(
+                {
+                  scopeKind: initial.scopeKind,
+                  scopeId,
+                  mode,
+                  rules: rulesFromText(rules),
+                  locked,
+                },
+                { onSuccess: onClose },
+              );
+            }}
+          >
             {initial.scopeKind === "group" && !initial.scopeId ? (
               <div className="space-y-1.5">
                 <Label>Group</Label>
@@ -955,43 +961,44 @@ function NetworkDialog({
                 />
               </div>
             ) : null}
-            {(save.error ?? remove.error) ? (
-              <p className="text-destructive text-sm" role="alert">
-                {(save.error ?? remove.error)?.message}
-              </p>
-            ) : null}
-          </DialogBody>
-          <DialogFooter className="mt-4">
-            {existing ? (
-              <Button
-                disabled={remove.isPending}
-                onClick={() =>
-                  remove.mutate(
-                    { scopeKind: initial.scopeKind, scopeId },
-                    { onSuccess: onClose },
-                  )
-                }
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                Remove policy
-              </Button>
-            ) : null}
-            <Button onClick={onClose} size="sm" type="button" variant="outline">
-              Cancel
-            </Button>
+          </form>
+          {(save.error ?? remove.error) ? (
+            <p className="text-destructive text-sm" role="alert">
+              {(save.error ?? remove.error)?.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          {existing ? (
             <Button
-              disabled={
-                save.isPending || (initial.scopeKind === "group" && !scopeId)
+              disabled={remove.isPending}
+              onClick={() =>
+                remove.mutate(
+                  { scopeKind: initial.scopeKind, scopeId },
+                  { onSuccess: onClose },
+                )
               }
               size="sm"
-              type="submit"
+              type="button"
+              variant="destructive"
             >
-              {save.isPending ? "Saving…" : "Save"}
+              Remove policy
             </Button>
-          </DialogFooter>
-        </form>
+          ) : null}
+          <Button onClick={onClose} size="sm" type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button
+            disabled={
+              save.isPending || (initial.scopeKind === "group" && !scopeId)
+            }
+            form={formId}
+            size="sm"
+            type="submit"
+          >
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

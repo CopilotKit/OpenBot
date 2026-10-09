@@ -64,29 +64,27 @@ export function RememberFact() {
               It reaches every one of your Bots.
             </DialogDescription>
           </DialogHeader>
-          {/*
-           * `contents`, so the body is still DialogContent's own flex child and keeps its
-           * `flex-1 min-h-0` chain, while the submit in the footer stays inside the form.
-           */}
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault();
-              remember.mutate(content, {
-                onSuccess: () => {
-                  setContent("");
-                  setOpen(false);
-                },
-              });
-            }}
-          >
-            <DialogBody className="mt-4">
+          <DialogBody className="mt-4">
+            {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+                direct child of DialogContent and keeps scrolling. */}
+            <form
+              id={formId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                remember.mutate(content, {
+                  onSuccess: () => {
+                    setContent("");
+                    setOpen(false);
+                  },
+                });
+              }}
+            >
               <Field>
-                <FieldLabel htmlFor={formId}>
+                <FieldLabel htmlFor={`${formId}-content`}>
                   Something you want your Bots to know
                 </FieldLabel>
                 <Textarea
-                  id={formId}
+                  id={`${formId}-content`}
                   required
                   maxLength={6000}
                   value={content}
@@ -94,29 +92,26 @@ export function RememberFact() {
                   placeholder="I prefer meetings in the morning."
                 />
               </Field>
-              {remember.error ? (
-                <p role="alert" className="text-destructive text-sm">
-                  {remember.error.message}
-                </p>
-              ) : null}
-            </DialogBody>
-            <DialogFooter className="mt-4">
-              <Button
-                onClick={() => setOpen(false)}
-                size="sm"
-                variant="outline"
-              >
-                Cancel
-              </Button>
-              <Button
-                disabled={remember.isPending || !content.trim()}
-                size="sm"
-                type="submit"
-              >
-                Remember
-              </Button>
-            </DialogFooter>
-          </form>
+            </form>
+            {remember.error ? (
+              <p role="alert" className="text-destructive text-sm">
+                {remember.error.message}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button onClick={() => setOpen(false)} size="sm" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={remember.isPending || !content.trim()}
+              form={formId}
+              size="sm"
+              type="submit"
+            >
+              Remember
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
