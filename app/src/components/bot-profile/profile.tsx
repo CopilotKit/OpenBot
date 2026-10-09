@@ -9,8 +9,10 @@ import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { BotNeedsYou } from "@/components/approvals/waiting";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
+import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -81,6 +83,11 @@ export function BotProfile({
       </div>
       <div className="mt-4">
         <BotPausedBanner agentId={agent.id} />
+      </div>
+
+      <BotNeedsYou agentId={agent.id} />
+      <div className="mt-12 empty:hidden">
+        <SuggestionsInbox agentId={agent.id} />
       </div>
 
       <PageSection title="For you">

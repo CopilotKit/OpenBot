@@ -34,8 +34,16 @@ async function refresh() {
 }
 
 /** Next steps a Bot proposed from background research: start one as a task, or dismiss it. */
-export function SuggestionsInbox() {
+export function SuggestionsInbox({
+  agentId,
+}: {
+  /** Only this Bot's suggestions, and nothing at all when it has none. */
+  agentId?: string;
+} = {}) {
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
+  const shown = (suggestions.data ?? []).filter(
+    (suggestion) => agentId === undefined || suggestion.agentId === agentId,
+  );
   const bots = useQuery(agentListQueryOptions());
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
@@ -44,6 +52,7 @@ export function SuggestionsInbox() {
   });
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
+  if (agentId !== undefined && shown.length === 0) return null;
   return (
     <section className="grid gap-3">
       <h2 className="font-semibold">Suggested next steps</h2>
@@ -53,8 +62,8 @@ export function SuggestionsInbox() {
         <p role="alert" className="text-destructive">
           {suggestions.error.message}
         </p>
-      ) : suggestions.data?.length ? (
-        suggestions.data.map((suggestion) => (
+      ) : shown.length ? (
+        shown.map((suggestion) => (
           <article
             key={suggestion.id}
             className="grid gap-2 rounded-lg border p-4"
