@@ -22,6 +22,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { AgentProfile } from "@/lib/agents/queries";
@@ -42,8 +49,6 @@ const NOTIFY_LABEL: Record<BotNotify, string> = {
   needs_input: "Only when it needs me",
   none: "Nothing (badges only)",
 };
-
-const selectClass = "h-8 rounded-md border bg-background px-2 text-sm";
 
 /** A Bot's own page: its state for you, what it is doing, its settings, and what can be done to it. */
 export function BotProfile({
@@ -139,24 +144,30 @@ export function BotProfile({
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
-                <select
-                  aria-label="Notifications"
-                  className={selectClass}
+                <Select
                   disabled={notify.isPending}
-                  onChange={(event) =>
+                  // The label map, so the closed trigger says "Everything" rather than the raw value.
+                  items={NOTIFY_LABEL}
+                  onValueChange={(next) => {
+                    if (next === lifecycle.data.notify) return;
                     notify.mutate({
                       agentId: agent.id,
-                      notify: event.target.value as BotNotify,
-                    })
-                  }
+                      notify: next as BotNotify,
+                    });
+                  }}
                   value={lifecycle.data.notify}
                 >
-                  {(Object.keys(NOTIFY_LABEL) as BotNotify[]).map((value) => (
-                    <option key={value} value={value}>
-                      {NOTIFY_LABEL[value]}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="Notifications">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(NOTIFY_LABEL) as BotNotify[]).map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {NOTIFY_LABEL[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </ItemActions>
             </Item>
             {permission === "default" ? (
