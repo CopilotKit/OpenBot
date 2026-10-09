@@ -1,6 +1,7 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBrain,
   IconChecks,
   IconKey,
   IconLayoutGrid,
@@ -52,6 +53,12 @@ const ITEMS: {
     title: "Approvals",
     icon: IconChecks,
     linkOptions: { to: "/settings/approvals" },
+  },
+  {
+    /* What your Bots know about you, across all of them. */
+    title: "Memory",
+    icon: IconBrain,
+    linkOptions: { to: "/settings/memory" },
   },
   {
     /*

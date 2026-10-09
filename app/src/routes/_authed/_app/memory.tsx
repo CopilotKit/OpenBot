@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { PageShell } from "@/components/layout/page-shell";
 import {
@@ -8,19 +8,13 @@ import {
 } from "@/components/suggestions/proactive-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   addMemorySource,
   availableMemorySourcesQueryOptions,
-  createMemory,
-  deleteMemory,
-  type MemoryRecord,
-  memoriesQueryOptions,
   memoryKeys,
   memorySourceAction,
   memorySourcesQueryOptions,
-  updateMemory,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
 export const Route = createFileRoute("/_authed/_app/memory")({
@@ -34,174 +28,24 @@ async function refresh() {
   await queryClient.invalidateQueries({ queryKey: memoryKeys.all });
 }
 function MemoryPage() {
-  const memories = useQuery(memoriesQueryOptions());
-  const [content, setContent] = useState("");
-  const formId = useId();
-  const remember = useMutation({
-    mutationFn: createMemory,
-    onSuccess: async () => {
-      setContent("");
-      await refresh();
-    },
-  });
   return (
     <PageShell
       title="Memory"
-      description="Review what your Bots remember, and choose which connected apps can contribute facts."
+      description="Suggestions from your Bots, background research, and which connected apps feed them facts."
     >
       <div className="grid gap-6">
+        <p className="text-muted-foreground text-sm">
+          What your Bots remember about you, and facts you tell them, are in{" "}
+          <Link className="underline underline-offset-4" to="/settings/memory">
+            Settings → Memory
+          </Link>
+          .
+        </p>
         <SuggestionsInbox />
-        <form
-          className="grid gap-3 rounded-lg border p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            remember.mutate(content);
-          }}
-        >
-          <h2 className="font-semibold">Remember a fact</h2>
-          <label className={field} htmlFor={formId}>
-            Something you want your Bots to know
-          </label>
-          <Textarea
-            id={formId}
-            required
-            maxLength={6000}
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            placeholder="I prefer meetings in the morning."
-          />
-          <Button
-            type="submit"
-            disabled={remember.isPending || !content.trim()}
-            className="justify-self-start"
-          >
-            Remember
-          </Button>
-          {remember.error && (
-            <p role="alert" className="text-destructive">
-              {remember.error.message}
-            </p>
-          )}
-        </form>
         <ProactiveResearchSettings />
         <Sources />
-        <section className="grid gap-3">
-          <h2 className="font-semibold">Your memories</h2>
-          {memories.isPending ? (
-            <p>Loading memories…</p>
-          ) : memories.error ? (
-            <p role="alert" className="text-destructive">
-              {memories.error.message}
-            </p>
-          ) : memories.data?.length ? (
-            memories.data.map((memory) => (
-              <MemoryCard key={memory.id} memory={memory} />
-            ))
-          ) : (
-            <p className="text-muted-foreground">You have no memories yet.</p>
-          )}
-        </section>
       </div>
     </PageShell>
-  );
-}
-function MemoryCard({ memory }: { memory: MemoryRecord }) {
-  const [content, setContent] = useState(memory.content);
-  const id = useId();
-  const save = useMutation({
-    mutationFn: (input: {
-      content?: string;
-      enabled?: boolean;
-      reviewState?: "confirmed";
-    }) => updateMemory(memory.id, input),
-    onSuccess: refresh,
-  });
-  const forget = useMutation({
-    mutationFn: () => deleteMemory(memory.id),
-    onSuccess: refresh,
-  });
-  return (
-    <article className="grid gap-3 rounded-lg border p-4">
-      <div className="flex flex-wrap justify-between gap-2">
-        <label htmlFor={id} className="text-sm text-muted-foreground">
-          {memory.provenance}
-        </label>
-        <span className="text-xs text-muted-foreground">
-          {!memory.enabled
-            ? "Disabled"
-            : memory.reviewState === "unreviewed"
-              ? memory.formedBy === "bot"
-                ? "Formed by your Bot · awaiting review"
-                : "Imported · awaiting review"
-              : "Reviewed"}
-        </span>
-      </div>
-      {memory.formedBy === "bot" && (
-        <p className="text-xs text-muted-foreground">
-          From {memory.sourceApp ?? "a conversation"}
-          {memory.observedAt
-            ? `, read ${new Date(memory.observedAt).toLocaleString()}`
-            : ""}
-          {memory.sourceLink && (
-            <>
-              {" · "}
-              <a
-                className="underline"
-                href={memory.sourceLink}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open record
-              </a>
-            </>
-          )}
-        </p>
-      )}
-      <Textarea
-        id={id}
-        value={content}
-        maxLength={6000}
-        onChange={(event) => setContent(event.target.value)}
-      />
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          disabled={save.isPending || !content.trim()}
-          onClick={() => save.mutate({ content })}
-        >
-          Save
-        </Button>
-        {memory.reviewState === "unreviewed" && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => save.mutate({ reviewState: "confirmed" })}
-          >
-            Confirm
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => save.mutate({ enabled: !memory.enabled })}
-        >
-          {memory.enabled ? "Disable" : "Enable"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={forget.isPending}
-          onClick={() => forget.mutate()}
-        >
-          Forget
-        </Button>
-      </div>
-      {(save.error || forget.error) && (
-        <p role="alert" className="text-destructive">
-          {save.error?.message || forget.error?.message}
-        </p>
-      )}
-    </article>
   );
 }
 function Sources() {

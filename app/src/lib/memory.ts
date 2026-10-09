@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "@/lib/client";
 export type MemoryRecord = {
   id: string;
@@ -107,3 +111,28 @@ export const memorySourceAction = (
       fallback: "Could not change this source",
     },
   );
+
+const settleMemory = (queryClient: QueryClient) => () =>
+  queryClient.invalidateQueries({ queryKey: memoryKeys.all });
+
+export const createMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: createMemory,
+    onSettled: settleMemory(queryClient),
+  });
+export const updateMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: { content?: string; enabled?: boolean; reviewState?: "confirmed" };
+    }) => updateMemory(id, input),
+    onSettled: settleMemory(queryClient),
+  });
+export const deleteMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: deleteMemory,
+    onSettled: settleMemory(queryClient),
+  });

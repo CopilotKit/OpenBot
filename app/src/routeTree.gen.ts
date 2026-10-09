@@ -38,6 +38,7 @@ import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedSettingsApprovalsRouteImport } from './routes/_authed/settings/approvals'
+import { Route as AuthedSettingsMemoryRouteImport } from './routes/_authed/settings/memory'
 import { Route as AuthedSettingsNotificationsRouteImport } from './routes/_authed/settings/notifications'
 import { Route as AuthedSettingsPasswordsRouteImport } from './routes/_authed/settings/passwords'
 import { Route as AuthedSignInRequestIdRouteImport } from './routes/_authed/sign-in/$requestId'
@@ -209,6 +210,11 @@ const AuthedSettingsApprovalsRoute = AuthedSettingsApprovalsRouteImport.update({
   path: '/approvals',
   getParentRoute: () => AuthedSettingsRouteRoute,
 } as any)
+const AuthedSettingsMemoryRoute = AuthedSettingsMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => AuthedSettingsRouteRoute,
+} as any)
 const AuthedSettingsNotificationsRoute =
   AuthedSettingsNotificationsRouteImport.update({
     id: '/notifications',
@@ -377,6 +383,7 @@ export interface FileRoutesByFullPath {
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
+  '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -429,6 +436,7 @@ export interface FileRoutesByTo {
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
   '/settings/approvals': typeof AuthedSettingsApprovalsRoute
+  '/settings/memory': typeof AuthedSettingsMemoryRoute
   '/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -485,6 +493,7 @@ export interface FileRoutesById {
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
   '/_authed/settings/approvals': typeof AuthedSettingsApprovalsRoute
+  '/_authed/settings/memory': typeof AuthedSettingsMemoryRoute
   '/_authed/settings/notifications': typeof AuthedSettingsNotificationsRoute
   '/_authed/settings/passwords': typeof AuthedSettingsPasswordsRoute
   '/_authed/sign-in/$requestId': typeof AuthedSignInRequestIdRoute
@@ -542,6 +551,7 @@ export interface FileRouteTypes {
     | '/admin/playground'
     | '/admin/skills'
     | '/settings/approvals'
+    | '/settings/memory'
     | '/settings/notifications'
     | '/settings/passwords'
     | '/sign-in/$requestId'
@@ -594,6 +604,7 @@ export interface FileRouteTypes {
     | '/admin/playground'
     | '/admin/skills'
     | '/settings/approvals'
+    | '/settings/memory'
     | '/settings/notifications'
     | '/settings/passwords'
     | '/sign-in/$requestId'
@@ -649,6 +660,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/playground'
     | '/_authed/admin/skills'
     | '/_authed/settings/approvals'
+    | '/_authed/settings/memory'
     | '/_authed/settings/notifications'
     | '/_authed/settings/passwords'
     | '/_authed/sign-in/$requestId'
@@ -889,6 +901,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsApprovalsRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/memory': {
+      id: '/_authed/settings/memory'
+      path: '/memory'
+      fullPath: '/settings/memory'
+      preLoaderRoute: typeof AuthedSettingsMemoryRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
     '/_authed/settings/notifications': {
       id: '/_authed/settings/notifications'
       path: '/notifications'
@@ -1116,6 +1135,7 @@ const AuthedAdminRouteRouteWithChildren =
 
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsApprovalsRoute: typeof AuthedSettingsApprovalsRoute
+  AuthedSettingsMemoryRoute: typeof AuthedSettingsMemoryRoute
   AuthedSettingsNotificationsRoute: typeof AuthedSettingsNotificationsRoute
   AuthedSettingsPasswordsRoute: typeof AuthedSettingsPasswordsRoute
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
@@ -1127,6 +1147,7 @@ interface AuthedSettingsRouteRouteChildren {
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsApprovalsRoute: AuthedSettingsApprovalsRoute,
+  AuthedSettingsMemoryRoute: AuthedSettingsMemoryRoute,
   AuthedSettingsNotificationsRoute: AuthedSettingsNotificationsRoute,
   AuthedSettingsPasswordsRoute: AuthedSettingsPasswordsRoute,
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
