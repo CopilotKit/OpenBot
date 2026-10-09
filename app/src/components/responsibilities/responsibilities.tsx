@@ -482,8 +482,8 @@ function GoalCard({ goal }: { goal: ResponsibilityRecord }) {
                 </p>
                 {run.waiting && (
                   <p>
-                    Waiting for {run.waiting.kind}. Respond through your
-                    approval inbox or conversation.
+                    Waiting for {run.waiting.kind}. Respond at the top of this
+                    Bot's page, or in the conversation.
                   </p>
                 )}
                 {run.error && (

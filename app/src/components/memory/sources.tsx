@@ -78,9 +78,9 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
     <section className="grid gap-3">
       <h2 className="font-semibold">Connected app sources</h2>
       <p className="text-sm text-muted-foreground">
-        Opt in to a read from an app your Bot can already access. Enabled
-        sources refresh every 15 minutes. Their facts are available to the
-        selected Bot.
+        Opt in to a read from an app this Bot can already access. Enabled
+        sources refresh every 15 minutes, and their facts are available to this
+        Bot only.
       </p>
       <form
         className="grid gap-3 rounded-lg border p-4"
