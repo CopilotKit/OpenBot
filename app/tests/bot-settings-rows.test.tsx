@@ -62,6 +62,46 @@ function serving(
     if (url.includes("/api/team-bots")) {
       return Response.json({ teamBots, publishable: [] });
     }
+    if (url === "/api/responsibilities") {
+      return Response.json({
+        responsibilities: [
+          { id: "g1", agentId: "expenses", status: "active" },
+          { id: "g2", agentId: "expenses", status: "paused" },
+          { id: "g3", agentId: "knowledge", status: "active" },
+        ],
+      });
+    }
+    if (url === "/api/delivery") {
+      return Response.json({
+        bindings: [
+          { id: "b1", transport: "slack", agentId: "expenses", enabled: true },
+          { id: "b2", transport: "sms", agentId: "knowledge", enabled: true },
+        ],
+        devices: [],
+        deliveries: [],
+        available: { slack: true, teams: false, sms: true, push: false },
+      });
+    }
+    if (url === "/api/memory/sources") {
+      return Response.json({
+        sources: [{ id: "s1", agentId: "expenses", enabled: true }],
+      });
+    }
+    if (url === "/api/proactive/settings") {
+      return Response.json({ settings: [] });
+    }
+    if (url === "/api/approvals") {
+      return Response.json({
+        enabled: true,
+        requests: [],
+        questions: [],
+        rules: [
+          { id: "r1", botId: "expenses" },
+          { id: "r2", botId: "*" },
+        ],
+        teamRules: [],
+      });
+    }
     return Response.json({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });
@@ -115,4 +155,19 @@ test("someone a Bot was published to sees Sharing, where its link is", async () 
   const view = draw({ ...BOT, mine: false, canManage: false });
   expect(await view.findByText("Sharing")).toBeTruthy();
   expect(await view.findByText("Whole team")).toBeTruthy();
+});
+
+test("the rows for responsibilities, reach, memory and rules say what this Bot has and open their pages", async () => {
+  serving("user");
+  const view = draw(BOT);
+  const row = async (title: string, summary: string, path: string) => {
+    expect(await view.findByText(summary)).toBeTruthy();
+    expect(view.getByText(title).closest("a")?.getAttribute("href")).toBe(
+      `/bots/expenses/${path}`,
+    );
+  };
+  await row("Responsibilities", "1 active", "responsibilities");
+  await row("Reaching you", "Slack", "reach");
+  await row("Memory", "1 source", "memory");
+  await row("Approval rules", "1 rule", "approvals");
 });

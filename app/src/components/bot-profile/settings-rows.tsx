@@ -1,5 +1,9 @@
 import {
+  IconBrain,
+  IconChecks,
   IconChevronRight,
+  IconDeviceMobile,
+  IconTargetArrow,
   IconClock,
   IconPuzzle,
   IconSettings,
@@ -21,11 +25,18 @@ import { Separator } from "@/components/ui/separator";
 import {
   accessSummary,
   countLabel,
+  memorySummary,
+  reachSummary,
   setupSummary,
   sharingSummary,
 } from "@/lib/agents/bot-summaries";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { approvalInboxOptions } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { deliveryQueryOptions } from "@/lib/delivery";
+import { memorySourcesQueryOptions } from "@/lib/memory";
+import { proactiveSettingsQueryOptions } from "@/lib/proactive";
+import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 import { routinesQueryOptions } from "@/lib/routines/queries";
 import { teamBotsQueryOptions } from "@/lib/team-bots";
@@ -33,6 +44,10 @@ import { connectorCount } from "./access";
 
 type Row = {
   to:
+    | "/bots/$agentId/responsibilities"
+    | "/bots/$agentId/reach"
+    | "/bots/$agentId/memory"
+    | "/bots/$agentId/approvals"
     | "/bots/$agentId/routines"
     | "/bots/$agentId/access"
     | "/bots/$agentId/sharing"
@@ -56,7 +71,71 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const canShare =
     agent.mine || me?.role === "admin" || published !== undefined;
 
+  const goals = useQuery(responsibilitiesQueryOptions());
+  const reach = useQuery(deliveryQueryOptions());
+  const sources = useQuery(memorySourcesQueryOptions());
+  const research = useQuery(proactiveSettingsQueryOptions());
+  const approvals = useQuery(approvalInboxOptions());
+
   const rows: Row[] = [
+    {
+      to: "/bots/$agentId/responsibilities",
+      title: "Responsibilities",
+      icon: IconTargetArrow,
+      summary: goals.data
+        ? countLabel(
+            goals.data.filter(
+              (goal) => goal.agentId === agent.id && goal.status === "active",
+            ).length,
+            "active",
+            "active",
+            "None active",
+          )
+        : "",
+    },
+    {
+      to: "/bots/$agentId/reach",
+      title: "Reaching you",
+      icon: IconDeviceMobile,
+      summary: reach.data
+        ? reachSummary(
+            reach.data.bindings
+              .filter(
+                (binding) => binding.enabled && binding.agentId === agent.id,
+              )
+              .map((binding) => binding.transport),
+          )
+        : "",
+    },
+    {
+      to: "/bots/$agentId/memory",
+      title: "Memory",
+      icon: IconBrain,
+      summary:
+        sources.data && research.data
+          ? memorySummary(
+              sources.data.filter((source) => source.agentId === agent.id)
+                .length,
+              research.data.some(
+                (setting) => setting.agentId === agent.id && setting.enabled,
+              ),
+            )
+          : "",
+    },
+    {
+      to: "/bots/$agentId/approvals",
+      title: "Approval rules",
+      icon: IconChecks,
+      summary: approvals.data
+        ? countLabel(
+            approvals.data.rules.filter((rule) => rule.botId === agent.id)
+              .length,
+            "rule",
+            "rules",
+            "No rules",
+          )
+        : "",
+    },
     {
       to: "/bots/$agentId/routines",
       title: "Routines",

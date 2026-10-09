@@ -48,3 +48,30 @@ export function setupSummary(agent: {
     return agent.endpoint;
   }
 }
+
+const TRANSPORT_LABEL: Record<string, string> = {
+  slack: "Slack",
+  teams: "Microsoft Teams",
+  sms: "SMS",
+};
+
+/** Where this Bot's conversations continue outside OpenBot, each place once. */
+export function reachSummary(transports: readonly string[]): string {
+  const places = [...new Set(transports)]
+    .map((transport) => TRANSPORT_LABEL[transport] ?? transport)
+    .sort((a, b) => a.localeCompare(b));
+  return places.length ? places.join(", ") : "Only in OpenBot";
+}
+
+/** The apps feeding this Bot facts, and whether it researches in the background. */
+export function memorySummary(sources: number, research: boolean): string {
+  const parts = [
+    sources ? countLabel(sources, "source", "sources", "") : "",
+    research
+      ? sources
+        ? "background research on"
+        : "Background research on"
+      : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "Nothing connected";
+}

@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import {
   accessSummary,
   countLabel,
+  memorySummary,
+  reachSummary,
   setupSummary,
   sharingSummary,
 } from "@/lib/agents/bot-summaries";
@@ -49,4 +51,18 @@ test("setup names where it runs", () => {
 
 test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {
   expect(sharingSummary(undefined, "public")).toBe("Everyone (public)");
+});
+
+test("reach names the places a Bot continues the conversation", () => {
+  expect(reachSummary([])).toBe("Only in OpenBot");
+  expect(reachSummary(["slack"])).toBe("Slack");
+  expect(reachSummary(["sms", "slack", "slack"])).toBe("Slack, SMS");
+  expect(reachSummary(["teams"])).toBe("Microsoft Teams");
+});
+
+test("memory names the sources and whether research is on", () => {
+  expect(memorySummary(0, false)).toBe("Nothing connected");
+  expect(memorySummary(2, false)).toBe("2 sources");
+  expect(memorySummary(0, true)).toBe("Background research on");
+  expect(memorySummary(1, true)).toBe("1 source, background research on");
 });
