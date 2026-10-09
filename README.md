@@ -188,15 +188,19 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
 | `/bots/:id`                 | One Bot: what it is doing, its routines, skills, sharing and setup. |
 | `/responsibilities`         | Give a Bot a lasting goal, follow its progress, and decide when it should work. |
-| `/reachability`             | Continue a conversation in Slack, Microsoft Teams, by text message, or on your phone. |
-| `/memory`                   | Review what your Bots remember, and choose which connected apps can contribute facts. |
-| `/approvals`                | Choose what your Bots may do, and review actions waiting for you.  |
+| `/reachability`             | Continue a conversation in Slack, Microsoft Teams, or by text message. |
+| `/memory`                   | Suggestions, background research, and which connected apps feed your Bots facts. |
+| `/approvals`                | Actions waiting for you, and rules for a single Bot.               |
 | `/skills`                   | Create and enable personal skills.                                 |
 | `/routines`                 | See the routines that are standing, and stop one.                  |
 | `/settings`                 | User preferences.                                                  |
 | `/settings/connected-accounts` | Connect your apps so your Bots can work with them.              |
 | `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
+| `/settings/notifications`   | Where updates go, your devices, and recent deliveries.             |
+| `/settings/approvals`       | Whether your Bots ask before acting, and rules for every Bot.      |
+| `/settings/memory`          | What your Bots remember about you, and facts you tell them.        |
 | `/admin/credentials`        | Store write-only encrypted credentials.                            |
+| `/admin/approvals`          | Team approval settings, team rules, and shared account requests.   |
 | `/admin/computers`          | View, stop, and reset Bot computers.                               |
 | `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
 | `/admin/components`         | Publish components and govern which Bots may use them.             |

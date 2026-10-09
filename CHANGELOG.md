@@ -26,6 +26,10 @@ Settings. `/agents` and `/team-bots` still work and open the new places. A Team 
 assigns to a group is pinned at the top of its members' Bots list instead of sitting in their
 sidebar.
 
+Settings now also holds whether your Bots ask before acting, rules for every Bot, your memories, your
+devices and recent deliveries, and GitHub event sources. Team approval settings and shared account
+requests moved to Admin → Approvals.
+
 ### An app's account can belong to the team
 
 An administrator can make a Composio app Shared: one account, connected once, that every Bot granted

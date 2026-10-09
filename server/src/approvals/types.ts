@@ -315,7 +315,7 @@ export function approvalAction(candidate: ApprovalCandidate): ApprovalAction {
     !continuation.toolCallId
   )
     throw new ApprovalRefusedError(
-      "This action needs your approval, but it was not started from a conversation that can ask you. Nothing was done. Ask for it in a chat with this Bot, or change your rules in Approvals.",
+      "This action needs your approval, but it was not started from a conversation that can ask you. Nothing was done. Ask for it in a chat with this Bot, or change your rules in Settings → Approvals.",
     );
   if (
     ![

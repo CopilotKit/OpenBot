@@ -292,7 +292,7 @@ export function createHostAccessBroker(
             : "ask";
       if (commandPolicy === "never")
         throw new HostAccessRefusedError(
-          "Commands on your computer are set to never run, by you or by your team. Change it in Approvals if you want Bots to run commands here.",
+          "Commands on your computer are set to never run, by you or by your team. Change it in Settings → Approvals if you want Bots to run commands here.",
         );
       // Safety requirements, rules and auto-review apply whatever the command policy is.
       const approval =
