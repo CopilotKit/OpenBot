@@ -63,7 +63,7 @@ import {
   type MessageListEmphasis,
   useMessageListEmphasis,
 } from "@/lib/settings/message-list";
-import { BotAttentionList } from "../bot-profile/attention";
+import { BotsNavBadge } from "../bot-profile/attention";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -311,8 +311,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </InputGroup>
             </SidebarMenuItem>
             <div className="w-full h-2" />
-            {/* Bots that need you, or that you paused. See bot-profile/attention.tsx. */}
-            <BotAttentionList />
             {/*
              * TWO DIFFERENT NOTHINGS, AND SAYING THE WRONG ONE IS ALARMING. A roster nobody has
              * used yet needs telling how to start. A roster that simply does not match what is in
@@ -385,6 +383,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <IconRobot />
               </div>
               <span className="text-sm">Bots</span>
+              {/* What waits on you across every Bot; Bots lists them first. */}
+              <BotsNavBadge />
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
