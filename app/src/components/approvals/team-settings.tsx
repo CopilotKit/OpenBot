@@ -1,16 +1,30 @@
+import { IconEyeCheck, IconTerminal2, IconUserCog } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { PageSection } from "@/components/layout/page-shell";
+import { Fragment } from "react";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
   approvalInboxOptions,
   createTeamApprovalRuleMutationOptions,
-  type HostCommandPolicy,
   revokeTeamApprovalRuleMutationOptions,
   teamApprovalSettingsMutationOptions,
   updateTeamApprovalRuleMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
-import { HOST_LABELS, RuleForm, RuleRow, selectClass } from "./rules";
+import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 import { SharedUseRequests } from "./shared-use-requests";
 
 /**
@@ -49,107 +63,102 @@ export function TeamApprovalSettings() {
       ) : null}
       {settings ? (
         <PageSection title="Team settings">
-          <div className="mt-4 space-y-3">
-            <label
-              htmlFor="enforce-auto-review"
-              className="flex items-center justify-between gap-4 rounded-lg border p-4"
-            >
-              <span id="enforce-auto-review-title" className="font-medium">
-                Require auto-review for everyone
-              </span>
-              <Switch
-                id="enforce-auto-review"
-                aria-labelledby="enforce-auto-review-title"
-                checked={settings.enforceAutoReview}
-                disabled={team.isPending}
-                onCheckedChange={(enforceAutoReview) =>
-                  team.mutate({ enforceAutoReview })
-                }
-              />
-            </label>
-            <label
-              htmlFor="custom-rules"
-              className="flex items-center justify-between gap-4 rounded-lg border p-4"
-            >
-              <span id="custom-rules-title" className="font-medium">
-                Let members set personal rules
-              </span>
-              <Switch
-                id="custom-rules"
-                aria-labelledby="custom-rules-title"
-                checked={settings.customRulesEnabled}
-                disabled={team.isPending}
-                onCheckedChange={(customRulesEnabled) =>
-                  team.mutate({ customRulesEnabled })
-                }
-              />
-            </label>
-            <label
-              htmlFor="host-commands-cap"
-              className="flex items-center justify-between gap-4 rounded-lg border p-4"
-            >
-              <span>
-                <span className="block font-medium">
-                  Commands on members' computers, at most
-                </span>
-                <span className="text-sm text-muted-foreground">
+          <PageRows>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconEyeCheck />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle id="enforce-auto-review-title">
+                  Require auto-review for everyone
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-labelledby="enforce-auto-review-title"
+                  checked={settings.enforceAutoReview}
+                  disabled={team.isPending}
+                  onCheckedChange={(enforceAutoReview) =>
+                    team.mutate({ enforceAutoReview })
+                  }
+                />
+              </ItemActions>
+            </Item>
+            <Separator />
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconUserCog />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle id="custom-rules-title">
+                  Let members set personal rules
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  aria-labelledby="custom-rules-title"
+                  checked={settings.customRulesEnabled}
+                  disabled={team.isPending}
+                  onCheckedChange={(customRulesEnabled) =>
+                    team.mutate({ customRulesEnabled })
+                  }
+                />
+              </ItemActions>
+            </Item>
+            <Separator />
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconTerminal2 />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Commands on members' computers, at most</ItemTitle>
+                <ItemDescription>
                   A member's own stricter setting still applies.
-                </span>
-              </span>
-              <select
-                id="host-commands-cap"
-                aria-label="Commands on members' computers, at most"
-                className={selectClass}
-                value={settings.hostCommandsCap}
-                disabled={team.isPending}
-                onChange={(event) =>
-                  team.mutate({
-                    hostCommandsCap: event.target.value as HostCommandPolicy,
-                  })
-                }
-              >
-                {(Object.keys(HOST_LABELS) as HostCommandPolicy[]).map(
-                  (key) => (
-                    <option key={key} value={key}>
-                      {HOST_LABELS[key]}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-          </div>
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <LabelSelect
+                  disabled={team.isPending}
+                  label="Commands on members' computers, at most"
+                  labels={HOST_LABELS}
+                  onChange={(hostCommandsCap) =>
+                    team.mutate({ hostCommandsCap })
+                  }
+                  value={settings.hostCommandsCap}
+                />
+              </ItemActions>
+            </Item>
+          </PageRows>
         </PageSection>
       ) : null}
       <PageSection
         description="These apply to every member's Bots, and members cannot change them."
         title="Team rules"
       >
-        <div className="mt-4 space-y-3">
+        {teamRules.length === 0 ? <PageEmpty>No team rules.</PageEmpty> : null}
+        <PageRows>
           {teamRules.map((rule) => (
-            <RuleRow
-              disabled={revokeTeam.isPending || changeTeamRule.isPending}
-              key={rule.id}
-              onChange={(behaviour) =>
-                changeTeamRule.mutate({ id: rule.id, behaviour })
-              }
-              onRevoke={() => revokeTeam.mutate(rule.id)}
-              rule={rule}
-              team
-            />
+            <Fragment key={rule.id}>
+              <RuleRow
+                disabled={revokeTeam.isPending || changeTeamRule.isPending}
+                onChange={(behaviour) =>
+                  changeTeamRule.mutate({ id: rule.id, behaviour })
+                }
+                onRevoke={() => revokeTeam.mutate(rule.id)}
+                rule={rule}
+                team
+              />
+              <Separator />
+            </Fragment>
           ))}
-          {teamRules.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No team rules.</p>
-          ) : null}
           <RuleForm
             label="Add a team rule"
             onSave={(input) => addTeamRule.mutate(input)}
             pending={addTeamRule.isPending}
           />
-        </div>
+        </PageRows>
       </PageSection>
-      <div className="mt-12">
-        <SharedUseRequests />
-      </div>
+      <SharedUseRequests />
     </>
   );
 }

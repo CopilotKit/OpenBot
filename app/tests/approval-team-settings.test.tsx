@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
 import { settleReactWork } from "./settle-react-work";
@@ -124,12 +124,13 @@ function draw() {
 test("an administrator sets the team-wide controls", async () => {
   const view = draw();
   await view.findByText("Team settings");
-  fireEvent.change(
+  const user = userEvent.setup({ document });
+  await user.click(
     view.getByRole("combobox", {
       name: "Commands on members' computers, at most",
     }),
-    { target: { value: "never" } },
   );
+  await user.click(await view.findByRole("option", { name: "Never" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/team",
@@ -145,12 +146,12 @@ test("an administrator adds a team rule for every Bot", async () => {
   const view = draw();
   await view.findByText("Add a team rule");
   const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a team rule/ }));
   await user.type(
-    view.getByRole("textbox", { name: "Tool or app" }),
+    await view.findByRole("textbox", { name: "Tool or app" }),
     "mcp/slack/*",
   );
-  const save = view.getByRole("button", { name: "Save rule" });
-  fireEvent.submit(save.closest("form") as HTMLFormElement);
+  await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/team/rules",

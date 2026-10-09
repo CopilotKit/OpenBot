@@ -1,12 +1,26 @@
+import { IconEyeCheck, IconHandStop, IconTerminal2 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { PageSection } from "@/components/layout/page-shell";
+import { Fragment } from "react";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
   approvalInboxOptions,
   approvalPreferencesMutationOptions,
   createApprovalRuleMutationOptions,
-  type HostCommandPolicy,
   revokeApprovalRuleMutationOptions,
   ruleCoversBot,
   updateApprovalRuleMutationOptions,
@@ -14,7 +28,7 @@ import {
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
-import { HOST_LABELS, RuleForm, RuleRow, selectClass } from "./rules";
+import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 
 /**
  * The person's own approval settings: whether their Bots ask before changing things, and the rules
@@ -58,6 +72,8 @@ export function ApprovalSettings() {
         !reachable.some((agent) => ruleCoversBot(rule.botId, agent.id))),
   );
   const teamRules = inbox.data?.teamRules ?? [];
+  const canAdd = Boolean(inbox.data?.preferences) && !rulesOff;
+  const saved = teamRules.length + everyBot.length;
 
   return (
     <>
@@ -76,70 +92,68 @@ export function ApprovalSettings() {
         </p>
       ) : null}
       <PageSection title="Before a Bot acts">
-        <div className="mt-4 space-y-3">
-          <label
-            htmlFor="ask-before-changes"
-            className="flex items-center justify-between gap-4 rounded-lg border p-4"
-          >
-            <span>
-              <span className="block font-medium">
-                Ask before making changes
-              </span>
-              <span className="text-sm text-muted-foreground">
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconHandStop />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Ask before making changes</ItemTitle>
+              <ItemDescription>
                 Review a Bot's changes to websites, connected apps, and files.
-              </span>
-            </span>
-            <Switch
-              id="ask-before-changes"
-              aria-label="Ask before making changes"
-              checked={inbox.data?.enabled ?? false}
-              disabled={inbox.isLoading || preferences.isPending}
-              onCheckedChange={(enabled) => preferences.mutate({ enabled })}
-            />
-          </label>
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label="Ask before making changes"
+                checked={inbox.data?.enabled ?? false}
+                disabled={inbox.isLoading || preferences.isPending}
+                onCheckedChange={(enabled) => preferences.mutate({ enabled })}
+              />
+            </ItemActions>
+          </Item>
           {inbox.data?.preferences ? (
             <>
-              <label
-                htmlFor="auto-review"
-                className="flex items-center justify-between gap-4 rounded-lg border p-4"
-              >
-                <span>
-                  <span id="auto-review-title" className="block font-medium">
-                    Auto-review
-                  </span>
-                  <span
+              <Separator />
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconEyeCheck />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle id="auto-review-title">Auto-review</ItemTitle>
+                  <ItemDescription
+                    className="line-clamp-none"
                     id="auto-review-description"
-                    className="text-sm text-muted-foreground"
                   >
                     {enforced ? "Required by your team. " : ""}
                     Before an action that could affect your accounts or share
                     information, a model checks it against what you asked for,
                     your rules and the safety requirements. If it cannot decide,
                     it asks you.
-                  </span>
-                </span>
-                <Switch
-                  id="auto-review"
-                  // Named by its title alone and described by the sentence under it, so the name
-                  // does not depend on how a label wrapping a composite control is resolved.
-                  aria-labelledby="auto-review-title"
-                  aria-describedby="auto-review-description"
-                  checked={enforced || inbox.data.preferences.autoReview}
-                  disabled={enforced || preferences.isPending}
-                  onCheckedChange={(autoReview) =>
-                    preferences.mutate({ autoReview })
-                  }
-                />
-              </label>
-              <label
-                htmlFor="host-commands"
-                className="flex items-center justify-between gap-4 rounded-lg border p-4"
-              >
-                <span>
-                  <span className="block font-medium">
-                    Commands on your computer
-                  </span>
-                  <span className="text-sm text-muted-foreground">
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Switch
+                    // Named by its title alone and described by the sentence beside it, so the name
+                    // stays short however long the description grows.
+                    aria-describedby="auto-review-description"
+                    aria-labelledby="auto-review-title"
+                    checked={enforced || inbox.data.preferences.autoReview}
+                    disabled={enforced || preferences.isPending}
+                    onCheckedChange={(autoReview) =>
+                      preferences.mutate({ autoReview })
+                    }
+                  />
+                </ItemActions>
+              </Item>
+              <Separator />
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconTerminal2 />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Commands on your computer</ItemTitle>
+                  <ItemDescription className="line-clamp-none">
                     {inbox.data.hostCommands &&
                     inbox.data.hostCommands !==
                       inbox.data.preferences.hostCommands
@@ -147,32 +161,23 @@ export function ApprovalSettings() {
                       : ""}
                     The OpenBot desktop app still shows each command before it
                     runs on your computer.
-                  </span>
-                </span>
-                <select
-                  id="host-commands"
-                  aria-label="Commands on your computer"
-                  className={selectClass}
-                  value={inbox.data.preferences.hostCommands}
-                  disabled={preferences.isPending}
-                  onChange={(event) =>
-                    preferences.mutate({
-                      hostCommands: event.target.value as HostCommandPolicy,
-                    })
-                  }
-                >
-                  {(Object.keys(HOST_LABELS) as HostCommandPolicy[]).map(
-                    (key) => (
-                      <option key={key} value={key}>
-                        {HOST_LABELS[key]}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </label>
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <LabelSelect
+                    disabled={preferences.isPending}
+                    label="Commands on your computer"
+                    labels={HOST_LABELS}
+                    onChange={(hostCommands) =>
+                      preferences.mutate({ hostCommands })
+                    }
+                    value={inbox.data.preferences.hostCommands}
+                  />
+                </ItemActions>
+              </Item>
             </>
           ) : null}
-        </div>
+        </PageRows>
       </PageSection>
       <PageSection
         description={
@@ -191,62 +196,71 @@ export function ApprovalSettings() {
         }
         title="Rules for every Bot"
       >
-        <div className="mt-4 space-y-3">
-          {teamRules.map((rule) => (
-            <RuleRow
-              disabled
-              key={rule.id}
-              locked
-              onChange={() => {}}
-              onRevoke={() => {}}
-              rule={rule}
-              team
-            />
-          ))}
-          {everyBot.map((rule) => (
-            <RuleRow
-              disabled={revoke.isPending || changeRule.isPending}
-              key={rule.id}
-              locked={rulesOff}
-              onChange={(behaviour) =>
-                changeRule.mutate({ id: rule.id, behaviour })
-              }
-              onRevoke={() => revoke.mutate(rule.id)}
-              rule={rule}
-            />
-          ))}
-          {everyBot.length === 0 && teamRules.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No rules saved.</p>
-          ) : null}
-          {inbox.data?.preferences && !rulesOff ? (
-            <RuleForm
-              botField={false}
-              label="Add a rule"
-              onSave={(input) => addRule.mutate(input)}
-              pending={addRule.isPending}
-            />
-          ) : null}
-        </div>
+        {saved === 0 ? <PageEmpty>No rules saved.</PageEmpty> : null}
+        {saved > 0 || canAdd ? (
+          <PageRows>
+            {teamRules.map((rule, index) => (
+              <Fragment key={rule.id}>
+                {index > 0 ? <Separator /> : null}
+                <RuleRow
+                  disabled
+                  locked
+                  onChange={() => {}}
+                  onRevoke={() => {}}
+                  rule={rule}
+                  team
+                />
+              </Fragment>
+            ))}
+            {everyBot.map((rule, index) => (
+              <Fragment key={rule.id}>
+                {teamRules.length + index > 0 ? <Separator /> : null}
+                <RuleRow
+                  disabled={revoke.isPending || changeRule.isPending}
+                  locked={rulesOff}
+                  onChange={(behaviour) =>
+                    changeRule.mutate({ id: rule.id, behaviour })
+                  }
+                  onRevoke={() => revoke.mutate(rule.id)}
+                  rule={rule}
+                />
+              </Fragment>
+            ))}
+            {canAdd ? (
+              <>
+                {saved > 0 ? <Separator /> : null}
+                <RuleForm
+                  botField={false}
+                  label="Add a rule"
+                  onSave={(input) => addRule.mutate(input)}
+                  pending={addRule.isPending}
+                />
+              </>
+            ) : null}
+          </PageRows>
+        ) : null}
       </PageSection>
       {agents.data !== undefined && otherBots.length > 0 ? (
         <PageSection
           description="These name no Bot you can open, but they still apply to any Bot they match. Remove the ones you no longer want."
           title="Rules for other Bots"
         >
-          <div className="mt-4 space-y-3">
-            {otherBots.map((rule) => (
-              <RuleRow
-                disabled={revoke.isPending || changeRule.isPending}
-                key={rule.id}
-                locked={rulesOff}
-                onChange={(behaviour) =>
-                  changeRule.mutate({ id: rule.id, behaviour })
-                }
-                onRevoke={() => revoke.mutate(rule.id)}
-                rule={rule}
-              />
+          <PageRows>
+            {otherBots.map((rule, index) => (
+              <Fragment key={rule.id}>
+                {index > 0 ? <Separator /> : null}
+                <RuleRow
+                  disabled={revoke.isPending || changeRule.isPending}
+                  locked={rulesOff}
+                  onChange={(behaviour) =>
+                    changeRule.mutate({ id: rule.id, behaviour })
+                  }
+                  onRevoke={() => revoke.mutate(rule.id)}
+                  rule={rule}
+                />
+              </Fragment>
             ))}
-          </div>
+          </PageRows>
         </PageSection>
       ) : null}
     </>

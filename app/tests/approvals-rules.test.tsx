@@ -145,8 +145,8 @@ test("team rules are locked for members, enforced auto-review is shown as requir
   await view.findByText("Ask before taking action (team rule)");
   const mine = view.getByRole("combobox", {
     name: "Behaviour for mcp/gmail/*",
-  }) as HTMLSelectElement;
-  expect(mine.value).toBe("allow");
+  });
+  expect(mine.textContent).toContain("Take action without asking");
   expect(view.getByText("Locked")).toBeTruthy();
   const review = view.getByRole("switch", { name: "Auto-review" });
   expect(review.getAttribute("aria-checked")).toBe("true");
@@ -162,7 +162,11 @@ test("a member changes a saved rule in place", async () => {
   const mine = await view.findByRole("combobox", {
     name: "Behaviour for mcp/gmail/*",
   });
-  fireEvent.change(mine, { target: { value: "hand_off" } });
+  const user = userEvent.setup({ document });
+  await user.click(mine);
+  await user.click(
+    await view.findByRole("option", { name: "Hand off to you" }),
+  );
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/rules/mine",
@@ -178,21 +182,19 @@ test("a member changes a saved rule in place", async () => {
 test("a member adds a rule with one of the four behaviours", async () => {
   const view = draw(<ApprovalSettings />);
   await view.findByText("Add a rule");
-  // Rules here apply to every Bot, so there is no Bot to name.
-  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
   const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
   await user.type(
-    view.getByRole("textbox", { name: "Tool or app" }),
+    await view.findByRole("textbox", { name: "Tool or app" }),
     "mcp/slack/*",
   );
-  fireEvent.change(
-    view.getAllByRole("combobox", { name: "Behaviour" })[0] as HTMLElement,
-    {
-      target: { value: "pre_approved" },
-    },
+  // Rules here apply to every Bot, so there is no Bot to name.
+  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
+  await user.click(view.getByRole("combobox", { name: "Behaviour" }));
+  await user.click(
+    await view.findByRole("option", { name: "Take action if pre-approved" }),
   );
-  const save = view.getByRole("button", { name: "Save rule" });
-  fireEvent.submit(save.closest("form") as HTMLFormElement);
+  await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/rules",

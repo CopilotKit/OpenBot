@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BotApprovalRules } from "@/components/approvals/bot-rules";
 import { settleReactWork } from "./settle-react-work";
@@ -111,17 +111,14 @@ test("a rule added here is for this Bot, with no Bot to type", async () => {
   serving();
   const view = draw();
   await view.findByText("Add a rule");
-  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
   const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
   await user.type(
-    view.getByRole("textbox", { name: "Tool or app" }),
+    await view.findByRole("textbox", { name: "Tool or app" }),
     "mcp/notion/*",
   );
-  fireEvent.submit(
-    view
-      .getByRole("button", { name: "Save rule" })
-      .closest("form") as HTMLFormElement,
-  );
+  expect(view.queryByRole("textbox", { name: "Bot" })).toBeNull();
+  await user.click(view.getByRole("button", { name: "Save rule" }));
   await waitFor(() =>
     expect(sent).toContainEqual({
       path: "/api/approvals/rules",
