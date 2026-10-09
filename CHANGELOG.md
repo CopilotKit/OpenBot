@@ -26,6 +26,10 @@ Settings. `/agents` and `/team-bots` still work and open the new places. A Team 
 assigns to a group is pinned at the top of its members' Bots list instead of sitting in their
 sidebar.
 
+The sidebar no longer lists each Bot that needs you. A badge on Bots counts the questions, approvals
+and stalled hand-offs waiting across all of them, and Bots lists those Bots first, under Needs you.
+Browser notifications when a Bot starts needing you are unchanged.
+
 Settings now also holds whether your Bots ask before acting, rules for every Bot, your memories, your
 devices and recent deliveries, and GitHub event sources. Team approval settings and shared account
 requests moved to Admin → Approvals.
