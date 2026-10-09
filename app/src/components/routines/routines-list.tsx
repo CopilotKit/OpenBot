@@ -457,10 +457,7 @@ export function RoutinesList({
       >
         {/* The heavier backdrop, forced: opened from a Bot's dialog this stacks over it, and Base
             UI would otherwise render a nested dialog with no backdrop at all. */}
-        <DialogContent
-          className="max-w-sm"
-          overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm"
-        >
+        <DialogContent overlayClassName="bg-black/20 supports-backdrop-filter:backdrop-blur-sm">
           <DialogHeader>
             <DialogTitle>Delete "{confirming?.schedule}"?</DialogTitle>
             <DialogDescription>
