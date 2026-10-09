@@ -124,11 +124,17 @@ export function SuggestionsInbox() {
 }
 
 /** Opt a Bot in to read-only background research of the apps it can already read. */
-export function ProactiveResearchSettings() {
+export function ProactiveResearchSettings({
+  agentId: fixedBot,
+}: {
+  /** Only this Bot's research, and a new one is this Bot's without asking. */
+  agentId?: string;
+} = {}) {
   const settings = useQuery(proactiveSettingsQueryOptions());
   const bots = useQuery(agentListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
-  const [agentId, setAgentId] = useState("");
+  const [pickedBot, setAgentId] = useState("");
+  const agentId = fixedBot ?? pickedBot;
   const [channelId, setChannelId] = useState("");
   const [focus, setFocus] = useState("");
   const [intervalMinutes, setIntervalMinutes] = useState(240);
@@ -160,25 +166,27 @@ export function ProactiveResearchSettings() {
         }}
       >
         <div className="grid gap-3 sm:grid-cols-3">
-          <label className={field}>
-            Bot
-            <select
-              required
-              className={select}
-              value={agentId}
-              onChange={(event) => {
-                setAgentId(event.target.value);
-                setChannelId("");
-              }}
-            >
-              <option value="">Choose a Bot</option>
-              {bots.data?.map((bot) => (
-                <option key={bot.id} value={bot.id}>
-                  {bot.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {fixedBot === undefined ? (
+            <label className={field}>
+              Bot
+              <select
+                required
+                className={select}
+                value={agentId}
+                onChange={(event) => {
+                  setAgentId(event.target.value);
+                  setChannelId("");
+                }}
+              >
+                <option value="">Choose a Bot</option>
+                {bots.data?.map((bot) => (
+                  <option key={bot.id} value={bot.id}>
+                    {bot.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className={field}>
             Deliver suggestions to
             <select
@@ -240,16 +248,20 @@ export function ProactiveResearchSettings() {
           {settings.error.message}
         </p>
       )}
-      {settings.data?.map((setting) => (
-        <SettingRow
-          key={setting.id}
-          setting={setting}
-          botName={
-            bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
-            setting.agentId
-          }
-        />
-      ))}
+      {settings.data
+        ?.filter(
+          (setting) => fixedBot === undefined || setting.agentId === fixedBot,
+        )
+        .map((setting) => (
+          <SettingRow
+            key={setting.id}
+            setting={setting}
+            botName={
+              bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
+              setting.agentId
+            }
+          />
+        ))}
     </section>
   );
 }
