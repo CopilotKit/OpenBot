@@ -112,3 +112,26 @@ test("duplicating opens the copy", async () => {
     expect(onDuplicated).toHaveBeenCalledWith("expenses-copy"),
   );
 });
+
+test("a Bot an administrator assigned to you reads as pinned and cannot be hidden or unpinned", () => {
+  const view = draw({
+    ...BOT,
+    mine: false,
+    canManage: false,
+    assignedToMe: true,
+  });
+  const pinned = view.getByRole("switch", { name: "Pinned" });
+  const hidden = view.getByRole("switch", { name: "Hidden" });
+  expect(pinned.getAttribute("aria-checked")).toBe("true");
+  expect(
+    pinned.hasAttribute("disabled") ||
+      pinned.getAttribute("aria-disabled") === "true",
+  ).toBe(true);
+  expect(
+    hidden.hasAttribute("disabled") ||
+      hidden.getAttribute("aria-disabled") === "true",
+  ).toBe(true);
+  expect(
+    view.getAllByText(/Assigned to you by an administrator/).length,
+  ).toBeGreaterThan(0);
+});

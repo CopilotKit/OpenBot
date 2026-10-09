@@ -173,6 +173,8 @@ export function ManageSection({
   const [resetOpen, setResetOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const error = setPinned.error ?? setHidden.error ?? duplicate.error;
+  // An administrator put it in this person's list; it stays pinned and cannot be hidden.
+  const assigned = agent.assignedToMe === true;
 
   return (
     <PageSection title="Manage">
@@ -189,16 +191,18 @@ export function ManageSection({
           <ItemContent>
             <ItemTitle>Pinned</ItemTitle>
             <ItemDescription>
-              {agent.pinned
-                ? "At the top of your Bots list. Nobody else's list changes."
-                : "Keep it at the top of your Bots list. Nobody else's list changes."}
+              {assigned
+                ? "Assigned to you by an administrator, so it stays at the top of your Bots list."
+                : agent.pinned
+                  ? "At the top of your Bots list. Nobody else's list changes."
+                  : "Keep it at the top of your Bots list. Nobody else's list changes."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
             <Switch
               aria-label="Pinned"
-              checked={agent.pinned}
-              disabled={setPinned.isPending}
+              checked={agent.pinned || assigned}
+              disabled={assigned || setPinned.isPending}
               onCheckedChange={(pinned) =>
                 setPinned.mutate({ agentId: agent.id, pinned })
               }
@@ -213,16 +217,18 @@ export function ManageSection({
           <ItemContent>
             <ItemTitle>Hidden</ItemTitle>
             <ItemDescription>
-              {agent.hidden
-                ? "Folded under Hidden on your Bots list. Nobody else's list changes."
-                : "Take it off your Bots list. Nobody else's list changes."}
+              {assigned
+                ? "Assigned to you by an administrator, so it cannot be hidden."
+                : agent.hidden
+                  ? "Folded under Hidden on your Bots list. Nobody else's list changes."
+                  : "Take it off your Bots list. Nobody else's list changes."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
             <Switch
               aria-label="Hidden"
               checked={agent.hidden}
-              disabled={setHidden.isPending}
+              disabled={assigned || setHidden.isPending}
               onCheckedChange={async (hidden) => {
                 await setHidden.mutateAsync({ agentId: agent.id, hidden });
                 if (hidden) onHidden();
