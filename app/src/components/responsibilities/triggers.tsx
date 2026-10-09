@@ -564,179 +564,184 @@ function NewTriggerDialog({
           {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
               direct child of DialogContent and keeps scrolling. */}
           <form
-            className="grid gap-5"
             id={`${id}-form`}
             onSubmit={(event) => {
               event.preventDefault();
               create.mutate();
             }}
           >
-            <Field>
-              <FieldLabel htmlFor={`${id}-kind`}>Trigger</FieldLabel>
-              <Select
-                items={KIND_LABEL}
-                onValueChange={(value) => {
-                  if (value) setKind(value as TriggerKind);
-                }}
-                value={kind}
-              >
-                <SelectTrigger className="w-full" id={`${id}-kind`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(KIND_LABEL) as TriggerKind[]).map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {KIND_LABEL[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldDescription>{KIND_HELP[kind]}</FieldDescription>
-            </Field>
-            {kind === "slack" ? (
-              <FieldGroup className="sm:grid sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor={`${id}-team`}>Slack team ID</FieldLabel>
-                  <Input
-                    id={`${id}-team`}
-                    required
-                    placeholder="T0123ABCD"
-                    value={teamId}
-                    onChange={(event) => setTeamId(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-mode`}>Fire on</FieldLabel>
-                  <Select
-                    items={SLACK_MODE}
-                    onValueChange={(value) => {
-                      if (value) setMode(value as SlackMode);
-                    }}
-                    value={mode}
-                  >
-                    <SelectTrigger className="w-full" id={`${id}-mode`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(SLACK_MODE) as SlackMode[]).map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {SLACK_MODE[value]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                {mode === "phrase" && (
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`${id}-kind`}>Trigger</FieldLabel>
+                <Select
+                  items={KIND_LABEL}
+                  onValueChange={(value) => {
+                    if (value) setKind(value as TriggerKind);
+                  }}
+                  value={kind}
+                >
+                  <SelectTrigger className="w-full" id={`${id}-kind`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(KIND_LABEL) as TriggerKind[]).map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {KIND_LABEL[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>{KIND_HELP[kind]}</FieldDescription>
+              </Field>
+              {kind === "slack" ? (
+                <FieldGroup className="sm:grid sm:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor={`${id}-phrases`}>
-                      Phrases (comma separated)
+                    <FieldLabel htmlFor={`${id}-team`}>
+                      Slack team ID
                     </FieldLabel>
                     <Input
-                      id={`${id}-phrases`}
+                      id={`${id}-team`}
                       required
-                      value={phrases}
-                      onChange={(event) => setPhrases(event.target.value)}
+                      placeholder="T0123ABCD"
+                      value={teamId}
+                      onChange={(event) => setTeamId(event.target.value)}
                     />
                   </Field>
-                )}
-                {mode === "reaction" && (
                   <Field>
-                    <FieldLabel htmlFor={`${id}-reactions`}>
-                      Reactions (blank: any)
+                    <FieldLabel htmlFor={`${id}-mode`}>Fire on</FieldLabel>
+                    <Select
+                      items={SLACK_MODE}
+                      onValueChange={(value) => {
+                        if (value) setMode(value as SlackMode);
+                      }}
+                      value={mode}
+                    >
+                      <SelectTrigger className="w-full" id={`${id}-mode`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(SLACK_MODE) as SlackMode[]).map(
+                          (value) => (
+                            <SelectItem key={value} value={value}>
+                              {SLACK_MODE[value]}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {mode === "phrase" && (
+                    <Field>
+                      <FieldLabel htmlFor={`${id}-phrases`}>
+                        Phrases (comma separated)
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-phrases`}
+                        required
+                        value={phrases}
+                        onChange={(event) => setPhrases(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                  {mode === "reaction" && (
+                    <Field>
+                      <FieldLabel htmlFor={`${id}-reactions`}>
+                        Reactions (blank: any)
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-reactions`}
+                        placeholder="eyes, rotating_light"
+                        value={reactions}
+                        onChange={(event) => setReactions(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-channels`}>
+                      Channel IDs (blank: all the Bot is in)
                     </FieldLabel>
                     <Input
-                      id={`${id}-reactions`}
-                      placeholder="eyes, rotating_light"
-                      value={reactions}
-                      onChange={(event) => setReactions(event.target.value)}
+                      id={`${id}-channels`}
+                      placeholder="C0123ABCD"
+                      value={channels}
+                      onChange={(event) => setChannels(event.target.value)}
                     />
                   </Field>
-                )}
-                <Field>
-                  <FieldLabel htmlFor={`${id}-channels`}>
-                    Channel IDs (blank: all the Bot is in)
-                  </FieldLabel>
-                  <Input
-                    id={`${id}-channels`}
-                    placeholder="C0123ABCD"
-                    value={channels}
-                    onChange={(event) => setChannels(event.target.value)}
-                  />
-                </Field>
-              </FieldGroup>
-            ) : (
-              <FieldGroup className="sm:grid sm:grid-cols-2">
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor={`${id}-types`}>Event types</FieldLabel>
-                  <Input
-                    id={`${id}-types`}
-                    placeholder={placeholder[kind]}
-                    value={eventTypes}
-                    onChange={(event) => setEventTypes(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-path`}>
-                    Only when field
-                  </FieldLabel>
-                  <Input
-                    id={`${id}-path`}
-                    placeholder="data.team.key"
-                    value={fieldPath}
-                    onChange={(event) => setFieldPath(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-equals`}>equals</FieldLabel>
-                  <Input
-                    id={`${id}-equals`}
-                    placeholder="ENG"
-                    value={fieldEquals}
-                    onChange={(event) => setFieldEquals(event.target.value)}
-                  />
-                </Field>
-                {kind === "github" && (
+                </FieldGroup>
+              ) : (
+                <FieldGroup className="sm:grid sm:grid-cols-2">
                   <Field className="sm:col-span-2">
-                    <FieldLabel htmlFor={`${id}-repo`}>
-                      Repository (optional)
-                    </FieldLabel>
+                    <FieldLabel htmlFor={`${id}-types`}>Event types</FieldLabel>
                     <Input
-                      id={`${id}-repo`}
-                      placeholder="owner/name"
-                      value={repository}
-                      onChange={(event) => setRepository(event.target.value)}
+                      id={`${id}-types`}
+                      placeholder={placeholder[kind]}
+                      value={eventTypes}
+                      onChange={(event) => setEventTypes(event.target.value)}
                     />
                   </Field>
-                )}
-                {kind === "email" && (
-                  <Field className="sm:col-span-2">
-                    <FieldLabel htmlFor={`${id}-senders`}>
-                      Allowed senders (blank: anyone)
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-path`}>
+                      Only when field
                     </FieldLabel>
                     <Input
-                      id={`${id}-senders`}
-                      placeholder="ops@example.com, example.com"
-                      value={senders}
-                      onChange={(event) => setSenders(event.target.value)}
+                      id={`${id}-path`}
+                      placeholder="data.team.key"
+                      value={fieldPath}
+                      onChange={(event) => setFieldPath(event.target.value)}
                     />
                   </Field>
-                )}
-                {VENDOR_SECRET.has(kind) && (
-                  <Field className="sm:col-span-2">
-                    <FieldLabel htmlFor={`${id}-secret`}>
-                      Signing secret (can be added later)
-                    </FieldLabel>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-equals`}>equals</FieldLabel>
                     <Input
-                      id={`${id}-secret`}
-                      type="password"
-                      autoComplete="new-password"
-                      value={secret}
-                      onChange={(event) => setSecret(event.target.value)}
+                      id={`${id}-equals`}
+                      placeholder="ENG"
+                      value={fieldEquals}
+                      onChange={(event) => setFieldEquals(event.target.value)}
                     />
                   </Field>
-                )}
-              </FieldGroup>
-            )}
+                  {kind === "github" && (
+                    <Field className="sm:col-span-2">
+                      <FieldLabel htmlFor={`${id}-repo`}>
+                        Repository (optional)
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-repo`}
+                        placeholder="owner/name"
+                        value={repository}
+                        onChange={(event) => setRepository(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                  {kind === "email" && (
+                    <Field className="sm:col-span-2">
+                      <FieldLabel htmlFor={`${id}-senders`}>
+                        Allowed senders (blank: anyone)
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-senders`}
+                        placeholder="ops@example.com, example.com"
+                        value={senders}
+                        onChange={(event) => setSenders(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                  {VENDOR_SECRET.has(kind) && (
+                    <Field className="sm:col-span-2">
+                      <FieldLabel htmlFor={`${id}-secret`}>
+                        Signing secret (can be added later)
+                      </FieldLabel>
+                      <Input
+                        id={`${id}-secret`}
+                        type="password"
+                        autoComplete="new-password"
+                        value={secret}
+                        onChange={(event) => setSecret(event.target.value)}
+                      />
+                    </Field>
+                  )}
+                </FieldGroup>
+              )}
+            </FieldGroup>
           </form>
           <SharedAppNotice botId={botId} reason="trigger" />
           {create.error && (
