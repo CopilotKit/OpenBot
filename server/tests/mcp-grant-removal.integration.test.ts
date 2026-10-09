@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { agents, mcpServers, mcpTools, pluginGrants } from "../src/db/schema";
-import type { ComposioBroker } from "../src/plugins/broker";
+import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { useComposioClient } from "../src/plugins/composio";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -22,7 +22,7 @@ const keptAction = `${keptSlug.toUpperCase()}_FETCH`;
 const keptRef = `${keptServerId}/${keptAction}`;
 const botId = `agent_grant_removal_${suite}`;
 
-const broker: ComposioBroker = {
+const broker: ConnectedAppBroker = {
   listApps: async () => [],
   ensureAuthConfig: async () => undefined,
   deleteAuthConfig: async () => undefined,
@@ -31,6 +31,7 @@ const broker: ComposioBroker = {
   },
   isConnected: async () => true,
   revoke: async () => true,
+  accountName: async () => null,
 };
 
 const events: { eventType: string; payload: Record<string, unknown> }[] = [];

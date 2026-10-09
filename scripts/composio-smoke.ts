@@ -438,7 +438,11 @@ say(`${app.name} publishes ${app.actionCount} actions.`);
 
 const connected = await ask(
   `Asking whether ${user} has a ${APP} connection`,
-  () => broker.isConnected({ userId: user, toolkit: APP }),
+  () =>
+    broker.isConnected({
+      account: { holder: "person", userId: user, vendorUserId: user },
+      toolkit: APP,
+    }),
 );
 /*
  * BOTH STATES ARE NAMED BECAUSE THIS READ CANNOT TELL THEM APART. `isConnected` is a count of this

@@ -190,7 +190,11 @@ describe("group conversations in PostgreSQL", () => {
     expect(String(calls[1]?.userMessage?.content)).toContain(
       `"speaker":"${A}"`,
     );
-    expect(calls[2]?.initiator).toEqual({ kind: "handoff", id: ada });
+    expect(calls[2]?.initiator).toEqual({
+      kind: "handoff",
+      id: ada,
+      origin: { kind: "person" },
+    });
     expect(String(calls[2]?.userMessage?.content)).toContain(
       `${A} addressed you`,
     );

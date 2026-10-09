@@ -10,18 +10,21 @@ people asking the same question get the answers their own accounts can see.
 
 Setting it up takes three hands, and none of them can do another's:
 
-| Who              | Does                                   | Where                                                            |
-| ---------------- | -------------------------------------- | ---------------------------------------------------------------- |
-| Whoever deploys  | Sets `COMPOSIO_API_KEY`                | The deployment's environment. There is no screen for it           |
-| An administrator | Enables an app                         | `/admin/plugins/composio`                                         |
-| An administrator | Grants its actions to a Bot            | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
-| Each person      | Connects their own account to that app | `/settings/connected-accounts`                                    |
+| Who              | Does                                                                       | Where                                                             |
+| ---------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment. There is no screen for it           |
+| An administrator | Enables an app                                                             | `/admin/plugins/composio`                                         |
+| An administrator | Grants its actions to a Bot                                                | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
+| Each person      | Connects their own account to that app                                     | `/settings/connected-accounts`                                    |
+| An administrator | Chooses Personal or Shared for an app, and connects a Shared app's account | `/admin/plugins/composio-<slug>`                                  |
 
 The key is the row that is easiest to misread, so it is stated twice: it is an environment variable
 and nothing else. No administrator, however permissioned, can turn Composio on from a page, and
 `/admin/plugins/composio` is where a key that is already set gets used rather than where one is set.
 
-There is deliberately no endpoint for an administrator to connect an account on somebody's behalf.
+There is deliberately no way for an administrator to connect an account **as somebody else**. A
+Shared app is a different thing: its account belongs to the deployment, not to any person, the audit
+trail says so on every call, and an administrator connects it as the team, from the app's own page.
 
 ## The key
 
@@ -401,6 +404,42 @@ broker was adopted to avoid. One app in thirteen was connectable before this cha
 what is left out now, and they are named here so that an operator who goes looking for a Slack-like
 app and does not find it knows which question they are asking.
 
+## Shared apps
+
+An app is Personal or Shared, never both. Personal is what every app was before: each person connects
+their own account and a Bot acts as whoever asked. Shared means one account, connected once by an
+administrator, that every Bot granted the app acts as — a company GitHub bot, a support inbox, a
+service account in Linear or HubSpot.
+
+**Switching** is on the app's page. It names what it will end — every person's account when going to
+Shared, the shared one when going back — and ends nothing until it is confirmed. If the vendor refuses
+to end one account, the switch does not happen and the vendor's sentence is shown.
+
+**Sign in as the team account.** The consent screen signs in with whatever account the administrator's
+browser already has open, which is often their own. The page shows the vendor's name for the account
+when the vendor publishes one, and says who connected it. Removing that administrator later does not
+end the shared account — it is the deployment's — so check that it is not theirs before they leave.
+
+**Who may use it is approved per Bot.** When an administrator grants a Shared app's action to a Bot,
+they approve who may steer a run that uses the account: only its owner, the people and groups it is
+published to (as they are listed at that moment; groups by name, so the directory decides who is in
+them), or everyone — and separately, whether outside input (email, Slack, webhooks, any trigger other
+than a schedule or Run now) may. Every call is checked against that, including runs handed on from
+another Bot, which are judged by what started the first run.
+
+**Widening a Bot later** — publishing it further, assigning it to a group, making it public, adding a
+trigger — goes through. If an administrator made the change, it is approved in the same step. If the
+owner did, the screen says the shared calls will be refused and offers Request approval, and a call
+that is refused files the same request on its own. Requests wait in the Approvals inbox under Shared
+account requests.
+
+**Writes ask first.** Making an app Shared adds a team rule that asks the person before any write
+through it. An administrator can remove the rule like any other.
+
+**The vendor sees only the team account.** Its own logs cannot say who asked. This deployment's audit
+trail can: every shared call records the person, the Bot, what started the run, and that it reached
+the deployment's account.
+
 ## What each person does
 
 At `/settings/connected-accounts`, a brokered app appears beside the OAuth connectors once an
@@ -490,7 +529,9 @@ switched on for it, and nothing at the vendor stands behind that.
 ## Blast radius
 
 One vendor ends up holding every person's connection to every app — which is the deal any broker
-offers, and should be chosen rather than discovered.
+offers, and should be chosen rather than discovered. A Shared app moves the radius from one person's
+account to the team's: anyone the approval admits acts as that account. The approval and the
+ask-before-write rule are the narrowing.
 
 ## Not built yet
 
@@ -499,6 +540,9 @@ destructive action is not asked about it because of the marker. What can stop su
 same as for every other connector's write: the person's **Ask before making changes** switch, an
 approval rule on the **Approvals** page (a person's own, or a team rule), or a built-in safety
 requirement. With none of those matching, the action runs.
+
+**Every write through a Shared app asks alike.** Composio publishes no "write but not destructive"
+distinction, so the ask-before-write rule on a Shared app asks for every write alike.
 
 **No way to give a Bot a whole large app to search.** A Bot carries the actions somebody switched on
 for it, one at a time. There is no search-and-run path for an app too large to tick through, which

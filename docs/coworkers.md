@@ -49,6 +49,12 @@ An owner can also publish a Bot as a Team Bot, to everybody signed in or to name
 visibility is unchanged by it. A published Bot stays invisible to teammates until it has a role
 description and a name other than a placeholder such as "New Bot".
 
+A Team Bot reaches a Personal app through its **owner's own account** when the owner has connected
+it — for everyone it is published to, triggers included — and otherwise through the asker's own
+account, with their consent. A Shared app is the governed alternative: one account that belongs to
+the deployment, with an administrator approving who may use it through each Bot. See
+[Composio → Shared apps](plugins/composio.md#shared-apps).
+
 ## Channels
 
 Starting a channel creates a new conversation and Intelligence thread. Two channels with the same coworker stay separate.

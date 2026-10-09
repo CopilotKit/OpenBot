@@ -25,7 +25,7 @@ import { createDatabase, type Database } from "../src/db/client";
 import {
   agents,
   auditEvents,
-  composioConnections,
+  brokeredConnections,
   credentials as credentialRows,
   credentials,
   mcpServers,
@@ -47,6 +47,7 @@ import {
   useComposioClient,
 } from "../src/plugins/composio";
 import { redirectUriFor } from "../src/plugins/oauth";
+import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   type AccessToken,
   CustomServerRefusedError,
@@ -284,8 +285,8 @@ let ownsFixtureIds = false;
  */
 function ownedConnections() {
   return and(
-    inArray(composioConnections.toolkit, ["gmail", "linear"]),
-    inArray(composioConnections.userId, ["user_asker", "user_leaver", ""]),
+    inArray(brokeredConnections.app, ["gmail", "linear"]),
+    inArray(brokeredConnections.userId, ["user_asker", "user_leaver", ""]),
   );
 }
 
@@ -347,10 +348,10 @@ beforeAll(async () => {
    */
   const existingConnections = await database
     .select({
-      toolkit: composioConnections.toolkit,
-      userId: composioConnections.userId,
+      toolkit: brokeredConnections.app,
+      userId: brokeredConnections.userId,
     })
-    .from(composioConnections)
+    .from(brokeredConnections)
     .where(ownedConnections());
 
   /*
@@ -370,7 +371,7 @@ beforeAll(async () => {
     ...existingBots.map((row) => `the Bot '${row.id}'`),
     ...existingConnections.map(
       (row) =>
-        `the composio_connections row ('${row.toolkit}', '${row.userId}')`,
+        `the brokered_connections row ('${row.toolkit}', '${row.userId}')`,
     ),
     ...existingPeople.map((row) => `the person '${row.id}'`),
   ];
@@ -4023,7 +4024,7 @@ async function freshDatabase(): Promise<Database> {
    * gone before the next test looks; a pair that was already there when the run started is still
    * the guard's to refuse, because at that point nothing has established it is ours.
    */
-  await database.delete(composioConnections).where(ownedConnections());
+  await database.delete(brokeredConnections).where(ownedConnections());
   // The person the connection outlives, who is a row in `users` like anybody else. Reached only
   // through the check at the top of this function, because there is no suffix on this id to tell a
   // fixture apart from somebody's account and ten cascades sit behind the difference.
@@ -4085,6 +4086,13 @@ async function freshStore(options: { broker?: ComposioBroker } = {}) {
  * and the call gate reads it to decide whether a connection row is required at all. Absent by
  * default, which is what every other test here wants: a row that is not `NO_AUTH` is a row the gate
  * still asks a connection for.
+ *
+ * `accountMode` defaults to `"personal"`, which is what `addBrokeredApp` itself records for any app
+ * enabled with a real scheme — the one every test below was written against, back when the column
+ * did not exist and every brokered call ran as the asker's own account unconditionally. Left null,
+ * an app whose scheme is not `NO_AUTH` reads as `accountFor`'s ambiguous case instead: this
+ * deployment does not yet know whether to call it as a person or as itself, and refuses rather than
+ * guessing. Overridable for the one test that reads the column back as the row actually holds it.
  */
 async function seedComposioGmail(
   database: Database,
@@ -4094,6 +4102,7 @@ async function seedComposioGmail(
     version?: string | null;
     url?: string;
     authScheme?: string;
+    accountMode?: "personal" | "shared" | null;
   } = {},
 ) {
   await database.insert(mcpServers).values({
@@ -4103,6 +4112,8 @@ async function seedComposioGmail(
     url: options.url ?? "composio://gmail",
     provenance: "composio",
     authScheme: options.authScheme ?? null,
+    accountMode:
+      options.accountMode === undefined ? "personal" : options.accountMode,
   });
   await database.insert(mcpTools).values({
     serverId: "gmail",
@@ -4118,9 +4129,13 @@ async function seedComposioGmail(
     configuration: {},
   });
   if (options.connect !== false) {
-    await database
-      .insert(composioConnections)
-      .values({ toolkit: "gmail", userId: "user_asker" });
+    await database.insert(brokeredConnections).values({
+      provider: "composio",
+      app: "gmail",
+      holder: "person",
+      userId: "user_asker",
+      vendorUserId: "user_asker",
+    });
   }
   await store.grant(
     "mcp",
@@ -4188,7 +4203,7 @@ afterAll(async () => {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
-  await database.delete(composioConnections).where(ownedConnections());
+  await database.delete(brokeredConnections).where(ownedConnections());
   /*
    * And the witness row, which is at neither `gmail` nor any person.
    *
@@ -4201,8 +4216,8 @@ afterAll(async () => {
    * witness is that run's to take back.
    */
   await database
-    .delete(composioConnections)
-    .where(eq(composioConnections.toolkit, `sweep_witness_${suite}`));
+    .delete(brokeredConnections)
+    .where(eq(brokeredConnections.app, `sweep_witness_${suite}`));
   await database.delete(agents).where(eq(agents.id, "bot_helper"));
   await database.delete(users).where(eq(users.id, "user_leaver"));
 });
@@ -4213,9 +4228,13 @@ test("a Composio connection row survives the person being deleted", async () => 
   await database
     .insert(users)
     .values({ id: "user_leaver", email: "leaver@example.com", name: "Leaver" });
-  await database
-    .insert(composioConnections)
-    .values({ toolkit: "gmail", userId: "user_leaver" });
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: "gmail",
+    holder: "person",
+    userId: "user_leaver",
+    vendorUserId: "user_leaver",
+  });
 
   await database.delete(users).where(eq(users.id, "user_leaver"));
 
@@ -4228,12 +4247,12 @@ test("a Composio connection row survives the person being deleted", async () => 
    * under test.
    */
   const rows = await database
-    .select({ toolkit: composioConnections.toolkit })
-    .from(composioConnections)
+    .select({ toolkit: brokeredConnections.app })
+    .from(brokeredConnections)
     .where(
       and(
-        eq(composioConnections.toolkit, "gmail"),
-        eq(composioConnections.userId, "user_leaver"),
+        eq(brokeredConnections.app, "gmail"),
+        eq(brokeredConnections.userId, "user_leaver"),
       ),
     );
 
@@ -4322,9 +4341,13 @@ test("a Composio call with nobody attributed is refused even when a connection r
     },
   });
   await seedComposioGmail(database, store);
-  await database
-    .insert(composioConnections)
-    .values({ toolkit: "gmail", userId: "" });
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: "gmail",
+    holder: "person",
+    userId: "",
+    vendorUserId: "",
+  });
   /*
    * A second anonymous row, at an app this file has nothing to do with.
    *
@@ -4338,9 +4361,13 @@ test("a Composio call with nobody attributed is refused even when a connection r
    * row can be what the assertion below is reading.
    */
   const unrelatedApp = `sweep_witness_${suite}`;
-  await database
-    .insert(composioConnections)
-    .values({ toolkit: unrelatedApp, userId: "" });
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: unrelatedApp,
+    holder: "person",
+    userId: "",
+    vendorUserId: "",
+  });
 
   try {
     await expect(
@@ -4358,11 +4385,11 @@ test("a Composio call with nobody attributed is refused even when a connection r
     // with it and the assertion below has something to read. Keyed on the PAIR either way: the app
     // is what makes this row this file's, and the anonymous actor on its own names nobody's.
     await database
-      .delete(composioConnections)
+      .delete(brokeredConnections)
       .where(
         and(
-          eq(composioConnections.toolkit, "gmail"),
-          eq(composioConnections.userId, ""),
+          eq(brokeredConnections.app, "gmail"),
+          eq(brokeredConnections.userId, ""),
         ),
       );
 
@@ -4371,9 +4398,9 @@ test("a Composio call with nobody attributed is refused even when a connection r
     // and a test that failed because one existed would be the same over-reach in assertion form.
     const anonymous = (
       await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, ""))
+        .select({ toolkit: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(eq(brokeredConnections.userId, ""))
     ).map((row) => row.toolkit);
     expect(anonymous).not.toContain("gmail");
     expect(anonymous).toContain(unrelatedApp);
@@ -4381,14 +4408,14 @@ test("a Composio call with nobody attributed is refused even when a connection r
     // Both, so a failed assertion above still leaves the table as this test found it. Each is keyed
     // on an app this run named, which is what makes the deletes this run's to make.
     await database
-      .delete(composioConnections)
-      .where(eq(composioConnections.toolkit, unrelatedApp));
+      .delete(brokeredConnections)
+      .where(eq(brokeredConnections.app, unrelatedApp));
     await database
-      .delete(composioConnections)
+      .delete(brokeredConnections)
       .where(
         and(
-          eq(composioConnections.toolkit, "gmail"),
-          eq(composioConnections.userId, ""),
+          eq(brokeredConnections.app, "gmail"),
+          eq(brokeredConnections.userId, ""),
         ),
       );
   }
@@ -4425,7 +4452,7 @@ test("a Composio call by somebody who has not connected the app is refused with 
  *
  * THE FAIL-OPEN THIS CLOSES. The gate reads `composio_connections` for `(toolkit, actorId)`, and
  * every test around it seeds a database where the app is connected by the asker or by nobody at
- * all — so dropping `eq(composioConnections.userId, actorId)` from that `where`, which turns the
+ * all — so dropping `eq(brokeredConnections.userId, actorId)` from that `where`, which turns the
  * question into "has ANYBODY connected Gmail", left the whole suite green. That single term is what
  * keeps one person's mailbox out of another's: with it gone, the first colleague to connect Gmail
  * makes the app callable by everybody, the broker is handed the stranger's id, and Composio answers
@@ -5106,8 +5133,12 @@ test("the Plugins page shows a brokered action with the effect the vendor record
 test("a server's address is the url the row holds, not one composed from its id", async () => {
   const { store, database } = await freshStore();
   // A row called `gmail` pointing at Slack, which is the shape the connection gate was once keyed
-  // on the wrong half of.
-  await seedComposioGmail(database, store, { url: "composio://slack" });
+  // on the wrong half of. `accountMode: null` as well, so the read below is asserted against the
+  // column exactly as this fixture leaves it rather than against `seedComposioGmail`'s own default.
+  await seedComposioGmail(database, store, {
+    url: "composio://slack",
+    accountMode: null,
+  });
 
   expect(await store.serverAddress("gmail")).toEqual({
     id: "gmail",
@@ -5119,6 +5150,9 @@ test("a server's address is the url the row holds, not one composed from its id"
     // fixture creates none. The column holds nothing for a row nothing was created against rather
     // than a default standing in for one, so null here is the read passing the column through.
     authScheme: null,
+    // Null for the same reason, and passed explicitly above: the column holds nothing for a row
+    // nothing decided rather than a default standing in for a decision.
+    accountMode: null,
   });
   /*
    * By membership rather than by equality, because this database is not only this test's: the
@@ -6587,6 +6621,7 @@ test("enabling an app writes a brokered row, and asks for its auth config first"
     authorize: unasked("begin somebody's connection"),
     isConnected: unasked("check somebody's connection"),
     revoke: unasked("withdraw somebody's grant"),
+    accountName: async () => null,
   };
 
   const { store, database, auditStore } = await freshStore({ broker });
@@ -6701,10 +6736,13 @@ function brokerSpy(answers: {
   }) => Promise<void>;
   deleteAuthConfig?: (toolkit: string) => Promise<void>;
   isConnected?: (request: {
-    userId: string;
+    account: AccountRef;
     toolkit: string;
   }) => Promise<boolean>;
-  revoke?: (request: { userId: string; toolkit: string }) => Promise<boolean>;
+  revoke?: (request: {
+    account: AccountRef;
+    toolkit: string;
+  }) => Promise<boolean>;
 }): { broker: ComposioBroker; order: string[] } {
   const order: string[] = [];
   const unasked = (what: string) => async (): Promise<never> => {
@@ -6719,9 +6757,12 @@ function brokerSpy(answers: {
       const owner =
         typeof request === "object" &&
         request !== null &&
-        "userId" in request &&
-        typeof request.userId === "string"
-          ? `:${request.userId}`
+        "account" in request &&
+        typeof request.account === "object" &&
+        request.account !== null &&
+        "vendorUserId" in request.account &&
+        typeof request.account.vendorUserId === "string"
+          ? `:${request.account.vendorUserId}`
           : "";
       order.push(`${name}${owner}`);
       if (!handler)
@@ -6751,6 +6792,7 @@ function brokerSpy(answers: {
         "check somebody's connection",
       ),
       revoke: asked("revoke", answers.revoke, "withdraw somebody's grant"),
+      accountName: async () => null,
     },
   };
 }
@@ -6775,21 +6817,27 @@ test("a brokered connection row is written only where the vendor says the accoun
   let live = false;
   const { broker, order } = brokerSpy({ isConnected: async () => live });
   const { store, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
 
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: false,
   });
   // Nothing at all, which is the whole of the first half: the gate a brokered call is decided on
   // must not exist for somebody the vendor does not recognise.
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
   expect(auditStore.recorded()).toHaveLength(0);
 
   live = true;
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: true,
   });
-  const connection = await store.brokeredConnection(pair);
+  const connection = await store.brokeredConnection({ toolkit, account });
   expect(connection?.connectedAt).toBeTruthy();
 
   expect(order).toEqual(["isConnected:user_asker", "isConnected:user_asker"]);
@@ -6827,14 +6875,24 @@ test("a brokered connection row is written only where the vendor says the accoun
 test("confirming a brokered connection the vendor no longer has removes the row", async () => {
   const { broker, order } = brokerSpy({ isConnected: async () => false });
   const { store, database, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
-  await database.insert(composioConnections).values(pair);
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId,
+    vendorUserId: userId,
+  });
 
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: false,
   });
 
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
   expect(order).toEqual(["isConnected:user_asker"]);
   expect(auditStore.recorded()).toHaveLength(0);
 });
@@ -6859,18 +6917,26 @@ test("confirming a brokered connection the vendor no longer has removes the row"
 test("confirming a brokered connection already recorded writes no second trail row", async () => {
   const { broker, order } = brokerSpy({ isConnected: async () => true });
   const { store, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
 
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: true,
   });
-  const first = await store.brokeredConnection(pair);
+  const first = await store.brokeredConnection({ toolkit, account });
   expect(first?.connectedAt).toBeTruthy();
 
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: true,
   });
-  expect(await store.confirmBrokeredConnection(pair)).toEqual({
+  expect(
+    await store.confirmBrokeredConnection({ toolkit, account, by: userId }),
+  ).toEqual({
     connected: true,
   });
 
@@ -6880,7 +6946,7 @@ test("confirming a brokered connection already recorded writes no second trail r
     "isConnected:user_asker",
   ]);
   // Unmoved, because the person connected when they connected: the confirms above are page loads.
-  expect(await store.brokeredConnection(pair)).toEqual(first);
+  expect(await store.brokeredConnection({ toolkit, account })).toEqual(first);
   expect(
     auditStore
       .recorded()
@@ -6908,27 +6974,36 @@ test("disconnecting a brokered connection revokes at the vendor before the row g
   const { broker, order } = brokerSpy({
     revoke: async () => {
       const rows = await database
-        .select({ userId: composioConnections.userId })
-        .from(composioConnections)
+        .select({ userId: brokeredConnections.userId })
+        .from(brokeredConnections)
         .where(ownedConnections());
       rowsWhenRevoked.push(...rows.map((row) => row.userId));
       return true;
     },
   });
   const { store, database, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
-  await database.insert(composioConnections).values(pair);
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId,
+    vendorUserId: userId,
+  });
 
   const outcome = await store.disconnectBrokered({
-    ...pair,
-    by: "user_asker",
+    toolkit,
+    account,
+    by: userId,
     reason: "self",
   });
 
   expect(outcome).toEqual({ vendorRevocationRequested: true });
   expect(rowsWhenRevoked).toEqual(["user_asker"]);
   expect(order).toEqual(["revoke:user_asker"]);
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
 
   const disconnected = auditStore
     .recorded()
@@ -6966,18 +7041,27 @@ test("a brokered connection outlives a revoke that failed, and a second attempt 
     },
   });
   const { store, database, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
-  await database.insert(composioConnections).values(pair);
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId,
+    vendorUserId: userId,
+  });
 
   await expect(
     store.disconnectBrokered({
-      ...pair,
-      by: "user_asker",
+      toolkit,
+      account,
+      by: userId,
       reason: "self",
     }),
   ).rejects.toThrow("Composio would not answer (502).");
 
-  expect(await store.brokeredConnection(pair)).not.toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).not.toBeNull();
   // No row in the trail either. "Their account was disconnected" is a claim about the vendor, and
   // nothing was disconnected anywhere.
   expect(auditStore.recorded()).toHaveLength(0);
@@ -6985,12 +7069,13 @@ test("a brokered connection outlives a revoke that failed, and a second attempt 
   broken = false;
   expect(
     await store.disconnectBrokered({
-      ...pair,
-      by: "user_asker",
+      toolkit,
+      account,
+      by: userId,
       reason: "self",
     }),
   ).toEqual({ vendorRevocationRequested: true });
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
 });
 
 /**
@@ -7012,13 +7097,22 @@ test("a brokered connection outlives a revoke that failed, and a second attempt 
 test("a brokered disconnect that withdrew no grant records that it withdrew none", async () => {
   const { broker, order } = brokerSpy({ revoke: async () => false });
   const { store, database, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
-  await database.insert(composioConnections).values(pair);
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId,
+    vendorUserId: userId,
+  });
 
   expect(
     await store.disconnectBrokered({
-      ...pair,
-      by: "user_asker",
+      toolkit,
+      account,
+      by: userId,
       reason: "self",
     }),
   ).toEqual({ vendorRevocationRequested: false });
@@ -7027,7 +7121,7 @@ test("a brokered disconnect that withdrew no grant records that it withdrew none
   // Gone, because there was nothing at the vendor and the row was therefore the half that had
   // drifted. Keeping it would leave the gate on every brokered call passing for an account that
   // no longer exists anywhere.
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
 
   const disconnected = auditStore
     .recorded()
@@ -7071,18 +7165,21 @@ test("a brokered disconnect with nothing to disconnect files nothing in the trai
   let granted = false;
   const { broker, order } = brokerSpy({ revoke: async () => granted });
   const { store, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_asker" };
+  const toolkit = "gmail";
+  const userId = "user_asker";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
 
   expect(
     await store.disconnectBrokered({
-      ...pair,
-      by: "user_asker",
+      toolkit,
+      account,
+      by: userId,
       reason: "self",
     }),
   ).toEqual({ vendorRevocationRequested: false });
 
   expect(order).toEqual(["revoke:user_asker"]);
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
   // Empty, which is the whole of the first half: no row went and no grant was withdrawn, so
   // nobody was disconnected and the trail has nothing to say about it.
   expect(auditStore.recorded()).toHaveLength(0);
@@ -7092,8 +7189,9 @@ test("a brokered disconnect with nothing to disconnect files nothing in the trai
   granted = true;
   expect(
     await store.disconnectBrokered({
-      ...pair,
-      by: "user_asker",
+      toolkit,
+      account,
+      by: userId,
       reason: "self",
     }),
   ).toEqual({ vendorRevocationRequested: true });
@@ -7196,10 +7294,10 @@ test("removing an app revokes everybody, then clears rows, then drops the config
   const stillConnected = async () =>
     (
       await database
-        .select({ userId: composioConnections.userId })
-        .from(composioConnections)
-        .where(eq(composioConnections.toolkit, "linear"))
-        .orderBy(asc(composioConnections.userId))
+        .select({ userId: brokeredConnections.userId })
+        .from(brokeredConnections)
+        .where(eq(brokeredConnections.app, "linear"))
+        .orderBy(asc(brokeredConnections.userId))
     ).map((row) => row.userId);
 
   const { broker, order } = brokerSpy({
@@ -7237,12 +7335,12 @@ test("removing an app revokes everybody, then clears rows, then drops the config
     .from(mcpServers)
     .where(eq(mcpServers.id, "composio-linear"));
   const strangers = await database
-    .select({ userId: composioConnections.userId })
-    .from(composioConnections)
+    .select({ userId: brokeredConnections.userId })
+    .from(brokeredConnections)
     .where(
       and(
-        eq(composioConnections.toolkit, "linear"),
-        inArray(composioConnections.userId, ["user-a", "user-b"]),
+        eq(brokeredConnections.app, "linear"),
+        inArray(brokeredConnections.userId, ["user-a", "user-b"]),
       ),
     );
   if (present || strangers.length > 0) {
@@ -7261,7 +7359,11 @@ test("removing an app revokes everybody, then clears rows, then drops the config
     });
     for (const userId of ["user-b", "user-a"]) {
       expect(
-        await store.confirmBrokeredConnection({ toolkit: "linear", userId }),
+        await store.confirmBrokeredConnection({
+          toolkit: "linear",
+          account: { holder: "person", userId, vendorUserId: userId },
+          by: userId,
+        }),
       ).toEqual({ connected: true });
     }
 
@@ -7288,10 +7390,24 @@ test("removing an app revokes everybody, then clears rows, then drops the config
     ]);
 
     expect(
-      await store.brokeredConnection({ toolkit: "linear", userId: "user-a" }),
+      await store.brokeredConnection({
+        toolkit: "linear",
+        account: {
+          holder: "person",
+          userId: "user-a",
+          vendorUserId: "user-a",
+        },
+      }),
     ).toBeNull();
     expect(
-      await store.brokeredConnection({ toolkit: "linear", userId: "user-b" }),
+      await store.brokeredConnection({
+        toolkit: "linear",
+        account: {
+          holder: "person",
+          userId: "user-b",
+          vendorUserId: "user-b",
+        },
+      }),
     ).toBeNull();
 
     const disconnected = auditStore
@@ -7335,11 +7451,11 @@ test("removing an app revokes everybody, then clears rows, then drops the config
       .delete(mcpServers)
       .where(eq(mcpServers.id, "composio-linear"));
     await database
-      .delete(composioConnections)
+      .delete(brokeredConnections)
       .where(
         and(
-          eq(composioConnections.toolkit, "linear"),
-          inArray(composioConnections.userId, ["user-a", "user-b"]),
+          eq(brokeredConnections.app, "linear"),
+          inArray(brokeredConnections.userId, ["user-a", "user-b"]),
         ),
       );
   }
@@ -7383,10 +7499,10 @@ test("removing a person revokes their brokered accounts at the broker", async ()
   const stillConnected = async () =>
     (
       await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, "user_leaver"))
-        .orderBy(asc(composioConnections.toolkit))
+        .select({ toolkit: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(eq(brokeredConnections.userId, "user_leaver"))
+        .orderBy(asc(brokeredConnections.app))
     ).map((row) => row.toolkit);
 
   const { broker, order } = brokerSpy({
@@ -7401,7 +7517,15 @@ test("removing a person revokes their brokered accounts at the broker", async ()
 
   for (const toolkit of ["linear", "gmail"]) {
     expect(
-      await store.confirmBrokeredConnection({ toolkit, userId: "user_leaver" }),
+      await store.confirmBrokeredConnection({
+        toolkit,
+        account: {
+          holder: "person",
+          userId: "user_leaver",
+          vendorUserId: "user_leaver",
+        },
+        by: "user_leaver",
+      }),
     ).toEqual({ connected: true });
   }
 
@@ -7426,12 +7550,23 @@ test("removing a person revokes their brokered accounts at the broker", async ()
   ]);
 
   expect(
-    await store.brokeredConnection({ toolkit: "gmail", userId: "user_leaver" }),
+    await store.brokeredConnection({
+      toolkit: "gmail",
+      account: {
+        holder: "person",
+        userId: "user_leaver",
+        vendorUserId: "user_leaver",
+      },
+    }),
   ).toBeNull();
   expect(
     await store.brokeredConnection({
       toolkit: "linear",
-      userId: "user_leaver",
+      account: {
+        holder: "person",
+        userId: "user_leaver",
+        vendorUserId: "user_leaver",
+      },
     }),
   ).toBeNull();
 
@@ -7486,8 +7621,16 @@ test("removing a person revokes their brokered accounts at the broker", async ()
 test("offboarding a brokered account nobody held any more withdraws nothing, and says so", async () => {
   const { broker, order } = brokerSpy({ revoke: async () => false });
   const { store, database, auditStore } = await freshStore({ broker });
-  const pair = { toolkit: "gmail", userId: "user_leaver" };
-  await database.insert(composioConnections).values(pair);
+  const toolkit = "gmail";
+  const userId = "user_leaver";
+  const account = { holder: "person" as const, userId, vendorUserId: userId };
+  await database.insert(brokeredConnections).values({
+    provider: "composio",
+    app: toolkit,
+    holder: "person",
+    userId,
+    vendorUserId: userId,
+  });
 
   expect(await store.retireConnectionsFor("user_leaver", "admin")).toEqual({
     retired: 1,
@@ -7496,7 +7639,7 @@ test("offboarding a brokered account nobody held any more withdraws nothing, and
   expect(order).toEqual(["revoke:user_leaver"]);
   // Gone, because there was nothing at the vendor and the row was therefore the half that had
   // drifted. Keeping it would leave the gate passing for a person who no longer exists.
-  expect(await store.brokeredConnection(pair)).toBeNull();
+  expect(await store.brokeredConnection({ toolkit, account })).toBeNull();
 
   const disconnected = auditStore
     .recorded()
@@ -7534,7 +7677,14 @@ test("removing an app records the grant it did not withdraw as not withdrawn", a
 
   expect(order).toEqual(["revoke:user_asker", "deleteAuthConfig"]);
   expect(
-    await store.brokeredConnection({ toolkit: "gmail", userId: "user_asker" }),
+    await store.brokeredConnection({
+      toolkit: "gmail",
+      account: {
+        holder: "person",
+        userId: "user_asker",
+        vendorUserId: "user_asker",
+      },
+    }),
   ).toBeNull();
 
   const disconnected = auditStore

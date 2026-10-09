@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppVariables } from "../auth/guards";
+import { afterExposureChange } from "../plugins/exposure-change";
+import type { SharedUseStore } from "../plugins/shared-use-store";
 import type { ResponsibilityBindingStore } from "./bindings";
 import { inboundAddressFor } from "./email";
 import type { ResponsibilityEngine } from "./engine";
@@ -19,6 +21,7 @@ export function createResponsibilityRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   bindings?: ResponsibilityBindingStore,
   triggers?: { store: TriggerStore; emailDomain?: string | null },
+  sharedUse?: SharedUseStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser, bodyLimit({ maxSize: 64 * 1024 }));
@@ -114,8 +117,24 @@ export function createResponsibilityRoutes(
         context.req.param("id"),
         { config: input.config, secret },
       );
+      /* A new trigger can widen whose input steers a shared app, so it gets the same say-what's-missing treatment as publishing. */
+      const botId = await sharedUse?.botForResponsibility(
+        context.req.param("id"),
+      );
       return context.json(
-        { trigger: dto(created.trigger), secret: created.secret },
+        {
+          trigger: dto(created.trigger),
+          secret: created.secret,
+          ...(botId
+            ? {
+                sharedApps: await afterExposureChange(
+                  sharedUse,
+                  context.var.actor,
+                  botId,
+                ),
+              }
+            : {}),
+        },
         201,
       );
     });
@@ -123,14 +142,25 @@ export function createResponsibilityRoutes(
       const input = await body(context.req.raw);
       if (!input || typeof input !== "object" || !("config" in input))
         throw new ResponsibilityRefusedError("Supply a trigger config.");
+      const updated = await triggers.store.update(
+        context.var.actor.id,
+        context.req.param("triggerId"),
+        { config: input.config },
+      );
+      const botId = await sharedUse?.botForResponsibility(
+        updated.responsibilityId,
+      );
       return context.json({
-        trigger: dto(
-          await triggers.store.update(
-            context.var.actor.id,
-            context.req.param("triggerId"),
-            { config: input.config },
-          ),
-        ),
+        trigger: dto(updated),
+        ...(botId
+          ? {
+              sharedApps: await afterExposureChange(
+                sharedUse,
+                context.var.actor,
+                botId,
+              ),
+            }
+          : {}),
       });
     });
     routes.post("/triggers/:triggerId/secret", async (context) => {
@@ -189,17 +219,23 @@ export function createResponsibilityRoutes(
       return context.body(null, 204);
     });
   }
-  routes.post("/", async (context) =>
-    context.json(
+  routes.post("/", async (context) => {
+    const responsibility = await store.create(
+      context.var.actor.id,
+      await body(context.req.raw),
+    );
+    return context.json(
       {
-        responsibility: await store.create(
-          context.var.actor.id,
-          await body(context.req.raw),
+        responsibility,
+        sharedApps: await afterExposureChange(
+          sharedUse,
+          context.var.actor,
+          responsibility.agentId,
         ),
       },
       201,
-    ),
-  );
+    );
+  });
   routes.get("/:id", async (context) =>
     context.json({
       responsibility: await store.get(
@@ -208,15 +244,21 @@ export function createResponsibilityRoutes(
       ),
     }),
   );
-  routes.patch("/:id", async (context) =>
-    context.json({
-      responsibility: await store.update(
-        context.var.actor.id,
-        context.req.param("id"),
-        await body(context.req.raw),
+  routes.patch("/:id", async (context) => {
+    const responsibility = await store.update(
+      context.var.actor.id,
+      context.req.param("id"),
+      await body(context.req.raw),
+    );
+    return context.json({
+      responsibility,
+      sharedApps: await afterExposureChange(
+        sharedUse,
+        context.var.actor,
+        responsibility.agentId,
       ),
-    }),
-  );
+    });
+  });
   routes.get("/:id/runs", async (context) =>
     context.json({
       runs: await store.listRuns(context.var.actor.id, context.req.param("id")),

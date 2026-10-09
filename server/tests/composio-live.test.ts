@@ -7,6 +7,7 @@ import {
 } from "@composio/core";
 import { effectOf, vendorSentence } from "../src/plugins/composio";
 import { createComposioClient } from "../src/plugins/composio-adapter";
+import { mintDeploymentVendorUserId } from "../src/plugins/shared-accounts";
 
 /**
  * One real call to Composio, so the shapes this transport is written against are the shapes it gets.
@@ -267,5 +268,33 @@ describe.skipIf(!live)("Composio, for real", () => {
     const gmail = apps.find((app) => app.slug === "gmail");
     expect(gmail?.slug).toBe("gmail");
     expect(gmail?.actionCount).toBeGreaterThan(0);
+  });
+
+  /**
+   * THE ONE SHAPE A STUB CANNOT STAND IN FOR: A DEPLOYMENT IDENTITY, NOT A PERSON'S.
+   *
+   * Every test above calls with a plain string user id. The broker is also asked to accept
+   * `{ holder: "deployment", vendorUserId }` — the shape a shared app's calls carry — and nothing
+   * here had shown the real API takes that vendor user id at all rather than, say, rejecting a
+   * value shaped like `openbot-deployment:<id>:<random>` as malformed. A freshly minted id names
+   * no account, so both calls below answer "nothing here" — not connected, no name — and that is
+   * the whole assertion: the identity is accepted, and an empty listing reads as empty rather than
+   * as an error.
+   *
+   * NO CONSENT LINK IS MINTED. `hackernews` is reached for its no-auth listing only, the same
+   * toolkit `NO_AUTH_ACTION` above already reads from with nobody's account touched.
+   */
+  test("the real API accepts a deployment identity and names no account it does not hold", async () => {
+    const { broker } = createComposioClient(key!);
+    const deployment = {
+      holder: "deployment" as const,
+      vendorUserId: mintDeploymentVendorUserId("live-check"),
+    };
+    expect(
+      await broker.isConnected({ account: deployment, toolkit: "hackernews" }),
+    ).toBe(false);
+    expect(
+      await broker.accountName({ account: deployment, toolkit: "hackernews" }),
+    ).toBeNull();
   });
 });

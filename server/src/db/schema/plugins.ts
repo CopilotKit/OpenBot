@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -40,88 +42,112 @@ const updatedAt = () =>
  * from two servers can never collide, and a rule written against `mcp.server == "atlassian"` keeps
  * meaning the same thing after somebody renames the display title.
  */
-export const mcpServers = pgTable("mcp_servers", {
-  id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  logo: text("logo"),
-  /** The vendor this server is maintained by, which is what the first-party rule is checked against. */
-  vendor: text("vendor").notNull(),
-  url: text("url").notNull(),
-  /**
-   * `first-party` for a curated entry, `custom` for one an administrator added by URL, `composio`
-   * for an app enabled through the broker.
-   *
-   * Recorded because the three are not the same risk. A curated entry has reviewed source provenance
-   * and a pinned host. A custom one is a URL somebody typed, and every surface that lists it says so.
-   * Storing which it is means the Plugins page, the audit trail and anybody reading the database
-   * later all agree about how a server got here, rather than inferring it from whether the host
-   * happens to still be in this build's catalogue.
-   *
-   * AND `composio` IS NOT MERELY A THIRD LABEL — it decides how the row is REACHED. `accessFor`
-   * reads this column to answer that a call is brokered, which is what makes it run in the account
-   * of the person asking rather than on the deployment's own credential, and `toolkitOf` then reads
-   * which app out of {@link mcpServers.url}. So this column and that one are ONE FACT IN TWO PLACES,
-   * and the invariant every writer keeps is that they are written together: a `composio://` url
-   * carries `provenance = composio`, and a row saying `composio` carries a url naming an app. Half
-   * of the pair is not a mislabelled row, it is a row dialled one way and governed another — see
-   * `requireNotBrokered` in `plugins/store.ts` for which writes are refused to keep the pair whole,
-   * and `addBrokeredApp` for the one that converts.
-   */
-  provenance: text("provenance").notNull().default("first-party"),
-  /**
-   * The vault row holding this server's credential, or null for a server that needs none.
-   *
-   * A pointer rather than the secret: the vault owns encryption, rotation and revocation, and a
-   * second copy of a token here would be a second thing to remember to revoke.
-   *
-   * A REAL foreign key, where this was `text` against a `uuid` primary key with none. That is not a
-   * typing nicety. The database was willing to hold a pointer to a credential row that did not
-   * exist, and it did: a test deleted the credential an administrator had registered and left this
-   * column addressing nothing, so the connector reported "no OAuth client registered yet" while the
-   * row still looked configured. Nothing caught it because nothing was checking.
-   *
-   * `restrict`, not `cascade` or `set null`. A credential this server points at should not be
-   * removable out from under it — the two legitimate ways to change it are replacing it, which
-   * repoints this column first, and removing the server, which takes the row with it. Anything else
-   * is a mistake, and should be refused rather than silently tidied into a working-looking state.
-   */
-  credentialId: uuid("credential_id").references(() => credentials.id, {
-    onDelete: "restrict",
-  }),
-  /**
-   * How this app connects, as it was resolved when somebody enabled it.
-   *
-   * Recorded rather than re-derived, because the catalogue is somebody else's and a vendor that
-   * starts publishing a new scheme for an app must not move live connections onto a different
-   * flow underneath them.
-   *
-   * THE VENDOR'S OWN SCHEME LITERAL, NOT A {@link BrokerConnection} KIND — `OAUTH2`, `DCR_OAUTH`,
-   * `API_KEY`, `BASIC`, `BEARER_TOKEN`, `BASIC_WITH_JWT`, `NO_AUTH`. Those two vocabularies name one
-   * fact, and this column is where a reader comes to find out which of them is written down, so it
-   * says: somebody looking here for `consent` or `fields` is reading the other one. Migration 0038
-   * backfilled every row whose provenance is `composio` to `OAUTH2`, because managed OAuth was the
-   * only config this deployment ever created and `addBrokeredApp` writes the row only after that
-   * config stands. A null is therefore not an older brokered row this deployment WROTE.
-   *
-   * WHICH IS NOT THE SAME AS A NULL BEING UNREACHABLE ON A BROKERED READ, and the difference has
-   * cost a verdict already. Every reader finds an app's row by {@link mcpServers.url}, which carries
-   * no unique index — two rows may name one app, and the one that answers is not always the one an
-   * enable wrote a scheme onto. Add a row inserted by hand, a row restored from elsewhere, or an app
-   * whose `BrokerConnection` was `unsupported`, and a brokered read really does meet a null here. So
-   * a reader must have three answers and not two: a key, a consent, and a column it cannot act on.
-   * `schemeKind` in `plugins/broker.ts` is that reading, and `confirmBrokeredConnection` is what
-   * happened without it — a null read as consent, and `verified: true` written on every page load
-   * over evidence nobody had.
-   */
-  authScheme: text("auth_scheme"),
-  /** What the deployment last heard back from it. `null` until the first successful listing. */
-  toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
-  /** The last failure, kept so the Plugins page can say why a server has no tools. */
-  lastError: text("last_error"),
-  addedBy: text("added_by"),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const mcpServers = pgTable(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    logo: text("logo"),
+    /** The vendor this server is maintained by, which is what the first-party rule is checked against. */
+    vendor: text("vendor").notNull(),
+    url: text("url").notNull(),
+    /**
+     * `first-party` for a curated entry, `custom` for one an administrator added by URL, `composio`
+     * for an app enabled through the broker.
+     *
+     * Recorded because the three are not the same risk. A curated entry has reviewed source provenance
+     * and a pinned host. A custom one is a URL somebody typed, and every surface that lists it says so.
+     * Storing which it is means the Plugins page, the audit trail and anybody reading the database
+     * later all agree about how a server got here, rather than inferring it from whether the host
+     * happens to still be in this build's catalogue.
+     *
+     * AND `composio` IS NOT MERELY A THIRD LABEL — it decides how the row is REACHED. `accessFor`
+     * reads this column to answer that a call is brokered, which is what makes it run in the account
+     * of the person asking rather than on the deployment's own credential, and `toolkitOf` then reads
+     * which app out of {@link mcpServers.url}. So this column and that one are ONE FACT IN TWO PLACES,
+     * and the invariant every writer keeps is that they are written together: a `composio://` url
+     * carries `provenance = composio`, and a row saying `composio` carries a url naming an app. Half
+     * of the pair is not a mislabelled row, it is a row dialled one way and governed another — see
+     * `requireNotBrokered` in `plugins/store.ts` for which writes are refused to keep the pair whole,
+     * and `addBrokeredApp` for the one that converts.
+     */
+    provenance: text("provenance").notNull().default("first-party"),
+    /**
+     * The vault row holding this server's credential, or null for a server that needs none.
+     *
+     * A pointer rather than the secret: the vault owns encryption, rotation and revocation, and a
+     * second copy of a token here would be a second thing to remember to revoke.
+     *
+     * A REAL foreign key, where this was `text` against a `uuid` primary key with none. That is not a
+     * typing nicety. The database was willing to hold a pointer to a credential row that did not
+     * exist, and it did: a test deleted the credential an administrator had registered and left this
+     * column addressing nothing, so the connector reported "no OAuth client registered yet" while the
+     * row still looked configured. Nothing caught it because nothing was checking.
+     *
+     * `restrict`, not `cascade` or `set null`. A credential this server points at should not be
+     * removable out from under it — the two legitimate ways to change it are replacing it, which
+     * repoints this column first, and removing the server, which takes the row with it. Anything else
+     * is a mistake, and should be refused rather than silently tidied into a working-looking state.
+     */
+    credentialId: uuid("credential_id").references(() => credentials.id, {
+      onDelete: "restrict",
+    }),
+    /**
+     * How this app connects, as it was resolved when somebody enabled it.
+     *
+     * Recorded rather than re-derived, because the catalogue is somebody else's and a vendor that
+     * starts publishing a new scheme for an app must not move live connections onto a different
+     * flow underneath them.
+     *
+     * THE VENDOR'S OWN SCHEME LITERAL, NOT A {@link BrokerConnection} KIND — `OAUTH2`, `DCR_OAUTH`,
+     * `API_KEY`, `BASIC`, `BEARER_TOKEN`, `BASIC_WITH_JWT`, `NO_AUTH`. Those two vocabularies name one
+     * fact, and this column is where a reader comes to find out which of them is written down, so it
+     * says: somebody looking here for `consent` or `fields` is reading the other one. Migration 0038
+     * backfilled every row whose provenance is `composio` to `OAUTH2`, because managed OAuth was the
+     * only config this deployment ever created and `addBrokeredApp` writes the row only after that
+     * config stands. A null is therefore not an older brokered row this deployment WROTE.
+     *
+     * WHICH IS NOT THE SAME AS A NULL BEING UNREACHABLE ON A BROKERED READ, and the difference has
+     * cost a verdict already. Every reader finds an app's row by {@link mcpServers.url}, which carries
+     * no unique index — two rows may name one app, and the one that answers is not always the one an
+     * enable wrote a scheme onto. Add a row inserted by hand, a row restored from elsewhere, or an app
+     * whose `BrokerConnection` was `unsupported`, and a brokered read really does meet a null here. So
+     * a reader must have three answers and not two: a key, a consent, and a column it cannot act on.
+     * `schemeKind` in `plugins/broker.ts` is that reading, and `confirmBrokeredConnection` is what
+     * happened without it — a null read as consent, and `verified: true` written on every page load
+     * over evidence nobody had.
+     */
+    authScheme: text("auth_scheme"),
+    /**
+     * Whose account a brokered app is reached through: each asking person's own (`personal`), or
+     * one account that belongs to this deployment (`shared`).
+     *
+     * NULL ON EVERY ROW THAT IS NOT A BROKERED APP NEEDING AN ACCOUNT, and that is a statement rather
+     * than a gap: a curated connector and a no-auth app have no account to choose between. A brokered
+     * row that needs one and has NULL here is refused as ambiguous by `accountFor`, never guessed.
+     */
+    accountMode: text("account_mode").$type<"personal" | "shared">(),
+    /**
+     * The identity this deployment's own account is held under at the vendor, minted once when the
+     * app is switched to Shared and cleared when it is switched back. A consent flow begins before
+     * any connection row exists, so this is where `authorize` and `confirm` both read it from.
+     */
+    sharedVendorUserId: text("shared_vendor_user_id"),
+    /** What the deployment last heard back from it. `null` until the first successful listing. */
+    toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
+    /** The last failure, kept so the Plugins page can say why a server has no tools. */
+    lastError: text("last_error"),
+    addedBy: text("added_by"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      "mcp_servers_account_mode_check",
+      sql`${table.accountMode} IS NULL OR ${table.accountMode} IN ('personal', 'shared')`,
+    ),
+  ],
+);
 
 /**
  * A tool one server says it offers, as of the last listing.
@@ -365,6 +391,55 @@ export const composioConnections = pgTable(
     primaryKey({ columns: [table.toolkit, table.userId] }),
     // "What has this person connected" is the settings page's only query, and offboarding's.
     index("composio_connections_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * Every account this deployment reaches a brokered app through: one per person per app, and at most
+ * one per app that belongs to the deployment itself.
+ *
+ * THE SUCCESSOR TO `composio_connections`, WHICH IS LEFT IN PLACE AND NEVER WRITTEN, so that a
+ * deployment rolled back to v0.1.0 still finds the table it expects. Every column that table had
+ * means here what it meant there; see its docblock for `verified` and `probe_action`, which carry
+ * over unchanged.
+ *
+ * `holder` IS EXPLICIT RATHER THAN A RESERVED VALUE IN `user_id`, so no query that means "this
+ * person's accounts" can match the deployment's by forgetting a filter: a deployment row has no
+ * `user_id` at all, and the CHECK below holds that.
+ */
+export const brokeredConnections = pgTable(
+  "brokered_connections",
+  {
+    provider: text("provider").$type<"composio">().notNull(),
+    app: text("app").notNull(),
+    holder: text("holder").$type<"person" | "deployment">().notNull(),
+    userId: text("user_id"),
+    vendorUserId: text("vendor_user_id").notNull(),
+    connectedBy: text("connected_by"),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    verified: boolean("verified").notNull().default(false),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    probeAction: text("probe_action"),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      "brokered_connections_holder_check",
+      sql`(${table.holder} = 'person' AND ${table.userId} IS NOT NULL) OR (${table.holder} = 'deployment' AND ${table.userId} IS NULL)`,
+    ),
+    check(
+      "brokered_connections_provider_check",
+      sql`${table.provider} IN ('composio')`,
+    ),
+    uniqueIndex("brokered_connections_person_idx")
+      .on(table.provider, table.app, table.userId)
+      .where(sql`${table.holder} = 'person'`),
+    uniqueIndex("brokered_connections_deployment_idx")
+      .on(table.provider, table.app)
+      .where(sql`${table.holder} = 'deployment'`),
+    index("brokered_connections_user_idx").on(table.userId),
   ],
 );
 

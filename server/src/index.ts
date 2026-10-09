@@ -83,6 +83,7 @@ import {
   createAuditReader,
   createAuditStore,
   DEPLOYMENT_INITIATOR,
+  handoffInitiator,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "./audit";
@@ -194,11 +195,16 @@ import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
+import { createAccountModeSwitch } from "./plugins/account-mode";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { useComposioClient } from "./plugins/composio";
 import { createComposioClient } from "./plugins/composio-adapter";
 import { backfillComposioLogos } from "./plugins/logos";
 import { redirectUriFor } from "./plugins/oauth";
+import {
+  createSharedUseGate,
+  createSharedUseStore,
+} from "./plugins/shared-use-store";
 import { createPluginStore } from "./plugins/store";
 import {
   grantedSkills,
@@ -740,13 +746,24 @@ const signInService = computerGateway
     })
   : undefined;
 
+/*
+ * Whether a Bot may act through a Shared app at all, kept apart from the policy boundary above
+ * because it answers a different question: not "is this action allowed" but "is this Bot's
+ * audience narrow enough for what an administrator approved for the shared account." Kept in
+ * module scope because the publication, assignment and grant routes below also need to reapprove
+ * or refile against it when a Bot's exposure changes.
+ */
+const sharedUseStore = createSharedUseStore(database);
+
 const pluginStore = createPluginStore({
   database,
+  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
   auditStore: bootAuditStore,
   credentials: credentialStore,
   encryptionKey: config.keyEncryptionKey,
   policy: () => policyStore.get(),
   approvalGate: approvalService.gate,
+  sharedUse: createSharedUseGate(sharedUseStore, bootAuditStore),
   // A connector send to other people asks the owner first. See plugins/share-target.ts.
   privateShareCheck: createPrivateShareCheck({
     approvals: approvalService.store,
@@ -768,6 +785,19 @@ const pluginStore = createPluginStore({
    * attempted.
    */
   broker: composio?.broker,
+});
+
+/*
+ * Personal ⇄ Shared for a brokered app. Built here because it needs the plugin store, the shared-use
+ * store and the approval policy at once: making an app Shared ends people's accounts, approves each
+ * Bot that holds it and adds an ask-before-write rule for its writes.
+ */
+const accountModes = createAccountModeSwitch({
+  store: pluginStore,
+  sharedUse: sharedUseStore,
+  teamRules: approvalService.store.policy,
+  deploymentId: config.deploymentId ?? tenantPackage.tenantId,
+  audit: bootAuditStore,
 });
 
 // Logo metadata is optional; a vendor outage must not prevent the API from starting.
@@ -2631,7 +2661,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
        * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
        * agreed to, and the person was told it never answered.
        */
-      agentFor: async ({ actorId, botId, fromBotId }) => {
+      agentFor: async ({ actorId, botId, fromBotId, initiator }) => {
         const actor = await actorFor(actorId).catch(() => null);
         if (!actor) {
           throw new Error(
@@ -2641,7 +2671,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
         return copilotRuntime.agentFor({
           actor,
           botId,
-          initiator: { kind: "handoff", id: fromBotId },
+          initiator: handoffInitiator(fromBotId, initiator),
         });
       },
       history: copilotRuntime.history,
@@ -3002,6 +3032,7 @@ const app = createApp(
   },
   {
     approvals: approvalService,
+    shared: { modes: accountModes, use: sharedUseStore },
     ...(signInService ? { passwords: signInService } : {}),
     demonstrations: {
       store: demonstrationStore,

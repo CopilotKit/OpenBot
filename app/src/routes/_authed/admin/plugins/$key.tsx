@@ -13,6 +13,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
 import {
   BrokeredAccountRow,
   useBrokeredAccount,
@@ -55,8 +56,13 @@ import {
   type CatalogueItem,
   connectionsQueryOptions,
   type PluginServer,
+  personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import {
+  botSharedAppsQueryOptions,
+  describeApproval,
+} from "@/lib/plugins/shared-use";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -107,6 +113,32 @@ function heldSummary(held: number, total: number): string {
   if (held === 0) return "No tools";
   if (held === total) return total === 1 ? "1 tool" : "Every tool";
   return `${held} of ${total} tools`;
+}
+
+/**
+ * One Bot's standing with the shared account behind THIS app, read off its own exposure.
+ *
+ * Nothing when the Bot does not hold this app at all — `sharedAppsHeldBy` only lists apps a Bot has
+ * at least one grant on, so there is no shared account for it to stand with yet — and nothing while
+ * the fetch is still open, so no stale answer flashes ahead of the real one. "Not approved" matches
+ * the word the shared-use inbox uses for the same absence (`shared-use-requests.tsx`), so an
+ * administrator reads the same two words for the same fact wherever it comes up.
+ */
+function BotApprovalText({
+  botId,
+  serverId,
+}: {
+  botId: string;
+  serverId: string;
+}) {
+  const exposure = useQuery(botSharedAppsQueryOptions(botId));
+  const app = exposure.data?.apps.find((one) => one.serverId === serverId);
+  if (!app) return null;
+  return (
+    <span className="text-muted-foreground text-xs">
+      {app.approval ? describeApproval(app.approval) : "Not approved"}
+    </span>
+  );
 }
 
 /**
@@ -186,10 +218,14 @@ function RouteComponent() {
    * The row itself rather than whether there is one, because the brokered row below wants what the
    * last re-check found and that is written on this same row. Asking a second time for it would be
    * a second answer to a question this read already carried.
+   *
+   * ONLY THIS PERSON'S OWN ROWS. A Shared app's deployment row arrives on the same read, and taking
+   * it for "you connected" would tell an administrator their own account is live when the one live
+   * account is the team's.
    */
-  const connection = (connections.data?.connections ?? []).find(
-    (row) => row.serverId === key,
-  );
+  const connection = personalConnections(
+    connections.data?.connections ?? [],
+  ).find((row) => row.serverId === key);
   const youConnected = connection !== undefined;
   /*
    * A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, AND ONLY WHERE IT IS READ.
@@ -214,6 +250,10 @@ function RouteComponent() {
 
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  /** Which way the mode-switch confirmation is asking, or null while it is closed. */
+  const [modeTarget, setModeTarget] = useState<"personal" | "shared" | null>(
+    null,
+  );
   const [token, setToken] = useState("");
   const [instanceHost, setInstanceHost] = useState("");
   const [client, setClient] = useState({ clientId: "", clientSecret: "" });
@@ -298,6 +338,18 @@ function RouteComponent() {
     name: agent.name,
     hidden: agent.hidden,
   }));
+  /*
+   * Every Bot this admin can see, hidden ones included. The mode-switch dialog's dry run can name
+   * a Bot that holds no grant on this app today — the default team rule a Shared switch writes
+   * reaches `*` — or a Bot hidden from the roster that still holds one of this app's grants, so the
+   * lookup has to cover both.
+   */
+  const botNames = Object.fromEntries(
+    [...(agents ?? []), ...(hiddenAgents ?? [])].map((agent) => [
+      agent.id,
+      agent.name,
+    ]),
+  );
 
   const auth = connectionKindFor(server, entry?.auth);
   const title = entry?.title ?? server?.title ?? key;
@@ -306,6 +358,19 @@ function RouteComponent() {
      disconnected sentence and once on its own — and two copies of it would drift. */
   const reassurance =
     "Setup is complete without it, and it reaches your documents only.";
+
+  /*
+   * A SHARED APP'S ROW IS THE TEAM ACCOUNT, NOT THIS ADMINISTRATOR'S.
+   *
+   * The deployment row is listed whether or not anything is connected to it, so its presence is not
+   * the answer — its `connected` field is. The hook below is still called once and unconditionally,
+   * per the rules of hooks; what changes is which row feeds it.
+   */
+  const shared = server?.accountMode === "shared";
+  const sharedConnection = (connections.data?.connections ?? []).find(
+    (row) => row.serverId === key && row.holder === "deployment",
+  );
+  const accountRow = shared ? sharedConnection : connection;
 
   /*
    * Everything the brokered row below reads and does, shared with the personal connected-accounts
@@ -318,7 +383,7 @@ function RouteComponent() {
     authScheme: server?.authScheme ?? null,
     brokered: auth === "brokered",
     configured: plugins.data?.composioConfigured ?? false,
-    recorded: youConnected,
+    recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
     report: setError,
     // Back to this page afterwards, not to the personal settings screen.
     returnTo: "admin",
@@ -329,15 +394,15 @@ function RouteComponent() {
      * columns default to. The three are optional on the type because that endpoint concatenates two
      * reads and only a brokered row carries them.
      */
-    verified: connection?.verified ?? false,
-    verifiedAt: connection?.verifiedAt ?? null,
+    verified: accountRow?.verified ?? false,
+    verifiedAt: accountRow?.verifiedAt ?? null,
     /*
      * AND THIS ONE IS NOT FLATTENED, for the reason the personal screen gives: the two above fall
      * back on the server's own column defaults, while a null here is the server's record that the
      * last check spent nothing — not the absence of a record. The row draws a different sentence
      * for each, so the difference has to reach it.
      */
-    probe: connection?.probe,
+    probe: accountRow?.probe,
     /*
      * WHILE THIS ONE IS, for the reason that screen gives too: it is the Re-check button's gate and
      * not a sentence. The record above says what was spent and this says whether the app has
@@ -345,7 +410,7 @@ function RouteComponent() {
      * was tried on with no way to ever have anything tried on it. Absent and false are the same
      * closed gate, so the fallback costs nothing here.
      */
-    checkable: connection?.checkable ?? false,
+    checkable: accountRow?.checkable ?? false,
   });
 
   /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
@@ -506,8 +571,55 @@ function RouteComponent() {
               />
             </ItemActions>
           </Item>
+
+          {/*
+           * ONLY A BROKERED APP THAT HAS AN ACCOUNT TO MAKE. `NO_AUTH` is the Composio scheme with
+           * nothing to connect at all — see `brokeredAccountsListedOn` — so there is no personal/
+           * shared choice to offer for it, and a row here could only open a dialog that refuses.
+           */}
+          {server?.provenance === "composio" &&
+          server.authScheme !== "NO_AUTH" ? (
+            <>
+              <Separator />
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Whose account</ItemTitle>
+                  <ItemDescription>
+                    {server.accountMode === "shared"
+                      ? "One shared account for everyone."
+                      : "Each person connects their own."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    onClick={() =>
+                      setModeTarget(
+                        server.accountMode === "shared" ? "personal" : "shared",
+                      )
+                    }
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {server.accountMode === "shared"
+                      ? "Make personal"
+                      : "Make shared"}
+                  </Button>
+                </ItemActions>
+              </Item>
+            </>
+          ) : null}
         </PageRows>
       </PageSection>
+
+      <AccountModeDialog
+        names={botNames}
+        onOpenChange={(open) => !open && setModeTarget(null)}
+        open={modeTarget !== null}
+        serverId={key}
+        target={modeTarget ?? "shared"}
+        title={title}
+      />
 
       {server ? (
         <PageSection
@@ -693,6 +805,15 @@ function RouteComponent() {
                 <Separator />
                 {connectionsUnreadable ? (
                   <ConnectionStateUnreadable />
+                ) : shared ? (
+                  <BrokeredAccountRow
+                    account={brokeredAccount}
+                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot granted these tools acts as this account.`}
+                    disconnectedDescription="No team account is connected, so Bots granted these tools are refused."
+                    heading="Team account"
+                    notice="Sign in as the team account, not your own."
+                    title={title}
+                  />
                 ) : (
                   <BrokeredAccountRow
                     account={brokeredAccount}
@@ -986,6 +1107,13 @@ function RouteComponent() {
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>
+                        {/*
+                         * Only on a Shared app: a Personal one has no one account behind it for a
+                         * Bot to stand with, so there is nothing here to approve.
+                         */}
+                        {shared ? (
+                          <BotApprovalText botId={bot.id} serverId={key} />
+                        ) : null}
                         <span className="text-muted-foreground text-xs">
                           {heldSummary(
                             server.tools.filter((tool) =>

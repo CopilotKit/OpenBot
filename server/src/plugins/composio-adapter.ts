@@ -6,6 +6,7 @@ import {
   type BrokerField,
   BrokerRefusalError,
   type ComposioBroker,
+  type ConnectedAppBroker,
   type FieldScheme,
   flagOf,
   isFieldScheme,
@@ -17,6 +18,7 @@ import {
   LISTING_LIMIT,
   vendorSentence,
 } from "./composio";
+import type { AccountRef } from "./shared-accounts";
 
 /**
  * The one file in `server/src` that imports `@composio/core`, and what it owes the rest of them.
@@ -404,6 +406,19 @@ function textOf(value: unknown): string | null {
   const text = value.trim();
   return text === "" ? null : text;
 }
+
+/**
+ * Who an error sentence is about, named the way the holder it acts for would read it.
+ *
+ * A DEPLOYMENT HOLDS NO "PERSON" TO BE TOLD ABOUT. The sentences below were all written for a
+ * person pressing Connect or Disconnect on their own settings page, and every one of them says so
+ * in the words "this person" — which is simply wrong where the account acted for is the
+ * deployment's own shared one, with nobody's personal credential anywhere behind it.
+ */
+const whose = (account: AccountRef) =>
+  account.holder === "deployment"
+    ? "this deployment's shared account"
+    : "this person";
 
 /**
  * How many pages of one listing this deployment will read before it stops and says so.
@@ -2188,19 +2203,20 @@ export type ComposioVendor = {
       cursor?: string;
     }): Promise<{
       /**
-       * The id is the only field read off an account, and it is read off the wire unchecked.
+       * The id, and `data.displayName` read by name, are the only fields read off an account.
+       * `data` and `state.val` also carry the account's tokens, and nothing else is read from them.
        *
        * `transformConnectedAccountResponse` spreads the raw item and overrides the fields it
        * renames (`@composio/core` 0.18.1, `src/utils/transformers/connectedAccounts.ts:52-66`), so
-       * `id` arrives exactly as Composio sent it inside the same warn-only `transform()` as
-       * everything else here. An account with no id is the one shape the revoke below cannot act
-       * on, and {@link withdrawableAccounts} is what says so about it.
+       * `id` and `data` arrive exactly as Composio sent them inside the same warn-only
+       * `transform()` as everything else here. An account with no id is the one shape the revoke
+       * below cannot act on, and {@link withdrawableAccounts} is what says so about it.
        *
-       * THE ROW ITSELF IS AN OBJECT BY CONSTRUCTION, which is why only the field is in doubt. The
+       * THE ROW ITSELF IS AN OBJECT BY CONSTRUCTION, which is why only the fields are in doubt. The
        * same function reads `response.auth_config.id` (`:60`) on its way to building each row, so a
        * row that is not an object raises inside the vendor's code and never reaches this listing.
        */
-      items: { id?: unknown }[];
+      items: { id?: unknown; data?: unknown }[];
       /**
        * The same truncation signal as the auth-config listing above, from the same vendor schema.
        *
@@ -2501,7 +2517,7 @@ export function buildComposioClient(
   now: () => number = Date.now,
 ): {
   actions: ComposioActions;
-  broker: ComposioBroker;
+  broker: ConnectedAppBroker;
 } {
   /**
    * This person's accounts for this app, in whichever states the ASKING question is about.
@@ -2528,9 +2544,9 @@ export function buildComposioClient(
     statuses: VendorAccountStatus[],
     asked: {
       configs?: string[];
-      enough?: (rows: { id?: unknown }[]) => boolean;
+      enough?: (rows: { id?: unknown; data?: unknown }[]) => boolean;
     } = {},
-  ): Promise<{ id?: unknown }[]> => {
+  ): Promise<{ id?: unknown; data?: unknown }[]> => {
     /*
      * EVERY PAGE UNLESS THE CALLER SAYS OTHERWISE, READ HERE RATHER THAN AT EITHER CALLER, so that
      * the two questions cannot drift on the one thing they do share. A truncated listing is the
@@ -3374,10 +3390,11 @@ export function buildComposioClient(
     },
 
     async authorize({
-      userId,
+      account,
       toolkit,
       returnUrl,
     }): Promise<{ redirectUrl: string }> {
+      const userId = account.vendorUserId;
       /*
        * THE CONFIG THIS DEPLOYMENT ALREADY MADE, AND NO SECOND ONE MADE HERE.
        *
@@ -3553,7 +3570,7 @@ export function buildComposioClient(
           );
         }
         throw new BrokerRefusalError(
-          `No authorization config this deployment holds at Composio for ${toolkit} could be shown to be enabled, so no link was made: consent spent against a config that turns out to be disabled attaches nothing and cannot be spent again without sending this person round the loop a second time. ${left.join(" ")}`,
+          `No authorization config this deployment holds at Composio for ${toolkit} could be shown to be enabled, so no link was made: consent spent against a config that turns out to be disabled attaches nothing and cannot be spent again without sending ${whose(account)} round the loop a second time. ${left.join(" ")}`,
           unreadable.length > 0
             ? { cause: everyRefusal(unreadable) }
             : undefined,
@@ -3611,7 +3628,7 @@ export function buildComposioClient(
         typeof redirectUrl !== "string"
       ) {
         throw new BrokerRefusalError(
-          `Composio sent ${sent(redirectUrl)} where the page to send this person to for ${toolkit} belongs, so nobody was sent anywhere. ${VENDOR_SHAPE_REMEDY}`,
+          `Composio sent ${sent(redirectUrl)} where the page to send ${whose(account)} to for ${toolkit} belongs, so nobody was sent anywhere. ${VENDOR_SHAPE_REMEDY}`,
         );
       }
       /*
@@ -3642,13 +3659,14 @@ export function buildComposioClient(
          * connection, so it is handed to the browser that asked and then forgotten.
          */
         throw new BrokerRefusalError(
-          `Composio began a connection to ${toolkit} but answered with no page to visit, so there is nothing to send this person to. An app that is connected by entering a credential rather than by visiting a page cannot be connected from here.`,
+          `Composio began a connection to ${toolkit} but answered with no page to visit, so there is nothing to send ${whose(account)} to. An app that is connected by entering a credential rather than by visiting a page cannot be connected from here.`,
         );
       }
       return { redirectUrl: page };
     },
 
-    async isConnected({ userId, toolkit }): Promise<boolean> {
+    async isConnected({ account, toolkit }): Promise<boolean> {
+      const userId = account.vendorUserId;
       /*
        * A COUNT, AND NOTHING IS READ OFF A ROW TO REACH IT. An ACTIVE account Composio described
        * without an id is still an ACTIVE account: this person can act through the app, which is the
@@ -3680,7 +3698,8 @@ export function buildComposioClient(
       );
     },
 
-    async revoke({ userId, toolkit }): Promise<boolean> {
+    async revoke({ account, toolkit }): Promise<boolean> {
+      const userId = account.vendorUserId;
       /*
        * THE ANSWER IS WHAT WAS ASKED FOR, not whether the call threw. `false` here means there was
        * nothing to withdraw, which is what the audit trail's `vendorRevocationRequested` is for: a
@@ -3760,7 +3779,7 @@ export function buildComposioClient(
             ? ` Composio also described ${unreadable.length} of its ${toolkit} authorization configs in a way this deployment cannot read, so any grant of theirs on one of those is outside the question either reading settles, and renaming the config above is not on its own enough to end everything they hold: reading those rows in Composio's own dashboard is what says whether anything is left.`
             : "";
         throw new BrokerRefusalError(
-          `Disconnecting ${toolkit} found none of this deployment's own authorization configs at Composio, and Composio holds ${held.length} for ${toolkit} whose name does not carry ${CONFIG_SUFFIX} — so nothing was withdrawn and this person's access has not ended, rather than their connection being forgotten here while their grant stands. Nothing here can tell one of ours, renamed in Composio's dashboard, from an operator's own work. If it is this deployment's, this person's grants on it are live, and renaming it to end with ${CONFIG_SUFFIX} lets disconnecting again withdraw them. If it is an operator's, this deployment granted nothing through it and only that dashboard can end what it holds.${alsoUnreadable}`,
+          `Disconnecting ${toolkit} found none of this deployment's own authorization configs at Composio, and Composio holds ${held.length} for ${toolkit} whose name does not carry ${CONFIG_SUFFIX} — so nothing was withdrawn and ${whose(account)}'s access has not ended, rather than their connection being forgotten here while their grant stands. Nothing here can tell one of ours, renamed in Composio's dashboard, from an operator's own work. If it is this deployment's, ${whose(account)}'s grants on it are live, and renaming it to end with ${CONFIG_SUFFIX} lets disconnecting again withdraw them. If it is an operator's, this deployment granted nothing through it and only that dashboard can end what it holds.${alsoUnreadable}`,
           unreadable.length > 0
             ? { cause: everyRefusal(unreadable) }
             : undefined,
@@ -3776,7 +3795,7 @@ export function buildComposioClient(
        */
       if (ours.length === 0 && unreadable.length > 0) {
         throw new BrokerRefusalError(
-          `Composio described ${unreadable.length} of its authorization configs for ${toolkit} in a way this deployment cannot read and none of the rest is one it made, so whether this person holds a grant on one of this deployment's own could not be told and nothing was withdrawn. Their access has not been shown to end. ${VENDOR_SHAPE_REMEDY}`,
+          `Composio described ${unreadable.length} of its authorization configs for ${toolkit} in a way this deployment cannot read and none of the rest is one it made, so whether ${whose(account)} holds a grant on one of this deployment's own could not be told and nothing was withdrawn. Their access has not been shown to end. ${VENDOR_SHAPE_REMEDY}`,
           { cause: everyRefusal(unreadable) },
         );
       }
@@ -3816,7 +3835,7 @@ export function buildComposioClient(
        */
       if (ids.length === 0 && nameless.length === 0 && unreadable.length > 0) {
         throw new BrokerRefusalError(
-          `Composio described ${unreadable.length} of its authorization configs for ${toolkit} in a way this deployment cannot read, and this person holds no account on any of the ones it could read, so nothing was withdrawn and their access has not been shown to end. Whether they hold a grant on one of THOSE is outside what either reading settles and disconnecting again meets the same answer: reading those rows in Composio's own dashboard is what says whether anything is left. ${VENDOR_SHAPE_REMEDY}`,
+          `Composio described ${unreadable.length} of its authorization configs for ${toolkit} in a way this deployment cannot read, and ${whose(account)} holds no account on any of the ones it could read, so nothing was withdrawn and their access has not been shown to end. Whether they hold a grant on one of THOSE is outside what either reading settles and disconnecting again meets the same answer: reading those rows in Composio's own dashboard is what says whether anything is left. ${VENDOR_SHAPE_REMEDY}`,
           { cause: everyRefusal(unreadable) },
         );
       }
@@ -3917,7 +3936,7 @@ export function buildComposioClient(
           );
         }
         throw new BrokerRefusalError(
-          `Composio withdrew ${ids.length - refused.length} of this person's ${accountsHeld} accounts for ${toolkit} and their access to it has not been shown to end. ${left.join(" ")}`,
+          `Composio withdrew ${ids.length - refused.length} of ${whose(account)}'s ${accountsHeld} accounts for ${toolkit} and their access to it has not been shown to end. ${left.join(" ")}`,
           { cause: everyRefusal([...refused, ...nameless, ...unreadable]) },
         );
       }
@@ -4386,11 +4405,12 @@ export function buildComposioClient(
      * See {@link ComposioBroker.revokeAccount}.
      */
     async connectWithFields({
-      userId,
+      account,
       toolkit,
       authScheme,
       values,
     }): Promise<{ accountId: string }> {
+      const userId = account.vendorUserId;
       /*
        * THIS DEPLOYMENT'S OWN CONFIG, FOR THE REASON {@link ComposioBroker.authorize} READS ONE: an
        * account is a lasting attachment to whatever config it was made against, so attaching
@@ -4653,6 +4673,26 @@ export function buildComposioClient(
         `Composio sent ${sent(verdict)} where its verdict on the withdrawal of the account this connection just made belongs, and that field is the only thing in the reply that says whether the account was deleted at all. This deployment cannot tell a withdrawal that happened from one that did not, so the account is reported as still standing and the credential behind it as not withdrawn. ${VENDOR_SHAPE_REMEDY}`,
       );
     },
+
+    async accountName({ account, toolkit }) {
+      const rows = await accountsFor(account.vendorUserId, toolkit, CONNECTED, {
+        enough: (found) => found.length > 0,
+      });
+      /*
+       * BY NAME, AND NOTHING ELSE. `data` is the vendor's whole connection blob — access, refresh
+       * and id tokens, and for some apps a client secret — and the one field a page may show is the
+       * display name the vendor chose to publish. Nothing is decoded out of a token to make up for a
+       * missing one: a name we had to dig for is a name the vendor did not publish.
+       */
+      for (const row of rows) {
+        const data = row.data;
+        if (data && typeof data === "object" && "displayName" in data) {
+          const name = textOf((data as { displayName?: unknown }).displayName);
+          if (name) return name;
+        }
+      }
+      return null;
+    },
   };
 
   return { actions, broker };
@@ -4694,7 +4734,7 @@ export function buildComposioClient(
  */
 export function createComposioClient(apiKey: string): {
   actions: ComposioActions;
-  broker: ComposioBroker;
+  broker: ConnectedAppBroker;
 } {
   /*
    * THREE ENTRIES, EVERY ONE OF THEM LOAD-BEARING, AND ALL THREE PINNED BY A TEST. What this

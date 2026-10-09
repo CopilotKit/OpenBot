@@ -30,6 +30,7 @@ import {
 import {
   agentProfiles,
   agents,
+  brokeredConnections,
   composioConnections,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
@@ -40,6 +41,7 @@ import {
   pluginGrants,
   skills,
   skillTools,
+  users,
 } from "../db/schema";
 import type { CheckPrivateShare } from "../proactive/private-share";
 import {
@@ -76,6 +78,13 @@ import { inspectToolArguments } from "./content-governance";
 import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { shareTargetOf } from "./share-target";
+import {
+  type AccountAnswer,
+  type AccountMode,
+  type AccountRef,
+  accountFor,
+} from "./shared-accounts";
+import type { SharedUseGate } from "./shared-use-store";
 import { transportFor } from "./transport";
 
 /**
@@ -189,6 +198,19 @@ export type ServerRecord = {
    * Null is not an older brokered row. It is a row that is not brokered at all.
    */
   authScheme: string | null;
+  /**
+   * Whose account a brokered app acts in: each person's own, or the one the deployment holds.
+   * Null on a row that needs no account at all, and on every row that is not brokered.
+   */
+  accountMode: "personal" | "shared" | null;
+  /**
+   * Whether a Shared app's deployment-held account is connected yet.
+   *
+   * ALWAYS FALSE WHILE {@link accountMode} IS NOT `"shared"`, even where a deployment row happens
+   * to stand at the app's url: a Personal app never acts in that account, so reporting it as
+   * connected would tell the page something that changes nothing a call does.
+   */
+  sharedVendorConnected: boolean;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.
@@ -227,6 +249,17 @@ export type ServerAddress = {
    * is a row that is not brokered.
    */
   authScheme: string | null;
+  /**
+   * Whose account the app this row names is used under: each person's own, or one the deployment
+   * holds for everybody.
+   *
+   * THE APP'S, READ OFF THE ROW THAT ANSWERS FOR IT, exactly as {@link authScheme} is. Two rows may
+   * name one app and only one of them decides whose account it is, so a page that drew the Shared
+   * treatment off the row it opened could show one answer while every connect, grant and call
+   * behind its buttons acted on the other. Null is a row that is not brokered, and also a brokered
+   * row whose app has no answering row left to say.
+   */
+  accountMode: AccountMode | null;
 };
 
 export type SkillRecord = {
@@ -1094,6 +1127,8 @@ export type PluginStoreOptions = {
    * See plugins/share-target.ts and proactive/private-share.ts. Absent asks nothing.
    */
   privateShareCheck?: CheckPrivateShare;
+  /** Who may steer a run that uses a Shared app's account. Absent, every shared call is refused. */
+  sharedUse?: SharedUseGate;
   database: Database;
   auditStore: AuditStore;
   /**
@@ -1155,6 +1190,11 @@ export type PluginStoreOptions = {
   broker?: ComposioBroker;
   /** Where the vendor sends people back; needed to (re)register a dynamic client. */
   redirectUri?: string;
+  /**
+   * What this deployment calls itself (`DEPLOYMENT_ID`, else the tenant package id). The prefix of
+   * a shared account's vendor identity, read only when an app is switched to Shared.
+   */
+  deploymentId?: string;
 };
 
 /**
@@ -1351,6 +1391,121 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   /**
+   * The account a call, a connect or a check acts for, from the row and the person — never from a
+   * request. A Shared app answers with the deployment's stored identity whoever asks.
+   */
+  async function accountRefFor(
+    serverId: string,
+    actorId: string,
+  ): Promise<
+    | { ref: AccountRef; title: string; mode: AccountMode; appId: string }
+    | { refusal: string }
+  > {
+    const [dialled] = await database
+      .select({
+        title: mcpServers.title,
+        provenance: mcpServers.provenance,
+        url: mcpServers.url,
+        authScheme: mcpServers.authScheme,
+        accountMode: mcpServers.accountMode,
+        sharedVendorUserId: mcpServers.sharedVendorUserId,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!dialled)
+      return {
+        refusal: `${serverId} is not an app this deployment has added.`,
+      };
+    /*
+     * THE NAME IS THE DIALLED ROW'S; THE ACCOUNT IS THE APP'S.
+     *
+     * CRITERION. For a brokered row whose url names an app, the scheme, the mode and the deployment
+     * identity are read off the row {@link brokeredAppRow} answers for that app, and `appId` names
+     * that row. Only the title — the words a person is shown — comes from the row they dialled.
+     *
+     * REASON. The url carries no unique index, so a second row can sit at an app's url carrying
+     * account columns of its own. Read off the dialled row, those columns let a duplicate decide
+     * the account for the app: `personal` at a Shared app's url took a non-administrator through
+     * Connect to a personal account on the team's app and took calls round the audience gate, and
+     * `shared` at a Personal app's url sent a person's call out as the deployment. The connection
+     * this decides is then looked up by toolkit, which is the app — so the decision has to be the
+     * app's too, or its two halves are about different rows.
+     *
+     * A BROKERED ROW WITH NO ANSWERING ROW IS NOT AN APP ANY MORE. The dialled row sits at the url,
+     * so only a removal racing this read gets here, and it is refused as the missing row is above.
+     */
+    const toolkit =
+      dialled.provenance === "composio" ? toolkitOf(dialled.url) : null;
+    const app = toolkit ? await brokeredAppRow(toolkit) : null;
+    if (toolkit && !app)
+      return {
+        refusal: `${serverId} is not an app this deployment has added.`,
+      };
+    const row = app
+      ? {
+          title: dialled.title,
+          provenance: dialled.provenance,
+          authScheme: app.authScheme,
+          accountMode: app.accountMode,
+          sharedVendorUserId: app.sharedVendorUserId,
+        }
+      : dialled;
+    const appId = app?.id ?? serverId;
+    const answer = accountFor(row, actorId);
+    type _RefDecides = Decides<
+      AccountAnswer["kind"],
+      {
+        none: "refused here — there is no account to connect, check or end";
+        person: "the actor, under their own id";
+        deployment: "the deployment, under the identity minted when the app became Shared";
+        ambiguous: "refused with accountFor's own sentence";
+      }
+    >;
+    if (answer.kind === "none")
+      return { refusal: `${row.title} needs no account.` };
+    if (answer.kind === "ambiguous") return { refusal: answer.message };
+    if (answer.kind === "person") {
+      if (!actorId)
+        return {
+          refusal: `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
+        };
+      return {
+        ref: { holder: "person", userId: actorId, vendorUserId: actorId },
+        title: row.title,
+        mode: "personal",
+        appId,
+      };
+    }
+    if (!row.sharedVendorUserId) {
+      throw new PluginInvariantError(
+        `${appId} is Shared and holds no deployment identity; switch it to Personal and back.`,
+      );
+    }
+    return {
+      ref: { holder: "deployment", vendorUserId: row.sharedVendorUserId },
+      title: row.title,
+      mode: "shared",
+      appId,
+    };
+  }
+
+  /** The WHERE clause for one account's row, by holder. */
+  const accountRow = (toolkit: string, account: AccountRef) =>
+    account.holder === "person"
+      ? and(
+          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.app, toolkit),
+          eq(brokeredConnections.holder, "person"),
+          eq(brokeredConnections.userId, account.userId),
+        )
+      : and(
+          eq(brokeredConnections.provider, "composio"),
+          eq(brokeredConnections.app, toolkit),
+          eq(brokeredConnections.holder, "deployment"),
+        );
+
+  /**
    * The token one call goes out with, and whose it is — decided from `access.credential`, so that
    * this function and the audit row cannot disagree about whose account a call ran in.
    *
@@ -1396,7 +1551,12 @@ export function createPluginStore(options: PluginStoreOptions) {
     entry: CatalogueEntry | null,
     actorId: string,
     access: ServerAccess,
-  ): Promise<{ token?: string }> {
+    /**
+     * The mode a call's audience gate was decided about, where one was; see the check beside
+     * {@link accountRefFor} below. Absent for a path with no such gate, the tool refresh.
+     */
+    gatedMode?: AccountMode | null,
+  ): Promise<{ token?: string; vendorUserId?: string }> {
     /*
      * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
      *
@@ -1450,10 +1610,11 @@ export function createPluginStore(options: PluginStoreOptions) {
       /*
        * AN APP THAT NEEDS NO AUTHENTICATION HAS NO ROW TO FIND, AND CANNOT EVER HAVE ONE.
        *
-       * `composio_connections` is the whole of the permission for a brokered call, and every row in
-       * it means one thing: this person granted this deployment access to their account at this
-       * app. A `NO_AUTH` app has no account and no consent — Composio refuses even to hold an
-       * authorization config for one — so nobody presses Connect and nothing could write the row.
+       * `brokered_connections` is the whole of the permission for a brokered call, and every row in
+       * it means one thing: an account at this app was granted to this deployment — a person's own,
+       * or for a Shared app the team account an administrator connected. A `NO_AUTH` app has no
+       * account and no consent — Composio refuses even to hold an authorization config for one — so
+       * nobody presses Connect and nothing could write the row.
        *
        * THE ALTERNATIVE WAS WRITING ONE ANYWAY, and it is worse than it looks. Offboarding reads
        * this table to find what to revoke, the audit trail reads it to say what somebody had, and
@@ -1507,31 +1668,48 @@ export function createPluginStore(options: PluginStoreOptions) {
       >;
 
       /*
-       * Keyed on the app the call will run in, which is the one the url names.
+       * Keyed on the app the call will run in, which is the one the url names, and on the account
+       * the ROW says acts — the asker's own for a Personal app, the deployment's for a Shared one.
        *
        * `row.id` is a display key and nothing holds it equal to the slug in the url, so a row named
        * `gmail` at `composio://slack` passed this gate on a Gmail connection and then ran a Slack
        * action — the person having connected an app they were never asked about.
        */
+      const resolved = await accountRefFor(row.id, actorId);
+      if ("refusal" in resolved)
+        throw new PluginRefusedError(resolved.refusal, null);
+      /*
+       * THE ACCOUNT MUST BE THE ONE THE AUDIENCE GATE WAS ASKED ABOUT.
+       *
+       * `callTool` decides whether to run the Shared audience gate off the app's mode as it read it,
+       * and this reads the mode again. An administrator switching the app to Shared between the two
+       * reads would otherwise send an ungated call out on the team account. Refused rather than
+       * re-gated: the switch is rare, asking again is cheap, and a refusal cannot be the hole.
+       */
+      if (gatedMode && resolved.mode !== gatedMode)
+        throw new PluginRefusedError(
+          `${row.title} changed how it is shared while this call was being checked, so it was not called. Ask again.`,
+          null,
+        );
       const [connected] = await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, access.toolkit),
-            eq(composioConnections.userId, actorId),
-          ),
-        )
+        .select({ vendorUserId: brokeredConnections.vendorUserId })
+        .from(brokeredConnections)
+        .where(accountRow(access.toolkit, resolved.ref))
         .limit(1);
-
       if (!connected) {
         throw new PluginRefusedError(
-          `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+          resolved.ref.holder === "deployment"
+            ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
+            : `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
           null,
         );
       }
-
-      return {};
+      /*
+       * THE ROW'S IDENTITY, NOT A RECOMPUTED ONE. A shared account was connected under the id minted
+       * when the app became Shared; reading it back here is what makes a later change to
+       * DEPLOYMENT_ID unable to move the account a call lands in.
+       */
+      return { vendorUserId: connected.vendorUserId };
     }
 
     if (access.credential !== "person-oauth") {
@@ -2422,12 +2600,46 @@ export function createPluginStore(options: PluginStoreOptions) {
      * Three call sites used to derive their own — the transport, the credential and the audit row —
      * and a Composio app made all three of them wrong at once. One derivation means they cannot
      * disagree, and `access.ts` is the only place a new kind of server has to be taught about.
+     *
+     * AND RESOLVED AGAINST THE APP'S ACCOUNT COLUMNS, NOT THE DIALLED ROW'S. `reachedAs` is read off
+     * the scheme and the mode, both of which belong to the app — see {@link BrokeredAppRow} — so a
+     * brokered row is handed to {@link accessFor} carrying the answering row's two columns. Done
+     * here rather than at each consumer because this is the one resolution every store path reads,
+     * which is fewer places to remember than the callers; `listServers` reports the same two columns
+     * off the same row for the one reader outside the store, the memory ingestion. `app` goes back
+     * with it, so the audience gate decides on and keys its approval by the row that answers rather
+     * than the one that was dialled. Null for every row that is not a brokered app.
      */
-    return { row, entry, access: accessFor(row, entry) };
+    const toolkit = row.provenance === "composio" ? toolkitOf(row.url) : null;
+    const app = toolkit ? await brokeredAppRow(toolkit) : null;
+    const access = accessFor(
+      app
+        ? { ...row, authScheme: app.authScheme, accountMode: app.accountMode }
+        : row,
+      entry,
+    );
+    return { row, entry, access, app };
   }
 
-  /** What a row that answers for an app is asked for: which row it is, and how the app connects. */
-  type BrokeredAppRow = { id: string; authScheme: string | null };
+  /**
+   * What a row that answers for an app is asked for: which row it is, how the app connects, and
+   * whose account it runs in.
+   *
+   * THE ACCOUNT COLUMNS TRAVEL WITH THE SCHEME FOR THE SCHEME'S OWN REASON. Whether an app is Shared
+   * and which deployment identity it holds are facts about the APP, exactly as its scheme is, and a
+   * duplicate row at the same url is not a second app. Read off whichever row a call was dialled
+   * through, a duplicate recording `personal` at a Shared app's url skipped the audience gate and
+   * let anybody connect a personal account to the team's app, and one recording `shared` at a
+   * Personal app's url sent a person's call out as the deployment. Every account decision —
+   * {@link accountRefFor}, the audience gate in `callTool`, the trail's `reachedAs`, the listing —
+   * now reads these from here, so none of them can be about a different row than the others.
+   */
+  type BrokeredAppRow = {
+    id: string;
+    authScheme: string | null;
+    accountMode: AccountMode | null;
+    sharedVendorUserId: string | null;
+  };
 
   /**
    * The one `mcp_servers` row that answers for the app a url names: its id, and its scheme.
@@ -2496,14 +2708,14 @@ export function createPluginStore(options: PluginStoreOptions) {
         id: mcpServers.id,
         url: mcpServers.url,
         authScheme: mcpServers.authScheme,
+        accountMode: mcpServers.accountMode,
+        sharedVendorUserId: mcpServers.sharedVendorUserId,
       })
       .from(mcpServers)
       .where(inArray(mcpServers.url, urls))
       .orderBy(asc(mcpServers.id));
-    for (const row of rows) {
-      if (!answering.has(row.url)) {
-        answering.set(row.url, { id: row.id, authScheme: row.authScheme });
-      }
+    for (const { url, ...row } of rows) {
+      if (!answering.has(url)) answering.set(url, row);
     }
     return answering;
   }
@@ -2532,6 +2744,7 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   return {
+    accountRefFor,
     /**
      * Add a server from the catalogue.
      *
@@ -3039,6 +3252,20 @@ export function createPluginStore(options: PluginStoreOptions) {
            * recorded failed check on the next page load. See the derivation of `scheme` above.
            */
           authScheme: scheme,
+          /*
+           * PERSONAL ON A NEW ROW, AND NULL WHERE THERE IS NO ACCOUNT TO HOLD.
+           *
+           * A freshly enabled app is reached through each asking person's own account until an
+           * administrator deliberately switches it to Shared — sharing one account across everyone
+           * a Bot reaches is a decision somebody makes, never a default this method makes for them.
+           * A `no-auth` app has no account at all, so it has no mode to choose between, and the
+           * column says so rather than claiming one; see {@link mcpServers.accountMode}.
+           *
+           * WRITTEN ON THE INSERT ONLY. The update below is the branch a second press of Add takes,
+           * and an app an administrator has already made Shared must not be quietly turned back
+           * into Personal by it.
+           */
+          accountMode: input.connection.kind === "no-auth" ? null : "personal",
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -3208,16 +3435,45 @@ export function createPluginStore(options: PluginStoreOptions) {
        * that does not exist for this app, and a Re-check button that will not press. A writer keyed
        * on a composed id has not recorded the fact; it has recorded it somewhere nothing looks.
        */
+      // Anyone at all, of either holder: a deployment's shared account was made against the
+      // standing config exactly as a person's was, and a rewrite would strand it the same way.
       const connections = await database
-        .select({ userId: composioConnections.userId })
-        .from(composioConnections)
-        .where(eq(composioConnections.toolkit, input.slug))
+        .select({ app: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, input.slug),
+          ),
+        )
         .limit(1);
 
       if (configured !== "standing" && connections.length === 0) {
+        /*
+         * MODE PICKED FOR THE PERSON ONLY WHERE THIS REWRITE IS WHAT GIVES THE APP AN ACCOUNT AT
+         * ALL, AND NEVER WHERE ONE WAS ALREADY CHOSEN. A row enabled `no-auth` has `accountMode`
+         * null — there was nothing to hold a mode about, see the insert above — and if this same
+         * re-add is what turns it into a key or consent app, it needs the ordinary default an
+         * insert would have given it, or every later read that asks "personal or shared" finds
+         * null and has no answer. An administrator who already chose Shared keeps that choice.
+         */
+        const [current] = await database
+          .select({ accountMode: mcpServers.accountMode })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, answering))
+          .limit(1);
+        const bumpAccountMode =
+          schemeKind(recorded) === "none" &&
+          schemeKind(scheme) !== "none" &&
+          (current?.accountMode ?? null) === null;
+
         await database
           .update(mcpServers)
-          .set({ authScheme: scheme, updatedAt: new Date() })
+          .set({
+            authScheme: scheme,
+            updatedAt: new Date(),
+            ...(bumpAccountMode ? { accountMode: "personal" as const } : {}),
+          })
           .where(eq(mcpServers.id, answering));
       }
 
@@ -3448,10 +3704,43 @@ export function createPluginStore(options: PluginStoreOptions) {
          * order and write their trail rows in the same order.
          */
         const connected = await database
-          .select({ userId: composioConnections.userId })
-          .from(composioConnections)
-          .where(eq(composioConnections.toolkit, toolkit))
-          .orderBy(asc(composioConnections.userId));
+          .select({
+            holder: brokeredConnections.holder,
+            userId: brokeredConnections.userId,
+            vendorUserId: brokeredConnections.vendorUserId,
+          })
+          .from(brokeredConnections)
+          .where(
+            and(
+              eq(brokeredConnections.provider, "composio"),
+              eq(brokeredConnections.app, toolkit),
+            ),
+          )
+          .orderBy(
+            asc(brokeredConnections.holder),
+            asc(brokeredConnections.userId),
+          );
+
+        /*
+         * BOTH HOLDERS, EACH NAMED AS WHAT IT IS. Removing an app ends every account standing for
+         * it — every person's own, and the one the deployment holds if the app was ever Shared,
+         * which may still be standing after a switch back that has not retired it yet. Each is
+         * revoked as the account its row says it is, under the vendor id the row was filed under,
+         * so the deployment's account is asked for as the deployment's and never as whoever
+         * pressed "remove". A person row always carries its user id (the table's holder check),
+         * so the fallback to the deployment form below is the shape a corrupt row would need, not
+         * a reading anything here relies on.
+         */
+        const accountOf = (
+          connection: (typeof connected)[number],
+        ): AccountRef =>
+          connection.holder === "person" && connection.userId !== null
+            ? {
+                holder: "person",
+                userId: connection.userId,
+                vendorUserId: connection.vendorUserId,
+              }
+            : { holder: "deployment", vendorUserId: connection.vendorUserId };
 
         /*
          * What the broker was actually asked for each of them, kept so the trail below records the
@@ -3459,21 +3748,25 @@ export function createPluginStore(options: PluginStoreOptions) {
          * key has since been unset can still remove the app, and it could not have been calling it
          * either way — but nothing was asked of Composio and the row must not claim otherwise.
          */
-        const vendorRevocationRequested = new Map<string, boolean>();
+        const vendorRevocationRequested: boolean[] = [];
         for (const connection of connected) {
-          vendorRevocationRequested.set(
-            connection.userId,
+          vendorRevocationRequested.push(
             broker
-              ? await broker.revoke({ userId: connection.userId, toolkit })
+              ? await broker.revoke({ account: accountOf(connection), toolkit })
               : false,
           );
         }
 
         await database
-          .delete(composioConnections)
-          .where(eq(composioConnections.toolkit, toolkit));
+          .delete(brokeredConnections)
+          .where(
+            and(
+              eq(brokeredConnections.provider, "composio"),
+              eq(brokeredConnections.app, toolkit),
+            ),
+          );
 
-        for (const connection of connected) {
+        for (const [index, connection] of connected.entries()) {
           await recordAuditEvent(auditStore, {
             eventType: "mcp.account_disconnected",
             targetType: "mcp_server",
@@ -3500,7 +3793,13 @@ export function createPluginStore(options: PluginStoreOptions) {
             payload: {
               actor: by,
               server: toolkit,
-              owner: connection.userId,
+              // Whose account this was, by the rule {@link disconnectBrokered} names it by: a
+              // person's own under their id, the deployment's own as the deployment, never as
+              // the administrator who removed the app.
+              owner:
+                connection.holder === "person" && connection.userId !== null
+                  ? connection.userId
+                  : "deployment",
               // The same three-way distinction the vault loop above draws, and the same answer: an
               // administrator took the whole app away and the person did nothing.
               reason: "mcp_server_removed",
@@ -3515,7 +3814,7 @@ export function createPluginStore(options: PluginStoreOptions) {
                * the upstream withdrawal runs as a background job nothing here can poll.
                */
               vendorRevocationRequested:
-                vendorRevocationRequested.get(connection.userId) ?? false,
+                vendorRevocationRequested[index] ?? false,
             },
           });
         }
@@ -4043,8 +4342,28 @@ export function createPluginStore(options: PluginStoreOptions) {
         rows.filter((row) => toolkitOf(row.url) !== null).map((row) => row.url),
       );
 
+      /*
+       * WHICH APPS THE DEPLOYMENT HOLDS AN ACCOUNT AT, IN ONE READ FOR THE WHOLE LIST. Keyed by
+       * app rather than by server, because the account belongs to the app's url and not to a row:
+       * two rows at one url are one Composio app with one deployment account behind it.
+       */
+      const deploymentHeld = new Set(
+        (
+          await database
+            .select({ app: brokeredConnections.app })
+            .from(brokeredConnections)
+            .where(
+              and(
+                eq(brokeredConnections.provider, "composio"),
+                eq(brokeredConnections.holder, "deployment"),
+              ),
+            )
+        ).map((held) => held.app),
+      );
+
       return rows.map((row) => {
         const entry = catalogueEntry(row.id);
+        const toolkit = toolkitOf(row.url);
         return {
           id: row.id,
           title: row.title,
@@ -4063,9 +4382,21 @@ export function createPluginStore(options: PluginStoreOptions) {
             entry.auth.clientRegistration === "dynamic",
           // The app's, for a row whose url names one; this row's own column for everything else,
           // which is a null on every server that is not brokered. See the read above.
-          authScheme: toolkitOf(row.url)
+          authScheme: toolkit
             ? (brokeredApps.get(row.url)?.authScheme ?? null)
             : row.authScheme,
+          /*
+           * The app's mode for the same reason as its scheme: a duplicate row at a Shared app's url
+           * is the Shared app, and the memory ingestion decides whose account a source reads from
+           * exactly these two fields.
+           */
+          accountMode: toolkit
+            ? (brokeredApps.get(row.url)?.accountMode ?? null)
+            : row.accountMode,
+          sharedVendorConnected:
+            toolkit !== null &&
+            brokeredApps.get(row.url)?.accountMode === "shared" &&
+            deploymentHeld.has(toolkit),
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {
@@ -4137,6 +4468,9 @@ export function createPluginStore(options: PluginStoreOptions) {
      * that way. The id and the title stay this row's own, because those name the row the page
      * opened; the scheme is a fact about the app, and the app has one answer.
      *
+     * `accountMode` IS THE APP'S FOR THE SAME REASON, off the same answering row and in the same
+     * read, never this row's own column; a row that names no app has no mode and answers null.
+     *
      * ONE EXTRA READ, AND ONLY FOR A BROKERED URL. A row that names no app takes the read it always
      * took.
      */
@@ -4153,8 +4487,13 @@ export function createPluginStore(options: PluginStoreOptions) {
         .limit(1);
       if (!row) return undefined;
       const toolkit = toolkitOf(row.url);
-      if (!toolkit) return row;
-      return { ...row, authScheme: await brokeredAppScheme(toolkit) };
+      if (!toolkit) return { ...row, accountMode: null };
+      const app = await brokeredAppRow(toolkit);
+      return {
+        ...row,
+        authScheme: app?.authScheme ?? null,
+        accountMode: app?.accountMode ?? null,
+      };
     },
 
     /**
@@ -4176,6 +4515,72 @@ export function createPluginStore(options: PluginStoreOptions) {
         .from(mcpServers)
         .orderBy(asc(mcpServers.id));
       return rows.map((row) => row.url);
+    },
+
+    /** Every account any holder has on a brokered app, as the broker would be asked to end it. */
+    async accountsOn(
+      serverId: string,
+    ): Promise<{ toolkit: string; accounts: AccountRef[] } | null> {
+      const [row] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = row ? toolkitOf(row.url) : null;
+      if (!toolkit) return null;
+      const held = await database
+        .select({
+          holder: brokeredConnections.holder,
+          userId: brokeredConnections.userId,
+          vendorUserId: brokeredConnections.vendorUserId,
+        })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, toolkit),
+          ),
+        );
+      return {
+        toolkit,
+        accounts: held.map(
+          (row): AccountRef =>
+            row.holder === "person"
+              ? {
+                  holder: "person",
+                  userId: row.userId ?? "",
+                  vendorUserId: row.vendorUserId,
+                }
+              : { holder: "deployment", vendorUserId: row.vendorUserId },
+        ),
+      };
+    },
+
+    /**
+     * Write an app's mode and deployment identity — onto the row that ANSWERS for the app.
+     *
+     * Every reader takes these two columns off {@link brokeredAppRow}, so a write landing on a
+     * duplicate row at the same url would be a switch nobody reads: the page would say Shared and
+     * every call would go on running as it did. The id given is resolved to its url, the url to its
+     * app, and the app to its answering row; a row that names no app is written as itself, which is
+     * the only row there is to write.
+     */
+    async setAccountModeColumns(
+      serverId: string,
+      mode: AccountMode,
+      sharedVendorUserId: string | null,
+    ) {
+      const [dialled] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = dialled ? toolkitOf(dialled.url) : null;
+      const app = toolkit ? await brokeredAppRow(toolkit) : null;
+      await database
+        .update(mcpServers)
+        .set({ accountMode: mode, sharedVendorUserId })
+        .where(eq(mcpServers.id, app?.id ?? serverId));
     },
 
     /**
@@ -4876,16 +5281,27 @@ export function createPluginStore(options: PluginStoreOptions) {
         checkable: boolean;
       }[]
     > {
+      /*
+       * THIS PERSON'S OWN ACCOUNTS AND NOTHING ELSE. `holder = 'person'` is said out loud rather
+       * than left to the user id, because a settings page listing "your connections" must never
+       * draw the deployment's shared account as one of them — a deployment row has no `user_id`,
+       * and the filter keeps that a fact this query states rather than one it happens to rely on.
+       */
       const connections = await database
         .select({
-          toolkit: composioConnections.toolkit,
-          connectedAt: composioConnections.connectedAt,
-          verified: composioConnections.verified,
-          verifiedAt: composioConnections.verifiedAt,
-          probeAction: composioConnections.probeAction,
+          toolkit: brokeredConnections.app,
+          connectedAt: brokeredConnections.connectedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
+          probeAction: brokeredConnections.probeAction,
         })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, userId));
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
+          ),
+        );
 
       /*
        * THE APP IS RESOLVED PER CONNECTION, NOT JOINED TO IT, BECAUSE THE URL IS NOT A KEY.
@@ -4975,33 +5391,175 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * The deployment's one account at a brokered app, as the admin page draws it; null where none
+     * is connected, and null for a server that is not brokered at all.
+     *
+     * `connectedBy` IS THE ADMINISTRATOR'S EMAIL, because an id is not something a page can show
+     * anybody. It falls back to the stored id when that person has since been removed, so the row
+     * still says somebody connected it rather than claiming nobody did.
+     *
+     * `displayName` IS ASKED OF THE BROKER AND NEVER FAILS THE READ. It is the vendor's name for
+     * the account — the one thing that tells an administrator WHICH team account is behind the app
+     * — and a vendor that will not say is a page missing a label, not a page that cannot load.
+     */
+    async deploymentConnectionFor(serverId: string): Promise<{
+      connectedAt: string;
+      connectedBy: string | null;
+      verified: boolean;
+      verifiedAt: string | null;
+      probe: string | null;
+      displayName: string | null;
+    } | null> {
+      const [server] = await database
+        .select({ url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      const toolkit = server ? toolkitOf(server.url) : null;
+      if (!toolkit) return null;
+
+      const [row] = await database
+        .select({
+          vendorUserId: brokeredConnections.vendorUserId,
+          connectedBy: brokeredConnections.connectedBy,
+          connectedByEmail: users.email,
+          connectedAt: brokeredConnections.connectedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
+          probeAction: brokeredConnections.probeAction,
+        })
+        .from(brokeredConnections)
+        .leftJoin(users, eq(users.id, brokeredConnections.connectedBy))
+        .where(
+          and(
+            eq(brokeredConnections.provider, "composio"),
+            eq(brokeredConnections.app, toolkit),
+            eq(brokeredConnections.holder, "deployment"),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+
+      const displayName = broker
+        ? await broker
+            .accountName({
+              account: { holder: "deployment", vendorUserId: row.vendorUserId },
+              toolkit,
+            })
+            .catch(() => null)
+        : null;
+
+      return {
+        connectedAt: iso(row.connectedAt) ?? "",
+        connectedBy: row.connectedByEmail ?? row.connectedBy,
+        verified: row.verified,
+        verifiedAt: iso(row.verifiedAt),
+        probe: row.probeAction,
+        displayName,
+      };
+    },
+
+    /**
+     * Every Shared app, connected or not, as `GET /connections` lists it beside a person's own.
+     *
+     * A SHARED APP WITH NOTHING CONNECTED IS STILL LISTED, as `connected: false`. Its absence would
+     * read as "this app needs nothing", when it is the one state an administrator has to act on —
+     * the page offers its Connect action off exactly this entry.
+     *
+     * `checkable` IS TRUE ONLY WHEN AN ACCOUNT IS CONNECTED AND THE APP IS A KEY APP WITH A PROBE
+     * ACTION, because a re-check spends a key on a safe read and there is no key to spend without
+     * a connected account, nor on a consent app, which has no key at all. Where it is a connected
+     * key app the answer is {@link probeActionFor}'s, asked of the app, for the reason
+     * {@link brokeredConnectionsFor} gives for keeping `checkable` apart from `probe`.
+     */
+    async sharedConnections(): Promise<
+      {
+        serverId: string;
+        scope: "";
+        holder: "deployment";
+        connected: boolean;
+        connectedAt: string | null;
+        connectedBy: string | null;
+        verified: boolean;
+        verifiedAt: string | null;
+        probe: string | null;
+        checkable: boolean;
+        displayName: string | null;
+      }[]
+    > {
+      /*
+       * ONE ENTRY PER SHARED APP, under the row that answers for it. A row marked `shared` that is
+       * a duplicate at some app's url is not the app — the app is Shared only if its answering row
+       * says so — and listing it would offer a Connect for an account no call would use.
+       */
+      const marked = await database
+        .select({ id: mcpServers.id, url: mcpServers.url })
+        .from(mcpServers)
+        .where(eq(mcpServers.accountMode, "shared"))
+        .orderBy(asc(mcpServers.id));
+      const answering = await brokeredAppRowsAt(
+        marked
+          .filter((row) => toolkitOf(row.url) !== null)
+          .map((row) => row.url),
+      );
+      const shared = marked.filter(
+        (row) => answering.get(row.url)?.id === row.id,
+      );
+
+      return await Promise.all(
+        shared.map(async (server) => {
+          const toolkit = toolkitOf(server.url);
+          const [connection, kind] = await Promise.all([
+            this.deploymentConnectionFor(server.id),
+            toolkit ? brokeredAppKind(toolkit) : null,
+          ]);
+          return {
+            serverId: server.id,
+            scope: "" as const,
+            holder: "deployment" as const,
+            connected: connection !== null,
+            connectedAt: connection?.connectedAt ?? null,
+            connectedBy: connection?.connectedBy ?? null,
+            verified: connection?.verified ?? false,
+            verifiedAt: connection?.verifiedAt ?? null,
+            probe: connection?.probe ?? null,
+            checkable:
+              connection !== null &&
+              kind === "key" &&
+              (await this.probeActionFor(server.id)) !== null,
+            displayName: connection?.displayName ?? null,
+          };
+        }),
+      );
+    },
+
+    /**
      * Whether this person has one brokered app connected, and since when.
      *
      * THE ROW IS A CACHE OF COMPOSIO'S ANSWER, not a record of a flow this deployment watched
      * finish. Nothing here holds a secret for a brokered app: the vendor keeps the account, and
-     * what {@link composioConnections} holds is the sentence "Composio said yes when we asked",
+     * what {@link brokeredConnections} holds is the sentence "Composio said yes when we asked",
      * written down so that every later call can be gated without a round trip. That makes drift
      * possible by construction — somebody can end the connection in Composio's own dashboard, and
      * this row would go on saying yes — and it is why {@link confirmBrokeredConnection} asks the
      * vendor again rather than trusting what is here. Calling confirm on any page load is
      * therefore how a row that drifted heals.
      *
-     * Read by the pair, because the pair is the primary key: an app has many people's connections
-     * and a person has many apps, and the only question anybody asks is about one of each.
+     * Read by the pair, because the pair is what the partial unique indexes enforce one row per:
+     * (provider, app) among deployment rows and (provider, app, user_id) among person rows —
+     * `holder` is each partial index's WHERE predicate, not a key column, so an ON CONFLICT
+     * target must name exactly those columns with the matching WHERE. An app has many people's
+     * connections and a person has many apps, and the only question anybody asks is about one of
+     * each.
      */
     async brokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
     }): Promise<{ connectedAt: string } | null> {
       const [row] = await database
-        .select({ connectedAt: composioConnections.connectedAt })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .select({ connectedAt: brokeredConnections.connectedAt })
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
 
       if (!row) return null;
@@ -5155,7 +5713,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      * seconds, and nothing held the row still across it. A person pressing Re-check and then
      * Disconnect in another tab — or a concurrent {@link confirmBrokeredConnection} getting `false`
      * from Composio and deleting the row — had the revoke complete at Composio and the row deleted,
-     * and then this in-flight upsert PUT IT BACK. `composio_connections` is the whole of the
+     * and then this in-flight upsert PUT IT BACK. `brokered_connections` is the whole of the
      * permission a brokered call is decided on, so what the re-insert restores is access to an
      * account the person has just disconnected, drawn on every screen as connected.
      *
@@ -5180,7 +5738,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async recordBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      connectedBy?: string;
       verified: boolean;
       probeAction: string | null;
       /** See the paragraph on `only` above. Absent is the ordinary upsert. */
@@ -5205,31 +5764,55 @@ export function createPluginStore(options: PluginStoreOptions) {
          * deleted while the vendor was being asked — and the caller has a sentence for that.
          */
         const written = await database
-          .update(composioConnections)
+          .update(brokeredConnections)
           .set(set)
-          .where(
-            and(
-              eq(composioConnections.toolkit, input.toolkit),
-              eq(composioConnections.userId, input.userId),
-            ),
-          )
-          .returning({ userId: composioConnections.userId });
+          .where(accountRow(input.toolkit, input.account))
+          .returning({ vendorUserId: brokeredConnections.vendorUserId });
         return { verifiedAt, wrote: written.length > 0 };
       }
 
       await database
-        .insert(composioConnections)
+        .insert(brokeredConnections)
         .values({
-          toolkit: input.toolkit,
-          userId: input.userId,
+          provider: "composio",
+          app: input.toolkit,
+          holder: input.account.holder,
+          userId:
+            input.account.holder === "person" ? input.account.userId : null,
+          vendorUserId: input.account.vendorUserId,
+          connectedBy:
+            input.account.holder === "deployment"
+              ? (input.connectedBy ?? null)
+              : null,
           verified: input.verified,
           verifiedAt,
           probeAction: input.probeAction,
         })
-        .onConflictDoUpdate({
-          target: [composioConnections.toolkit, composioConnections.userId],
-          set,
-        });
+        .onConflictDoUpdate(
+          input.account.holder === "person"
+            ? {
+                target: [
+                  brokeredConnections.provider,
+                  brokeredConnections.app,
+                  brokeredConnections.userId,
+                ],
+                targetWhere: sql`${brokeredConnections.holder} = 'person'`,
+                set,
+              }
+            : {
+                target: [brokeredConnections.provider, brokeredConnections.app],
+                targetWhere: sql`${brokeredConnections.holder} = 'deployment'`,
+                // WHO CONNECTED IT MEANS THE LATEST CONNECTION. A deployment account is
+                // shared, so a second administrator reconnecting it supersedes the first —
+                // which `set` otherwise never said, leaving the row crediting whoever
+                // connected it the first time. Added only when this call names a
+                // `connectedBy` at all, so a re-check or a confirm that passes none does not
+                // blank out the administrator an earlier connect already recorded.
+                set: input.connectedBy
+                  ? { ...set, connectedBy: input.connectedBy ?? null }
+                  : set,
+              },
+        );
       return { verifiedAt, wrote: true };
     },
 
@@ -5271,7 +5854,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async probeBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
       /**
        * THE ACCOUNT TO SPEND IT IN, where the caller has one in mind.
        *
@@ -5281,9 +5864,10 @@ export function createPluginStore(options: PluginStoreOptions) {
        * other, working account — and the same defect the other way round condemned a good key, and
        * deleted the account it made, on the strength of some other account of theirs being broken.
        *
-       * ABSENT FOR A RE-CHECK, AND THAT IS A GAP RATHER THAN A CHOICE. `composio_connections`
-       * records no account id — the row is keyed on the person and the app — so a press of Re-check
-       * has nothing to pin to and asks the vendor the same app-level question it always did. It is
+       * ABSENT FOR A RE-CHECK, AND THAT IS A GAP RATHER THAN A CHOICE. `brokered_connections`
+       * records no account id — a person's row is keyed on the person and the app, a deployment
+       * row on the app alone — so a press of Re-check has nothing to pin to and asks the vendor
+       * the same app-level question it always did. It is
        * the milder half: a re-check writes a verdict but takes nothing away, and its refusal tells
        * the person their key is wrong rather than removing anything they hold.
        */
@@ -5359,7 +5943,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       const { result, answered } = await composioAskAction(
         {
           url: `composio://${input.toolkit}`,
-          actorId: input.userId,
+          actorId: input.account.vendorUserId,
           // Spread rather than passed as `undefined`, so "any account of theirs" reaches the wire
           // as a body with no such key. See {@link ComposioActions.execute}.
           ...(input.accountId === undefined
@@ -5478,14 +6062,15 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async confirmBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }): Promise<{ connected: boolean }> {
       // Before anything, and for the reason `addBrokeredApp` says it first too: a deployment with
       // no key has no broker to have connected anybody at, so there is nothing here to ask.
       if (!broker) throw new BrokerUnconfiguredError();
 
       const connected = await broker.isConnected({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
       });
       if (!connected) {
@@ -5494,13 +6079,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         // as nothing else, and a row that outlived it would go on saying yes about an account the
         // vendor has just denied.
         await database
-          .delete(composioConnections)
-          .where(
-            and(
-              eq(composioConnections.toolkit, input.toolkit),
-              eq(composioConnections.userId, input.userId),
-            ),
-          );
+          .delete(brokeredConnections)
+          .where(accountRow(input.toolkit, input.account));
         return { connected: false };
       }
 
@@ -5515,14 +6095,9 @@ export function createPluginStore(options: PluginStoreOptions) {
        * than through {@link brokeredConnection}, which answers with the connection date alone.
        */
       const [held] = await database
-        .select({ verified: composioConnections.verified })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .select({ verified: brokeredConnections.verified })
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
       const existing = held !== undefined;
 
@@ -5651,7 +6226,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         // {@link composioConnections.verified}.
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: true,
           // NOTHING WAS SPENT TO EARN THAT FLAG, and that is what the null records rather than an
           // absence of information. A consent connection is verified by the vendor's own yes at its
@@ -5678,7 +6254,8 @@ export function createPluginStore(options: PluginStoreOptions) {
          */
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: false,
           probeAction: null,
         });
@@ -5726,10 +6303,11 @@ export function createPluginStore(options: PluginStoreOptions) {
           // person's access to one app however it ended.
           targetId: input.toolkit,
           payload: {
-            actor: input.userId,
+            actor: input.by,
             server: input.toolkit,
             scope: "",
             reconnected: false,
+            holder: input.account.holder,
           },
         });
       }
@@ -5797,7 +6375,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async connectBrokeredWithFields(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
       values: Record<string, string>;
     }): Promise<{ connected: true; verified: boolean; probe: string | null }> {
       // First, and for `confirmBrokeredConnection`'s reason: a deployment with no key has nobody to
@@ -5843,7 +6422,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
 
       const { accountId } = await broker.connectWithFields({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
         authScheme,
         values: input.values,
@@ -5866,7 +6445,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       const probed = await this.probeBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
         /*
          * THE ACCOUNT THIS CALL JUST MADE, which is the only account this check is about. A person
          * and an app do not name one: Composio takes an account per key, somebody may hold several
@@ -5889,7 +6468,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       // checked.
       const existing = await this.brokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
       });
 
       /*
@@ -5918,7 +6497,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         // and however it ended.
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
           server: input.toolkit,
           /*
            * EMPTY, AND PRESENT, which is the whole of what this field does on a brokered row.
@@ -5936,6 +6515,7 @@ export function createPluginStore(options: PluginStoreOptions) {
            */
           scope: "",
           reconnected: existing !== null,
+          holder: input.account.holder,
           /*
            * THE NAMES AND NEVER THE VALUES. What a reader of the trail needs is which app somebody
            * connected and what it asked them for; the values are the credential itself, and an
@@ -5975,7 +6555,8 @@ export function createPluginStore(options: PluginStoreOptions) {
          */
         await this.recordBrokeredConnection({
           toolkit: input.toolkit,
-          userId: input.userId,
+          account: input.account,
+          connectedBy: input.by,
           verified: false,
           // THE ACTION THAT WAS TRIED, which is the half of this state the flag cannot hold. It is
           // the whole of what separates this row on a later page load from a key nobody ever tried,
@@ -6001,7 +6582,8 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetType: "mcp_server",
           targetId: input.toolkit,
           payload: {
-            actor: input.userId,
+            actor: input.by,
+            holder: input.account.holder,
             action: probed.probe,
             verified: false,
           },
@@ -6053,7 +6635,8 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await this.recordBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
+        connectedBy: input.by,
         verified,
         // What was spent, which is the name on a probe that ran and the null that IS the first of
         // the three states: this app published nothing safe to try the key on. `verified` is
@@ -6113,7 +6696,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         targetType: "mcp_server",
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
+          holder: input.account.holder,
           action: probe,
           verified,
           ...(probed.outcome === "unreachable"
@@ -6192,7 +6776,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async recheckBrokeredConnection(input: {
       toolkit: string;
-      userId: string;
+      account: AccountRef;
+      by: string;
     }): Promise<{
       verified: boolean;
       verifiedAt: string | null;
@@ -6242,16 +6827,11 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       const [held] = await database
         .select({
-          verified: composioConnections.verified,
-          verifiedAt: composioConnections.verifiedAt,
+          verified: brokeredConnections.verified,
+          verifiedAt: brokeredConnections.verifiedAt,
         })
-        .from(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
+        .from(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
         .limit(1);
 
       if (!held) {
@@ -6261,7 +6841,10 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
-      const probed = await this.probeBrokeredConnection(input);
+      const probed = await this.probeBrokeredConnection({
+        toolkit: input.toolkit,
+        account: input.account,
+      });
 
       /*
        * THE VENDOR WAS NOT REACHED, SO THE RECORD OF THE LAST CHECK IS LEFT EXACTLY WHERE IT IS.
@@ -6321,7 +6904,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       const verified = probed.outcome === "answered";
       const { verifiedAt, wrote } = await this.recordBrokeredConnection({
         toolkit: input.toolkit,
-        userId: input.userId,
+        account: input.account,
         verified,
         // The action this press spent. Never null on this path: the nothing-to-probe branch above
         // returns before reaching the writer, precisely so that a check which could try nothing
@@ -6378,7 +6961,8 @@ export function createPluginStore(options: PluginStoreOptions) {
         targetType: "mcp_server",
         targetId: input.toolkit,
         payload: {
-          actor: input.userId,
+          actor: input.by,
+          holder: input.account.holder,
           action: probe,
           verified,
         },
@@ -6491,17 +7075,20 @@ export function createPluginStore(options: PluginStoreOptions) {
      */
     async disconnectBrokered(input: {
       toolkit: string;
-      userId: string;
+      /** Whose account ends — a person's own, or the one the deployment holds for a Shared app. */
+      account: AccountRef;
       by: string;
       /**
-       * Why the account ended, which is the closed pair and not free text. A brokered account ends
-       * in exactly two ways — the person disconnecting their own, and the person being removed
-       * from the People screen, which is the word {@link retireConnectionsFor} already files its
-       * own rows under. A reader asking the trail which of the two happened can be answered only
-       * if it is the same word every time, so the type is the pair rather than whatever sentence a
-       * caller happened to spell.
+       * Why the account ended, which is a closed set and not free text. A brokered account ends
+       * in exactly four ways — the person disconnecting their own; the person being removed from
+       * the People screen, which is the word {@link retireConnectionsFor} already files its own
+       * rows under; an administrator disconnecting the deployment's account for a Shared app; and
+       * the app being switched between Personal and Shared, which retires the accounts the old
+       * mode held. A reader asking the trail which of them happened can be answered only if it is
+       * the same word every time, so the type is the set rather than whatever sentence a caller
+       * happened to spell.
        */
-      reason: "self" | "person_removed";
+      reason: "self" | "person_removed" | "admin" | "mode_switched";
     }): Promise<{ vendorRevocationRequested: boolean }> {
       if (!broker) throw new BrokerUnconfiguredError();
 
@@ -6543,7 +7130,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       // disconnected. Named apart from the field below because for a key the two differ: something
       // ended, and nothing was asked of the provider.
       const ended = await broker.revoke({
-        userId: input.userId,
+        account: input.account,
         toolkit: input.toolkit,
       });
 
@@ -6552,14 +7139,9 @@ export function createPluginStore(options: PluginStoreOptions) {
       // `returning` because whether a row was here is half of what decides if anybody was
       // disconnected, and a delete that answered nothing would leave the two cases indistinguishable.
       const [deleted] = await database
-        .delete(composioConnections)
-        .where(
-          and(
-            eq(composioConnections.toolkit, input.toolkit),
-            eq(composioConnections.userId, input.userId),
-          ),
-        )
-        .returning({ toolkit: composioConnections.toolkit });
+        .delete(brokeredConnections)
+        .where(accountRow(input.toolkit, input.account))
+        .returning({ app: brokeredConnections.app });
 
       if (deleted || ended) {
         await recordAuditEvent(auditStore, {
@@ -6571,8 +7153,12 @@ export function createPluginStore(options: PluginStoreOptions) {
             server: input.toolkit,
             // Whose account this was, which is not always who ended it: an administrator
             // offboarding somebody and a person disconnecting themselves write the same shape of
-            // row, and only these two fields tell them apart.
-            owner: input.userId,
+            // row, and only these two fields tell them apart. The deployment's own account has no
+            // person behind it, so it is named as the deployment rather than as whoever pressed.
+            owner:
+              input.account.holder === "person"
+                ? input.account.userId
+                : "deployment",
             reason: input.reason,
             vendorRevocationRequested,
           },
@@ -6604,8 +7190,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      * longer use.
      *
      * AND THE BROKERED CONNECTIONS, which are neither a credential nor a join row. Composio holds
-     * the account, so there is no secret in the vault to find and the `composio_connections` row is
-     * itself the permission — the only thing deciding whether a call may go out as this person.
+     * the account, so there is no secret in the vault to find and the person's `brokered_connections`
+     * row is itself the permission — the only thing deciding whether a call may go out as this person.
      * Sweeping the vault alone therefore left that gate passing for somebody who had been removed.
      *
      * NOT VENDOR-SIDE REVOCATION FOR THE VAULT HALF. That needs the OAuth client and the vendor's
@@ -6687,8 +7273,8 @@ export function createPluginStore(options: PluginStoreOptions) {
        * CRITERION. After this returns, no brokered call may go out on this person's behalf.
        *
        * REASON. A brokered connection is not a credential: Composio holds the account and this
-       * deployment sends a user id, so the vault sweep above finds nothing and `composio_connections`
-       * is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
+       * deployment sends a user id, so the vault sweep above finds nothing and the person's
+       * `brokered_connections` row is the entire gate. Reading only the vault therefore retired nothing for somebody whose only
        * connector was brokered, reported that as a retirement, and left the `(toolkit, user_id)` gate
        * passing for a person who no longer exists — their access outliving them, which is the first
        * thing anybody asks about a per-person connector. The table's own docblock justifies its shape
@@ -6710,10 +7296,15 @@ export function createPluginStore(options: PluginStoreOptions) {
        * order.
        */
       const brokered = await database
-        .select({ toolkit: composioConnections.toolkit })
-        .from(composioConnections)
-        .where(eq(composioConnections.userId, userId))
-        .orderBy(asc(composioConnections.toolkit));
+        .select({ toolkit: brokeredConnections.app })
+        .from(brokeredConnections)
+        .where(
+          and(
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
+          ),
+        )
+        .orderBy(asc(brokeredConnections.app));
 
       /*
        * What the broker was actually asked for each app, kept so the trail below records the answer
@@ -6741,7 +7332,16 @@ export function createPluginStore(options: PluginStoreOptions) {
           withdrawn.push({
             toolkit: connection.toolkit,
             requested: broker
-              ? await broker.revoke({ userId, toolkit: connection.toolkit })
+              ? await broker.revoke({
+                  /*
+                   * THE PERSON'S OWN ACCOUNT, NAMED AS ONE. Offboarding somebody ends what they
+                   * held and never the deployment's shared account, whoever connected it — so the
+                   * holder is fixed here rather than read off anything, and the vendor id is the
+                   * person's own, which is what a personal account is filed under at Composio.
+                   */
+                  account: { holder: "person", userId, vendorUserId: userId },
+                  toolkit: connection.toolkit,
+                })
               : false,
           });
         } catch (error) {
@@ -6767,11 +7367,12 @@ export function createPluginStore(options: PluginStoreOptions) {
        * Composio, so the table claims a connection this person does not have.
        */
       if (withdrawn.length > 0) {
-        await database.delete(composioConnections).where(
+        await database.delete(brokeredConnections).where(
           and(
-            eq(composioConnections.userId, userId),
+            eq(brokeredConnections.holder, "person"),
+            eq(brokeredConnections.userId, userId),
             inArray(
-              composioConnections.toolkit,
+              brokeredConnections.app,
               withdrawn.map((entry) => entry.toolkit),
             ),
           ),
@@ -6910,7 +7511,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(decision.reason, null);
       }
 
-      const { row, entry, access } = await requireServer(serverId);
+      const { row, entry, access, app } = await requireServer(serverId);
 
       const advertised = await database
         .select({
@@ -7156,12 +7757,73 @@ export function createPluginStore(options: PluginStoreOptions) {
         }
       }
 
+      /*
+       * A SHARED ACCOUNT ANSWERS TO WHOEVER CAN STEER THE BOT, and that is checked on every call.
+       *
+       * The grant says this Bot may use the app; it says nothing about who may reach the Bot. A
+       * Shared app acts as one team account for everyone, so a Bot opened to more people than an
+       * administrator approved would hand that account to all of them. The gate decides that here,
+       * at call time, so an audience widened a moment ago is caught on its next call. With no gate
+       * wired there is nothing that can answer the question, and the call is refused rather than
+       * assumed safe.
+       */
+      /*
+       * DECIDED ON, AND KEYED BY, THE APP'S ANSWERING ROW — never the dialled one. A duplicate row
+       * at a Shared app's url saying `personal` must not take the call round this gate, and an
+       * approval is a fact about the app, so it is asked for under the app's id whichever row the
+       * grant happens to name. `gatedMode` then travels to {@link connectionTokenFor}, which
+       * refuses if the account it resolves is not the one this gate was decided about.
+       */
+      const gatedMode: AccountMode | null =
+        access.credential !== "brokered"
+          ? null
+          : app?.accountMode === "shared"
+            ? "shared"
+            : "personal";
+      if (gatedMode === "shared" && app) {
+        const verdict = options.sharedUse
+          ? await options.sharedUse({
+              botId: input.botId,
+              serverId: app.id,
+              title: row.title,
+              actorId: input.actorId,
+              ...(input.initiator ? { initiator: input.initiator } : {}),
+            })
+          : {
+              allowed: false as const,
+              message: `${row.title} is shared, and this deployment cannot check who may use it, so it was not called.`,
+            };
+        if (!verdict.allowed) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.call_rejected",
+            targetType: "mcp_tool",
+            targetId: input.ref,
+            ...(input.initiator ? { initiator: input.initiator } : {}),
+            payload: {
+              ...decided,
+              decision: { ...decided.decision, carriedOut: false },
+              refusal: verdict.refusal ?? "shared_audience",
+            },
+          });
+          throw new PluginRefusedError(verdict.message, null);
+        }
+      }
+
+      /*
+       * THE APPROVAL GATE IS ASKED UNDER THE APP'S ID TOO, for a brokered row whose app has an
+       * answering row. Rules are written against the app — the Shared default is `${appId}/*`
+       * scoped to the app's id — so a write granted through a duplicate row has to be judged as
+       * the app's, or it matches no rule and walks past the ask an administrator set. `target`
+       * still names the dialled row, which is what the call itself goes to; every other row is
+       * asked about exactly as before.
+       */
+      const gateApp = access.credential === "brokered" ? app : null;
       const approval = await options.approvalGate?.({
         actorId: input.actorId,
         botId: input.botId,
-        toolRef: input.ref,
+        toolRef: gateApp ? `${gateApp.id}/${toolName}` : input.ref,
         effect,
-        scope: serverId,
+        scope: gateApp ? gateApp.id : serverId,
         args: vendorArgs,
         target: { serverId, toolName, url: row.url, effect },
         continuation: currentApprovalContext(),
@@ -7184,11 +7846,12 @@ export function createPluginStore(options: PluginStoreOptions) {
        * it did.
        */
       try {
-        const { token } = await connectionTokenFor(
+        const { token, vendorUserId } = await connectionTokenFor(
           row,
           entry,
           input.credentialActorId ?? input.actorId,
           access,
+          gatedMode,
         );
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
@@ -7196,7 +7859,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           {
             url: effectiveUrl(row, entry),
             token,
-            actorId: input.credentialActorId ?? input.actorId,
+            actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },
           toolName,

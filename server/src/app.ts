@@ -95,8 +95,11 @@ import { createPasswordRoutes, createSignInRoutes } from "./passwords/routes";
 import type { SignInService } from "./passwords/service";
 import type { OnboardingStore } from "./people/onboarding";
 import { MAX_PAGE, type PeopleStore } from "./people/store";
+import type { AccountModeSwitch } from "./plugins/account-mode";
 import type { ComposioBroker } from "./plugins/broker";
 import { createPluginRoutes } from "./plugins/routes";
+import { createSharedUseRoutes } from "./plugins/shared-use-routes";
+import type { SharedUseStore } from "./plugins/shared-use-store";
 import {
   isDeploymentFault,
   PluginRefusedError,
@@ -389,6 +392,17 @@ export function createApp(
       recorder: DemonstrationRecorder;
     };
     approvals?: ApprovalService;
+    /**
+     * Shared apps: who may use an app's one team account, and the switch that makes an app Shared.
+     *
+     * A field here rather than another positional parameter. Everything from `auditReader` on is
+     * optional and positional, so a 37th argument is one an caller can misplace silently — the trap
+     * `composio` and `connect` are both commented for. One object carries both halves because every
+     * surface that needs one needs the other: the plugin routes switch modes and record approvals,
+     * the approvals inbox answers requests, and publishing or assigning a Bot re-checks what it was
+     * approved for. Absent, none of those surfaces exists — and nothing can turn an app Shared.
+     */
+    shared?: { modes: AccountModeSwitch; use: SharedUseStore };
     /** The private sign-in form and the Passwords vault. See passwords/service.ts. */
     passwords?: SignInService;
     delivery?: {
@@ -1371,6 +1385,7 @@ export function createApp(
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
         config.managedAgent?.endpoint?.toString(),
+        coworker?.shared?.use,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -1518,7 +1533,17 @@ export function createApp(
   if (coworker?.teamBots)
     app.route(
       "/api/team-bots",
-      createTeamBotRoutes(coworker.teamBots, requireUser),
+      createTeamBotRoutes(coworker.teamBots, requireUser, coworker.shared?.use),
+    );
+  /*
+   * BEFORE `/api/approvals`, which would otherwise take every path under it and answer 404 for
+   * these. Needs the trail as well as the store: approving a Bot's use of a team account is a
+   * decision somebody must be able to find later.
+   */
+  if (coworker?.shared && auditStore)
+    app.route(
+      "/api/approvals/shared-use",
+      createSharedUseRoutes(coworker.shared.use, requireUser, auditStore),
     );
   if (coworker?.approvals)
     app.route(
@@ -1568,6 +1593,7 @@ export function createApp(
         requireUser,
         bindings,
         coworker.responsibilities.triggers,
+        coworker.shared?.use,
       ),
     );
     if (coworker.responsibilities.triggers) {
@@ -1638,6 +1664,7 @@ export function createApp(
           appUrl: config.appUrl,
         },
         composio,
+        coworker?.shared,
       ),
     );
   }
