@@ -29,8 +29,7 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     updateApprovalRuleMutationOptions(queryClient),
   );
   const revoke = useMutation(revokeApprovalRuleMutationOptions(queryClient));
-  const error =
-    inbox.error ?? addRule.error ?? changeRule.error ?? revoke.error;
+  const error = inbox.error ?? changeRule.error ?? revoke.error;
   if (inbox.isPending && !error) return null;
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
   // Rules naming this Bot, including a pattern that covers it; rules for every Bot are in Settings.
@@ -105,8 +104,7 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
                 botField={false}
                 forBot={agentId}
                 label="Add a rule"
-                onSave={(input) => addRule.mutate(input)}
-                pending={addRule.isPending}
+                save={addRule}
               />
             </>
           ) : null}

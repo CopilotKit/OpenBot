@@ -49,11 +49,7 @@ export function ApprovalSettings() {
   );
   const revoke = useMutation(revokeApprovalRuleMutationOptions(queryClient));
   const error =
-    inbox.error ??
-    preferences.error ??
-    addRule.error ??
-    changeRule.error ??
-    revoke.error;
+    inbox.error ?? preferences.error ?? changeRule.error ?? revoke.error;
   if (inbox.isPending && !error) return null;
   const enforced = inbox.data?.team?.enforceAutoReview ?? false;
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
@@ -229,12 +225,7 @@ export function ApprovalSettings() {
             {canAdd ? (
               <>
                 {saved > 0 ? <Separator /> : null}
-                <RuleForm
-                  botField={false}
-                  label="Add a rule"
-                  onSave={(input) => addRule.mutate(input)}
-                  pending={addRule.isPending}
-                />
+                <RuleForm botField={false} label="Add a rule" save={addRule} />
               </>
             ) : null}
           </PageRows>

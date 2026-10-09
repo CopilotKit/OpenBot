@@ -111,6 +111,18 @@ const base = {
   teamRules: [],
 };
 
+test("the target of a waiting action is shown whole, however long", async () => {
+  const long = request("r1", "expenses");
+  long.action.scope =
+    "https://checkout.example/carts/0f8e2a4c-9b1d-4f6e-a3c7-5d2e8b1f9a04/pay";
+  inbox = { ...base, requests: [long], questions: [] };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  const scope = await view.findByText(long.action.scope);
+  expect(scope.className).toContain("line-clamp-none");
+  expect(scope.className).toContain("break-all");
+});
+
 test("only what this Bot waits on is shown, and it can be decided here", async () => {
   inbox = {
     ...base,

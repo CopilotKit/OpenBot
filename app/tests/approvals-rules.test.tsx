@@ -15,7 +15,13 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApprovalSettings } from "@/components/approvals/settings";
 import { InlineApproval } from "@/components/approvals/inline-approval";
@@ -90,10 +96,13 @@ const inbox = {
 
 /** Per-test changes to the inbox the server returns. */
 let inboxOverride: Record<string, unknown> = {};
+/** A refusal the server gives the next time a rule is added, or none. */
+let refuseRule: string | null = null;
 
 beforeEach(() => {
   sent.length = 0;
   inboxOverride = {};
+  refuseRule = null;
   role = "user";
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -104,6 +113,11 @@ beforeEach(() => {
           method: init.method,
           body: init.body ? JSON.parse(String(init.body)) : undefined,
         });
+        if (url === "/api/approvals/rules" && refuseRule) {
+          const error = refuseRule;
+          refuseRule = null;
+          return Response.json({ error }, { status: 400 });
+        }
         return Response.json({ ok: true });
       }
       if (url === "/api/approvals")
@@ -208,6 +222,66 @@ test("a member adds a rule with one of the four behaviours", async () => {
       },
     }),
   );
+});
+
+test("a rule that is not saved keeps the dialog open, with what was typed and why", async () => {
+  refuseRule = "That tool is not one a Bot can use.";
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Add a rule");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /Add a rule/ }));
+  await user.type(
+    await view.findByRole("textbox", { name: "Tool or app" }),
+    "mcp/nowhere/*",
+  );
+  await user.click(view.getByRole("button", { name: "Save rule" }));
+  const dialog = await view.findByRole("dialog");
+  expect((await within(dialog).findByRole("alert")).textContent).toContain(
+    "That tool is not one a Bot can use.",
+  );
+  expect(
+    (
+      within(dialog).getByRole("textbox", {
+        name: "Tool or app",
+      }) as HTMLInputElement
+    ).value,
+  ).toBe("mcp/nowhere/*");
+  // Saved the second time, the dialog closes.
+  await user.click(within(dialog).getByRole("button", { name: "Save rule" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(
+    sent.filter((request) => request.path === "/api/approvals/rules"),
+  ).toHaveLength(2);
+});
+
+test("two rules for one tool are told apart by the rest of what they match, never cut short", async () => {
+  inboxOverride = {
+    rules: [
+      {
+        id: "anywhere",
+        botId: "*",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+      {
+        id: "one-site",
+        botId: "*",
+        toolRef: "computer_click",
+        effect: "write",
+        scope: "checkout.a-very-long-shop-name.example",
+        behaviour: "allow",
+      },
+    ],
+  };
+  const view = draw(<ApprovalSettings />);
+  const match = await view.findByText(
+    "write on checkout.a-very-long-shop-name.example",
+  );
+  expect(match.className).toContain("line-clamp-none");
+  // The tool stays the row's title.
+  expect(view.getAllByText("computer_click")).toHaveLength(2);
 });
 
 test("with personal rules switched off by the team, they are shown as not applying and none can be added", async () => {

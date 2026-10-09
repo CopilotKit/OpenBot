@@ -121,7 +121,9 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
                       .replace(/^computer_|^host\//, "")
                       .replaceAll("_", " ")}
                   </ItemTitle>
-                  <ItemDescription>{request.action.scope}</ItemDescription>
+                  <ItemDescription className="line-clamp-none break-all">
+                    {request.action.scope}
+                  </ItemDescription>
                   {request.action.policy ? (
                     <p className="text-sm">
                       {request.action.policy.behaviour === "hand_off"

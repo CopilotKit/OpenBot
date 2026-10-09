@@ -4,6 +4,7 @@ import {
   IconPlus,
   IconShieldCheck,
 } from "@tabler/icons-react";
+import type { UseMutationResult } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -117,18 +118,27 @@ export function RuleRow({
   onChange: (behaviour: RuleBehaviour) => void;
 }) {
   const labels = team ? TEAM_BEHAVIOUR_LABELS : BEHAVIOUR_LABELS;
+  // The tool is the title; the rest of what the rule matches is the line beneath, never clamped,
+  // since two rules for one tool differ only there.
+  const match = [
+    rule.effect !== "*" ? rule.effect : null,
+    rule.scope !== "*" ? `on ${rule.scope}` : null,
+    rule.botId !== "*" ? `for ${rule.botId}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
         {locked ? <IconLock /> : <IconShieldCheck />}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>
-          {rule.toolRef}
-          {rule.effect !== "*" ? `, ${rule.effect}` : ""}
-          {rule.scope !== "*" ? ` on ${rule.scope}` : ""}
-          {rule.botId !== "*" ? ` for ${rule.botId}` : ""}
-        </ItemTitle>
+        <ItemTitle>{rule.toolRef}</ItemTitle>
+        {match ? (
+          <ItemDescription className="line-clamp-none break-all">
+            {match}
+          </ItemDescription>
+        ) : null}
         {locked ? <ItemDescription>Locked</ItemDescription> : null}
       </ItemContent>
       <ItemActions>
@@ -174,14 +184,13 @@ const EMPTY_RULE: ApprovalRuleInput = {
  */
 export function RuleForm({
   label,
-  pending,
-  onSave,
+  save,
   botField = true,
   forBot,
 }: {
   label: string;
-  pending: boolean;
-  onSave: (input: ApprovalRuleInput) => void;
+  /** The write that adds the rule. The dialog closes when it succeeds and shows why when it fails. */
+  save: UseMutationResult<unknown, Error, ApprovalRuleInput>;
   /** Off where the rule applies to every Bot, so there is no Bot to name. */
   botField?: boolean;
   /** The Bot every rule from this form is for, already known from the page it is on. */
@@ -195,6 +204,11 @@ export function RuleForm({
   const close = () => {
     setOpen(false);
     setRule(blank);
+  };
+  // Opening starts clean: the last attempt's failure belongs to the draft it was about.
+  const show = () => {
+    save.reset();
+    setOpen(true);
   };
   const field = (key: keyof ApprovalRuleInput, title: string, hint: string) => (
     <Field>
@@ -213,10 +227,7 @@ export function RuleForm({
   );
   return (
     <>
-      <Item
-        render={<button onClick={() => setOpen(true)} type="button" />}
-        size="sm"
-      >
+      <Item render={<button onClick={show} type="button" />} size="sm">
         <ItemMedia variant="icon">
           <IconPlus />
         </ItemMedia>
@@ -230,10 +241,7 @@ export function RuleForm({
           <IconChevronRight className="size-4 text-muted-foreground" />
         </ItemActions>
       </Item>
-      <Dialog
-        onOpenChange={(next) => (next ? setOpen(true) : close())}
-        open={open}
-      >
+      <Dialog onOpenChange={(next) => (next ? show() : close())} open={open}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
@@ -249,8 +257,8 @@ export function RuleForm({
               id={id}
               onSubmit={(event) => {
                 event.preventDefault();
-                onSave(rule);
-                close();
+                // A failed save keeps the dialog and the draft, so the person can correct it.
+                save.mutate(rule, { onSuccess: close });
               }}
             >
               <FieldGroup>
@@ -275,13 +283,18 @@ export function RuleForm({
                 </Field>
               </FieldGroup>
             </form>
+            {save.error ? (
+              <p className="mt-4 text-destructive text-sm" role="alert">
+                {save.error.message}
+              </p>
+            ) : null}
           </DialogBody>
           <DialogFooter className="mt-4">
             <Button onClick={close} size="sm" variant="outline">
               Cancel
             </Button>
             <Button
-              disabled={pending || !rule.toolRef.trim()}
+              disabled={save.isPending || !rule.toolRef.trim()}
               form={id}
               size="sm"
               type="submit"

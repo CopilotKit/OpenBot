@@ -45,11 +45,7 @@ export function TeamApprovalSettings() {
     revokeTeamApprovalRuleMutationOptions(queryClient),
   );
   const error =
-    inbox.error ??
-    team.error ??
-    addTeamRule.error ??
-    changeTeamRule.error ??
-    revokeTeam.error;
+    inbox.error ?? team.error ?? changeTeamRule.error ?? revokeTeam.error;
   if (inbox.isPending && !error) return null;
   const settings = inbox.data?.team;
   const teamRules = inbox.data?.teamRules ?? [];
@@ -151,11 +147,7 @@ export function TeamApprovalSettings() {
               <Separator />
             </Fragment>
           ))}
-          <RuleForm
-            label="Add a team rule"
-            onSave={(input) => addTeamRule.mutate(input)}
-            pending={addTeamRule.isPending}
-          />
+          <RuleForm label="Add a team rule" save={addTeamRule} />
         </PageRows>
       </PageSection>
       <SharedUseRequests />
