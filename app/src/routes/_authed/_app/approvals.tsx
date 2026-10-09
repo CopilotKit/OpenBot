@@ -8,7 +8,7 @@ function ApprovalsPage() {
   return (
     <PageShell
       title="Approvals"
-      description="Choose what your Bots may do, and review actions waiting for you."
+      description="Actions waiting for you, and rules for a single Bot."
     >
       <ApprovalInbox />
     </PageShell>

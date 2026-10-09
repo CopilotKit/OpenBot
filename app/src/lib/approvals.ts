@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "@/lib/client";
 export type ApprovalDecision =
   | "allow_once"
@@ -150,4 +154,57 @@ export const updateTeamApprovalRule = (
     method: "PATCH",
     body: input,
     fallback: "The team rule could not be changed.",
+  });
+
+const approvalsKey = ["approvals"] as const;
+const settle = (queryClient: QueryClient) => () =>
+  queryClient.invalidateQueries({ queryKey: approvalsKey });
+
+export const approvalPreferencesMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: setApprovalPreferences,
+    onSettled: settle(queryClient),
+  });
+export const createApprovalRuleMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: createApprovalRule,
+    onSettled: settle(queryClient),
+  });
+export const updateApprovalRuleMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({ id, behaviour }: { id: string; behaviour: RuleBehaviour }) =>
+      updateApprovalRule(id, { behaviour }),
+    onSettled: settle(queryClient),
+  });
+export const revokeApprovalRuleMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: revokeApprovalRule,
+    onSettled: settle(queryClient),
+  });
+export const teamApprovalSettingsMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: setTeamApprovalSettings,
+    onSettled: settle(queryClient),
+  });
+export const createTeamApprovalRuleMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: createTeamApprovalRule,
+    onSettled: settle(queryClient),
+  });
+export const updateTeamApprovalRuleMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: ({ id, behaviour }: { id: string; behaviour: RuleBehaviour }) =>
+      updateTeamApprovalRule(id, { behaviour }),
+    onSettled: settle(queryClient),
+  });
+export const revokeTeamApprovalRuleMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: revokeTeamApprovalRule,
+    onSettled: settle(queryClient),
   });

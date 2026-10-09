@@ -1,6 +1,7 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconChecks,
   IconKey,
   IconLayoutGrid,
   IconPlug,
@@ -45,6 +46,12 @@ const ITEMS: {
     title: "Notifications",
     icon: IconBell,
     linkOptions: { to: "/settings/notifications" },
+  },
+  {
+    /* Whether Bots ask first, and rules for every Bot. Team settings are an administrator's. */
+    title: "Approvals",
+    icon: IconChecks,
+    linkOptions: { to: "/settings/approvals" },
   },
   {
     /*
