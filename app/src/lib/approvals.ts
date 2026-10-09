@@ -64,6 +64,8 @@ export type ApprovalInboxData = {
   questions: {
     id: string;
     botId: string;
+    /** The Bot whose conversation this belongs to: for a hand-off, the Bot that handed it on. */
+    conversationBotId?: string;
     threadId: string;
     question: string;
     why?: string;
@@ -208,3 +210,16 @@ export const revokeTeamApprovalRuleMutationOptions = (
     mutationFn: revokeTeamApprovalRule,
     onSettled: settle(queryClient),
   });
+
+/**
+ * Whether a rule's Bot field covers this Bot, matched the way the server matches it (`policy.ts`):
+ * `*` is anything, and a `*` inside a value is any run of characters.
+ */
+export function ruleCoversBot(pattern: string, agentId: string): boolean {
+  if (pattern === "*") return true;
+  const source = pattern
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${source}$`, "s").test(agentId);
+}

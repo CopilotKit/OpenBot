@@ -186,3 +186,48 @@ test("only this Bot's suggestions are shown", async () => {
   expect(await view.findByText(/Chase the March invoice/)).toBeTruthy();
   expect(view.queryByText(/Archive old pages/)).toBeNull();
 });
+
+test("a question asked during a hand-off is on the page of the Bot whose conversation it is", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "knowledge",
+        conversationBotId: "expenses",
+        threadId: "thread",
+        question: "Which ledger?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const handedOn = draw(<BotNeedsYou agentId="expenses" />);
+  expect(await handedOn.findByText(/Which ledger\?/)).toBeTruthy();
+  cleanup();
+  const asked = draw(<BotNeedsYou agentId="knowledge" />);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(asked.queryByText(/Which ledger\?/)).toBeNull();
+});
+
+test("with only a question waiting, Needs you says nothing about approvals and has one heading", async () => {
+  inbox = {
+    ...base,
+    requests: [],
+    questions: [
+      {
+        id: "q1",
+        botId: "expenses",
+        threadId: "thread",
+        question: "Which card?",
+        createdAt: "2026-10-09T10:00:00Z",
+      },
+    ],
+  };
+  serving();
+  const view = draw(<BotNeedsYou agentId="expenses" />);
+  await view.findByText(/Which card\?/);
+  expect(view.queryByText("No actions need your approval.")).toBeNull();
+  expect(view.queryByText("Waiting for you")).toBeNull();
+});

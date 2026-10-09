@@ -42,6 +42,31 @@ export const questionResponseMessage = (
   role: "user" as const,
   content: `In response to your question: ${question.question}\n\n${response}`,
 });
+/**
+ * A waiting question as the person's inbox lists it, or null for a row that is not one.
+ *
+ * `conversationBotId` is the Bot whose conversation the question belongs to: for a hand-off, the Bot
+ * that handed the work on, not the one that asked. It is the Bot the attention badge and the Bot's
+ * activity count the question under, so a screen showing one Bot's questions filters on it.
+ */
+export function listedQuestion(row: {
+  key: string;
+  payload: unknown;
+  createdAt: Date;
+}) {
+  const value = questionSchema.safeParse(row.payload);
+  return value.success
+    ? {
+        id: row.key,
+        botId: value.data.botId,
+        conversationBotId: questionConversationBot(value.data),
+        threadId: value.data.threadId,
+        question: value.data.question,
+        why: value.data.why,
+        createdAt: row.createdAt,
+      }
+    : null;
+}
 export type ApprovalQuestions = ReturnType<typeof createApprovalQuestions>;
 export function createApprovalQuestions(
   database: Database,
@@ -61,21 +86,7 @@ export function createApprovalQuestions(
         .where(and(owned(owner), isNull(workItems.finishedAt)))
         .orderBy(desc(workItems.createdAt))
         .limit(100);
-      return rows
-        .map((row) => {
-          const value = questionSchema.safeParse(row.payload);
-          return value.success
-            ? {
-                id: row.key,
-                botId: value.data.botId,
-                threadId: value.data.threadId,
-                question: value.data.question,
-                why: value.data.why,
-                createdAt: row.createdAt,
-              }
-            : null;
-        })
-        .filter((row) => row !== null);
+      return rows.map(listedQuestion).filter((row) => row !== null);
     },
     async respond(owner: string, id: string, response: string) {
       const answer = z.string().trim().min(1).max(6000).parse(response);

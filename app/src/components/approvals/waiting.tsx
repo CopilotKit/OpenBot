@@ -36,7 +36,7 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
   });
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   const questions = (inbox.data?.questions ?? []).filter((question) =>
-    ours(question.botId),
+    ours(question.conversationBotId ?? question.botId),
   );
   const pending = (inbox.data?.requests ?? []).filter(
     (request) => request.status === "pending" && ours(request.action.botId),
@@ -50,7 +50,6 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
         </p>
       ) : null}
       <div className="space-y-3">
-        <h2 className="font-medium">Waiting for you</h2>
         {questions.map((question) => (
           <article
             key={question.id}
@@ -86,96 +85,85 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
             </Button>
           </article>
         ))}
-        {inbox.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading approvals…</p>
-        ) : pending.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No actions need your approval.
-          </p>
-        ) : (
-          pending.map((request) => (
-            <article
-              className="space-y-3 rounded-lg border p-4"
-              key={request.id}
-            >
-              <div>
-                <h3 className="font-medium">
-                  {botName(request.action.botId)} wants to{" "}
-                  {request.action.toolRef
-                    .replace(/^computer_|^host\//, "")
-                    .replaceAll("_", " ")}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {request.action.scope}
+        {pending.map((request) => (
+          <article className="space-y-3 rounded-lg border p-4" key={request.id}>
+            <div>
+              <h3 className="font-medium">
+                {botName(request.action.botId)} wants to{" "}
+                {request.action.toolRef
+                  .replace(/^computer_|^host\//, "")
+                  .replaceAll("_", " ")}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {request.action.scope}
+              </p>
+              {request.action.policy ? (
+                <p className="text-sm">
+                  {request.action.policy.behaviour === "hand_off"
+                    ? "Handed to you: "
+                    : ""}
+                  {request.action.policy.reason}
                 </p>
-                {request.action.policy ? (
-                  <p className="text-sm">
-                    {request.action.policy.behaviour === "hand_off"
-                      ? "Handed to you: "
-                      : ""}
-                    {request.action.policy.reason}
-                  </p>
-                ) : null}
+              ) : null}
+            </div>
+            <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
+              {JSON.stringify(request.action.args, null, 2)}
+            </pre>
+            {request.action.policy?.behaviour === "hand_off" ? (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={decision.isPending}
+                  onClick={() =>
+                    decision.mutate({ id: request.id, choice: "handled" })
+                  }
+                >
+                  I did it myself
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={decision.isPending}
+                  onClick={() =>
+                    decision.mutate({ id: request.id, choice: "deny" })
+                  }
+                >
+                  Don't do it
+                </Button>
               </div>
-              <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-                {JSON.stringify(request.action.args, null, 2)}
-              </pre>
-              {request.action.policy?.behaviour === "hand_off" ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    disabled={decision.isPending}
-                    onClick={() =>
-                      decision.mutate({ id: request.id, choice: "handled" })
-                    }
-                  >
-                    I did it myself
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={decision.isPending}
-                    onClick={() =>
-                      decision.mutate({ id: request.id, choice: "deny" })
-                    }
-                  >
-                    Don't do it
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    disabled={decision.isPending}
-                    onClick={() =>
-                      decision.mutate({ id: request.id, choice: "allow_once" })
-                    }
-                  >
-                    Allow once
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={decision.isPending}
-                    onClick={() =>
-                      decision.mutate({
-                        id: request.id,
-                        choice: "allow_always",
-                      })
-                    }
-                  >
-                    Always allow here
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={decision.isPending}
-                    onClick={() =>
-                      decision.mutate({ id: request.id, choice: "deny" })
-                    }
-                  >
-                    Deny
-                  </Button>
-                </div>
-              )}
-            </article>
-          ))
-        )}
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={decision.isPending}
+                  onClick={() =>
+                    decision.mutate({ id: request.id, choice: "allow_once" })
+                  }
+                >
+                  Allow once
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={decision.isPending}
+                  onClick={() =>
+                    decision.mutate({
+                      id: request.id,
+                      choice: "allow_always",
+                    })
+                  }
+                >
+                  Always allow here
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={decision.isPending}
+                  onClick={() =>
+                    decision.mutate({ id: request.id, choice: "deny" })
+                  }
+                >
+                  Deny
+                </Button>
+              </div>
+            )}
+          </article>
+        ))}
       </div>
     </>
   );
@@ -189,7 +177,7 @@ export function BotNeedsYou({ agentId }: { agentId: string }) {
   const inbox = useQuery(approvalInboxOptions());
   const waiting =
     (inbox.data?.questions ?? []).some(
-      (question) => question.botId === agentId,
+      (question) => (question.conversationBotId ?? question.botId) === agentId,
     ) ||
     (inbox.data?.requests ?? []).some(
       (request) =>
