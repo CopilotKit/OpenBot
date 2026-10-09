@@ -116,7 +116,10 @@ export function createGroupMutationOptions(queryClient: QueryClient) {
 }
 
 /** Add a person who has signed in here to a group this person is in. */
-export function addGroupMemberMutationOptions(channelId: string) {
+export function addGroupMemberMutationOptions(
+  queryClient: QueryClient,
+  channelId: string,
+) {
   return mutationOptions({
     mutationFn: async (email: string) => {
       await client(`/api/groups/${encodeURIComponent(channelId)}/members`, {
@@ -125,6 +128,9 @@ export function addGroupMemberMutationOptions(channelId: string) {
         fallback: "That person could not be added.",
       });
     },
+    // So the list of people shows them straight away.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: groupKeys.detail(channelId) }),
   });
 }
 

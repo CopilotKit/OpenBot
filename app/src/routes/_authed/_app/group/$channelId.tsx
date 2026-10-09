@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
 import { GroupChat } from "@/components/channels/group-chat";
+import { GroupPeopleButton } from "@/components/channels/group-people";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { channelQueryOptions } from "@/lib/channels/queries";
 
@@ -25,6 +26,7 @@ function RouteComponent() {
         <span className="min-w-0 truncate text-sm tracking-tight">
           {channel.data?.name ?? "Group"}
         </span>
+        <GroupPeopleButton channelId={channelId} />
       </div>
       {(channel.data?.agentIds ?? []).map((agentId) => (
         <BotPausedBanner agentId={agentId} key={agentId} />
