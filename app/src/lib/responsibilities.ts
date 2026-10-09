@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
 export type ResponsibilityRecord = {
@@ -239,4 +243,26 @@ export function setTriggerEnabled(triggerId: string, enabled: boolean) {
       fallback: "Could not change the trigger",
     },
   );
+}
+
+const settleGithub = (queryClient: QueryClient) => () =>
+  queryClient.invalidateQueries({ queryKey: responsibilityKeys.bindings });
+
+export function createGithubBindingMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      repository,
+      secret,
+    }: {
+      repository: string;
+      secret: string;
+    }) => createGithubBinding(repository, secret),
+    onSettled: settleGithub(queryClient),
+  });
+}
+export function removeGithubBindingMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: removeGithubBinding,
+    onSettled: settleGithub(queryClient),
+  });
 }

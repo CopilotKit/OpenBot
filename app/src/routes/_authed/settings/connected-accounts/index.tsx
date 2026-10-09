@@ -16,6 +16,7 @@ import {
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { GithubSources } from "@/components/settings/github-sources";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -388,6 +389,7 @@ function RouteComponent() {
           </div>
         </PageSection>
       ) : null}
+      <GithubSources />
       <TeamBotConsents />
     </PageShell>
   );

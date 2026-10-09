@@ -18,12 +18,9 @@ import { channelListQueryOptions } from "@/lib/channels/queries";
 import { markdownComponents } from "@/lib/markdown";
 import { sharedUseKeys } from "@/lib/plugins/shared-use";
 import {
-  createGithubBinding,
   createResponsibility,
   createTrigger,
-  githubBindingsQueryOptions,
   type ResponsibilityRecord,
-  removeGithubBinding,
   removeTrigger,
   responsibilitiesQueryOptions,
   responsibilityAction,
@@ -71,7 +68,6 @@ function ResponsibilitiesPage() {
             You have no responsibilities yet.
           </p>
         )}
-        <GithubSources />
       </div>
     </PageShell>
   );
@@ -232,6 +228,18 @@ function NewResponsibility() {
             <option value="schedule">Schedule</option>
           </select>
         </label>
+        {source === "github" && (
+          <p className="text-muted-foreground text-sm sm:col-span-2">
+            Events come from the repositories you connected in{" "}
+            <Link
+              className="underline underline-offset-4"
+              to="/settings/connected-accounts"
+            >
+              Settings → Connected accounts
+            </Link>
+            .
+          </p>
+        )}
         {source !== "none" && (
           <label className={fieldClass} htmlFor={`${formId}-event`}>
             Event type
@@ -500,95 +508,6 @@ function RunMarkdown({ children }: { children: string }) {
     >
       {children}
     </Streamdown>
-  );
-}
-
-function GithubSources() {
-  const formId = useId();
-  const bindings = useQuery(githubBindingsQueryOptions());
-  const [repository, setRepository] = useState("");
-  const [secret, setSecret] = useState("");
-  const create = useMutation({
-    mutationFn: () => createGithubBinding(repository, secret),
-    onSuccess: async () => {
-      setSecret("");
-      setRepository("");
-      await refresh();
-    },
-  });
-  const remove = useMutation({
-    mutationFn: removeGithubBinding,
-    onSuccess: refresh,
-  });
-  return (
-    <section className="grid gap-3 rounded-lg border p-4">
-      <h2 className="font-semibold">GitHub event sources</h2>
-      <p className="text-sm text-muted-foreground">
-        Register a repository, then add its webhook in GitHub using the endpoint
-        below and the same secret. Subscribe a responsibility to an event such
-        as issues.opened.
-      </p>
-      <form
-        className="grid gap-3 sm:grid-cols-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          create.mutate();
-        }}
-      >
-        <label className={fieldClass} htmlFor={`${formId}-repository`}>
-          Repository
-          <Input
-            id={`${formId}-repository`}
-            value={repository}
-            onChange={(event) => setRepository(event.target.value)}
-            placeholder="owner/repository"
-            required
-          />
-        </label>
-        <label className={fieldClass} htmlFor={`${formId}-secret`}>
-          Webhook secret
-          <Input
-            id={`${formId}-secret`}
-            type="password"
-            autoComplete="new-password"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-            required
-          />
-        </label>
-        <Button type="submit" className="self-end" disabled={create.isPending}>
-          Connect events
-        </Button>
-      </form>
-      {(bindings.error || create.error || remove.error) && (
-        <p role="alert" className="text-destructive">
-          {bindings.error?.message ??
-            create.error?.message ??
-            remove.error?.message}
-        </p>
-      )}
-      {bindings.data?.map((binding) => (
-        <div
-          key={binding.id}
-          className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"
-        >
-          <div>
-            <p className="text-sm">{binding.repository}</p>
-            <code className="break-all text-xs">
-              {window.location.origin}/api/events/github/{binding.id}
-            </code>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={remove.isPending}
-            onClick={() => remove.mutate(binding.id)}
-          >
-            Disconnect
-          </Button>
-        </div>
-      ))}
-    </section>
   );
 }
 
