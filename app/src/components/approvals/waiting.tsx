@@ -1,7 +1,17 @@
+import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { PageSection } from "@/components/layout/page-shell";
+import { Fragment, useState } from "react";
+import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
@@ -12,9 +22,10 @@ import {
 } from "@/lib/approvals";
 
 /**
- * Questions and actions waiting on the person, each decided where it is shown. Given a Bot, only
- * that Bot's. The same requests the conversation draws inline, so a decision made in either place is
- * the one decision.
+ * Questions and actions waiting on the person, one row each, decided where it is shown: the answer
+ * box and the decision buttons sit on the row's own footer line. Given a Bot, only that Bot's. The
+ * same requests the conversation draws inline, so a decision made in either place is the one
+ * decision.
  */
 export function WaitingForYou({ agentId }: { agentId?: string }) {
   const cache = useQueryClient();
@@ -45,126 +56,150 @@ export function WaitingForYou({ agentId }: { agentId?: string }) {
   return (
     <>
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="mt-4 text-sm text-destructive">
           {error.message}
         </p>
       ) : null}
-      <div className="space-y-3">
-        {questions.map((question) => (
-          <article
-            key={question.id}
-            className="space-y-3 rounded-lg border p-4"
-          >
-            <h3 className="font-medium">
-              {botName(question.botId)} asks: {question.question}
-            </h3>
-            {question.why ? (
-              <p className="text-sm text-muted-foreground">{question.why}</p>
-            ) : null}
-            <Textarea
-              aria-label="Your answer"
-              placeholder="Your answer"
-              value={answers[question.id] ?? ""}
-              onChange={(event) =>
-                setAnswers((prior) => ({
-                  ...prior,
-                  [question.id]: event.target.value,
-                }))
-              }
-            />
-            <Button
-              disabled={answer.isPending || !answers[question.id]?.trim()}
-              onClick={() =>
-                answer.mutate({
-                  id: question.id,
-                  response: answers[question.id] ?? "",
-                })
-              }
-            >
-              Send answer
-            </Button>
-          </article>
-        ))}
-        {pending.map((request) => (
-          <article className="space-y-3 rounded-lg border p-4" key={request.id}>
-            <div>
-              <h3 className="font-medium">
-                {botName(request.action.botId)} wants to{" "}
-                {request.action.toolRef
-                  .replace(/^computer_|^host\//, "")
-                  .replaceAll("_", " ")}
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                {request.action.scope}
-              </p>
-              {request.action.policy ? (
-                <p className="text-sm">
-                  {request.action.policy.behaviour === "hand_off"
-                    ? "Handed to you: "
-                    : ""}
-                  {request.action.policy.reason}
-                </p>
-              ) : null}
-            </div>
-            <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
-              {JSON.stringify(request.action.args, null, 2)}
-            </pre>
-            {request.action.policy?.behaviour === "hand_off" ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={decision.isPending}
-                  onClick={() =>
-                    decision.mutate({ id: request.id, choice: "handled" })
-                  }
-                >
-                  I did it myself
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={decision.isPending}
-                  onClick={() =>
-                    decision.mutate({ id: request.id, choice: "deny" })
-                  }
-                >
-                  Don't do it
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={decision.isPending}
-                  onClick={() =>
-                    decision.mutate({ id: request.id, choice: "allow_once" })
-                  }
-                >
-                  Allow once
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={decision.isPending}
-                  onClick={() =>
-                    decision.mutate({
-                      id: request.id,
-                      choice: "allow_always",
-                    })
-                  }
-                >
-                  Always allow here
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={decision.isPending}
-                  onClick={() =>
-                    decision.mutate({ id: request.id, choice: "deny" })
-                  }
-                >
-                  Deny
-                </Button>
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
+      {questions.length + pending.length > 0 ? (
+        <PageRows>
+          {questions.map((question, index) => (
+            <Fragment key={question.id}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconMessageQuestion />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle className="line-clamp-none">
+                    {botName(question.botId)} asks: {question.question}
+                  </ItemTitle>
+                  {question.why ? (
+                    <ItemDescription className="line-clamp-none">
+                      {question.why}
+                    </ItemDescription>
+                  ) : null}
+                </ItemContent>
+                <ItemFooter className="flex-col items-start">
+                  <Textarea
+                    aria-label="Your answer"
+                    onChange={(event) =>
+                      setAnswers((prior) => ({
+                        ...prior,
+                        [question.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Your answer"
+                    value={answers[question.id] ?? ""}
+                  />
+                  <Button
+                    disabled={answer.isPending || !answers[question.id]?.trim()}
+                    onClick={() =>
+                      answer.mutate({
+                        id: question.id,
+                        response: answers[question.id] ?? "",
+                      })
+                    }
+                    size="sm"
+                  >
+                    Send answer
+                  </Button>
+                </ItemFooter>
+              </Item>
+            </Fragment>
+          ))}
+          {pending.map((request, index) => (
+            <Fragment key={request.id}>
+              {questions.length + index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconHandStop />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="line-clamp-none">
+                    {botName(request.action.botId)} wants to{" "}
+                    {request.action.toolRef
+                      .replace(/^computer_|^host\//, "")
+                      .replaceAll("_", " ")}
+                  </ItemTitle>
+                  <ItemDescription>{request.action.scope}</ItemDescription>
+                  {request.action.policy ? (
+                    <p className="text-sm">
+                      {request.action.policy.behaviour === "hand_off"
+                        ? "Handed to you: "
+                        : ""}
+                      {request.action.policy.reason}
+                    </p>
+                  ) : null}
+                  <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
+                    {JSON.stringify(request.action.args, null, 2)}
+                  </pre>
+                </ItemContent>
+                {request.action.policy?.behaviour === "hand_off" ? (
+                  <ItemFooter className="flex-wrap justify-start">
+                    <Button
+                      disabled={decision.isPending}
+                      onClick={() =>
+                        decision.mutate({ id: request.id, choice: "handled" })
+                      }
+                      size="sm"
+                    >
+                      I did it myself
+                    </Button>
+                    <Button
+                      disabled={decision.isPending}
+                      onClick={() =>
+                        decision.mutate({ id: request.id, choice: "deny" })
+                      }
+                      size="sm"
+                      variant="outline"
+                    >
+                      Don't do it
+                    </Button>
+                  </ItemFooter>
+                ) : (
+                  <ItemFooter className="flex-wrap justify-start">
+                    <Button
+                      disabled={decision.isPending}
+                      onClick={() =>
+                        decision.mutate({
+                          id: request.id,
+                          choice: "allow_once",
+                        })
+                      }
+                      size="sm"
+                    >
+                      Allow once
+                    </Button>
+                    <Button
+                      disabled={decision.isPending}
+                      onClick={() =>
+                        decision.mutate({
+                          id: request.id,
+                          choice: "allow_always",
+                        })
+                      }
+                      size="sm"
+                      variant="outline"
+                    >
+                      Always allow here
+                    </Button>
+                    <Button
+                      disabled={decision.isPending}
+                      onClick={() =>
+                        decision.mutate({ id: request.id, choice: "deny" })
+                      }
+                      size="sm"
+                      variant="outline"
+                    >
+                      Deny
+                    </Button>
+                  </ItemFooter>
+                )}
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
+      ) : null}
     </>
   );
 }
@@ -186,9 +221,7 @@ export function BotNeedsYou({ agentId }: { agentId: string }) {
   if (!waiting) return null;
   return (
     <PageSection title="Needs you">
-      <div className="mt-4">
-        <WaitingForYou agentId={agentId} />
-      </div>
+      <WaitingForYou agentId={agentId} />
     </PageSection>
   );
 }
