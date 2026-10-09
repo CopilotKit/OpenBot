@@ -91,14 +91,22 @@ export function RuleForm({
   pending,
   onSave,
   botField = true,
+  oneBot = false,
 }: {
   label: string;
   pending: boolean;
   onSave: (input: ApprovalRuleInput) => void;
   /** Off where the rule applies to every Bot, so there is no Bot to name. */
   botField?: boolean;
+  /**
+   * The rule is for a single Bot, so the Bot must be named. Left at `*` it would apply to every Bot
+   * and be saved somewhere other than the page it was written on.
+   */
+  oneBot?: boolean;
 }) {
-  const [rule, setRule] = useState<ApprovalRuleInput>(EMPTY_RULE);
+  const blank = oneBot ? { ...EMPTY_RULE, botId: "" } : EMPTY_RULE;
+  const [rule, setRule] = useState<ApprovalRuleInput>(blank);
+  const botNamed = !oneBot || (rule.botId.trim() !== "" && rule.botId !== "*");
   const field = (key: keyof ApprovalRuleInput, title: string, hint: string) => (
     <label className="grid gap-1 text-sm">
       <span>{title}</span>
@@ -121,14 +129,16 @@ export function RuleForm({
       onSubmit={(event) => {
         event.preventDefault();
         onSave(rule);
-        setRule(EMPTY_RULE);
+        setRule(blank);
       }}
     >
       <h3 className="font-medium sm:col-span-2">{label}</h3>
       {field("toolRef", "Tool or app", "mcp/gmail/*, computer_click, host/*")}
       {field("effect", "Kind of action", "* , write, read, delegate")}
       {field("scope", "Target", "*, a site, a folder, a Bot name")}
-      {botField ? field("botId", "Bot", "* for every Bot") : null}
+      {botField
+        ? field("botId", "Bot", oneBot ? "The Bot's name" : "* for every Bot")
+        : null}
       <label className="grid gap-1 text-sm">
         <span>Behaviour</span>
         <select
@@ -148,7 +158,10 @@ export function RuleForm({
         </select>
       </label>
       <div className="flex items-end">
-        <Button type="submit" disabled={pending || !rule.toolRef.trim()}>
+        <Button
+          type="submit"
+          disabled={pending || !rule.toolRef.trim() || !botNamed}
+        >
           Save rule
         </Button>
       </div>

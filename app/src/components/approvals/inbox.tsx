@@ -13,6 +13,7 @@ import {
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
 import { queryClient as appQueryClient } from "@/query-client";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { RuleForm, RuleRow } from "./rules";
 
 /**
@@ -50,6 +51,7 @@ export function ApprovalInbox() {
     addRule.error ??
     changeRule.error ??
     revoke.error;
+  const me = useQuery(currentUserQueryOptions()).data;
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
   const oneBot = (inbox.data?.rules ?? []).filter((rule) => rule.botId !== "*");
   const pending =
@@ -63,6 +65,19 @@ export function ApprovalInbox() {
           Settings → Approvals
         </Link>
         .
+        {me?.role === "admin" ? (
+          <>
+            {" "}
+            Team settings and shared account requests are in{" "}
+            <Link
+              className="underline underline-offset-4"
+              to="/admin/approvals"
+            >
+              Admin → Approvals
+            </Link>
+            .
+          </>
+        ) : null}
       </p>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -225,6 +240,7 @@ export function ApprovalInbox() {
         {inbox.data?.preferences && !rulesOff ? (
           <RuleForm
             label="Add a rule for one Bot"
+            oneBot
             pending={addRule.isPending}
             onSave={(input) => addRule.mutate(input)}
           />

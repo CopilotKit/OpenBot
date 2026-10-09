@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { PageSection } from "@/components/layout/page-shell";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -148,7 +149,20 @@ export function ApprovalSettings() {
         </div>
       </PageSection>
       <PageSection
-        description={`The strictest matching rule wins, so an "ask" rule beats an "allow" one. Team rules are locked. Changing a password, security settings and payments are always handed to you.${rulesOff ? " Your team has switched personal rules off, so they are kept but do not apply." : ""}`}
+        description={
+          <>
+            The strictest matching rule wins, so an "ask" rule beats an "allow"
+            one. Team rules are locked. Changing a password, security settings
+            and payments are always handed to you. Rules for a single Bot are on{" "}
+            <Link className="underline underline-offset-4" to="/approvals">
+              Approvals
+            </Link>
+            .
+            {rulesOff
+              ? " Your team has switched personal rules off, so they are kept but do not apply."
+              : ""}
+          </>
+        }
         title="Rules for every Bot"
       >
         <div className="mt-4 space-y-3">

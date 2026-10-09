@@ -31,7 +31,7 @@ afterEach(cleanup);
 afterAll(() => GlobalRegistrator.unregister());
 
 const originalFetch = global.fetch;
-const role = "user";
+let role: "user" | "admin" = "user";
 const sent: { path: string; method: string; body: unknown }[] = [];
 
 const inbox = {
@@ -95,6 +95,7 @@ let inboxOverride: Record<string, unknown> = {};
 beforeEach(() => {
   sent.length = 0;
   inboxOverride = {};
+  role = "user";
   global.fetch = Object.assign(
     async (path: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(path);
@@ -262,6 +263,53 @@ test("with personal rules switched off by the team, they are shown as not applyi
   const view = draw(<ApprovalSettings />);
   expect(await view.findByText(/kept but do not apply/)).toBeTruthy();
   expect(view.queryByText("Add a rule")).toBeNull();
+});
+
+test("a rule added for one Bot must name that Bot", async () => {
+  const view = draw();
+  await view.findByText("Add a rule for one Bot");
+  const user = userEvent.setup({ document });
+  await user.type(
+    view.getByRole("textbox", { name: "Tool or app" }),
+    "mcp/slack/*",
+  );
+  const save = view.getByRole("button", { name: "Save rule" });
+  // Without a Bot it would become a rule for every Bot and vanish from this page.
+  expect(save.hasAttribute("disabled")).toBe(true);
+  await user.type(view.getByRole("textbox", { name: "Bot" }), "Shopper");
+  fireEvent.submit(save.closest("form") as HTMLFormElement);
+  await waitFor(() =>
+    expect(sent).toContainEqual({
+      path: "/api/approvals/rules",
+      method: "POST",
+      body: {
+        botId: "Shopper",
+        toolRef: "mcp/slack/*",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+    }),
+  );
+});
+
+test("an administrator on the Approvals page is told where team settings went", async () => {
+  role = "admin";
+  const view = draw();
+  const link = await view.findByRole("link", { name: "Admin → Approvals" });
+  expect(link.getAttribute("href")).toBe("/admin/approvals");
+});
+
+test("a member on the Approvals page is not pointed at Admin", async () => {
+  const view = draw();
+  await view.findByText("Rules for one Bot");
+  expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
+});
+
+test("rules for every Bot point to where rules for a single Bot are", async () => {
+  const view = draw(<ApprovalSettings />);
+  const link = await view.findByRole("link", { name: "Approvals" });
+  expect(link.getAttribute("href")).toBe("/approvals");
 });
 
 test("a pending change is drawn in the conversation where the action was, and decided there", async () => {
