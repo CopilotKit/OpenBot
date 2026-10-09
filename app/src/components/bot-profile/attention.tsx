@@ -82,6 +82,7 @@ export function BotsNavBadge() {
       <span
         aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
         className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums"
+        role="img"
       >
         {waiting}
       </span>
