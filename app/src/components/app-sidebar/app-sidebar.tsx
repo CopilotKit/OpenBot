@@ -1,12 +1,11 @@
 import {
+  IconBolt,
   IconBox,
   IconLogout,
   IconPlus,
-  IconRobot,
   IconSearch,
   IconSettings,
   IconShieldLock,
-  IconUsersGroup,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -271,22 +270,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             >
               <IconPlus />
             </Button>
-            <Button
-              aria-label="New group conversation"
-              size="icon"
-              variant="ghost"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/group/new"
-                  activeProps={{
-                    className: "bg-foreground/5",
-                  }}
-                />
-              )}
-            >
-              <IconUsersGroup />
-            </Button>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -376,7 +359,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               )}
             >
               <div className="size-[28px] flex items-center justify-center">
-                <IconRobot />
+                <IconBolt />
               </div>
               <span className="text-sm">Bots</span>
               {/* What waits on you across every Bot; Bots lists them first. */}
