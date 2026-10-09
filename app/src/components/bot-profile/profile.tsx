@@ -91,9 +91,7 @@ export function BotProfile({
       </div>
 
       <BotNeedsYou agentId={agent.id} />
-      <div className="mt-12 empty:hidden">
-        <SuggestionsInbox agentId={agent.id} />
-      </div>
+      <SuggestionsInbox agentId={agent.id} />
 
       <PageSection title="For you">
         {/* Whether this Bot's Shared-app calls are being refused right now, with the button that

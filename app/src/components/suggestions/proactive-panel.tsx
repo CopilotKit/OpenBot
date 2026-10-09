@@ -1,7 +1,46 @@
+import {
+  IconBulb,
+  IconChevronRight,
+  IconClock,
+  IconPlus,
+  IconRadar,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { Fragment, useId, useState } from "react";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
@@ -18,14 +57,20 @@ import {
 } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
 
-const field = "grid gap-1 text-sm";
-const select = "h-9 rounded-md border bg-background px-3 text-sm";
 const intervals = [
   { minutes: 60, label: "Every hour" },
   { minutes: 240, label: "Every 4 hours" },
   { minutes: 720, label: "Twice a day" },
   { minutes: 1440, label: "Once a day" },
 ];
+/** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
+const intervalItems = intervals.map((interval) => ({
+  value: interval.minutes,
+  label: interval.label,
+}));
+const intervalLabel = (minutes: number) =>
+  intervals.find((interval) => interval.minutes === minutes)?.label ??
+  `Every ${minutes} minutes`;
 async function refresh() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
@@ -54,85 +99,100 @@ export function SuggestionsInbox({
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
   if (agentId !== undefined && shown.length === 0) return null;
   return (
-    <section className="grid gap-3">
-      <h2 className="font-semibold">Suggested next steps</h2>
-      {suggestions.isPending ? (
-        <p>Loading suggestions…</p>
-      ) : suggestions.error ? (
-        <p role="alert" className="text-destructive">
+    <PageSection title="Suggested next steps">
+      {suggestions.isPending ? null : suggestions.error ? (
+        <p role="alert" className="mt-4 text-destructive text-sm">
           {suggestions.error.message}
         </p>
       ) : shown.length ? (
-        shown.map((suggestion) => (
-          <article
-            key={suggestion.id}
-            className="grid gap-2 rounded-lg border p-4"
-          >
-            <div className="flex flex-wrap justify-between gap-2">
-              <strong>{suggestion.title}</strong>
-              <span className="text-xs text-muted-foreground">
-                {botName(suggestion.agentId)} ·{" "}
-                {new Date(suggestion.createdAt).toLocaleString()}
-              </span>
-            </div>
-            <p className="text-sm whitespace-pre-wrap">{suggestion.detail}</p>
-            {(suggestion.sourceApp || suggestion.sourceLink) && (
-              <p className="text-xs text-muted-foreground">
-                From {suggestion.sourceApp ?? "a connected app"}
-                {suggestion.sourceLink && (
-                  <>
-                    {" · "}
-                    <a
-                      className="underline"
-                      href={suggestion.sourceLink}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open record
-                    </a>
-                  </>
-                )}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                disabled={act.isPending}
-                onClick={() =>
-                  act.mutate({ id: suggestion.id, action: "start" })
-                }
-              >
-                Start as task
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={act.isPending}
-                onClick={() =>
-                  act.mutate({ id: suggestion.id, action: "dismiss" })
-                }
-              >
-                Dismiss
-              </Button>
-            </div>
-          </article>
-        ))
+        <PageRows>
+          {shown.map((suggestion, index) => (
+            <Fragment key={suggestion.id}>
+              {index > 0 ? <Separator /> : null}
+              <Item size="sm">
+                <ItemMedia variant="icon">
+                  <IconBulb />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle className="line-clamp-none">
+                    {suggestion.title}
+                  </ItemTitle>
+                  {suggestion.detail ? (
+                    <ItemDescription className="line-clamp-none whitespace-pre-wrap text-foreground">
+                      {suggestion.detail}
+                    </ItemDescription>
+                  ) : null}
+                  <ItemDescription className="line-clamp-none">
+                    {botName(suggestion.agentId)} ·{" "}
+                    {new Date(suggestion.createdAt).toLocaleString()}
+                    {suggestion.sourceApp || suggestion.sourceLink ? (
+                      <>
+                        {" · "}From {suggestion.sourceApp ?? "a connected app"}
+                        {suggestion.sourceLink && (
+                          <>
+                            {" · "}
+                            <a
+                              href={suggestion.sourceLink}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open record
+                            </a>
+                          </>
+                        )}
+                      </>
+                    ) : null}
+                  </ItemDescription>
+                  {/* A set, so it wraps onto its own line rather than crowding the title. */}
+                  <ItemFooter>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        disabled={act.isPending}
+                        onClick={() =>
+                          act.mutate({ id: suggestion.id, action: "start" })
+                        }
+                      >
+                        Start as task
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={act.isPending}
+                        onClick={() =>
+                          act.mutate({ id: suggestion.id, action: "dismiss" })
+                        }
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </ItemFooter>
+                </ItemContent>
+              </Item>
+            </Fragment>
+          ))}
+        </PageRows>
       ) : (
-        <p className="text-muted-foreground">
+        <PageEmpty>
           No suggestions right now. Bots with background research on will
           suggest next steps here.
-        </p>
+        </PageEmpty>
       )}
       {act.error && (
-        <p role="alert" className="text-destructive">
+        <p role="alert" className="mt-4 text-destructive text-sm">
           {act.error.message}
         </p>
       )}
-    </section>
+    </PageSection>
   );
 }
 
-/** Opt a Bot in to read-only background research of the apps it can already read. */
+/**
+ * Opt a Bot in to read-only background research of the apps it can already read.
+ *
+ * Each opt-in is a row stating its current answer; it opens a dialog to change how often, run it,
+ * turn it off or remove it. Opting in is a dialog behind the section's action.
+ */
 export function ProactiveResearchSettings({
   agentId: fixedBot,
 }: {
@@ -140,6 +200,62 @@ export function ProactiveResearchSettings({
   agentId?: string;
 } = {}) {
   const settings = useQuery(proactiveSettingsQueryOptions());
+  const bots = useQuery(agentListQueryOptions());
+  const [adding, setAdding] = useState(false);
+  const shown = (settings.data ?? []).filter(
+    (setting) => fixedBot === undefined || setting.agentId === fixedBot,
+  );
+  return (
+    <PageSection
+      action={
+        <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
+          <IconPlus />
+          Turn on research
+        </Button>
+      }
+      description="A Bot you opt in looks through the apps it can already read, forms memories for you to review and suggests next steps. It can only read: it cannot send messages, change anything in an app, or use a browser or computer."
+      title="Background research"
+    >
+      {settings.isPending ? null : settings.error ? (
+        <p role="alert" className="mt-4 text-destructive text-sm">
+          {settings.error.message}
+        </p>
+      ) : shown.length === 0 ? (
+        <PageEmpty>Background research is off.</PageEmpty>
+      ) : (
+        <PageRows>
+          {shown.map((setting, index) => (
+            <Fragment key={setting.id}>
+              {index > 0 ? <Separator /> : null}
+              <SettingRow
+                setting={setting}
+                botName={
+                  bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
+                  setting.agentId
+                }
+              />
+            </Fragment>
+          ))}
+        </PageRows>
+      )}
+      {adding ? (
+        <TurnOnResearchDialog
+          fixedBot={fixedBot}
+          onClose={() => setAdding(false)}
+        />
+      ) : null}
+    </PageSection>
+  );
+}
+
+/** Which Bot, where its suggestions go, how often, and what to look for. */
+function TurnOnResearchDialog({
+  fixedBot,
+  onClose,
+}: {
+  fixedBot?: string;
+  onClose: () => void;
+}) {
   const bots = useQuery(agentListQueryOptions());
   const channels = useInfiniteQuery(channelListQueryOptions());
   const [pickedBot, setAgentId] = useState("");
@@ -154,127 +270,161 @@ export function ProactiveResearchSettings({
   const add = useMutation({
     mutationFn: createProactiveSetting,
     onSuccess: async () => {
-      setFocus("");
+      onClose();
       await refresh();
     },
   });
   return (
-    <section className="grid gap-3">
-      <h2 className="font-semibold">Background research</h2>
-      <p className="text-sm text-muted-foreground">
-        A Bot you opt in looks through the apps it can already read, forms
-        memories for you to review and suggests next steps. It can only read: it
-        cannot send messages, change anything in an app, or use a browser or
-        computer.
-      </p>
-      <form
-        className="grid gap-3 rounded-lg border p-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          add.mutate({ agentId, channelId, focus, intervalMinutes });
-        }}
-      >
-        <div className="grid gap-3 sm:grid-cols-3">
-          {fixedBot === undefined ? (
-            <label className={field}>
-              Bot
-              <select
-                required
-                className={select}
-                value={agentId}
-                onChange={(event) => {
-                  setAgentId(event.target.value);
-                  setChannelId("");
-                }}
-              >
-                <option value="">Choose a Bot</option>
-                {bots.data?.map((bot) => (
-                  <option key={bot.id} value={bot.id}>
-                    {bot.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <label className={field}>
-            Deliver suggestions to
-            <select
-              required
-              className={select}
-              value={channelId}
-              onChange={(event) => setChannelId(event.target.value)}
-            >
-              <option value="">Choose a channel</option>
-              {eligibleChannels.map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {conversationLabel(channel)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={field}>
-            How often
-            <select
-              className={select}
-              value={intervalMinutes}
-              onChange={(event) =>
-                setIntervalMinutes(Number(event.target.value))
-              }
-            >
-              {intervals.map((interval) => (
-                <option key={interval.minutes} value={interval.minutes}>
-                  {interval.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label className={field} htmlFor={`${id}-focus`}>
-          What to look for (optional)
-          <Input
-            id={`${id}-focus`}
-            maxLength={1000}
-            value={focus}
-            onChange={(event) => setFocus(event.target.value)}
-            placeholder="Open issues assigned to me and questions waiting on me"
-          />
-        </label>
-        <Button
-          type="submit"
-          className="justify-self-start"
-          disabled={add.isPending || !agentId || !channelId}
+    <Dialog onOpenChange={(next) => !next && onClose()} open>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Turn on background research</DialogTitle>
+          <DialogDescription>
+            It reads on a schedule and delivers what it suggests to a channel it
+            is in.
+          </DialogDescription>
+        </DialogHeader>
+        {/*
+         * `contents`, so the body is still DialogContent's own flex child and keeps its
+         * `flex-1 min-h-0` chain, while the submit in the footer stays inside the form.
+         */}
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault();
+            add.mutate({ agentId, channelId, focus, intervalMinutes });
+          }}
         >
-          Turn on background research
-        </Button>
-        {add.error && (
-          <p role="alert" className="text-destructive">
-            {add.error.message}
-          </p>
-        )}
-      </form>
-      {settings.error && (
-        <p role="alert" className="text-destructive">
-          {settings.error.message}
-        </p>
-      )}
-      {settings.data
-        ?.filter(
-          (setting) => fixedBot === undefined || setting.agentId === fixedBot,
-        )
-        .map((setting) => (
-          <SettingRow
-            key={setting.id}
-            setting={setting}
-            botName={
-              bots.data?.find((bot) => bot.id === setting.agentId)?.name ??
-              setting.agentId
-            }
-          />
-        ))}
-    </section>
+          <DialogBody className="mt-4 overflow-y-auto">
+            <FieldGroup>
+              {fixedBot === undefined ? (
+                <Field>
+                  <FieldLabel htmlFor={`${id}-bot`}>Bot</FieldLabel>
+                  <Select
+                    items={bots.data?.map((bot) => ({
+                      value: bot.id,
+                      label: bot.name,
+                    }))}
+                    onValueChange={(value) => {
+                      setAgentId(value ?? "");
+                      setChannelId("");
+                    }}
+                    required
+                    value={agentId || null}
+                  >
+                    <SelectTrigger className="w-full" id={`${id}-bot`}>
+                      <SelectValue placeholder="Choose a Bot" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bots.data?.map((bot) => (
+                        <SelectItem key={bot.id} value={bot.id}>
+                          {bot.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
+              <Field>
+                <FieldLabel htmlFor={`${id}-channel`}>
+                  Deliver suggestions to
+                </FieldLabel>
+                <Select
+                  items={eligibleChannels.map((channel) => ({
+                    value: channel.id,
+                    label: conversationLabel(channel),
+                  }))}
+                  onValueChange={(value) => setChannelId(value ?? "")}
+                  required
+                  value={channelId || null}
+                >
+                  <SelectTrigger className="w-full" id={`${id}-channel`}>
+                    <SelectValue placeholder="Choose a channel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eligibleChannels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {conversationLabel(channel)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
+                <Select
+                  items={intervalItems}
+                  onValueChange={(value) => {
+                    if (value !== null) setIntervalMinutes(value);
+                  }}
+                  value={intervalMinutes}
+                >
+                  <SelectTrigger className="w-full" id={`${id}-interval`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {intervals.map((interval) => (
+                      <SelectItem
+                        key={interval.minutes}
+                        value={interval.minutes}
+                      >
+                        {interval.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${id}-focus`}>
+                  What to look for (optional)
+                </FieldLabel>
+                <Input
+                  id={`${id}-focus`}
+                  maxLength={1000}
+                  value={focus}
+                  onChange={(event) => setFocus(event.target.value)}
+                  placeholder="Open issues assigned to me and questions waiting on me"
+                />
+              </Field>
+            </FieldGroup>
+            {add.error && (
+              <p role="alert" className="text-destructive text-sm">
+                {add.error.message}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button onClick={onClose} size="sm" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={add.isPending || !agentId || !channelId}
+              size="sm"
+              type="submit"
+            >
+              Turn on background research
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
+/** Whether it is on, and when it runs next. Stated rather than captured, so it follows the query. */
+function researchStatus(setting: ProactiveSetting) {
+  return !setting.enabled
+    ? "Off"
+    : setting.lastStatus === "running"
+      ? "Researching now"
+      : `Next ${new Date(setting.nextRunAt).toLocaleString()}`;
+}
+
+/**
+ * One Bot's research: a summary of its current answer and a chevron, opening a dialog that changes
+ * it. The dialog is the row's sibling, not its child, so a click inside it does not bubble back to
+ * the row and reopen it.
+ */
 function SettingRow({
   setting,
   botName,
@@ -282,6 +432,8 @@ function SettingRow({
   setting: ProactiveSetting;
   botName: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
   const change = useMutation({
     mutationFn: (
       action:
@@ -302,78 +454,127 @@ function SettingRow({
             ),
     onSuccess: refresh,
   });
+  const summary = [
+    setting.focus,
+    intervalLabel(setting.intervalMinutes),
+    researchStatus(setting),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <article className="grid gap-2 rounded-lg border p-4">
-      <div className="flex flex-wrap justify-between gap-2">
-        <strong>{botName}</strong>
-        <span className="text-sm text-muted-foreground">
-          {!setting.enabled
-            ? "Off"
-            : setting.lastStatus === "running"
-              ? "Researching now"
-              : `Next ${new Date(setting.nextRunAt).toLocaleString()}`}
-        </span>
-      </div>
-      {setting.focus && <p className="text-sm">{setting.focus}</p>}
-      {setting.lastRunAt && (
-        <p className="text-xs text-muted-foreground">
-          Last ran {new Date(setting.lastRunAt).toLocaleString()}
-          {setting.lastStatus === "succeeded" ? "" : ` (${setting.lastStatus})`}
-        </p>
-      )}
-      {setting.lastError && (
-        <p role="alert" className="text-destructive">
-          {setting.lastError}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="How often"
-          className={select}
-          value={setting.intervalMinutes}
-          onChange={(event) =>
-            change.mutate({
-              kind: "interval",
-              minutes: Number(event.target.value),
-            })
-          }
-        >
-          {intervals.map((interval) => (
-            <option key={interval.minutes} value={interval.minutes}>
-              {interval.label}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!setting.enabled || change.isPending}
-          onClick={() => change.mutate({ kind: "run" })}
-        >
-          Run now
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={change.isPending}
-          onClick={() => change.mutate({ kind: "toggle" })}
-        >
-          {setting.enabled ? "Turn off" : "Turn on"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={change.isPending}
-          onClick={() => change.mutate({ kind: "remove" })}
-        >
-          Remove
-        </Button>
-      </div>
-      {change.error && (
-        <p role="alert" className="text-destructive">
-          {change.error.message}
-        </p>
-      )}
-    </article>
+    <>
+      <Item
+        render={<button onClick={() => setOpen(true)} type="button" />}
+        size="sm"
+      >
+        <ItemMedia variant="icon">
+          <IconRadar />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{botName}</ItemTitle>
+          <ItemDescription>{summary}</ItemDescription>
+          {setting.lastError ? (
+            <ItemDescription className="text-destructive">
+              {setting.lastError}
+            </ItemDescription>
+          ) : null}
+        </ItemContent>
+        <ItemActions>
+          <IconChevronRight className="size-4 text-muted-foreground" />
+        </ItemActions>
+      </Item>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Background research</DialogTitle>
+            <DialogDescription>
+              {setting.focus ? `${botName} · ${setting.focus}` : botName}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="mt-4">
+            <Item size="sm" variant="muted">
+              <ItemMedia variant="icon">
+                <IconClock />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{researchStatus(setting)}</ItemTitle>
+                {setting.lastRunAt && (
+                  <ItemDescription>
+                    Last ran {new Date(setting.lastRunAt).toLocaleString()}
+                    {setting.lastStatus === "succeeded"
+                      ? ""
+                      : ` (${setting.lastStatus})`}
+                  </ItemDescription>
+                )}
+              </ItemContent>
+            </Item>
+            {setting.lastError && (
+              <p role="alert" className="text-destructive text-sm">
+                {setting.lastError}
+              </p>
+            )}
+            <Field>
+              <FieldLabel htmlFor={`${id}-interval`}>How often</FieldLabel>
+              {/* Writes on pick: one value, no draft worth holding. */}
+              <Select
+                disabled={change.isPending}
+                items={intervalItems}
+                onValueChange={(minutes) => {
+                  if (minutes !== null && minutes !== setting.intervalMinutes)
+                    change.mutate({ kind: "interval", minutes });
+                }}
+                value={setting.intervalMinutes}
+              >
+                <SelectTrigger className="w-full" id={`${id}-interval`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {intervals.map((interval) => (
+                    <SelectItem key={interval.minutes} value={interval.minutes}>
+                      {interval.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {change.error && (
+              <p role="alert" className="text-destructive text-sm">
+                {change.error.message}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={change.isPending}
+              onClick={() =>
+                change.mutate(
+                  { kind: "remove" },
+                  { onSuccess: () => setOpen(false) },
+                )
+              }
+            >
+              Remove
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={change.isPending}
+              onClick={() => change.mutate({ kind: "toggle" })}
+            >
+              {setting.enabled ? "Turn off" : "Turn on"}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!setting.enabled || change.isPending}
+              onClick={() => change.mutate({ kind: "run" })}
+            >
+              Run now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
