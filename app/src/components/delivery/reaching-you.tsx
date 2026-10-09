@@ -407,7 +407,6 @@ function ConnectDialog({
           {transport === "sms" ? (
             <>
               <form
-                id={`${formId}-phone-form`}
                 onSubmit={(event) => {
                   event.preventDefault();
                   sms.mutate();
@@ -417,20 +416,29 @@ function ConnectDialog({
                   <FieldLabel htmlFor={`${formId}-phone`}>
                     Phone number
                   </FieldLabel>
-                  <Input
-                    id={`${formId}-phone`}
-                    onChange={(event) => setPhone(event.target.value)}
-                    pattern="\+[1-9][0-9]{7,14}"
-                    placeholder="+15551234567"
-                    required
-                    type="tel"
-                    value={phone}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={`${formId}-phone`}
+                      onChange={(event) => setPhone(event.target.value)}
+                      pattern="\+[1-9][0-9]{7,14}"
+                      placeholder="+15551234567"
+                      required
+                      type="tel"
+                      value={phone}
+                    />
+                    <Button
+                      disabled={!chosen || !available.sms || sms.isPending}
+                      size="sm"
+                      type="submit"
+                      variant={challengeId ? "outline" : "default"}
+                    >
+                      Send verification code
+                    </Button>
+                  </div>
                 </Field>
               </form>
               {challengeId ? (
                 <form
-                  id={`${formId}-code-form`}
                   onSubmit={(event) => {
                     event.preventDefault();
                     confirm.mutate();
@@ -440,13 +448,22 @@ function ConnectDialog({
                     <FieldLabel htmlFor={`${formId}-code`}>
                       Verification code
                     </FieldLabel>
-                    <Input
-                      autoComplete="one-time-code"
-                      id={`${formId}-code`}
-                      onChange={(event) => setCode(event.target.value)}
-                      required
-                      value={code}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        autoComplete="one-time-code"
+                        id={`${formId}-code`}
+                        onChange={(event) => setCode(event.target.value)}
+                        required
+                        value={code}
+                      />
+                      <Button
+                        disabled={confirm.isPending}
+                        size="sm"
+                        type="submit"
+                      >
+                        Confirm phone
+                      </Button>
+                    </div>
                   </Field>
                 </form>
               ) : null}
@@ -490,29 +507,8 @@ function ConnectDialog({
           <Button onClick={onClose} size="sm" variant="outline">
             Close
           </Button>
-          {transport === "sms" ? (
-            <>
-              <Button
-                disabled={!chosen || !available.sms || sms.isPending}
-                form={`${formId}-phone-form`}
-                size="sm"
-                type="submit"
-                variant={challengeId ? "outline" : "default"}
-              >
-                Send verification code
-              </Button>
-              {challengeId ? (
-                <Button
-                  disabled={confirm.isPending}
-                  form={`${formId}-code-form`}
-                  size="sm"
-                  type="submit"
-                >
-                  Confirm phone
-                </Button>
-              ) : null}
-            </>
-          ) : (
+          {/* A phone's two steps each submit their own field, beside it. */}
+          {transport === "sms" ? null : (
             <Button
               disabled={!chosen || !available[transport] || link.isPending}
               onClick={() => link.mutate(transport)}

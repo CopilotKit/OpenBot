@@ -43,7 +43,7 @@ const binding = (id: string, agentId: string, address: string) => ({
 });
 
 const writes: { request: string; body: unknown }[] = [];
-function serving() {
+function serving(sms = false) {
   writes.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -58,6 +58,7 @@ function serving() {
         code: "abc",
         command: "link abc",
         expiresInMinutes: 10,
+        challengeId: "challenge-1",
       });
     }
     if (url.startsWith("/api/delivery")) {
@@ -68,7 +69,7 @@ function serving() {
         ],
         devices: [],
         deliveries: [],
-        available: { slack: true, teams: false, sms: false, push: false },
+        available: { slack: true, teams: false, sms, push: false },
       });
     }
     if (url.startsWith("/api/channels")) {
@@ -174,4 +175,36 @@ test("a transport the deployment cannot reach says why instead of opening", asyn
     view.queryByRole("button", { name: /^Link Microsoft Teams/ }),
   ).toBeNull();
   expect(view.getByText(/needs to pair OpenBot with OpenTag/)).toBeTruthy();
+});
+
+test("a phone is verified for the chosen conversation, then asks for its code", async () => {
+  serving(true);
+  sessionStorage.clear();
+  const view = draw();
+  const user = userEvent.setup({ document });
+  await view.findByRole("button", { name: "Disconnect" });
+  await user.click(view.getByRole("button", { name: /^Connect a phone/ }));
+  await chooseConversation(view, user, "Finance desk");
+  await user.type(view.getByLabelText("Phone number"), "+15551234567");
+  await user.click(
+    view.getByRole("button", { name: "Send verification code" }),
+  );
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      request: "POST /api/delivery/sms/start",
+      body: {
+        channelId: "channel-expenses",
+        agentId: "expenses",
+        phone: "+15551234567",
+      },
+    }),
+  );
+  await user.type(await view.findByLabelText("Verification code"), "123456");
+  await user.click(view.getByRole("button", { name: "Confirm phone" }));
+  await waitFor(() =>
+    expect(writes).toContainEqual({
+      request: "POST /api/delivery/sms/confirm",
+      body: { challengeId: "challenge-1", code: "123456" },
+    }),
+  );
 });
