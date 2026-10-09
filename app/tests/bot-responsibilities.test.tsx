@@ -124,23 +124,23 @@ test("a new responsibility needs no Bot picked, and offers only this Bot's conve
   serving();
   const view = draw();
   await view.findByText("Reconcile receipts");
+  const user = userEvent.setup({ document });
+  await user.click(view.getByRole("button", { name: /New responsibility/ }));
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
-  const conversation = view.getByRole("combobox", { name: /^Conversation/ });
-  const options = [...conversation.querySelectorAll("option")].map(
+  await user.click(view.getByRole("combobox", { name: /^Conversation/ }));
+  const options = (await view.findAllByRole("option")).map(
     (option) => option.textContent,
   );
   expect(options).toContain("Finance desk");
   expect(options).not.toContain("Docs desk");
 
-  const user = userEvent.setup({ document });
-  fireEvent.change(conversation, { target: { value: "channel-expenses" } });
+  await user.click(view.getByRole("option", { name: "Finance desk" }));
   await user.type(view.getByLabelText("Title"), "Close the month");
   await user.type(view.getByLabelText("Instruction"), "Close it.");
   await user.type(view.getByLabelText("Success criteria"), "Closed.");
   fireEvent.submit(
-    view
-      .getByRole("button", { name: /Create/ })
-      .closest("form") as HTMLFormElement,
+    (view.getByRole("button", { name: /Create/ }) as HTMLButtonElement)
+      .form as HTMLFormElement,
   );
   await waitFor(() =>
     expect(writes.map((write) => write.body)).toContainEqual(

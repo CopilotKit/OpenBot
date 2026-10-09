@@ -16,11 +16,7 @@ function ResponsibilitiesPage() {
       description="Lasting goals this Bot works on for you, what started each run, and what it found."
       title="Responsibilities"
     >
-      {(agent) => (
-        <div className="mt-6">
-          <BotResponsibilities agentId={agent.id} />
-        </div>
-      )}
+      {(agent) => <BotResponsibilities agentId={agent.id} />}
     </BotSubpage>
   );
 }
