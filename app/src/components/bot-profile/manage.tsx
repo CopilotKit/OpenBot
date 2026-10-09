@@ -306,15 +306,17 @@ export function ManageSection({
       </PageRows>
       <ResetDialog agent={agent} onOpenChange={setResetOpen} open={resetOpen} />
       <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete {agent.name}?</DialogTitle>
             <DialogDescription>This cannot be undone.</DialogDescription>
           </DialogHeader>
           {remove.error ? (
-            <p className="mt-4 text-destructive text-sm" role="alert">
-              {remove.error.message}
-            </p>
+            <DialogBody className="mt-4">
+              <p className="text-destructive text-sm" role="alert">
+                {remove.error.message}
+              </p>
+            </DialogBody>
           ) : null}
           <DialogFooter className="mt-4">
             <Button
