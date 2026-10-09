@@ -42,7 +42,6 @@ export type HostAccessDesktopResult = {
   grant?: {
     grantId: string;
     displayName: string;
-    writable?: boolean;
   };
 };
 
@@ -90,7 +89,6 @@ export function asHostAccessDesktopResult(
           grant: {
             grantId: grant.grantId,
             displayName: grant.displayName,
-            writable: grant.writable === true,
           },
         }
       : {}),
