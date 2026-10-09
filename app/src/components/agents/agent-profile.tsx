@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { AgentDialog } from "@/components/agents/agent-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentQueryOptions } from "@/lib/agents/queries";
@@ -49,7 +48,6 @@ function ProfileSkeleton() {
  */
 export function AgentProfile({ agentId }: { agentId: string }) {
   /** The full dialog, opened over the chat rather than navigating away from it. */
-  const [managing, setManaging] = useState(false);
   const navigate = useNavigate();
   const agent = useQuery(agentQueryOptions(agentId));
 
@@ -109,18 +107,14 @@ export function AgentProfile({ agentId }: { agentId: string }) {
         </Button>
         <Button
           className="w-full text-sm!"
-          onClick={() => setManaging(true)}
+          render={(props) => (
+            <Link {...props} params={{ agentId }} to="/bots/$agentId" />
+          )}
           variant="outline"
         >
-          Manage coworker
+          Open {profile.name}
         </Button>
       </div>
-
-      <AgentDialog
-        agentId={agentId}
-        onClose={() => setManaging(false)}
-        open={managing}
-      />
     </div>
   );
 }
