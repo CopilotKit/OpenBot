@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ReachingYou } from "@/components/delivery/reaching-you";
 import { settleReactWork } from "./settle-react-work";
 
@@ -106,19 +107,37 @@ test("only this Bot's destinations are listed", async () => {
   expect(view.getAllByRole("button", { name: "Disconnect" })).toHaveLength(1);
 });
 
+/** The link flow is a dialog: open it from its row, then choose the conversation it continues. */
+async function openSlackLink(view: ReturnType<typeof draw>) {
+  const user = userEvent.setup({ document });
+  await view.findByRole("button", { name: "Disconnect" });
+  await user.click(view.getByRole("button", { name: /^Link Slack/ }));
+  return user;
+}
+
+async function chooseConversation(
+  view: ReturnType<typeof draw>,
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+) {
+  await user.click(view.getByRole("combobox", { name: /^Conversation/ }));
+  await user.click(await view.findByRole("option", { name }));
+}
+
 test("linking Slack needs only a conversation, and warns that it moves the account", async () => {
   serving();
   const view = draw();
-  await view.findByRole("button", { name: "Disconnect" });
+  const user = await openSlackLink(view);
   expect(view.queryByRole("combobox", { name: /^Bot/ })).toBeNull();
   expect(view.getByText(/Linking it here moves it/)).toBeTruthy();
-  const conversation = view.getByRole("combobox", { name: /^Conversation/ });
-  const options = [...conversation.querySelectorAll("option")].map(
+  await user.click(view.getByRole("combobox", { name: /^Conversation/ }));
+  const options = (await view.findAllByRole("option")).map(
     (option) => option.textContent,
   );
+  expect(options).toContain("Finance desk");
   expect(options).not.toContain("Docs desk");
-  fireEvent.change(conversation, { target: { value: "channel-expenses" } });
-  fireEvent.click(view.getByRole("button", { name: "Link Slack" }));
+  await user.click(view.getByRole("option", { name: "Finance desk" }));
+  await user.click(view.getByRole("button", { name: "Link Slack" }));
   await waitFor(() =>
     expect(writes).toContainEqual({
       request: "POST /api/delivery/opentag/start",
@@ -129,19 +148,30 @@ test("linking Slack needs only a conversation, and warns that it moves the accou
       },
     }),
   );
+  expect(await view.findByText("link abc")).toBeTruthy();
 });
 
 test("nothing can be linked until a conversation is chosen", async () => {
   serving();
   const view = draw();
-  await view.findByRole("button", { name: "Disconnect" });
+  const user = await openSlackLink(view);
   expect(
     view.getByRole("button", { name: "Link Slack" }).hasAttribute("disabled"),
   ).toBe(true);
-  fireEvent.change(view.getByRole("combobox", { name: /^Conversation/ }), {
-    target: { value: "channel-expenses" },
-  });
+  await chooseConversation(view, user, "Finance desk");
+  await waitFor(() =>
+    expect(
+      view.getByRole("button", { name: "Link Slack" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+});
+
+test("a transport the deployment cannot reach says why instead of opening", async () => {
+  serving();
+  const view = draw();
+  await view.findByRole("button", { name: "Disconnect" });
   expect(
-    view.getByRole("button", { name: "Link Slack" }).hasAttribute("disabled"),
-  ).toBe(false);
+    view.queryByRole("button", { name: /^Link Microsoft Teams/ }),
+  ).toBeNull();
+  expect(view.getByText(/needs to pair OpenBot with OpenTag/)).toBeTruthy();
 });

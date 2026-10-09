@@ -1,8 +1,45 @@
+import {
+  IconBrandSlack,
+  IconBrandTeams,
+  IconChevronRight,
+  IconDeviceMobileMessage,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
@@ -10,6 +47,7 @@ import {
   confirmSms,
   deliveryKey,
   deliveryQueryOptions,
+  type Reachability,
   removeDeliveryBinding,
   startChatLink,
   startSms,
@@ -40,60 +78,80 @@ function writePending(id: string) {
   }
 }
 
+type Transport = Reachability["bindings"][number]["transport"];
+
+const TRANSPORT: Record<
+  Transport,
+  { link: string; icon: typeof IconBrandSlack; summary: string }
+> = {
+  slack: {
+    link: "Link Slack",
+    icon: IconBrandSlack,
+    summary: "Continue a conversation from Slack.",
+  },
+  teams: {
+    link: "Link Microsoft Teams",
+    icon: IconBrandTeams,
+    summary: "Continue a conversation from Microsoft Teams.",
+  },
+  sms: {
+    link: "Connect a phone",
+    icon: IconDeviceMobileMessage,
+    summary: "Continue a conversation by text message.",
+  },
+};
+
+const refresh = () => queryClient.invalidateQueries({ queryKey: deliveryKey });
+
 /**
  * Continuing a conversation in Slack, Microsoft Teams or by text message. Given a Bot, only that
  * Bot's conversations and destinations, and no Bot to pick.
+ *
+ * The destinations already connected are rows with a Disconnect each. Connecting one is a row per
+ * transport that opens a dialog, because it is several inputs — a conversation, then an account or
+ * a phone number — and the answer is a code to send back.
  */
 export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
   const reach = useQuery(deliveryQueryOptions());
-  const channels = useInfiniteQuery(channelListQueryOptions());
   const bots = useQuery(agentListQueryOptions());
   // People read Bots by name; the id is what the list used to show.
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? id;
-  const [channelId, setChannelId] = useState("");
-  const [pickedBot, setAgentId] = useState("");
-  const agentId = fixedBot ?? pickedBot;
-  const [phone, setPhone] = useState("");
-  const [copied, setCopied] = useState(false);
   const [challengeId, setChallengeId] = useState(readPending);
   useEffect(() => writePending(challengeId), [challengeId]);
-  const [code, setCode] = useState("");
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: deliveryKey });
-  const link = useMutation({
-    mutationFn: (platform: "slack" | "teams") =>
-      startChatLink({ channelId, agentId, platform }),
-    onSuccess: () => setCopied(false),
-  });
-  const sms = useMutation({
-    mutationFn: () => startSms({ channelId, agentId, phone }),
-    onSuccess: setChallengeId,
-  });
-  const confirm = useMutation({
-    mutationFn: () => confirmSms(challengeId, code),
-    onSuccess: async () => {
-      setChallengeId("");
-      setCode("");
-      await refresh();
-    },
-  });
+  const [connecting, setConnecting] = useState<Transport | null>(null);
   const remove = useMutation({
     mutationFn: removeDeliveryBinding,
     onSuccess: refresh,
   });
-  const selected = channels.data?.find((channel) => channel.id === channelId);
-  const error =
-    reach.error ??
-    channels.error ??
-    link.error ??
-    sms.error ??
-    confirm.error ??
-    remove.error;
+  const destinations = reach.data?.bindings.filter(
+    (binding) =>
+      binding.enabled &&
+      (fixedBot === undefined || binding.agentId === fixedBot),
+  );
+  const listError = reach.error ?? remove.error;
+  /*
+   * A transport the deployment cannot reach is a row that says why rather than one that opens a
+   * dialog whose every button is disabled. A phone with a code already on its way stays reachable,
+   * so the code can still be confirmed.
+   */
+  const open = (transport: Transport) =>
+    !!reach.data?.available[transport] ||
+    (transport === "sms" && challengeId !== "");
+  const summary = (transport: Transport) => {
+    if (transport === "sms" && challengeId) {
+      return "A verification code is on its way. Enter it to finish.";
+    }
+    if (open(transport)) return TRANSPORT[transport].summary;
+    return transport === "sms"
+      ? "Text messages are not set up on this deployment."
+      : "An administrator needs to pair OpenBot with OpenTag before Slack or Teams can be linked.";
+  };
+
   return (
-    <div className="grid gap-5">
+    <>
       {fixedBot === undefined ? (
-        <p className="text-muted-foreground text-sm">
+        <p className="mt-6 text-muted-foreground text-sm">
           Your devices, recent deliveries, and where each kind of update goes
           are in{" "}
           <Link
@@ -105,223 +163,366 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           .
         </p>
       ) : null}
-      {error && (
-        <p role="alert" className="text-destructive">
-          {error.message}
-        </p>
-      )}
-      <div className="grid gap-3 rounded-lg border p-4">
-        <h2 className="font-semibold">Connect a conversation</h2>
-        <label className="grid gap-1 text-sm">
-          Conversation
-          <select
-            className="h-9 rounded border bg-background px-3"
-            value={channelId}
-            onChange={(event) => {
-              setChannelId(event.target.value);
-              if (fixedBot === undefined) setAgentId("");
-            }}
-          >
-            <option value="">Choose a conversation</option>
-            {channels.data
-              ?.filter(
-                (channel) =>
-                  channel.active &&
-                  (fixedBot === undefined ||
-                    channel.agentIds.includes(fixedBot)),
-              )
-              .map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {conversationLabel(channel)}
-                </option>
-              ))}
-          </select>
-        </label>
-        {fixedBot === undefined ? (
-          <label className="grid gap-1 text-sm">
-            Bot
-            <select
-              className="h-9 rounded border bg-background px-3"
-              value={agentId}
-              onChange={(event) => setAgentId(event.target.value)}
-            >
-              <option value="">Choose a Bot</option>
-              {selected?.agentIds.map((id) => (
-                <option key={id} value={id}>
-                  {botName(id)}
-                </option>
-              ))}
-            </select>
-          </label>
+      <PageSection title="Connected destinations">
+        {listError ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            {listError.message}
+          </p>
         ) : null}
-        {channels.hasNextPage && (
-          <Button variant="outline" onClick={() => channels.fetchNextPage()}>
-            Load more conversations
-          </Button>
+        {reach.isPending || !destinations ? null : destinations.length === 0 ? (
+          <PageEmpty>No destinations connected.</PageEmpty>
+        ) : (
+          <PageRows>
+            {destinations.map((binding, index) => {
+              const Icon = TRANSPORT[binding.transport].icon;
+              return (
+                <Fragment key={binding.id}>
+                  {index > 0 ? <Separator /> : null}
+                  <Item size="sm">
+                    <ItemMedia variant="icon">
+                      <Icon />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>
+                        {binding.transport === "slack"
+                          ? "Slack"
+                          : binding.transport === "teams"
+                            ? "Microsoft Teams"
+                            : binding.address}
+                      </ItemTitle>
+                      <ItemDescription>
+                        {botName(binding.agentId)}
+                        {binding.optedOutAt
+                          ? " · Replied STOP; text START to resume"
+                          : null}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(binding.id)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Disconnect
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                </Fragment>
+              );
+            })}
+          </PageRows>
         )}
-        <p className="text-muted-foreground text-sm">
-          An account or phone number reaches one conversation at a time. Linking
-          it here moves it from wherever it is linked now.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={
-              !agentId ||
-              !channelId ||
-              !reach.data?.available.slack ||
-              link.isPending
-            }
-            onClick={() => link.mutate("slack")}
-          >
-            Link Slack
-          </Button>
-          <Button
-            variant="outline"
-            disabled={
-              !agentId ||
-              !channelId ||
-              !reach.data?.available.teams ||
-              link.isPending
-            }
-            onClick={() => link.mutate("teams")}
-          >
-            Link Microsoft Teams
-          </Button>
-        </div>
-        {link.data && (
-          <div className="grid gap-2 rounded border bg-muted/40 p-3 text-sm">
-            <p>
-              Send this message to the OpenBot app in{" "}
-              {link.data.platform === "teams" ? "Microsoft Teams" : "Slack"}{" "}
-              within {link.data.expiresInMinutes} minutes. It links that account
-              to this conversation and Bot.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 break-all rounded bg-background px-2 py-1">
-                {link.data.command}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(link.data?.command ?? "");
-                  setCopied(true);
+      </PageSection>
+      <PageSection
+        description="In a channel other people can read, the Bot answers you in a direct message instead."
+        title="Connect a conversation"
+      >
+        {reach.data ? (
+          <PageRows>
+            {(Object.keys(TRANSPORT) as Transport[]).map((transport, index) => {
+              const Icon = TRANSPORT[transport].icon;
+              const opens = open(transport);
+              return (
+                <Fragment key={transport}>
+                  {index > 0 ? <Separator /> : null}
+                  <Item
+                    render={
+                      opens ? (
+                        <button
+                          onClick={() => setConnecting(transport)}
+                          type="button"
+                        />
+                      ) : undefined
+                    }
+                    size="sm"
+                  >
+                    <ItemMedia variant="icon">
+                      <Icon />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{TRANSPORT[transport].link}</ItemTitle>
+                      <ItemDescription>{summary(transport)}</ItemDescription>
+                    </ItemContent>
+                    {opens ? (
+                      <ItemActions>
+                        <IconChevronRight className="size-4 text-muted-foreground" />
+                      </ItemActions>
+                    ) : null}
+                  </Item>
+                </Fragment>
+              );
+            })}
+          </PageRows>
+        ) : null}
+      </PageSection>
+      {connecting && reach.data ? (
+        <ConnectDialog
+          available={reach.data.available}
+          botName={botName}
+          challengeId={challengeId}
+          fixedBot={fixedBot}
+          onChallenge={setChallengeId}
+          onClose={() => setConnecting(null)}
+          transport={connecting}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Choose the conversation, then link an account or verify a phone. Linking an account answers with a
+ * one-time `link <code>` message to send to the OpenBot app; a phone answers with a text carrying a
+ * code to type back here.
+ */
+function ConnectDialog({
+  transport,
+  available,
+  fixedBot,
+  botName,
+  challengeId,
+  onChallenge,
+  onClose,
+}: {
+  transport: Transport;
+  available: Reachability["available"];
+  fixedBot: string | undefined;
+  botName: (id: string) => string;
+  challengeId: string;
+  onChallenge: (id: string) => void;
+  onClose: () => void;
+}) {
+  const formId = useId();
+  const channels = useInfiniteQuery(channelListQueryOptions());
+  const [channelId, setChannelId] = useState("");
+  const [pickedBot, setAgentId] = useState("");
+  const agentId = fixedBot ?? pickedBot;
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [copied, setCopied] = useState(false);
+  const link = useMutation({
+    mutationFn: (platform: "slack" | "teams") =>
+      startChatLink({ channelId, agentId, platform }),
+    onSuccess: () => setCopied(false),
+  });
+  const sms = useMutation({
+    mutationFn: () => startSms({ channelId, agentId, phone }),
+    onSuccess: onChallenge,
+  });
+  const confirm = useMutation({
+    mutationFn: () => confirmSms(challengeId, code),
+    onSuccess: async () => {
+      onChallenge("");
+      setCode("");
+      await refresh();
+      onClose();
+    },
+  });
+  const conversations =
+    channels.data?.filter(
+      (channel) =>
+        channel.active &&
+        (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
+    ) ?? [];
+  const selected = channels.data?.find((channel) => channel.id === channelId);
+  const chosen = !!agentId && !!channelId;
+  const error = channels.error ?? link.error ?? sms.error ?? confirm.error;
+
+  return (
+    <Dialog onOpenChange={(next) => !next && onClose()} open>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{TRANSPORT[transport].link}</DialogTitle>
+          <DialogDescription>
+            An account or phone number reaches one conversation at a time.
+            Linking it here moves it from wherever it is linked now.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4 grid gap-4 overflow-y-auto">
+          <Field>
+            <FieldLabel htmlFor={`${formId}-conversation`}>
+              Conversation
+            </FieldLabel>
+            <Select
+              items={Object.fromEntries(
+                conversations.map((channel) => [
+                  channel.id,
+                  conversationLabel(channel),
+                ]),
+              )}
+              onValueChange={(next) => {
+                setChannelId(typeof next === "string" ? next : "");
+                if (fixedBot === undefined) setAgentId("");
+              }}
+              value={channelId || null}
+            >
+              <SelectTrigger className="w-full" id={`${formId}-conversation`}>
+                <SelectValue placeholder="Choose a conversation" />
+              </SelectTrigger>
+              <SelectContent>
+                {conversations.map((channel) => (
+                  <SelectItem key={channel.id} value={channel.id}>
+                    {conversationLabel(channel)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {fixedBot === undefined ? (
+            <Field>
+              <FieldLabel htmlFor={`${formId}-bot`}>Bot</FieldLabel>
+              <Select
+                items={Object.fromEntries(
+                  (selected?.agentIds ?? []).map((id) => [id, botName(id)]),
+                )}
+                onValueChange={(next) =>
+                  setAgentId(typeof next === "string" ? next : "")
+                }
+                value={pickedBot || null}
+              >
+                <SelectTrigger className="w-full" id={`${formId}-bot`}>
+                  <SelectValue placeholder="Choose a Bot" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selected?.agentIds.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {botName(id)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : null}
+          {channels.hasNextPage ? (
+            <Button
+              className="justify-self-start"
+              onClick={() => channels.fetchNextPage()}
+              size="sm"
+              variant="outline"
+            >
+              Load more conversations
+            </Button>
+          ) : null}
+          {transport === "sms" ? (
+            <>
+              <form
+                id={`${formId}-phone-form`}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sms.mutate();
                 }}
               >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            </div>
-          </div>
-        )}
-        <p className="text-sm text-muted-foreground">
-          In a channel other people can read, the Bot answers you in a direct
-          message instead.
-        </p>
-        {reach.data && !reach.data.available.slack && (
-          <p className="text-sm text-muted-foreground">
-            An administrator needs to pair OpenBot with OpenTag before Slack or
-            Teams can be linked.
-          </p>
-        )}
-        <form
-          className="grid gap-3 border-t pt-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            sms.mutate();
-          }}
-        >
-          <label htmlFor="delivery-phone" className="grid gap-1 text-sm">
-            Phone number
-            <Input
-              id="delivery-phone"
-              type="tel"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="+15551234567"
-              required
-              pattern="\+[1-9][0-9]{7,14}"
-            />
-          </label>
-          <Button
-            type="submit"
-            disabled={
-              !agentId ||
-              !channelId ||
-              !reach.data?.available.sms ||
-              sms.isPending
-            }
-          >
-            Send verification code
-          </Button>
-        </form>
-        {challengeId && (
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              confirm.mutate();
-            }}
-          >
-            <Input
-              aria-label="Verification code"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              required
-            />
-            <Button type="submit" disabled={confirm.isPending}>
-              Confirm phone
-            </Button>
-          </form>
-        )}
-      </div>
-      <section className="grid gap-3 rounded-lg border p-4">
-        <h2 className="font-semibold">Connected destinations</h2>
-        {reach.isPending ? (
-          <p>Loading connections…</p>
-        ) : (
-          reach.data?.bindings
-            .filter(
-              (binding) =>
-                binding.enabled &&
-                (fixedBot === undefined || binding.agentId === fixedBot),
-            )
-            .map((binding) => (
-              <div
-                key={binding.id}
-                className="flex items-center justify-between gap-2"
-              >
-                <p className="text-sm">
-                  {binding.transport === "slack"
-                    ? "Slack"
-                    : binding.transport === "teams"
-                      ? "Microsoft Teams"
-                      : binding.optedOutAt
-                        ? `${binding.address} (replied STOP; text START to resume)`
-                        : binding.address}{" "}
-                  · {botName(binding.agentId)}
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={remove.isPending}
-                  onClick={() => remove.mutate(binding.id)}
+                <Field>
+                  <FieldLabel htmlFor={`${formId}-phone`}>
+                    Phone number
+                  </FieldLabel>
+                  <Input
+                    id={`${formId}-phone`}
+                    onChange={(event) => setPhone(event.target.value)}
+                    pattern="\+[1-9][0-9]{7,14}"
+                    placeholder="+15551234567"
+                    required
+                    type="tel"
+                    value={phone}
+                  />
+                </Field>
+              </form>
+              {challengeId ? (
+                <form
+                  id={`${formId}-code-form`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    confirm.mutate();
+                  }}
                 >
-                  Disconnect
+                  <Field>
+                    <FieldLabel htmlFor={`${formId}-code`}>
+                      Verification code
+                    </FieldLabel>
+                    <Input
+                      autoComplete="one-time-code"
+                      id={`${formId}-code`}
+                      onChange={(event) => setCode(event.target.value)}
+                      required
+                      value={code}
+                    />
+                  </Field>
+                </form>
+              ) : null}
+            </>
+          ) : link.data ? (
+            <Item size="sm" variant="muted">
+              <ItemContent>
+                <ItemDescription className="line-clamp-none">
+                  Send this message to the OpenBot app in{" "}
+                  {link.data.platform === "teams" ? "Microsoft Teams" : "Slack"}{" "}
+                  within {link.data.expiresInMinutes} minutes. It links that
+                  account to this conversation and Bot.
+                </ItemDescription>
+                <ItemTitle className="break-all font-mono">
+                  {link.data.command}
+                </ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(
+                      link.data?.command ?? "",
+                    );
+                    setCopied(true);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  {copied ? "Copied" : "Copy"}
                 </Button>
-              </div>
-            ))
-        )}
-        {reach.data?.bindings.every(
-          (binding) =>
-            !binding.enabled ||
-            (fixedBot !== undefined && binding.agentId !== fixedBot),
-        ) && (
-          <p className="text-sm text-muted-foreground">
-            No destinations connected.
-          </p>
-        )}
-      </section>
-    </div>
+              </ItemActions>
+            </Item>
+          ) : null}
+          {error ? (
+            <p className="text-destructive text-sm" role="alert">
+              {error.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" variant="outline">
+            Close
+          </Button>
+          {transport === "sms" ? (
+            <>
+              <Button
+                disabled={!chosen || !available.sms || sms.isPending}
+                form={`${formId}-phone-form`}
+                size="sm"
+                type="submit"
+                variant={challengeId ? "outline" : "default"}
+              >
+                Send verification code
+              </Button>
+              {challengeId ? (
+                <Button
+                  disabled={confirm.isPending}
+                  form={`${formId}-code-form`}
+                  size="sm"
+                  type="submit"
+                >
+                  Confirm phone
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <Button
+              disabled={!chosen || !available[transport] || link.isPending}
+              onClick={() => link.mutate(transport)}
+              size="sm"
+            >
+              {TRANSPORT[transport].link}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
