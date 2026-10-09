@@ -31,7 +31,7 @@ afterEach(cleanup);
 afterAll(() => GlobalRegistrator.unregister());
 
 const originalFetch = global.fetch;
-let role: "user" | "admin" = "user";
+const role = "user";
 const sent: { path: string; method: string; body: unknown }[] = [];
 
 const inbox = {
