@@ -136,3 +136,19 @@ test("a rule added here is for this Bot, with no Bot to type", async () => {
     }),
   );
 });
+
+test("a personal rule whose Bot is a pattern matching this Bot is shown and can be removed here", async () => {
+  serving();
+  const served = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await served(input, init);
+    if (String(input) !== "/api/approvals" || init?.method) return response;
+    const body = await response.json();
+    body.rules.push(rule("pattern", "exp*", "mcp/linear/*"));
+    return Response.json(body);
+  }) as unknown as typeof fetch;
+  const view = draw();
+  expect(
+    await view.findByRole("combobox", { name: "Behaviour for mcp/linear/*" }),
+  ).toBeTruthy();
+});

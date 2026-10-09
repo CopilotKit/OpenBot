@@ -108,6 +108,8 @@ beforeEach(() => {
       }
       if (url === "/api/approvals")
         return Response.json({ ...inbox, ...inboxOverride });
+      if (url.startsWith("/api/agents"))
+        return Response.json({ agents: [{ id: "shopper-bot", name: "Shop" }] });
       if (url === "/api/me")
         return Response.json({
           user: { id: "me", email: "me@example.test", role },
@@ -234,7 +236,7 @@ test("rules for every Bot point to where rules for a single Bot are", async () =
       ...inbox.rules,
       {
         id: "one-bot",
-        botId: "shopper",
+        botId: "shopper-bot",
         toolRef: "computer_click",
         effect: "*",
         scope: "*",
@@ -249,6 +251,27 @@ test("rules for every Bot point to where rules for a single Bot are", async () =
   expect(
     view.queryByRole("combobox", { name: "Behaviour for computer_click" }),
   ).toBeNull();
+});
+
+test("a rule naming no Bot this person can open is listed so it can be removed", async () => {
+  inboxOverride = {
+    rules: [
+      ...inbox.rules,
+      {
+        id: "orphan",
+        botId: "Shopper",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "allow",
+      },
+    ],
+  };
+  const view = draw(<ApprovalSettings />);
+  expect(await view.findByText("Rules for other Bots")).toBeTruthy();
+  expect(
+    view.getByRole("combobox", { name: "Behaviour for computer_click" }),
+  ).toBeTruthy();
 });
 
 test("a pending change is drawn in the conversation where the action was, and decided there", async () => {

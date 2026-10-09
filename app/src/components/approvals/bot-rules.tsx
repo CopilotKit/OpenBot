@@ -4,6 +4,7 @@ import {
   approvalInboxOptions,
   createApprovalRuleMutationOptions,
   revokeApprovalRuleMutationOptions,
+  ruleCoversBot,
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
 import { queryClient } from "@/query-client";
@@ -11,7 +12,7 @@ import { RuleForm, RuleRow } from "./rules";
 
 /**
  * The person's approval rules for one Bot, and the team rules that reach it, locked. Rules for every
- * Bot are in Settings → Approvals. A rule's `botId` is the Bot's id, so "this Bot's" is an equality.
+ * Bot are in Settings → Approvals. A rule's `botId` is the Bot's id, or a pattern covering it.
  */
 export function BotApprovalRules({ agentId }: { agentId: string }) {
   const inbox = useQuery(approvalInboxOptions());
@@ -24,8 +25,9 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     inbox.error ?? addRule.error ?? changeRule.error ?? revoke.error;
   if (inbox.isPending && !error) return null;
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
+  // Rules naming this Bot, including a pattern that covers it; rules for every Bot are in Settings.
   const mine = (inbox.data?.rules ?? []).filter(
-    (rule) => rule.botId === agentId,
+    (rule) => rule.botId !== "*" && ruleCoversBot(rule.botId, agentId),
   );
   const team = (inbox.data?.teamRules ?? []).filter(
     (rule) => rule.botId === "*" || rule.botId === agentId,

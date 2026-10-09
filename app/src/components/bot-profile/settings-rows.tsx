@@ -31,7 +31,7 @@ import {
   sharingSummary,
 } from "@/lib/agents/bot-summaries";
 import type { AgentProfile } from "@/lib/agents/queries";
-import { approvalInboxOptions } from "@/lib/approvals";
+import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deliveryQueryOptions } from "@/lib/delivery";
 import { memorySourcesQueryOptions } from "@/lib/memory";
@@ -128,8 +128,10 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
       icon: IconChecks,
       summary: approvals.data
         ? countLabel(
-            approvals.data.rules.filter((rule) => rule.botId === agent.id)
-              .length,
+            approvals.data.rules.filter(
+              (rule) =>
+                rule.botId !== "*" && ruleCoversBot(rule.botId, agent.id),
+            ).length,
             "rule",
             "rules",
             "No rules",

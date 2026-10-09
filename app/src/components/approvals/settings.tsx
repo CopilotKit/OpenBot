@@ -8,8 +8,10 @@ import {
   createApprovalRuleMutationOptions,
   type HostCommandPolicy,
   revokeApprovalRuleMutationOptions,
+  ruleCoversBot,
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, RuleForm, RuleRow, selectClass } from "./rules";
@@ -22,6 +24,8 @@ import { HOST_LABELS, RuleForm, RuleRow, selectClass } from "./rules";
 export function ApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
   const me = useQuery(currentUserQueryOptions()).data;
+  const agents = useQuery(agentListQueryOptions());
+  const hiddenAgents = useQuery(agentListQueryOptions(true));
   const preferences = useMutation(
     approvalPreferencesMutationOptions(queryClient),
   );
@@ -41,6 +45,17 @@ export function ApprovalSettings() {
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
   const everyBot = (inbox.data?.rules ?? []).filter(
     (rule) => rule.botId === "*",
+  );
+  /*
+   * Rules that name no Bot this person can open — a Bot since deleted, or a name typed where an id
+   * belonged. They are still enforced, so they are listed here where they can be removed.
+   */
+  const reachable = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
+  const otherBots = (inbox.data?.rules ?? []).filter(
+    (rule) =>
+      rule.botId !== "*" &&
+      (agents.data === undefined ||
+        !reachable.some((agent) => ruleCoversBot(rule.botId, agent.id))),
   );
   const teamRules = inbox.data?.teamRules ?? [];
 
@@ -213,6 +228,27 @@ export function ApprovalSettings() {
           ) : null}
         </div>
       </PageSection>
+      {agents.data !== undefined && otherBots.length > 0 ? (
+        <PageSection
+          description="These name no Bot you can open, but they still apply to any Bot they match. Remove the ones you no longer want."
+          title="Rules for other Bots"
+        >
+          <div className="mt-4 space-y-3">
+            {otherBots.map((rule) => (
+              <RuleRow
+                disabled={revoke.isPending || changeRule.isPending}
+                key={rule.id}
+                locked={rulesOff}
+                onChange={(behaviour) =>
+                  changeRule.mutate({ id: rule.id, behaviour })
+                }
+                onRevoke={() => revoke.mutate(rule.id)}
+                rule={rule}
+              />
+            ))}
+          </div>
+        </PageSection>
+      ) : null}
     </>
   );
 }
