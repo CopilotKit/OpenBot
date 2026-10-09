@@ -9,10 +9,10 @@ export const Route = createFileRoute("/_authed/settings/memory")({
 function MemorySettingsPage() {
   return (
     <PageShell
+      action={<RememberFact />}
       description="What your Bots know about you. Facts you tell them reach every Bot; what a Bot learns stays with that Bot."
       title="Memory"
     >
-      <RememberFact />
       <MemoryList />
     </PageShell>
   );

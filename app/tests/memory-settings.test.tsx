@@ -90,8 +90,12 @@ test("remembering a fact saves it", async () => {
   serving();
   const view = draw(<RememberFact />);
   const user = userEvent.setup({ document });
+  // The form lives in a dialog behind the page's action, not on the page.
+  fireEvent.click(view.getByRole("button", { name: "Remember a fact" }));
   await user.type(
-    view.getByRole("textbox", { name: "Something you want your Bots to know" }),
+    await view.findByRole("textbox", {
+      name: "Something you want your Bots to know",
+    }),
     "I work from Lisbon.",
   );
   fireEvent.click(view.getByRole("button", { name: "Remember" }));
