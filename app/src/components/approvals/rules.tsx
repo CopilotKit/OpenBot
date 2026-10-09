@@ -92,6 +92,7 @@ export function RuleForm({
   onSave,
   botField = true,
   oneBot = false,
+  forBot,
 }: {
   label: string;
   pending: boolean;
@@ -103,8 +104,14 @@ export function RuleForm({
    * and be saved somewhere other than the page it was written on.
    */
   oneBot?: boolean;
+  /** The Bot every rule from this form is for, already known from the page it is on. */
+  forBot?: string;
 }) {
-  const blank = oneBot ? { ...EMPTY_RULE, botId: "" } : EMPTY_RULE;
+  const blank = forBot
+    ? { ...EMPTY_RULE, botId: forBot }
+    : oneBot
+      ? { ...EMPTY_RULE, botId: "" }
+      : EMPTY_RULE;
   const [rule, setRule] = useState<ApprovalRuleInput>(blank);
   const botNamed = !oneBot || (rule.botId.trim() !== "" && rule.botId !== "*");
   const field = (key: keyof ApprovalRuleInput, title: string, hint: string) => (
