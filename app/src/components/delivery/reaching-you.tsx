@@ -166,7 +166,10 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={
-              !agentId || !reach.data?.available.slack || link.isPending
+              !agentId ||
+              !channelId ||
+              !reach.data?.available.slack ||
+              link.isPending
             }
             onClick={() => link.mutate("slack")}
           >
@@ -175,7 +178,10 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           <Button
             variant="outline"
             disabled={
-              !agentId || !reach.data?.available.teams || link.isPending
+              !agentId ||
+              !channelId ||
+              !reach.data?.available.teams ||
+              link.isPending
             }
             onClick={() => link.mutate("teams")}
           >
@@ -238,7 +244,12 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
           </label>
           <Button
             type="submit"
-            disabled={!agentId || !reach.data?.available.sms || sms.isPending}
+            disabled={
+              !agentId ||
+              !channelId ||
+              !reach.data?.available.sms ||
+              sms.isPending
+            }
           >
             Send verification code
           </Button>

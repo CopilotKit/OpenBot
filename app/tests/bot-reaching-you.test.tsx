@@ -130,3 +130,18 @@ test("linking Slack needs only a conversation, and warns that it moves the accou
     }),
   );
 });
+
+test("nothing can be linked until a conversation is chosen", async () => {
+  serving();
+  const view = draw();
+  await view.findByRole("button", { name: "Disconnect" });
+  expect(
+    view.getByRole("button", { name: "Link Slack" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.change(view.getByRole("combobox", { name: /^Conversation/ }), {
+    target: { value: "channel-expenses" },
+  });
+  expect(
+    view.getByRole("button", { name: "Link Slack" }).hasAttribute("disabled"),
+  ).toBe(false);
+});
