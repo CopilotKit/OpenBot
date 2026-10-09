@@ -1,4 +1,4 @@
-import { IconApps, IconBox } from "@tabler/icons-react";
+import { IconApps, IconBox, IconChevronRight } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -207,6 +207,9 @@ function Granted({ agentId }: { agentId: string }) {
                   <span className="text-muted-foreground text-sm tabular-nums">
                     {labels.length} {labels.length === 1 ? "tool" : "tools"}
                   </span>
+                  {me?.role === "admin" ? (
+                    <IconChevronRight className="size-4 text-muted-foreground" />
+                  ) : null}
                 </ItemActions>
               </Item>
             </Fragment>

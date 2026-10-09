@@ -56,6 +56,16 @@ function serving() {
         pending: [],
       });
     }
+    if (url.endsWith("/lifecycle")) {
+      return Response.json({
+        lifecycle: {
+          agentId: "expenses",
+          paused: false,
+          pausedAt: null,
+          notify: "all",
+        },
+      });
+    }
     if (url.includes("/api/me")) {
       return Response.json({
         user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
@@ -95,4 +105,11 @@ test("someone who cannot manage the Bot is not shown the warning", async () => {
   const view = draw({ ...BOT, canManage: false, mine: false });
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(view.queryByText(/calls from this Bot are refused/)).toBeNull();
+});
+
+test("the Message row shows the chevron every row that goes somewhere carries", async () => {
+  serving();
+  const view = draw(BOT);
+  const row = (await view.findByText("Message Expenses")).closest("a");
+  expect(row?.querySelector(".tabler-icon-chevron-right")).not.toBeNull();
 });

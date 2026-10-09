@@ -135,3 +135,14 @@ test("a Bot an administrator assigned to you reads as pinned and cannot be hidde
     view.getAllByText(/Assigned to you by an administrator/).length,
   ).toBeGreaterThan(0);
 });
+
+test("rows that open a dialog show a chevron, and Duplicate, which acts at once, does not", () => {
+  const view = draw(BOT);
+  const chevron = (name: RegExp) =>
+    view
+      .getByRole("button", { name })
+      .querySelector(".tabler-icon-chevron-right");
+  expect(chevron(/^Reset/)).not.toBeNull();
+  expect(chevron(/^Delete/)).not.toBeNull();
+  expect(chevron(/^Duplicate/)).toBeNull();
+});

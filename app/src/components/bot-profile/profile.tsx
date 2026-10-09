@@ -1,4 +1,9 @@
-import { IconBell, IconMessage, IconPlayerPause } from "@tabler/icons-react";
+import {
+  IconBell,
+  IconChevronRight,
+  IconMessage,
+  IconPlayerPause,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
@@ -191,6 +196,9 @@ export function BotProfile({
                 <ItemTitle>Message {agent.name}</ItemTitle>
                 <ItemDescription>Start a conversation.</ItemDescription>
               </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
+              </ItemActions>
             </Item>
           </PageRows>
         )}

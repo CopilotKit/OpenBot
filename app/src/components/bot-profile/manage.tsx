@@ -1,4 +1,5 @@
 import {
+  IconChevronRight,
   IconCopy,
   IconEyeOff,
   IconPin,
@@ -274,6 +275,9 @@ export function ManageSection({
               its scheduled work. You see what will go first.
             </ItemDescription>
           </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
         </Item>
         {agent.canManage ? (
           <>
@@ -293,6 +297,9 @@ export function ManageSection({
                   For everyone. This cannot be undone.
                 </ItemDescription>
               </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
+              </ItemActions>
             </Item>
           </>
         ) : null}
