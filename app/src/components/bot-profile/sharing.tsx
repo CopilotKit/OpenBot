@@ -1,6 +1,12 @@
-import { IconLink, IconUsersGroup } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import {
+  IconChevronRight,
+  IconLink,
+  IconPlus,
+  IconUsers,
+  IconUsersGroup,
+} from "@tabler/icons-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Fragment, useId, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -8,6 +14,16 @@ import {
 } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -17,7 +33,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { countLabel } from "@/lib/agents/bot-summaries";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
@@ -28,6 +52,7 @@ import {
   teamBotsQueryOptions,
   unpublishTeamBotMutationOptions,
 } from "@/lib/team-bots";
+import { queryClient } from "@/query-client";
 
 const list = (value: string) =>
   value
@@ -43,9 +68,9 @@ const list = (value: string) =>
 export function SharingSections({ agent }: { agent: AgentProfile }) {
   const data = useQuery(teamBotsQueryOptions());
   const me = useQuery(currentUserQueryOptions()).data;
-  const queryClient = useQueryClient();
   const unpublish = useMutation(unpublishTeamBotMutationOptions(queryClient));
   const [copied, setCopied] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   if (data.isPending) return null;
   if (data.error) {
     return (
@@ -135,9 +160,34 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
           description="Publishing does not change its visibility, and it can be undone."
           title={published ? "Who it is published to" : "Publish"}
         >
-          <div className="mt-4">
-            <PublishForm botId={agent.id} current={published} />
-          </div>
+          {/* More than one value — an audience, then people and groups — so a summary row and a
+              dialog rather than a form on the page. */}
+          <PageRows>
+            <Item
+              render={
+                <button onClick={() => setPublishing(true)} type="button" />
+              }
+              size="sm"
+            >
+              <ItemMedia variant="icon">
+                <IconUsersGroup />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Audience</ItemTitle>
+                <ItemDescription>{audienceSummary(published)}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <IconChevronRight className="size-4 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </PageRows>
+          {publishing ? (
+            <PublishDialog
+              botId={agent.id}
+              current={published}
+              onClose={() => setPublishing(false)}
+            />
+          ) : null}
         </PageSection>
       ) : null}
       {me?.role === "admin" && published ? (
@@ -145,18 +195,43 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
           description="An assigned Bot is pinned at the top of every member's Bots list. Use * for the whole team."
           title="Assign to groups"
         >
-          <div className="mt-4">
-            <Assignments bot={published} />
-          </div>
+          <Assignments bot={published} />
         </PageSection>
       ) : null}
     </>
   );
 }
 
-/** Who a Bot is published to: the whole team, or named people and groups. */
-function PublishForm({ botId, current }: { botId: string; current?: TeamBot }) {
-  const queryClient = useQueryClient();
+/** The current answer on the Audience row: who it is published to, as a count. */
+function audienceSummary(current: TeamBot | undefined): string {
+  if (!current) return "Not published";
+  if (current.audience === "team") return "The whole team";
+  const parts = [
+    countLabel(current.people?.length ?? 0, "person", "people", ""),
+    countLabel(current.groups?.length ?? 0, "group", "groups", ""),
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "Specific people or groups";
+}
+
+const AUDIENCES = {
+  team: "The whole team",
+  people: "Specific people or groups",
+} as const;
+
+/**
+ * Who a Bot is published to: the whole team, or named people and groups. Mounted only while open,
+ * so each opening starts from the current answer rather than from an abandoned edit.
+ */
+function PublishDialog({
+  botId,
+  current,
+  onClose,
+}: {
+  botId: string;
+  current?: TeamBot;
+  onClose: () => void;
+}) {
+  const formId = useId();
   const publish = useMutation(publishTeamBotMutationOptions(queryClient));
   const [audience, setAudience] = useState<"team" | "people">(
     current?.audience ?? "team",
@@ -164,118 +239,232 @@ function PublishForm({ botId, current }: { botId: string; current?: TeamBot }) {
   const [emails, setEmails] = useState((current?.people ?? []).join(", "));
   const [groups, setGroups] = useState((current?.groups ?? []).join(", "));
   return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        publish.mutate({
-          botId,
-          audience,
-          emails: audience === "people" ? list(emails) : [],
-          groups: audience === "people" ? list(groups) : [],
-        });
-      }}
-    >
-      <div className="flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-1.5">
-          <input
-            checked={audience === "team"}
-            name={`audience-${botId}`}
-            onChange={() => setAudience("team")}
-            type="radio"
-          />
-          The whole team
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input
-            checked={audience === "people"}
-            name={`audience-${botId}`}
-            onChange={() => setAudience("people")}
-            type="radio"
-          />
-          Specific people or groups
-        </label>
-      </div>
-      {audience === "people" ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Input
-            aria-label="People, by email"
-            onChange={(event) => setEmails(event.target.value)}
-            placeholder="People, by email, comma separated"
-            value={emails}
-          />
-          <Input
-            aria-label="Groups"
-            onChange={(event) => setGroups(event.target.value)}
-            placeholder="Groups, comma separated"
-            value={groups}
-          />
-        </div>
-      ) : null}
-      <SharedAppNotice botId={botId} reason="publish" />
-      <div className="flex items-center gap-2">
-        <Button disabled={publish.isPending} size="sm" type="submit">
-          {current ? "Update" : "Publish to team"}
-        </Button>
-        {publish.error ? (
-          <span className="text-sm text-destructive" role="alert">
-            {publish.error.message}
-          </span>
-        ) : null}
-      </div>
-    </form>
+    <Dialog onOpenChange={(next) => !next && onClose()} open>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {current ? "Who it is published to" : "Publish"}
+          </DialogTitle>
+          <DialogDescription>
+            Publishing does not change its visibility, and it can be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4 overflow-y-auto">
+          {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
+              direct child of DialogContent and keeps scrolling. */}
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              publish.mutate(
+                {
+                  botId,
+                  audience,
+                  emails: audience === "people" ? list(emails) : [],
+                  groups: audience === "people" ? list(groups) : [],
+                },
+                { onSuccess: onClose },
+              );
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`${formId}-audience`}>
+                  Published to
+                </FieldLabel>
+                <Select
+                  items={AUDIENCES}
+                  onValueChange={(value) => {
+                    if (value === "team" || value === "people") {
+                      setAudience(value);
+                    }
+                  }}
+                  value={audience}
+                >
+                  <SelectTrigger className="w-full" id={`${formId}-audience`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(AUDIENCES) as (keyof typeof AUDIENCES)[]).map(
+                      (value) => (
+                        <SelectItem key={value} value={value}>
+                          {AUDIENCES[value]}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {audience === "people" ? (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor={`${formId}-people`}>
+                      People, by email
+                    </FieldLabel>
+                    <Input
+                      id={`${formId}-people`}
+                      onChange={(event) => setEmails(event.target.value)}
+                      placeholder="Comma separated"
+                      value={emails}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${formId}-groups`}>Groups</FieldLabel>
+                    <Input
+                      id={`${formId}-groups`}
+                      onChange={(event) => setGroups(event.target.value)}
+                      placeholder="Comma separated"
+                      value={groups}
+                    />
+                  </Field>
+                </>
+              ) : null}
+              <SharedAppNotice botId={botId} reason="publish" />
+            </FieldGroup>
+          </form>
+          {publish.error ? (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              {publish.error.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button
+            disabled={publish.isPending}
+            form={formId}
+            size="sm"
+            type="submit"
+          >
+            {current ? "Update" : "Publish to team"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
+/**
+ * The groups an administrator has pinned this Bot for: one row each with a Remove, and a row that
+ * opens a dialog to add one.
+ */
 function Assignments({ bot }: { bot: TeamBot }) {
-  const queryClient = useQueryClient();
+  const remove = useMutation(assignTeamBotMutationOptions(queryClient));
+  const [assigning, setAssigning] = useState(false);
+  const assigned = bot.assignments ?? [];
+  return (
+    <>
+      {remove.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {remove.error.message}
+        </p>
+      ) : null}
+      {assigned.length === 0 ? (
+        <PageEmpty>Not assigned to any group.</PageEmpty>
+      ) : null}
+      <PageRows>
+        {assigned.map((name) => (
+          <Fragment key={name}>
+            <Item size="sm">
+              <ItemMedia variant="icon">
+                <IconUsers />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{name === "*" ? "Whole team" : name}</ItemTitle>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  aria-label={`Remove ${name}`}
+                  disabled={remove.isPending}
+                  onClick={() =>
+                    remove.mutate({ botId: bot.id, group: name, remove: true })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  Remove
+                </Button>
+              </ItemActions>
+            </Item>
+            <Separator />
+          </Fragment>
+        ))}
+        <Item
+          render={<button onClick={() => setAssigning(true)} type="button" />}
+          size="sm"
+        >
+          <ItemMedia variant="icon">
+            <IconPlus />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Assign to a group</ItemTitle>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+      </PageRows>
+      {assigning ? (
+        <AssignDialog bot={bot} onClose={() => setAssigning(false)} />
+      ) : null}
+    </>
+  );
+}
+
+/** One group to pin this Bot for, or * for the whole team. */
+function AssignDialog({ bot, onClose }: { bot: TeamBot; onClose: () => void }) {
+  const formId = useId();
   const assign = useMutation(assignTeamBotMutationOptions(queryClient));
   const [group, setGroup] = useState("");
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      {(bot.assignments ?? []).map((name) => (
-        <Button
-          aria-label={`Remove ${name}`}
-          key={name}
-          onClick={() =>
-            assign.mutate({ botId: bot.id, group: name, remove: true })
-          }
-          size="sm"
-          variant="outline"
-        >
-          {name === "*" ? "Whole team" : name} ×
-        </Button>
-      ))}
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          assign.mutate(
-            { botId: bot.id, group },
-            { onSuccess: () => setGroup("") },
-          );
-        }}
-      >
-        <Input
-          aria-label={`Assign ${bot.name} to a group`}
-          className="w-40"
-          onChange={(event) => setGroup(event.target.value)}
-          placeholder="Group, or *"
-          value={group}
-        />
-        <Button
-          disabled={!group.trim() || assign.isPending}
-          size="sm"
-          type="submit"
-        >
-          Assign
-        </Button>
-      </form>
-      {assign.error ? (
-        <span className="text-destructive" role="alert">
-          {assign.error.message}
-        </span>
-      ) : null}
-    </div>
+    <Dialog onOpenChange={(next) => !next && onClose()} open>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Assign {bot.name} to a group</DialogTitle>
+          <DialogDescription>
+            It is pinned at the top of every member's Bots list.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              assign.mutate({ botId: bot.id, group }, { onSuccess: onClose });
+            }}
+          >
+            <Field>
+              <FieldLabel htmlFor={`${formId}-group`}>Group, or *</FieldLabel>
+              <Input
+                id={`${formId}-group`}
+                onChange={(event) => setGroup(event.target.value)}
+                placeholder="* for the whole team"
+                value={group}
+              />
+            </Field>
+          </form>
+          {assign.error ? (
+            <p className="mt-4 text-destructive text-sm" role="alert">
+              {assign.error.message}
+            </p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button
+            disabled={!group.trim() || assign.isPending}
+            form={formId}
+            size="sm"
+            type="submit"
+          >
+            Assign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
