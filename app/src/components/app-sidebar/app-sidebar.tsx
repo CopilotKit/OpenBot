@@ -1,15 +1,11 @@
 import {
   IconBox,
-  IconBrain,
-  IconChecks,
-  IconDeviceMobile,
   IconLogout,
   IconPlus,
   IconRobot,
   IconSearch,
   IconSettings,
   IconShieldLock,
-  IconTargetArrow,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import {
@@ -405,77 +401,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <IconBox />
               </div>
               <span className="text-sm trackint-tight">Skills</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/reachability"
-                  activeProps={{ className: "bg-foreground/5" }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconDeviceMobile />
-              </div>
-              <span className="text-sm">Reachability</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          {/* Routines live on each Bot's own page now, not as a nav destination: the question
-              "what does this Bot do on a schedule" is asked while looking at the Bot. The
-              /routines route still answers a direct link. */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/responsibilities"
-                  activeProps={{ className: "bg-foreground/5" }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconTargetArrow />
-              </div>
-              <span className="text-sm">Responsibilities</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/memory"
-                  activeProps={{ className: "bg-foreground/5" }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconBrain />
-              </div>
-              <span className="text-sm">Memory</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="hover:bg-foreground/5 h-10"
-              render={(props) => (
-                <Link
-                  {...props}
-                  to="/approvals"
-                  activeProps={{ className: "bg-foreground/5" }}
-                />
-              )}
-            >
-              <div className="size-[28px] flex items-center justify-center">
-                <IconChecks />
-              </div>
-              <span className="text-sm">Approvals</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

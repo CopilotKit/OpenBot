@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { legacyAgentsTarget } from "@/lib/agents/legacy-routes";
+import { LEGACY_PAGES, legacyAgentsTarget } from "@/lib/agents/legacy-routes";
 
 test("/agents?agent=<id> opens that Bot's page", () => {
   expect(legacyAgentsTarget({ agent: "agent_1" })).toEqual({
@@ -23,4 +23,13 @@ test("/agents on its own is the roster", () => {
 
 test("creating wins over opening, as it did on /agents", () => {
   expect(legacyAgentsTarget({ new: true, agent: "agent_1" }).to).toBe("/bots");
+});
+
+test("the four pages that left the sidebar send people to where their contents went", () => {
+  expect(LEGACY_PAGES).toEqual({
+    "/approvals": "/settings/approvals",
+    "/memory": "/settings/memory",
+    "/reachability": "/settings/notifications",
+    "/responsibilities": "/bots",
+  });
 });

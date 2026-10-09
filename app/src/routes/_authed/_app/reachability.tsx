@@ -1,18 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ReachingYou } from "@/components/delivery/reaching-you";
-import { PageShell } from "@/components/layout/page-shell";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { LEGACY_PAGES } from "@/lib/agents/legacy-routes";
 
+/** `/reachability` left the sidebar. Linking is on each Bot's page; devices and deliveries are in Settings. */
 export const Route = createFileRoute("/_authed/_app/reachability")({
-  component: ReachabilityPage,
+  beforeLoad: () => {
+    throw redirect({ to: LEGACY_PAGES["/reachability"], replace: true });
+  },
 });
-
-function ReachabilityPage() {
-  return (
-    <PageShell
-      title="Reachability"
-      description="Continue a conversation in Slack, Microsoft Teams, or by text message. Questions and approval requests reach the same person who owns the conversation."
-    >
-      <ReachingYou />
-    </PageShell>
-  );
-}

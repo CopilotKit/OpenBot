@@ -1,18 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { PageShell } from "@/components/layout/page-shell";
-import { BotResponsibilities } from "@/components/responsibilities/responsibilities";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { LEGACY_PAGES } from "@/lib/agents/legacy-routes";
 
+/** `/responsibilities` left the sidebar. Each Bot's responsibilities are on its own page. */
 export const Route = createFileRoute("/_authed/_app/responsibilities")({
-  component: ResponsibilitiesPage,
+  beforeLoad: () => {
+    throw redirect({ to: LEGACY_PAGES["/responsibilities"], replace: true });
+  },
 });
-
-function ResponsibilitiesPage() {
-  return (
-    <PageShell
-      title="Responsibilities"
-      description="Give a Bot a lasting goal, follow its progress, and decide when it should work."
-    >
-      <BotResponsibilities />
-    </PageShell>
-  );
-}

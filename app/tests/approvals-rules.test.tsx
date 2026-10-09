@@ -17,7 +17,6 @@ import {
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ApprovalInbox } from "@/components/approvals/inbox";
 import { ApprovalSettings } from "@/components/approvals/settings";
 import { InlineApproval } from "@/components/approvals/inline-approval";
 import {
@@ -123,7 +122,7 @@ afterEach(() => {
 });
 
 /** A screen in a router of one route, for the links it holds. */
-function draw(screen: ReactNode = <ApprovalInbox />) {
+function draw(screen: ReactNode = <ApprovalSettings />) {
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
     routeTree: createRootRoute({ component: () => screen }),
@@ -138,20 +137,6 @@ function draw(screen: ReactNode = <ApprovalInbox />) {
     </QueryClientProvider>,
   );
 }
-
-test("a hand-off is marked done by the person, never allowed on their behalf", async () => {
-  const view = draw();
-  await view.findByText(/Handed to you: Paying/);
-  expect(view.queryByRole("button", { name: "Allow once" })).toBeNull();
-  fireEvent.click(view.getByRole("button", { name: "I did it myself" }));
-  await waitFor(() =>
-    expect(sent).toContainEqual({
-      path: "/api/approvals/request-1/decision",
-      method: "POST",
-      body: { decision: "handled" },
-    }),
-  );
-});
 
 test("team rules are locked for members, enforced auto-review is shown as required, and the host cap is named", async () => {
   const view = draw(<ApprovalSettings />);
@@ -221,41 +206,6 @@ test("a member adds a rule with one of the four behaviours", async () => {
   );
 });
 
-test("rules for one Bot stay on the Approvals page, and rules for every Bot move to Settings", async () => {
-  inboxOverride = {
-    rules: [
-      ...inbox.rules,
-      {
-        id: "one-bot",
-        botId: "Shopper",
-        toolRef: "computer_click",
-        effect: "*",
-        scope: "*",
-        behaviour: "ask",
-      },
-    ],
-  };
-  const page = draw();
-  expect(
-    await page.findByRole("combobox", { name: "Behaviour for computer_click" }),
-  ).toBeTruthy();
-  expect(page.queryByRole("switch", { name: "Auto-review" })).toBeNull();
-  expect(
-    page.queryByRole("combobox", { name: "Behaviour for mcp/gmail/*" }),
-  ).toBeNull();
-  cleanup();
-
-  const settings = draw(<ApprovalSettings />);
-  expect(
-    await settings.findByRole("combobox", {
-      name: "Behaviour for mcp/gmail/*",
-    }),
-  ).toBeTruthy();
-  expect(
-    settings.queryByRole("combobox", { name: "Behaviour for computer_click" }),
-  ).toBeNull();
-});
-
 test("with personal rules switched off by the team, they are shown as not applying and none can be added", async () => {
   inboxOverride = {
     team: { ...inbox.team, customRulesEnabled: false },
@@ -265,51 +215,40 @@ test("with personal rules switched off by the team, they are shown as not applyi
   expect(view.queryByText("Add a rule")).toBeNull();
 });
 
-test("a rule added for one Bot must name that Bot", async () => {
-  const view = draw();
-  await view.findByText("Add a rule for one Bot");
-  const user = userEvent.setup({ document });
-  await user.type(
-    view.getByRole("textbox", { name: "Tool or app" }),
-    "mcp/slack/*",
-  );
-  const save = view.getByRole("button", { name: "Save rule" });
-  // Without a Bot it would become a rule for every Bot and vanish from this page.
-  expect(save.hasAttribute("disabled")).toBe(true);
-  await user.type(view.getByRole("textbox", { name: "Bot" }), "Shopper");
-  fireEvent.submit(save.closest("form") as HTMLFormElement);
-  await waitFor(() =>
-    expect(sent).toContainEqual({
-      path: "/api/approvals/rules",
-      method: "POST",
-      body: {
-        botId: "Shopper",
-        toolRef: "mcp/slack/*",
-        effect: "*",
-        scope: "*",
-        behaviour: "ask",
-      },
-    }),
-  );
-});
-
-test("an administrator on the Approvals page is told where team settings went", async () => {
+test("an administrator is told where team settings are", async () => {
   role = "admin";
-  const view = draw();
+  const view = draw(<ApprovalSettings />);
   const link = await view.findByRole("link", { name: "Admin → Approvals" });
   expect(link.getAttribute("href")).toBe("/admin/approvals");
 });
 
-test("a member on the Approvals page is not pointed at Admin", async () => {
-  const view = draw();
-  await view.findByText("Rules for one Bot");
+test("a member is not pointed at Admin", async () => {
+  const view = draw(<ApprovalSettings />);
+  await view.findByText("Rules for every Bot");
   expect(view.queryByRole("link", { name: "Admin → Approvals" })).toBeNull();
 });
 
 test("rules for every Bot point to where rules for a single Bot are", async () => {
+  inboxOverride = {
+    rules: [
+      ...inbox.rules,
+      {
+        id: "one-bot",
+        botId: "shopper",
+        toolRef: "computer_click",
+        effect: "*",
+        scope: "*",
+        behaviour: "ask",
+      },
+    ],
+  };
   const view = draw(<ApprovalSettings />);
-  const link = await view.findByRole("link", { name: "Approvals" });
-  expect(link.getAttribute("href")).toBe("/approvals");
+  const link = await view.findByRole("link", { name: "that Bot's page" });
+  expect(link.getAttribute("href")).toBe("/bots");
+  // A rule naming one Bot lives on that Bot's page, not here.
+  expect(
+    view.queryByRole("combobox", { name: "Behaviour for computer_click" }),
+  ).toBeNull();
 });
 
 test("a pending change is drawn in the conversation where the action was, and decided there", async () => {

@@ -10,16 +10,18 @@ import {
   revokeApprovalRuleMutationOptions,
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 import { HOST_LABELS, RuleForm, RuleRow, selectClass } from "./rules";
 
 /**
  * The person's own approval settings: whether their Bots ask before changing things, and the rules
  * that apply to every one of their Bots. Team rules are listed so the person can see them, locked;
- * administrators change them in Admin → Approvals. Rules for a single Bot are not here.
+ * administrators change them in Admin → Approvals. Rules for a single Bot are on that Bot's page.
  */
 export function ApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
+  const me = useQuery(currentUserQueryOptions()).data;
   const preferences = useMutation(
     approvalPreferencesMutationOptions(queryClient),
   );
@@ -47,6 +49,15 @@ export function ApprovalSettings() {
       {error ? (
         <p className="mt-6 text-destructive text-sm" role="alert">
           {error.message}
+        </p>
+      ) : null}
+      {me?.role === "admin" ? (
+        <p className="mt-6 text-muted-foreground text-sm">
+          Team settings and shared account requests are in{" "}
+          <Link className="underline underline-offset-4" to="/admin/approvals">
+            Admin → Approvals
+          </Link>
+          .
         </p>
       ) : null}
       <PageSection title="Before a Bot acts">
@@ -154,8 +165,8 @@ export function ApprovalSettings() {
             The strictest matching rule wins, so an "ask" rule beats an "allow"
             one. Team rules are locked. Changing a password, security settings
             and payments are always handed to you. Rules for a single Bot are on{" "}
-            <Link className="underline underline-offset-4" to="/approvals">
-              Approvals
+            <Link className="underline underline-offset-4" to="/bots">
+              that Bot's page
             </Link>
             .
             {rulesOff

@@ -176,8 +176,12 @@ function GroupLine({
         ) : message.status === "waiting" ? (
           <p className="text-sm text-muted-foreground">
             {message.reason ?? "Waiting for your response."}{" "}
-            <Link className="underline" to="/approvals">
-              Open approvals
+            <Link
+              className="underline"
+              params={{ agentId: message.agentId }}
+              to="/bots/$agentId"
+            >
+              Open {name}
             </Link>
           </p>
         ) : message.consent ? (
