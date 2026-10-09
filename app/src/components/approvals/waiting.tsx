@@ -1,5 +1,5 @@
 import { IconHandStop, IconMessageQuestion } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -15,11 +15,11 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
-  type ApprovalDecision,
-  answerPersonQuestion,
+  answerPersonQuestionMutationOptions,
   approvalInboxOptions,
-  decideApproval,
+  decideApprovalMutationOptions,
 } from "@/lib/approvals";
+import { queryClient } from "@/query-client";
 
 /**
  * Questions and actions waiting on the person, one row each, decided where it is shown: the answer
@@ -28,23 +28,13 @@ import {
  * decision.
  */
 export function WaitingForYou({ agentId }: { agentId?: string }) {
-  const cache = useQueryClient();
   const inbox = useQuery(approvalInboxOptions());
   const agents = useQuery(agentListQueryOptions());
   const botName = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? id;
-  const refresh = () => cache.invalidateQueries({ queryKey: ["approvals"] });
-  const decision = useMutation({
-    mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
-      decideApproval(id, choice),
-    onSuccess: refresh,
-  });
+  const decision = useMutation(decideApprovalMutationOptions(queryClient));
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const answer = useMutation({
-    mutationFn: ({ id, response }: { id: string; response: string }) =>
-      answerPersonQuestion(id, response),
-    onSuccess: refresh,
-  });
+  const answer = useMutation(answerPersonQuestionMutationOptions(queryClient));
   const ours = (botId: string) => agentId === undefined || botId === agentId;
   const questions = (inbox.data?.questions ?? []).filter((question) =>
     ours(question.conversationBotId ?? question.botId),

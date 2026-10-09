@@ -46,15 +46,13 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { sharedUseKeys } from "@/lib/plugins/shared-use";
 import {
-  createTrigger,
+  createTriggerMutationOptions,
   type ResponsibilityRecord,
-  removeTrigger,
-  responsibilityKeys,
-  revealTriggerSecret,
-  setTriggerEnabled,
-  setTriggerSecret,
+  removeTriggerMutationOptions,
+  revealTriggerSecretMutationOptions,
+  setTriggerEnabledMutationOptions,
+  setTriggerSecretMutationOptions,
   type TriggerConfig,
   type TriggerKind,
   type TriggerRecord,
@@ -183,10 +181,6 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
     id: string;
     secret: string;
   } | null>(null);
-  const reload = () =>
-    queryClient.invalidateQueries({
-      queryKey: responsibilityKeys.triggers(goal.id),
-    });
   return (
     <section className="grid gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -228,9 +222,8 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
                 freshSecret={
                   freshSecret?.id === trigger.id ? freshSecret.secret : null
                 }
-                onChanged={async (secret) => {
+                onChanged={(secret) => {
                   if (secret) setFreshSecret({ id: trigger.id, secret });
-                  await reload();
                 }}
               />
             </Fragment>
@@ -242,14 +235,13 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           goalId={goal.id}
           botId={goal.agentId}
           onClose={() => setAdding(false)}
-          onCreated={async (created) => {
+          onCreated={(created) => {
             setAdding(false);
             if (created.secret)
               setFreshSecret({
                 id: created.trigger.id,
                 secret: created.secret,
               });
-            await reload();
           }}
         />
       ) : null}
@@ -269,36 +261,31 @@ function TriggerRow({
 }: {
   trigger: TriggerRecord;
   freshSecret: string | null;
-  onChanged: (secret: string | null) => Promise<void>;
+  /** A write that produced a new key; the triggers list itself refetches from the write. */
+  onChanged: (secret: string | null) => void;
 }) {
   const [secret, setSecret] = useState<string | null>(freshSecret);
   const [pasted, setPasted] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const shown = freshSecret ?? secret;
-  const reveal = useMutation({
-    mutationFn: () => revealTriggerSecret(trigger.id),
-    onSuccess: setSecret,
-  });
-  const rotate = useMutation({
-    mutationFn: () =>
-      setTriggerSecret(
-        trigger.id,
-        VENDOR_SECRET.has(trigger.kind) ? pasted : undefined,
-      ),
-    onSuccess: async (result) => {
-      setPasted("");
-      setSecret(result.secret);
-      await onChanged(result.secret);
-    },
-  });
-  const remove = useMutation({
-    mutationFn: () => removeTrigger(trigger.id),
-    onSuccess: () => onChanged(null),
-  });
-  const toggle = useMutation({
-    mutationFn: () => setTriggerEnabled(trigger.id, !trigger.enabled),
-    onSuccess: () => onChanged(null),
-  });
+  const reveal = useMutation(revealTriggerSecretMutationOptions());
+  const rotate = useMutation(setTriggerSecretMutationOptions(queryClient));
+  const remove = useMutation(removeTriggerMutationOptions(queryClient));
+  const toggle = useMutation(setTriggerEnabledMutationOptions(queryClient));
+  const rotateSecret = () =>
+    rotate.mutate(
+      {
+        trigger,
+        secret: VENDOR_SECRET.has(trigger.kind) ? pasted : undefined,
+      },
+      {
+        onSuccess: (result) => {
+          setPasted("");
+          setSecret(result.secret);
+          onChanged(result.secret);
+        },
+      },
+    );
   const url = trigger.path ? `${window.location.origin}${trigger.path}` : null;
   const generated = trigger.kind === "webhook" || trigger.kind === "github";
   const Icon = KIND_ICON[trigger.kind];
@@ -321,7 +308,7 @@ function TriggerRow({
               size="sm"
               variant="destructive"
               disabled={remove.isPending}
-              onClick={() => remove.mutate()}
+              onClick={() => remove.mutate(trigger)}
             >
               Remove for good
             </Button>
@@ -346,7 +333,9 @@ function TriggerRow({
               aria-label={`Run on this ${KIND_LABEL[trigger.kind]} trigger`}
               checked={trigger.enabled}
               disabled={toggle.isPending}
-              onCheckedChange={() => toggle.mutate()}
+              onCheckedChange={() =>
+                toggle.mutate({ trigger, enabled: !trigger.enabled })
+              }
             />
           </>
         )}
@@ -395,7 +384,9 @@ function TriggerRow({
                 size="sm"
                 variant="outline"
                 disabled={reveal.isPending}
-                onClick={() => reveal.mutate()}
+                onClick={() =>
+                  reveal.mutate(trigger.id, { onSuccess: setSecret })
+                }
               >
                 Show key
               </Button>
@@ -404,7 +395,7 @@ function TriggerRow({
               size="sm"
               variant="outline"
               disabled={rotate.isPending}
-              onClick={() => rotate.mutate()}
+              onClick={rotateSecret}
             >
               Rotate key
             </Button>
@@ -418,7 +409,7 @@ function TriggerRow({
             className="grid gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              rotate.mutate();
+              rotateSecret();
             }}
           >
             <span
@@ -482,7 +473,7 @@ function NewTriggerDialog({
   onCreated: (created: {
     trigger: TriggerRecord;
     secret: string | null;
-  }) => Promise<void>;
+  }) => void;
 }) {
   const id = useId();
   const [kind, setKind] = useState<TriggerKind>("webhook");
@@ -525,21 +516,8 @@ function NewTriggerDialog({
       return { kind, filter, allowedSenders: list(senders) };
     return { kind, filter };
   };
-  const create = useMutation({
-    mutationFn: () =>
-      createTrigger(goalId, {
-        config: config(),
-        ...(VENDOR_SECRET.has(kind) && secret ? { secret } : {}),
-      }),
-    onSuccess: async (created) => {
-      await onCreated(created);
-      /* A new trigger is a new way the shared app gets called, so the approval it needs may
-       * have changed: refresh the inbox and this Bot's shared-app notice alongside it. */
-      await queryClient.invalidateQueries({
-        queryKey: sharedUseKeys.requests(),
-      });
-    },
-  });
+  // The triggers list and the shared-app requests both refetch from the write itself.
+  const create = useMutation(createTriggerMutationOptions(queryClient));
   const placeholder: Record<TriggerKind, string> = {
     webhook: "deploy.finished (blank: any)",
     github: "issues.opened, pull_request",
@@ -567,7 +545,16 @@ function NewTriggerDialog({
             id={`${id}-form`}
             onSubmit={(event) => {
               event.preventDefault();
-              create.mutate();
+              create.mutate(
+                {
+                  responsibilityId: goalId,
+                  input: {
+                    config: config(),
+                    ...(VENDOR_SECRET.has(kind) && secret ? { secret } : {}),
+                  },
+                },
+                { onSuccess: onCreated },
+              );
             }}
           >
             <FieldGroup>

@@ -210,6 +210,20 @@ export const revokeTeamApprovalRuleMutationOptions = (
     mutationFn: revokeTeamApprovalRule,
     onSettled: settle(queryClient),
   });
+/** Allow once, always allow, deny, or "I did it myself" on one waiting action. */
+export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
+      decideApproval(id, choice),
+    onSuccess: settle(queryClient),
+  });
+/** Answer a question a Bot asked mid-run; the run resumes with the answer. */
+export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({ id, response }: { id: string; response: string }) =>
+      answerPersonQuestion(id, response),
+    onSuccess: settle(queryClient),
+  });
 
 /**
  * Whether a rule's Bot field covers this Bot, matched the way the server matches it (`policy.ts`):

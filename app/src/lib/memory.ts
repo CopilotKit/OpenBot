@@ -136,3 +136,23 @@ export const deleteMemoryMutationOptions = (queryClient: QueryClient) =>
     mutationFn: deleteMemory,
     onSettled: settleMemory(queryClient),
   });
+
+/** Opt a Bot in to reading one of its connected apps' actions as a memory source. */
+export const addMemorySourceMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: addMemorySource,
+    onSuccess: settleMemory(queryClient),
+  });
+
+/** Sync, remove, enable or disable one memory source. */
+export const memorySourceActionMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({
+      sourceId,
+      name,
+    }: {
+      sourceId: string;
+      name: "sync" | "remove" | "enable" | "disable";
+    }) => memorySourceAction(sourceId, name),
+    onSuccess: settleMemory(queryClient),
+  });

@@ -41,12 +41,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { markdownComponents } from "@/lib/markdown";
 import {
   type ResponsibilityRecord,
-  responsibilityAction,
-  responsibilityKeys,
+  responsibilityActionMutationOptions,
   responsibilityRunsQueryOptions,
   type TriggerRecord,
   triggersQueryOptions,
-  updateResponsibility,
+  updateResponsibilityMutationOptions,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
@@ -105,10 +104,6 @@ export function summaryFor(
   return triggers ? `${status} · Runs when asked` : status;
 }
 
-async function refresh() {
-  await queryClient.invalidateQueries({ queryKey: responsibilityKeys.all });
-}
-
 /**
  * Everything about one responsibility, opened from its row: what can be done to it now (pause, run,
  * complete — each immediate), its wording (a draft, saved by the footer), where it stands, what
@@ -127,19 +122,8 @@ export function ResponsibilityDialog({
   const [instruction, setInstruction] = useState(goal.instruction);
   const [successCriteria, setSuccessCriteria] = useState(goal.successCriteria);
   const triggers = useQuery(triggersQueryOptions(goal.id));
-  const action = useMutation({
-    mutationFn: (value: "pause" | "resume" | "complete" | "run") =>
-      responsibilityAction(goal.id, value),
-    onSuccess: refresh,
-  });
-  const edit = useMutation({
-    mutationFn: () =>
-      updateResponsibility(goal.id, { title, instruction, successCriteria }),
-    onSuccess: async () => {
-      onClose();
-      await refresh();
-    },
-  });
+  const action = useMutation(responsibilityActionMutationOptions(queryClient));
+  const edit = useMutation(updateResponsibilityMutationOptions(queryClient));
   const standing = [
     goal.progress
       ? {
@@ -190,7 +174,10 @@ export function ResponsibilityDialog({
                       checked={goal.status === "active"}
                       disabled={action.isPending}
                       onCheckedChange={(active) =>
-                        action.mutate(active ? "resume" : "pause")
+                        action.mutate({
+                          id: goal.id,
+                          action: active ? "resume" : "pause",
+                        })
                       }
                     />
                   </ItemActions>
@@ -206,7 +193,7 @@ export function ResponsibilityDialog({
                       disabled={action.isPending}
                       onClick={() => {
                         setShowRuns(true);
-                        action.mutate("run");
+                        action.mutate({ id: goal.id, action: "run" });
                       }}
                       type="button"
                     />
@@ -234,7 +221,9 @@ export function ResponsibilityDialog({
                   render={
                     <button
                       disabled={action.isPending}
-                      onClick={() => action.mutate("complete")}
+                      onClick={() =>
+                        action.mutate({ id: goal.id, action: "complete" })
+                      }
                       type="button"
                     />
                   }
@@ -287,7 +276,13 @@ export function ResponsibilityDialog({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              edit.mutate();
+              edit.mutate(
+                {
+                  id: goal.id,
+                  patch: { title, instruction, successCriteria },
+                },
+                { onSuccess: onClose },
+              );
             }}
           >
             <FieldGroup>

@@ -45,15 +45,12 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
-  createProactiveSetting,
+  changeProactiveSettingMutationOptions,
+  createProactiveSettingMutationOptions,
   type ProactiveSetting,
-  proactiveKeys,
   proactiveSettingsQueryOptions,
   proactiveSuggestionsQueryOptions,
-  removeProactiveSetting,
-  resolveSuggestion,
-  runProactiveNow,
-  updateProactiveSetting,
+  resolveSuggestionMutationOptions,
 } from "@/lib/proactive";
 import { queryClient } from "@/query-client";
 
@@ -71,13 +68,6 @@ const intervalItems = intervals.map((interval) => ({
 const intervalLabel = (minutes: number) =>
   intervals.find((interval) => interval.minutes === minutes)?.label ??
   `Every ${minutes} minutes`;
-async function refresh() {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
-    queryClient.invalidateQueries({ queryKey: proactiveKeys.suggestions }),
-  ]);
-}
-
 /** Next steps a Bot proposed from background research: start one as a task, or dismiss it. */
 export function SuggestionsInbox({
   agentId,
@@ -90,11 +80,7 @@ export function SuggestionsInbox({
     (suggestion) => agentId === undefined || suggestion.agentId === agentId,
   );
   const bots = useQuery(agentListQueryOptions());
-  const act = useMutation({
-    mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
-      resolveSuggestion(id, action),
-    onSuccess: refresh,
-  });
+  const act = useMutation(resolveSuggestionMutationOptions(queryClient));
   const botName = (id: string) =>
     bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
   if (agentId !== undefined && shown.length === 0) return null;
@@ -267,13 +253,7 @@ function TurnOnResearchDialog({
   const eligibleChannels = (channels.data ?? []).filter(
     (channel) => channel.active && channel.agentIds.includes(agentId),
   );
-  const add = useMutation({
-    mutationFn: createProactiveSetting,
-    onSuccess: async () => {
-      onClose();
-      await refresh();
-    },
-  });
+  const add = useMutation(createProactiveSettingMutationOptions(queryClient));
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
@@ -291,7 +271,10 @@ function TurnOnResearchDialog({
             id={id}
             onSubmit={(event) => {
               event.preventDefault();
-              add.mutate({ agentId, channelId, focus, intervalMinutes });
+              add.mutate(
+                { agentId, channelId, focus, intervalMinutes },
+                { onSuccess: onClose },
+              );
             }}
           >
             <FieldGroup>
@@ -433,26 +416,9 @@ function SettingRow({
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
-  const change = useMutation({
-    mutationFn: (
-      action:
-        | { kind: "toggle" }
-        | { kind: "run" }
-        | { kind: "remove" }
-        | { kind: "interval"; minutes: number },
-    ) =>
-      action.kind === "run"
-        ? runProactiveNow(setting.id)
-        : action.kind === "remove"
-          ? removeProactiveSetting(setting.id)
-          : updateProactiveSetting(
-              setting.id,
-              action.kind === "toggle"
-                ? { enabled: !setting.enabled }
-                : { intervalMinutes: action.minutes },
-            ),
-    onSuccess: refresh,
-  });
+  const change = useMutation(
+    changeProactiveSettingMutationOptions(queryClient),
+  );
   const summary = [
     setting.focus,
     intervalLabel(setting.intervalMinutes),
@@ -529,7 +495,10 @@ function SettingRow({
                 items={intervalItems}
                 onValueChange={(minutes) => {
                   if (minutes !== null && minutes !== setting.intervalMinutes)
-                    change.mutate({ kind: "interval", minutes });
+                    change.mutate({
+                      setting,
+                      change: { kind: "interval", minutes },
+                    });
                 }}
                 value={setting.intervalMinutes}
               >
@@ -558,7 +527,7 @@ function SettingRow({
               disabled={change.isPending}
               onClick={() =>
                 change.mutate(
-                  { kind: "remove" },
+                  { setting, change: { kind: "remove" } },
                   { onSuccess: () => setOpen(false) },
                 )
               }
@@ -569,14 +538,18 @@ function SettingRow({
               size="sm"
               variant="outline"
               disabled={change.isPending}
-              onClick={() => change.mutate({ kind: "toggle" })}
+              onClick={() =>
+                change.mutate({ setting, change: { kind: "toggle" } })
+              }
             >
               {setting.enabled ? "Turn off" : "Turn on"}
             </Button>
             <Button
               size="sm"
               disabled={!setting.enabled || change.isPending}
-              onClick={() => change.mutate({ kind: "run" })}
+              onClick={() =>
+                change.mutate({ setting, change: { kind: "run" } })
+              }
             >
               Run now
             </Button>

@@ -96,3 +96,39 @@ export function removePushDeviceMutationOptions(queryClient: QueryClient) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: deliveryKey }),
   });
 }
+
+export function removeDeliveryBindingMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: removeDeliveryBinding,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: deliveryKey }),
+  });
+}
+
+/**
+ * Ask for a one-time `link <code>` message. No `queryClient`: nothing is linked until the code is
+ * sent from Slack or Teams, so nothing cached has changed yet and there is nothing to invalidate.
+ */
+export function startChatLinkMutationOptions() {
+  return mutationOptions({ mutationFn: startChatLink });
+}
+
+/**
+ * Text a verification code to a phone. No `queryClient`, for the same reason as a link message: the
+ * phone is not connected until the code comes back through `confirmSms`.
+ */
+export function startSmsMutationOptions() {
+  return mutationOptions({ mutationFn: startSms });
+}
+
+export function confirmSmsMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      challengeId,
+      code,
+    }: {
+      challengeId: string;
+      code: string;
+    }) => confirmSms(challengeId, code),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: deliveryKey }),
+  });
+}

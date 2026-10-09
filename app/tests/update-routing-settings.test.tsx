@@ -34,6 +34,15 @@ function serving() {
       });
       return Response.json({ ok: true });
     }
+    // A deployment with every channel set up, so each switch reflects the person's preference.
+    if (String(input).endsWith("/api/delivery")) {
+      return Response.json({
+        bindings: [],
+        devices: [],
+        deliveries: [],
+        available: { slack: true, teams: true, sms: true, push: true },
+      });
+    }
     return Response.json({
       routing: { progress: ["push"], decision: "all", question: "all" },
     });

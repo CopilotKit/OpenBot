@@ -4,6 +4,7 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { sharedUseKeys } from "@/lib/plugins/shared-use";
 
 export type ResponsibilityRecord = {
   id: string;
@@ -264,5 +265,117 @@ export function removeGithubBindingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: removeGithubBinding,
     onSettled: settleGithub(queryClient),
+  });
+}
+
+const settleResponsibilities = (queryClient: QueryClient) => () =>
+  queryClient.invalidateQueries({ queryKey: responsibilityKeys.all });
+
+export function createResponsibilityMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: createResponsibility,
+    onSuccess: settleResponsibilities(queryClient),
+  });
+}
+
+export function updateResponsibilityMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      id,
+      patch,
+    }: {
+      id: string;
+      patch: { title: string; instruction: string; successCriteria: string };
+    }) => updateResponsibility(id, patch),
+    onSuccess: settleResponsibilities(queryClient),
+  });
+}
+
+/** Pause, resume, complete or run a responsibility now. */
+export function responsibilityActionMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "pause" | "resume" | "complete" | "run";
+    }) => responsibilityAction(id, action),
+    onSuccess: settleResponsibilities(queryClient),
+  });
+}
+
+const settleTriggers = (queryClient: QueryClient, responsibilityId: string) =>
+  queryClient.invalidateQueries({
+    queryKey: responsibilityKeys.triggers(responsibilityId),
+  });
+
+/**
+ * Add a trigger. A new trigger is a new way a shared app gets called, so the approval it needs may
+ * have changed: the shared-use requests are refreshed alongside the triggers.
+ */
+export function createTriggerMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      responsibilityId,
+      input,
+    }: {
+      responsibilityId: string;
+      input: { config: TriggerConfig; secret?: string };
+    }) => createTrigger(responsibilityId, input),
+    onSuccess: async (_created, { responsibilityId }) => {
+      await settleTriggers(queryClient, responsibilityId);
+      await queryClient.invalidateQueries({
+        queryKey: sharedUseKeys.requests(),
+      });
+    },
+  });
+}
+
+/**
+ * Read a trigger's write-only secret on demand. No `queryClient` and no `onSuccess`: it changes
+ * nothing and caches nothing, so there is nothing to invalidate, and the secret lives only in the
+ * row that asked for it.
+ */
+export function revealTriggerSecretMutationOptions() {
+  return mutationOptions({ mutationFn: revealTriggerSecret });
+}
+
+/** Rotate a generated secret, or store the provider's newly pasted one. */
+export function setTriggerSecretMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      trigger,
+      secret,
+    }: {
+      trigger: Pick<TriggerRecord, "id" | "responsibilityId">;
+      secret?: string;
+    }) => setTriggerSecret(trigger.id, secret),
+    onSuccess: (_result, { trigger }) =>
+      settleTriggers(queryClient, trigger.responsibilityId),
+  });
+}
+
+export function removeTriggerMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (trigger: Pick<TriggerRecord, "id" | "responsibilityId">) =>
+      removeTrigger(trigger.id),
+    onSuccess: (_result, trigger) =>
+      settleTriggers(queryClient, trigger.responsibilityId),
+  });
+}
+
+/** Switch a trigger on or off; a paused trigger acknowledges deliveries but never starts a run. */
+export function setTriggerEnabledMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: ({
+      trigger,
+      enabled,
+    }: {
+      trigger: Pick<TriggerRecord, "id" | "responsibilityId">;
+      enabled: boolean;
+    }) => setTriggerEnabled(trigger.id, enabled),
+    onSuccess: (_result, { trigger }) =>
+      settleTriggers(queryClient, trigger.responsibilityId),
   });
 }

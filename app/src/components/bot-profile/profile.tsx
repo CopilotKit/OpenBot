@@ -111,20 +111,22 @@ export function BotProfile({
                 <IconPlayerPause />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>Paused</ItemTitle>
+                {/* On means working, the way a responsibility's Active switch reads: titled "Paused",
+                    the row showed the word "Paused" beside a switch that was off for a running Bot. */}
+                <ItemTitle>Active</ItemTitle>
                 <ItemDescription>
                   {lifecycle.data.paused
-                    ? "No routine, responsibility, hand-off or follow-up starts for you, and what was running has stopped."
+                    ? "Paused. No routine, responsibility, hand-off or follow-up starts for you, and what was running has stopped."
                     : "Runs its routines, responsibilities, hand-offs and follow-ups for you."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch
-                  aria-label="Paused"
-                  checked={lifecycle.data.paused}
+                  aria-label="Active"
+                  checked={!lifecycle.data.paused}
                   disabled={pause.isPending}
-                  onCheckedChange={(paused) =>
-                    pause.mutate({ agentId: agent.id, paused })
+                  onCheckedChange={(active) =>
+                    pause.mutate({ agentId: agent.id, paused: !active })
                   }
                 />
               </ItemActions>

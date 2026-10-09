@@ -43,17 +43,13 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
-  addMemorySource,
+  addMemorySourceMutationOptions,
   availableMemorySourcesQueryOptions,
-  memoryKeys,
-  memorySourceAction,
+  memorySourceActionMutationOptions,
   memorySourcesQueryOptions,
 } from "@/lib/memory";
 import { queryClient } from "@/query-client";
 
-async function refresh() {
-  await queryClient.invalidateQueries({ queryKey: memoryKeys.all });
-}
 /**
  * Connected apps a Bot reads facts from. Given a Bot, only that Bot's sources, and a new one is that
  * Bot's without asking.
@@ -96,24 +92,8 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
   const required = Array.isArray(chosen?.inputSchema.required)
     ? chosen.inputSchema.required
     : [];
-  const add = useMutation({
-    mutationFn: addMemorySource,
-    onSuccess: async () => {
-      setTitle("");
-      setAdding(false);
-      await refresh();
-    },
-  });
-  const action = useMutation({
-    mutationFn: ({
-      sourceId,
-      name,
-    }: {
-      sourceId: string;
-      name: "sync" | "remove" | "enable" | "disable";
-    }) => memorySourceAction(sourceId, name),
-    onSuccess: refresh,
-  });
+  const add = useMutation(addMemorySourceMutationOptions(queryClient));
+  const action = useMutation(memorySourceActionMutationOptions(queryClient));
   const shown = (sources.data ?? []).filter(
     (source) => fixedBot === undefined || source.agentId === fixedBot,
   );
@@ -260,12 +240,20 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     else values[setting.name] = value;
                   }
                   setError("");
-                  add.mutate({
-                    agentId,
-                    toolRef,
-                    title,
-                    args: values,
-                  });
+                  add.mutate(
+                    {
+                      agentId,
+                      toolRef,
+                      title,
+                      args: values,
+                    },
+                    {
+                      onSuccess: () => {
+                        setTitle("");
+                        setAdding(false);
+                      },
+                    },
+                  );
                 } catch (cause) {
                   setError(
                     cause instanceof Error

@@ -1,10 +1,19 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
-import { client } from "@/lib/client";
-import { createGroupMutationOptions } from "@/lib/groups";
+import {
+  createGroupMutationOptions,
+  sendGroupMessageMutationOptions,
+} from "@/lib/groups";
 import { newId } from "@/lib/new-id";
-import { createChannelMutationOptions } from "./mutations";
+import {
+  createChannelMutationOptions,
+  deleteChannelMutationOptions,
+} from "./mutations";
 import { channelKeys } from "./queries";
 import { routeMessage } from "./route";
 
@@ -36,16 +45,27 @@ export async function startWithChosen(input: {
  * Start a group from a just-submitted first message: create it with the Bots in the order they were
  * picked, give it the message, then open it. Pure so the order can be tested; nothing is sent or
  * opened when the group could not be made.
+ *
+ * A group exists to hold that first message, so one whose message did not send is discarded rather
+ * than left in everybody's roster as an empty conversation. The send's own error is what the caller
+ * sees (the composer keeps the draft for another try); a failed discard is swallowed, because the
+ * person's problem is the message, and an empty group is the lesser leftover.
  */
 export async function startGroupWith(input: {
   agentIds: string[];
   text: string;
   create: (agentIds: string[]) => Promise<{ id: string }>;
   send: (channelId: string, text: string) => Promise<void>;
+  discard: (channelId: string) => Promise<void>;
   open: (channelId: string) => Promise<void>;
 }): Promise<void> {
   const group = await input.create(input.agentIds);
-  await input.send(group.id, input.text);
+  try {
+    await input.send(group.id, input.text);
+  } catch (error) {
+    await input.discard(group.id).catch(() => undefined);
+    throw error;
+  }
   await input.open(group.id);
 }
 
@@ -60,6 +80,7 @@ export function useStartChannel() {
   const navigate = useNavigate();
   const createChannel = useMutation(createChannelMutationOptions(queryClient));
   const createGroup = useMutation(createGroupMutationOptions(queryClient));
+  const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
 
   const start = async (agentId: string, text: string) => {
     const channel = await createChannel.mutateAsync([agentId]);
@@ -81,12 +102,16 @@ export function useStartChannel() {
         queryClient.setQueryData(channelKeys.detail(channel.id), channel);
         return channel;
       },
+      // The group's id only exists once it is made, so the send's factory is bound here, per
+      // group, and run through an observer rather than a hook created ahead of time.
       send: (channelId, message) =>
-        client(`/api/groups/${encodeURIComponent(channelId)}`, {
-          method: "POST",
-          body: { id: newId(), text: message, agentId: null },
-          fallback: "Your message could not be sent to the group.",
-        }).then(() => undefined),
+        new MutationObserver(
+          queryClient,
+          sendGroupMessageMutationOptions(queryClient, channelId),
+        ).mutate({ id: newId(), text: message, agentId: null }),
+      discard: async (channelId) => {
+        await deleteChannel.mutateAsync(channelId);
+      },
       open: (channelId) =>
         navigate({
           params: { channelId },

@@ -45,13 +45,12 @@ import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   type ChatLink,
-  confirmSms,
-  deliveryKey,
+  confirmSmsMutationOptions,
   deliveryQueryOptions,
   type Reachability,
-  removeDeliveryBinding,
-  startChatLink,
-  startSms,
+  removeDeliveryBindingMutationOptions,
+  startChatLinkMutationOptions,
+  startSmsMutationOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
 
@@ -110,8 +109,6 @@ const TRANSPORT: Record<
   },
 };
 
-const refresh = () => queryClient.invalidateQueries({ queryKey: deliveryKey });
-
 /**
  * Continuing a conversation in Slack, Microsoft Teams or by text message. Given a Bot, only that
  * Bot's conversations and destinations, and no Bot to pick.
@@ -142,10 +139,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
     const held = links[transport];
     return held && held.expiresAt > Date.now() ? held : undefined;
   };
-  const remove = useMutation({
-    mutationFn: removeDeliveryBinding,
-    onSuccess: refresh,
-  });
+  const remove = useMutation(removeDeliveryBindingMutationOptions(queryClient));
   const destinations = reach.data?.bindings.filter(
     (binding) =>
       binding.enabled &&
@@ -336,32 +330,24 @@ function ConnectDialog({
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
-  const link = useMutation({
-    mutationFn: (platform: "slack" | "teams") =>
-      startChatLink({ channelId, agentId, platform }),
-    onSuccess: (result) => {
-      onLinked({
-        ...result,
-        channelId,
-        agentId,
-        expiresAt: Date.now() + result.expiresInMinutes * 60_000,
-      });
-      setCopied(false);
-    },
-  });
-  const sms = useMutation({
-    mutationFn: () => startSms({ channelId, agentId, phone }),
-    onSuccess: onChallenge,
-  });
-  const confirm = useMutation({
-    mutationFn: () => confirmSms(challengeId, code),
-    onSuccess: async () => {
-      onChallenge("");
-      setCode("");
-      await refresh();
-      onClose();
-    },
-  });
+  const link = useMutation(startChatLinkMutationOptions());
+  const sms = useMutation(startSmsMutationOptions());
+  const confirm = useMutation(confirmSmsMutationOptions(queryClient));
+  const startLink = (platform: ChatPlatform) =>
+    link.mutate(
+      { channelId, agentId, platform },
+      {
+        onSuccess: (result) => {
+          onLinked({
+            ...result,
+            channelId,
+            agentId,
+            expiresAt: Date.now() + result.expiresInMinutes * 60_000,
+          });
+          setCopied(false);
+        },
+      },
+    );
   const conversations =
     channels.data?.filter(
       (channel) =>
@@ -452,7 +438,10 @@ function ConnectDialog({
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  sms.mutate();
+                  sms.mutate(
+                    { channelId, agentId, phone },
+                    { onSuccess: onChallenge },
+                  );
                 }}
               >
                 <Field>
@@ -484,7 +473,16 @@ function ConnectDialog({
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
-                    confirm.mutate();
+                    confirm.mutate(
+                      { challengeId, code },
+                      {
+                        onSuccess: () => {
+                          onChallenge("");
+                          setCode("");
+                          onClose();
+                        },
+                      },
+                    );
                   }}
                 >
                   <Field>
@@ -552,7 +550,7 @@ function ConnectDialog({
           {transport === "sms" ? null : (
             <Button
               disabled={!chosen || !available[transport] || link.isPending}
-              onClick={() => link.mutate(transport)}
+              onClick={() => startLink(transport)}
               size="sm"
             >
               {TRANSPORT[transport].link}

@@ -13,6 +13,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { setUpdateRoutingMutationOptions } from "@/lib/bot-lifecycle/mutations";
+import { deliveryQueryOptions } from "@/lib/delivery";
 import {
   type UpdateKind,
   type UpdateTransport,
@@ -48,13 +49,23 @@ const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
  */
 export function UpdateRoutingSection() {
   const routing = useQuery(updateRoutingQueryOptions());
+  const reach = useQuery(deliveryQueryOptions());
   const save = useMutation(setUpdateRoutingMutationOptions(queryClient));
+  /*
+   * A channel this deployment has not set up can carry nothing, so its switch is off and disabled
+   * whatever the stored preference says, rather than on beside a channel that delivers nothing. The
+   * preference itself is left alone: an administrator who configures Slack later finds it as the
+   * person last set it. When the deployment's channels could not be read, the preference is shown
+   * as it is rather than every channel claimed unavailable.
+   */
+  const configured = (transport: UpdateTransport) =>
+    reach.data ? reach.data.available[transport] : true;
   return (
     <PageSection
       description="Where each kind of update goes when you are not looking. The web always shows everything."
       title="Where updates go"
     >
-      {routing.isPending ? null : routing.error ? (
+      {routing.isPending || reach.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           Could not load where your updates go.
         </p>
@@ -77,7 +88,7 @@ export function UpdateRoutingSection() {
                       {KIND_LABEL[kind].description}
                     </ItemDescription>
                   </ItemContent>
-                  <ItemFooter className="gap-4 pl-8">
+                  <ItemFooter className="flex-wrap justify-start gap-x-6 gap-y-3 pl-8">
                     {TRANSPORTS.map((transport) => (
                       <div
                         className="flex items-center gap-2 text-sm"
@@ -85,8 +96,10 @@ export function UpdateRoutingSection() {
                       >
                         <Switch
                           aria-label={`${KIND_LABEL[kind].title} by ${transport.label}`}
-                          checked={allowed(transport.id)}
-                          disabled={save.isPending}
+                          checked={
+                            configured(transport.id) && allowed(transport.id)
+                          }
+                          disabled={save.isPending || !configured(transport.id)}
                           onCheckedChange={(checked) => {
                             const next = TRANSPORTS.map((t) => t.id).filter(
                               (id) =>
@@ -102,7 +115,14 @@ export function UpdateRoutingSection() {
                           }}
                           size="sm"
                         />
-                        {transport.label}
+                        <span className="flex flex-col leading-tight whitespace-nowrap">
+                          {transport.label}
+                          {configured(transport.id) ? null : (
+                            <span className="text-muted-foreground text-xs">
+                              Not set up
+                            </span>
+                          )}
+                        </span>
                       </div>
                     ))}
                   </ItemFooter>

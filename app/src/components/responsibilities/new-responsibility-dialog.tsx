@@ -30,9 +30,8 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { conversationLabel } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
-  createResponsibility,
+  createResponsibilityMutationOptions,
   type ResponsibilityRecord,
-  responsibilityKeys,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
 
@@ -81,15 +80,7 @@ export function NewResponsibilityDialog({
         channel.active &&
         (fixedBot === undefined || channel.agentIds.includes(fixedBot)),
     ) ?? [];
-  const create = useMutation({
-    mutationFn: createResponsibility,
-    onSuccess: async () => {
-      onClose();
-      await queryClient.invalidateQueries({
-        queryKey: responsibilityKeys.all,
-      });
-    },
-  });
+  const create = useMutation(createResponsibilityMutationOptions(queryClient));
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
@@ -106,14 +97,18 @@ export function NewResponsibilityDialog({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              create.mutate({
-                channelId,
-                agentId,
-                title,
-                instruction,
-                successCriteria,
-                subscriptions: source === "none" ? [] : [{ source, eventType }],
-              });
+              create.mutate(
+                {
+                  channelId,
+                  agentId,
+                  title,
+                  instruction,
+                  successCriteria,
+                  subscriptions:
+                    source === "none" ? [] : [{ source, eventType }],
+                },
+                { onSuccess: onClose },
+              );
             }}
           >
             <FieldGroup>
