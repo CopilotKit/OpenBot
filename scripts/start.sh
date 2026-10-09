@@ -424,7 +424,7 @@ $(green "Ready. http://localhost:$APP_PORT")
 Next steps:
 
   - Direct Bot chat:       http://localhost:$APP_PORT/bot
-  - Coworkers:             http://localhost:$APP_PORT/agents
+  - Bots:                  http://localhost:$APP_PORT/bots
   - Audit trail:           http://localhost:$APP_PORT/admin/audit
   - Boundaries/policy:     http://localhost:$APP_PORT/admin/boundaries
   - Setup docs:            README.md
@@ -433,7 +433,7 @@ Next steps:
 Try:
 
   1. Open /bot and ask: Open news.ycombinator.com and tell me the top story.
-  2. Create a coworker in /agents and start a channel with it.
+  2. Create a Bot in /bots and start a channel with it.
   3. Review browser/file actions in /admin/audit.
   4. Add a deny rule in /admin/boundaries, then retry the same action.
 

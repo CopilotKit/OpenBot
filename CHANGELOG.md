@@ -16,6 +16,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   such record for up to ten minutes after the upgrade, and calls they make to a Shared app in that
   window are refused.
 
+### One Bots list, and one page per Bot
+
+Agents, Team Bots and Bots were three lists of the same Bots. `/bots` is now the only one — pinned,
+yours, shared with you, and the ones you hid — with **New Bot** at the top. A Bot's page holds
+everything about it: its routines, its skills and what it may reach, who it is shared with, and its
+name, role and connection. Where updates reach you and your answers to shared Bots moved to
+Settings. `/agents` and `/team-bots` still work and open the new places. A Team Bot an administrator
+assigns to a group is pinned at the top of its members' Bots list instead of sitting in their
+sidebar.
+
 ### An app's account can belong to the team
 
 An administrator can make a Composio app Shared: one account, connected once, that every Bot granted
