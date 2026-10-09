@@ -186,11 +186,11 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/group/new`                | Start one conversation with two or more Bots.                      |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
-| `/bots/:id`                 | One Bot: what it is doing, its routines, skills, sharing and setup. |
-| `/responsibilities`         | Give a Bot a lasting goal, follow its progress, and decide when it should work. |
-| `/reachability`             | Continue a conversation in Slack, Microsoft Teams, or by text message. |
-| `/memory`                   | Suggestions, background research, and which connected apps feed your Bots facts. |
-| `/approvals`                | Actions waiting for you, and rules for a single Bot.               |
+| `/bots/:id`                 | One Bot: what it waits on you for, what it is doing, and how it is set up. |
+| `/bots/:id/responsibilities` | Give the Bot a lasting goal, follow its progress, and decide when it should work. |
+| `/bots/:id/reach`           | Continue a conversation with the Bot in Slack, Microsoft Teams, or by text message. |
+| `/bots/:id/memory`          | Which connected apps feed the Bot facts, and its background research. |
+| `/bots/:id/approvals`       | What the Bot may do without asking you first.                      |
 | `/skills`                   | Create and enable personal skills.                                 |
 | `/routines`                 | See the routines that are standing, and stop one.                  |
 | `/settings`                 | User preferences.                                                  |

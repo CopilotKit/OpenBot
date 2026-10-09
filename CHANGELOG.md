@@ -30,6 +30,12 @@ The sidebar no longer lists each Bot that needs you. A badge on Bots counts the 
 and stalled hand-offs waiting across all of them, and Bots lists those Bots first, under Needs you.
 Browser notifications when a Bot starts needing you are unchanged.
 
+The sidebar is now Bots and Skills. Each Bot's page holds what that Bot is waiting on you for, its
+suggested next steps, its responsibilities, where it reaches you, its memory sources and background
+research, and its approval rules. `/approvals`, `/memory`, `/reachability` and `/responsibilities`
+still work and open the new places. Messages from Bots, Slack and Teams that named those pages now
+point at the Bot's page.
+
 Settings now also holds whether your Bots ask before acting, rules for every Bot, your memories, your
 devices and recent deliveries, and GitHub event sources. Team approval settings and shared account
 requests moved to Admin → Approvals.
