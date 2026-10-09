@@ -18,6 +18,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { BotRoster } from "@/components/bots/bot-roster";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * The Bots roster: one list of every Bot a person can reach, replacing the Bots, Agents and Team
@@ -27,7 +28,10 @@ import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 afterEach(() => {

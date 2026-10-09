@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ManageSection } from "@/components/bot-profile/manage";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * What can be done to a Bot from its own page. Navigation is the page's, so the section reports
@@ -12,7 +13,10 @@ import type { AgentProfile } from "@/lib/agents/queries";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 afterEach(() => {

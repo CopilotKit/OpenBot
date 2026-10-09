@@ -11,6 +11,7 @@ import { cleanup, render } from "@testing-library/react";
 import { SharingSections } from "@/components/bot-profile/sharing";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { TeamBot, TeamBotsData } from "@/lib/team-bots";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Bot's Sharing page: its owner publishes and unpublishes it, an administrator assigns it to
@@ -19,7 +20,10 @@ import type { TeamBot, TeamBotsData } from "@/lib/team-bots";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 afterEach(() => {

@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { UpdateRoutingSection } from "@/components/settings/update-routing";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * Where updates go, now in Settings: one decision for all of a person's Bots, so it is no longer
@@ -11,7 +12,10 @@ import { UpdateRoutingSection } from "@/components/settings/update-routing";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 afterEach(() => {

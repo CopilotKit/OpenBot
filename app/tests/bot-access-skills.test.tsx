@@ -10,6 +10,7 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AccessSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * A Bot's Skills and access page. A person may put their own skill on a Bot they own, and only
@@ -18,7 +19,10 @@ import type { AgentProfile } from "@/lib/agents/queries";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 afterEach(() => {
