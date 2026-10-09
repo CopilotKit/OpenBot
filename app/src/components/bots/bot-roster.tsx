@@ -50,11 +50,23 @@ export function BotRoster() {
       </p>
     );
   }
-  const { pinned, yours, shared } = groupRoster(agents.data);
+  const { needsYou, pinned, yours, shared } = groupRoster(
+    agents.data,
+    (agentId) => {
+      const state = byId.get(agentId);
+      return state ? needsInput(state) : 0;
+    },
+  );
   const yoursPinned = pinned.some((agent) => agent.mine);
+  const yoursWaiting = needsYou.some((agent) => agent.mine);
 
   return (
     <>
+      {needsYou.length ? (
+        <PageSection title="Needs you">
+          <RosterRows agents={needsYou} byId={byId} />
+        </PageSection>
+      ) : null}
       {pinned.length ? (
         <PageSection title="Pinned">
           <RosterRows agents={pinned} byId={byId} />
@@ -67,7 +79,9 @@ export function BotRoster() {
           <PageEmpty>
             {yoursPinned
               ? "Your Bots are all pinned above."
-              : "You have no Bots of your own yet."}
+              : yoursWaiting
+                ? "Your Bots are all under Needs you."
+                : "You have no Bots of your own yet."}
           </PageEmpty>
         )}
       </PageSection>

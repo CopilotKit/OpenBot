@@ -59,3 +59,18 @@ test("a Team Bot an administrator assigned to the person is always pinned", () =
   expect(ids(groups.pinned)).toEqual(["assigned"]);
   expect(groups.shared).toEqual([]);
 });
+
+test("a Bot waiting on the person is in Needs you only, ahead of every other section", () => {
+  const waiting = new Set(["pinned-waiting", "mine-waiting"]);
+  const groups = groupRoster(
+    [
+      bot({ id: "pinned-waiting", pinned: true }),
+      bot({ id: "mine-waiting", mine: true }),
+      bot({ id: "quiet", mine: true }),
+    ],
+    (id) => (waiting.has(id) ? 1 : 0),
+  );
+  expect(ids(groups.needsYou)).toEqual(["pinned-waiting", "mine-waiting"]);
+  expect(groups.pinned).toEqual([]);
+  expect(ids(groups.yours)).toEqual(["quiet"]);
+});

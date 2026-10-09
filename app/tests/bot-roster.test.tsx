@@ -59,10 +59,15 @@ function bot(overrides: Partial<AgentProfile> & { id: string }): AgentProfile {
 }
 
 /** Serves the visible roster, the hidden roster, and an empty attention list. */
-function serving(visible: AgentProfile[], hidden: AgentProfile[]) {
+function serving(
+  visible: AgentProfile[],
+  hidden: AgentProfile[],
+  attention: Record<string, unknown>[] = [],
+) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/api/bots/attention")) return Response.json({ bots: [] });
+    if (url.includes("/api/bots/attention"))
+      return Response.json({ bots: attention });
     return Response.json({
       agents: url.includes("hidden=true") ? hidden : visible,
     });
@@ -180,4 +185,35 @@ test("a failed refetch keeps the roster it already had, not the error", async ()
   );
   expect(view.getByText("Mine")).toBeTruthy();
   expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("a Bot with something waiting comes first, under Needs you, with its count", async () => {
+  serving(
+    [
+      bot({ id: "mine", name: "Mine" }),
+      bot({ id: "waiting", name: "Waiting", mine: false }),
+    ],
+    [],
+    [
+      {
+        agentId: "waiting",
+        name: "Waiting",
+        questions: 1,
+        approvals: 1,
+        handoffs: 0,
+        unread: 0,
+        paused: false,
+        notify: "all",
+      },
+    ],
+  );
+  const view = draw();
+  expect(await view.findByText("Needs you")).toBeTruthy();
+  const headings = [...view.container.querySelectorAll("h2")].map(
+    (heading) => heading.textContent,
+  );
+  expect(headings).toEqual(["Needs you", "Yours", "Shared with you"]);
+  // Once, under Needs you, not again under Shared with you.
+  expect(view.getAllByText("Waiting")).toHaveLength(1);
+  expect(view.getByText("2")).toBeTruthy();
 });
