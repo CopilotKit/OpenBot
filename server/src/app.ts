@@ -80,6 +80,8 @@ import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
+import { identityRoutes } from "./identity/routes";
+import type { IdentityStore } from "./identity/store";
 import { createIntelligenceClient } from "./intelligence-client";
 import {
   createLearningRoutes,
@@ -435,6 +437,10 @@ export function createApp(
    * resolver still answers from `config.selfHostBanner` rather than asking the network.
    */
   selfHostBanner?: SelfHostBanner,
+  /** A person's own linked accounts. Absent answers 503 on /api/identity. */
+  identity?: IdentityStore,
+  /** The GitHub sign-in callback, built by the caller; mounted behind requireUser ahead of /api/identity. */
+  identityGithubCallback?: Hono<{ Variables: AppVariables }>,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   mountDesktopConnectionFailure(app, desktopHostToken);
@@ -689,6 +695,41 @@ export function createApp(
   app.route(
     "/api/settings/preferences",
     userPreferencesRoutes(requireUser, userPreferences),
+  );
+
+  /*
+   * The session must match the sealed state's person, otherwise a link started by one person could
+   * attach another person's GitHub account (login CSRF), so the callback requires the same session
+   * as the rest of /api/identity; a missing session answers 401 rather than a redirect. Mounted
+   * before the identity router so that router never sees a GET to this path; other methods fall
+   * through to it and get its own 401/404.
+   */
+  if (identityGithubCallback) {
+    app.use("/api/identity/github/callback", requireUser);
+    app.route("/api/identity/github/callback", identityGithubCallback);
+  }
+  /*
+   * A person's own linked accounts at outside providers (Slack, GitHub). Theirs alone: there is no
+   * administrator view and no linking on somebody else's behalf. A provider is offered only when
+   * its return path is wired: Slack needs the identity redeemer for the codes it issues, and GitHub
+   * needs the callback mounted above, otherwise people would be sent away and back to nothing.
+   */
+  app.route(
+    "/api/identity",
+    identityRoutes(requireUser, identity, auditStore, {
+      slackLinking: Boolean(
+        coworker?.delivery?.webhooks.slack &&
+          coworker.delivery.webhooks.identity,
+      ),
+      github:
+        identityGithubCallback && config.githubApp && config.publicUrl
+          ? {
+              clientId: config.githubApp.clientId,
+              publicUrl: config.publicUrl,
+              encryptionKey: config.keyEncryptionKey,
+            }
+          : undefined,
+    }),
   );
 
   app.get("/api/settings/instructions", requireUser, async (context) => {

@@ -20,7 +20,20 @@ const bound: DeliveryBinding = {
   address: "U1",
   enabled: true,
 };
-function fixture(options: { converse?: ConverseResult; bound?: boolean } = {}) {
+type IdentityAdapter = {
+  redeem(
+    code: string,
+    sender: { teamId: string; userId: string },
+  ): Promise<"linked" | "conflict" | "invalid">;
+  discard(code: string): Promise<boolean>;
+};
+function fixture(
+  options: {
+    converse?: ConverseResult;
+    bound?: boolean;
+    identity?: IdentityAdapter;
+  } = {},
+) {
   const calls: unknown[] = [];
   const decisions: unknown[] = [];
   const twilio = createTwilioTransport({
@@ -97,6 +110,7 @@ function fixture(options: { converse?: ConverseResult; bound?: boolean } = {}) {
       return { matched: 0, deliveries: [] };
     },
     twilio,
+    ...(options.identity ? { identity: options.identity } : {}),
     approvals: {
       store: {
         get: async (owner, id) => {
@@ -222,6 +236,203 @@ test("a link code binds the verified sender to the challenge's own scope", async
       },
     },
   ]);
+});
+const IDENTITY_CODE = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const EXPIRED =
+  "That link code expired, was already used, or is for another app. Create a new one in OpenBot.";
+function identityFixture(
+  outcome?: "linked" | "conflict" | "invalid",
+  live = true,
+) {
+  const redeemed: unknown[] = [];
+  const discarded: string[] = [];
+  const f = fixture({
+    bound: false,
+    ...(outcome
+      ? {
+          identity: {
+            redeem: async (code, who) => {
+              redeemed.push([code, who]);
+              return outcome;
+            },
+            discard: async (code) => {
+              discarded.push(code);
+              return live;
+            },
+          },
+        }
+      : {}),
+  });
+  return { f, redeemed, discarded };
+}
+const linkMessage = (code: string) => ({
+  messages: [
+    { id: "m1", role: "user", content: `<@UBOT> link ${code.toUpperCase()}` },
+  ],
+});
+test("a Reachability code is checked before the identity adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage("11111111-2222-4333-8444-555555555555"),
+  });
+  expect(said(result.events)).toContain("Linked");
+  expect(f.calls).toHaveLength(1);
+  expect(redeemed).toEqual([]);
+});
+test("an identity code from a Slack sender is redeemed through the adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(
+    "Linked your Slack account to OpenBot. You can see it under Settings → Connected accounts.",
+  );
+  expect(redeemed).toEqual([[IDENTITY_CODE, { teamId: "T1", userId: "U1" }]]);
+});
+const CANCELLED =
+  "That code was posted where others could see it, so I cancelled it. Create a new one in OpenBot and send it to me in a direct message.";
+test("an identity code sent where others can read it is cancelled, never redeemed", async () => {
+  for (const conversation of [{ id: "C0123456789", kind: "channel" }, null]) {
+    const { f, redeemed, discarded } = identityFixture("linked");
+    const result = await run(f, {
+      context: [sender("slack:T1:U1", conversation)],
+      ...linkMessage(IDENTITY_CODE),
+    });
+    expect(said(result.events)).toBe(CANCELLED);
+    expect(said(result.events)).not.toContain("still works");
+    expect(discarded).toEqual([IDENTITY_CODE]);
+    expect(redeemed).toEqual([]);
+    expect(f.calls).toEqual([]);
+  }
+});
+test("an unknown or expired code in a shared conversation gets the expired reply", async () => {
+  const { f, redeemed, discarded } = identityFixture("linked", false);
+  const result = await run(f, {
+    context: [sender("slack:T1:U1", { id: "C0123456789", kind: "channel" })],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+  expect(discarded).toEqual([IDENTITY_CODE]);
+  expect(redeemed).toEqual([]);
+});
+test("an identity code in a direct message is never discarded", async () => {
+  const { f, discarded } = identityFixture("linked");
+  await run(f, { context: [sender()], ...linkMessage(IDENTITY_CODE) });
+  expect(discarded).toEqual([]);
+});
+test("a Reachability code still links from a shared conversation", async () => {
+  const { f, redeemed, discarded } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender("slack:T1:U1", { id: "C0123456789", kind: "channel" })],
+    ...linkMessage("11111111-2222-4333-8444-555555555555"),
+  });
+  expect(said(result.events)).toContain("Linked.");
+  expect(redeemed).toEqual([]);
+  expect(discarded).toEqual([]);
+});
+const observedMessage = (content: string) => ({
+  context: [
+    {
+      description: "openbot.sender",
+      value: JSON.stringify({
+        user: "slack:T1:U1",
+        event: "Ev50",
+        conversation: { id: "C0123456789", kind: "channel" },
+        observe: "message",
+      }),
+    },
+  ],
+  messages: [{ id: "m1", role: "user", content }],
+});
+const triggersOf = (f: ReturnType<typeof fixture>) =>
+  f.calls
+    .map((c) => (c as { trigger?: Record<string, unknown> }).trigger)
+    .filter(Boolean);
+test("an identity code pasted in a channel without a mention is cancelled quietly and kept out of triggers", async () => {
+  for (const content of [
+    `link ${IDENTITY_CODE.toUpperCase()}`,
+    `here: link ${IDENTITY_CODE.toUpperCase()} thanks`,
+  ]) {
+    const { f, redeemed, discarded } = identityFixture("linked");
+    const result = await run(f, observedMessage(content));
+    expect(said(result.events)).toBe("");
+    expect(discarded).toEqual([IDENTITY_CODE]);
+    expect(redeemed).toEqual([]);
+    const triggers = triggersOf(f);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]).toMatchObject({ type: "message", eventId: "Ev50" });
+    expect(JSON.stringify(triggers[0]).toLowerCase()).not.toContain(
+      IDENTITY_CODE,
+    );
+  }
+});
+test("an ordinary observed channel message reaches triggers unchanged and discards nothing", async () => {
+  const { f, discarded } = identityFixture("linked");
+  const result = await run(f, observedMessage("deploy is broken"));
+  expect(said(result.events)).toBe("");
+  expect(discarded).toEqual([]);
+  expect(triggersOf(f)).toEqual([
+    expect.objectContaining({ type: "message", text: "deploy is broken" }),
+  ]);
+});
+test("a failed discard of an observed channel code still feeds triggers quietly", async () => {
+  const f = fixture({
+    bound: false,
+    identity: {
+      redeem: async () => "invalid",
+      discard: async () => {
+        throw new Error("db down");
+      },
+    },
+  });
+  const error = console.error;
+  console.error = () => {};
+  try {
+    const result = await run(f, observedMessage(`link ${IDENTITY_CODE}`));
+    expect(said(result.events)).toBe("");
+  } finally {
+    console.error = error;
+  }
+  const triggers = triggersOf(f);
+  expect(triggers).toHaveLength(1);
+  expect(JSON.stringify(triggers[0])).not.toContain(IDENTITY_CODE);
+});
+test("an identity code conflict gets the already-linked reply", async () => {
+  const { f } = identityFixture("conflict");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(
+    "This Slack account is already linked to another OpenBot user.",
+  );
+});
+test("an invalid identity code gets the expired reply", async () => {
+  const { f } = identityFixture("invalid");
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+});
+test("a Teams sender never reaches the identity adapter", async () => {
+  const { f, redeemed } = identityFixture("linked");
+  const result = await run(f, {
+    context: [sender("teams:tenant1:user1")],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
+  expect(redeemed).toEqual([]);
+});
+test("without an identity adapter an unknown code gets the expired reply", async () => {
+  const { f } = identityFixture();
+  const result = await run(f, {
+    context: [sender()],
+    ...linkMessage(IDENTITY_CODE),
+  });
+  expect(said(result.events)).toBe(EXPIRED);
 });
 test("bound sender runs the canonical turn and an approval becomes an OpenTag card", async () => {
   const f = fixture({

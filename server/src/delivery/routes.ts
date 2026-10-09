@@ -281,6 +281,8 @@ export function createDeliveryWebhookRoutes(deps: {
   approvals?: PairedApprovals;
   /** Test seam; production uses the responsibilities lane's `ingestSlackEvent`. */
   ingestSlack?: OpenTagAgentDeps["ingestSlack"];
+  /** Redeems OpenBot linked-account codes sent to the Slack app in a DM; cancels one posted in a channel. */
+  identity?: OpenTagAgentDeps["identity"];
 }) {
   const routes = new Hono<{ Variables: AppVariables }>();
   // A paired chat run carries its conversation's history, so it gets a larger envelope.
@@ -303,6 +305,7 @@ export function createDeliveryWebhookRoutes(deps: {
           scopeFor: deps.scopeFor,
           ...(deps.approvals ? { approvals: deps.approvals } : {}),
           ...(deps.ingestSlack ? { ingestSlack: deps.ingestSlack } : {}),
+          ...(deps.identity ? { identity: deps.identity } : {}),
         },
         c.req.raw,
       ),

@@ -16,6 +16,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   such record for up to ten minutes after the upgrade, and calls they make to a Shared app in that
   window are refused.
 
+### People can link their Slack and GitHub accounts
+
+Settings → Connected accounts gains a Linked accounts section with one card per account a person can
+link. Slack links through a one-time code sent to the OpenTag app in a direct message; a code posted
+in a channel is cancelled. GitHub links through a GitHub App's user sign-in, set with
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` (both or neither); the server refuses to start
+with them and no public URL. Nothing reads the links yet: they are what GitHub alerts and reviews will
+build on. Migration `0053_identity_links` only adds tables.
+
 ### An app's account can belong to the team
 
 An administrator can make a Composio app Shared: one account, connected once, that every Bot granted

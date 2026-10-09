@@ -177,6 +177,10 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { githubCallbackRoutes } from "./identity/github-callback";
+import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
+import { slackCodeRedeemer } from "./identity/slack-redeem";
+import { createIdentityStore } from "./identity/store";
 import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
@@ -344,6 +348,7 @@ await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
+const identityStore = createIdentityStore(database, credentialStore);
 const agentVault = {
   store: credentialStore,
   reader: credentialStore,
@@ -397,14 +402,29 @@ const peopleStore = createPeopleStore(
   database,
   config.auth?.initialAdminEmails ?? [],
   /*
-   * Removing somebody retires the credentials they granted this deployment.
+   * Removing somebody retires what they connected: their plugin credentials and connections, and
+   * their linked outside accounts (which keep resolving to them, now refused; the tokens are revoked
+   * and every link needs reconnecting). Both halves run whichever fails, and the failure is rethrown
+   * after (see retireOwnedAccounts).
    *
-   * A closure rather than the method itself, because the plugin store is built further down: this
-   * has to exist before `auth` does, and that one needs the vault and the policy. Nothing calls this
-   * during module initialisation — it runs when an administrator removes somebody, over HTTP — so by
-   * then the binding is there.
+   * A closure, because `pluginStore` is built further down: this has to exist before `auth` does,
+   * and that one needs the vault and the policy. `pluginStore` is read only when the closure runs —
+   * an administrator or the directory removing somebody, never during module initialisation — so by
+   * then the binding is there. The linked-account half writes its audit rows through a store made
+   * on its own transaction, so it reads no later binding (`bootAuditStore` included).
    */
-  (userId, by) => pluginStore.retireConnectionsFor(userId, by),
+  (userId, by) =>
+    retireOwnedAccounts({
+      plugins: () => pluginStore.retireConnectionsFor(userId, by),
+      identities: () =>
+        retireIdentityLinks(
+          database,
+          credentialStore,
+          (executor) => createAuditStore(executor),
+          userId,
+          by,
+        ),
+    }),
 );
 const identityProviderStore = createIdentityProviderStore(database);
 /*
@@ -2868,6 +2888,24 @@ const selfHostBannerIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
 
+const identityGithubCallback =
+  config.githubApp && config.publicUrl
+    ? githubCallbackRoutes({
+        clientId: config.githubApp.clientId,
+        clientSecret: config.githubApp.clientSecret,
+        publicUrl: config.publicUrl,
+        appUrl: config.appUrl,
+        encryptionKey: config.keyEncryptionKey,
+        personIsActive: async (userId) => {
+          const person = await peopleStore.find(userId);
+          return person !== undefined && !person.revoked;
+        },
+        credentials: credentialStore,
+        identity: identityStore,
+        auditStore: bootAuditStore,
+      })
+    : undefined;
+
 const app = createApp(
   config,
   auth,
@@ -3023,6 +3061,7 @@ const app = createApp(
         scopeFor: deliveryScopeFor,
         slack: deliveryProviders.slack,
         twilio: deliveryProviders.sms,
+        identity: slackCodeRedeemer(identityStore, bootAuditStore),
       },
     },
     memory: { store: personalMemoryStore, ingestion: memoryIngestion },
@@ -3052,6 +3091,9 @@ const app = createApp(
     enabled: config.selfHostBanner,
     entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
   }),
+
+  identityStore,
+  identityGithubCallback,
 );
 
 /**

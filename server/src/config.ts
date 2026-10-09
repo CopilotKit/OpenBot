@@ -90,6 +90,11 @@ export type AuthProviderId = "google" | "microsoft" | "okta";
 /** An OAuth client, as every provider here needs one. */
 export type OAuthClient = { clientId: string; clientSecret: string };
 
+export type GithubAppConfig = {
+  clientId: string;
+  clientSecret: string;
+};
+
 export type AuthConfig = {
   baseUrl: string;
   secret: string;
@@ -217,6 +222,8 @@ export type DeploymentConfig = {
    * where a key that was revoked last week would have surfaced regardless.
    */
   composioApiKey: string | undefined;
+  /** GitHub App user sign-in, so people can link their GitHub account. Both or neither of GITHUB_APP_CLIENT_ID / GITHUB_APP_CLIENT_SECRET. */
+  githubApp?: GithubAppConfig;
   /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
@@ -658,6 +665,23 @@ function oauthClient(
   if (Boolean(clientId) !== Boolean(clientSecret)) {
     throw new Error(
       `${provider}_OAUTH_CLIENT_ID and ${provider}_OAUTH_CLIENT_SECRET must be set together`,
+    );
+  }
+
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
+}
+
+function githubAppConfig(
+  environment: Environment,
+): GithubAppConfig | undefined {
+  const clientId = optional(environment, "GITHUB_APP_CLIENT_ID");
+  const clientSecret = optional(environment, "GITHUB_APP_CLIENT_SECRET");
+
+  // Both or neither. One alone is a half-configured sign-in that fails at the first attempt rather
+  // than at start-up, which is the worst moment to discover it.
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
+    throw new Error(
+      "GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET must be set together",
     );
   }
 
@@ -1269,6 +1293,17 @@ export function loadConfig(
     ? organizationAuthority(organizationAuthValue)
     : undefined;
   const managedAgent = managedAgentConfig(environment);
+  const githubApp = githubAppConfig(environment);
+  const publicUrl = (
+    optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
+  )?.replace(/\/+$/, "");
+  // GitHub sends people back to this address after they approve. Without it linking is silently
+  // switched off, so say so at start-up instead.
+  if (githubApp && !publicUrl) {
+    throw new Error(
+      "GITHUB_APP_CLIENT_ID needs OPENBOT_PUBLIC_URL (or BETTER_AUTH_URL) so GitHub can send people back to this server.",
+    );
+  }
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -1278,12 +1313,11 @@ export function loadConfig(
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
+    ...(githubApp ? { githubApp } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     composioApiKey: optional(environment, "COMPOSIO_API_KEY"),
-    publicUrl: (
-      optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
-    )?.replace(/\/+$/, ""),
+    publicUrl,
     appUrl: (
       optional(environment, "OPENBOT_APP_URL") ??
       commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??

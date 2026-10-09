@@ -520,6 +520,24 @@ export const auditEventTypes = [
   /* A Bot connected to, or disconnected from, a Slack, Teams or SMS conversation. */
   "delivery.linked",
   "delivery.unlinked",
+  /*
+   * A person linking an outside account to themselves (a Slack link code, a GitHub sign-in). Target
+   * the link id; payload `actor` and `provider` only, never the subject, realm or credential id.
+   */
+  "identity.linked",
+  /*
+   * A person removing their own link to an outside account (Slack, GitHub). The link and its stored
+   * token go here; nothing is changed at the provider.
+   */
+  "identity.unlinked",
+  /*
+   * A removed person's linked account retired by the removal: marked `needs_reconnect`, its stored
+   * token (if any) revoked here. Target the link id; payload `actor` (the remover, not always a user
+   * id, so never `actorUserId`), `owner` (the removed person), `provider`, `reason`
+   * ("person_removed") and `credentialRevoked` (whether this removal revoked a live token). Never the
+   * subject, realm or credential id.
+   */
+  "identity.link_retired",
   /* Routines, however they were made: by a person on the screen or by a Bot through its tools. */
   "routine.created",
   "routine.updated",
