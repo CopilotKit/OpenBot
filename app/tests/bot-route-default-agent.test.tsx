@@ -321,13 +321,9 @@ test("/bot opens a live Computer sidebar with ownership controls and preserves t
     "/bot?agent=general-assistant",
   );
   const toggle = await view.findByRole("button", { name: "Open Computer" });
-  await waitFor(() =>
-    expect(
-      view
-        .getByRole("button", { name: "Take control" })
-        .hasAttribute("disabled"),
-    ).toBe(false),
-  );
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  // Taking control is offered inside the Computer, never beside the header's icon.
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
   const chat = view.getByTestId("copilot-chat");
   fireEvent.change(view.getByRole("textbox", { name: "Chat draft" }), {
     target: { value: "Keep this conversation" },

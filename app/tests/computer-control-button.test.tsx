@@ -264,7 +264,7 @@ test("a takeover stays shared when chat remounts before its response", async () 
   expect(await second.findByRole("button", { name: "Hand back" })).toBeTruthy();
 });
 
-test("the labeled Computer toggle opens and closes without changing ownership", async () => {
+test("the header's Computer toggle is an icon alone; taking control lives in the Computer itself", async () => {
   const backend = server();
   function Chat() {
     const [open, setOpen] = useState(false);
@@ -280,14 +280,11 @@ test("the labeled Computer toggle opens and closes without changing ownership", 
     );
   }
   const view = render(<Chat />);
-  await waitFor(() =>
-    expect(
-      view
-        .getByRole("button", { name: "Take control" })
-        .hasAttribute("disabled"),
-    ).toBe(false),
-  );
-  fireEvent.click(view.getByRole("button", { name: "Open Computer" }));
+  const toggle = await view.findByRole("button", { name: "Open Computer" });
+  await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+  expect(toggle.textContent).toBe("");
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  fireEvent.click(toggle);
   expect(view.getByText("Live computer sidebar")).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Close Computer" }));
   expect(view.queryByText("Live computer sidebar")).toBeNull();
@@ -314,7 +311,9 @@ test("an active human prompt opens once and does not fight closing the Computer"
   fireEvent.click(view.getByRole("button", { name: "Close Computer" }));
   view.rerender(<Chat />);
   expect(view.queryByText("Live computer sidebar")).toBeNull();
-  expect(view.getByRole("button", { name: "Hand back" })).toBeTruthy();
+  // Closed, the icon still says the Computer wants the person; handing back is done inside it.
+  expect(view.getByRole("img", { name: "Needs you" })).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Hand back" })).toBeNull();
 });
 
 test("both controls stay disabled while the current browser action drains", async () => {
