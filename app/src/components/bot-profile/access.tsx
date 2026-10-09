@@ -101,7 +101,11 @@ function YourSkills({ agentId }: { agentId: string }) {
           {grant.error.message}
         </p>
       ) : null}
-      {page.isPending ? null : skills.length === 0 ? (
+      {page.isPending ? null : page.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Could not load your skills.
+        </p>
+      ) : skills.length === 0 ? (
         <PageEmpty>
           You have not written a skill yet.{" "}
           <Link className="underline underline-offset-4" to="/skills">

@@ -150,3 +150,15 @@ test("on a Bot that is not yours there are no skill switches", async () => {
   expect(await view.findByText(/^Nothing granted yet\./)).toBeTruthy();
   expect(view.queryByRole("switch")).toBeNull();
 });
+
+test("your skills failing to load says so, not that you have none", async () => {
+  serving();
+  const served = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith("/api/plugins")
+      ? new Response(null, { status: 500 })
+      : served(input, init)) as unknown as typeof fetch;
+  const view = draw(BOT);
+  expect(await view.findByText("Could not load your skills.")).toBeTruthy();
+  expect(view.queryByText(/You have not written a skill yet/)).toBeNull();
+});
