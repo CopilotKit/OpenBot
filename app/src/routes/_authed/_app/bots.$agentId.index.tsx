@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ManageSection } from "@/components/bot-profile/manage";
 import { BotProfile } from "@/components/bot-profile/profile";
+import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import { PageShell } from "@/components/layout/page-shell";
 import { agentQueryOptions } from "@/lib/agents/queries";
 
@@ -40,6 +41,7 @@ function BotProfilePage() {
               onHidden={toRoster}
             />
           }
+          settings={<BotSettingsRows agent={agent.data} />}
         />
       )}
     </PageShell>
