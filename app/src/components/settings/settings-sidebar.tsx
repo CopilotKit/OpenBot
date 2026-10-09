@@ -1,5 +1,6 @@
 import {
   IconArrowLeft,
+  IconBell,
   IconKey,
   IconLayoutGrid,
   IconPlug,
@@ -38,6 +39,12 @@ const ITEMS: {
     /* `/settings` prefixes every other route here, and would otherwise light up on all of them. */
     exact: true,
     linkOptions: { to: "/settings" },
+  },
+  {
+    /* Where updates go for every Bot at once; how much each Bot sends is on that Bot's page. */
+    title: "Notifications",
+    icon: IconBell,
+    linkOptions: { to: "/settings/notifications" },
   },
   {
     /*

@@ -5,16 +5,18 @@ import {
   IconPlug,
   IconSearch,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import * as React from "react";
 import {
   PageEmpty,
+  PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
 import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -33,6 +35,7 @@ import {
   personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { clearTeamBotConsentsMutationOptions } from "@/lib/team-bots";
 
 /**
  * The services a Bot reads as you.
@@ -385,6 +388,49 @@ function RouteComponent() {
           </div>
         </PageSection>
       ) : null}
+      <TeamBotConsents />
     </PageShell>
+  );
+}
+
+/**
+ * A Bot someone shared with you uses its owner's connected apps unless you let it use yours on the
+ * card it shows you. This forgets every one of those answers, so each such Bot asks again.
+ */
+function TeamBotConsents() {
+  const clear = useMutation(clearTeamBotConsentsMutationOptions());
+  return (
+    <PageSection
+      description="A Bot someone shared with you uses their connected apps, and yours only where you allowed it on the card it showed you."
+      title="Bots shared with you"
+    >
+      {clear.error ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          {clear.error.message}
+        </p>
+      ) : null}
+      <PageRows>
+        <Item size="sm">
+          <ItemContent>
+            <ItemTitle>Your answers</ItemTitle>
+            <ItemDescription>
+              {clear.isSuccess
+                ? "Cleared. Each will ask again."
+                : "Forget them, so each asks again."}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              disabled={clear.isPending}
+              onClick={() => clear.mutate()}
+              size="sm"
+              variant="outline"
+            >
+              Clear
+            </Button>
+          </ItemActions>
+        </Item>
+      </PageRows>
+    </PageSection>
   );
 }
