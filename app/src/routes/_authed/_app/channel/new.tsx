@@ -148,9 +148,11 @@ function RouteComponent() {
           >
             {selected.map((profile) => (
               <ComboboxChip
+                className="gap-1.5 pl-1"
                 key={profile.id}
                 removeLabel={`Remove ${profile.name}`}
               >
+                <ChannelAvatar participantIds={[profile.id]} size={16} />
                 {profile.name}
               </ComboboxChip>
             ))}
