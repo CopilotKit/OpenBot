@@ -5,6 +5,7 @@ import type * as React from "react";
 import { useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
+import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -78,6 +79,12 @@ export function BotProfile({
       </div>
 
       <PageSection title="For you">
+        {/* Whether this Bot's Shared-app calls are being refused right now, with the button that
+            asks an administrator. About its present reach, so it lives here, not only where
+            publishing happens. */}
+        {agent.canManage ? (
+          <SharedAppNotice botId={agent.id} reason="publish" />
+        ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Could not load this Bot's state.
