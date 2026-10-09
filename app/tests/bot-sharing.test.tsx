@@ -127,3 +127,25 @@ test("an administrator can assign a published Bot to groups but not publish some
   expect(view.queryByRole("button", { name: "Update" })).toBeNull();
   expect(view.queryByRole("button", { name: "Unpublish" })).toBeNull();
 });
+
+test("a public Bot that is not published says everyone can already use it", async () => {
+  serving(
+    {
+      teamBots: [],
+      publishable: [{ id: "expenses", name: "Expenses", title: "Finance" }],
+    },
+    "user",
+  );
+  const view = draw({ ...BOT, visibility: "public" });
+  expect(
+    await view.findByText(/everyone in the deployment can already use it/),
+  ).toBeTruthy();
+  expect(view.queryByText(/Only you can use it/)).toBeNull();
+});
+
+test("someone else's unpublished private Bot is not described as yours alone", async () => {
+  serving({ teamBots: [], publishable: [] }, "admin");
+  const view = draw({ ...BOT, mine: false });
+  expect(await view.findByText("Not published.")).toBeTruthy();
+  expect(view.queryByText(/Only you can use it/)).toBeNull();
+});

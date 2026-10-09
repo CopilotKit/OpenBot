@@ -121,7 +121,13 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
             </Item>
           </PageRows>
         ) : (
-          <PageEmpty>Not published. Only you can use it.</PageEmpty>
+          <PageEmpty>
+            {agent.visibility === "public"
+              ? "Not published to the team. It is public, so everyone in the deployment can already use it."
+              : agent.mine
+                ? "Not published. Only you can use it."
+                : "Not published."}
+          </PageEmpty>
         )}
       </PageSection>
       {agent.mine && (published || publishable) ? (

@@ -44,7 +44,10 @@ const BOT: AgentProfile = {
   mine: true,
 };
 
-function serving(role: "admin" | "user") {
+function serving(
+  role: "admin" | "user",
+  teamBots: { id: string; audience: "team" | "people" }[] = [],
+) {
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("/api/routines")) {
@@ -57,7 +60,7 @@ function serving(role: "admin" | "user") {
       return Response.json({ tools: [], skills: [] });
     }
     if (url.includes("/api/team-bots")) {
-      return Response.json({ teamBots: [], publishable: [] });
+      return Response.json({ teamBots, publishable: [] });
     }
     return Response.json({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
@@ -90,7 +93,8 @@ test("the owner sees Sharing, and each row opens its own page", async () => {
   expect(view.getByText("Setup").closest("a")?.getAttribute("href")).toBe(
     "/bots/expenses/setup",
   );
-  expect(await view.findByText("Not shared")).toBeTruthy();
+  // Public and unpublished: everyone can already use it.
+  expect(await view.findByText("Everyone (public)")).toBeTruthy();
 });
 
 test("someone who neither owns the Bot nor administers the deployment does not see Sharing", async () => {
@@ -104,4 +108,11 @@ test("an administrator sees Sharing on somebody else's Bot", async () => {
   serving("admin");
   const view = draw({ ...BOT, mine: false });
   expect(await view.findByText("Sharing")).toBeTruthy();
+});
+
+test("someone a Bot was published to sees Sharing, where its link is", async () => {
+  serving("user", [{ id: "expenses", audience: "team" }]);
+  const view = draw({ ...BOT, mine: false, canManage: false });
+  expect(await view.findByText("Sharing")).toBeTruthy();
+  expect(await view.findByText("Whole team")).toBeTruthy();
 });

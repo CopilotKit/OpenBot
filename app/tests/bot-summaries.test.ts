@@ -24,9 +24,9 @@ test("access names skills and apps, or says there is nothing", () => {
 });
 
 test("sharing names the audience", () => {
-  expect(sharingSummary(undefined)).toBe("Not shared");
-  expect(sharingSummary({ audience: "team" })).toBe("Whole team");
-  expect(sharingSummary({ audience: "people" })).toBe(
+  expect(sharingSummary(undefined, "private")).toBe("Not shared");
+  expect(sharingSummary({ audience: "team" }, "private")).toBe("Whole team");
+  expect(sharingSummary({ audience: "people" }, "private")).toBe(
     "Specific people and groups",
   );
 });
@@ -45,4 +45,8 @@ test("setup names where it runs", () => {
     "not a url",
   );
   expect(setupSummary({ builtIn: false, endpoint: null })).toBe("Built in");
+});
+
+test("a public Bot nobody published is still open to everyone, not 'Not shared'", () => {
+  expect(sharingSummary(undefined, "public")).toBe("Everyone (public)");
 });

@@ -44,14 +44,17 @@ type Row = {
 
 /**
  * One row per area of this Bot's configuration, each stating its current answer and opening the page
- * that changes it. Sharing is only for its owner and administrators.
+ * that changes it. Sharing is for its owner, administrators, and anyone it is published to.
  */
 export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const me = useQuery(currentUserQueryOptions()).data;
   const routines = useQuery(routinesQueryOptions());
   const plugins = useQuery(agentPluginsQueryOptions(agent.id));
-  const canShare = agent.mine || me?.role === "admin";
-  const teamBots = useQuery({ ...teamBotsQueryOptions(), enabled: canShare });
+  const teamBots = useQuery(teamBotsQueryOptions());
+  const published = teamBots.data?.teamBots.find((bot) => bot.id === agent.id);
+  // Its owner and administrators change it there; anyone it is published to finds its link there.
+  const canShare =
+    agent.mine || me?.role === "admin" || published !== undefined;
 
   const rows: Row[] = [
     {
@@ -86,9 +89,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
             title: "Sharing",
             icon: IconUsersGroup,
             summary: teamBots.data
-              ? sharingSummary(
-                  teamBots.data.teamBots.find((bot) => bot.id === agent.id),
-                )
+              ? sharingSummary(published, agent.visibility)
               : "",
           },
         ]

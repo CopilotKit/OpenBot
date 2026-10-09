@@ -21,10 +21,17 @@ export function accessSummary(skills: number, apps: number): string {
   return parts.length ? parts.join(", ") : "Nothing granted";
 }
 
+/**
+ * Who else can use it. Publishing and visibility are separate records: a public Bot nobody published
+ * is still open to everyone in the deployment.
+ */
 export function sharingSummary(
   published: { audience: "team" | "people" } | undefined,
+  visibility: "public" | "private",
 ): string {
-  if (!published) return "Not shared";
+  if (!published) {
+    return visibility === "public" ? "Everyone (public)" : "Not shared";
+  }
   return published.audience === "team"
     ? "Whole team"
     : "Specific people and groups";
