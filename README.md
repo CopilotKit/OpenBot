@@ -182,8 +182,8 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | Route                       | Purpose                                                            |
 | --------------------------- | ------------------------------------------------------------------ |
 | `/`                         | Start and browse channels.                                         |
+| `/channel/new`              | Start a conversation; two or more Bots in To: start a group.       |
 | `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
-| `/group/new`                | Start one conversation with two or more Bots.                      |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
 | `/bots/:id`                 | One Bot: what it waits on you for, what it is doing, and how it is set up. |

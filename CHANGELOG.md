@@ -36,6 +36,10 @@ research, and its approval rules. `/approvals`, `/memory`, `/reachability` and `
 still work and open the new places. Messages from Bots, Slack and Teams that named those pages now
 point at the Bot's page.
 
+A group conversation is started like any other: put two or more Bots in the To: field of a new
+conversation, in the order they should answer. The separate group button and `/group/new` screen
+are gone; `/group/new` opens the new-conversation screen.
+
 Settings now also holds whether your Bots ask before acting, rules for every Bot, your memories, your
 devices and recent deliveries, and GitHub event sources. Team approval settings and shared account
 requests moved to Admin → Approvals.
