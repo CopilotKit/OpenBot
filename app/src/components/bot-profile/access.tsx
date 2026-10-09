@@ -71,11 +71,7 @@ export function AccessSections({ agent }: { agent: AgentProfile }) {
     <>
       {agent.mine ? <YourSkills agentId={agent.id} /> : null}
       <Granted agentId={agent.id} />
-      {/* The panel draws its own heading and count, and nothing at all when there is nothing to
-          say to somebody who cannot change it. */}
-      <PageSection>
-        <HandoffPanel agentId={agent.id} />
-      </PageSection>
+      <HandoffPanel agentId={agent.id} />
     </>
   );
 }
