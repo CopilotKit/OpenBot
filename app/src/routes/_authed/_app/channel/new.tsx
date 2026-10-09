@@ -3,17 +3,25 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { ChannelAvatar } from "@/components/channels/avatar";
-import { canSend, type Recipient } from "@/components/channels/compose-state";
+import {
+  canSend,
+  type Recipient,
+  startsGroup,
+  toFieldChange,
+} from "@/components/channels/compose-state";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { seedMessage } from "@/components/channels/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import {
   Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
   ComboboxContent,
   ComboboxEmpty,
-  ComboboxInput,
   ComboboxItem,
   ComboboxList,
+  useComboboxAnchor,
 } from "@/components/ui/combobox";
 import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
@@ -26,8 +34,9 @@ import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import { newId } from "../../../../lib/new-id";
 
 /**
- * Creates the channel on first send. The selected coworker stays in the URL so profile links and
- * reloads preserve the pending recipient without creating an empty channel.
+ * Creates the conversation on first send. One Bot in the To: field is an ordinary channel; two or
+ * more are a group, answering in the order they were picked. The first Bot stays in the URL so
+ * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
 /** What `GET /api/agents/:id` answers for a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Agent not found.";
@@ -42,7 +51,7 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
 function RouteComponent() {
   const { agent } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { startChosen, pending } = useStartChannel();
+  const { startChosen, startGroup, pending } = useStartChannel();
   const { data: profiles, isError: rosterError } = useQuery(
     agentListQueryOptions(),
   );
@@ -89,10 +98,19 @@ function RouteComponent() {
           ? "This Bot isn't available to you. It may be unpublished, not shared with you, or not described yet."
           : "Coworker couldn't be loaded."
         : null;
-  const recipients: Recipient[] = chosen
-    ? [{ id: chosen.id, name: chosen.name }]
-    : [];
-  const skillCommands = useSkillCommands(chosen?.id ?? "");
+  /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
+  const [picked, setPicked] = useState<AgentProfile[] | null>(null);
+  const selected = picked ?? (chosen ? [chosen] : []);
+  const anchor = useComboboxAnchor();
+  const recipients: Recipient[] = selected.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+  }));
+  const group = startsGroup(recipients);
+  // A group's first message goes to all of its Bots, so no one Bot's commands are offered.
+  const skillCommands = useSkillCommands(
+    group ? "" : (recipients[0]?.id ?? ""),
+  );
 
   if (profiles === undefined && !rosterError) return null;
 
@@ -105,33 +123,56 @@ function RouteComponent() {
           // Do not auto-open when the recipient came from the URL; the field is already answered.
           defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
           autoHighlight
+          multiple
           items={profiles ?? []}
           isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
             item.id === value.id
           }
           itemToStringLabel={(item: AgentProfile) => item.name}
           itemToStringValue={(item: AgentProfile) => item.id}
-          onValueChange={(next) => {
-            // Recipient changes are not separate navigation history entries.
+          onValueChange={(next: AgentProfile[], details) => {
+            const kept = toFieldChange(selected, next, details.reason);
+            setPicked(kept);
+            // The first Bot stays in the URL so a reload keeps the conversation's recipient; the
+            // rest of a group lives in the page. Not a separate navigation history entry.
             void navigate({
               replace: true,
-              search: next ? { agent: next.id } : {},
+              search: kept[0] ? { agent: kept[0].id } : {},
             });
           }}
-          value={chosen ?? null}
+          value={selected}
         >
-          <ComboboxInput
-            // The popup opening is not enough on its own: typing filters through this input, so
-            // the caret starts here whenever the recipient question is still open. Same condition
-            // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
-            autoFocus={!chosen}
-            placeholder="Choose a coworker…"
-            // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
-            className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
-          />
+          <ComboboxChips
+            ref={anchor}
+            className="flex-1 border-none bg-transparent! focus-within:ring-0 dark:bg-transparent!"
+          >
+            {selected.map((profile) => (
+              <ComboboxChip
+                key={profile.id}
+                removeLabel={`Remove ${profile.name}`}
+              >
+                {profile.name}
+              </ComboboxChip>
+            ))}
+            <ComboboxChipsInput
+              // The popup opening is not enough on its own: typing filters through this input, so
+              // the caret starts here whenever the recipient question is still open. A recipient
+              // from the URL means the composer takes focus instead.
+              autoFocus={!chosen}
+              placeholder={
+                selected.length
+                  ? "Add another Bot for a group…"
+                  : "Choose a Bot…"
+              }
+            />
+          </ComboboxChips>
           {/* Allow max-w to constrain the popup even though its anchor is full-width. */}
-          <ComboboxContent className="min-w-0 max-w-lg" sideOffset={12}>
-            <ComboboxEmpty>No agents found.</ComboboxEmpty>
+          <ComboboxContent
+            anchor={anchor}
+            className="min-w-0 max-w-lg"
+            sideOffset={12}
+          >
+            <ComboboxEmpty>No Bots found.</ComboboxEmpty>
             <ComboboxList>
               {(item: AgentProfile) => (
                 <ComboboxItem key={item.id} value={item} className="h-10">
@@ -166,6 +207,23 @@ function RouteComponent() {
         onSubmit={async (draft) => {
           const recipient = recipients[0];
           if (!recipient || !canSend(recipients, draft.text)) return;
+          if (group) {
+            setError(null);
+            try {
+              await startGroup(
+                recipients.map((entry) => entry.id),
+                draft.text,
+              );
+            } catch (caught) {
+              setError(
+                caught instanceof Error
+                  ? caught.message
+                  : "Could not start the group.",
+              );
+              throw caught;
+            }
+            return;
+          }
 
           setError(null);
           setSent(seedMessage(draft.text, newId()));

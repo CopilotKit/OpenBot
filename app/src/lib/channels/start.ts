@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { stashFirstMessage } from "@/components/channels/transcript-messages";
+import { client } from "@/lib/client";
+import { createGroupMutationOptions } from "@/lib/groups";
+import { newId } from "@/lib/new-id";
 import { createChannelMutationOptions } from "./mutations";
 import { channelKeys } from "./queries";
 import { routeMessage } from "./route";
@@ -30,6 +33,23 @@ export async function startWithChosen(input: {
 }
 
 /**
+ * Start a group from a just-submitted first message: create it with the Bots in the order they were
+ * picked, give it the message, then open it. Pure so the order can be tested; nothing is sent or
+ * opened when the group could not be made.
+ */
+export async function startGroupWith(input: {
+  agentIds: string[];
+  text: string;
+  create: (agentIds: string[]) => Promise<{ id: string }>;
+  send: (channelId: string, text: string) => Promise<void>;
+  open: (channelId: string) => Promise<void>;
+}): Promise<void> {
+  const group = await input.create(input.agentIds);
+  await input.send(group.id, input.text);
+  await input.open(group.id);
+}
+
+/**
  * Start a channel from a just-submitted first message, then navigate there.
  *
  * Ordering matters: create, seed the channel cache, stash the first message, then navigate. That
@@ -39,6 +59,7 @@ export function useStartChannel() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const createChannel = useMutation(createChannelMutationOptions(queryClient));
+  const createGroup = useMutation(createGroupMutationOptions(queryClient));
 
   const start = async (agentId: string, text: string) => {
     const channel = await createChannel.mutateAsync([agentId]);
@@ -51,8 +72,33 @@ export function useStartChannel() {
     });
   };
 
+  const startGroup = (agentIds: string[], text: string) =>
+    startGroupWith({
+      agentIds,
+      text,
+      create: async (ids) => {
+        const channel = await createGroup.mutateAsync(ids);
+        queryClient.setQueryData(channelKeys.detail(channel.id), channel);
+        return channel;
+      },
+      send: (channelId, message) =>
+        client(`/api/groups/${encodeURIComponent(channelId)}`, {
+          method: "POST",
+          body: { id: newId(), text: message, agentId: null },
+          fallback: "Your message could not be sent to the group.",
+        }).then(() => undefined),
+      open: (channelId) =>
+        navigate({
+          params: { channelId },
+          replace: true,
+          to: "/group/$channelId",
+        }),
+    });
+
   return {
-    pending: createChannel.isPending,
+    pending: createChannel.isPending || createGroup.isPending,
+    /** Two or more Bots: a group, answering in the order given. */
+    startGroup,
     start,
     /** `start`, for a coworker the person chose: the choice is recorded first. */
     startChosen: (agentId: string, text: string) =>
