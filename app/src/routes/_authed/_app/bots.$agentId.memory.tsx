@@ -16,8 +16,8 @@ function MemoryPage() {
       title="Memory"
     >
       {(agent) => (
-        <div className="mt-6 grid gap-6">
-          <p className="text-muted-foreground text-sm">
+        <>
+          <p className="mt-6 text-muted-foreground text-sm">
             What your Bots remember about you is in{" "}
             <Link
               className="underline underline-offset-4"
@@ -29,7 +29,7 @@ function MemoryPage() {
           </p>
           <MemorySources agentId={agent.id} />
           <ProactiveResearchSettings agentId={agent.id} />
-        </div>
+        </>
       )}
     </BotSubpage>
   );
