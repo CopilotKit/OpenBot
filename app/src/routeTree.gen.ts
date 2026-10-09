@@ -54,6 +54,8 @@ import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './route
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
 import { Route as AuthedAppBotsAgentIdIndexRouteImport } from './routes/_authed/_app/bots.$agentId.index'
+import { Route as AuthedAppBotsAgentIdAccessRouteImport } from './routes/_authed/_app/bots.$agentId.access'
+import { Route as AuthedAppBotsAgentIdRoutinesRouteImport } from './routes/_authed/_app/bots.$agentId.routines'
 import { Route as AuthedAppBotsAgentIdSetupRouteImport } from './routes/_authed/_app/bots.$agentId.setup'
 import { Route as AuthedAdminPluginsKeyBotsAgentIdRouteImport } from './routes/_authed/admin/plugins/$key_.bots.$agentId'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
@@ -292,6 +294,18 @@ const AuthedAppBotsAgentIdIndexRoute =
     path: '/bots/$agentId/',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppBotsAgentIdAccessRoute =
+  AuthedAppBotsAgentIdAccessRouteImport.update({
+    id: '/bots/$agentId/access',
+    path: '/bots/$agentId/access',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppBotsAgentIdRoutinesRoute =
+  AuthedAppBotsAgentIdRoutinesRouteImport.update({
+    id: '/bots/$agentId/routines',
+    path: '/bots/$agentId/routines',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAppBotsAgentIdSetupRoute =
   AuthedAppBotsAgentIdSetupRouteImport.update({
     id: '/bots/$agentId/setup',
@@ -354,6 +368,8 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
+  '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
@@ -400,6 +416,8 @@ export interface FileRoutesByTo {
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
+  '/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/bots/$agentId': typeof AuthedAppBotsAgentIdIndexRoute
   '/admin/plugins/$key/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
@@ -451,6 +469,8 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/_authed/_app/bots/$agentId/access': typeof AuthedAppBotsAgentIdAccessRoute
+  '/_authed/_app/bots/$agentId/routines': typeof AuthedAppBotsAgentIdRoutinesRoute
   '/_authed/_app/bots/$agentId/setup': typeof AuthedAppBotsAgentIdSetupRoute
   '/_authed/_app/bots/$agentId/': typeof AuthedAppBotsAgentIdIndexRoute
   '/_authed/admin/plugins/$key_/bots/$agentId': typeof AuthedAdminPluginsKeyBotsAgentIdRoute
@@ -501,6 +521,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/'
     | '/settings/components-gallery/'
     | '/settings/connected-accounts/'
+    | '/bots/$agentId/access'
+    | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId/'
     | '/admin/plugins/$key/bots/$agentId'
@@ -547,6 +569,8 @@ export interface FileRouteTypes {
     | '/admin/plugins'
     | '/settings/components-gallery'
     | '/settings/connected-accounts'
+    | '/bots/$agentId/access'
+    | '/bots/$agentId/routines'
     | '/bots/$agentId/setup'
     | '/bots/$agentId'
     | '/admin/plugins/$key/bots/$agentId'
@@ -597,6 +621,8 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
     | '/_authed/settings/connected-accounts/'
+    | '/_authed/_app/bots/$agentId/access'
+    | '/_authed/_app/bots/$agentId/routines'
     | '/_authed/_app/bots/$agentId/setup'
     | '/_authed/_app/bots/$agentId/'
     | '/_authed/admin/plugins/$key_/bots/$agentId'
@@ -925,6 +951,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppBotsAgentIdIndexRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/_app/bots/$agentId/access': {
+      id: '/_authed/_app/bots/$agentId/access'
+      path: '/bots/$agentId/access'
+      fullPath: '/bots/$agentId/access'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdAccessRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/bots/$agentId/routines': {
+      id: '/_authed/_app/bots/$agentId/routines'
+      path: '/bots/$agentId/routines'
+      fullPath: '/bots/$agentId/routines'
+      preLoaderRoute: typeof AuthedAppBotsAgentIdRoutinesRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
     '/_authed/_app/bots/$agentId/setup': {
       id: '/_authed/_app/bots/$agentId/setup'
       path: '/bots/$agentId/setup'
@@ -1035,6 +1075,8 @@ interface AuthedAppRouteChildren {
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
   AuthedAppBotsIndexRoute: typeof AuthedAppBotsIndexRoute
+  AuthedAppBotsAgentIdAccessRoute: typeof AuthedAppBotsAgentIdAccessRoute
+  AuthedAppBotsAgentIdRoutinesRoute: typeof AuthedAppBotsAgentIdRoutinesRoute
   AuthedAppBotsAgentIdSetupRoute: typeof AuthedAppBotsAgentIdSetupRoute
   AuthedAppBotsAgentIdIndexRoute: typeof AuthedAppBotsAgentIdIndexRoute
 }
@@ -1055,6 +1097,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
   AuthedAppBotsIndexRoute: AuthedAppBotsIndexRoute,
+  AuthedAppBotsAgentIdAccessRoute: AuthedAppBotsAgentIdAccessRoute,
+  AuthedAppBotsAgentIdRoutinesRoute: AuthedAppBotsAgentIdRoutinesRoute,
   AuthedAppBotsAgentIdSetupRoute: AuthedAppBotsAgentIdSetupRoute,
   AuthedAppBotsAgentIdIndexRoute: AuthedAppBotsAgentIdIndexRoute,
 }

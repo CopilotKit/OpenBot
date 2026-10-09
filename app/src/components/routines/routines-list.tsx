@@ -213,7 +213,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
  * The signed-in person's standing instructions: a switch to stop one taking effect, and a delete
  * that ends it for good.
  *
- * Scoped by `agentId` on a Bot's own dialog, unscoped on the Routines page. One query either way —
+ * Scoped by `agentId` on a Bot's Routines page, unscoped on the Routines page. One query either way —
  * the list is owner-scoped and small, so the scope is a filter here rather than a second endpoint.
  */
 export function RoutinesList({
@@ -222,7 +222,7 @@ export function RoutinesList({
 }: {
   /** Show only the routines this Bot carries out. Absent shows all of the person's. */
   agentId?: string;
-  /** Inside a dialog, where the page section's own top margin is somebody else's spacing. */
+  /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
 } = {}) {
   const routines = useQuery(routinesQueryOptions());
