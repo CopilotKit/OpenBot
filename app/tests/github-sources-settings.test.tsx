@@ -74,6 +74,8 @@ test("connecting a repository sends it with its secret", async () => {
   serving();
   const view = draw();
   const user = userEvent.setup({ document });
+  await view.findByText("acme/app");
+  await user.click(view.getByRole("button", { name: "Add a repository" }));
   await user.type(
     await view.findByRole("textbox", { name: "Repository" }),
     "acme/web",
