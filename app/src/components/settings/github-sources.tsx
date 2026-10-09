@@ -1,4 +1,4 @@
-import { IconBrandGithub } from "@tabler/icons-react";
+import { IconBrandGithub, IconPlus } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import {
@@ -49,7 +49,8 @@ export function GithubSources() {
   return (
     <PageSection
       action={
-        <Button onClick={() => setAdding(true)} size="sm" variant="outline">
+        <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
+          <IconPlus />
           Add a repository
         </Button>
       }

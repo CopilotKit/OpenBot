@@ -868,10 +868,9 @@ function NetworkDialog({
         </DialogHeader>
         <DialogBody className="mt-4 space-y-4 overflow-y-auto">
           {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
-              direct child of DialogContent and keeps scrolling. The form repeats the body's gap and
-              space-y so the fields keep their spacing. */}
+              direct child of DialogContent and keeps scrolling. */}
           <form
-            className="flex flex-col gap-4 space-y-4"
+            className="flex flex-col gap-4"
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
