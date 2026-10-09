@@ -99,7 +99,13 @@ export function GithubSources() {
   );
 }
 
-/** A repository and the webhook secret GitHub will sign its events with. */
+/**
+ * A repository and the webhook secret GitHub will sign its events with.
+ *
+ * The form wraps the header, body and footer so the footer's button submits it, and Enter in either
+ * field does too. It is `contents`, drawing no box of its own, so the body still lays out as a direct
+ * child of the dialog and keeps its scrolling.
+ */
 function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
   const formId = useId();
   const [repository, setRepository] = useState("");
@@ -108,30 +114,29 @@ function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a repository</DialogTitle>
-          <DialogDescription>
-            Use the same secret when you add the webhook in GitHub.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="mt-4">
-          <form
-            className="grid gap-4"
-            id={formId}
-            onSubmit={(event) => {
-              event.preventDefault();
-              create.mutate(
-                { repository, secret },
-                {
-                  onSuccess: () => {
-                    setSecret("");
-                    setRepository("");
-                    onClose();
-                  },
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault();
+            create.mutate(
+              { repository, secret },
+              {
+                onSuccess: () => {
+                  setSecret("");
+                  setRepository("");
+                  onClose();
                 },
-              );
-            }}
-          >
+              },
+            );
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Add a repository</DialogTitle>
+            <DialogDescription>
+              Use the same secret when you add the webhook in GitHub.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="mt-4">
             <Field>
               <FieldLabel htmlFor={`${formId}-repository`}>
                 Repository
@@ -163,21 +168,16 @@ function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
                 {create.error.message}
               </p>
             ) : null}
-          </form>
-        </DialogBody>
-        <DialogFooter className="mt-4">
-          <Button onClick={onClose} size="sm" variant="outline">
-            Cancel
-          </Button>
-          <Button
-            disabled={create.isPending}
-            form={formId}
-            size="sm"
-            type="submit"
-          >
-            Connect events
-          </Button>
-        </DialogFooter>
+          </DialogBody>
+          <DialogFooter className="mt-4">
+            <Button onClick={onClose} size="sm" variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={create.isPending} size="sm" type="submit">
+              Connect events
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
