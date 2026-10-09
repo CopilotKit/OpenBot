@@ -25,11 +25,12 @@ test("creating wins over opening, as it did on /agents", () => {
   expect(legacyAgentsTarget({ new: true, agent: "agent_1" }).to).toBe("/bots");
 });
 
-test("the four pages that left the sidebar send people to where their contents went", () => {
+test("pages that left the sidebar send people to where their contents went", () => {
   expect(LEGACY_PAGES).toEqual({
     "/approvals": "/settings/approvals",
     "/memory": "/settings/memory",
     "/reachability": "/settings/notifications",
     "/responsibilities": "/bots",
+    "/group/new": "/channel/new",
   });
 });

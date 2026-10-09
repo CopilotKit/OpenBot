@@ -27,4 +27,6 @@ export const LEGACY_PAGES = {
   "/memory": "/settings/memory",
   "/reachability": "/settings/notifications",
   "/responsibilities": "/bots",
+  // A group is started from the new-conversation screen by putting two or more Bots in To:.
+  "/group/new": "/channel/new",
 } as const;
