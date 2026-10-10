@@ -8,6 +8,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+- Migration `0053_bot_scoped_memory_dedupe` rebuilds the Bot-memory dedupe index per Bot. A fact
+  one Bot remembered used to be swallowed as a duplicate when a second Bot formed it, leaving the
+  second Bot unable to recall it; each Bot now keeps its own row. The migration only rebuilds an
+  index and keeps every row.
+
 **Before upgrading.** Two things change for an existing deployment:
 - Migration `0052_shared_brokered_accounts` copies every Composio connection into a new
   `brokered_connections` table and leaves `composio_connections` in place, unwritten. Rolling back to

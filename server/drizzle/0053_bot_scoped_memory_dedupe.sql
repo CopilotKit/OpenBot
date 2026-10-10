@@ -1,0 +1,2 @@
+DROP INDEX "personal_memories_formed_digest_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "personal_memories_formed_digest_idx" ON "personal_memories" USING btree ("owner_user_id","formed_by_agent_id","import_digest") WHERE "personal_memories"."formed_by" = 'bot';
