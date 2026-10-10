@@ -138,6 +138,8 @@ While a person controls the browser, Bot actions are refused rather than queued.
 
 Secret entry is separate from chat content. The audit trail records that a secret was requested or supplied and the character count, not the secret value.
 
+Guessing at one is bounded too. The routes that verify something guessable — the typed password and the short second-factor code on `POST /api/sign-in-requests/:id/submit` and `/:id/use-saved` — allow each person a few dozen code attempts per window (sixty per ten minutes) and refuse the rest with 429 and a `Retry-After`, without echoing the secret or saying which guess was close. Request creation has its own hourly budget. The budgets are per server process, so a deployment with several replicas enforces roughly that many times over; reads of a person's own requests are never limited.
+
 ## Watching a Bot work
 
 Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.

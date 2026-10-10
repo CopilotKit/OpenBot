@@ -2,6 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import type { ActionActor } from "../computer/gateway";
+import { createRateLimiter } from "../rate-limit";
 import type { SignInService } from "./service";
 import { SignInRefusedError } from "./types";
 
@@ -45,6 +46,26 @@ async function readBody(
 }
 
 /**
+ * Guess-rate budgets for the sign-in routes, overridable per caller (tests take small
+ * budgets and a fake clock; production takes the defaults).
+ *
+ * `submit` covers `POST /:id/submit` and `POST /:id/use-saved` together, because both
+ * verify something guessable: a password the person types and, more importantly, the
+ * short numeric second-factor code. Sixty guesses per ten minutes per person is far
+ * past what a human mistyping a code needs, and nowhere near what a six-digit space
+ * needs to fall. `request` covers `POST /` alone: creating requests is cheap, but an
+ * unbounded caller could fill the pending list faster than its expiry sweeps it.
+ */
+export type SignInRouteLimits = {
+  submit?: { windowMs?: number; max?: number };
+  request?: { windowMs?: number; max?: number };
+  now?: () => number;
+};
+
+const DEFAULT_SUBMIT_LIMIT = { windowMs: 10 * 60 * 1000, max: 60 };
+const DEFAULT_REQUEST_LIMIT = { windowMs: 60 * 60 * 1000, max: 30 };
+
+/**
  * The private sign-in form's API, and the Passwords list.
  *
  * Mounted at `/api/sign-in-requests` and `/api/passwords`. Every route is the signed-in owner's own:
@@ -54,13 +75,25 @@ async function readBody(
  * and an error this module did not write (a database driver's, say) can quote the statement it was
  * running. Refusals are this module's own sentences; everything else is one fixed line.
  */
+
 export function createSignInRoutes(
   service: SignInService,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   canUseBot: BotAccessCheck,
+  limits?: SignInRouteLimits,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
+  const submitLimiter = createRateLimiter({
+    ...DEFAULT_SUBMIT_LIMIT,
+    ...limits?.submit,
+    ...(limits?.now ? { now: limits.now } : {}),
+  });
+  const requestLimiter = createRateLimiter({
+    ...DEFAULT_REQUEST_LIMIT,
+    ...limits?.request,
+    ...(limits?.now ? { now: limits.now } : {}),
+  });
   routes.onError((error, context) => {
     if (error instanceof SignInRefusedError)
       return context.json({ error: error.message }, error.status);
@@ -71,7 +104,7 @@ export function createSignInRoutes(
   });
 
   /** The open chat's Bot asking. An unattended Bot asks through its headless tool instead. */
-  routes.post("/", async (context) => {
+  routes.post("/", requestLimiter, async (context) => {
     const body = await readBody(context.req.raw);
     const botId = field(body, "botId", { required: true, max: 200 }) as string;
     if (!(await canUseBot(context.var.actor, botId)))
@@ -101,7 +134,7 @@ export function createSignInRoutes(
     ),
   );
 
-  routes.post("/:id/submit", async (context) => {
+  routes.post("/:id/submit", submitLimiter, async (context) => {
     const body = await readBody(context.req.raw);
     return context.json(
       await service.submit(
@@ -118,7 +151,7 @@ export function createSignInRoutes(
     );
   });
 
-  routes.post("/:id/use-saved", async (context) => {
+  routes.post("/:id/use-saved", submitLimiter, async (context) => {
     const body = await readBody(context.req.raw);
     return context.json(
       await service.useSaved(
