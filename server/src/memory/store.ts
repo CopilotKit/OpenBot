@@ -405,6 +405,7 @@ export function createMemoryStore(
           and(
             eq(personalMemories.ownerUserId, ownerUserId),
             eq(personalMemories.formedBy, "bot"),
+            eq(personalMemories.formedByAgentId, input.agentId),
             eq(personalMemories.importDigest, digest),
           ),
         )
@@ -437,7 +438,11 @@ export function createMemoryStore(
           importDigest: digest,
         })
         .onConflictDoNothing({
-          target: [personalMemories.ownerUserId, personalMemories.importDigest],
+          target: [
+            personalMemories.ownerUserId,
+            personalMemories.formedByAgentId,
+            personalMemories.importDigest,
+          ],
           where: sql`${personalMemories.formedBy} = 'bot'`,
         })
         .returning({ id: personalMemories.id });
@@ -453,6 +458,7 @@ export function createMemoryStore(
           and(
             eq(personalMemories.ownerUserId, ownerUserId),
             eq(personalMemories.formedBy, "bot"),
+            eq(personalMemories.formedByAgentId, input.agentId),
             eq(personalMemories.importDigest, digest),
           ),
         )

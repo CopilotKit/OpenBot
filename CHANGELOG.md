@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Four things change for an existing deployment:
+**Before upgrading.** Five things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -28,6 +28,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   comes back on their next conversation with that Bot (one they turned off and kept stays off).
   `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`)
   prevent it.
+
+- Migration `0056_bot_scoped_memory_dedupe` rebuilds the Bot-memory dedupe index per Bot. A fact
+  one Bot remembered used to be swallowed as a duplicate when a second Bot formed it, leaving the
+  second Bot unable to recall it; each Bot now keeps its own row. The migration only rebuilds an
+  index and keeps every row.
 
 ### Fewer "Verify you are human" pages
 

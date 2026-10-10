@@ -393,6 +393,13 @@
       "when": 1791841282662,
       "tag": "0055_default_opt_outs",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791644240047,
+      "tag": "0056_bot_scoped_memory_dedupe",
+      "breakpoints": true
     }
   ]
 }
