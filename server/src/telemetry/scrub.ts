@@ -42,6 +42,37 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
     /(x-api-key\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s'"]+)/gi,
     (_m, lead) => `${lead}${REDACTED}`,
   ],
+  /*
+   * Credentials passed positionally: the value is the word after the flag, so nothing in the command
+   * names it and the rules below cannot see it. Tool-anchored, and checked before them because a
+   * generic rule can mistake an attached short-form password for a flag name — `redis-cli -asecret`
+   * reads as a flag called `-asecret`, and the rule for a flag named after a secret then redacts the
+   * word after it instead of the password.
+   *
+   * Each of these refuses a value that begins with `-`, so a flag left bare, which asks for the
+   * password interactively, does not swallow the flag that follows it.
+   */
+  // `-psecret` for mysql and friends. Nothing separates them: a space means the password is asked for
+  // at the prompt and the word after `-p` is the database, so only the attached form is redacted.
+  [
+    /(\bmysql(?:dump)?\b[^|;&]*?\s-p)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
+  // `docker login -p secret`, where `-p` is the password rather than a port.
+  [
+    /(\bdocker\s+login\b[^|;&]*?\s-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
+  // `sshpass -p secret ssh user@host`, where `-p` is the password handed to ssh.
+  [
+    /(\bsshpass\b[^|;&]*?\s-p[ \t]*)("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
+  // `redis-cli -a secret`, `-asecret` and `--pass secret`, the same shape under redis-cli's names.
+  [
+    /(\bredis-cli\b[^|;&]*?\s(?:-a[ \t]*|--pass(?:=|[ \t]+)))("[^"]*"|'[^']*'|[^\s'"-]\S*)/gi,
+    (_m, lead) => `${lead}${REDACTED}`,
+  ],
   // A quoted key in a JSON body: `-d '{"password":"x"}'`, or `-d "{\\"password\\":\\"x\\"}"` once the
   // shell quoting around it has escaped the inner quotes. The rule below stops at the closing quote
   // of the key, so it never saw these.
@@ -68,23 +99,21 @@ const RULES: [RegExp, (match: string, ...groups: string[]) => string][] = [
     ),
     (_m, lead) => `${lead}${REDACTED}`,
   ],
-  // `-psecret` for mysql and friends, `-p secret` too.
-  [
-    /(\bmysql(?:dump)?\b[^|;&]*?\s-p)(\S+)/gi,
-    (_m, lead) => `${lead}${REDACTED}`,
-  ],
   // `curl -u user:password`, and the other ways curl takes it: `-uuser:password`,
-  // `--user=user:password`, and either of them with the pair in quotes.
+  // `--user=user:password`, `--proxy-user user:password`, and any of them with the pair in quotes.
+  // curl's short form for the proxy is `-U`, which is deliberately not here: `-U` is a user agent to
+  // wget and an unrelated flag to ssh, and a pair like `wget -U Mozilla:5` is not a credential.
   [
-    /(\s(?:-u\s*|--user(?:=|\s+)))(?:"([^":]*):[^"]*"|'([^':]*):[^']*'|([^\s:"']+):\S+)/g,
+    /(\s(?:-u\s*|--user(?:=|\s+)|--proxy-user(?:=|\s+)))(?:"([^":]*):[^"]*"|'([^':]*):[^']*'|([^\s:"']+):\S+)/g,
     (_m, lead, doubleQuoted, singleQuoted, bare) => {
       const user = doubleQuoted ?? singleQuoted ?? bare;
       return `${lead}${user}:${REDACTED}`;
     },
   ],
-  // Userinfo in any URL: `https://user:pass@host`.
+  // Userinfo in any URL: `https://user:pass@host`. The user is optional, because
+  // `redis://:pass@host` is how a password-only scheme is written.
   [
-    /([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+):([^\s/@]+)@/gi,
+    /([a-z][a-z0-9+.-]*:\/\/)([^\s/@:]*):([^\s/@]+)@/gi,
     (_m, scheme, user) => `${scheme}${user}:${REDACTED}@`,
   ],
 ];
