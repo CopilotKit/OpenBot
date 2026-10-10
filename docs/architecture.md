@@ -126,6 +126,15 @@ Computer actions carry the initiator too. A run with no browser attached (a rout
 a group turn) is given the computer tools server-side, with the Bot and the person bound before the
 model supplies any arguments, and the gateway writes that run's initiator on every decision.
 
+### Taking the trail out
+
+The Audit screen's **Export CSV** downloads the current filter as
+`GET /api/admin/audit-events?format=csv`: the same filtered query as the table, walked page by
+page up to 5,000 rows and returned as RFC 4180 CSV with the redacted payload as one JSON column.
+An export that hits the cap answers with `X-Audit-Export-Truncated`, so a reviewer narrows
+`from`/`to` or a filter instead of citing a partial trail. An unknown `format` is a 400, like any
+other malformed audit query.
+
 ## Human control and secrets
 
 Handovers are audited as control events:

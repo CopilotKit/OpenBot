@@ -982,3 +982,107 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     to,
   };
 }
+
+/**
+ * CSV export for the admin audit trail.
+ *
+ * The table at Admin > Audit is the only read surface, so a review that needs evidence —
+ * a compliance pull, an incident timeline, a count of what policy refused — has nowhere to
+ * take it. `GET /api/admin/audit-events?format=csv` answers the same filtered query as the
+ * JSON list and returns it as RFC 4180 CSV, capped so an unbounded trail cannot become an
+ * unbounded response. Payloads arrive here already redacted (see `redactAuditPayload`), and
+ * the export carries them as one JSON column rather than spreading unknown keys across
+ * columns a spreadsheet would then misread.
+ */
+export const AUDIT_EXPORT_MAX_ROWS = 5_000;
+export const AUDIT_EXPORT_PAGE_SIZE = 500;
+
+export const AUDIT_EXPORT_COLUMNS = [
+  "id",
+  "createdAt",
+  "eventType",
+  "actorUserId",
+  "initiatorKind",
+  "initiatorId",
+  "targetType",
+  "targetId",
+  "decisionAllowed",
+  "decisionRule",
+  "bot",
+  "payload",
+] as const;
+
+function toCsvCell(value: string): string {
+  if (
+    value.includes('"') ||
+    value.includes(",") ||
+    value.includes("\n") ||
+    value.includes("\r")
+  ) {
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+  return value;
+}
+
+function auditEventToCsvRow(event: AuditEvent): string {
+  const payload = event.payload ?? {};
+  const decision = (payload.decision ?? {}) as {
+    allowed?: unknown;
+    rule?: unknown;
+  };
+  const cells = [
+    event.id,
+    event.createdAt,
+    event.eventType,
+    event.actorUserId ?? "",
+    event.initiatorKind ?? "",
+    event.initiatorId ?? "",
+    event.targetType ?? "",
+    event.targetId ?? "",
+    typeof decision.allowed === "boolean" ? String(decision.allowed) : "",
+    typeof decision.rule === "string" ? decision.rule : "",
+    typeof payload.bot === "string" ? payload.bot : "",
+    JSON.stringify(payload),
+  ];
+  return cells.map(toCsvCell).join(",");
+}
+
+export function auditEventsToCsv(events: AuditEvent[]): string {
+  const header = AUDIT_EXPORT_COLUMNS.join(",");
+  if (events.length === 0) return `${header}\n`;
+  return `${header}\n${events.map(auditEventToCsvRow).join("\n")}\n`;
+}
+
+/**
+ * The rows behind an export, walked page by page through the same reader the JSON list
+ * uses, so the CSV and the table never disagree about what a filter matches.
+ *
+ * `cursor` and `limit` are the JSON list's paging, not the export's, and are ignored here:
+ * the export takes everything the filters match up to `maxRows` and says whether it
+ * stopped early, so the caller can narrow the range instead of silently receiving a
+ * partial trail.
+ */
+export async function readAuditExportRows(
+  reader: AuditReader,
+  baseQuery: AuditEventQuery,
+  options?: { maxRows?: number; pageSize?: number },
+): Promise<{ events: AuditEvent[]; truncated: boolean }> {
+  const maxRows = options?.maxRows ?? AUDIT_EXPORT_MAX_ROWS;
+  const pageSize = options?.pageSize ?? AUDIT_EXPORT_PAGE_SIZE;
+  const { cursor: _paging, limit: _limit, ...filters } = baseQuery;
+  const events: AuditEvent[] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+  for (;;) {
+    const page = await reader.list({ ...filters, limit: pageSize, cursor });
+    for (const event of page.events) {
+      if (events.length >= maxRows) {
+        truncated = true;
+        return { events, truncated };
+      }
+      events.push(event);
+    }
+    if (!page.nextCursor) return { events, truncated };
+    cursor = page.nextCursor;
+  }
+}

@@ -25,11 +25,13 @@ import type { ApprovalService } from "./approvals/service";
 import {
   type AuditEventType,
   type AuditInitiator,
+  auditEventsToCsv,
   AuditQueryError,
   type AuditReader,
   type AuditStore,
   auditQueryFromUrl,
   DEPLOYMENT_INITIATOR,
+  readAuditExportRows,
   recordAuditEvent,
 } from "./audit";
 import { createDevRequireUser } from "./auth/dev-actor";
@@ -792,9 +794,47 @@ export function createApp(
     }
 
     try {
-      return context.json(
-        await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
-      );
+      const url = new URL(context.req.url);
+      const format = url.searchParams.get("format");
+      if (
+        format !== null &&
+        format !== "" &&
+        format !== "json" &&
+        format !== "csv"
+      ) {
+        return context.json(
+          { error: 'Query parameter "format" must be "json" or "csv".' },
+          400,
+        );
+      }
+      /*
+       * The export answers the same filtered query as the list — `eventType`,
+       * `actorUserId`, `initiatorKind`, `targetType`, `targetId`, `from`, `to` — so the
+       * downloaded file and the table agree. Paging (`cursor`, `limit`) belongs to the
+       * JSON list and is ignored here; the export walks every matching page up to the
+       * cap in `readAuditExportRows` and names the file after the day it was pulled.
+       */
+      if (format === "csv") {
+        const query = auditQueryFromUrl(url);
+        const { events, truncated } = await readAuditExportRows(
+          auditReader,
+          query,
+        );
+        const day = new Date().toISOString().slice(0, 10);
+        context.header("Content-Type", "text/csv; charset=utf-8");
+        context.header(
+          "Content-Disposition",
+          `attachment; filename="audit-events-${day}.csv"`,
+        );
+        if (truncated) {
+          context.header(
+            "X-Audit-Export-Truncated",
+            "true; narrow from/to or a filter to export the full range",
+          );
+        }
+        return context.body(auditEventsToCsv(events));
+      }
+      return context.json(await auditReader.list(auditQueryFromUrl(url)));
     } catch (error) {
       if (error instanceof AuditQueryError) {
         return context.json({ error: error.message }, 400);

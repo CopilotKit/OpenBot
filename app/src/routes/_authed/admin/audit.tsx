@@ -1,4 +1,4 @@
-import { IconRefresh } from "@tabler/icons-react";
+import { IconDownload, IconRefresh } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,8 +15,9 @@ import {
   outcomeOf,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import { auditEventsQueryOptions } from "@/lib/audit/queries";
+import { auditEventsQueryOptions, auditExportUrl } from "@/lib/audit/queries";
 import { silenceOf } from "@/lib/audit/silence";
+import { client } from "@/lib/client";
 
 /**
  * Read surface for policy, computer, component, MCP, and credential audit events.
@@ -66,6 +67,41 @@ function AuditPage() {
   const events = useQuery(auditEventsQueryOptions(search));
   const rows = (events.data?.events ?? []) as AuditEvent[];
   const nameFor = useBotNames();
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  /*
+   * The same filtered query as the table, downloaded as a file. The server walks every
+   * matching page up to its cap, so this stays a single request no matter how many pages
+   * the filter matches; the filename carries the day it was pulled.
+   */
+  async function exportCsv() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const response = await client(auditExportUrl(search), {
+        fallback: "Could not export audit events",
+      });
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Could not export audit events",
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     /*
@@ -76,10 +112,21 @@ function AuditPage() {
      */
     <PageShell
       action={
-        <Button onClick={() => events.refetch()} size="sm" variant="ghost">
-          <IconRefresh />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            disabled={exporting}
+            onClick={exportCsv}
+            size="sm"
+            variant="outline"
+          >
+            <IconDownload />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </Button>
+          <Button onClick={() => events.refetch()} size="sm" variant="ghost">
+            <IconRefresh />
+            Refresh
+          </Button>
+        </div>
       }
       description="Every action a Bot took, and every one this deployment's policy refused."
       title="Audit"
@@ -101,6 +148,11 @@ function AuditPage() {
           ))}
         </div>
 
+        {exportError ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            {exportError}
+          </p>
+        ) : null}
         {events.isPending ? null : events.isError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             The audit trail could not be loaded.
