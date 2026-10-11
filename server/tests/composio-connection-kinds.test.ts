@@ -20,14 +20,14 @@ import { createDatabase } from "../src/db/client";
 import {
   agents,
   auditEvents,
-  composioConnections,
+  brokeredConnections,
   mcpServers,
   mcpTools,
   pluginGrants,
 } from "../src/db/schema";
 import {
   BrokerRefusalError,
-  type ComposioBroker,
+  type ConnectedAppBroker,
   SCHEME_KINDS,
   type SchemeKind,
   schemeKind,
@@ -36,6 +36,7 @@ import type { ComposioActions } from "../src/plugins/composio";
 import { useComposioClient } from "../src/plugins/composio";
 import { connectionOf } from "../src/plugins/composio-adapter";
 import { createPluginRoutes } from "../src/plugins/routes";
+import type { AccountRef } from "../src/plugins/shared-accounts";
 import {
   BROKERED_PROBE_OUTCOMES,
   type BrokeredProbe,
@@ -534,6 +535,18 @@ const suite = randomUUID().slice(0, 8);
 const person = `user_kinds_${suite}`;
 
 /**
+ * The one account every cell below acts as, under the shape a personal app's resolves to —
+ * `accountRefFor` in `store.ts` answers `{ holder: "person", userId: actorId, vendorUserId: actorId }`
+ * for a Personal app, so the vendor identity is the person's own id and not a second one invented
+ * here.
+ */
+const PERSON_ACCOUNT: AccountRef = {
+  holder: "person",
+  userId: person,
+  vendorUserId: person,
+};
+
+/**
  * ONE APP PER MEMBER, recorded with the literal a real enable would have written for that member.
  *
  * `unreadable` IS A NULL COLUMN, which is the commonest way to reach that member and an ordinary
@@ -645,7 +658,7 @@ const credentialsStub: CredentialSecretReader & CredentialStore = {
 /** What the broker was asked, so "the vendor was told" is an assertion and not a guess. */
 let brokerAsks: string[] = [];
 
-const broker: ComposioBroker = {
+const broker: ConnectedAppBroker = {
   listApps: async () => {
     throw new Error("nothing here lists the catalogue");
   },
@@ -657,11 +670,15 @@ const broker: ComposioBroker = {
     return { redirectUrl: `https://composio.test/${request.toolkit}/consent` };
   },
   isConnected: async (request) => {
-    brokerAsks.push(`isConnected:${request.toolkit}/${request.userId}`);
+    brokerAsks.push(
+      `isConnected:${request.toolkit}/${request.account.vendorUserId}`,
+    );
     return true;
   },
   revoke: async (request) => {
-    brokerAsks.push(`revoke:${request.toolkit}/${request.userId}`);
+    brokerAsks.push(
+      `revoke:${request.toolkit}/${request.account.vendorUserId}`,
+    );
     return true;
   },
   deleteAuthConfig: async () => {
@@ -680,12 +697,15 @@ const broker: ComposioBroker = {
     ];
   },
   connectWithFields: async (request) => {
-    brokerAsks.push(`connectWithFields:${request.toolkit}/${request.userId}`);
+    brokerAsks.push(
+      `connectWithFields:${request.toolkit}/${request.account.vendorUserId}`,
+    );
     return { accountId: `ca_kinds_${suite}` };
   },
   revokeAccount: async (accountId) => {
     brokerAsks.push(`revokeAccount:${accountId}`);
   },
+  accountName: async () => null,
 };
 
 const store = createPluginStore({
@@ -766,6 +786,14 @@ async function seedApp(
     url: `composio://${slug}`,
     provenance: "composio",
     ...(recorded === null ? {} : { authScheme: recorded }),
+    /*
+     * PERSONAL, EXCEPT FOR THE APP WITH NO ACCOUNT AT ALL. `accountFor` in `shared-accounts.ts`
+     * answers `none` for a `NO_AUTH` scheme before it ever reads this column, so the `none` member
+     * needs no mode — every other member has an account, and an ambiguous mode would refuse the
+     * per-person gate and the connect route with a sentence about a setting rather than the one
+     * each cell is actually about.
+     */
+    ...(recorded === "NO_AUTH" ? {} : { accountMode: "personal" as const }),
   });
 }
 
@@ -789,12 +817,13 @@ async function publishProbe(serverId: string): Promise<void> {
  */
 async function verifiedAtOf(toolkit: string): Promise<Date | null> {
   const [row] = await database
-    .select({ verifiedAt: composioConnections.verifiedAt })
-    .from(composioConnections)
+    .select({ verifiedAt: brokeredConnections.verifiedAt })
+    .from(brokeredConnections)
     .where(
       and(
-        eq(composioConnections.toolkit, toolkit),
-        eq(composioConnections.userId, person),
+        eq(brokeredConnections.app, toolkit),
+        eq(brokeredConnections.holder, "person"),
+        eq(brokeredConnections.userId, person),
       ),
     )
     .limit(1);
@@ -805,19 +834,20 @@ async function verifiedAtOf(toolkit: string): Promise<Date | null> {
 async function recordedHere(): Promise<string[]> {
   const rows = await database
     .select({
-      toolkit: composioConnections.toolkit,
-      verified: composioConnections.verified,
-      probeAction: composioConnections.probeAction,
+      app: brokeredConnections.app,
+      verified: brokeredConnections.verified,
+      probeAction: brokeredConnections.probeAction,
     })
-    .from(composioConnections)
+    .from(brokeredConnections)
     .where(
       and(
-        eq(composioConnections.userId, person),
-        inArray(composioConnections.toolkit, TOOLKITS),
+        eq(brokeredConnections.holder, "person"),
+        eq(brokeredConnections.userId, person),
+        inArray(brokeredConnections.app, TOOLKITS),
       ),
     );
   return rows.map(
-    (row) => `${row.toolkit}:${row.verified}:${row.probeAction ?? "null"}`,
+    (row) => `${row.app}:${row.verified}:${row.probeAction ?? "null"}`,
   );
 }
 
@@ -827,8 +857,8 @@ async function clean(): Promise<void> {
   await database.delete(mcpTools).where(inArray(mcpTools.serverId, APP_IDS));
   await database.delete(mcpServers).where(inArray(mcpServers.id, APP_IDS));
   await database
-    .delete(composioConnections)
-    .where(inArray(composioConnections.toolkit, TOOLKITS));
+    .delete(brokeredConnections)
+    .where(inArray(brokeredConnections.app, TOOLKITS));
 }
 
 beforeEach(async () => {
@@ -1066,7 +1096,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           await store.confirmBrokeredConnection({
             toolkit: APP.key.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([`${APP.key.slug}:false:null`]);
         },
@@ -1082,7 +1113,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
            */
           await store.confirmBrokeredConnection({
             toolkit: APP.consent.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([
             `${APP.consent.slug}:true:null`,
@@ -1102,16 +1134,20 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
            */
           const consentedOn = new Date("2026-09-01T10:00:00.000Z");
           await database
-            .delete(composioConnections)
+            .delete(brokeredConnections)
             .where(
               and(
-                eq(composioConnections.toolkit, APP.consent.slug),
-                eq(composioConnections.userId, person),
+                eq(brokeredConnections.app, APP.consent.slug),
+                eq(brokeredConnections.holder, "person"),
+                eq(brokeredConnections.userId, person),
               ),
             );
-          await database.insert(composioConnections).values({
-            toolkit: APP.consent.slug,
+          await database.insert(brokeredConnections).values({
+            provider: "composio",
+            app: APP.consent.slug,
+            holder: "person",
             userId: person,
+            vendorUserId: person,
             verified: true,
             verifiedAt: consentedOn,
             probeAction: null,
@@ -1119,7 +1155,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
 
           await store.confirmBrokeredConnection({
             toolkit: APP.consent.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await verifiedAtOf(APP.consent.slug)).toEqual(consentedOn);
           expect(await recordedHere()).toEqual([
@@ -1133,7 +1170,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           await store.confirmBrokeredConnection({
             toolkit: APP.none.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([]);
 
@@ -1148,7 +1186,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
            */
           await store.confirmBrokeredConnection({
             toolkit: APP.none.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([]);
         },
@@ -1159,7 +1198,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           await store.confirmBrokeredConnection({
             toolkit: APP.unreadable.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([
             `${APP.unreadable.slug}:false:null`,
@@ -1169,7 +1209,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           // overwritten with a verdict about evidence nobody has.
           await store.confirmBrokeredConnection({
             toolkit: APP.unreadable.slug,
-            userId: person,
+            account: PERSON_ACCOUNT,
+            by: person,
           });
           expect(await recordedHere()).toEqual([
             `${APP.unreadable.slug}:false:null`,
@@ -1189,7 +1230,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           expect(
             await store.connectBrokeredWithFields({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
               values: { generic_api_key: "never-sent-anywhere" },
             }),
           ).toEqual({
@@ -1207,7 +1249,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
             await refusalOf(
               store.connectBrokeredWithFields({
                 toolkit: APP.consent.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
                 values: { generic_api_key: "never-sent-anywhere" },
               }),
             ),
@@ -1223,7 +1266,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
             await refusalOf(
               store.connectBrokeredWithFields({
                 toolkit: APP.none.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
                 values: { generic_api_key: "never-sent-anywhere" },
               }),
             ),
@@ -1239,7 +1283,8 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
             await refusalOf(
               store.connectBrokeredWithFields({
                 toolkit: APP.unreadable.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
                 values: { generic_api_key: "never-sent-anywhere" },
               }),
             ),
@@ -1257,12 +1302,24 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.key.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.key.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
             }),
           ).toMatchObject({ verified: true, probe: PROBE_ACTION });
         },
@@ -1273,13 +1330,25 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.consent.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.consent.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
                 toolkit: APP.consent.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
               }),
             ),
           ).toMatch(/is not an app this deployment holds a key for/);
@@ -1292,13 +1361,25 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.none.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.none.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
                 toolkit: APP.none.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
               }),
             ),
           ).toMatch(/is not an app this deployment holds a key for/);
@@ -1311,13 +1392,25 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.unreadable.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.unreadable.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await refusalOf(
               store.recheckBrokeredConnection({
                 toolkit: APP.unreadable.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
               }),
             ),
           ).toMatch(/is not an app this deployment holds a key for/);
@@ -1334,12 +1427,23 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "claims NO vendor revocation: there is no grant behind an API key for anybody to withdraw",
         assert: async () => {
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.key.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.key.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
               by: person,
               reason: "self",
             }),
@@ -1351,12 +1455,23 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "reports the vendor's own withdrawal as asked for, which is a real request for a consent account",
         assert: async () => {
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.consent.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.consent.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.consent.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
               by: person,
               reason: "self",
             }),
@@ -1368,12 +1483,23 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "reports whatever the vendor says it ended, which is the same claim it makes for everything it cannot call a key app",
         assert: async () => {
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.none.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.none.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.none.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
               by: person,
               reason: "self",
             }),
@@ -1392,12 +1518,23 @@ const SCHEME_CONSUMERS: Consumer<SchemeKind>[] = [
           "reports it as asked for too — an app this deployment cannot say holds a key is one whose withdrawal it has to report as asked",
         assert: async () => {
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.unreadable.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.unreadable.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.disconnectBrokered({
               toolkit: APP.unreadable.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
               by: person,
               reason: "self",
             }),
@@ -1488,7 +1625,8 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
           expect(
             await store.connectBrokeredWithFields({
               toolkit: NO_PROBE_APP.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
               values: { generic_api_key: "never-sent-anywhere" },
             }),
           ).toEqual({ connected: true, verified: false, probe: null });
@@ -1506,7 +1644,8 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
           expect(
             await store.connectBrokeredWithFields({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
               values: { generic_api_key: "never-sent-anywhere" },
             }),
           ).toEqual({
@@ -1536,7 +1675,8 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
           const said = await refusalOf(
             store.connectBrokeredWithFields({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
               values: { generic_api_key: "never-sent-anywhere" },
             }),
           );
@@ -1574,7 +1714,8 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
           expect(
             await store.connectBrokeredWithFields({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
               values: { generic_api_key: "never-sent-anywhere" },
             }),
           ).toEqual({ connected: true, verified: false, probe: null });
@@ -1594,12 +1735,24 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: NO_PROBE_APP.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: NO_PROBE_APP.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: NO_PROBE_APP.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
             }),
           ).toEqual({ verified: false, verifiedAt: null, probe: null });
           expect(await recordedHere()).toEqual([
@@ -1612,12 +1765,24 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
         assert: async () => {
           useAnsweringClient();
           await database
-            .insert(composioConnections)
-            .values({ toolkit: APP.key.slug, userId: person });
+            .insert(brokeredConnections)
+
+            .values({
+              provider: "composio",
+
+              app: APP.key.slug,
+
+              holder: "person",
+
+              userId: person,
+
+              vendorUserId: person,
+            });
           expect(
             await store.recheckBrokeredConnection({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
             }),
           ).toMatchObject({ verified: true, probe: PROBE_ACTION });
           expect(await recordedHere()).toEqual([
@@ -1639,16 +1804,20 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
               };
             },
           });
-          await database.insert(composioConnections).values({
-            toolkit: APP.key.slug,
+          await database.insert(brokeredConnections).values({
+            provider: "composio",
+            app: APP.key.slug,
+            holder: "person",
             userId: person,
+            vendorUserId: person,
             verified: true,
             probeAction: PROBE_ACTION,
           });
           const said = await refusalOf(
             store.recheckBrokeredConnection({
               toolkit: APP.key.slug,
-              userId: person,
+              account: PERSON_ACCOUNT,
+              by: person,
             }),
           );
           expect(said).toMatch(/rate limit exceeded/);
@@ -1676,9 +1845,12 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
               throw new Error("Composio was not reachable");
             },
           });
-          await database.insert(composioConnections).values({
-            toolkit: APP.key.slug,
+          await database.insert(brokeredConnections).values({
+            provider: "composio",
+            app: APP.key.slug,
+            holder: "person",
             userId: person,
+            vendorUserId: person,
             verified: true,
             probeAction: PROBE_ACTION,
           });
@@ -1686,7 +1858,8 @@ const PROBE_CONSUMERS: Consumer<BrokeredProbe["outcome"]>[] = [
             await refusalOf(
               store.recheckBrokeredConnection({
                 toolkit: APP.key.slug,
-                userId: person,
+                account: PERSON_ACCOUNT,
+                by: person,
               }),
             ),
           ).toMatch(/could not be checked just now/);
@@ -1867,7 +2040,8 @@ describe("what a brokered connection writes into the append-only trail", () => {
     expect(
       await store.connectBrokeredWithFields({
         toolkit: APP.key.slug,
-        userId: person,
+        account: PERSON_ACCOUNT,
+        by: person,
         values: { generic_api_key: "never-sent-anywhere" },
       }),
     ).toEqual({ connected: true, verified: false, probe: null });
@@ -1914,11 +2088,13 @@ describe("what a brokered connection writes into the append-only trail", () => {
 
     await store.confirmBrokeredConnection({
       toolkit: APP.consent.slug,
-      userId: person,
+      account: PERSON_ACCOUNT,
+      by: person,
     });
     await store.connectBrokeredWithFields({
       toolkit: APP.key.slug,
-      userId: person,
+      account: PERSON_ACCOUNT,
+      by: person,
       values: { generic_api_key: "never-sent-anywhere" },
     });
 

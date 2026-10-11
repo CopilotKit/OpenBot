@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { accessFor } from "../plugins/access";
+import type { Decides } from "../plugins/broker";
 import { catalogueEntry } from "../plugins/catalogue";
+import { type AccountAnswer, accountFor } from "../plugins/shared-accounts";
 import { PluginRefusedError, type PluginStore } from "../plugins/store";
 import type { MemoryStore } from "./store";
 import {
@@ -159,14 +161,36 @@ export function createMemoryIngestion(options: {
       )
     )
       throw new MemoryRefusedError("Reconnect this app to use its memories.");
-    if (
-      access.credential === "brokered" &&
-      access.reachedAs === "person" &&
-      !(await plugins.brokeredConnectionsFor(source.ownerUserId)).some(
-        (connection) => connection.serverId === server.id,
-      )
-    )
-      throw new MemoryRefusedError("Reconnect this app to use its memories.");
+    if (access.credential === "brokered") {
+      const account = accountFor(server, source.ownerUserId);
+      type _MemoryAccountDecides = Decides<
+        AccountAnswer["kind"],
+        {
+          none: "reads with no account at all";
+          person: "needs the owner's own connection";
+          deployment: "needs the deployment's shared connection";
+          ambiguous: "refused with accountFor's sentence";
+        }
+      >;
+      if (account.kind === "ambiguous")
+        throw new MemoryRefusedError(account.message);
+      if (
+        account.kind === "deployment" &&
+        !(await plugins.deploymentConnectionFor(server.id))
+      ) {
+        throw new MemoryRefusedError(
+          `${server.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`,
+        );
+      }
+      if (
+        account.kind === "person" &&
+        !(await plugins.brokeredConnectionsFor(source.ownerUserId)).some(
+          (connection) => connection.serverId === server.id,
+        )
+      ) {
+        throw new MemoryRefusedError("Reconnect this app to use its memories.");
+      }
+    }
     return tool;
   }
   async function sync(ownerUserId: string, id: string) {
@@ -244,6 +268,7 @@ export function createMemoryIngestion(options: {
     };
   }
   return {
+    authorize,
     async createSource(ownerUserId: string, input: unknown) {
       const parsed = parseMemorySourceInput(input);
       await authorize({ ...parsed, ownerUserId });

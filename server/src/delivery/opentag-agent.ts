@@ -100,7 +100,7 @@ const platformName = (transport: ChatTransport) =>
   transport === "teams" ? "Microsoft Teams" : "Slack";
 
 export function linkInstructions(transport: ChatTransport) {
-  return `I don't know who you are in OpenBot yet, so I did not run anything. In OpenBot, open Reachability, choose the conversation and Bot, pick ${platformName(transport)}, and send me the \`link <code>\` message it shows you.`;
+  return `I don't know who you are in OpenBot yet, so I did not run anything. In OpenBot, open the Bot's page, choose Reaching you and the conversation, pick ${platformName(transport)}, and send me the \`link <code>\` message it shows you.`;
 }
 
 export async function handleOpenTagRun(
@@ -273,11 +273,11 @@ async function answer(
     const card = await approvalCard(deps, result.binding, approvalId);
     if (result.extras.approvals.length > 1)
       parts.push(
-        `${result.extras.approvals.length - 1} more approval request(s) are waiting in your OpenBot approval inbox.`,
+        `${result.extras.approvals.length - 1} more approval request(s) are waiting on the Bot's page in OpenBot.`,
       );
     if (card) return { text: parts.join("\n\n"), interrupt: card };
     parts.push(
-      "Your Bot is waiting for an approval. Open your OpenBot approval inbox to review it.",
+      "Your Bot is waiting for an approval. Open the Bot's page in OpenBot to review it.",
     );
   } else if (result.kind === "waiting" && !parts.length) {
     parts.push("Your Bot is waiting for a person. Open OpenBot to continue.");
@@ -324,7 +324,7 @@ async function answerPrivately(
   for (const approvalId of result.extras.approvals)
     await deps.router.notify(scope, {
       id: approvalId,
-      text: `${bot?.name ?? "Your Bot"} is waiting for your approval. Open your OpenBot approval inbox to review it.`,
+      text: `${bot?.name ?? "Your Bot"} is waiting for your approval. Open the Bot's page in OpenBot to review it.`,
       kind: "approval",
       requestId: approvalId,
     });
@@ -430,12 +430,12 @@ async function decideFromCard(
     };
   if (!deps.approvals)
     return {
-      text: "Approvals from chat are unavailable on this deployment. Decide in your OpenBot approval inbox.",
+      text: "Approvals from chat are unavailable on this deployment. Decide on the Bot's page in OpenBot.",
     };
   const person = parseChannelUser(resume.by);
   if (!person)
     return {
-      text: "This approval card did not say who answered it, so nothing was decided. Update OpenTag, or decide in your OpenBot approval inbox.",
+      text: "This approval card did not say who answered it, so nothing was decided. Update OpenTag, or decide on the Bot's page in OpenBot.",
     };
   // The clicker is mapped exactly like a message sender; OpenTag already refused anyone but the
   // named approver, and OpenBot then decides only as that binding's owner.

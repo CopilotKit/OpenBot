@@ -45,9 +45,15 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 Filtering happens in server/database queries. Package-provided agents cannot be edited or deleted through the product.
 
 An owner can also publish a Bot as a Team Bot, to everybody signed in or to named people and groups
-(`/api/team-bots`, the **Team Bots** screen). Publishing is a separate, revocable record; the Bot's own
+(`/api/team-bots`, the Bot's **Sharing** page). Publishing is a separate, revocable record; the Bot's own
 visibility is unchanged by it. A published Bot stays invisible to teammates until it has a role
 description and a name other than a placeholder such as "New Bot".
+
+A Team Bot reaches a Personal app through its **owner's own account** when the owner has connected
+it — for everyone it is published to, triggers included — and otherwise through the asker's own
+account, with their consent. A Shared app is the governed alternative: one account that belongs to
+the deployment, with an administrator approving who may use it through each Bot. See
+[Composio → Shared apps](plugins/composio.md#shared-apps).
 
 ## Channels
 
@@ -59,7 +65,7 @@ Each channel routes through a channel-local proxy agent id, pinned to that chann
 
 Deleting is soft. The coworker stops running, but existing channels remain readable for their members and restore as tombstones.
 
-Hiding and pinning are personal roster state. Hiding removes the coworker from one user's list without disabling the coworker for anyone else; pinning moves it into the **Pinned** section at the top of `/agents` for that user only.
+Hiding and pinning are personal roster state. Hiding removes the coworker from one user's list without disabling the coworker for anyone else; pinning moves it into the **Pinned** section at the top of `/bots` for that user only. A Team Bot an administrator assigned to a group is always pinned for its members.
 
 ## Default endpoint
 
@@ -92,7 +98,7 @@ agents:
     endpoint: http://risk.internal/ag-ui
 ```
 
-In the product, create or edit a coworker from `/agents` and set:
+In the product, create a coworker from `/bots` and edit it from its page's **Setup**, and set:
 
 - name;
 - title;

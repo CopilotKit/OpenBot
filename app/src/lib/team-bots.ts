@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/agents/queries";
 import { client } from "@/lib/client";
+import { sharedUseKeys } from "@/lib/plugins/shared-use";
 
 /** A published Team Bot as this person sees it. Audience fields only for its owner and admins. */
 export type TeamBot = {
@@ -73,7 +74,13 @@ export function publishTeamBotMutationOptions(queryClient: QueryClient) {
         fallback: "The Bot could not be published.",
       });
     },
-    onSettled: () => refresh(queryClient),
+    /* Publishing can widen who reaches a shared app, so the request inbox may now hold a
+     * fresh one (or SharedAppNotice's own query may need to drop a request it just resolved). */
+    onSettled: () =>
+      Promise.all([
+        refresh(queryClient),
+        queryClient.invalidateQueries({ queryKey: sharedUseKeys.requests() }),
+      ]),
   });
 }
 

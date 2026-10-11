@@ -175,7 +175,7 @@ impl<R: tauri::Runtime> HostApprovalUi for NativeApproval<R> {
             )
         } else {
             format!(
-                "Your OpenBot setting: {}. Change it in Approvals.",
+                "Your OpenBot setting: {}. Change it in Settings → Approvals.",
                 request.command_policy.label()
             )
         };

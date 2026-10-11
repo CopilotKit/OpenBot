@@ -1,6 +1,8 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { AppVariables } from "../auth/guards";
+import { afterExposureChange } from "../plugins/exposure-change";
+import type { SharedUseStore } from "../plugins/shared-use-store";
 import {
   TeamBotForbiddenError,
   TeamBotNotFoundError,
@@ -11,6 +13,7 @@ import {
 export function createTeamBotRoutes(
   teamBots: TeamBots,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  sharedUse?: SharedUseStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
   routes.use("*", requireUser);
@@ -49,7 +52,13 @@ export function createTeamBotRoutes(
       context.req.param("botId"),
       input,
     );
-    return context.body(null, 204);
+    return context.json({
+      sharedApps: await afterExposureChange(
+        sharedUse,
+        context.var.actor,
+        context.req.param("botId"),
+      ),
+    });
   });
   routes.delete("/:botId/publication", async (context) => {
     await teamBots.unpublish(context.var.actor, context.req.param("botId"));
@@ -64,7 +73,13 @@ export function createTeamBotRoutes(
       context.req.param("botId"),
       input.group,
     );
-    return context.body(null, 204);
+    return context.json({
+      sharedApps: await afterExposureChange(
+        sharedUse,
+        context.var.actor,
+        context.req.param("botId"),
+      ),
+    });
   });
   routes.delete("/:botId/assignments/:group", async (context) => {
     await teamBots.unassign(

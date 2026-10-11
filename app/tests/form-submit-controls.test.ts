@@ -11,6 +11,10 @@ import ts from "typescript";
  * source, Confirm phone, Turn on background research) and the recorder before them. A plain
  * `<button>` defaults to submit, so it counts; a `<Button>` counts only with `type="submit"`.
  *
+ * A submit control outside the form counts when it names the form: `form={id}` matching the form's
+ * own `id={id}`. A dialog does this to keep its submit in `DialogFooter` while `DialogBody` stays a
+ * direct child of `DialogContent`.
+ *
  * A form submitted some other way (the composer's Enter key and send action) names itself here with
  * a reason, rather than every form losing the check.
  */
@@ -54,13 +58,27 @@ test("every form with an onSubmit has a control that submits it", async () => {
       true,
       ts.ScriptKind.TSX,
     );
+    /** The `form` attribute of every submit control in the file, as written. */
+    const named = new Set<string>();
+    const collect = (node: ts.Node) => {
+      if (
+        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        submits(node)
+      ) {
+        const form = attribute(node, "form")?.initializer;
+        if (form) named.add(form.getText());
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(source);
     const visit = (node: ts.Node) => {
       if (
         ts.isJsxElement(node) &&
         node.openingElement.tagName.getText() === "form" &&
         attribute(node.openingElement, "onSubmit")
       ) {
-        let found = false;
+        const id = attribute(node.openingElement, "id")?.initializer;
+        let found = id !== undefined && named.has(id.getText());
         const inside = (child: ts.Node) => {
           if (found) return;
           if (

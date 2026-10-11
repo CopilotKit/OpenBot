@@ -253,7 +253,7 @@ async function sharePermission(
     return `${input.refused}: ${verdict.message}`;
   const initiator = continuation?.initiator;
   if (initiator && initiator.kind !== "person") throw verdict.suspension;
-  return `${input.refused} yet: ${verdict.message} Tell the person you are waiting for their permission in Approvals.`;
+  return `${input.refused} yet: ${verdict.message} Tell the person you are waiting for their permission on your page in OpenBot.`;
 }
 
 /** Re-exported so callers of this module do not need to know where it is declared. */
@@ -272,7 +272,18 @@ export type CoordinationRunAuthority = {
   } | null>;
 };
 
-const delegatedWork = z.object({
+/* ROOT INITIATORS a handed-over run may trace back to — a person, the deployment itself,
+ * or something that named an id when it kicked the work off. A handoff's own initiator is
+ * layered on top of this union below, carrying one of these roots as its optional origin. */
+const rootInitiator = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("person") }),
+  z.object({ kind: z.literal("deployment") }),
+  z.object({ kind: z.literal("routine"), id: z.string().min(1) }),
+  z.object({ kind: z.literal("responsibility"), id: z.string().min(1) }),
+  z.object({ kind: z.literal("memory"), id: z.string().min(1) }),
+]);
+
+export const delegatedWork = z.object({
   fromBotId: z.string().min(1),
   toBotId: z.string().min(1),
   actorId: z.string().min(1),
@@ -281,11 +292,13 @@ const delegatedWork = z.object({
   depth: z.number().int().nonnegative(),
   task: z.string(),
   initiator: z
-    .discriminatedUnion("kind", [
-      z.object({ kind: z.literal("person") }),
-      z.object({ kind: z.literal("deployment") }),
-      z.object({ kind: z.literal("routine"), id: z.string().min(1) }),
-      z.object({ kind: z.literal("handoff"), id: z.string().min(1) }),
+    .union([
+      rootInitiator,
+      z.object({
+        kind: z.literal("handoff"),
+        id: z.string().min(1),
+        origin: rootInitiator.optional(),
+      }),
     ])
     .optional(),
 });

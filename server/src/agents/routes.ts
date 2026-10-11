@@ -3,12 +3,14 @@ import { Hono } from "hono";
 import type { AuditEventType, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import { afterExposureChange } from "../plugins/exposure-change";
+import type { SharedUseStore } from "../plugins/shared-use-store";
 import { testAgentConnection } from "./connection-test";
 import { checkAgentEndpoint } from "./endpoint";
 import { canManageAgent } from "./profile-policy";
 import {
-  AgentNotFoundError,
   AgentAssignedError,
+  AgentNotFoundError,
   AgentNotManageableError,
   type AgentProfileStore,
   ManagedAgentUnavailableError,
@@ -287,6 +289,13 @@ export function createAgentRoutes(
    * dialog nagged built-in coworkers about a credential they never needed.
    */
   managedEndpoint?: string,
+  /**
+   * Where a Bot's shared accounts live, so making a Bot public can say what that means for them.
+   *
+   * Absent in a deployment with no plugin store, which is a deployment where `afterExposureChange`
+   * already reports nothing rather than reach for a store that is not there.
+   */
+  sharedUse?: SharedUseStore,
 ) {
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
   const dto = (actor: AgentActor, agent: AgentProfile) => ({
@@ -550,7 +559,24 @@ export function createAgentRoutes(
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         ...(parsed.value.auth ? { keyReplaced: true } : {}),
       });
-      return context.json({ agent: dto(context.var.actor, agent) });
+      /*
+       * Publishing is the owner's call, and a wider audience can outrun what an administrator
+       * approved for a shared account this Bot holds. Reported only on the edit that opens a Bot to
+       * everybody, so a screen can offer to ask rather than let the first refused call be how anybody
+       * finds out.
+       */
+      return context.json({
+        agent: dto(context.var.actor, agent),
+        ...(parsed.value.visibility === "public"
+          ? {
+              sharedApps: await afterExposureChange(
+                sharedUse,
+                context.var.actor,
+                agent.id,
+              ),
+            }
+          : {}),
+      });
     } catch (error) {
       return mapStoreError(context, error);
     }

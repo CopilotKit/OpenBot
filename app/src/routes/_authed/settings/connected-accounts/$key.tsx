@@ -30,8 +30,22 @@ import { Separator } from "@/components/ui/separator";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
+  type PluginServer,
+  personalConnections,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+
+/**
+ * Whether this server is reached through Composio AS THIS PERSON.
+ *
+ * A Shared app is also `provenance === "composio"` — it is still Composio that holds the account —
+ * but there is no "your account" here to confirm: the one account is the deployment's, and every
+ * Bot holding a grant acts as it regardless of who is asking. Exported so the test for this file can
+ * pin the distinction without rendering the page.
+ */
+export function brokeredFor(server: PluginServer | undefined): boolean {
+  return server?.provenance === "composio" && server.accountMode !== "shared";
+}
 
 /**
  * One service, and whether a Bot may read it as you.
@@ -81,15 +95,20 @@ function RouteComponent() {
   const entry = plugins.data?.catalogue.find((item) => item.key === key);
   const server = (plugins.data?.servers ?? []).find((s) => s.id === key);
   const enabled = server !== undefined;
-  const connection = (connections.data?.connections ?? []).find(
-    (row) => row.serverId === key,
-  );
+  /*
+   * READ THROUGH `personalConnections`, never the raw list: a Shared app's row is the deployment's
+   * one standing account, not this person's, and `find` over the unfiltered rows would have handed
+   * it to this page as if it were.
+   */
+  const connection = personalConnections(
+    connections.data?.connections ?? [],
+  ).find((row) => row.serverId === key);
   /*
    * Asked of the row rather than the catalogue, because a brokered app has no catalogue entry at
    * all: the deployment recorded how it is reached when the app was enabled, and that record is the
    * only thing here that knows.
    */
-  const brokered = server?.provenance === "composio";
+  const brokered = brokeredFor(server);
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({
@@ -183,6 +202,35 @@ function RouteComponent() {
           rather than something that may be wrong. Reload the page, and tell an
           administrator if it persists.
         </p>
+      </PageShell>
+    );
+  }
+
+  /*
+   * A SHARED APP, BEFORE THE BROKERED BRANCH BELOW GETS A LOOK AT IT.
+   *
+   * `brokered` above already reads false for one of these — `brokeredFor` is what pulls a Shared
+   * app out of that branch — so without one of its own here it would fall all the way to the
+   * `user-oauth` branch and draw "Your account" with a Connect button over an account that is not
+   * this person's to connect, confirm or disconnect. There is nothing to decide: the account is the
+   * deployment's, every Bot holding a grant already acts as it, and this page says so and stops.
+   */
+  if (server?.accountMode === "shared") {
+    return (
+      <PageShell backButton={back} title={server.title}>
+        {/* One fact, so no heading and no actions: there is nothing here for this person to do. */}
+        <PageSection>
+          <PageRows className="mt-0">
+            <Item size="sm">
+              <ItemContent>
+                <ItemTitle>Team account</ItemTitle>
+                <ItemDescription>
+                  Shared by your organisation. Bots act as the team account.
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          </PageRows>
+        </PageSection>
       </PageShell>
     );
   }

@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
 export type ProactiveSetting = {
@@ -84,4 +88,58 @@ export const resolveSuggestion = (id: string, action: "start" | "dismiss") =>
       action === "start"
         ? "Could not start this suggestion"
         : "Could not dismiss this suggestion",
+  });
+
+/** A setting's research produces suggestions, so a change to either refreshes both. */
+const settleProactive = (queryClient: QueryClient) => () =>
+  Promise.all([
+    queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
+    queryClient.invalidateQueries({ queryKey: proactiveKeys.suggestions }),
+  ]);
+
+/** Start a suggested next step as a task, or dismiss it. */
+export const resolveSuggestionMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
+      resolveSuggestion(id, action),
+    onSuccess: settleProactive(queryClient),
+  });
+
+export const createProactiveSettingMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: createProactiveSetting,
+    onSuccess: settleProactive(queryClient),
+  });
+
+/** What can be done to one background-research setting from its row. */
+export type ProactiveChange =
+  | { kind: "toggle" }
+  | { kind: "run" }
+  | { kind: "remove" }
+  | { kind: "interval"; minutes: number };
+
+export const changeProactiveSettingMutationOptions = (
+  queryClient: QueryClient,
+) =>
+  mutationOptions({
+    mutationFn: ({
+      setting,
+      change,
+    }: {
+      setting: Pick<ProactiveSetting, "id" | "enabled">;
+      change: ProactiveChange;
+    }) =>
+      change.kind === "run"
+        ? runProactiveNow(setting.id)
+        : change.kind === "remove"
+          ? removeProactiveSetting(setting.id)
+          : updateProactiveSetting(
+              setting.id,
+              change.kind === "toggle"
+                ? { enabled: !setting.enabled }
+                : { intervalMinutes: change.minutes },
+            ),
+    onSuccess: settleProactive(queryClient),
   });

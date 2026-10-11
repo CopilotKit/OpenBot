@@ -143,10 +143,21 @@ test("marking read PUTs the read route and patches lastReadAt in place", async (
   const patched = queryClient.getQueryData<InfiniteData<ChannelPage>>(
     channelKeys.list(),
   );
-  // The dot clears from the cache before the wire answered, and nothing was invalidated:
-  // there is no onSuccess to queue a refetch that would race the socket's own patches.
+  // The dot clears from the cache before the wire answered.
   expect(patched?.pages[0]?.channels[0]?.lastReadAt).not.toBeNull();
-  expect(options.onSuccess).toBeUndefined();
+});
+
+test("a landed mark-read refreshes the Bots badge, and never the roster the socket patches", async () => {
+  capturingFetch(204, undefined);
+  const { queryClient, invalidated } = invalidationRecorder();
+  const options = markChannelReadMutationOptions(queryClient);
+  await options.onSuccess?.(
+    undefined,
+    "channel-1",
+    undefined,
+    mutationContext(queryClient),
+  );
+  expect(invalidated).toEqual([{ queryKey: ["bot-lifecycle", "attention"] }]);
 });
 
 test("a message stamped by a clock ahead of ours still reads as seen after marking", async () => {

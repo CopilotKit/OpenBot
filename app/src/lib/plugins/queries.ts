@@ -81,6 +81,24 @@ export type PluginServer = {
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];
+  /**
+   * Whether this app is PERSONAL, held one credential per person, or SHARED, with a single
+   * deployment-held account that every Bot holding a grant acts as. Null for a server that has
+   * never been asked, which reads as personal everywhere today.
+   *
+   * What a row's {@link PluginConnection.holder} is checked against, and the only place that
+   * distinction is decided — a connection row never switches an app between the two on its own.
+   */
+  accountMode: "personal" | "shared" | null;
+  /**
+   * Whether a Shared app's one deployment-held account is connected yet.
+   *
+   * Asked of the server rather than read off the connections list, because a Shared app with
+   * nothing connected is not an absence from that list — see `GET /connections`, which lists it
+   * anyway so it can be offered a Connect action. Meaningless, and always false, while
+   * {@link accountMode} is not `"shared"`.
+   */
+  sharedVendorConnected: boolean;
 };
 
 export type PluginSkill = {
@@ -207,6 +225,43 @@ export type PluginConnection = {
   scope: string;
   connectedAt: string;
   /**
+   * Whose account this row is: the signed-in person's own, or the one standing account of a Shared
+   * app (see {@link PluginServer.accountMode}) that every Bot holding a grant acts as regardless of
+   * who is asking. Undefined on a shape written before the distinction existed, which reads as
+   * `"person"` — see {@link personalConnections}, which is what a screen asking "is this mine" reads
+   * through rather than comparing against the literal.
+   */
+  holder?: "person" | "deployment";
+  /**
+   * Whether the deployment's one shared account is connected, present only on a DEPLOYMENT row.
+   *
+   * A Shared app's row is listed even when nothing is connected to it yet — see
+   * {@link PluginServer.sharedVendorConnected} — so a reader cannot take the row's presence for a
+   * yes. This is the field that answers.
+   *
+   * NOTE: an unconnected deployment row has no real date for {@link connectedAt} either, which
+   * would want that field widened to `string | null` to say so honestly. Left as `string` here
+   * instead — `connected-accounts/$key.tsx` hands it straight to `new Date(...)`, and widening
+   * turned that red under `bun run typecheck`. A row with nothing connected must therefore be read
+   * through this field, not through `connectedAt`, until that caller is dealt with.
+   */
+  connected?: boolean;
+  /**
+   * The email of whoever connected the shared account, present only on a DEPLOYMENT row.
+   *
+   * Null is reachable: nobody has connected it yet, or the row predates this being recorded.
+   */
+  connectedBy?: string | null;
+  /**
+   * The vendor's own name for the connected account (an org, a bot, a workspace), present only on
+   * a DEPLOYMENT row.
+   *
+   * Shown instead of a person's name precisely because there isn't one here — the account is the
+   * deployment's, and this is what tells one Shared app's row apart from another's otherwise
+   * identical "connected" answer.
+   */
+  displayName?: string | null;
+  /**
    * Whether a real call was last made with this credential, present only on a BROKERED row.
    *
    * Only a brokered row has anything to re-check: this deployment holds no secret for it, only a
@@ -274,6 +329,16 @@ export type PluginConnections = {
   connections: PluginConnection[];
   redirectUri: string | null;
 };
+
+/**
+ * The connections that are the signed-in person's own. A Shared app's row is the deployment's, and
+ * every screen that asks "is this mine" must never read it as yes.
+ */
+export function personalConnections(
+  rows: PluginConnection[],
+): PluginConnection[] {
+  return rows.filter((row) => row.holder !== "deployment");
+}
 
 /**
  * The signed-in person's own connections.

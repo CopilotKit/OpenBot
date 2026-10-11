@@ -59,7 +59,7 @@ export const botCardAnswer = {
     }
     parts.push(
       "It was granted no connector, no tool and no address. Tell the person that anything it needs to reach is granted on its profile, that it can be talked to now, and that its profile is at",
-      `/agents?agent=${input.agentId}.`,
+      `/bots/${input.agentId}.`,
     );
     return parts.join(" ");
   },
@@ -90,7 +90,8 @@ export function wasCreated(result: string): boolean {
  * say why.
  */
 export function createdBotIdIn(result: string): string | null {
-  return /agent=([A-Za-z0-9_-]+)/.exec(result)?.[1] ?? null;
+  // `/bots/<id>` now; `/agents?agent=<id>` in answers written before Bots had their own pages.
+  return /(?:\/bots\/|agent=)([A-Za-z0-9_-]+)/.exec(result)?.[1] ?? null;
 }
 
 /**

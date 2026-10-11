@@ -6,12 +6,14 @@
  * has an auth config for, whose account is attached to one, and how a person attaches or detaches
  * theirs. Two different questions, so two different projections rather than one wide client.
  *
- * IT IMPORTS NOTHING, AND THAT IS THE POINT OF IT. Not `@composio/core`, not a type from elsewhere
- * in this tree. Everything below is a name for a shape, so the vendor's package stays confined to
- * the adapter that implements {@link ComposioBroker} — one file, replaceable, and the only place a
+ * IT IMPORTS NO VENDOR, AND THAT IS THE POINT OF IT. Not `@composio/core`, not a client, not a
+ * schema. Everything below is a name for a shape, so the vendor's package stays confined to the
+ * adapter that implements {@link ConnectedAppBroker} — one file, replaceable, and the only place a
  * version bump can reach. A module that named the vendor's types here would put their package on
- * the import graph of every test that touches enablement.
+ * the import graph of every test that touches enablement. `AccountRef`, below, is the one import
+ * that crosses this file's boundary, and it is a type this deployment names, never the vendor's.
  */
+import type { AccountRef } from "./shared-accounts";
 
 /**
  * The schemes whose secret a PERSON holds and types in, rather than one anybody registers.
@@ -320,7 +322,7 @@ export type BrokerApp = {
 };
 
 /**
- * What {@link ComposioBroker.ensureAuthConfig} found or did, which decides whether its caller may
+ * What {@link ConnectedAppBroker.ensureAuthConfig} found or did, which decides whether its caller may
  * write the scheme it asked for onto the app's row. See that method.
  */
 export type AuthConfigOutcome = "created" | "standing" | "not-needed";
@@ -335,7 +337,7 @@ export type AuthConfigOutcome = "created" | "standing" | "not-needed";
  * into each of those tests, and the first thing every one of them would do is find a way not to
  * dial.
  */
-export type ComposioBroker = {
+export type ConnectedAppBroker = {
   /** Every app the catalogue offers, which is what an administrator chooses from. */
   listApps(): Promise<BrokerApp[]>;
   /**
@@ -397,7 +399,7 @@ export type ComposioBroker = {
    * mailbox for as long as it stays valid.
    */
   authorize(request: {
-    userId: string;
+    account: AccountRef;
     toolkit: string;
     /**
      * Where the vendor sends this person once the consent screen is done with them.
@@ -425,10 +427,13 @@ export type ComposioBroker = {
      */
     returnUrl: string;
   }): Promise<{ redirectUrl: string }>;
-  /** Whether this person currently has an account attached to this app at the vendor. */
-  isConnected(request: { userId: string; toolkit: string }): Promise<boolean>;
+  /** Whether this account is currently attached to this app at the vendor. */
+  isConnected(request: {
+    account: AccountRef;
+    toolkit: string;
+  }): Promise<boolean>;
   /**
-   * Ask the vendor to withdraw this person's grant, answering WHAT WAS ACTUALLY ASKED.
+   * Ask the vendor to withdraw this account's grant, answering WHAT WAS ACTUALLY ASKED.
    *
    * True where this deployment found at least one account and asked the vendor to revoke it, false
    * where there was none to withdraw — not "the call did not throw". The audit trail records that
@@ -451,7 +456,7 @@ export type ComposioBroker = {
    * holds — the only thing that names which app to try again against — is still standing when they
    * press disconnect a second time.
    */
-  revoke(request: { userId: string; toolkit: string }): Promise<boolean>;
+  revoke(request: { account: AccountRef; toolkit: string }): Promise<boolean>;
   /**
    * What this app asks a person to type, as Composio publishes it for the scheme.
    *
@@ -464,7 +469,7 @@ export type ComposioBroker = {
    * it is worth more than anything this deployment could invent about somebody else's console.
    *
    * THE SCHEME IS PASSED IN RATHER THAN RESOLVED HERE, for the reason {@link
-   * ComposioBroker.ensureAuthConfig} takes a connection rather than deriving one: the caller
+   * ConnectedAppBroker.ensureAuthConfig} takes a connection rather than deriving one: the caller
    * already holds the scheme recorded on the app's row at enable time, and a second derivation is a
    * second answer — a form drawn for `BASIC` in front of a config created for `API_KEY`, whose
    * fields the person cannot fill in because they are not the ones their app has.
@@ -494,15 +499,15 @@ export type ComposioBroker = {
    *
    * THE `accountId` IS ANSWERED SO A CALLER CAN UNDO EXACTLY THIS ACCOUNT. A connection made from
    * typed fields is verified before it is kept, and a verification has to be able to take back the
-   * thing it just made and nothing else. {@link ComposioBroker.revoke} is the wrong instrument for
+   * thing it just made and nothing else. {@link ConnectedAppBroker.revoke} is the wrong instrument for
    * that — it ends every account this person holds for the app, which is right for somebody ending
    * their access and wrong for a step undoing its own work. The two differ exactly when the local
    * row and Composio have drifted apart: the person already had a connection that works, this
    * attempt made a second one, the verification failed — and a sweep there takes down the
-   * connection that was working. See {@link ComposioBroker.revokeAccount}.
+   * connection that was working. See {@link ConnectedAppBroker.revokeAccount}.
    */
   connectWithFields(request: {
-    userId: string;
+    account: AccountRef;
     toolkit: string;
     authScheme: FieldScheme;
     /**
@@ -518,7 +523,7 @@ export type ComposioBroker = {
   /**
    * End ONE account by id, and ask for the grant behind it to be withdrawn too.
    *
-   * ONE, WHICH IS THE WHOLE DIFFERENCE FROM {@link ComposioBroker.revoke}. That method sweeps every
+   * ONE, WHICH IS THE WHOLE DIFFERENCE FROM {@link ConnectedAppBroker.revoke}. That method sweeps every
    * account a person holds for an app, because what it serves is a person ending their access to
    * it. This serves a caller undoing an account it just made, and the id is the whole of what it
    * names — nothing is listed, nothing is matched, and no account this call was not handed can be
@@ -528,7 +533,7 @@ export type ComposioBroker = {
    *
    * WITH `revoke_on_delete`, WHICH IS WHAT MAKES IT A WITHDRAWAL RATHER THAN A RECORD-KEEPING
    * SOFT-DELETE. Without that flag the account stops being visible to this deployment and the
-   * credential at the far end stands — which is the exact state {@link ComposioBroker.revoke}
+   * credential at the far end stands — which is the exact state {@link ConnectedAppBroker.revoke}
    * records this deployment once claiming as a revocation, and it is worse here than there: the
    * secret left live is one a person typed minutes ago into a form that then told them the
    * connection had not been kept.
@@ -549,7 +554,17 @@ export type ComposioBroker = {
    * it on the evidence that is actually available.
    */
   revokeAccount(accountId: string): Promise<void>;
+  /** The vendor's display name for the connected account, when it publishes one; null otherwise. */
+  accountName(request: {
+    account: AccountRef;
+    toolkit: string;
+  }): Promise<string | null>;
 };
+
+/**
+ * @deprecated Kept for one release while callers move to {@link ConnectedAppBroker}.
+ */
+export type ComposioBroker = ConnectedAppBroker;
 
 /**
  * A refusal this deployment authored, whose own message is the whole explanation.
@@ -586,7 +601,7 @@ export class BrokerRefusalError extends Error {
  * the feature. It is a thrown class rather than a null answer because the broker's methods
  * answer apps, booleans and urls, and there is no value in any of those shapes that means "nobody
  * was asked" — an empty app list is indistinguishable from a catalogue outage, and `false` from
- * {@link ComposioBroker.isConnected} is a positive claim about somebody's account.
+ * {@link ConnectedAppBroker.isConnected} is a positive claim about somebody's account.
  *
  * The setting is named in the message because the message is usually the whole remedy: an operator
  * reading it needs the name of the variable to set, and the one other place this deployment names
@@ -600,9 +615,11 @@ export class BrokerRefusalError extends Error {
  * message where no call was made at all.
  */
 export class BrokerUnconfiguredError extends BrokerRefusalError {
-  constructor() {
+  constructor(provider = "Composio") {
     super(
-      "Composio is not configured for this deployment, so nothing was asked. Set COMPOSIO_API_KEY to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no Composio tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere.",
+      provider === "Composio"
+        ? "Composio is not configured for this deployment, so nothing was asked. Set COMPOSIO_API_KEY to make the brokered apps available; until it is set there is nothing to connect, nothing to grant and no Composio tool for a Bot to call, and the admin Plugins page shows one row under More apps that goes nowhere."
+        : `${provider} is not configured for this deployment, so nothing was asked.`,
     );
     this.name = "BrokerUnconfiguredError";
   }

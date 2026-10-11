@@ -4,10 +4,12 @@ import { join } from "node:path";
 import {
   type MutationFunctionContext,
   MutationObserver,
+  mutationOptions,
   QueryClient,
 } from "@tanstack/react-query";
 import * as pluginMutations from "../src/lib/plugins/mutations";
 import {
+  accountModePreview,
   addCuratedServerMutationOptions,
   addCustomServerMutationOptions,
   brokeredConnectionFieldsMutationOptions,
@@ -22,6 +24,7 @@ import {
   removePluginServerMutationOptions,
   removeSkillMutationOptions,
   saveSkillMutationOptions,
+  setAccountModeMutationOptions,
   setPluginGrantMutationOptions,
 } from "../src/lib/plugins/mutations";
 import { pluginKeys } from "../src/lib/plugins/queries";
@@ -284,6 +287,17 @@ const REFUSALS: {
     factory: recheckBrokeredConnectionMutationOptions,
     variables: "gmail",
   },
+  {
+    name: "switching a server's account mode",
+    route: "PUT /api/plugins/servers/:id/account-mode",
+    status: 500,
+    message: "The switch did not finish, and nothing was changed.",
+    factory: setAccountModeMutationOptions,
+    variables: {
+      serverId: "linear",
+      mode: "shared" as const,
+    },
+  },
 ];
 
 for (const refusal of REFUSALS) {
@@ -327,6 +341,8 @@ const NOT_A_MUTATION_FACTORY: Record<string, string> = {
     "The refetch itself — the thing every case above asserts was asked for, not a press.",
   grantPlugin:
     "The bare write, for a caller granting a batch and refreshing once at the end. It carries no refetch on purpose, and the mutation that wraps it is covered above.",
+  accountModePreview:
+    "The bare read: `confirm: false` on the same PUT the real switch sends, asked not to commit. Nothing changed, so there is nothing to refetch — and the switch that does commit is covered above.",
 };
 
 /**
@@ -531,6 +547,24 @@ const ENCODED_REQUESTS: {
     url: `/api/plugins/skills/${ENCODED_ID}`,
     build: removeSkillMutationOptions,
     variables: HOSTILE_ID,
+  },
+  {
+    name: "previewing an account mode switch",
+    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    build: () =>
+      mutationOptions({
+        mutationFn: (variables: {
+          serverId: string;
+          mode: "personal" | "shared";
+        }) => accountModePreview(variables.serverId, variables.mode),
+      }),
+    variables: { serverId: HOSTILE_ID, mode: "shared" as const },
+  },
+  {
+    name: "switching a server's account mode",
+    url: `/api/plugins/servers/${ENCODED_ID}/account-mode`,
+    build: setAccountModeMutationOptions,
+    variables: { serverId: HOSTILE_ID, mode: "shared" as const },
   },
   {
     /*

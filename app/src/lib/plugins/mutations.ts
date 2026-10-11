@@ -1,6 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import { pluginKeys } from "./queries";
+import type { SharedUseApproval } from "./shared-use";
 
 /**
  * Writes against what a deployment has installed: MCP servers, skills, and which Bots carry them.
@@ -100,11 +101,19 @@ export function invalidatePlugins(queryClient: QueryClient) {
  * grant, so the audit trail is unchanged, but the reader is refreshed once at the end rather than
  * between every pair. Anything granting a single one should use the mutation below instead, which
  * carries the refetch with it.
+ *
+ * `approval` IS HOW A GRANT ON A SHARED APP NARROWS ITS OWN AUDIENCE. Granting a Bot a shared app it
+ * is not yet covered for is what provokes the audience refusal in the first place, so the one screen
+ * that offers the grant is also where an administrator can pre-empt it by shipping the approval the
+ * grant would otherwise go ask for. Sent only when present, for the reason every optional body field
+ * in this file is: a grant that carries no opinion about audience must not read as one that narrowed
+ * it to nothing.
  */
 export function grantPlugin(variables: {
   kind: PluginKind;
   ref: string;
   agentId: string;
+  approval?: SharedUseApproval;
 }): Promise<unknown> {
   return client("/api/plugins/grants", {
     method: "POST",
@@ -112,8 +121,76 @@ export function grantPlugin(variables: {
       kind: variables.kind,
       ref: variables.ref,
       agentId: variables.agentId,
+      ...(variables.approval ? { approval: variables.approval } : {}),
     },
     fallback: "That Agent could not be changed.",
+  });
+}
+
+/**
+ * What switching a server's account mode would do, asked before it is done.
+ *
+ * `wouldRevoke` is who loses their account: a person's own connection when the switch is into
+ * Shared, or the deployment's shared one when it is switched back out of it. `bots` is every Bot
+ * currently granted this app's actions when switching to Shared (empty when switching to
+ * Personal), each with its exposure now — who can reach it and whether outside input can — which
+ * is what the switch would approve for it.
+ */
+export type AccountModePreview = {
+  mode: "personal" | "shared";
+  wouldRevoke: { holder: "person" | "deployment"; count: number };
+  bots: { botId: string; exposure: SharedUseApproval }[];
+};
+
+/**
+ * Ask what switching a server to this mode would change, without changing anything.
+ *
+ * `confirm: false` is the whole of the contract: the same route decides and the same body shape
+ * answers either way, so a preview is not a second endpoint to keep in step with the real switch —
+ * it is the real switch, asked not to commit.
+ */
+export async function accountModePreview(
+  serverId: string,
+  mode: "personal" | "shared",
+): Promise<AccountModePreview> {
+  const response = await client(
+    `/api/plugins/servers/${encodeURIComponent(serverId)}/account-mode`,
+    {
+      method: "PUT",
+      body: { mode, confirm: false },
+      fallback: "What the switch would change could not be read.",
+    },
+  );
+  return ((await response.json()) as { preview: AccountModePreview }).preview;
+}
+
+/**
+ * Switch a server's account mode for real.
+ *
+ * `approvals` carries the administrator's narrowed approvals, keyed by Bot id, for Bots the preview
+ * listed; a Bot not named gets its exposure as listed.
+ */
+export function setAccountModeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      serverId: string;
+      mode: "personal" | "shared";
+      approvals?: Record<string, SharedUseApproval>;
+    }) => {
+      await client(
+        `/api/plugins/servers/${encodeURIComponent(variables.serverId)}/account-mode`,
+        {
+          method: "PUT",
+          body: {
+            mode: variables.mode,
+            confirm: true,
+            ...(variables.approvals ? { approvals: variables.approvals } : {}),
+          },
+          fallback: "The switch did not finish, and nothing was changed.",
+        },
+      );
+    },
+    onSettled: () => invalidatePlugins(queryClient),
   });
 }
 

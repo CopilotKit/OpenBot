@@ -1,4 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 import { client } from "@/lib/client";
 export type MemoryRecord = {
   id: string;
@@ -107,3 +111,48 @@ export const memorySourceAction = (
       fallback: "Could not change this source",
     },
   );
+
+const settleMemory = (queryClient: QueryClient) => () =>
+  queryClient.invalidateQueries({ queryKey: memoryKeys.all });
+
+export const createMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: createMemory,
+    onSettled: settleMemory(queryClient),
+  });
+export const updateMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: { content?: string; enabled?: boolean; reviewState?: "confirmed" };
+    }) => updateMemory(id, input),
+    onSettled: settleMemory(queryClient),
+  });
+export const deleteMemoryMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: deleteMemory,
+    onSettled: settleMemory(queryClient),
+  });
+
+/** Opt a Bot in to reading one of its connected apps' actions as a memory source. */
+export const addMemorySourceMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: addMemorySource,
+    onSuccess: settleMemory(queryClient),
+  });
+
+/** Sync, remove, enable or disable one memory source. */
+export const memorySourceActionMutationOptions = (queryClient: QueryClient) =>
+  mutationOptions({
+    mutationFn: ({
+      sourceId,
+      name,
+    }: {
+      sourceId: string;
+      name: "sync" | "remove" | "enable" | "disable";
+    }) => memorySourceAction(sourceId, name),
+    onSuccess: settleMemory(queryClient),
+  });

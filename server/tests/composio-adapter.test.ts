@@ -3,6 +3,7 @@ import { Composio, telemetry } from "@composio/core";
 import {
   type BrokerConnection,
   BrokerRefusalError,
+  BrokerUnconfiguredError,
   brokerSentence,
   type ComposioBroker,
 } from "../src/plugins/broker";
@@ -899,7 +900,7 @@ describe("beginning one person's connection", () => {
     );
 
     const begun = await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl:
         "https://openbot.test/settings/connected-accounts/composio-linear",
@@ -948,7 +949,7 @@ describe("beginning one person's connection", () => {
     );
 
     const refused = broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl:
         "https://openbot.test/settings/connected-accounts/composio-linear",
@@ -1008,7 +1009,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: "https://openbot.test/settings/connected-accounts/x",
     });
@@ -1042,7 +1043,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     const refused = broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: "https://openbot.test/settings/connected-accounts/x",
     });
@@ -1376,7 +1377,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -1410,7 +1411,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -1546,7 +1547,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
     );
 
     const refused = broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: "https://openbot.test/settings/connected-accounts/x",
     });
@@ -1597,7 +1598,7 @@ describe("telling this deployment's auth configs from anybody else's", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -1826,9 +1827,12 @@ describe("withdrawing one person's grants", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      true,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(true);
     expect(deleted).toEqual([["ca_1", { revoke_on_delete: true }]]);
   });
 
@@ -1855,7 +1859,10 @@ describe("withdrawing one person's grants", () => {
      * ASSERTED AS A REFUSAL AND AS A COUNT, because "did not answer true" is satisfied by a crash.
      */
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
     expect(refusal).toBeInstanceOf(BrokerRefusalError);
     expect(refusal.message).toMatch(
@@ -1884,7 +1891,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
     expect(refusal).toBeInstanceOf(BrokerRefusalError);
     expect(refusal.message).not.toMatch(A_CRASH);
@@ -1923,7 +1933,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     expect(refusal).toBeInstanceOf(BrokerRefusalError);
@@ -1948,9 +1961,12 @@ describe("withdrawing one person's grants", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      false,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(false);
 
     /*
      * `accountType` because its default is private accounts only, so a shared account is invisible
@@ -1999,7 +2015,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     expect(
-      await broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+      await broker.isConnected({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     ).toBe(true);
 
     // ACTIVE only — an unfinished or expired account must not tell somebody their app is wired up —
@@ -2030,7 +2049,10 @@ describe("withdrawing one person's grants", () => {
      * question `./access` asks this method before running somebody's action.
      */
     expect(
-      await broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+      await broker.isConnected({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     ).toBe(false);
   });
 
@@ -2063,8 +2085,14 @@ describe("withdrawing one person's grants", () => {
       () => 1_000_000,
     );
 
-    await broker.isConnected({ userId: "user_1", toolkit: "gmail" });
-    await broker.isConnected({ userId: "user_1", toolkit: "gmail" });
+    await broker.isConnected({
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      toolkit: "gmail",
+    });
+    await broker.isConnected({
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      toolkit: "gmail",
+    });
 
     expect(asked).toEqual([["ACTIVE"], ["ACTIVE"]]);
   });
@@ -2087,7 +2115,10 @@ describe("withdrawing one person's grants", () => {
       }),
     );
 
-    const refused = broker.revoke({ userId: "user_1", toolkit: "gmail" });
+    const refused = broker.revoke({
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+      toolkit: "gmail",
+    });
 
     // The third account is the whole point: a throw at the second used to abandon it, so a grant
     // nobody ever asked about outlived a call that reported only the failure of a different one.
@@ -2117,7 +2148,10 @@ describe("withdrawing one person's grants", () => {
      * second attempt with everything the first one had.
      */
     await expect(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     ).rejects.toBeInstanceOf(BrokerRefusalError);
   });
 
@@ -2155,7 +2189,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // Both readable grants gone, and no delete sent for the row that had no id: a withdrawal of
@@ -2213,7 +2250,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // The grant on the config that WAS readable is gone, which is the half a throw ahead of the
@@ -2272,7 +2312,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     expect(failure).toBeInstanceOf(BrokerRefusalError);
@@ -2306,7 +2349,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     expect(
-      await broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+      await broker.isConnected({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     ).toBe(true);
   });
 
@@ -2351,9 +2397,12 @@ describe("withdrawing one person's grants", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      true,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(true);
 
     // The operator's config is not in the question, so no account on it can be in the answer and
     // none of them can reach the delete.
@@ -2380,9 +2429,12 @@ describe("withdrawing one person's grants", () => {
       fakeVendor({ authConfigs: { list: async () => ({ items: [] }) } }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      false,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(false);
   });
 
   /**
@@ -2414,7 +2466,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
     expect(refusal).toBeInstanceOf(BrokerRefusalError);
     expect(refusal.message).not.toMatch(A_CRASH);
@@ -2462,9 +2517,16 @@ describe("withdrawing one person's grants", () => {
         }),
       );
 
-      expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-        true,
-      );
+      expect(
+        await broker.revoke({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
+      ).toBe(true);
       // And the flag still went out, so the `true` is about a delete that asked for the grant to be
       // revoked rather than about one that quietly filed the account away.
       expect(deleted).toEqual(["ca_1"]);
@@ -2509,9 +2571,12 @@ describe("withdrawing one person's grants", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      true,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(true);
     expect(deleted).toEqual(["ca_1"]);
   });
 
@@ -2541,7 +2606,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
     expect(failure).toBeInstanceOf(BrokerRefusalError);
     expect(failure.message).toMatch(/withdrew 1 of this person's 2 accounts/);
@@ -2572,7 +2640,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     expect(failure).toBeInstanceOf(BrokerRefusalError);
@@ -2622,7 +2693,10 @@ describe("withdrawing one person's grants", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     expect(failure).toBeInstanceOf(BrokerRefusalError);
@@ -2654,7 +2728,7 @@ describe("refusals a route can tell from an outage", () => {
 
     const error = await broker
       .authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: "https://openbot.test/settings/connected-accounts/x",
       })
@@ -2685,7 +2759,7 @@ describe("refusals a route can tell from an outage", () => {
 
     const error = await broker
       .authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: "https://openbot.test/settings/connected-accounts/x",
       })
@@ -2971,6 +3045,12 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
         "The account listing did not answer. This is a gate rather than a page, and its caller refuses the run either way.",
     },
     {
+      method: "accountName",
+      kind: "an outage",
+      because:
+        "The account listing did not answer. There is no name to show either way, and the page this fills in asks nothing more of the vendor than that one listing.",
+    },
+    {
       method: "connectionFields",
       kind: "an outage",
       because:
@@ -3056,7 +3136,11 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
       }),
       ask: ({ broker }) =>
         broker.authorize({
-          userId: "user_1",
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
           toolkit: "linear",
           returnUrl: RETURN_URL,
         }),
@@ -3065,7 +3149,27 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
       method: "isConnected",
       vendor: (raise) => ({ connectedAccounts: { list: raise } }),
       ask: ({ broker }) =>
-        broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+        broker.isConnected({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
+    },
+    {
+      method: "accountName",
+      vendor: (raise) => ({ connectedAccounts: { list: raise } }),
+      ask: ({ broker }) =>
+        broker.accountName({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
     },
     {
       method: "revoke",
@@ -3079,7 +3183,14 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
         },
       }),
       ask: ({ broker }) =>
-        broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+        broker.revoke({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
     },
     {
       method: "connectionFields",
@@ -3101,7 +3212,11 @@ describe("what a vendor failure becomes on its way out of the seam", () => {
       }),
       ask: ({ broker }) =>
         broker.connectWithFields({
-          userId: "user_1",
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
           toolkit: "linear",
           authScheme: "API_KEY",
           values: { generic_api_key: "never-sent-anywhere" },
@@ -3249,7 +3364,7 @@ describe("each vendor condition reaches the reader as its own remedy", () => {
       () => 1_000_000,
     );
     return broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -3491,7 +3606,10 @@ describe("what the delete loop keeps of the failures it meets", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // The sentence stays the count, which is what a reader can act on. The reasons are what a log
@@ -3520,7 +3638,10 @@ describe("what the delete loop keeps of the failures it meets", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     expect((failure.cause as Error).message).toBe("Composio refused that one.");
@@ -3566,7 +3687,10 @@ describe("what the delete loop keeps of the failures it meets", () => {
     );
 
     const failure = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // The third account is the one the old classification abandoned: a `TypeError` at the second
@@ -3731,7 +3855,11 @@ describe("a vendor listing that is not the shape it is declared to be", () => {
       asked: ["authConfigs.list"],
       ask: ({ broker }) =>
         broker.authorize({
-          userId: "user_1",
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
           toolkit: "linear",
           returnUrl: RETURN_URL,
         }),
@@ -3777,7 +3905,14 @@ describe("a vendor listing that is not the shape it is declared to be", () => {
       // the assertion stays a statement about the whole conversation with the vendor.
       asked: ["authConfigs.list", "connectedAccounts.list"],
       ask: ({ broker }) =>
-        broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+        broker.revoke({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
       authored: true,
     },
     {
@@ -3901,9 +4036,12 @@ describe("a listing that arrived with a cursor still outstanding", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      true,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(true);
 
     // `ca_2` is the whole test. It is on the second page, so a reader that stopped at the first
     // deletes `ca_1`, answers `true`, and leaves a live grant behind an audit row saying this
@@ -3948,7 +4086,10 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     // "this person has no account", which then tells them to connect an app they already hold — and
     // tells the gate in `./access` that they may not act through one they can.
     expect(
-      await broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+      await broker.isConnected({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     ).toBe(true);
   });
 
@@ -4007,7 +4148,14 @@ describe("a listing that arrived with a cursor still outstanding", () => {
       );
 
       expect(
-        await broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+        await broker.isConnected({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
       ).toBe(true);
       // One request, because the first answer settled it. Counted rather than left implicit: an
       // implementation that read on and happened not to throw would answer `true` as well, and the
@@ -4036,7 +4184,10 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     const failure = await failureOf(
-      broker.isConnected({ userId: "user_1", toolkit: "gmail" }),
+      broker.isConnected({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
     expect(failure).toBeInstanceOf(BrokerRefusalError);
     expect(failure.message).not.toMatch(A_CRASH);
@@ -4098,7 +4249,7 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -4130,7 +4281,10 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // Read as absent, a cursor this deployment cannot follow is a truncated page wearing the
@@ -4197,9 +4351,16 @@ describe("a listing that arrived with a cursor still outstanding", () => {
         }),
       );
 
-      expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-        true,
-      );
+      expect(
+        await broker.revoke({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
+      ).toBe(true);
       expect(deleted).toEqual(["ca_1"]);
       expect(calls).toBe(1);
     });
@@ -4260,7 +4421,10 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // A vendor answering the same cursor for ever is a hung request rather than a long one, and the
@@ -4307,7 +4471,10 @@ describe("a listing that arrived with a cursor still outstanding", () => {
     );
 
     const refusal = await failureOf(
-      broker.revoke({ userId: "user_1", toolkit: "gmail" }),
+      broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
     );
 
     // Stopping is the easy half; the half that matters is that stopping is not answering. A ceiling
@@ -4493,7 +4660,7 @@ describe("a vendor answer that is one object rather than a listing", () => {
      */
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5022,7 +5189,7 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5073,7 +5240,7 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5117,7 +5284,7 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5150,7 +5317,7 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: "pplx-secret" },
@@ -5191,7 +5358,7 @@ describe("what a malformed field of a row actually costs", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5229,7 +5396,7 @@ describe("what a malformed field of a row actually costs", () => {
     );
 
     await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -5340,7 +5507,11 @@ describe("what a malformed field of a row actually costs", () => {
 
       const refusal = await failureOf(
         broker.authorize({
-          userId: "user_1",
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
           toolkit: "linear",
           returnUrl: RETURN_URL,
         }),
@@ -5441,9 +5612,12 @@ describe("a field Composio padded with whitespace", () => {
       }),
     );
 
-    expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-      true,
-    );
+    expect(
+      await broker.revoke({
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
+        toolkit: "gmail",
+      }),
+    ).toBe(true);
     expect(deleted).toEqual([["ca_1", { revoke_on_delete: true }]]);
   });
 
@@ -5526,7 +5700,7 @@ describe("a field Composio padded with whitespace", () => {
     );
 
     const begun = await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -5561,7 +5735,7 @@ describe("a field Composio padded with whitespace", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5606,7 +5780,7 @@ describe("a field Composio padded with whitespace", () => {
     );
 
     const begun = await broker.authorize({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       returnUrl: RETURN_URL,
     });
@@ -5642,7 +5816,7 @@ describe("a field Composio padded with whitespace", () => {
 
     expect(
       await broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: "pplx-secret" },
@@ -5674,7 +5848,7 @@ describe("a field Composio padded with whitespace", () => {
 
     const refusal = await failureOf(
       broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         returnUrl: RETURN_URL,
       }),
@@ -5860,9 +6034,16 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
       }));
 
       const { broker } = createComposioClient("never-dialled");
-      expect(await broker.revoke({ userId: "user_1", toolkit: "gmail" })).toBe(
-        true,
-      );
+      expect(
+        await broker.revoke({
+          account: {
+            holder: "person",
+            userId: "user_1",
+            vendorUserId: "user_1",
+          },
+          toolkit: "gmail",
+        }),
+      ).toBe(true);
       await broker.deleteAuthConfig("gmail");
     } finally {
       // Restored whatever happened above, because these are the SDK's own classes and every later
@@ -5931,7 +6112,7 @@ describe("the key becoming a vendor, and which delete that vendor carries", () =
 
       const { broker } = createComposioClient("never-dialled");
       begun = await broker.authorize({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "gmail",
         returnUrl: RETURN_URL,
       });
@@ -7590,7 +7771,7 @@ describe("connecting one person with the secret they typed", () => {
 
     expect(
       await broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET, subdomain: "acme" },
@@ -7650,7 +7831,7 @@ describe("connecting one person with the secret they typed", () => {
     );
 
     await broker.connectWithFields({
-      userId: "user_1",
+      account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
       toolkit: "linear",
       authScheme: "API_KEY",
       values: { generic_api_key: TYPED_SECRET, status: "INITIALIZING" },
@@ -7716,7 +7897,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7747,7 +7928,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7776,7 +7957,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7826,7 +8007,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7875,7 +8056,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -7908,7 +8089,7 @@ describe("connecting one person with the secret they typed", () => {
 
     const refusal = await failureOf(
       broker.connectWithFields({
-        userId: "user_1",
+        account: { holder: "person", userId: "user_1", vendorUserId: "user_1" },
         toolkit: "linear",
         authScheme: "API_KEY",
         values: { generic_api_key: TYPED_SECRET },
@@ -8115,4 +8296,114 @@ describe("taking back the one account a verification just made", () => {
       expect(deleted).toEqual([["ca_new", { revoke_on_delete: true }]]);
     });
   }
+});
+
+/**
+ * Which account a request is about, named by WHO HOLDS IT rather than by whose request it is.
+ *
+ * A deployment's own account and a person's account are each asked for under the `AccountRef`'s
+ * `vendorUserId` — never under whoever's `userId` happens to be making the request — so the vendor
+ * id behind a `deployment` holder, `openbot-deployment:<deploymentId>:...`, is what goes out for a
+ * deployment, and a person's own vendor id goes out for a person. And when a connected-account
+ * listing comes back, only its published `displayName` is ever read for a name; nothing in that
+ * listing's tokens is touched or decoded.
+ */
+describe("accounts named by holder", () => {
+  const deployment = {
+    holder: "deployment" as const,
+    vendorUserId: "openbot-deployment:acme:R1",
+  };
+  const person = {
+    holder: "person" as const,
+    userId: "user_1",
+    vendorUserId: "user_1",
+  };
+
+  test("the deployment's account is asked for under its vendor id, never a person's", async () => {
+    const asked: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async (query: unknown) => {
+            asked.push(query);
+            return { items: [{ id: "ca_1" }] };
+          },
+        },
+      }),
+    );
+    expect(
+      await broker.isConnected({ account: deployment, toolkit: "github" }),
+    ).toBe(true);
+    expect(asked).toEqual([
+      expect.objectContaining({ userIds: ["openbot-deployment:acme:R1"] }),
+    ]);
+  });
+
+  test("a person's account is asked for under their vendor id", async () => {
+    const asked: unknown[] = [];
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async (query: unknown) => {
+            asked.push(query);
+            return { items: [] };
+          },
+        },
+      }),
+    );
+    expect(
+      await broker.isConnected({ account: person, toolkit: "github" }),
+    ).toBe(false);
+    expect(asked).toEqual([expect.objectContaining({ userIds: ["user_1"] })]);
+  });
+
+  test("only the display name leaves a listing that carries the account's tokens", async () => {
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async () => ({
+            items: [
+              {
+                id: "ca_1",
+                data: {
+                  displayName: "acme-bot",
+                  access_token: "gho_SECRET",
+                  refresh_token: "r_SECRET",
+                  client_secret: "cs_SECRET",
+                  id_token: "eyJ.SECRET",
+                },
+                state: { val: { access_token: "gho_SECRET" } },
+              },
+            ],
+          }),
+        },
+      }),
+    );
+    const name = await broker.accountName({
+      account: deployment,
+      toolkit: "github",
+    });
+    expect(name).toBe("acme-bot");
+    expect(JSON.stringify(name)).not.toMatch(/SECRET/);
+  });
+
+  test("no display name is no name, and nothing is decoded from tokens", async () => {
+    const { broker } = buildComposioClient(
+      fakeVendor({
+        connectedAccounts: {
+          list: async () => ({
+            items: [{ id: "ca_1", data: { id_token: "eyJhbGciOi.e30.x" } }],
+          }),
+        },
+      }),
+    );
+    expect(
+      await broker.accountName({ account: deployment, toolkit: "gmail" }),
+    ).toBeNull();
+  });
+
+  test("an unconfigured broker names the provider it is missing", () => {
+    expect(new BrokerUnconfiguredError("Acme").message).toMatch(/Acme/);
+    expect(new BrokerUnconfiguredError().message).toMatch(/COMPOSIO_API_KEY/);
+  });
 });

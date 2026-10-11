@@ -37,9 +37,9 @@ export type AgentProfile = {
    */
   hasCallbackToken: boolean;
   hidden: boolean;
-  /** Whether the signed-in person pinned it to the top of their agents list. Nobody else's. */
+  /** Whether the signed-in person pinned it to the top of their Bots list. Nobody else's. */
   pinned: boolean;
-  /** A Team Bot an administrator assigned to this person; the sidebar always lists it. */
+  /** A Team Bot an administrator assigned to this person; their Bots list always pins it. */
   assignedToMe?: boolean;
   systemOwned: boolean;
   canManage: boolean;
@@ -55,8 +55,8 @@ export type AgentProfile = {
 /**
  * Whether this is an agent shared with you: made public by somebody else, not your own.
  *
- * Written once so the roster (`/`) and the browse screen (`/agents`) can't drift apart on what
- * "shared with you" means — both filter their list through this, not a copy of the rule.
+ * Written once so every list of "shared with you" — the home screen's carousel among them — filters
+ * through this rule rather than a copy of it.
  */
 export function isSharedWithYou(agent: AgentProfile): boolean {
   return !agent.mine && agent.visibility === "public";

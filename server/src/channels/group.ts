@@ -28,6 +28,7 @@ import type { ApprovalContinuation } from "../approvals/types";
 import {
   type AuditInitiator,
   type AuditStore,
+  handoffInitiator,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "../audit";
@@ -658,7 +659,7 @@ export function createGroupConversations(deps: {
     const depth = turn.depth ?? 0;
     const initiator: AuditInitiator =
       turn.fromAgentId !== undefined
-        ? { kind: "handoff", id: turn.fromAgentId }
+        ? handoffInitiator(turn.fromAgentId, PERSON_INITIATOR)
         : PERSON_INITIATOR;
     const peers = mentionedPeers(reply, bots, speaker.id);
     for (const [index, peer] of peers.entries()) {
@@ -849,7 +850,7 @@ export function createGroupConversations(deps: {
           exclude,
         ),
         initiator: turn.fromAgentId
-          ? { kind: "handoff", id: turn.fromAgentId }
+          ? handoffInitiator(turn.fromAgentId, PERSON_INITIATOR)
           : PERSON_INITIATOR,
       });
       await writing;

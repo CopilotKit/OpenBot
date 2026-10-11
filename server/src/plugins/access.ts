@@ -226,6 +226,11 @@ export function accessFor(
      * says whether a brokered call lands in an ACCOUNT at all. See the `reachedAs` branch below.
      */
     authScheme: string | null;
+    /**
+     * Whether the app was switched to Shared, which is the other thing on the row that says a
+     * brokered call lands in nobody's account in particular. See the `reachedAs` branch below.
+     */
+    accountMode?: string | null;
   },
   entry: CatalogueEntry | null,
 ): ServerAccess {
@@ -271,12 +276,19 @@ export function accessFor(
      * person's account, which is the whole point of the connector; a brokered row whose scheme
      * column was never written is far likelier to be one of those than a no-auth app, and `person`
      * is the answer that does not under-attribute a call that really did run in somebody's mailbox.
+     *
+     * A Shared app is reached as the deployment for the same reason a no-auth app is: whoever
+     * asked, the call lands in one account that is nobody's in particular, and naming the asker as
+     * the account would assert an attribution that does not exist. The asker is still on the row as
+     * `actor`.
      */
     return {
       transport: "composio",
       credential: "brokered",
       reachedAs:
-        schemeKind(row.authScheme) === "none" ? "deployment" : "person",
+        schemeKind(row.authScheme) === "none" || row.accountMode === "shared"
+          ? "deployment"
+          : "person",
       toolkit: toolkitOf(row.url),
     };
   }

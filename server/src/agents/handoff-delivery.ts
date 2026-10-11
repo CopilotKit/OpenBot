@@ -14,6 +14,7 @@
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import type { Observable } from "rxjs";
 import { headlessTurnRefusal } from "../admin/controls";
+import type { AuditInitiator } from "../audit";
 import type { HandoffDelivery } from "./handoff-runner";
 import { guardBotTurn } from "./lifecycle";
 import { textOf } from "./message-text";
@@ -88,6 +89,8 @@ export function createHandoffDelivery(options: {
     botId: string;
     /** The Bot that handed the work on, so the trail says a hop ran this and not the person. */
     fromBotId: string;
+    /** What started the original run, so a Bot built for a hop still knows who it ultimately acts for. */
+    initiator?: AuditInitiator;
   }) => Promise<AbstractAgent | null>;
   /**
    * The conversation so far, so the addressed Bot is not answering out of context.
@@ -180,6 +183,7 @@ export function createHandoffDelivery(options: {
         actorId: work.actorId,
         botId: work.toBotId,
         fromBotId: work.fromBotId,
+        ...(work.initiator ? { initiator: work.initiator } : {}),
       });
       if (!agent) {
         /*
