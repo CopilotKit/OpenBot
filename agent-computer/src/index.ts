@@ -340,13 +340,26 @@ function isBlankPage(url: string): boolean {
  * Best effort: a page that will not load is logged and the handoff goes ahead, because a person in
  * front of a blank browser can still type the address, and a refused handoff helps nobody.
  */
+const restoringPages = new Set<string>();
 async function restoreHandoffPage(botId: string): Promise<void> {
+  // One at a time per Bot: the help call and "Take control" both start one, and the second would
+  // navigate again over the first while it is still loading.
+  if (restoringPages.has(botId)) return;
   const session = sessions.for(botId);
   const want = session.control.pageToRestore();
   if (!want) return;
+  // Run in the background, so the help call and "Take control" answer at once. Starting the browser
+  // can take a while; by the time it is up the person may already be driving, or the request over.
+  const inputsBefore = session.humanInputs;
+  restoringPages.add(botId);
   try {
     const target = await currentPage(botId);
     if (!isBlankPage(target.url())) return;
+    if (
+      session.humanInputs !== inputsBefore ||
+      session.control.pageToRestore() !== want
+    )
+      return;
     await navigateWebPage(target, want, RUNTIME.backend, NAVIGATION_TIMEOUT_MS);
     // A new document, so every ref handed out before it is retired, as after any navigation.
     session.snapshotId += 1;
@@ -365,6 +378,8 @@ async function restoreHandoffPage(botId: string): Promise<void> {
         reason: error instanceof Error ? error.message : String(error),
       }),
     );
+  } finally {
+    restoringPages.delete(botId);
   }
 }
 
@@ -661,6 +676,7 @@ serve<StreamData>({
         ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
         return;
       }
+      session.humanInputs += 1;
       try {
         const recorded = ws.data.recordingId
           ? await describeHumanGesture(
@@ -830,7 +846,9 @@ serve<StreamData>({
           "model",
           stuckOn?.url(),
         );
-        await restoreHandoffPage(botId);
+        // Not awaited: reopening the page can take a navigation timeout plus a cold browser start,
+        // and the Bot's help call must not wait on it. It catches its own errors.
+        void restoreHandoffPage(botId);
         return json(state);
       }
 
@@ -953,8 +971,9 @@ serve<StreamData>({
           return json({ error: "A requestId is required." }, 400);
         if (url.pathname === "/control/take") {
           const taken = await session.control.take(body.requestId);
-          // The browser may have restarted while the request waited; give the person the page.
-          await restoreHandoffPage(botId);
+          // The browser may have restarted while the request waited; give the person the page. In the
+          // background, so "Take control" answers at once; the live screen shows the page as it loads.
+          void restoreHandoffPage(botId);
           return json(taken);
         }
         if (url.pathname === "/control/cancel")
@@ -969,6 +988,7 @@ serve<StreamData>({
         if (!session.control.humanMayDrive()) {
           return json({ error: TAKE_CONTROL_FIRST }, 409);
         }
+        session.humanInputs += 1;
         const body = (await request.json().catch(() => null)) as Record<
           string,
           unknown

@@ -116,16 +116,54 @@ export function createControl(
       throw storageError;
     }
   }
+  /**
+   * End a request.
+   *
+   * Its page goes with it unless a restart interrupted it. A page address can carry a one-time token
+   * (a sign-in code, a reset or magic link), and the record is kept on disk for a month: the address
+   * is only needed while the request is live, or so a request raised after a restart can reopen it.
+   */
   function finish(
     request: HandoffRequest,
     status: "completed" | "cancelled" | "expired" | "interrupted",
     interruption?: string,
+    keepPage = false,
   ) {
     request.status = status;
     request.updatedAt = now();
     request.finishedAt = request.updatedAt;
     delete request.expiresAt;
     if (interruption) request.interruption = interruption;
+    if (status === "interrupted" && keepPage && request.url)
+      request.keepsPage = true;
+    else {
+      delete request.url;
+      delete request.keepsPage;
+    }
+  }
+  /**
+   * Drop every page a finished request no longer needs: all of them, except the latest request's when
+   * a restart interrupted it within the help TTL. Also cleans records written before pages were
+   * dropped on finish. True when something changed.
+   */
+  function scrubPages(at: string): boolean {
+    let changed = false;
+    const latest = data.requests.at(-1);
+    for (const request of data.requests) {
+      if ((!request.url && !request.keepsPage) || active(request)) continue;
+      const inheritable =
+        request === latest &&
+        request.status === "interrupted" &&
+        request.keepsPage === true &&
+        request.url !== undefined &&
+        request.finishedAt !== undefined &&
+        Date.parse(at) - Date.parse(request.finishedAt) <= HELP_REQUEST_TTL_MS;
+      if (inheritable) continue;
+      delete request.url;
+      delete request.keepsPage;
+      changed = true;
+    }
+    return changed;
   }
   function syncAdmission() {
     if (active(current()) || data.holder === "human" || data.recoveryRequired)
@@ -134,6 +172,7 @@ export function createControl(
   }
   function expire() {
     if (storageError) throw storageError;
+    if (scrubPages(now())) persist();
     const request = current();
     if (
       request?.status === "waiting" &&
@@ -187,13 +226,33 @@ export function createControl(
       );
     return request;
   }
-  function interrupt(reason: string): ControlState {
+  /**
+   * The computer stopped serving the current request.
+   *
+   * `keepPage` only for a restart underneath the request (the process or the browser coming back up):
+   * then a request raised from the blank browser that follows can reopen the page. A deliberate stop
+   * or reset is someone moving on, and reset is meant to forget everything, so neither keeps it.
+   */
+  function interrupt(
+    reason: string,
+    { keepPage = false }: { keepPage?: boolean } = {},
+  ): ControlState {
     const request = current();
     // Recovery is for a page a person was driving: what they left it as is unknown until someone
     // looks. A request nobody took left the page exactly as the Bot had it, and holding the Bot
     // until a person "checks" a page no person touched stranded it asking for control it had.
     const personHadIt = data.holder === "human" || request?.status === "taken";
-    if (request && active(request)) finish(request, "interrupted", reason);
+    if (request && active(request))
+      finish(request, "interrupted", reason, keepPage);
+    if (!keepPage) {
+      // A restart may already have interrupted this request and kept its page (a stop closes the
+      // browser first, which reports as a replacement). The stop or reset is the last word.
+      const latest = data.requests.at(-1);
+      if (latest?.status === "interrupted") {
+        delete latest.url;
+        delete latest.keepsPage;
+      }
+    }
     if (personHadIt) data.recoveryRequired = true;
     data.holder = "bot";
     data.since = now();
@@ -208,7 +267,10 @@ export function createControl(
   if (restored && (active(current()) || data.holder === "human"))
     interrupt(
       "The computer process restarted; the previous page was interrupted. Request help again to continue.",
+      { keepPage: true },
     );
+  // Records saved before finished requests dropped their pages are cleaned on first read.
+  if (restored && scrubPages(now())) persist();
   if (restored && !active(current()) && data.holder === "bot") {
     data.resumeSnapshotRequired = true;
     persist();
@@ -223,11 +285,19 @@ export function createControl(
    */
   function interruptedPage(at: string): string | undefined {
     const latest = data.requests.at(-1);
-    if (latest?.status !== "interrupted" || !latest.url || !latest.finishedAt)
+    if (
+      latest?.status !== "interrupted" ||
+      latest.keepsPage !== true ||
+      !latest.url ||
+      !latest.finishedAt
+    )
       return undefined;
-    return Date.parse(at) - Date.parse(latest.finishedAt) <= HELP_REQUEST_TTL_MS
-      ? latest.url
-      : undefined;
+    if (Date.parse(at) - Date.parse(latest.finishedAt) <= HELP_REQUEST_TTL_MS)
+      return latest.url;
+    // Past the TTL the address is only a liability; requestHelp persists right after.
+    delete latest.url;
+    delete latest.keepsPage;
+    return undefined;
   }
 
   function rememberAlias(toolCallId: string, requestId: string) {

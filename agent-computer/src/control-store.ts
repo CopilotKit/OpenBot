@@ -64,6 +64,7 @@ function validRequest(v: unknown): v is HandoffRequest {
     (v.interruption === undefined || typeof v.interruption === "string") &&
     (v.url === undefined ||
       (typeof v.url === "string" && v.url.length <= MAX_REQUEST_URL)) &&
+    (v.keepsPage === undefined || typeof v.keepsPage === "boolean") &&
     (v.status !== "waiting" || timestamp(v.expiresAt)) &&
     (v.status === "waiting" || v.expiresAt === undefined) &&
     (v.status === "waiting" || v.status === "taken"
