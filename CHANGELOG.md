@@ -8,6 +8,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.** A hosted computer's browser is now headed by default. It uses a little more
+memory than headless did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode:
+headless`) to keep the old behaviour. A deployment whose public URL is https on a public address starts signing its Bots'
+requests with Web Bot Auth; `WEB_BOT_AUTH=off` (Helm: `config.webBotAuth: "off"`) prevents it.
+
+### Fewer "Verify you are human" pages
+
+Sites behind Cloudflare challenged a Bot's browser on sight, and opening one could restart the
+computer and leave the person a blank page to solve. Now:
+- The computer no longer restarts on such a page, and a help request reopens the page the Bot was
+  on, so the person taking control always gets the check to solve. That handoff is the designed
+  fallback for a check a Bot cannot pass.
+- A hosted computer runs headed Chromium on its own virtual display, behind the same live screen.
+  Headless Chromium is what bot checks catch first. A computer still run headless no longer calls
+  itself `HeadlessChrome`.
+- With a public https URL, every request a Bot's browser sends is signed with Web Bot Auth and the
+  key is published at `/.well-known/http-message-signatures-directory`. Register the deployment once
+  with Cloudflare (Bot Submission Form, Request Signature) for sites that allow signed agents to let
+  Bots through. See docs/configuration.md. Every site a Bot visits sees the deployment's URL.
+- A residential or ISP proxy is a first-class setting: `EGRESS_PROXY_DEFAULT`, or on Helm
+  `computers.egressProxy` with the URL in a Secret. Off by default; turning it on makes Bots' traffic
+  look like a person's home connection, which is the operator's choice to make.
+- Bun 1.4.3 throughout, which fixes the connection crash behind the restarts.
+
 ## 0.2.0
 
 **Before upgrading.** Two things change for an existing deployment:
