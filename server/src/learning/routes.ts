@@ -2,18 +2,24 @@ import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type {
+  LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
 } from "../../../shared/learning";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
+import type { LearningAutoAssign } from "./auto-assign";
 import { type LearningSettingsStore, parseLearningSettings } from "./settings";
+
+/** The longest the settings page waits for an automatic check before answering without it. */
+const AUTO_ASSIGN_WAIT_MS = 3_000;
 
 type InspectorSnapshot = Awaited<
   ReturnType<CopilotKitIntelligence["getInspectorLearning"]>
 >;
 export type LearningAdminDependencies = {
   store: LearningSettingsStore;
+  autoAssign?: LearningAutoAssign;
   status?: (agentId: string) => Promise<LearningDeliveryStatus>;
   inspect?: (input: {
     agentId?: string;
@@ -61,9 +67,28 @@ export function createLearningRoutes(
       { status: 503, headers: { "content-type": "application/json" } },
     );
   });
-  routes.get("/settings", async (context) =>
-    context.json({ settings: await dependencies.store.read() }),
-  );
+  routes.get("/settings", async (context) => {
+    // Check first, so an administrator who just created the container sees it assigned on this
+    // load. Bounded: a slow Intelligence answers on a later load, not by holding this one.
+    let automatic: LearningAutoAssignState | undefined;
+    if (dependencies.autoAssign) {
+      const autoAssign = dependencies.autoAssign;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      automatic = await Promise.race([
+        autoAssign.check(),
+        new Promise<LearningAutoAssignState>((resolve) => {
+          timer = setTimeout(
+            () => resolve(autoAssign.state()),
+            AUTO_ASSIGN_WAIT_MS,
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+    }
+    return context.json({
+      settings: await dependencies.store.read(),
+      ...(automatic ? { automatic } : {}),
+    });
+  });
   routes.put(
     "/settings",
     bodyLimit({ maxSize: 128 * 1024 }),

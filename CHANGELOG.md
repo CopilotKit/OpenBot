@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Three things change for an existing deployment:
+**Before upgrading.** Four things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -18,6 +18,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   entitled to Intelligence memory, the memory sweep then copies existing reviewed, switched-on memories
   into Intelligence, a few people at a time each minute; it is idempotent and safe to interrupt.
   Memories awaiting review, paused or forgotten stay local until that changes.
+- With nothing saved under Admin → Automatic Learning and no `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`,
+  the server assigns its Intelligence project's `openbot` container once it exists, and `scripts/start.sh`
+  creates that container. A saved setting, including off, is never changed;
+  `OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) prevents it.
 
 ### Fewer "Verify you are human" pages
 
@@ -37,6 +41,18 @@ computer and leave the person a blank page to solve. Now:
   `computers.egressProxy` with the URL in a Secret. Off by default; turning it on makes Bots' traffic
   look like a person's home connection, which is the operator's choice to make.
 - Bun 1.4.3 throughout, which fixes the connection crash behind the restarts.
+
+### Automatic Learning assigns its container without a trip to Admin
+
+Learning was on by default but collected nothing until somebody assigned a container. Now, when
+nothing is saved under Admin → Automatic Learning and `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is
+not set, the server assigns its Intelligence project's `openbot` container as the default as soon as
+that container exists, records it in the audit log, and the Admin page says so. A saved setting,
+including off, is never changed. The runtime key cannot create a container, so
+`bun scripts/setup-learning.ts` now creates `openbot` in an existing key's project instead of
+refusing, and `scripts/start.sh` runs that check on every start without a browser or prompt. Set
+`OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) to keep the old
+behaviour.
 
 ### Memory lives in CopilotKit Intelligence
 

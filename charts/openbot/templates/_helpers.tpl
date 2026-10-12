@@ -351,6 +351,11 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: CPK_INTELLIGENCE_SKILLS_REVISION
   value: {{ . | quote }}
 {{- end }}
+{{- /* Absent, as it is under `--reuse-values`, means on: only an explicit false is written. */}}
+{{- if eq (toString $learning.autoAssign) "false" }}
+- name: OPENBOT_LEARNING_AUTO_ASSIGN
+  value: "false"
+{{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL

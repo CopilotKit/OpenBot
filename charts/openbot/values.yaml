@@ -169,13 +169,15 @@ config:
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
-  # Fresh self-hosted setup: run scripts/setup-learning.ts on a computer with Chrome/Edge access
-  # to Intelligence, then transfer its runtime key through your secret manager and use openbot here.
-  # Existing key-only installs create it through authenticated Intelligence administration first.
+  # With nothing saved in Admin and no containerId below, the server assigns the project's openbot
+  # container on its own once it exists; the runtime key cannot create it. Create it once with
+  # scripts/setup-learning.ts (or in Intelligence), from a computer that can sign in to Intelligence.
   # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""
     revision: ""
+    # false stops the automatic assignment (OPENBOT_LEARNING_AUTO_ASSIGN=false).
+    autoAssign: true
   # How far one Bot may hand work to another.
   #
   # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what

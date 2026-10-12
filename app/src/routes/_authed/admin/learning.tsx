@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
   learningKeys,
   learningOverviewQueryOptions,
@@ -13,6 +14,7 @@ import {
   saveLearningSettings,
 } from "@/lib/learning/queries";
 import type {
+  LearningAutoAssignState,
   LearningSettings,
   LearningTarget,
 } from "../../../../../shared/learning";
@@ -21,6 +23,26 @@ export const Route = createFileRoute("/_authed/admin/learning")({
   component: LearningPage,
 });
 const selectClass = "w-full rounded-md border bg-background px-3 py-2 text-sm";
+
+/** What automatic assignment found, in words, or nothing when there is nothing to say. */
+function automaticMessage(
+  automatic: LearningAutoAssignState | null | undefined,
+  settings: LearningSettings,
+): string | undefined {
+  if (!automatic) return undefined;
+  if (
+    automatic.state === "assigned" &&
+    settings.defaultTarget?.containerId === automatic.containerId
+  )
+    return `OpenBot assigned this Intelligence project's "${automatic.containerId}" container automatically. Change it here at any time.`;
+  if (automatic.state === "absent")
+    return `This Intelligence project has no "${automatic.containerId}" Learning container yet, so nothing is collected. Create a container with that ID in Intelligence, or run bun scripts/setup-learning.ts, and OpenBot assigns it automatically.`;
+  if (automatic.state === "not_entitled")
+    return "This Intelligence project's plan does not include Learning, so no container was assigned.";
+  if (automatic.state === "unavailable")
+    return "OpenBot could not ask Intelligence for this project's Learning container. It tries again.";
+  return undefined;
+}
 
 function TargetFields({
   target,
@@ -76,6 +98,7 @@ function TargetFields({
 export function LearningPage() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
+  const automatic = useQuery(learningAutomaticQueryOptions());
   const agents = useQuery(agentListQueryOptions());
   const hiddenAgents = useQuery(agentListQueryOptions(true));
   const roster = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
@@ -87,6 +110,11 @@ export function LearningPage() {
   );
   const delivery = useQuery(learningDeliveryQueryOptions(selected));
   const settings = draft ?? settingsQuery.data;
+  // About what is saved, so it steps aside while an edit is in progress.
+  const automaticNote =
+    settingsQuery.data && !draft
+      ? automaticMessage(automatic.data, settingsQuery.data)
+      : undefined;
   const save = useMutation({
     mutationFn: saveLearningSettings,
     onSuccess: async (next) => {
@@ -118,7 +146,7 @@ export function LearningPage() {
     >
       <PageSection
         title="Participation"
-        description="Changes to container assignments apply to new threads. Existing threads keep their first assignment. Containers must already exist in the same Intelligence project."
+        description="Changes to container assignments apply to new threads. Existing threads keep their first assignment. Containers must already exist in the same Intelligence project. Until anything is saved here, OpenBot assigns that project's openbot container automatically."
       >
         {settingsQuery.isPending && (
           <p role="status">Loading Learning settings…</p>
@@ -153,6 +181,11 @@ export function LearningPage() {
                 change({ ...settings, defaultTarget })
               }
             />
+            {automaticNote && (
+              <p role="status" className="text-sm">
+                {automaticNote}
+              </p>
+            )}
             <p className="text-muted-foreground text-sm">
               An empty default leaves unmapped Bots out. IDs use 1–64 lowercase
               letters, numbers, and single hyphens. Leave revision empty to

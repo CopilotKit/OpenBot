@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import type {
+  LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
   LearningSettings,
@@ -9,6 +10,7 @@ import type {
 export const learningKeys = {
   all: ["learning"] as const,
   settings: ["learning", "settings"] as const,
+  automatic: ["learning", "automatic"] as const,
 };
 export function learningSettingsQueryOptions() {
   return queryOptions({
@@ -17,6 +19,19 @@ export function learningSettingsQueryOptions() {
       client("/api/admin/learning/settings", "settings", {
         fallback: "Learning settings could not be loaded.",
       }),
+  });
+}
+/** Why no container was assigned automatically, or `null` when the server has nothing to say. */
+export function learningAutomaticQueryOptions() {
+  return queryOptions({
+    queryKey: learningKeys.automatic,
+    retry: false,
+    queryFn: async (): Promise<LearningAutoAssignState | null> =>
+      (await client<LearningAutoAssignState | undefined>(
+        "/api/admin/learning/settings",
+        "automatic",
+        { fallback: "Learning settings could not be loaded." },
+      )) ?? null,
   });
 }
 export function learningOverviewQueryOptions(agentId?: string) {

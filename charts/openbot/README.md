@@ -346,7 +346,11 @@ nobody can talk to.
 ## Automatic Learning
 
 Learning is on by default, and it needs a container in the Intelligence project before it collects or
-delivers anything. `config.learning.containerId` sets the initial default container
+delivers anything. With nothing saved in Admin and no `config.learning.containerId`, the server
+assigns the project's `openbot` container as the default by itself once it exists. The runtime key
+cannot create it, so create it once, with `bun scripts/setup-learning.ts` from a computer that can
+sign in to Intelligence, or in Intelligence itself. `config.learning.autoAssign: false` turns the
+automatic assignment off. `config.learning.containerId` sets the initial default container
 (`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`) and `config.learning.revision` the skills revision
 (`CPK_INTELLIGENCE_SKILLS_REVISION`). Both are only starting values: settings saved in Admin →
 Automatic Learning take precedence, including switching it off. See
