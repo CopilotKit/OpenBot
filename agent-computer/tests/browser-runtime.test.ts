@@ -2,8 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { browserRuntimeFromEnv } from "../src/browser-runtime";
 
 describe("the configured browser runtime", () => {
-  test.each(["linux", "darwin", "win32"])(
-    "managed %s uses full headless Chromium",
+  // Linux is where hosted computers run: a container, a pod, the desktop app's Podman machine.
+  test("managed Linux is headed on its own virtual display", () => {
+    expect(browserRuntimeFromEnv({}, "linux")).toEqual({
+      backend: "managed",
+      channel: "chromium",
+      mode: "headed",
+      useVirtualDisplay: true,
+      allowExec: true,
+    });
+  });
+
+  test.each(["darwin", "win32"])(
+    "managed %s, a developer's own machine, stays headless",
     (platform) => {
       expect(browserRuntimeFromEnv({}, platform)).toEqual({
         backend: "managed",
@@ -12,6 +23,15 @@ describe("the configured browser runtime", () => {
         useVirtualDisplay: false,
         allowExec: true,
       });
+    },
+  );
+
+  test.each(["linux", "darwin", "win32"])(
+    "headless is still chosen on %s when asked for",
+    (platform) => {
+      expect(
+        browserRuntimeFromEnv({ COMPUTER_BROWSER_MODE: "headless" }, platform),
+      ).toMatchObject({ mode: "headless", useVirtualDisplay: false });
     },
   );
 

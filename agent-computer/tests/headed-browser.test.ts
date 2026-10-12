@@ -54,7 +54,10 @@ beforeAll(async () => {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   process.env.COMPUTER_TOKEN = TOKEN;
-  process.env.COMPUTER_BROWSER_MODE = "headed";
+  // Linux is where hosted computers run and headed is their default, so it is left to the default
+  // there; anywhere else it has to be asked for.
+  if (process.platform === "linux") delete process.env.COMPUTER_BROWSER_MODE;
+  else process.env.COMPUTER_BROWSER_MODE = "headed";
   process.env.PORT = String(port);
   process.env.PROFILES_DIR = join(root, "profiles");
   process.env.WORKSPACE_DIR = join(root, "workspace");

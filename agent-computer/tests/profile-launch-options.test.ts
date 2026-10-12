@@ -48,7 +48,10 @@ describe.skipIf(
         expect(options?.channel).toBe(
           backend === "managed" ? "chromium" : "chrome",
         );
-        expect(options?.headless).toBe(backend === "managed");
+        // Managed is headed where hosted computers run (Linux) and headless on a developer's machine.
+        expect(options?.headless).toBe(
+          backend === "managed" && process.platform !== "linux",
+        );
         expect(options?.handleSIGINT).toBe(false);
         expect(options?.handleSIGTERM).toBe(false);
         expect(options?.ignoreDefaultArgs).toEqual(["--enable-automation"]);
