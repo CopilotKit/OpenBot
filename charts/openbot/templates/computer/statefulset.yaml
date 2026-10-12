@@ -157,6 +157,9 @@ spec:
             - name: COMPUTER_BROWSER_IDLE_MS
               value: {{ . | quote }}
             {{- end }}
+            {{- with include "openbot.computerEnv" . | fromJsonArray }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
             {{- with .Values.computers.extraEnv }}
 {{ toYaml . | indent 12 }}
             {{- end }}

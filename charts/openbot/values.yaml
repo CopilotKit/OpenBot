@@ -119,6 +119,14 @@ migrations:
 config:
   # Where people reach this deployment. Sets the OAuth callback and the trusted origin.
   publicUrl: ""
+  # Web Bot Auth: every request a Bot's browser makes is signed as coming from this deployment, and
+  # the public key is published at `<publicUrl>/.well-known/http-message-signatures-directory`, so a
+  # site behind Cloudflare that allows signed agents lets the Bot through instead of challenging it.
+  # Empty means on whenever `publicUrl` is https on a public address (verifiers must be able to fetch
+  # the key), off otherwise; `on` or `off` decides it, and `on` also signs behind a private address. Signing earns nothing until the deployment is registered
+  # with Cloudflare, a manual step described in the chart README. The key is derived from
+  # `secrets.keyEncryptionKey` unless `secrets.webBotAuthKey` gives one.
+  webBotAuth: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.
   initialAdminEmails: ""
   # Email domains admitted at sign-in, comma-separated. Empty admits everybody, which is what the
@@ -344,6 +352,28 @@ computers:
   maxBrowsers: ""
   browserIdleMs: ""
 
+  # Which Chromium a Bot's computer runs. `headed` is full Chromium drawing to the pod's own X server
+  # (Xvfb, started by the computer), behind the same streamed screen: it is what sites see from a
+  # person's browser, and Cloudflare's bot check challenges it far less than headless Chromium. Costs
+  # a little more memory and CPU than `headless`, which is still available.
+  browserMode: headed
+
+  # A residential or ISP proxy for every Bot's outbound traffic. OFF BY DEFAULT, and an operator's
+  # choice to make knowingly: through one, a Bot's traffic leaves from an address a consumer ISP owns,
+  # so a site sees what looks like a person at home rather than a datacenter. That is the point (a
+  # datacenter address is the other thing bot checks key on) and also the thing to be comfortable
+  # with. The credentialed URL (`http://user:password@gateway.provider.example:8000`) is a secret:
+  # `secrets.egressProxyUrl`, or a key in a Secret of your own. It reaches every computer as
+  # `EGRESS_PROXY_DEFAULT`, behind the egress filter, so the network policy still decides what a Bot
+  # may reach. With `networkPolicy.enabled`, also name the proxy in
+  # `networkPolicy.computerExtraEgress`. One Bot's own proxy is still `EGRESS_PROXY_<BOT>` in
+  # `extraEnv` below.
+  egressProxy:
+    enabled: false
+    # Empty uses the chart's Secret (`secrets.egressProxyUrl`).
+    existingSecret: ""
+    existingSecretKey: egress-proxy-url
+
   persistence:
     # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS. Naming `gp3` or `pd-balanced` is how a chart stops
     # installing on a bare-metal cluster. Note that the ordinary block volume on every cloud is
@@ -358,7 +388,8 @@ computers:
   resources:
     requests:
       cpu: 500m
-      # Chromium is roughly 200-500MB headless and up to 2GB with real pages open.
+      # Chromium is roughly 200-500MB per browser (a little more headed, plus a few MB for Xvfb) and
+      # up to 2GB with real pages open.
       memory: 1Gi
     limits:
       memory: 4Gi
@@ -565,6 +596,12 @@ secrets:
   # logs ones are unset.
   otelLogsHeaders: ""
   otelHeaders: ""
+  # Optional, with `config.webBotAuth`. An Ed25519 private key as a JSON Web Key, to sign with instead
+  # of the one derived from `keyEncryptionKey`. Read from key `web-bot-auth-key` of whichever Secret
+  # this chart uses, when present.
+  webBotAuthKey: ""
+  # Required when `computers.egressProxy.enabled` and no `existingSecret` is named there.
+  egressProxyUrl: ""
 
 externalSecrets:
   enabled: false

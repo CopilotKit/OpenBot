@@ -312,7 +312,9 @@ cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both 
 an existing Secret are named; a Bot endpoint is named with no token to call it with; a browser is
 asked for inside more than one API replica; `networkPolicy.enabled` is set with an external database
 and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
-`networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks; or
+`networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
+`computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
+no `secrets.egressProxyUrl` where this chart writes the Secret; or
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
 `worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
 `secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
@@ -521,6 +523,54 @@ networkPolicy:
 `EGRESS_PROXY_DEFAULT` covers every Bot and `EGRESS_PROXY_<BOT>` names one, with the Bot's id
 upper-cased and anything unusual replaced. Naming a proxy the policy provably blocks is refused at
 install rather than found as a browser that fails on every page.
+
+## Getting past bot checks
+
+Sites behind Cloudflare decide per request whether to challenge. Three settings change what a Bot's
+browser looks like to them, and the handoff (the Bot asks, a person takes control, solves the check
+and hands back) is the designed fallback when they are not enough. The full explanation is in
+[docs/configuration.md](../../docs/configuration.md#getting-past-bot-checks).
+
+**Headed Chromium, on by default.** `computers.browserMode: headed` runs full Chromium on the pod's
+own Xvfb, in `shared` and `sandbox` mode alike, behind the same live screen. `headless` is still
+there and uses less memory; it is the browser bot checks are best at spotting.
+
+**Web Bot Auth, on whenever `config.publicUrl` is https on a public address.** Every request a Bot's browser sends is
+signed as coming from this deployment, and the key is published at
+`<publicUrl>/.well-known/http-message-signatures-directory`. `config.webBotAuth: "on"` or `"off"`
+decides it explicitly. The key is derived from `secrets.keyEncryptionKey`; `secrets.webBotAuthKey`
+(an Ed25519 private JWK, key `web-bot-auth-key` in a Secret of your own) replaces it. It earns
+nothing until the deployment is registered with Cloudflare, once, by hand:
+
+1. `curl -i https://<publicUrl>/.well-known/http-message-signatures-directory` answers `200` with
+   `Signature` and `Signature-Input` headers.
+2. In the Cloudflare dashboard: **Manage Account** > **Configurations** > **Bot Submission Form**.
+3. **Verification Method**: **Request Signature**. **Validation Instructions**: the directory URL.
+   Submit, and follow it under **BotBase** > **Submission history**.
+
+**A residential or ISP proxy, off by default and the operator's choice.** The Bots' traffic then
+leaves from an address a consumer ISP owns, so sites see what looks like a person at home rather than
+a datacenter. The credentialed URL is a secret:
+
+```yaml
+computers:
+  egressProxy:
+    enabled: true
+    # existingSecret: residential-proxy      # else the chart writes secrets.egressProxyUrl
+    # existingSecretKey: egress-proxy-url
+networkPolicy:
+  computerExtraEgress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 8000
+          protocol: TCP
+```
+
+It reaches every computer as `EGRESS_PROXY_DEFAULT`, behind the egress filter, so the network
+policy still decides what a Bot may reach. Turning it on with `networkPolicy.enabled` and no
+`computerExtraEgress`, or with no URL where this chart holds the Secret, is refused at install.
 
 ## Upgrades
 

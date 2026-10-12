@@ -287,6 +287,14 @@ This template renders nothing.
   a public one at template time, so this misses that case rather than guessing at it. A proxy
   supplied through `extraEnvFrom` is not readable here at all.
 */}}
+{{- /*
+  The residential proxy is a Secret this template cannot read, so where it is cannot be checked: with
+  network policies on, the computer reaches 80 and 443 on public addresses and nothing else, and
+  residential gateways almost always listen elsewhere. Asked for by name rather than guessed at.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) ((.Values.computers).egressProxy | default dict).enabled }}
+{{- fail "computers.egressProxy.enabled with networkPolicy.enabled needs the proxy named in networkPolicy.computerExtraEgress (its address and port), or every page a Bot opens would fail at the computer's network policy." }}
+{{- end }}
 {{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) }}
 {{- range .Values.computers.extraEnv }}
 {{- if hasPrefix "EGRESS_PROXY" (.name | default "") }}
