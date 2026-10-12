@@ -30,7 +30,6 @@ describe("host access broker", () => {
       grant: {
         grantId: "native-grant-1",
         displayName: "Project",
-        writable: false,
       },
     });
 

@@ -46,7 +46,7 @@ your own machine.
 
 An agent platform that runs inside your own infrastructure. Docker Compose brings up every part of it, the data sits in your PostgreSQL, and the model is yours to choose: no model ships in the box, and an administrator supplies the credential, which is encrypted at rest and never logged.
 
-A deployment starts with two coworkers, and they are configuration rather than code: **General Assistant** for everyday work and **Knowledge** for company questions. A **Risk Analyst** joins them once its endpoint is configured, and ten more wait in `examples/fintech/catalog/`, each doing one job — reading an expense claim against the policy as written, turning a meeting note into the follow-ups actually in it, drafting release notes from what shipped, triaging a ticket, answering a new starter from the handbook, writing a brief that names what it could not find, writing up an interview, handing an on-call shift over, assembling what is known before a renewal, and grouping customer feedback into themes it can cite. Copy one into `examples/fintech/agents/` to add it, write your own there or in `agents.yaml`, or make one from `/agents` in the UI.
+A deployment starts with two coworkers, and they are configuration rather than code: **General Assistant** for everyday work and **Knowledge** for company questions. A **Risk Analyst** joins them once its endpoint is configured, and ten more wait in `examples/fintech/catalog/`, each doing one job — reading an expense claim against the policy as written, turning a meeting note into the follow-ups actually in it, drafting release notes from what shipped, triaging a ticket, answering a new starter from the handbook, writing a brief that names what it could not find, writing up an interview, handing an on-call shift over, assembling what is known before a renewal, and grouping customer feedback into themes it can cite. Copy one into `examples/fintech/agents/` to add it, write your own there or in `agents.yaml`, or make one from `/bots` in the UI.
 
 Anything a Bot does to a computer, a file, an MCP server or a component goes through one gateway that decides and records it. That is the difference between an agent that can use your tools and an agent you can let near them.
 
@@ -175,29 +175,32 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
 - Ask the Bot to fill out <https://httpbin.org/forms/post>, then inspect `/admin/audit`.
 - Open `/admin/boundaries`, add a deny rule or preset, and retry the same browser action.
-- Create a coworker from `/agents`, give it a standing role, and start a channel with it.
+- Create a Bot from `/bots`, give it a standing role, and start a channel with it.
 
 ## Main surfaces
 
 | Route                       | Purpose                                                            |
 | --------------------------- | ------------------------------------------------------------------ |
 | `/`                         | Start and browse channels.                                         |
-| `/agents`                   | Create, edit, duplicate, pin, hide, delete, and launch coworkers.  |
+| `/channel/new`              | Start a conversation; two or more Bots in To: start a group.       |
 | `/channel/:id`              | Converse with one coworker, watch its screen, and see what it ran. |
-| `/group/new`                | Start one conversation with two or more Bots.                      |
 | `/bot`                      | Direct chat with a Bot; `?agent=<id>` selects one.                 |
-| `/bots`                     | What each of your Bots is doing, what it needs from you, and whether it is paused. |
-| `/team-bots`                | Bots your teammates published, and the ones you share.             |
-| `/responsibilities`         | Give a Bot a lasting goal, follow its progress, and decide when it should work. |
-| `/reachability`             | Continue a conversation in Slack, Microsoft Teams, by text message, or on your phone. |
-| `/memory`                   | Review what your Bots remember, and choose which connected apps can contribute facts. |
-| `/approvals`                | Choose what your Bots may do, and review actions waiting for you.  |
+| `/bots`                     | Every Bot you can reach; create one, and open its page to change it. |
+| `/bots/:id`                 | One Bot: what it waits on you for, what it is doing, and how it is set up. |
+| `/bots/:id/responsibilities` | Give the Bot a lasting goal, follow its progress, and decide when it should work. |
+| `/bots/:id/reach`           | Continue a conversation with the Bot in Slack, Microsoft Teams, or by text message. |
+| `/bots/:id/memory`          | Which connected apps feed the Bot facts, and its background research. |
+| `/bots/:id/approvals`       | What the Bot may do without asking you first.                      |
 | `/skills`                   | Create and enable personal skills.                                 |
 | `/routines`                 | See the routines that are standing, and stop one.                  |
 | `/settings`                 | User preferences.                                                  |
 | `/settings/connected-accounts` | Connect your apps so your Bots can work with them.              |
 | `/settings/passwords`       | Logins you saved when signing a Bot in to a website.               |
+| `/settings/notifications`   | Where updates go, your devices, and recent deliveries.             |
+| `/settings/approvals`       | Whether your Bots ask before acting, and rules for every Bot.      |
+| `/settings/memory`          | What your Bots remember about you, and facts you tell them.        |
 | `/admin/credentials`        | Store write-only encrypted credentials.                            |
+| `/admin/approvals`          | Team approval settings, team rules, and shared account requests.   |
 | `/admin/computers`          | View, stop, and reset Bot computers.                               |
 | `/admin/boundaries`         | Configure browser/file/MCP action policy.                          |
 | `/admin/components`         | Publish components and govern which Bots may use them.             |
@@ -235,7 +238,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 Any AG-UI endpoint can be a Bot.
 
-From `/agents`, create a coworker with:
+From `/bots`, create a Bot with:
 
 - name, title, and role description;
 - private or public visibility;

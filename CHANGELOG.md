@@ -16,6 +16,41 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   such record for up to ten minutes after the upgrade, and calls they make to a Shared app in that
   window are refused.
 
+### The desktop asks before every command that can edit a folder
+
+When a Bot runs a command in a folder shared from the desktop app, the person sees a prompt that can
+offer "Always allow in this folder". That choice now covers commands that only read the folder. A
+command that can change or delete files in it shows the prompt every time, without the "Always
+allow" option. Folders already set to "Always allow" work as before for read-only commands.
+
+### One Bots list, and one page per Bot
+
+Agents, Team Bots and Bots were three lists of the same Bots. `/bots` is now the only one — pinned,
+yours, shared with you, and the ones you hid — with **New Bot** at the top. A Bot's page holds
+everything about it: its routines, its skills and what it may reach, who it is shared with, and its
+name, role and connection. Where updates reach you and your answers to shared Bots moved to
+Settings. `/agents` and `/team-bots` still work and open the new places. A Team Bot an administrator
+assigns to a group is pinned at the top of its members' Bots list instead of sitting in their
+sidebar.
+
+The sidebar no longer lists each Bot that needs you. A badge on Bots counts the questions, approvals
+and stalled hand-offs waiting across all of them, and Bots lists those Bots first, under Needs you.
+Browser notifications when a Bot starts needing you are unchanged.
+
+The sidebar is now Bots and Skills. Each Bot's page holds what that Bot is waiting on you for, its
+suggested next steps, its responsibilities, where it reaches you, its memory sources and background
+research, and its approval rules. `/approvals`, `/memory`, `/reachability` and `/responsibilities`
+still work and open the new places. Messages from Bots, Slack and Teams that named those pages now
+point at the Bot's page.
+
+A group conversation is started like any other: put two or more Bots in the To: field of a new
+conversation, in the order they should answer. The separate group button and `/group/new` screen
+are gone; `/group/new` opens the new-conversation screen.
+
+Settings now also holds whether your Bots ask before acting, rules for every Bot, your memories, your
+devices and recent deliveries, and GitHub event sources. Team approval settings and shared account
+requests moved to Admin → Approvals.
+
 ### People can link their Slack and GitHub accounts
 
 Settings → Connected accounts gains a Linked accounts section with one card per account a person can

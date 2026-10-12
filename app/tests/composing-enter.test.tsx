@@ -17,7 +17,7 @@ import {
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType, ReactNode } from "react";
-import { AgentDialog } from "@/components/agents/agent-dialog";
+import { SetupSections } from "@/components/bot-profile/setup";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { computerKeys } from "@/lib/computers/queries";
@@ -140,13 +140,12 @@ async function settle() {
 }
 
 test("a coworker's name is not saved by the Enter that confirms a composed character", async () => {
-  const view = draw(
-    <AgentDialog agentId={PROFILE.id} onClose={() => {}} open />,
-    (client) => client.setQueryData(agentKeys.detail(PROFILE.id), PROFILE),
+  const view = draw(<SetupSections agent={PROFILE} />, (client) =>
+    client.setQueryData(agentKeys.detail(PROFILE.id), PROFILE),
   );
 
-  fireEvent.click(await view.findByRole("button", { name: "Edit name" }));
-  const field = view.getByDisplayValue(PROFILE.name);
+  fireEvent.click(await view.findByRole("button", { name: /^Name/ }));
+  const field = await view.findByDisplayValue(PROFILE.name);
   await type(field, "経費");
 
   await confirmComposedCharacter(field);

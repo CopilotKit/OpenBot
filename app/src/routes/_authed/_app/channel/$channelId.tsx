@@ -1,30 +1,20 @@
 import { IconSettings } from "@tabler/icons-react";
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
-import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
-import { ChannelAvatar } from "@/components/channels/avatar";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
+import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
-import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
-import {
-  type AgentChannel,
-  channelListQueryOptions,
-  channelQueryOptions,
-} from "@/lib/channels/queries";
+import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
+import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
@@ -57,34 +47,7 @@ function RouteComponent() {
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
 
-  const queryClient = useQueryClient();
-  const markRead = useMutation(markChannelReadMutationOptions(queryClient));
-  /*
-   * This channel's roster summary, read out of the same infinite query the sidebar renders.
-   * The detail query deliberately knows nothing about activity; the roster is where the socket
-   * keeps lastMessageAt live, so it is the one honest source for "has something new been said".
-   */
-  const roster = useInfiniteQuery(channelListQueryOptions());
-  const summary = roster.data?.find((row) => row.id === channelId);
-
-  /*
-   * Opening the channel marks it read; the Bot replying while it is open marks it read again.
-   * One effect covers both: the dep changes on navigation and on every activity patch, and the
-   * unseen check keeps it from writing a row per render. No dependency on the mutation object —
-   * its identity changes per render and the effect must not re-fire for that.
-   *
-   * Keyed on primitives, deliberately. The optimistic mark-read patch changes the summary OBJECT's
-   * identity without changing these values, so an object dep would re-fire the effect on its own
-   * write — and when lastMessageAt sits ahead of this browser's clock (another device wrote it),
-   * that re-fire loops into a PUT per render. Primitives hold still under the patch: one PUT.
-   */
-  const unseen = summary !== undefined && hasUnseenActivity(summary);
-  const markReadMutate = markRead.mutate;
-  useEffect(() => {
-    if (unseen) {
-      markReadMutate(channelId);
-    }
-  }, [channelId, unseen, markReadMutate]);
+  useMarkOpenChannelRead(channelId);
 
   // Browser activity may auto-open the screen once per run unless this run was dismissed.
   const dismissedEpoch = useRef<number | null>(null);

@@ -16,13 +16,16 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AgentDialog } from "@/components/agents/agent-dialog";
+import { useQuery } from "@tanstack/react-query";
+import { SetupSections } from "@/components/bot-profile/setup";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import type { AgentProfileStore } from "../../server/src/agents/profile-store";
 import type { AgentProfile } from "../../server/src/agents/profile-types";
 import { createAgentRoutes } from "../../server/src/agents/routes";
+import { settleReactWork } from "./settle-react-work";
 
 /**
- * Editing a coworker that runs on this deployment's own Bot.
+ * Editing a Bot that runs on this deployment's own Bot, from its Setup page.
  *
  * A coworker created as "Built in" on a deployment with a managed Bot is stored pointing at that
  * Bot's address, and the profile publishes it, with `builtIn` beside it so a screen can tell. The
@@ -34,13 +37,16 @@ import { createAgentRoutes } from "../../server/src/agents/routes";
  * renamed, retitled, redescribed or made public at all.
  *
  * The routes are the server's own, mounted behind `fetch` the way `agent-api-path.test.ts` mounts
- * them, so the refusal is the real one. The dialog is drawn in a router of one route, for the
- * `useNavigate` its General section holds.
+ * them, so the refusal is the real one. The Setup sections are drawn in a router of one route, as
+ * the Bot's Setup page draws them.
  */
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -63,15 +69,15 @@ beforeEach(() => {
   updates = [];
 });
 
-function serve(endpoint: string) {
+function serve(endpoint: string, ownerUserId = actor.id) {
   let profile: AgentProfile = {
     id: "expenses",
     name: "Expenses",
     title: "Finance Operations",
     roleDescription: "Review receipts.",
     avatarSeed: "expenses",
-    visibility: "private",
-    ownerUserId: actor.id,
+    ownerUserId,
+    visibility: ownerUserId === actor.id ? "private" : "public",
     systemOwned: false,
     hidden: false,
     pinned: false,
@@ -126,17 +132,19 @@ function serve(endpoint: string) {
   );
 }
 
+/** Loads the profile through the real route, as the Setup page does, then draws its sections. */
+function Setup() {
+  const agent = useQuery(agentQueryOptions("expenses"));
+  return agent.data ? <SetupSections agent={agent.data} /> : null;
+}
+
 function draw() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ["/"] }),
-    routeTree: createRootRoute({
-      component: () => (
-        <AgentDialog agentId="expenses" onClose={() => {}} open />
-      ),
-    }),
+    routeTree: createRootRoute({ component: Setup }),
   });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -147,8 +155,8 @@ function draw() {
 
 async function rename(view: ReturnType<typeof draw>, to: string) {
   const user = userEvent.setup({ document: view.baseElement.ownerDocument });
-  await user.click(await view.findByRole("button", { name: "Edit name" }));
-  const field = view.getByDisplayValue("Expenses");
+  await user.click(await view.findByRole("button", { name: /^Name/ }));
+  const field = await view.findByDisplayValue("Expenses");
   await user.clear(field);
   await user.type(field, to);
   await user.click(view.getByRole("button", { name: "Save" }));
@@ -181,4 +189,12 @@ test("a coworker somebody hosts keeps its own endpoint when it is renamed", asyn
     name: "Receipts",
     endpoint: "https://agents.example.test/ag-ui",
   });
+});
+
+test("someone who cannot manage the Bot reads its setup but cannot open an editor", async () => {
+  serve(MANAGED, "someone-else");
+  const view = draw();
+
+  expect(await view.findByText("Expenses")).toBeTruthy();
+  expect(view.queryByRole("button", { name: /^Name/ })).toBeNull();
 });

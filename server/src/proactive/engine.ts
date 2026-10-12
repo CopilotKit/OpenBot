@@ -222,7 +222,7 @@ export function createProactiveEngine(deps: ProactiveEngineDeps) {
       await deps.notify(scope, {
         id: `suggestion:${suggestion.id}`,
         kind: "reply",
-        text: `Suggested next step: ${suggestion.title}\n${suggestion.detail}${suggestion.sourceApp ? `\nFrom ${suggestion.sourceApp}` : ""}\nStart or dismiss it in OpenBot under Memory.`,
+        text: `Suggested next step: ${suggestion.title}\n${suggestion.detail}${suggestion.sourceApp ? `\nFrom ${suggestion.sourceApp}` : ""}\nStart or dismiss it on the Bot's page in OpenBot.`,
       });
       await deps.store.markDelivered(suggestion.id);
     }

@@ -1,5 +1,6 @@
 import {
   IconBuildingBank,
+  IconChecks,
   IconChevronRight,
   IconCode,
   IconDeviceDesktop,
@@ -67,6 +68,12 @@ const SECTIONS: {
         description: "Rules that decide what a Bot may never do.",
         icon: IconShieldCheck,
         linkOptions: { to: "/admin/boundaries" },
+      },
+      {
+        title: "Approvals",
+        description: "What every member's Bots must ask before acting.",
+        icon: IconChecks,
+        linkOptions: { to: "/admin/approvals" },
       },
       {
         title: "Computers",

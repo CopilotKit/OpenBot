@@ -499,8 +499,8 @@ function RouteComponent() {
           </PageSection>
 
           {/*
-           * Stacked over the switch it came from, same pattern as the delete confirmation in
-           * `agent-dialog.tsx`: the consent a Shared app needs is its own moment, not a row that
+           * Stacked over the switch it came from, same pattern as a Bot's delete confirmation in
+           * `bot-profile/manage.tsx`: the consent a Shared app needs is its own moment, not a row that
            * happens to have grown a form. Closing without confirming — the backdrop, Escape, or
            * Cancel — leaves `pendingGrant` behind and the Switch stays exactly where it was; nothing
            * is granted until the confirm button below runs.
