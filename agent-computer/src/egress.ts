@@ -580,29 +580,105 @@ async function decide(
 }
 
 /**
- * Connection options that reach a name through the addresses already checked, and nothing else.
+ * The checked addresses in the order they are tried: IPv4 first, then IPv6, each in DNS order.
  *
- * Every address the name resolved to passed the deny check, so any of them may be tried. Node's own
- * Happy Eyeballs (`autoSelectFamily`, RFC 8305) then tries them in turn, so an AAAA answer on a
- * computer with no IPv6 route falls back to the A record instead of failing. The `lookup` answers
- * from the checked list without asking DNS, which is what keeps the pin: the name is never resolved
- * a second time. A literal address needs neither.
+ * IPv4 first because a container network is the usual place this runs, and many have no IPv6 route:
+ * an AAAA answer tried first there costs a full attempt timeout on every connection.
+ */
+export function connectOrder(addresses: readonly string[]): string[] {
+  return [
+    ...addresses.filter((address) => isIP(address) !== 6),
+    ...addresses.filter((address) => isIP(address) === 6),
+  ];
+}
+
+/** How long one address may take to accept before the next checked address is tried. */
+export const CONNECT_ATTEMPT_TIMEOUT_MS = 3_000;
+
+/**
+ * Connect to a name through the addresses already checked, one at a time, and nothing else.
+ *
+ * Every address the name resolved to passed the deny check, so any of them may be tried; a literal
+ * address is the only one tried. The name is never resolved a second time, which is what keeps the
+ * pin. Each attempt connects to one literal address, so no lookup runs and no runtime fallback logic
+ * is involved: this loop is the fallback.
+ *
+ * NOT `autoSelectFamily` WITH THE CHECKED LIST, WHICH THIS USED TO BE. Bun's `node:net` walks a list
+ * of addresses with a timer that can fire after the connection it belongs to has been torn down, and
+ * then throws `TypeError: null is not an object (evaluating 'context')` from
+ * `internalConnectMultipleTimeout` (oven-sh/bun#25633, still reproducing on 1.3.13 and seen here on
+ * 1.3.14). The throw is in a timer, so nothing catches it and the computer process exits. A
+ * Cloudflare-fronted site resolves to several addresses and a challenge page opens and abandons many
+ * connections at once, so opening one in a Bot's browser restarted the computer and lost the page the
+ * person was being asked to solve.
+ */
+export function connectInTurn(
+  target: { host: string; port: number; addresses?: readonly string[] },
+  onReady: (socket: Socket) => void,
+  onError: (error: Error) => void,
+  attemptTimeoutMs = CONNECT_ATTEMPT_TIMEOUT_MS,
+): void {
+  const queue = target.addresses?.length
+    ? connectOrder(target.addresses)
+    : [target.host];
+  let lastError: Error | undefined;
+  const attempt = (index: number) => {
+    const address = queue[index];
+    if (address === undefined) {
+      onError(lastError ?? new Error(`Could not connect to ${target.host}.`));
+      return;
+    }
+    let settled = false;
+    const socket = connect({ host: address, port: target.port });
+    const moveOn = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      lastError = error;
+      socket.destroy();
+      attempt(index + 1);
+    };
+    const timer = setTimeout(
+      () =>
+        moveOn(new Error(`${address}:${target.port} did not answer in time.`)),
+      attemptTimeoutMs,
+    );
+    socket.once("error", moveOn);
+    socket.once("connect", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off("error", moveOn);
+      // From here an error belongs to the caller, exactly as it did when it registered its own.
+      socket.once("error", onError);
+      onReady(socket);
+    });
+  };
+  attempt(0);
+}
+
+/**
+ * Request options that reach a name through one checked address, without a second lookup.
+ *
+ * For plain HTTP, where the request library owns the socket. One address rather than the list, for
+ * the reason given on {@link connectInTurn}: the list is what sends Bun down its crashing path. The
+ * first IPv4 address is chosen, so a computer with no IPv6 route still connects.
  */
 function pinnedTo(addresses: readonly string[] | undefined) {
   if (!addresses?.length) return {};
-  const entries = addresses.map((address) => ({
-    address,
-    family: isIP(address) === 6 ? 6 : 4,
-  }));
+  const [address] = connectOrder(addresses);
+  if (address === undefined) return {};
+  const family = isIP(address) === 6 ? 6 : 4;
   return {
-    autoSelectFamily: true,
+    autoSelectFamily: false,
     lookup: (
       _host: string,
       options: { all?: boolean } | number | undefined,
       callback: (...args: unknown[]) => void,
     ) => {
-      if (typeof options === "object" && options?.all) callback(null, entries);
-      else callback(null, entries[0]?.address, entries[0]?.family);
+      if (typeof options === "object" && options?.all)
+        callback(null, [{ address, family }]);
+      else callback(null, address, family);
     },
   };
 }
@@ -654,15 +730,7 @@ function tunnel(
   onError: (error: Error) => void,
 ) {
   if (!upstream) {
-    const socket = connect(
-      {
-        host: target.host,
-        port: target.port,
-        ...(pinnedTo(target.addresses) as object),
-      },
-      () => onReady(socket),
-    );
-    socket.once("error", onError);
+    connectInTurn(target, onReady, onError);
     return;
   }
   const via = upstreamAddress(upstream);

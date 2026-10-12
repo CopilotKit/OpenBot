@@ -1,4 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
 import { serve } from "bun";
 import type { Page } from "playwright";
@@ -104,6 +105,14 @@ if (!COMPUTER_TOKEN) {
   );
   process.exit(1);
 }
+
+/*
+ * No multi-address connect anywhere in this process. Bun turns it on by default, and its timer can
+ * throw from `internalConnectMultipleTimeout` after the connection is gone, which exits the process
+ * (oven-sh/bun#25633). The egress filter already connects one checked address at a time (see
+ * `connectInTurn`); this covers every other connect here, such as reaching an upstream proxy by name.
+ */
+setDefaultAutoSelectFamily(false);
 
 const RUNTIME = browserRuntimeFromEnv(process.env);
 const BROWSER_MODE = RUNTIME.mode;
@@ -303,6 +312,58 @@ async function currentPage(
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
   session.livePage = page;
   return page;
+}
+
+/** A browser that has not been sent anywhere, which is what a restarted one shows. */
+function isBlankPage(url: string): boolean {
+  return (
+    url === "" ||
+    url === "about:blank" ||
+    url.startsWith("chrome://newtab") ||
+    url.startsWith("chrome://new-tab-page")
+  );
+}
+
+/**
+ * Put the page a handoff is about back in front of the person, when the browser came back blank.
+ *
+ * A browser restarts underneath a waiting request more often than it should: Chromium crashing, the
+ * idle sweep or the cap closing it, the whole computer restarting. Each of those relaunches onto
+ * `about:blank`, and before this a person who took control was handed a blank screen with nothing to
+ * solve while the Bot waited for them to solve it. The request carries the page it was raised on, so
+ * the computer opens it again first. Through the same navigation the Bot uses, so the egress filter
+ * and the page-access rule still decide whether it may load.
+ *
+ * Only a blank browser is touched. A person or a site that moved the page somewhere else meant to.
+ * Best effort: a page that will not load is logged and the handoff goes ahead, because a person in
+ * front of a blank browser can still type the address, and a refused handoff helps nobody.
+ */
+async function restoreHandoffPage(botId: string): Promise<void> {
+  const session = sessions.for(botId);
+  const want = session.control.pageToRestore();
+  if (!want) return;
+  try {
+    const target = await currentPage(botId);
+    if (!isBlankPage(target.url())) return;
+    await navigateWebPage(target, want, RUNTIME.backend, NAVIGATION_TIMEOUT_MS);
+    // A new document, so every ref handed out before it is retired, as after any navigation.
+    session.snapshotId += 1;
+    console.info(
+      JSON.stringify({
+        type: "computer-handoff-page-restored",
+        botId,
+        origin: new URL(want).origin,
+      }),
+    );
+  } catch (error) {
+    console.info(
+      JSON.stringify({
+        type: "computer-handoff-page-not-restored",
+        botId,
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 
 /**
@@ -750,9 +811,17 @@ serve<StreamData>({
           typeof body.toolCallId !== "string"
         )
           return json({ error: "toolCallId must be a string." }, 400);
-        return json(
-          session.control.requestHelp(body?.reason, body?.toolCallId),
+        // The page the Bot is stuck on, recorded with the request. A browser that will not start is
+        // no reason to refuse the request: the person is the one who can see why.
+        const stuckOn = await currentPage(botId).catch(() => undefined);
+        const state = session.control.requestHelp(
+          body?.reason,
+          body?.toolCallId,
+          "model",
+          stuckOn?.url(),
         );
+        await restoreHandoffPage(botId);
+        return json(state);
       }
 
       // The Bot asking for one value it must not be told. It has already focused the field.
@@ -872,8 +941,12 @@ serve<StreamData>({
         } | null;
         if (typeof body?.requestId !== "string" || !body.requestId.trim())
           return json({ error: "A requestId is required." }, 400);
-        if (url.pathname === "/control/take")
-          return json(await session.control.take(body.requestId));
+        if (url.pathname === "/control/take") {
+          const taken = await session.control.take(body.requestId);
+          // The browser may have restarted while the request waited; give the person the page.
+          await restoreHandoffPage(botId);
+          return json(taken);
+        }
         if (url.pathname === "/control/cancel")
           return json(session.control.cancel(body.requestId));
         return json(session.control.release(body.requestId));

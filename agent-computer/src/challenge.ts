@@ -95,6 +95,9 @@ export async function detectChallenge(
     result.reason,
     options.toolCallId,
     result.kind,
+    // The challenge's own address, so a browser that restarts before anyone takes control is sent
+    // back to it rather than handing the person a blank page with nothing to solve.
+    page.url(),
   ).request;
   if (!request)
     throw new Error("The challenge handoff did not produce a request.");

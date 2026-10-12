@@ -22,6 +22,11 @@ export type HandoffRequest = {
   expiresAt?: string;
   finishedAt?: string;
   interruption?: string;
+  /**
+   * The page the request was raised on, so a browser that comes back blank can be sent there again
+   * before a person is asked to solve it. http(s) only; absent when the page was blank.
+   */
+  url?: string;
 };
 export type ComputerControlState = {
   holder: "bot" | "human";
