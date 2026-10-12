@@ -377,9 +377,11 @@ Automatic Learning take precedence, including switching it off. See
 
 ## Memory and background research
 
-Both are on by default: when a person talks to one of their Bots on its own, OpenBot switches on
-read-only background research by that Bot and makes each app the person connected in their own
-account a memory source for it. A person who turns either off, or removes it, keeps it that way.
+Both are on by default: when a person talks to one of their Bots in a conversation with that Bot
+alone, OpenBot switches on read-only background research by that Bot, and from any turn by a Bot it
+makes each app the person connected in their own account a memory source for it (not on a Team Bot
+somebody else published, where their accounts need consent). A person who turns either off, or
+removes it, keeps it that way, through a Bot reset too.
 `config.memory.sourceDefaults: false` and `config.memory.researchDefaults: false` stop new defaults
 for the whole deployment.
 

@@ -130,6 +130,9 @@ describe("Team Bots in PostgreSQL", () => {
     });
     expect(await profiles.get(teammate, bot)).not.toBeNull();
     expect(await profiles.get(engineer, bot)).not.toBeNull();
+    // Somebody else's to a teammate, so their accounts need consent; never to its owner.
+    expect(await teamBots.publishedByAnother(teammate.id, bot)).toBe(true);
+    expect(await teamBots.publishedByAnother(owner.id, bot)).toBe(false);
 
     await teamBots.publish(owner, bot, {
       audience: "people",
@@ -149,6 +152,7 @@ describe("Team Bots in PostgreSQL", () => {
 
     await teamBots.unpublish(owner, bot);
     expect(await profiles.get(engineer, bot)).toBeNull();
+    expect(await teamBots.publishedByAnother(teammate.id, bot)).toBe(false);
     // Only the owner publishes, and an undescribed Bot is not published at all.
     await expect(
       teamBots.publish(teammate, bot, {

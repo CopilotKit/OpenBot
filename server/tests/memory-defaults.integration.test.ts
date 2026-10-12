@@ -319,6 +319,23 @@ describe("memory sources, on by default", () => {
     );
   });
 
+  // A Team Bot somebody else published reaches a person's own accounts only with their consent.
+  test("a Team Bot somebody else published gets none of the person's apps by default", async () => {
+    await reset();
+    const asked: string[] = [];
+    const theirs = defaults({
+      publishedByAnother: async (person, agentId) => {
+        asked.push(`${person}:${agentId}`);
+        return true;
+      },
+    });
+    expect(await theirs.adoptSources(owner, bot)).toEqual([]);
+    expect(await sourcesOf(owner, bot)).toEqual([]);
+    expect(asked).toEqual([`${owner}:${bot}`]);
+    const mine = defaults({ publishedByAnother: async () => false });
+    expect(await mine.adoptSources(owner, bot)).toHaveLength(1);
+  });
+
   test("the deployment switch stops new sources", async () => {
     await reset();
     expect(await defaults({ sources: false }).adoptSources(owner, bot)).toEqual(

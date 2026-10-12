@@ -23,8 +23,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Migration `0055_default_opt_outs` adds one table, `default_opt_outs`, where a person's removal of a
   default memory source or background research is recorded. Memory sources and background research
   then switch on for each person and Bot that talk (below), so expect background research turns, and
-  their model tokens, four hours after a person first talks to a Bot. `OPENBOT_MEMORY_SOURCE_DEFAULTS=false`
-  and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`) prevent it.
+  their model tokens, four hours after a person first talks to a Bot. Only removals from now on are
+  recorded: a source or research setting somebody deleted before the upgrade left no trace, so it
+  comes back on their next conversation with that Bot (one they turned off and kept stays off).
+  `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`)
+  prevent it.
 
 ### Fewer "Verify you are human" pages
 
@@ -51,14 +54,15 @@ computer and leave the person a blank page to solve. Now:
 A fresh deployment used to remember only what a person told a Bot: connected-app memory sources and
 background research each waited for somebody to set them up, one Bot at a time. Now, when a person
 talks to one of their Bots in a conversation with that Bot alone, OpenBot switches on background
-research by that Bot (read-only as before, every four hours, first run one interval later) and makes
-each app the person connected in their own account, that the Bot can read, a memory source for that
-Bot. Sources read as the person, their facts reach that Bot only, and imported facts wait for the
+research by that Bot (read-only as before, every four hours, first run one interval later). And from
+any turn a Bot takes for a person, each app the person connected in their own account, that the Bot
+can read, becomes a memory source for that Bot, except on a Team Bot somebody else published, where
+the person's own accounts need their consent. Sources read as the person, their facts reach that Bot only, and imported facts wait for the
 person's review before they go to Intelligence, exactly as a source made by hand. Shared apps and apps
 that need no account are not added; a person still adds those by hand.
 
-Turning either off keeps it off, and removing one is remembered: OpenBot never switches it back on.
-Nothing already saved changes. Set `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` or
+Turning either off keeps it off, and removing one is remembered: OpenBot never switches it back on,
+and resetting the Bot keeps both. Nothing already saved changes. Set `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` or
 `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.sourceDefaults` / `researchDefaults`) to stop
 new defaults for the whole deployment.
 

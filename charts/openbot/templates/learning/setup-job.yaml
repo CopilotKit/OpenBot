@@ -108,7 +108,9 @@ spec:
         - name: copilotkit-login
           secret:
             secretName: {{ $cli.name | quote }}
-            defaultMode: 0400
+            # Readable by the image's non-root user: a Secret file is root's, and the chart sets no
+            # fsGroup by default. The script copies it to a 0600 file of its own before use.
+            defaultMode: 0444
             items:
               - key: {{ $cli.key | default "config.json" | quote }}
                 path: config.json

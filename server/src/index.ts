@@ -1209,6 +1209,9 @@ const memoryDefaults = createMemoryDefaults({
   canDeliver: async (ownerUserId, channelId, agentId) =>
     (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
   mintThreadId: () => threadIdentity.mint(),
+  // Read when a Bot turn starts, long after `teamBots` below is defined.
+  publishedByAnother: (ownerUserId, agentId) =>
+    teamBots.publishedByAnother(ownerUserId, agentId),
 });
 personSpoke = memoryDefaults.personSpoke;
 const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) => {

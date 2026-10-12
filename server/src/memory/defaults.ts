@@ -134,6 +134,11 @@ export function createMemoryDefaults(options: {
     agentId: string,
   ): Promise<boolean>;
   mintThreadId(): string;
+  /**
+   * A Team Bot somebody else published uses a person's own accounts only with their consent
+   * (team-bots.ts), so none of their apps becomes its memory source by default. They can add one.
+   */
+  publishedByAnother?(ownerUserId: string, agentId: string): Promise<boolean>;
   now?: () => number;
   minIntervalMs?: number;
   log?: (entry: Record<string, unknown>) => void;
@@ -170,6 +175,7 @@ export function createMemoryDefaults(options: {
     agentId: string,
   ): Promise<string[]> {
     if (!options.sources) return [];
+    if (await options.publishedByAnother?.(ownerUserId, agentId)) return [];
     const candidates = await options.ingestion.defaultSourceCandidates(
       ownerUserId,
       agentId,
