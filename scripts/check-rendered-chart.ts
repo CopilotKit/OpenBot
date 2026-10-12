@@ -128,6 +128,30 @@ for (const [name, keys] of written) {
 }
 
 /**
+ * The same question of a key a store syncs in.
+ *
+ * An ExternalSecret's `data` is the list of keys that will exist in the Secret it creates, so it can
+ * be compared just as a rendered Secret is. Only the half above was asked, which is how a licence
+ * token synced from a store reached the Secret and never the pod: the server's environment named
+ * `license-token` only when `secrets.licenseToken` was a literal, and nothing compared the two.
+ */
+for (const document of documents) {
+  if (!/^kind:\s*ExternalSecret\s*$/m.test(document)) continue;
+  const name =
+    document.match(/^\s{2}name:\s*(\S+)/m)?.[1]?.replace(/^["']|["']$/g, "") ??
+    "an ExternalSecret";
+  for (const [, key] of document.matchAll(
+    /^\s*(?:-\s+)?secretKey:\s*([a-z0-9-]+)\s*$/gm,
+  )) {
+    if (key && !text.includes(`key: ${key}`)) {
+      problems.push(
+        `ExternalSecret "${name}" syncs "${key}", which nothing in this render reads.`,
+      );
+    }
+  }
+}
+
+/**
  * A policy that fences the API off from the services it cannot work without.
  *
  * The same question as the Secret one above, asked of the other thing a render can be internally

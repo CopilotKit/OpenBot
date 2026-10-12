@@ -29,7 +29,13 @@ npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
 That key is the only Intelligence credential a managed install needs; the free plan is enough.
 `secrets.licenseToken` is optional and exists for a self-hosted Intelligence that issues its own
 licence. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
-`.env`, which is what you want for something you are about to paste into a Secret.
+`.env`, which is what you want for something you are about to paste into a Secret. With
+`externalSecrets`, name `license-token` in its `data` and the server receives it the same way.
+
+**A self-hosted Intelligence needs that licence too, on its own deployment.** Its chart takes it as
+`appApi.licenseSecret` or `externalSecrets.secrets.license`. Without it Intelligence answers every
+entitlement read with `RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED` and refuses memory, while
+conversations carry on; OpenBot logs `intelligence-entitlement-not-ready` at boot when it does.
 
 **A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
 a volume, and a fresh cluster often has no class marked default. See

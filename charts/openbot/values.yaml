@@ -540,7 +540,9 @@ secrets:
   # Intelligence missing.
   intelligenceApiKey: ""
   # Optional. Managed Intelligence issues no licence token; set this only for a self-hosted
-  # Intelligence that has one, and it is passed to the server as COPILOTKIT_LICENSE_TOKEN.
+  # Intelligence that has one, and it is passed to the server as COPILOTKIT_LICENSE_TOKEN. From a
+  # store, name `license-token` in `externalSecrets.data` instead; it is passed the same way. That
+  # Intelligence needs the licence on its own deployment too, or it refuses memory.
   licenseToken: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
