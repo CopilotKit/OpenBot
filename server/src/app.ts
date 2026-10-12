@@ -138,6 +138,10 @@ import { userPreferencesRoutes } from "./user-preferences-routes";
 import { createVoiceProvider } from "./voice/provider";
 import { createVoiceRoutes } from "./voice/routes";
 import type { VoiceSessionServices } from "./voice/session-routes";
+import {
+  DIRECTORY_PATH as WEB_BOT_AUTH_DIRECTORY_PATH,
+  directoryResponse as webBotAuthDirectory,
+} from "./web-bot-auth";
 
 /**
  * How much of a multipart body is boundary, headers and other fields rather than file.
@@ -447,6 +451,14 @@ export function createApp(
   mountProviderOAuthProxy(app, modelProviderProxy);
 
   app.get("/health", (context) => context.json({ status: "ok" }));
+  // The public key Bots' browsers sign their requests with, where Cloudflare and any other verifier
+  // look for it. Public by design, and absent when Web Bot Auth is off. See web-bot-auth.ts.
+  const webBotAuth = config.webBotAuth;
+  if (webBotAuth) {
+    app.get(WEB_BOT_AUTH_DIRECTORY_PATH, (context) =>
+      webBotAuthDirectory(context.req.raw, webBotAuth),
+    );
+  }
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
   // INTELLIGENCE_API_KEY and the licence token, and this endpoint is reachable by anyone. Returning
   // the object wholesale would serve deployment secrets to the browser. Add fields here explicitly.

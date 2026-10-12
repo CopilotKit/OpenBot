@@ -17,6 +17,7 @@ import {
   transcriptionConfig,
 } from "./dictation/config";
 import { type VoiceConfig, voiceConfig } from "./voice/config";
+import { type WebBotAuth, webBotAuthFromEnv } from "./web-bot-auth";
 
 export type RuntimeCapabilities = {
   mode: "intelligence";
@@ -237,6 +238,11 @@ export type DeploymentConfig = {
    * deployment running without authentication — and there is nothing to connect there anyway.
    */
   publicUrl: string | undefined;
+  /**
+   * The key Bots' browsers sign their requests with, and the address its public half is published
+   * under. Undefined when Web Bot Auth is off; see `web-bot-auth.ts` for when that is.
+   */
+  webBotAuth?: WebBotAuth;
   /**
    * Where the browser app is served from, with no trailing slash.
    *
@@ -1305,13 +1311,19 @@ export function loadConfig(
     );
   }
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
+  const deploymentKey = keyEncryptionKey(environment);
+  const webBotAuth = webBotAuthFromEnv(environment, {
+    publicUrl,
+    keyEncryptionKey: deploymentKey,
+  });
 
   return {
     port: serverPort(environment),
     transcription: transcriptionConfig(environment),
     voice: voiceConfig(environment),
     databaseUrl: required(environment, "DATABASE_URL"),
-    keyEncryptionKey: keyEncryptionKey(environment),
+    keyEncryptionKey: deploymentKey,
+    ...(webBotAuth ? { webBotAuth } : {}),
     ...(managedAgent ? { managedAgent } : {}),
     ...(githubApp ? { githubApp } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),

@@ -124,13 +124,27 @@ jobs:
         working-directory: agent-computer
       - run: bunx playwright install --with-deps chromium
         working-directory: agent-computer
+      # Headless here: these launch through the profile path without the computer's own X server.
+      # The headless run of the Web Bot Auth test is also the one that checks the user agent fix.
       - run: >-
           bun test tests/sign-in.test.ts tests/session-cookies.test.ts tests/follows-popup.test.ts
-          tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts
+          tests/demonstration-live.test.ts tests/webrtc-proxy.test.ts tests/web-bot-auth-browser.test.ts
         working-directory: agent-computer
         env:
           OPENBOT_COMPUTER_BROWSER: '1'
           OPENBOT_DEMONSTRATION_LIVE: '1'
+          COMPUTER_BROWSER_MODE: headless
+      # Headed is the default for hosted computers, so it is tested as one: the computer starting its
+      # own Xvfb, and the signing again with cross-site frames in processes of their own.
+      - run: bun test tests/headed-browser.test.ts
+        working-directory: agent-computer
+        env:
+          OPENBOT_HEADED_BROWSER: '1'
+      - run: xvfb-run --auto-servernum bun test tests/web-bot-auth-browser.test.ts
+        working-directory: agent-computer
+        env:
+          OPENBOT_COMPUTER_BROWSER: '1'
+          COMPUTER_BROWSER_MODE: headed
 
   chart:
     name: chart (${{ matrix.target }})
@@ -218,6 +232,19 @@ jobs:
             --set networkPolicy.enabled=true \
             --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
             --set-string computers.extraEnv[0].value=http://proxy.internal:3128
+          # The residential proxy setting, whose address is a secret the template cannot read, with
+          # network policies on and no path opened to it.
+          refuses "a residential proxy with no path through the network policy" \
+            --set networkPolicy.enabled=true --set computers.egressProxy.enabled=true \
+            --set-string secrets.egressProxyUrl=http://user:pass@gateway.example:8000
+          # The same setting switched on with no URL behind it, where this chart holds the secret.
+          if ! grep -qE '^ *enabled: true' <(sed -n '/^externalSecrets:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml) \
+             && ! grep -qE '^ *existingSecret: [^"]' <(sed -n '/^secrets:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml); then
+            refuses "a residential proxy switched on with no URL" \
+              --set computers.egressProxy.enabled=true
+          else
+            echo "skipped: the proxy URL refusal is armed only where this chart writes the Secret"
+          fi
           # A delivery or directory switch with no secret behind it. Armed on every target: the chart
           # requires the value when it holds the secret, and requires the store to name the key when
           # a store does.

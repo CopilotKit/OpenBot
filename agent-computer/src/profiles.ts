@@ -42,6 +42,7 @@ import { browserRuntimeFromEnv } from "./browser-runtime";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
 import { chooseLivePage } from "./live-page";
+import { attachBrowserNetwork, attachPageNetwork } from "./page-network";
 import { botIdsIn } from "./profile-listing";
 import {
   type SessionCookieKeeper,
@@ -516,6 +517,16 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         }
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
+        /*
+         * The user agent fix and the Web Bot Auth signature, before the first navigation so the first
+         * request a site sees already carries both. Not for a native Chrome: that is the person's own
+         * browser, which says who it is already and should not announce a deployment on their behalf.
+         */
+        const network = { headless: BROWSER_RUNTIME.mode === "headless" };
+        if (!LOCAL_CHROME) {
+          await attachBrowserNetwork(context, network);
+          await attachPageNetwork(context, page, network);
+        }
         const record: LiveBrowser = {
           context,
           page,
@@ -539,6 +550,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
         // in a new window is neither shown to the person taking the wheel nor reachable by input.
         context.on("page", (opened) => {
+          if (!LOCAL_CHROME) void attachPageNetwork(context, opened, network);
           record.retarget();
           // A popup closes itself when it succeeds, and the record must move back to the opener
           // rather than leave a closed page to be read as a dead browser.

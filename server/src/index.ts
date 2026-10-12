@@ -451,6 +451,7 @@ const computerProvider = config.computer
   ? withPolicyPushOnWake(createComputerProvider(config.computer), {
       policyForBot: (botId) => enterpriseControls()?.policyForBot(botId),
       ...(config.computer.token ? { token: config.computer.token } : {}),
+      ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
     })
   : undefined;
 
@@ -2867,6 +2868,7 @@ await installEnterpriseControls({
   auditStore: bootAuditStore,
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
+  ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],

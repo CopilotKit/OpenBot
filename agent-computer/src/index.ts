@@ -53,6 +53,7 @@ import { type BotSession, createSessions } from "./sessions";
 import { createShell } from "./shell";
 import { fillSignIn, parseSignInFill } from "./sign-in";
 import { startVirtualDisplay } from "./virtual-display";
+import { applyWebBotAuthPush } from "./web-bot-auth";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -740,8 +741,16 @@ serve<StreamData>({
       return json({ error: "That is not a usable bot id." }, 400);
     }
     // The admin network policy, pushed by the server on every change; applied without a restart.
-    if (url.pathname === "/egress-policy" && request.method === "PUT")
-      return handleEgressPolicyRequest(botId, request);
+    // The deployment's Web Bot Auth key rides the same push (see `web-bot-auth.ts`).
+    if (url.pathname === "/egress-policy" && request.method === "PUT") {
+      const body = (await request
+        .clone()
+        .json()
+        .catch(() => null)) as { webBotAuth?: unknown } | null;
+      const applied = await handleEgressPolicyRequest(botId, request);
+      if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
+      return applied;
+    }
     const session = sessions.for(botId);
 
     /*
