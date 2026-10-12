@@ -177,13 +177,18 @@ function MemoryRow({
     enabled?: boolean;
     reviewState?: "confirmed";
   }) => save.mutate({ id: memory.id, input });
-  const status = !memory.enabled
-    ? "Disabled"
-    : memory.formedBy === "bot"
-      ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · awaiting review" : ""}`
-      : memory.reviewState === "unreviewed"
-        ? "Imported · awaiting review"
-        : "Reviewed";
+  // Intelligence keeps only the words of a memory it holds for this person, so it can be edited or
+  // forgotten here but not paused or reviewed.
+  const heldByIntelligence = memory.formedBy === "intelligence";
+  const status = heldByIntelligence
+    ? "Kept in Intelligence"
+    : !memory.enabled
+      ? "Disabled"
+      : memory.formedBy === "bot"
+        ? `Formed by ${botName}${memory.reviewState === "unreviewed" ? " · awaiting review" : ""}`
+        : memory.reviewState === "unreviewed"
+          ? "Imported · awaiting review"
+          : "Reviewed";
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -250,15 +255,17 @@ function MemoryRow({
           </p>
         )}
       </ItemContent>
-      <ItemActions>
-        {/* Binary and immediate: Bots stop or start using it when switched. */}
-        <Switch
-          aria-label={`Use this memory: ${clip(memory.content)}`}
-          checked={memory.enabled}
-          disabled={save.isPending}
-          onCheckedChange={(enabled) => update({ enabled })}
-        />
-      </ItemActions>
+      {heldByIntelligence ? null : (
+        <ItemActions>
+          {/* Binary and immediate: Bots stop or start using it when switched. */}
+          <Switch
+            aria-label={`Use this memory: ${clip(memory.content)}`}
+            checked={memory.enabled}
+            disabled={save.isPending}
+            onCheckedChange={(enabled) => update({ enabled })}
+          />
+        </ItemActions>
+      )}
       {editing ? (
         <EditMemoryDialog
           memory={memory}

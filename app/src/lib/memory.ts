@@ -11,7 +11,8 @@ export type MemoryRecord = {
   sourceId: string | null;
   enabled: boolean;
   reviewState: "unreviewed" | "confirmed" | "edited";
-  formedBy: "person" | "import" | "bot";
+  /** `intelligence`: held by CopilotKit Intelligence for this person, formed outside OpenBot. */
+  formedBy: "person" | "import" | "bot" | "intelligence";
   formedByAgentId: string | null;
   sourceApp: string | null;
   sourceLink: string | null;

@@ -82,6 +82,15 @@ export const personalMemories = pgTable(
     sourceRef: text("source_ref"),
     sourceLink: text("source_link"),
     observedAt: timestamp("observed_at", { withTimezone: true }),
+    /**
+     * The memory's id in CopilotKit Intelligence, when this deployment is entitled to Intelligence
+     * memory and the memory has been mirrored there. Intelligence holds the content and does the
+     * recall; this row keeps what Intelligence has no field for (provenance, review, who formed it,
+     * which source and Bot may see it). Null while it is local only.
+     */
+    intelligenceMemoryId: text("intelligence_memory_id"),
+    /** sha256 of the content last written to Intelligence, so an edit is mirrored exactly once. */
+    intelligenceDigest: text("intelligence_digest"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -91,6 +100,10 @@ export const personalMemories = pgTable(
   },
   (table) => [
     index("personal_memories_owner_idx").on(table.ownerUserId, table.enabled),
+    index("personal_memories_intelligence_idx").on(
+      table.ownerUserId,
+      table.intelligenceMemoryId,
+    ),
     index("personal_memories_formed_idx").on(
       table.ownerUserId,
       table.formedByAgentId,
