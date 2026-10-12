@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Three things change for an existing deployment:
+**Before upgrading.** Four things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -20,6 +20,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the server assigns its Intelligence project's `openbot` container once it exists, and `scripts/start.sh`
   creates that container. A saved setting, including off, is never changed;
   `OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) prevents it.
+- Migration `0055_default_opt_outs` adds one table, `default_opt_outs`, where a person's removal of a
+  default memory source or background research is recorded. Memory sources and background research
+  then switch on for each person and Bot that talk (below), so expect background research turns, and
+  their model tokens, four hours after a person first talks to a Bot. `OPENBOT_MEMORY_SOURCE_DEFAULTS=false`
+  and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`) prevent it.
 
 ### Fewer "Verify you are human" pages
 
@@ -40,6 +45,36 @@ computer and leave the person a blank page to solve. Now:
   `computers.egressProxy` with the URL in a Secret. Off by default; turning it on makes Bots' traffic
   look like a person's home connection, which is the operator's choice to make.
 - Bun 1.4.3 throughout, which fixes the connection crash behind the restarts.
+
+### Memory sources and background research are on by default
+
+A fresh deployment used to remember only what a person told a Bot: connected-app memory sources and
+background research each waited for somebody to set them up, one Bot at a time. Now, when a person
+talks to one of their Bots in a conversation with that Bot alone, OpenBot switches on background
+research by that Bot (read-only as before, every four hours, first run one interval later) and makes
+each app the person connected in their own account, that the Bot can read, a memory source for that
+Bot. Sources read as the person, their facts reach that Bot only, and imported facts wait for the
+person's review before they go to Intelligence, exactly as a source made by hand. Shared apps and apps
+that need no account are not added; a person still adds those by hand.
+
+Turning either off keeps it off, and removing one is remembered: OpenBot never switches it back on.
+Nothing already saved changes. Set `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` or
+`OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.sourceDefaults` / `researchDefaults`) to stop
+new defaults for the whole deployment.
+
+### Automatic Learning creates its container where OpenBot holds a credential that can
+
+The runtime key cannot create Learning containers, so a deployment without the `openbot` container
+collected nothing until somebody ran a helper. Now:
+- `bun scripts/setup-learning.ts` (and `scripts/start.sh` on every start) creates it with a CopilotKit
+  CLI login even when no project is selected in the checkout, choosing the runtime key's project.
+- `INTELLIGENCE_SERVICE_TOKEN` with `INTELLIGENCE_PROJECT_ID` lets the server create it by itself, on a
+  CopilotKit local evaluation install (the only kind where Intelligence accepts a service token for
+  Learning).
+- The Helm chart runs a setup Job when `config.learning.setup` names a CLI-login Secret or a service
+  token Secret.
+- Admin → Automatic Learning has a "Create the openbot container" button when the deployment holds one
+  of those, and otherwise, like the server log, says exactly what to run.
 
 ### Automatic Learning assigns its container without a trip to Admin
 

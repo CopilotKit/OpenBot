@@ -348,13 +348,40 @@ nobody can talk to.
 Learning is on by default, and it needs a container in the Intelligence project before it collects or
 delivers anything. With nothing saved in Admin and no `config.learning.containerId`, the server
 assigns the project's `openbot` container as the default by itself once it exists. The runtime key
-cannot create it, so create it once, with `bun scripts/setup-learning.ts` from a computer that can
-sign in to Intelligence, or in Intelligence itself. `config.learning.autoAssign: false` turns the
-automatic assignment off. `config.learning.containerId` sets the initial default container
+cannot create it, so give the chart a credential that can and a setup Job creates it on install and
+every upgrade:
+
+- Managed Intelligence: a CopilotKit CLI login. Sign in into an empty folder and store the file it
+  writes, then set `config.learning.setup.cliLoginSecret.name: openbot-copilotkit-cli`:
+
+  ```sh
+  COPILOTKIT_CONFIG_DIR="$(mktemp -d)"; export COPILOTKIT_CONFIG_DIR
+  npx --yes copilotkit@latest login
+  kubectl create secret generic openbot-copilotkit-cli \
+    --from-file=config.json="$COPILOTKIT_CONFIG_DIR/auth/config.json"
+  ```
+
+  It is a person's 30-day session; only the Job reads it, never the server.
+- A CopilotKit local evaluation install: a service token Secret in
+  `config.learning.setup.serviceTokenSecret` with the project's numeric ID in
+  `config.learning.setup.projectId`. The server gets it too, so Admin can create the container again.
+
+Without either, create it once with `bun scripts/setup-learning.ts` from a computer that can sign in
+to Intelligence, or in Intelligence itself; the server log and Admin → Automatic Learning say exactly
+that. `config.learning.autoAssign: false` turns the automatic assignment off.
+`config.learning.containerId` sets the initial default container
 (`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`) and `config.learning.revision` the skills revision
 (`CPK_INTELLIGENCE_SKILLS_REVISION`). Both are only starting values: settings saved in Admin →
 Automatic Learning take precedence, including switching it off. See
 [docs/automatic-learning.md](../../docs/automatic-learning.md).
+
+## Memory and background research
+
+Both are on by default: when a person talks to one of their Bots on its own, OpenBot switches on
+read-only background research by that Bot and makes each app the person connected in their own
+account a memory source for it. A person who turns either off, or removes it, keeps it that way.
+`config.memory.sourceDefaults: false` and `config.memory.researchDefaults: false` stop new defaults
+for the whole deployment.
 
 ## Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 

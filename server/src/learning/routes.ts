@@ -1,5 +1,5 @@
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import { Hono, type MiddlewareHandler } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type {
   LearningAutoAssignState,
@@ -89,23 +89,54 @@ export function createLearningRoutes(
       ...(automatic ? { automatic } : {}),
     });
   });
+  /** JSON excludes form CSRF; browser requests must also match an explicitly trusted origin. */
+  const sameOriginJson = (context: Context<{ Variables: AppVariables }>) => {
+    const origin = context.req.header("origin");
+    const allowed = new Set([
+      new URL(context.req.url).origin,
+      ...trustedOrigins,
+    ]);
+    return (
+      context.req.header("content-type")?.split(";")[0]?.trim() ===
+        "application/json" &&
+      (origin
+        ? allowed.has(origin)
+        : context.req.header("sec-fetch-site") !== "cross-site")
+    );
+  };
+  /**
+   * Create this project's container with the credential this deployment holds, then assign it.
+   * Offered only when there is one (`automatic.canCreate`); without one the page shows what to run.
+   */
+  routes.post("/container", async (context) => {
+    if (!sameOriginJson(context))
+      return context.json(
+        { error: "Use a same-origin JSON request to create the container." },
+        403,
+      );
+    if (!dependencies.autoAssign)
+      return context.json(
+        { error: "Automatic Learning assignment is switched off." },
+        409,
+      );
+    const automatic = await dependencies.autoAssign.createNow();
+    if (audit)
+      await recordAuditEvent(audit, {
+        eventType: "configuration.changed",
+        targetType: "learning",
+        actorUserId: context.var.actor.id,
+        payload: {
+          change: "container_creation_requested",
+          outcome: automatic.state,
+        },
+      });
+    return context.json({ automatic });
+  });
   routes.put(
     "/settings",
     bodyLimit({ maxSize: 128 * 1024 }),
     async (context) => {
-      // JSON excludes form CSRF; browser requests must also match an explicitly trusted origin.
-      const origin = context.req.header("origin");
-      const allowed = new Set([
-        new URL(context.req.url).origin,
-        ...trustedOrigins,
-      ]);
-      if (
-        context.req.header("content-type")?.split(";")[0]?.trim() !==
-          "application/json" ||
-        (origin
-          ? !allowed.has(origin)
-          : context.req.header("sec-fetch-site") === "cross-site")
-      ) {
+      if (!sameOriginJson(context)) {
         return context.json(
           {
             error:

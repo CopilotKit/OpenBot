@@ -120,9 +120,17 @@ export function runtimeKeyClient(
   });
 }
 
+/** What creating the container with a credential that can did. `skipped`: nothing here could. */
+export type ContainerCreation = "present" | "created" | "skipped";
+
 export type LearningAutoAssign = {
   /** Check now, unless a check is already running, and return what it found. Never throws. */
   check(): Promise<LearningAutoAssignState>;
+  /**
+   * Admin's "Create it now": try the configured credential again, whatever earlier attempts found,
+   * then check. Never throws; a failure comes back as the state's `createError`.
+   */
+  createNow(): Promise<LearningAutoAssignState>;
   /** Start a check in the background if none ran within the last `minIntervalMs`. */
   kick(): void;
   /** The last answer, without asking. */
@@ -146,9 +154,10 @@ const MIN_INTERVAL_MS = 60_000;
  *
  * - It never overrides a choice. A saved Admin setting of any kind, including a saved off, and a
  *   container named in the environment both mean there is nothing to do.
- * - It never creates a container. The runtime key cannot; `scripts/setup-learning.ts` (and
- *   `scripts/start.sh`, which runs it when a CopilotKit CLI login is present) does that with a
- *   credential that can.
+ * - It creates the container only through `create`, with a credential that can (a service token on
+ *   a local evaluation install, or a CopilotKit CLI login on this machine; see
+ *   learning/ensure-container.ts), once per process unless Admin asks again. The runtime key cannot.
+ *   With no such credential it says exactly what to run, once, in the log and on the Admin page.
  * - It is safe on many replicas: the write is a conditional insert, so the first one wins and the
  *   rest see a saved setting. Only the winner writes the audit row.
  * - It never blocks startup or a turn. Every failure is logged once per kind and tried again later.
@@ -158,6 +167,10 @@ export function createLearningAutoAssign(options: {
   enabled: boolean;
   store: Pick<LearningSettingsStore, "saved" | "adoptDefault">;
   probe: (containerId: string) => Promise<ContainerProbe>;
+  /** Create the container with a credential that can. Absent when this deployment holds none. */
+  create?: () => Promise<ContainerCreation>;
+  /** Exactly what an operator runs when the container is absent and nothing here created it. */
+  instructions?: string;
   audit?: AuditStore;
   containerId?: string;
   retryMs?: number;
@@ -187,15 +200,60 @@ export function createLearningAutoAssign(options: {
     log({ type: "learning-auto-assign", outcome: kind, containerId, ...entry });
   };
 
+  const instructions =
+    options.instructions ??
+    `Run bun scripts/setup-learning.ts, or create a container with ID "${containerId}" in Intelligence; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`;
+  /** Whether this process already tried `create`: once at boot, again only when Admin asks. */
+  let createTried = false;
+  let createError: string | undefined;
+
+  /** Create it with the configured credential, once. True when it is there now. */
+  const tryCreate = async (): Promise<boolean> => {
+    if (!options.create || createTried) return false;
+    createTried = true;
+    try {
+      const result = await options.create();
+      createError = undefined;
+      if (result === "skipped") return false;
+      log({
+        type: "learning-auto-assign",
+        outcome: result === "created" ? "container_created" : "container_found",
+        containerId,
+        message:
+          result === "created"
+            ? `Created the "${containerId}" Learning container with the configured credential.`
+            : `The "${containerId}" Learning container is there now.`,
+      });
+      return true;
+    } catch (error) {
+      createError =
+        error instanceof Error
+          ? error.message.slice(0, 500)
+          : "The container could not be created.";
+      once("create_failed", { message: createError });
+      return false;
+    }
+  };
+
+  const absent = (): LearningAutoAssignState => ({
+    state: "absent",
+    containerId,
+    instructions,
+    canCreate: Boolean(options.create),
+    ...(createError ? { createError } : {}),
+  });
+
   const run = async (): Promise<LearningAutoAssignState> => {
     if (!options.enabled) return { state: "off" };
     if (await options.store.saved()) return { state: "saved" };
-    const found = await options.probe(containerId);
+    let found = await options.probe(containerId);
+    if (found === "absent" && (await tryCreate()))
+      found = await options.probe(containerId);
     if (found === "absent") {
       once("absent", {
-        message: `This Intelligence project has no "${containerId}" Learning container, so Automatic Learning collects nothing yet. Run bun scripts/setup-learning.ts, or create a container with ID "${containerId}" in Intelligence; OpenBot assigns it within ${Math.round((options.retryMs ?? RETRY_MS) / 60_000)} minutes.`,
+        message: `This Intelligence project has no "${containerId}" Learning container, so Automatic Learning collects nothing yet. ${instructions}`,
       });
-      return { state: "absent", containerId };
+      return absent();
     }
     if (found === "not_entitled") {
       once("not_entitled", {
@@ -265,6 +323,14 @@ export function createLearningAutoAssign(options: {
 
   return {
     check,
+    async createNow() {
+      // Wait out a check already running, so this attempt is not swallowed by its result.
+      if (running) await running;
+      // Off, saved or assigned: there is nothing for a container to be assigned to.
+      if (settled(current)) return current;
+      createTried = false;
+      return check();
+    },
     kick() {
       if (settled(current) || running) return;
       if (now() - lastStartedAt < minIntervalMs) return;

@@ -191,6 +191,21 @@ jobs:
       # question: every secret key a container demands has to be one the chart actually writes.
       # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
       - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      # No target names a Learning credential, so the setup Job renders nowhere above. Render it with
+      # one of each, and hold it to the same coherence check.
+      - name: Learning setup Job renders
+        run: |
+          helm template ci charts/openbot \
+            --values charts/openbot/ci/${{ matrix.target }}-values.yaml \
+            --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
+            --api-versions agents.x-k8s.io/v1beta1/Sandbox \
+            --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
+            --set-string config.learning.setup.cliLoginSecret.name=openbot-copilotkit-cli \
+            --set-string config.learning.setup.serviceTokenSecret.name=intelligence-service-token \
+            --set-string config.learning.setup.projectId=7 \
+            > rendered-learning.yaml
+          grep -q 'app.kubernetes.io/component: learning-setup' rendered-learning.yaml
+          bun scripts/check-rendered-chart.ts rendered-learning.yaml
       # And that the refusals are load-bearing rather than decorative. A chart full of `fail`
       # messages nothing ever triggers is a chart that has never been shown to refuse anything, and
       # every one of these describes a state that shipped in a values file at some point.
@@ -253,6 +268,8 @@ jobs:
             --set config.opentag.enabled=true
           refuses "SCIM switched on with no bearer token" \
             --set config.scim.enabled=true
+          refuses "a Learning service token with no project to create the container in" \
+            --set-string config.learning.setup.serviceTokenSecret.name=intelligence-service-token
           # The rest are refusals the server makes at boot, mirrored so the value is named at install.
           refuses "an OpenTag URL with the pairing switched off" \
             --set-string config.opentag.url=https://opentag.example.com

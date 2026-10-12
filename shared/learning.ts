@@ -55,7 +55,17 @@ export const AUTOMATIC_LEARNING_CONTAINER_ID = "openbot";
  */
 export type LearningAutoAssignState =
   | { state: "off" | "saved" | "not_entitled" | "unavailable" | "pending" }
-  | { state: "assigned" | "absent"; containerId: string };
+  | { state: "assigned"; containerId: string }
+  | {
+      state: "absent";
+      containerId: string;
+      /** Exactly what an operator runs to create it, for the Intelligence this deployment uses. */
+      instructions?: string;
+      /** Whether this deployment holds a credential that can create it (Admin's "Create it now"). */
+      canCreate?: boolean;
+      /** Why the last attempt with that credential failed. */
+      createError?: string;
+    };
 
 export const LEARNING_CONTAINER_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export function isLearningContainerId(value: unknown): value is string {

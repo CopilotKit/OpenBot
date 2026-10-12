@@ -387,3 +387,14 @@ This template renders nothing.
 {{- fail "config.scim.enabled but externalSecrets.data does not name scim-bearer-token, so the server pod cannot start." }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  The Learning service token, without the project it creates the container in.
+
+  The server refuses INTELLIGENCE_SERVICE_TOKEN without a numeric INTELLIGENCE_PROJECT_ID at boot, so
+  the same rule is applied at install, with the value named.
+*/}}
+{{- $learningSetup := include "openbot.learningSetup" . | fromYaml }}
+{{- if and ($learningSetup.serviceTokenSecret | default dict).name (not (regexMatch "^[1-9][0-9]{0,15}$" ($learningSetup.projectId | toString))) }}
+{{- fail "config.learning.setup.serviceTokenSecret needs config.learning.setup.projectId: the numeric ID of the Intelligence project the runtime key belongs to, where the token creates the openbot Learning container." }}
+{{- end }}

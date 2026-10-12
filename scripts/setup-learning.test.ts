@@ -29,7 +29,30 @@ const missing = {
   error: { code: "LEARNING_CONTAINER_NOT_FOUND" },
 };
 
-async function fixture(extra = "") {
+/** `copilotkit project list --json` for a signed-in login, as the CLI prints it. */
+const listed = (...slugs: string[]) => ({
+  exitCode: 0,
+  stdout: JSON.stringify({
+    organizationId: "org_synthetic",
+    selectedProjectId: null,
+    search: null,
+    projects: slugs.map((slug, index) => ({
+      id: String(12 + index),
+      slug,
+      name: slug,
+      organizationId: "org_synthetic",
+      createdAt: "2026-10-01T00:00:00.000Z",
+      selected: false,
+    })),
+  }),
+});
+/** A machine with no CLI login: the CLI says so on stderr and exits non-zero. */
+const signedOut = { exitCode: 1, stdout: "" };
+
+async function fixture(
+  extra = "",
+  list: { exitCode: number; stdout: string } = signedOut,
+) {
   const directory = await mkdtemp(join(tmpdir(), "openbot-learning-setup-"));
   directories.push(directory);
   await mkdir(join(directory, ".copilotkit"));
@@ -43,8 +66,11 @@ async function fixture(extra = "") {
     `INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai\nINTELLIGENCE_API_KEY=\n# Keep my other configuration\nOPENAI_API_KEY=synthetic-model\n${extra}`,
   );
   const calls: string[][] = [];
-  const runCli = async (args: string[]) => {
+  const directoriesUsed: string[] = [];
+  const runCli = async (args: string[], cwd: string) => {
     calls.push(args);
+    directoriesUsed.push(cwd);
+    if (args[0] === "project" && args[1] === "list") return list;
     if (args[0] === "project") {
       await writeFile(
         envPath,
@@ -69,6 +95,7 @@ async function fixture(extra = "") {
     directory,
     envPath,
     calls,
+    directoriesUsed,
     runCli,
     options: { directory, environment: {} },
   };
@@ -234,6 +261,72 @@ test("a CLI project that is not the key's project creates nothing", async () => 
   }
 });
 
+test("a CLI login with no project selected creates the container in the key's project, on its own", async () => {
+  const f = await fixture(
+    "INTELLIGENCE_API_KEY=cpk-manual-key\n",
+    listed("chosen", "someone-else"),
+  );
+  await rm(join(f.directory, ".copilotkit"), { recursive: true });
+  const before = await readFile(f.envPath, "utf8");
+  const key = keyView(["absent", "present"]);
+  // What scripts/start.sh runs: no person, no prompt.
+  expect(
+    await setupLearning({
+      ...f.options,
+      runCli: f.runCli,
+      keyIntelligence: key.keyIntelligence,
+      nonInteractive: true,
+    }),
+  ).toBe("created");
+  expect(f.calls).toEqual([
+    ["project", "list", "--json"],
+    ["learning", "containers", "get", "openbot", "--json"],
+    [
+      "learning",
+      "containers",
+      "create",
+      "--id",
+      "openbot",
+      "--name",
+      "OpenBot",
+      "--json",
+    ],
+  ]);
+  // From a scratch directory that is gone afterwards: this checkout's selection is never made.
+  const [scratch] = new Set(f.directoriesUsed);
+  expect(new Set(f.directoriesUsed).size).toBe(1);
+  expect(scratch).not.toBe(f.directory);
+  expect(
+    await readFile(
+      join(scratch as string, ".copilotkit/project.json"),
+      "utf8",
+    ).catch(() => null),
+  ).toBeNull();
+  expect(
+    await readFile(join(f.directory, ".copilotkit/project.json"), "utf8").catch(
+      () => null,
+    ),
+  ).toBeNull();
+  expect(await readFile(f.envPath, "utf8")).toBe(before);
+  expect(key.probes).toEqual(["openbot", "openbot"]);
+});
+
+test("a CLI login that cannot see the key's project creates nothing", async () => {
+  for (const list of [listed("someone-else"), listed()]) {
+    const f = await fixture("INTELLIGENCE_API_KEY=cpk-manual-key\n", list);
+    await rm(join(f.directory, ".copilotkit"), { recursive: true });
+    await expect(
+      setupLearning({
+        ...f.options,
+        runCli: f.runCli,
+        keyIntelligence: keyView(["absent"]).keyIntelligence,
+        nonInteractive: true,
+      }),
+    ).rejects.toThrow("could be confirmed");
+    expect(f.calls).toEqual([["project", "list", "--json"]]);
+  }
+});
+
 test("a container the key still cannot see after creation is reported, not assigned", async () => {
   const f = await fixture("INTELLIGENCE_API_KEY=cpk-manual-key\n");
   await expect(
@@ -277,7 +370,7 @@ test("non-interactive runs never sign in, prompt or provision a key", async () =
   expect(fresh.calls).toHaveLength(0);
   expect(await readFile(fresh.envPath, "utf8")).toBe(before);
 
-  // A key but no CLI project selected here: nothing to create with.
+  // A key, no CLI project selected here, and no CLI login: asked once, nothing to create with.
   const unselected = await fixture("INTELLIGENCE_API_KEY=cpk-manual-key\n");
   await rm(join(unselected.directory, ".copilotkit"), { recursive: true });
   expect(
@@ -288,7 +381,20 @@ test("non-interactive runs never sign in, prompt or provision a key", async () =
       nonInteractive: true,
     }),
   ).toBe("skipped");
-  expect(unselected.calls).toHaveLength(0);
+  expect(unselected.calls).toEqual([["project", "list", "--json"]]);
+  // With no login on the machine at all, the CLI is not even downloaded.
+  const noLogin = await fixture("INTELLIGENCE_API_KEY=cpk-manual-key\n");
+  await rm(join(noLogin.directory, ".copilotkit"), { recursive: true });
+  expect(
+    await setupLearning({
+      ...noLogin.options,
+      runCli: noLogin.runCli,
+      keyIntelligence: keyView(["absent"]).keyIntelligence,
+      nonInteractive: true,
+      cliLogin: false,
+    }),
+  ).toBe("skipped");
+  expect(noLogin.calls).toHaveLength(0);
   // Interactively, the same state explains what to do.
   await expect(
     setupLearning({

@@ -293,8 +293,10 @@ green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
 
 # Automatic Learning collects nothing until a container is assigned. The server assigns this
 # project's `openbot` container on its own once it exists (server/src/learning/auto-assign.ts), but
-# the runtime key it holds cannot create one. A CopilotKit CLI login can, so make sure the container
-# exists before the server looks. Never fatal and never interactive: one line, whatever happens.
+# the runtime key it holds cannot create one. A CopilotKit CLI login can, whether or not a project is
+# selected here, and so can INTELLIGENCE_SERVICE_TOKEN on a local evaluation install, so make sure the
+# container exists before the server looks. Never fatal and never interactive: one line, whatever
+# happens, and with nothing that can create it the line says exactly what to run.
 LEARNING_CONTAINER="$(setting CPK_INTELLIGENCE_LEARNING_CONTAINER_ID "")"
 LEARNING_AUTO_ASSIGN="$(setting OPENBOT_LEARNING_AUTO_ASSIGN true)"
 if [ -z "$LEARNING_CONTAINER" ] && [ "$LEARNING_AUTO_ASSIGN" != "false" ] \

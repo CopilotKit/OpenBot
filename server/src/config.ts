@@ -176,9 +176,26 @@ export type DeploymentConfig = {
    * Whether OpenBot assigns the Intelligence project's `openbot` Learning container as the default
    * when nobody has chosen one (learning/auto-assign.ts). On unless OPENBOT_LEARNING_AUTO_ASSIGN is
    * "false" or "0", and off whenever CPK_INTELLIGENCE_LEARNING_CONTAINER_ID names a container. It
-   * never overrides a saved Admin setting, and it never creates a container.
+   * never overrides a saved Admin setting. It creates the container only with a credential that can
+   * (see `learningSetup`), never with the runtime key.
    */
   learningAutoAssign: boolean;
+  /**
+   * A credential that can create Learning containers, for a deployment whose operator supplied one.
+   *
+   * The runtime key cannot: Intelligence creates containers for a person's session, a CopilotKit CLI
+   * login, or, on a CopilotKit local evaluation install only, a service token. The server holds
+   * neither of the first two, so this is the service token, sent as `x-copilotkit-ei-service-token`
+   * to `/api/learning/projects/:projectId/containers` with the project it belongs to. Both or
+   * neither: a token without its project is refused at startup.
+   */
+  learningSetup?: { serviceToken: string; projectId: string };
+  /**
+   * Memory sources and background research OpenBot switches on for each person (memory/defaults.ts).
+   * Both on unless OPENBOT_MEMORY_SOURCE_DEFAULTS or OPENBOT_PROACTIVE_DEFAULTS is "false" or "0".
+   * Switching either off stops new defaults and leaves every existing row as it is.
+   */
+  memoryDefaults: { sources: boolean; research: boolean };
   /** Audio configuration is independent of agent model providers. */
   transcription?: TranscriptionConfig;
   voice?: VoiceConfig;
@@ -1348,6 +1365,11 @@ export function loadConfig(
     runtime: runtimeCapabilities(environment),
     learning: learningDefault(environment),
     learningAutoAssign: learningAutoAssignEnabled(environment),
+    ...learningSetupCredential(environment),
+    memoryDefaults: {
+      sources: switchedOn(environment, "OPENBOT_MEMORY_SOURCE_DEFAULTS"),
+      research: switchedOn(environment, "OPENBOT_PROACTIVE_DEFAULTS"),
+    },
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
@@ -1385,6 +1407,30 @@ function learningAutoAssignEnabled(environment: Environment): boolean {
     return false;
   const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
   return value !== "false" && value !== "0";
+}
+
+/** On unless the variable is "false" or "0", the rule every default-on switch here follows. */
+function switchedOn(environment: Environment, name: string): boolean {
+  const value = optional(environment, name);
+  return value !== "false" && value !== "0";
+}
+
+/** The service token and its project, both or neither. See `DeploymentConfig.learningSetup`. */
+function learningSetupCredential(environment: Environment): {
+  learningSetup?: { serviceToken: string; projectId: string };
+} {
+  const serviceToken = optional(environment, "INTELLIGENCE_SERVICE_TOKEN");
+  const projectId = optional(environment, "INTELLIGENCE_PROJECT_ID");
+  if (!serviceToken && !projectId) return {};
+  if (!serviceToken || !projectId)
+    throw new Error(
+      "INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID go together: the token creates the openbot Learning container in that project. Set both, or neither.",
+    );
+  if (!/^[1-9][0-9]{0,15}$/.test(projectId))
+    throw new Error(
+      "INTELLIGENCE_PROJECT_ID must be the Intelligence project's numeric ID.",
+    );
+  return { learningSetup: { serviceToken, projectId } };
 }
 
 /** Optional container default; the enabled preference alone does not collect or deliver. */

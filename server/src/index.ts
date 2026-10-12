@@ -109,7 +109,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
-import { createChannelStore } from "./channels/routes";
+import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -191,7 +191,15 @@ import {
   probeLearningContainer,
   withLearningAutoAssign,
 } from "./learning/auto-assign";
+import {
+  cliLoginPresent,
+  ensureLearningContainer,
+  intelligenceApiOrigin,
+  keyIntelligence,
+  learningSetupInstructions,
+} from "./learning/ensure-container";
 import { createLearningSettingsStore } from "./learning/settings";
+import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
@@ -357,11 +365,53 @@ const learningSettingsStore = createLearningSettingsStore(
 const learningProbeIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
+/*
+ * Who can create the `openbot` container here: never the runtime key. A service token the operator
+ * configured (local evaluation installs), or a CopilotKit CLI login on this machine, which is what a
+ * laptop running `bun run start` has. Neither, and the log and Admin say exactly what to run instead.
+ */
+const learningApiOrigin = (() => {
+  try {
+    return intelligenceApiOrigin(config.runtime.intelligence.apiUrl);
+  } catch {
+    return undefined;
+  }
+})();
+const learningCanCreate =
+  learningApiOrigin !== undefined &&
+  (config.learningSetup !== undefined || cliLoginPresent());
 const learningAutoAssign = createLearningAutoAssign({
   enabled: config.learningAutoAssign,
   store: learningSettingsStore,
   probe: (containerId) =>
     probeLearningContainer(learningProbeIntelligence, containerId),
+  ...(learningApiOrigin
+    ? { instructions: learningSetupInstructions(learningApiOrigin) }
+    : {}),
+  ...(learningCanCreate && learningApiOrigin
+    ? {
+        create: () =>
+          ensureLearningContainer({
+            directory: process.cwd(),
+            apiUrl: learningApiOrigin,
+            nonInteractive: true,
+            key: keyIntelligence(
+              learningApiOrigin,
+              config.runtime.intelligence.apiKey,
+              config.runtime.intelligence.gatewayWsUrl,
+            ),
+            cliLogin: cliLoginPresent(),
+            ...(config.learningSetup
+              ? {
+                  serviceToken: {
+                    token: config.learningSetup.serviceToken,
+                    projectId: config.learningSetup.projectId,
+                  },
+                }
+              : {}),
+          }),
+      }
+    : {}),
   audit: createAuditStore(database),
 });
 const learningSettings = withLearningAutoAssign(
@@ -390,11 +440,23 @@ const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
 const threadIdentity = createThreadIdentity(
   config.deploymentId ?? tenantPackage.tenantId,
 );
-const channelStore = createChannelStore(
+const baseChannelStore = createChannelStore(
   database,
   agentProfileStore,
   threadIdentity,
 );
+/**
+ * A person spoke in one of their conversations. Bound once memory defaults exist (memory/defaults.ts):
+ * a conversation with one Bot switches on that Bot's research and memory sources for this person.
+ */
+let personSpoke: ((ownerUserId: string, channelId: string) => void) | undefined;
+const channelStore: ChannelStore = {
+  ...baseChannelStore,
+  async recordActivity(actor, channelId, activity, source) {
+    await baseChannelStore.recordActivity(actor, channelId, activity, source);
+    if (activity.agentId === null) personSpoke?.(actor.id, channelId);
+  },
+};
 const channelEvents = createChannelEventHub();
 /**
  * Which components each Bot may answer with.
@@ -1131,8 +1193,29 @@ const memoryIngestion = createMemoryIngestion({
 });
 // Proactive research may only read; see proactive/restriction.ts. Read from the catalogue per call.
 const proactiveReadOnlyRefs = createReadOnlyClassifier(pluginStore);
-const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) =>
-  memoryIngestion.contextFor(ownerUserId, botId);
+/*
+ * Memory sources and background research, on by default for each person and Bot, and never switched
+ * back on once the person turns one down. See memory/defaults.ts.
+ */
+const memoryDefaults = createMemoryDefaults({
+  database,
+  ingestion: memoryIngestion,
+  sources: config.memoryDefaults.sources,
+  research: config.memoryDefaults.research,
+  channelBots: async (ownerUserId, channelId) =>
+    (await channelStore.get(await actorFor(ownerUserId), channelId))
+      ?.agentIds ?? null,
+  // The same rule research delivery uses, read when a person speaks (long after it is defined).
+  canDeliver: async (ownerUserId, channelId, agentId) =>
+    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
+  mintThreadId: () => threadIdentity.mint(),
+});
+personSpoke = memoryDefaults.personSpoke;
+const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) => {
+  // Apps connected since this Bot's last turn become its memory sources. Never waits.
+  memoryDefaults.botTurn(ownerUserId, botId);
+  return memoryIngestion.contextFor(ownerUserId, botId);
+};
 const memorySweep = repeatAfterEach(async () => {
   try {
     await memoryIngestion.syncDue();

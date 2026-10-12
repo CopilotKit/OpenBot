@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { memorySources, personalMemories } from "../db/schema/memory";
+import { lockDefaults, recordOptOut, sourceServerId } from "./defaults";
 import type {
   IntelligenceMemory,
   IntelligenceMemoryRecord,
@@ -616,16 +617,37 @@ export function createMemoryStore(
             enabled: false,
           }).catch(() => {});
       }
-      const [row] = await database
-        .delete(memorySources)
+      const [source] = await database
+        .select({ agentId: memorySources.agentId })
+        .from(memorySources)
         .where(
           and(
             eq(memorySources.id, id),
             eq(memorySources.ownerUserId, ownerUserId),
           ),
         )
-        .returning({ id: memorySources.id });
-      if (!row) throw new MemoryNotFoundError();
+        .limit(1);
+      if (!source) throw new MemoryNotFoundError();
+      // Removing a source is turning that app down for this Bot: OpenBot never adds it back.
+      await database.transaction(async (transaction) => {
+        await lockDefaults(transaction, ownerUserId, source.agentId);
+        const [row] = await transaction
+          .delete(memorySources)
+          .where(
+            and(
+              eq(memorySources.id, id),
+              eq(memorySources.ownerUserId, ownerUserId),
+            ),
+          )
+          .returning({ toolRef: memorySources.toolRef });
+        if (!row) throw new MemoryNotFoundError();
+        await recordOptOut(transaction, {
+          ownerUserId,
+          agentId: source.agentId,
+          feature: "memory_source",
+          scope: sourceServerId(row.toolRef),
+        });
+      });
     },
     async dueSources(limit = 5) {
       return database

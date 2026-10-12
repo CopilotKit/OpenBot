@@ -170,14 +170,42 @@ config:
     # The two secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
   # With nothing saved in Admin and no containerId below, the server assigns the project's openbot
-  # container on its own once it exists; the runtime key cannot create it. Create it once with
-  # scripts/setup-learning.ts (or in Intelligence), from a computer that can sign in to Intelligence.
+  # container on its own once it exists. The runtime key cannot create it, so `setup` below gives the
+  # chart a credential that can; without one, the server log and Admin → Automatic Learning say
+  # exactly what to run (scripts/setup-learning.ts, from a computer that can sign in to Intelligence).
   # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""
     revision: ""
     # false stops the automatic assignment (OPENBOT_LEARNING_AUTO_ASSIGN=false).
     autoAssign: true
+    # Creating the container. Name either Secret and a Job runs on every install and upgrade that
+    # creates it in the runtime key's project, proves it with that key, and exits; the server then
+    # assigns it. Both Secrets are yours: create them before installing.
+    setup:
+      # A CopilotKit CLI login, for managed Intelligence. Sign in into an empty folder and store the
+      # file it writes (a person's 30-day session, so keep the Secret as tight as that warrants):
+      #   COPILOTKIT_CONFIG_DIR="$(mktemp -d)"; export COPILOTKIT_CONFIG_DIR
+      #   npx --yes copilotkit@latest login
+      #   kubectl create secret generic openbot-copilotkit-cli \
+      #     --from-file=config.json="$COPILOTKIT_CONFIG_DIR/auth/config.json"
+      # The Job reads it once. The server never holds it.
+      cliLoginSecret:
+        name: ""
+        key: config.json
+      # An Intelligence service token, which creates Learning containers on a CopilotKit local
+      # evaluation install only. Requires projectId: the numeric ID of the runtime key's project.
+      # Passed to the server too, so Admin → Automatic Learning can create the container again.
+      serviceTokenSecret:
+        name: ""
+        key: token
+      projectId: ""
+  # Memory sources and background research, on by default for each person and Bot (OpenBot turns
+  # them on when a person talks to a Bot, and never back on once the person turns one off or removes
+  # it). false stops new defaults for the whole deployment; existing settings are left as they are.
+  memory:
+    sourceDefaults: true
+    researchDefaults: true
   # How far one Bot may hand work to another.
   #
   # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what

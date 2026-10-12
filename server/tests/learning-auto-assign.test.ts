@@ -5,6 +5,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import {
+  type ContainerCreation,
   type ContainerProbe,
   classifyProbeError,
   createLearningAutoAssign,
@@ -21,6 +22,8 @@ function harness(
     probe?: ContainerProbe | (() => Promise<ContainerProbe>);
     now?: () => number;
     minIntervalMs?: number;
+    create?: () => Promise<ContainerCreation>;
+    instructions?: string;
   } = {},
 ) {
   const store = createLearningSettingsStore();
@@ -40,6 +43,8 @@ function harness(
       return typeof probe === "function" ? probe() : probe;
     },
     log: (entry) => logs.push(entry),
+    ...(options.create ? { create: options.create } : {}),
+    ...(options.instructions ? { instructions: options.instructions } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.minIntervalMs !== undefined
       ? { minIntervalMs: options.minIntervalMs }
@@ -224,7 +229,15 @@ describe("automatic Learning container assignment", () => {
   });
 
   test.each([
-    ["absent", { state: "absent", containerId: "openbot" }],
+    [
+      "absent",
+      {
+        state: "absent",
+        containerId: "openbot",
+        canCreate: false,
+        instructions: expect.stringContaining("bun scripts/setup-learning.ts"),
+      },
+    ],
     ["not_entitled", { state: "not_entitled" }],
     ["unavailable", { state: "unavailable" }],
   ] as const)(
@@ -250,6 +263,94 @@ describe("automatic Learning container assignment", () => {
     expect(String(h.logs[0]?.message)).toContain(
       "bun scripts/setup-learning.ts",
     );
+  });
+
+  test("with a credential that can, a fresh deployment creates the container and assigns it", async () => {
+    let probe: ContainerProbe = "absent";
+    let creates = 0;
+    const h = harness({
+      probe: async () => probe,
+      create: async () => {
+        creates++;
+        probe = "present";
+        return "created";
+      },
+    });
+    expect(await h.autoAssign.check()).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect(creates).toBe(1);
+    expect(h.probes).toEqual(["openbot", "openbot"]);
+    expect((await h.store.read()).defaultTarget).toEqual({
+      containerId: "openbot",
+    });
+    expect(h.logs.map((entry) => entry.outcome)).toEqual([
+      "container_created",
+      "assigned",
+    ]);
+  });
+
+  test("without one, it says exactly what to run, once, and offers no button", async () => {
+    const instructions = "Run exactly this.";
+    const h = harness({
+      probe: "absent",
+      instructions,
+      create: async () => "skipped",
+    });
+    const state = await h.autoAssign.check();
+    expect(state).toEqual({
+      state: "absent",
+      containerId: "openbot",
+      instructions,
+      canCreate: true,
+    });
+    await h.autoAssign.check();
+    expect(h.logs).toHaveLength(1);
+    expect(String(h.logs[0]?.message)).toEndWith(instructions);
+  });
+
+  test("a failed creation is reported, tried once per process, and again only when Admin asks", async () => {
+    let creates = 0;
+    let probe: ContainerProbe = "absent";
+    const h = harness({
+      probe: async () => probe,
+      create: async () => {
+        creates++;
+        if (creates === 1) throw new Error("Intelligence refused the token.");
+        probe = "present";
+        return "created";
+      },
+    });
+    expect(await h.autoAssign.check()).toMatchObject({
+      state: "absent",
+      createError: "Intelligence refused the token.",
+    });
+    await h.autoAssign.check();
+    expect(creates).toBe(1);
+    expect(await h.autoAssign.createNow()).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+    expect(creates).toBe(2);
+    // Assigned is settled: asking again creates nothing.
+    expect((await h.autoAssign.createNow()).state).toBe("assigned");
+    expect(creates).toBe(2);
+  });
+
+  test("creation never overrides a saved setting", async () => {
+    let creates = 0;
+    const h = harness({
+      probe: "absent",
+      create: async () => {
+        creates++;
+        return "created";
+      },
+    });
+    await h.store.write({ enabled: false, defaultTarget: null, agents: {} });
+    expect(await h.autoAssign.check()).toEqual({ state: "saved" });
+    expect(await h.autoAssign.createNow()).toEqual({ state: "saved" });
+    expect(creates).toBe(0);
   });
 
   test("a container created later is assigned on the next check", async () => {

@@ -356,6 +356,16 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: OPENBOT_LEARNING_AUTO_ASSIGN
   value: "false"
 {{- end }}
+{{- /* Absent, as under `--reuse-values`, means on, like autoAssign: only an explicit false is written. */}}
+{{- $memory := .Values.config.memory | default dict }}
+{{- if eq (toString $memory.sourceDefaults) "false" }}
+- name: OPENBOT_MEMORY_SOURCE_DEFAULTS
+  value: "false"
+{{- end }}
+{{- if eq (toString $memory.researchDefaults) "false" }}
+- name: OPENBOT_PROACTIVE_DEFAULTS
+  value: "false"
+{{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
@@ -740,5 +750,31 @@ than anything that names the cause.
 */}}
 {{- define "openbot.automountToken" -}}
 {{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
+{{- end -}}
+
+{{- /*
+  The operator's credential for creating the openbot Learning container (values: config.learning.setup).
+
+  Read through `default dict` at every level, because `setup` is a key this chart did not have before
+  and `helm upgrade --reuse-values` hands back the previous release's values without it.
+*/}}
+{{- define "openbot.learningSetup" -}}
+{{- $learning := .Values.config.learning | default dict -}}
+{{- toYaml ($learning.setup | default dict) -}}
+{{- end -}}
+
+{{- /* INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID, when the operator named a token Secret. */}}
+{{- define "openbot.learningServiceTokenEnv" -}}
+{{- $setup := include "openbot.learningSetup" . | fromYaml -}}
+{{- $token := $setup.serviceTokenSecret | default dict -}}
+{{- if $token.name }}
+- name: INTELLIGENCE_SERVICE_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $token.name | quote }}
+      key: {{ $token.key | default "token" | quote }}
+- name: INTELLIGENCE_PROJECT_ID
+  value: {{ $setup.projectId | toString | quote }}
+{{- end }}
 {{- end -}}
 

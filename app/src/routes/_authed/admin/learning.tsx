@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
+  createLearningContainer,
   learningAutomaticQueryOptions,
   learningDeliveryQueryOptions,
   learningKeys,
@@ -36,7 +37,7 @@ function automaticMessage(
   )
     return `OpenBot assigned this Intelligence project's "${automatic.containerId}" container automatically. Change it here at any time.`;
   if (automatic.state === "absent")
-    return `This Intelligence project has no "${automatic.containerId}" Learning container yet, so nothing is collected. Create a container with that ID in Intelligence, or run bun scripts/setup-learning.ts, and OpenBot assigns it automatically.`;
+    return `This Intelligence project has no "${automatic.containerId}" Learning container yet, so nothing is collected.`;
   if (automatic.state === "not_entitled")
     return "This Intelligence project's plan does not include Learning, so no container was assigned.";
   if (automatic.state === "unavailable")
@@ -91,6 +92,57 @@ function TargetFields({
           }}
         />
       </label>
+    </div>
+  );
+}
+
+/**
+ * The missing container, and how it gets made: a button when this deployment holds a credential that
+ * can create it, and always the exact steps for an operator, since the runtime key cannot.
+ */
+function ContainerSetup({
+  automatic,
+}: {
+  automatic: Extract<LearningAutoAssignState, { state: "absent" }>;
+}) {
+  const queryClient = useQueryClient();
+  const create = useMutation({
+    mutationFn: createLearningContainer,
+    onSuccess: async (next) => {
+      queryClient.setQueryData(learningKeys.automatic, next);
+      await queryClient.invalidateQueries({ queryKey: learningKeys.all });
+    },
+  });
+  return (
+    <div className="grid gap-2 rounded-md border p-3 text-sm">
+      {automatic.canCreate && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            disabled={create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {create.isPending
+              ? "Creating…"
+              : `Create the ${automatic.containerId} container`}
+          </Button>
+          <span className="text-muted-foreground">
+            Uses the credential this deployment was given, never the runtime
+            key.
+          </span>
+        </div>
+      )}
+      {(create.error || automatic.createError) && (
+        <p role="alert" className="text-destructive">
+          {create.error?.message ?? automatic.createError}
+        </p>
+      )}
+      {automatic.instructions && (
+        <p>
+          <span className="font-medium">To create it: </span>
+          {automatic.instructions}
+        </p>
+      )}
     </div>
   );
 }
@@ -185,6 +237,9 @@ export function LearningPage() {
               <p role="status" className="text-sm">
                 {automaticNote}
               </p>
+            )}
+            {!draft && automatic.data?.state === "absent" && (
+              <ContainerSetup automatic={automatic.data} />
             )}
             <p className="text-muted-foreground text-sm">
               An empty default leaves unmapped Bots out. IDs use 1–64 lowercase

@@ -38,10 +38,24 @@ Pausing OpenBot Learning preserves its mappings and thread assignments. It stops
 With no container assigned, the server asks Intelligence, using its runtime key, whether the project has a container with ID `openbot`. If it does, the server saves it as the default, exactly as an administrator saving it in Admin would, and records a `configuration.changed` audit row initiated by the deployment. It asks at start, every ten minutes, and when a turn or the Admin page reads Learning settings, at most once a minute. A container created later is picked up without a restart.
 
 - It never overrides a choice. Any saved Admin setting, including off or an empty default, means there is nothing to do, and so does `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`.
-- It never creates a container, because the runtime key cannot. Create `openbot` with the helper above or in Intelligence.
+- It creates the container only with a credential that can, never with the runtime key. See [Creating the container](#creating-the-container).
 - It is safe on many replicas. The save only succeeds where nothing was ever saved, so one replica wins and writes the audit row.
 - It never blocks startup or a turn. A missing container, a plan without Learning, or an unreachable Intelligence is logged once as a `learning-auto-assign` line and tried again later. The Admin page says which one applies.
 - `OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) turns it off.
+
+## Creating the container
+
+Intelligence creates Learning containers (`POST /api/learning/projects/:projectId/containers`) for three callers only: a person's browser session, a CopilotKit CLI login, and a service token, which counts only on a CopilotKit local evaluation install. A project's runtime key is none of them. So OpenBot creates `openbot` wherever it holds one of those, proves the result with the runtime key (a container the key cannot see is in another project and is reported, never assigned), and otherwise says exactly what to run:
+
+| Where | Credential | What happens |
+| --- | --- | --- |
+| `bun run start` / `scripts/start.sh` | Your CLI login (`npx --yes copilotkit@latest login`) | Every start runs `scripts/setup-learning.ts --non-interactive`. With no project selected in the checkout, it lists the projects your login can see and uses the runtime key's, from a scratch directory, so nothing in the checkout is selected or rewritten. With no login on the machine it does not download the CLI. |
+| `bun scripts/setup-learning.ts` | CLI login (managed) or browser sign-in (self-hosted) | As above, interactively; self-hosted opens a browser. |
+| Server, at start and from Admin | `INTELLIGENCE_SERVICE_TOKEN` + `INTELLIGENCE_PROJECT_ID` (local evaluation installs), or a CLI login on the same machine | Creates it once at start if it is missing. **Admin → Automatic Learning** shows **Create the openbot container** when one of these is present, to try again. |
+| Helm | `config.learning.setup.cliLoginSecret` or `serviceTokenSecret` + `projectId` | A Job per release revision runs `server/src/learning/ensure-container.ts` and exits; the server assigns the container on its next check. The CLI login is used by that Job only. |
+| Desktop app | CopilotKit or self-hosted sign-in | Connecting creates or reuses the selected project's `openbot` (above). |
+
+With none of them, the `learning-auto-assign` log line and the Admin page name the exact steps for your Intelligence: for managed, sign in with the CLI and run the helper (or give the chart a CLI login); for self-hosted, run the helper and sign in, or set a service token on a local evaluation install. Creating a container with ID `openbot` in Intelligence by hand works everywhere.
 
 ## Credentials and permissions
 

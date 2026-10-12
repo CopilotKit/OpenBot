@@ -6,6 +6,7 @@ import {
   proactiveSettings,
   proactiveSuggestions,
 } from "../db/schema/proactive";
+import { lockDefaults, recordOptOut } from "../memory/defaults";
 import { PROACTIVE_INITIATOR_PREFIX } from "./restriction";
 import {
   ProactiveNotFoundError,
@@ -86,12 +87,22 @@ export function createProactiveStore(database: Database) {
       if (!row) throw new ProactiveNotFoundError();
       return row;
     },
+    /** Removing research is turning it down for this Bot: OpenBot never switches it back on. */
     async remove(owner: string, id: string) {
-      const rows = await database
-        .delete(proactiveSettings)
-        .where(owned(owner, id))
-        .returning({ id: proactiveSettings.id });
-      if (!rows.length) throw new ProactiveNotFoundError();
+      const { agentId } = await get(owner, id);
+      await database.transaction(async (transaction) => {
+        await lockDefaults(transaction, owner, agentId);
+        const rows = await transaction
+          .delete(proactiveSettings)
+          .where(owned(owner, id))
+          .returning({ id: proactiveSettings.id });
+        if (!rows.length) throw new ProactiveNotFoundError();
+        await recordOptOut(transaction, {
+          ownerUserId: owner,
+          agentId,
+          feature: "proactive_research",
+        });
+      });
     },
     /**
      * Take the due settings and move each one's next run forward in the same statement, so two

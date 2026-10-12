@@ -59,6 +59,14 @@ export function learningDeliveryQueryOptions(agentId: string) {
       ),
   });
 }
+/** Create the project's container with the deployment's credential, then report what assignment found. */
+export function createLearningContainer(): Promise<LearningAutoAssignState> {
+  return client("/api/admin/learning/container", "automatic", {
+    method: "POST",
+    body: {},
+    fallback: "The Learning container could not be created.",
+  });
+}
 export function saveLearningSettings(
   settings: LearningSettings,
 ): Promise<LearningSettings> {

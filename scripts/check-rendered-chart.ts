@@ -179,8 +179,9 @@ if (policyComponents.size > 0) {
     )?.[1];
     const name = workload.match(/^\s{2}name:\s*(\S+)/m)?.[1] ?? "a workload";
     if (!component) continue;
-    // The migrations Job runs once at install and is torn down; it is not a standing surface.
-    if (component === "migrations") continue;
+    // The migrations Job runs once at install and is torn down; it is not a standing surface. The
+    // Learning setup Job is the same: once per revision, then gone (templates/learning/setup-job.yaml).
+    if (component === "migrations" || component === "learning-setup") continue;
     if (!policyComponents.has(component)) {
       problems.push(
         `This release has NetworkPolicies but none selects ${name} (component: ${component}), so it is the one pod left unfenced while everything around it is restricted. Give it a policy or say in the chart why it needs none.`,

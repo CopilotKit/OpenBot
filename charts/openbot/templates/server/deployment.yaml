@@ -100,6 +100,10 @@ spec:
           env:
 {{ include "openbot.databaseUrlEnv" . | indent 12 }}
 {{ include "openbot.commonEnv" . | indent 12 }}
+            {{- /* The server's alone, not commonEnv's: only the API creates Learning containers. */}}
+            {{- with (include "openbot.learningServiceTokenEnv" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "openbot.configMapName" . }}

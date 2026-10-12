@@ -1037,6 +1037,50 @@ describe("automatic Learning container assignment", () => {
     expect(config.learning).toEqual({ containerId: "support" });
     expect(config.learningAutoAssign).toBe(false);
   });
+
+  test("a service token and its project create the container; one without the other is refused", () => {
+    expect(loadConfig(baseEnvironment).learningSetup).toBeUndefined();
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
+        INTELLIGENCE_PROJECT_ID: "7",
+      }).learningSetup,
+    ).toEqual({ serviceToken: "synthetic-token", projectId: "7" });
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
+      }),
+    ).toThrow("go together");
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        INTELLIGENCE_SERVICE_TOKEN: "synthetic-token",
+        INTELLIGENCE_PROJECT_ID: "my-project",
+      }),
+    ).toThrow("numeric ID");
+  });
+});
+
+describe("memory sources and background research", () => {
+  test("are on by default for a fresh deployment", () => {
+    expect(loadConfig(baseEnvironment).memoryDefaults).toEqual({
+      sources: true,
+      research: true,
+    });
+  });
+
+  test.each(["false", "0"])("each switches off on its own with %p", (value) => {
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_MEMORY_SOURCE_DEFAULTS: value })
+        .memoryDefaults,
+    ).toEqual({ sources: false, research: true });
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_PROACTIVE_DEFAULTS: value })
+        .memoryDefaults,
+    ).toEqual({ sources: true, research: false });
+  });
 });
 
 /**
