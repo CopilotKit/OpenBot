@@ -8,10 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** A hosted computer's browser is now headed by default. It uses a little more
-memory than headless did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode:
-headless`) to keep the old behaviour. A deployment whose public URL is https on a public address starts signing its Bots'
-requests with Web Bot Auth; `WEB_BOT_AUTH=off` (Helm: `config.webBotAuth: "off"`) prevents it.
+**Before upgrading.** Three things change for an existing deployment:
+- A hosted computer's browser is now headed by default. It uses a little more memory than headless
+  did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
+  behaviour.
+- A deployment whose public URL is https on a public address starts signing its Bots' requests with
+  Web Bot Auth; `WEB_BOT_AUTH=off` (Helm: `config.webBotAuth: "off"`) prevents it.
+- Migration `0054_memory_on_intelligence` adds two columns to `personal_memories`. On a deployment
+  entitled to Intelligence memory, the memory sweep then copies existing reviewed, switched-on memories
+  into Intelligence, a few people at a time each minute; it is idempotent and safe to interrupt.
+  Memories awaiting review, paused or forgotten stay local until that changes.
 
 ### Fewer "Verify you are human" pages
 
@@ -31,6 +37,15 @@ computer and leave the person a blank page to solve. Now:
   `computers.egressProxy` with the URL in a Secret. Off by default; turning it on makes Bots' traffic
   look like a person's home connection, which is the operator's choice to make.
 - Bun 1.4.3 throughout, which fixes the connection crash behind the restarts.
+
+### Memory lives in CopilotKit Intelligence
+
+A deployment entitled to Intelligence memory now keeps its people's memories there: Intelligence holds
+the content and ranks recall, and memories another app on the same project formed for a person appear
+in their Memory page and reach their Bots. OpenBot still records each memory's provenance, review state
+and which Bot or source it came from, and applies those rules to everything Intelligence returns, so a
+Bot-formed memory still reaches only the Bot that formed it. Without Intelligence memory nothing changes:
+OpenBot's own tables remain the store.
 
 ## 0.2.0
 

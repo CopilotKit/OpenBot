@@ -321,6 +321,31 @@ A skill declares the tools it needs (`skill_tools`). Before the run starts, the 
 
 This narrows the offer. It is not a boundary, and it never substitutes for one. The grant, the policy and the audit row decide what may happen; this decides only what the model can see. Every way it can fail — no skills declared, a model that cannot answer, a message that matches nothing, twelve tools or fewer — leaves the whole catalogue offered, because a narrowing that failed closed would remove capability an administrator granted, silently. `mcp.tools_discovered` records what was offered, out of how much, and why.
 
+## Personal memory
+
+A person's memory is kept in CopilotKit Intelligence when the deployment is entitled to Intelligence
+memory (`features.memory` in its runtime entitlement), and in OpenBot's own tables when it is not.
+
+- **Intelligence holds the content and does the recall.** Every memory the person has accepted is
+  mirrored there: one they wrote, a Bot-formed or imported one once they confirm it. Editing a memory
+  supersedes its Intelligence copy; pausing or forgetting it retires it, because Intelligence has no
+  field for "paused". Recall for a search is ranked by Intelligence.
+- **OpenBot keeps what Intelligence has no field for.** Intelligence stores only content, kind and
+  scope, so the OpenBot row stays the record of where a memory came from, its review state, which Bot
+  formed it and which source imported it. Those decide which Bot may see a memory, and they are applied
+  to everything Intelligence returns before a Bot sees it: a Bot-formed memory still reaches only the
+  Bot that formed it, while it holds the source app.
+- **Only the person's own memories.** Every call names the person and asks for `user` scope with no
+  project access, and project-scoped results are dropped, so one person's Bot never sees another
+  person's memory.
+- **Memories formed elsewhere.** A memory Intelligence holds for the person that no OpenBot row
+  describes (another app on the same project, or Intelligence itself) appears in their Memory page as
+  "Kept in Intelligence" and is recalled as their own. It can be edited or forgotten there, not paused.
+- **Without Intelligence memory** (not entitled, a lapsed licence, an outage), OpenBot reads and writes
+  its tables exactly as before and nothing fails. Writes made meanwhile are mirrored by the memory sweep
+  once Intelligence memory is available again; the first passes after a deployment becomes entitled are
+  the backfill of everything it already holds.
+
 ## Tenant package and knowledge
 
 `TENANT_PACKAGE_DIR` points at the tenant package. The default is `../examples/fintech`.
