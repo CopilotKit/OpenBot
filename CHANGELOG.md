@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Automatic Learning assigns its container without a trip to Admin
+
+Learning was on by default but collected nothing until somebody assigned a container. Now, when
+nothing is saved under Admin → Automatic Learning and `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is
+not set, the server assigns its Intelligence project's `openbot` container as the default as soon as
+that container exists, records it in the audit log, and the Admin page says so. A saved setting,
+including off, is never changed. The runtime key cannot create a container, so
+`bun scripts/setup-learning.ts` now creates `openbot` in an existing key's project instead of
+refusing, and `scripts/start.sh` runs that check on every start without a browser or prompt. Set
+`OPENBOT_LEARNING_AUTO_ASSIGN=false` (Helm: `config.learning.autoAssign: false`) to keep the old
+behaviour.
+
 ## 0.2.0
 
 **Before upgrading.** Two things change for an existing deployment:

@@ -25,6 +25,8 @@ function fixture() {
       settings = next;
       return settings;
     },
+    saved: async () => true,
+    adoptDefault: async () => false,
     bindThread: async ({ userId, threadId, containerId }) => {
       const key = JSON.stringify([userId, threadId]);
       if (!bindings.has(key)) bindings.set(key, containerId);

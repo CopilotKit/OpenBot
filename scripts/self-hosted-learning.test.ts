@@ -100,6 +100,29 @@ test("fresh browser setup creates a verified container before minting its projec
   expect(f.closed()).toBe(1);
 });
 
+test("a deployment with a key gains only the container: nothing is minted and the key is never sent", async () => {
+  const f = fixture();
+  expect(
+    await setupSelfHostedLearning({
+      ...f.options,
+      existingKey: "cpk-existing-key",
+    }),
+  ).toEqual({
+    apiUrl,
+    apiKey: "cpk-existing-key",
+    learningContainerId: "openbot",
+  });
+  expect(f.calls.filter((call) => call.method === "POST")).toEqual([
+    {
+      url: `${apiUrl}${path}`,
+      method: "POST",
+      data: { id: "openbot", name: "OpenBot" },
+    },
+  ]);
+  expect(JSON.stringify(f.calls)).not.toContain("cpk-existing-key");
+  expect(f.closed()).toBe(1);
+});
+
 test("existing containers are reused and an exact create race is re-read once", async () => {
   for (const race of [false, true]) {
     let reads = 0;

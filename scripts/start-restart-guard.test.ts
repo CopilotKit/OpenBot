@@ -139,9 +139,10 @@ exit 0
   );
   // The runtime health check is a script piped into `bun run -`, so that one invocation is the real
   // Bun: it is what decides whether the run carries on. Everything else Bun would start is faked.
+  // The Learning container check answers with one line, which start.sh relays.
   await writeExecutable(
     join(fakeBin, "bun"),
-    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then exec "$REAL_BUN" "$@"; fi\nexit 0\n',
+    '#!/usr/bin/env bash\nif [ "$1" = run ] && [ "$2" = - ]; then exec "$REAL_BUN" "$@"; fi\nif [ "$1" = scripts/setup-learning.ts ]; then echo "noise"; echo "LEARNING-CHECK $*"; fi\nexit 0\n',
   );
   // What `python3` is on a stock Windows machine: the Microsoft Store alias, which runs nothing. A
   // script that still needed it would stop at the health check in every test in this file.
@@ -342,6 +343,47 @@ describe("start.sh one computer each", () => {
         "compose up -d --build postgres supervisor agent-computer agent-bot agent-langgraph",
       );
     }
+  });
+});
+
+describe("start.sh Learning container check", () => {
+  /**
+   * The server assigns `openbot` once it exists, but its runtime key cannot create it. start.sh asks
+   * the setup helper, without a browser or a prompt, to make sure it exists, and relays its last line.
+   */
+  test("runs the non-interactive check when a key is set and nothing is assigned", async () => {
+    const result = await runStartWithStaleServerProbe(401, {
+      settings: { INTELLIGENCE_API_KEY: "cpk-synthetic" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "LEARNING-CHECK scripts/setup-learning.ts --non-interactive",
+    );
+    expect(result.stdout).not.toContain("noise");
+  });
+
+  test.each([
+    [
+      "a container is named",
+      { CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "mine" },
+    ],
+    ["it is switched off", { OPENBOT_LEARNING_AUTO_ASSIGN: "false" }],
+    ["it is switched off with 0", { OPENBOT_LEARNING_AUTO_ASSIGN: "0" }],
+  ])("is skipped when %s", async (_, settings) => {
+    const result = await runStartWithStaleServerProbe(401, {
+      settings: { INTELLIGENCE_API_KEY: "cpk-synthetic", ...settings },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("LEARNING-CHECK");
+  });
+
+  test("is skipped without a runtime key", async () => {
+    const result = await runStartWithStaleServerProbe(401);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("LEARNING-CHECK");
   });
 });
 

@@ -584,14 +584,16 @@ address: its page and the Bot both say inbound email is not configured on this d
 ## Automatic Learning
 
 Learning is on by default; with no container assigned, nothing is collected or delivered and the
-deployment still starts and chats. Both variables are optional defaults that an administrator's saved
-settings under **Admin → Automatic Learning** override, including a saved off. See
-[automatic-learning.md](automatic-learning.md).
+deployment still starts and chats. Until something is saved, the server assigns its Intelligence
+project's `openbot` container as the default by itself once that container exists. The variables
+below are optional; an administrator's saved settings under **Admin → Automatic Learning** override
+them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 
 | Variable                                 | Meaning                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` | Default Learning container for this deployment's Bots. 1 to 64 lowercase letters, digits and single hyphens, or the server refuses to start. |
 | `CPK_INTELLIGENCE_SKILLS_REVISION`       | An exact published skills revision to pin. Read only beside a container id. Unset follows the latest. |
+| `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise, and off whenever `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is set. |
 
 ## OpenTelemetry export
 

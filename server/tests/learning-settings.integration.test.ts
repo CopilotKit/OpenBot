@@ -103,6 +103,43 @@ describe("durable Learning settings", () => {
         .where(eq(learningThreadBindings.threadId, threadId)),
     ).toHaveLength(1);
   });
+  test("automatic assignment writes only where nothing was ever saved, and once across replicas", async () => {
+    await database
+      .delete(learningSettings)
+      .where(eq(learningSettings.id, "current"));
+    const replicas = [0, 1, 2, 3].map(() =>
+      createLearningSettingsStore(database),
+    );
+    expect(await replicas[0]?.saved()).toBe(false);
+    const won = await Promise.all(
+      replicas.map((store, index) =>
+        store.adoptDefault({ containerId: `openbot-${index}` }),
+      ),
+    );
+    expect(won.filter(Boolean)).toHaveLength(1);
+    const winner = won.indexOf(true);
+    const assigned = {
+      enabled: true,
+      defaultTarget: { containerId: `openbot-${winner}` },
+      agents: {},
+    };
+    for (const store of replicas) {
+      expect(await store.saved()).toBe(true);
+      expect(await store.read()).toEqual(assigned);
+    }
+
+    // A saved Admin choice, including off, is never replaced.
+    const off = { enabled: false, defaultTarget: null, agents: {} };
+    await replicas[0]?.write(off);
+    expect(await replicas[1]?.adoptDefault({ containerId: "openbot" })).toBe(
+      false,
+    );
+    expect(await replicas[2]?.read()).toEqual(off);
+    await database
+      .delete(learningSettings)
+      .where(eq(learningSettings.id, "current"));
+  });
+
   test("two users independently bind the same supplied thread ID", async () => {
     const store = createLearningSettingsStore(database);
     const threadId = `learning-${randomUUID()}`;

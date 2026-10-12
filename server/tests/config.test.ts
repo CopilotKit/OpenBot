@@ -1014,6 +1014,31 @@ describe("the self-host banner", () => {
   );
 });
 
+describe("automatic Learning container assignment", () => {
+  test("is on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).learningAutoAssign).toBe(true);
+  });
+
+  test.each(["false", "0"])(
+    "is off for OPENBOT_LEARNING_AUTO_ASSIGN=%p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_LEARNING_AUTO_ASSIGN: value })
+          .learningAutoAssign,
+      ).toBe(false);
+    },
+  );
+
+  test("is off when the environment names a container", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "support",
+    });
+    expect(config.learning).toEqual({ containerId: "support" });
+    expect(config.learningAutoAssign).toBe(false);
+  });
+});
+
 /**
  * Naming the private addresses an agent may live at.
  *

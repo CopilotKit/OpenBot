@@ -186,6 +186,11 @@ import {
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
 import { clearLearningRevisionFallback } from "./learning/runtime";
+import {
+  createLearningAutoAssign,
+  probeLearningContainer,
+  withLearningAutoAssign,
+} from "./learning/auto-assign";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createMemoryStore } from "./memory/store";
@@ -343,7 +348,26 @@ const port = config.port;
 const database = createDatabase(config.databaseUrl);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
-const learningSettings = createLearningSettingsStore(database, config.learning);
+const learningSettingsStore = createLearningSettingsStore(
+  database,
+  config.learning,
+);
+// Its own client, like the self-host banner's: the constructor opens nothing.
+const learningProbeIntelligence = createIntelligenceClient(
+  config.runtime.intelligence,
+);
+const learningAutoAssign = createLearningAutoAssign({
+  enabled: config.learningAutoAssign,
+  store: learningSettingsStore,
+  probe: (containerId) =>
+    probeLearningContainer(learningProbeIntelligence, containerId),
+  audit: createAuditStore(database),
+});
+const learningSettings = withLearningAutoAssign(
+  learningSettingsStore,
+  learningAutoAssign,
+);
+learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
@@ -3027,6 +3051,7 @@ const app = createApp(
   },
   {
     store: learningSettings,
+    autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
     inspect: copilotRuntime.learning?.inspect,
   },

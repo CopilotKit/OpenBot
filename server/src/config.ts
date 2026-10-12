@@ -171,6 +171,13 @@ export type HandoffCaps = {
 export type DeploymentConfig = {
   /** Optional environment default. A saved Admin setting takes precedence. */
   learning?: LearningTarget;
+  /**
+   * Whether OpenBot assigns the Intelligence project's `openbot` Learning container as the default
+   * when nobody has chosen one (learning/auto-assign.ts). On unless OPENBOT_LEARNING_AUTO_ASSIGN is
+   * "false" or "0", and off whenever CPK_INTELLIGENCE_LEARNING_CONTAINER_ID names a container. It
+   * never overrides a saved Admin setting, and it never creates a container.
+   */
+  learningAutoAssign: boolean;
   /** Audio configuration is independent of agent model providers. */
   transcription?: TranscriptionConfig;
   voice?: VoiceConfig;
@@ -1328,6 +1335,7 @@ export function loadConfig(
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
     learning: learningDefault(environment),
+    learningAutoAssign: learningAutoAssignEnabled(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
@@ -1354,6 +1362,17 @@ export function loadConfig(
       : {}),
     ...(workerSharedSecret ? { workerSharedSecret } : {}),
   };
+}
+
+/**
+ * Same rule as generated interfaces: on unless explicitly "false" or "0". A container named in the
+ * environment is a choice, so there is nothing to assign.
+ */
+function learningAutoAssignEnabled(environment: Environment): boolean {
+  if (optional(environment, "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID"))
+    return false;
+  const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
+  return value !== "false" && value !== "0";
 }
 
 /** Optional container default; the enabled preference alone does not collect or deliver. */
