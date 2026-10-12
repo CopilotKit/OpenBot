@@ -611,6 +611,11 @@ export const CONNECT_ATTEMPT_TIMEOUT_MS = 3_000;
  * Cloudflare-fronted site resolves to several addresses and a challenge page opens and abandons many
  * connections at once, so opening one in a Bot's browser restarted the computer and lost the page the
  * person was being asked to solve.
+ *
+ * Bun fixed the timer in 1.4.0 (oven-sh/bun#32660, which this repository now runs on 1.4.3, where
+ * Bun's own regression fixture passes and fails on 1.3.14). Kept anyway: walking the checked list
+ * ourselves is what pins the connection to addresses that passed the deny check, so it is the right
+ * shape regardless of the runtime bug, and it costs nothing a person would notice.
  */
 export function connectInTurn(
   target: { host: string; port: number; addresses?: readonly string[] },

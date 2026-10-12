@@ -49,7 +49,7 @@ B. CLONE: RUN OPENBOT LOCALLY, CHANGE IT, OR EDIT A TENANT PACKAGE
 Use this to run OpenBot from source on their machine, or to edit code or configuration.
 
 Requirements for the clone path:
-- Bun 1.3.14. The repository pins it in package.json.
+- Bun 1.4.3. The repository pins it in package.json.
 - Docker CLI plus Docker Compose, or a compatible `docker` command/socket. `scripts/start.sh`
   calls `docker compose` for PostgreSQL and shipped Bots; Podman works only when it is exposed
   through that Docker-compatible command path.

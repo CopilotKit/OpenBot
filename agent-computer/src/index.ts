@@ -109,8 +109,9 @@ if (!COMPUTER_TOKEN) {
 /*
  * No multi-address connect anywhere in this process. Bun turns it on by default, and its timer can
  * throw from `internalConnectMultipleTimeout` after the connection is gone, which exits the process
- * (oven-sh/bun#25633). The egress filter already connects one checked address at a time (see
- * `connectInTurn`); this covers every other connect here, such as reaching an upstream proxy by name.
+ * (oven-sh/bun#25633, fixed in Bun 1.4.0, kept as defence in depth). The egress filter already
+ * connects one checked address at a time (see `connectInTurn`); this covers every other connect here,
+ * such as reaching an upstream proxy by name.
  */
 setDefaultAutoSelectFamily(false);
 

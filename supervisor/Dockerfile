@@ -7,7 +7,7 @@
 # supervisor reports and carries on from.
 FROM ghcr.io/spiffe/spire-server:1.15.1 AS spire
 
-FROM oven/bun:1.3.14-alpine
+FROM oven/bun:1.4.3-alpine
 
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh

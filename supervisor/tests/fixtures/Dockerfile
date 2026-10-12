@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14-slim
+FROM oven/bun:1.4.3-slim
 ARG FIXTURE_NAMESPACE
 ARG FIXTURE_VARIANT
 LABEL openbot.test-fixture=$FIXTURE_NAMESPACE openbot.test-variant=$FIXTURE_VARIANT

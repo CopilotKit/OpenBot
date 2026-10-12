@@ -2,7 +2,7 @@
 # AG-UI and talks to a model, and the computer it drives is a separate container with its own
 # lifecycle. Two Bots in the box rather than one, so "any AG-UI agent is a Bot" is demonstrated by
 # two implementations that share nothing but the protocol.
-FROM oven/bun:1.3-alpine
+FROM oven/bun:1.4-alpine
 
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh

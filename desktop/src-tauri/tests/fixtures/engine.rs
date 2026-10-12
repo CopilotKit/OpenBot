@@ -14,7 +14,7 @@ fn main() {
     let joined = args.join(" ");
     if SCENARIO == "runtime" {
         assert_eq!(joined, "--version", "launch must not install dependencies");
-        println!("1.3.14");
+        println!("1.4.3");
         return;
     }
     if joined.starts_with("image inspect ") {

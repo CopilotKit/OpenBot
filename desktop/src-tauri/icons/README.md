@@ -16,7 +16,7 @@ and loads no application or network content.
 ## Reproduce the source export
 
 Tool versions used: Node 24.16.0, Playwright 1.62.1, Chromium 151.0.7922.34,
-Bun 1.3.14, and the desktop lockfile's Tauri CLI 2.11.4. Use an installed
+Bun 1.4.3, and the desktop lockfile's Tauri CLI 2.11.4. Use an installed
 Playwright 1.62.1 module and its matching Chromium executable. The renderer
 records the executable hash and refuses a different browser version.
 

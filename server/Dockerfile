@@ -6,7 +6,7 @@
 #
 # Multi-stage so the build's dependencies do not ship. Non-root because nothing here needs to be.
 
-FROM oven/bun:1.3.14 AS deps
+FROM oven/bun:1.4.3 AS deps
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ COPY examples examples
 RUN bun run --cwd app build
 
 
-FROM oven/bun:1.3.14 AS runtime
+FROM oven/bun:1.4.3 AS runtime
 
 # Not root. The API opens a socket and talks to Postgres; neither needs privileges, and a Chromium
 # container is a separate image with its own reasons.
