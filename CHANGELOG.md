@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.2.0
+
 **Before upgrading.** Two things change for an existing deployment:
 - Migration `0052_shared_brokered_accounts` copies every Composio connection into a new
   `brokered_connections` table and leaves `composio_connections` in place, unwritten. Rolling back to
