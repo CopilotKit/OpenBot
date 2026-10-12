@@ -21,34 +21,25 @@ function generatedJwk(): JsonWebKey {
   return generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
 }
 
-describe("whether Web Bot Auth is on", () => {
-  test("on by default when the deployment has a public HTTPS address", () => {
-    const identity = webBotAuthFromEnv(
-      {},
-      { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-    );
-    expect(identity?.agent).toBe(PUBLIC);
-  });
+const ON = { WEB_BOT_AUTH: "on" };
 
-  // A verifier on the internet has to fetch the key over HTTPS, so anything else would sign with a
-  // directory nobody can read.
+describe("whether Web Bot Auth is on", () => {
+  // A signed request names the deployment to every site a Bot visits, and OpenBot is private by
+  // design, so no address, however public, switches it on by itself.
   test.each([
+    PUBLIC,
     undefined,
     "http://openbot.example.com",
     "https://localhost:3001",
-    "https://127.0.0.1",
-    "https://app.localhost",
     "https://10.0.0.5",
-    "https://192.168.1.20:3001",
     "https://openbot.internal",
-    "https://intranet",
-  ])("off by default for %s", (publicUrl) => {
+  ])("off by default, even for %s", (publicUrl) => {
     expect(
       webBotAuthFromEnv({}, { publicUrl, keyEncryptionKey: KEY }),
     ).toBeUndefined();
   });
 
-  test("off when switched off, whatever the address", () => {
+  test("off when switched off", () => {
     expect(
       webBotAuthFromEnv(
         { WEB_BOT_AUTH: "off" },
@@ -57,30 +48,40 @@ describe("whether Web Bot Auth is on", () => {
     ).toBeUndefined();
   });
 
+  test("on when switched on, signing as the public URL", () => {
+    expect(
+      webBotAuthFromEnv(ON, { publicUrl: PUBLIC, keyEncryptionKey: KEY })
+        ?.agent,
+    ).toBe(PUBLIC);
+  });
+
+  // A verifier has to fetch the key over HTTPS, so anything else would sign with a directory nobody
+  // can read.
   test.each([
     "http://openbot.example.com",
     "https://localhost:3001",
+    "https://127.0.0.1",
+    "https://app.localhost",
+    "https://[::1]:3001",
     undefined,
   ])(
     "on with %s, which nobody else can fetch over HTTPS, is refused at start-up",
     (publicUrl) => {
       expect(() =>
-        webBotAuthFromEnv(
-          { WEB_BOT_AUTH: "on" },
-          { publicUrl, keyEncryptionKey: KEY },
-        ),
+        webBotAuthFromEnv(ON, { publicUrl, keyEncryptionKey: KEY }),
       ).toThrow("WEB_BOT_AUTH=on needs an HTTPS address");
     },
   );
 
   // Only the operator knows whether their verifier can reach a private address.
-  test("on signs with a private HTTPS address", () => {
+  test.each([
+    "https://10.0.0.5",
+    "https://openbot.internal",
+    "https://intranet",
+  ])("on signs with the private HTTPS address %s", (publicUrl) => {
     expect(
-      webBotAuthFromEnv(
-        { WEB_BOT_AUTH: "on" },
-        { publicUrl: "https://10.0.0.5", keyEncryptionKey: KEY },
-      )?.agent,
-    ).toBe("https://10.0.0.5");
+      webBotAuthFromEnv(ON, { publicUrl, keyEncryptionKey: KEY })?.agent,
+    ).toBe(publicUrl);
   });
 
   test("an unknown switch value is refused", () => {
@@ -92,29 +93,32 @@ describe("whether Web Bot Auth is on", () => {
     ).toThrow("WEB_BOT_AUTH must be on or off");
   });
 
-  test("reaches the configuration, and stays off in an ordinary local one", () => {
+  test("reaches the configuration, and stays off without the switch", () => {
     expect(loadConfig(testEnvironment()).webBotAuth).toBeUndefined();
     expect(
-      loadConfig(testEnvironment({ OPENBOT_PUBLIC_URL: PUBLIC })).webBotAuth
-        ?.agent,
+      loadConfig(testEnvironment({ OPENBOT_PUBLIC_URL: PUBLIC })).webBotAuth,
+    ).toBeUndefined();
+    expect(
+      loadConfig(testEnvironment({ OPENBOT_PUBLIC_URL: PUBLIC, ...ON }))
+        .webBotAuth?.agent,
     ).toBe(PUBLIC);
   });
 });
 
 describe("the signing key", () => {
   test("is derived from the deployment key, the same on every replica and restart", () => {
-    const first = webBotAuthFromEnv(
-      {},
-      { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-    );
-    const second = webBotAuthFromEnv(
-      {},
-      { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-    );
-    const other = webBotAuthFromEnv(
-      {},
-      { publicUrl: PUBLIC, keyEncryptionKey: OTHER_KEY },
-    );
+    const first = webBotAuthFromEnv(ON, {
+      publicUrl: PUBLIC,
+      keyEncryptionKey: KEY,
+    });
+    const second = webBotAuthFromEnv(ON, {
+      publicUrl: PUBLIC,
+      keyEncryptionKey: KEY,
+    });
+    const other = webBotAuthFromEnv(ON, {
+      publicUrl: PUBLIC,
+      keyEncryptionKey: OTHER_KEY,
+    });
     expect(first?.privateJwk).toEqual(second?.privateJwk as JsonWebKey);
     expect(first?.keyid).not.toBe(other?.keyid);
     // One way: the deployment key is not the signing key or anything in the published directory.
@@ -124,7 +128,7 @@ describe("the signing key", () => {
   test("is WEB_BOT_AUTH_KEY when given", () => {
     const jwk = generatedJwk();
     const identity = webBotAuthFromEnv(
-      { WEB_BOT_AUTH_KEY: JSON.stringify(jwk) },
+      { ...ON, WEB_BOT_AUTH_KEY: JSON.stringify(jwk) },
       { publicUrl: PUBLIC, keyEncryptionKey: KEY },
     );
     expect(identity?.publicJwk).toEqual({
@@ -138,7 +142,7 @@ describe("the signing key", () => {
     const jwk = { ...generatedJwk(), x: generatedJwk().x };
     expect(() =>
       webBotAuthFromEnv(
-        { WEB_BOT_AUTH_KEY: JSON.stringify(jwk) },
+        { ...ON, WEB_BOT_AUTH_KEY: JSON.stringify(jwk) },
         { publicUrl: PUBLIC, keyEncryptionKey: KEY },
       ),
     ).toThrow("does not match");
@@ -152,7 +156,7 @@ describe("the signing key", () => {
       let message = "";
       try {
         webBotAuthFromEnv(
-          { WEB_BOT_AUTH_KEY: value },
+          { ...ON, WEB_BOT_AUTH_KEY: value },
           { publicUrl: PUBLIC, keyEncryptionKey: KEY },
         );
       } catch (error) {
@@ -164,20 +168,20 @@ describe("the signing key", () => {
   });
 
   test("is named by its RFC 7638 thumbprint, as the reference signer names it", async () => {
-    const identity = webBotAuthFromEnv(
-      {},
-      { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-    );
+    const identity = webBotAuthFromEnv(ON, {
+      publicUrl: PUBLIC,
+      keyEncryptionKey: KEY,
+    });
     const signer = await signerFromJWK(identity?.privateJwk as JsonWebKey);
     expect(identity?.keyid).toBe(signer.keyid);
   });
 });
 
 describe("the key directory", () => {
-  const identity = webBotAuthFromEnv(
-    {},
-    { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-  )!;
+  const identity = webBotAuthFromEnv(ON, {
+    publicUrl: PUBLIC,
+    keyEncryptionKey: KEY,
+  })!;
 
   test("publishes the public key and nothing private", async () => {
     const response = await directoryResponse(
@@ -271,7 +275,7 @@ describe("the key directory", () => {
 
   test("is served at the well-known path when on, and not served when off", async () => {
     const on = createApp(
-      loadConfig(testEnvironment({ OPENBOT_PUBLIC_URL: PUBLIC })),
+      loadConfig(testEnvironment({ OPENBOT_PUBLIC_URL: PUBLIC, ...ON })),
     );
     const served = await on.request(`${PUBLIC}${DIRECTORY_PATH}`);
     expect(served.status).toBe(200);
@@ -287,10 +291,10 @@ describe("the key directory", () => {
 });
 
 describe("handing the key to a computer", () => {
-  const identity = webBotAuthFromEnv(
-    {},
-    { publicUrl: PUBLIC, keyEncryptionKey: KEY },
-  )!;
+  const identity = webBotAuthFromEnv(ON, {
+    publicUrl: PUBLIC,
+    keyEncryptionKey: KEY,
+  })!;
 
   async function pushedBody(webBotAuth?: typeof identity) {
     let body: unknown;

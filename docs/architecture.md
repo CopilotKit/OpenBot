@@ -136,7 +136,7 @@ Handovers are audited as control events:
 
 While a person controls the browser, Bot actions are refused rather than queued. A run with no browser attached pauses instead, waiting on the handover.
 
-The handover is also the designed fallback for a bot check a Bot cannot pass (a "Verify you are human" page, a CAPTCHA). OpenBot reduces how often that happens (headed Chromium, Web Bot Auth signatures, an optional residential proxy; see [Getting past bot checks](configuration.md#getting-past-bot-checks)) and never solves one on anyone's behalf: the Bot asks, the person solves it in the live screen, and hands back. A help request records the page it was made on, so a computer that restarted in between reopens that page rather than handing over a blank browser.
+The handover is also the designed fallback for a bot check a Bot cannot pass (a "Verify you are human" page, a CAPTCHA). OpenBot reduces how often that happens (headed Chromium, optional Web Bot Auth signatures, an optional residential proxy; see [Getting past bot checks](configuration.md#getting-past-bot-checks)) and never solves one on anyone's behalf: the Bot asks, the person solves it in the live screen, and hands back. A help request records the page it was made on, so a computer that restarted in between reopens that page rather than handing over a blank browser.
 
 Secret entry is separate from chat content. The audit trail records that a secret was requested or supplied and the character count, not the secret value.
 

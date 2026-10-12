@@ -8,12 +8,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Four things change for an existing deployment:
+**Before upgrading.** Three things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
-- A deployment whose public URL is https on a public address starts signing its Bots' requests with
-  Web Bot Auth; `WEB_BOT_AUTH=off` (Helm: `config.webBotAuth: "off"`) prevents it.
 - Migration `0054_memory_on_intelligence` adds two columns to `personal_memories`. On a deployment
   entitled to Intelligence memory, the memory sweep then copies existing reviewed, switched-on memories
   into Intelligence, a few people at a time each minute; it is idempotent and safe to interrupt.
@@ -33,8 +31,9 @@ computer and leave the person a blank page to solve. Now:
 - A hosted computer runs headed Chromium on its own virtual display, behind the same live screen.
   Headless Chromium is what bot checks catch first. A computer still run headless no longer calls
   itself `HeadlessChrome`.
-- With a public https URL, every request a Bot's browser sends is signed with Web Bot Auth and the
-  key is published at `/.well-known/http-message-signatures-directory`. Register the deployment once
+- Web Bot Auth, off unless switched on: with `WEB_BOT_AUTH=on` (Helm: `config.webBotAuth: "on"`)
+  and an https public URL, every request a Bot's browser sends is signed and the key is published at
+  `/.well-known/http-message-signatures-directory`. Register the deployment once
   with Cloudflare (Bot Submission Form, Request Signature) for sites that allow signed agents to let
   Bots through. See docs/configuration.md. Every site a Bot visits sees the deployment's URL.
 - A residential or ISP proxy is a first-class setting: `EGRESS_PROXY_DEFAULT`, or on Helm

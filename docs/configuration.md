@@ -622,7 +622,7 @@ is still the record.
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
 | `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |
-| `WEB_BOT_AUTH`                       | `on` or `off`. Unset means on when the public URL is https on a public address, off otherwise. See [Web Bot Auth](#web-bot-auth). |
+| `WEB_BOT_AUTH`                       | `on` or `off`. Unset means off. `on` needs an https public URL. See [Web Bot Auth](#web-bot-auth). |
 | `WEB_BOT_AUTH_KEY`                   | The Web Bot Auth signing key, an Ed25519 private JWK. Unset derives one from `KEY_ENCRYPTION_KEY`. Never logged. |
 | `OPENBOT_LOCAL_COMPUTER_DIR`         | Local startup helper's absolute data root. Defaults to the platform's OpenBot user-data directory; contains `profiles/` and `workspace/`. |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
@@ -829,8 +829,9 @@ for when none of them is enough.
 1. **A real browser.** Headed Chromium, the default for hosted computers (see above). Headless
    Chromium is what bot checks are best at spotting, and is challenged even from a residential
    address.
-2. **Web Bot Auth.** The browser signs every request as coming from this deployment, the way
-   OpenAI's agent does. A site that allows signed agents lets it through. See below.
+2. **Web Bot Auth, off unless you switch it on.** The browser signs every request as coming from
+   this deployment, the way OpenAI's agent does. A site that allows signed agents lets it through.
+   See below.
 3. **Where the traffic leaves from.** A datacenter address is the other thing bot checks key on. A
    residential or ISP proxy changes it. See [Residential or ISP proxy](#residential-or-isp-proxy).
 4. **The handoff, which is the designed fallback.** When a site still challenges (a "Verify you are
@@ -852,13 +853,14 @@ Cloudflare's signed-agent scheme, built on HTTP Message Signatures (RFC 9421). W
   the browser as each request leaves it, so the egress filter still judges every connection, TLS is
   still Chromium's own, cookies are unchanged, and no CORS preflight is added.
 
-**When it is on.** `WEB_BOT_AUTH` unset means on when `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`)
-is https on a public address, and off otherwise. A verifier has to fetch the key from the internet
-over HTTPS, so a laptop on `http://localhost:3001` would only be signing with a directory nobody can
-read. A private address (`10.x`, `192.168.x`, `*.internal`, a single-label name) stays off unless
-`WEB_BOT_AUTH=on`, because only the operator knows whether their verifier reaches it. `on` with plain
-http or a loopback address is refused at start-up; `off` turns it off anywhere. On Helm,
-`config.webBotAuth`.
+**When it is on.** Only when `WEB_BOT_AUTH=on` (on Helm, `config.webBotAuth: "on"`). Unset or `off`
+means off, whatever the address. An OpenBot deployment is private by design, and signing announces
+it: every site a Bot visits sees the deployment's URL, and Cloudflare will only register a key
+directory it can fetch from the internet. So it is a deliberate choice, made by an operator whose
+public URL is reachable and who wants sites to know their Bots. `on` needs `OPENBOT_PUBLIC_URL` (or
+`BETTER_AUTH_URL`) to be https and not this machine, and is refused at start-up otherwise. A private
+https address (`10.x`, `192.168.x`, `*.internal`, a single-label name) is accepted, because only the
+operator knows whether their verifier reaches it.
 
 **The key.** Derived from `KEY_ENCRYPTION_KEY` (one way, with HKDF), so every replica and restart
 signs with the same key and nothing new is needed to start. `WEB_BOT_AUTH_KEY` names one instead, an
@@ -883,7 +885,7 @@ Bot Auth read the same directory.
 
 **What it tells sites.** Every site a Bot visits, Cloudflare-fronted or not, sees this deployment's
 public URL in `Signature-Agent`. That is the point (an honest agent says who it is), and it is why
-the switch exists.
+it is off unless switched on.
 
 **What is signed.** Every request the browser sends, whatever sent it: pages, redirects,
 subresources, cross-site frames running in processes of their own, dedicated workers, and service

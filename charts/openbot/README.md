@@ -539,10 +539,11 @@ and hands back) is the designed fallback when they are not enough. The full expl
 own Xvfb, in `shared` and `sandbox` mode alike, behind the same live screen. `headless` is still
 there and uses less memory; it is the browser bot checks are best at spotting.
 
-**Web Bot Auth, on whenever `config.publicUrl` is https on a public address.** Every request a Bot's browser sends is
-signed as coming from this deployment, and the key is published at
-`<publicUrl>/.well-known/http-message-signatures-directory`. `config.webBotAuth: "on"` or `"off"`
-decides it explicitly. The key is derived from `secrets.keyEncryptionKey`; `secrets.webBotAuthKey`
+**Web Bot Auth, off unless `config.webBotAuth: "on"`.** Every request a Bot's browser sends is
+then signed as coming from this deployment, and the key is published at
+`<publicUrl>/.well-known/http-message-signatures-directory`. It announces the deployment's URL to
+every site a Bot visits, and it needs an https `config.publicUrl` that Cloudflare can reach, so a
+private deployment leaves it off. The key is derived from `secrets.keyEncryptionKey`; `secrets.webBotAuthKey`
 (an Ed25519 private JWK, key `web-bot-auth-key` in a Secret of your own) replaces it. It earns
 nothing until the deployment is registered with Cloudflare, once, by hand:
 

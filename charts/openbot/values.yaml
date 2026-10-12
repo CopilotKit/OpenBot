@@ -122,9 +122,9 @@ config:
   # Web Bot Auth: every request a Bot's browser makes is signed as coming from this deployment, and
   # the public key is published at `<publicUrl>/.well-known/http-message-signatures-directory`, so a
   # site behind Cloudflare that allows signed agents lets the Bot through instead of challenging it.
-  # Empty means on whenever `publicUrl` is https on a public address (verifiers must be able to fetch
-  # the key), off otherwise; `on` or `off` decides it, and `on` also signs behind a private address. Signing earns nothing until the deployment is registered
-  # with Cloudflare, a manual step described in the chart README. The key is derived from
+  # Off unless "on": signing announces the deployment's URL to every site a Bot visits. "on" needs an
+  # https `publicUrl` (verifiers fetch the key from it) and earns nothing until the deployment is
+  # registered with Cloudflare, a manual step described in the chart README. The key is derived from
   # `secrets.keyEncryptionKey` unless `secrets.webBotAuthKey` gives one.
   webBotAuth: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.

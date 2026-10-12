@@ -99,13 +99,10 @@ function thumbprint(x: string): string {
 }
 
 /**
- * Where a verifier could fetch the directory from: `public` for an https address on the internet,
- * `private` for https on a private or single-label name (an intranet verifier, perhaps), and
- * undefined for anything that is not https or is this machine.
+ * The origin a verifier fetches the directory from, or undefined for anything that is not https or
+ * is this machine, where no verifier could ever read it.
  */
-function httpsReach(
-  url: string | undefined,
-): { origin: string; reach: "public" | "private" } | undefined {
+function httpsOrigin(url: string | undefined): string | undefined {
   if (!url) return undefined;
   let parsed: URL;
   try {
@@ -123,33 +120,17 @@ function httpsReach(
   ) {
     return undefined;
   }
-  const octets = host.split(".").map(Number);
-  const [a = -1, b = -1] = octets;
-  const privateAddress =
-    (octets.length === 4 &&
-      octets.every((octet) => Number.isInteger(octet)) &&
-      (a === 10 ||
-        (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) ||
-        (a === 169 && b === 254) ||
-        (a === 100 && b >= 64 && b <= 127))) ||
-    /^f[cd]|^fe[89ab]/.test(host) ||
-    !host.includes(".") ||
-    /\.(local|internal|lan|home\.arpa|test)$/.test(host);
-  return {
-    origin: parsed.origin,
-    reach: privateAddress ? "private" : "public",
-  };
+  return parsed.origin;
 }
 
 /**
  * The deployment's Web Bot Auth identity, or undefined when it is off.
  *
- * `WEB_BOT_AUTH=on|off`; unset means on whenever the deployment has a public HTTPS address
- * (`OPENBOT_PUBLIC_URL`, else `BETTER_AUTH_URL`), because the directory has to be fetchable over
- * HTTPS from the internet for the signatures to mean anything, and off otherwise: plain http, this
- * machine, or a private address. `on` also signs with a private HTTPS address, and is refused for
- * plain http or this machine rather than signing with a directory nobody can read.
+ * Off unless `WEB_BOT_AUTH=on`. A signed request names the deployment's URL to every site a Bot
+ * visits, and an OpenBot deployment is private by design, so signing is the operator's deliberate
+ * choice, never inferred from the address. `on` needs an https `OPENBOT_PUBLIC_URL` (else
+ * `BETTER_AUTH_URL`) that is not this machine, because that is where verifiers fetch the key; it is
+ * refused for plain http or loopback rather than signing with a directory nobody can read.
  *
  * The key is `WEB_BOT_AUTH_KEY` (an Ed25519 private JWK) when given, otherwise derived from
  * `KEY_ENCRYPTION_KEY` with HKDF, so every replica and every restart signs with the same key and a
@@ -165,20 +146,13 @@ export function webBotAuthFromEnv(
       `WEB_BOT_AUTH must be on or off, not ${JSON.stringify(environment.WEB_BOT_AUTH)}.`,
     );
   }
-  if (switchValue === "off") return undefined;
-  const reach = httpsReach(options.publicUrl);
-  if (!reach) {
-    if (switchValue === "on") {
-      throw new Error(
-        "WEB_BOT_AUTH=on needs an HTTPS address in OPENBOT_PUBLIC_URL (or BETTER_AUTH_URL) other than this machine, where verifiers fetch the signing key.",
-      );
-    }
-    return undefined;
+  if (switchValue !== "on") return undefined;
+  const agent = httpsOrigin(options.publicUrl);
+  if (!agent) {
+    throw new Error(
+      "WEB_BOT_AUTH=on needs an HTTPS address in OPENBOT_PUBLIC_URL (or BETTER_AUTH_URL) other than this machine, where verifiers fetch the signing key.",
+    );
   }
-  // On by itself only where the internet can read the key. A private address is the operator's
-  // call, since only they know whether their verifier can reach it.
-  if (reach.reach === "private" && switchValue !== "on") return undefined;
-  const agent = reach.origin;
   const explicit = environment.WEB_BOT_AUTH_KEY?.trim();
   const privateJwk = explicit
     ? parseJwk(explicit)
