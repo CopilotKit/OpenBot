@@ -145,20 +145,25 @@ async function emitRestorationProof(modelModule: ModelModule) {
   }
 }
 
+/**
+ * A refused, reset or broken connection, however this Bun spells it. Bun 1.3 threw an Error with
+ * `code: "ConnectionRefused"`; Bun 1.4 throws a TypeError with `code: "ECONNREFUSED"` and the code
+ * prefixed to the message. Node-style errors carry it on `cause`. Matched on codes, not message text.
+ */
+const STOPPED_LISTENER_CODES = new Set([
+  "ConnectionRefused",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+]);
+
 function fetchFailureLooksLikeStoppedListener(error: unknown) {
   if (!(error instanceof Error)) return false;
-  if (
-    error.message ===
-    "Unable to connect. Is the computer able to access the url?"
-  ) {
-    return true;
-  }
-
+  const code = (error as { code?: unknown }).code;
   const cause = (error as { cause?: { code?: unknown } }).cause;
   return (
-    cause?.code === "ECONNREFUSED" ||
-    cause?.code === "ECONNRESET" ||
-    cause?.code === "EPIPE"
+    (typeof code === "string" && STOPPED_LISTENER_CODES.has(code)) ||
+    (typeof cause?.code === "string" && STOPPED_LISTENER_CODES.has(cause.code))
   );
 }
 

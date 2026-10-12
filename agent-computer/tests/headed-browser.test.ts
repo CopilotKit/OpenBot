@@ -35,6 +35,7 @@ async function freePort(): Promise<number> {
 
 let base = "";
 let root = "";
+let site: ReturnType<typeof Bun.serve> | undefined;
 
 function api(path: string, init?: RequestInit) {
   return fetch(`${base}${path}`, {
@@ -59,6 +60,18 @@ beforeAll(async () => {
   if (process.platform === "linux") delete process.env.COMPUTER_BROWSER_MODE;
   else process.env.COMPUTER_BROWSER_MODE = "headed";
   process.env.PORT = String(port);
+  // No API server pushes this computer a network policy, so it browses before one arrives, as in
+  // demonstration-live.test.ts. The page is served over http because `/navigate` refuses data: URLs.
+  process.env.EGRESS_POLICY_REQUIRED = "0";
+  site = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () =>
+      new Response(
+        "<!doctype html><body></body><script>document.body.textContent=navigator.userAgent+'\\nwebdriver='+navigator.webdriver</script>",
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      ),
+  });
   process.env.PROFILES_DIR = join(root, "profiles");
   process.env.WORKSPACE_DIR = join(root, "workspace");
   await mkdir(process.env.PROFILES_DIR, { recursive: true });
@@ -68,16 +81,13 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!asked) return;
   await api("/computers/stop", { method: "POST" }).catch(() => undefined);
+  site?.stop(true);
   await rm(root, { recursive: true, force: true });
 }, 30_000);
 
 describe.skipIf(!asked)("a browser a person can take over", () => {
   test("is full Chromium rather than the headless shell", async () => {
-    const page =
-      "data:text/html," +
-      encodeURIComponent(
-        "<body></body><script>document.body.textContent=navigator.userAgent+'\\nwebdriver='+navigator.webdriver</script>",
-      );
+    const page = `http://127.0.0.1:${site?.port}/`;
     const navigated = await api("/navigate", {
       method: "POST",
       body: JSON.stringify({ url: page }),

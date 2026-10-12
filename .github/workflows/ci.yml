@@ -319,6 +319,10 @@ jobs:
       # Bot's own tree and not in the root one.
       - run: bun install --frozen-lockfile
         working-directory: agent-langgraph
+      # Same for the computer: its Web Bot Auth tests import `web-bot-auth`, which lives in
+      # agent-computer's own tree and not in the root one.
+      - run: bun install --frozen-lockfile
+        working-directory: agent-computer
       # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
       # from that Bot's own dependency tree.
       - run: bun install
