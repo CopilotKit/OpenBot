@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Memory lives in CopilotKit Intelligence
+
+A deployment entitled to Intelligence memory now keeps its people's memories there: Intelligence holds
+the content and ranks recall, and memories another app on the same project formed for a person appear
+in their Memory page and reach their Bots. OpenBot still records each memory's provenance, review state
+and which Bot or source it came from, and applies those rules to everything Intelligence returns, so a
+Bot-formed memory still reaches only the Bot that formed it. Without Intelligence memory nothing changes:
+OpenBot's own tables remain the store.
+
+**Before upgrading.** Migration `0054_memory_on_intelligence` adds two columns to `personal_memories`.
+On an entitled deployment, the memory sweep then copies existing reviewed, switched-on memories into
+Intelligence, a few people at a time each minute; it is idempotent and safe to interrupt. Memories
+awaiting review, paused or forgotten stay local until that changes.
+
 ## 0.2.0
 
 **Before upgrading.** Two things change for an existing deployment:

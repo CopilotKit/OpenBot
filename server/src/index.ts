@@ -188,6 +188,7 @@ import {
 import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
@@ -1077,7 +1078,14 @@ const hostAccessBroker = createHostAccessBroker(Date.now, {
 // grant, the policy and the audit row are exactly where they were. Host-folder tools are also
 // server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
 // receives only opaque grant ids and relative paths.
-const personalMemoryStore = createMemoryStore(database);
+// Memory lives in CopilotKit Intelligence when this deployment is entitled to it, and in OpenBot's own
+// tables when it is not; see memory/store.ts. Its own client, like the thread reader's: the
+// constructor opens nothing.
+const personalMemoryStore = createMemoryStore(database, {
+  intelligence: createIntelligenceMemory({
+    client: createIntelligenceClient(config.runtime.intelligence),
+  }),
+});
 const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
@@ -1109,6 +1117,20 @@ const memorySweep = repeatAfterEach(async () => {
         type: "memory-sweep-error",
         error: error instanceof Error ? error.name : "UnknownError",
         context: { operation: "syncDue" },
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
+  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
+  try {
+    await personalMemoryStore.mirrorPending();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "memory-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        context: { operation: "mirrorPending" },
         timestamp: new Date().toISOString(),
       }),
     );
