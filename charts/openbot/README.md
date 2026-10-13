@@ -163,6 +163,44 @@ helm upgrade --install openbot charts/openbot \
 it in a file anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`,
 so an uninstall does not take the key that every stored credential was encrypted with.
 
+### Pin the image by digest
+
+A tag can be moved; a digest cannot. Each release's `container-images.json` names the digest CI
+tested, and `image.digest` deploys exactly that:
+
+```sh
+gh release download v0.2.0 --pattern container-images.json
+helm upgrade --install openbot charts/openbot ... \
+  --set image.tag=v0.2.0 \
+  --set-string image.digest="$(jq -r '.images.openbot.reference | split("@")[1]' container-images.json)"
+```
+
+The image becomes `repository:tag@digest`, so the tag stays readable and the digest decides what is
+pulled. Anything other than `sha256:` and 64 hex characters is refused at install.
+
+### Your own tenant package
+
+The tenant package is a directory (`config.tenantPackageDir`, `/app/examples/fintech` by default).
+To run your own without building an image, put its files in a ConfigMap and mount it with
+`config.extraVolumes` and `config.extraVolumeMounts`. They reach the server and the routines and
+computer-culler CronJobs, the pods that load the package, so the package is the same wherever it is
+read:
+
+```yaml
+config:
+  tenantPackageDir: /tenant
+  extraVolumes:
+    - name: tenant
+      configMap: { name: my-tenant-package }
+  extraVolumeMounts:
+    - name: tenant
+      mountPath: /tenant
+      readOnly: true
+```
+
+A ConfigMap is flat, so a package that uses `agents/` needs `items` with `path: agents/<file>.yaml`,
+or keeps its coworkers in `agents.yaml`.
+
 ## What the defaults assume
 
 **A plain cluster with no cloud features.** The cluster's own default StorageClass, no RuntimeClass,
@@ -406,6 +444,7 @@ the key in the last column.
 | SCIM provisioning                | `config.scim.enabled`                             | `connectionId`                                            | `scim-bearer-token` (required), `scim-bearer-token-next` (optional) |
 | Inbound email triggers           | `config.inboundEmail.domain` and `snsTopicArns`   | both needed, or the route is not mounted                  |                                                                |
 | OpenTelemetry export             | `config.otel.endpoint` or `logsEndpoint`          | `serviceName`, `paused`                                   | `otel-logs-headers`, `otel-headers` (optional)                 |
+| Composio app catalogue           | `secrets.composioApiKey` (the key is the switch)  |                                                           | `composio-api-key` (server only; see [Composio](../../docs/plugins/composio.md)) |
 
 ```yaml
 config:

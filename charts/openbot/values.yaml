@@ -15,6 +15,11 @@ image:
   # Empty means the chart's appVersion prefixed with `v` (the form published tags take), so an
   # upgrade of the chart moves the image with it. A value set here is used verbatim.
   tag: ""
+  # The image digest, `sha256:` and 64 hex characters, from the release's `container-images.json`.
+  # Set, the image becomes `repository:tag@digest` and Kubernetes pulls exactly those bytes, which is
+  # how docs/releasing.md says to deploy: a tag can be moved, a digest cannot. The tag stays in the
+  # reference for whoever reads it. Empty pulls by tag alone, as before.
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -304,6 +309,20 @@ config:
   # Free-form additions, for anything this chart has no opinion about.
   extraEnv: []
   extraEnvFrom: []
+  # Volumes, and where to mount them, on every pod that loads this deployment's configuration: the
+  # server and the routines and computer-culler CronJobs, the same pods `extraEnv` reaches. The usual
+  # reason is a tenant package of your own, from a ConfigMap, with `tenantPackageDir` pointed at its
+  # mount; every one of those pods reads the package, so mounting it on the server alone is not enough.
+  #
+  #   extraVolumes:
+  #     - name: tenant
+  #       configMap: { name: my-tenant-package }
+  #   extraVolumeMounts:
+  #     - name: tenant
+  #       mountPath: /tenant
+  #       readOnly: true
+  extraVolumes: []
+  extraVolumeMounts: []
 
 # How a Bot gets a computer.
 #
@@ -605,6 +624,10 @@ secrets:
   # store, name `license-token` in `externalSecrets.data` instead; it is passed the same way. That
   # Intelligence needs the licence on its own deployment too, or it refuses memory.
   licenseToken: ""
+  # Optional. One key for the whole deployment, for Composio, the broker holding people's accounts for
+  # a few hundred apps (docs/plugins/composio.md). Passed to the server alone as COMPOSIO_API_KEY.
+  # From a store, name `composio-api-key` in `externalSecrets.data` instead.
+  composioApiKey: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
   # Required when `routines.enabled`: what the CronJob presents to the API server to be recognised

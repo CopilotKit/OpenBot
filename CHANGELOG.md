@@ -47,6 +47,29 @@ carry on and nothing in OpenBot's log says why. The server now asks once at star
 `intelligence-entitlement-unreadable` when Intelligence cannot be asked. Start-up does not wait for
 the answer.
 
+### The server says at boot when its key cannot call the configured model
+
+A key without access to the tenant package's `default_model` passed every start-up check and failed at
+the first message, as "The model … does not exist or you do not have access to it", in front of
+whoever sent it. The server now asks the provider once at start-up and logs `model-unavailable` with
+the model and the fix, or `model-credential-rejected` for a refused key. It asks only OpenAI and
+Anthropic themselves, not an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, says nothing
+while no key is configured, and never delays start-up.
+
+### The Helm chart pins by digest, mounts a tenant package, and takes a Composio key
+
+Three things a deployment on Kubernetes did by hand now have values of their own:
+
+- `image.digest` deploys exactly the image a release's `container-images.json` names, as
+  `repository:tag@digest`. It refuses anything that is not `sha256:` and 64 hex characters.
+- `config.extraVolumes` and `config.extraVolumeMounts` mount volumes on the server and on the routines
+  and computer-culler CronJobs, the pods that load the configuration. A tenant package from a
+  ConfigMap no longer needs a custom image.
+- `secrets.composioApiKey`, or `composio-api-key` named in `externalSecrets.data`, reaches the server
+  as `COMPOSIO_API_KEY`. Only the server receives it, not the CronJobs.
+
+With none of them set, every target renders exactly as before.
+
 ### Fewer "Verify you are human" pages
 
 Sites behind Cloudflare challenged a Bot's browser on sight, and opening one could restart the
