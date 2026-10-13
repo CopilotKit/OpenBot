@@ -32,6 +32,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### Bot turns hold their conversation more carefully
+
+Routines, responsibilities, background research, wake-ups, group turns and Bot-to-Bot handoffs keep a
+lock on the conversation while they run and renew it as they go.
+
+- **A failed renewal no longer stops the turn.** Before, any failed renewal stopped a routine or
+  responsibility turn, including a network blip. A stopped turn is retried from the start, so a Bot
+  that had already sent an email could send it again. Now a turn stops only when Intelligence says
+  the conversation belongs to another run (409).
+- **A handoff that loses its lock now stops.** Before, a handoff ignored every failed renewal and
+  kept writing, even into a person's own channel after they started typing there. Now it stops, gives
+  the conversation back and is retried a minute later.
+- **A paused Bot's handoff no longer locks the conversation.** A handoff now checks that the Bot is
+  not paused, and that "Use Bots" and the model allowlist allow it, before taking the lock. Before,
+  every retry took the lock briefly and could refuse the person's own message.
+- **Routine turns ask for a 120-second lock.** This is the lifetime Intelligence already applies, so
+  nothing changes on today's platform.
+
 ### A sign-in's verification code is asked for after the password
 
 The private sign-in form used to ask for a username, a password and "a verification code, if the
