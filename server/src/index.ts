@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { AbstractAgent } from "@ag-ui/client";
 import {
@@ -8,7 +8,9 @@ import {
 import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
 import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import { workOwner } from "@openbot/shared/work-owner";
-import { and, eq, isNull, } from "drizzle-orm";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -28,17 +30,16 @@ import {
   readApprovedRunAssertion,
   readRunAssertion,
 } from "./agents/callback-token";
-import { canUseComputer, } from "./agents/computer-access";
+import { canUseComputer } from "./agents/computer-access";
 import { createAgentFetch } from "./agents/endpoint";
-import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
-import { createHandoffDelivery } from "./agents/handoff-delivery";
+import { createHandoffDesk } from "./agents/handoff";
 import { createHandoffRunner } from "./agents/handoff-runner";
-import { signHandoffDeliveryRun } from "./agents/handoff-signing";
 import {
   authoriseCoordinationRun,
   createCoordinationTools,
   readCoordinationHandoffClaim,
 } from "./agents/handoff-tool";
+import { startHandoffDelivery } from "./agents/handoff-wiring";
 import {
   configureBotLifecycle,
   createBotLifecycleStore,
@@ -47,6 +48,7 @@ import { createBotReset } from "./agents/lifecycle-reset";
 import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
+import { serverTurnAdmission } from "./agents/turn-admission";
 import {
   createWakeUpRunner,
   createWakeUpStore,
@@ -54,17 +56,15 @@ import {
 } from "./agents/wake-up";
 import { createApp } from "./app";
 import { createApprovedActionExecutor } from "./approvals/execute";
-import {
-  PERSON_QUESTION_WAITING,
-} from "./approvals/question-resume";
+import { createPersonResponseTick } from "./approvals/person-response-sweep";
+import { PERSON_QUESTION_WAITING } from "./approvals/question-resume";
 import {
   createApprovalQuestions,
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
-import {
-  createApprovalService,
-} from "./approvals/service";
+import { createApprovalResumeTick } from "./approvals/resume-sweep";
+import { createApprovalService } from "./approvals/service";
 import { createApprovalStore } from "./approvals/store";
 import {
   ApprovalRefusedError,
@@ -78,7 +78,6 @@ import {
   createAuditReader,
   createAuditStore,
   DEPLOYMENT_INITIATOR,
-  handoffInitiator,
   PERSON_INITIATOR,
   recordAuditEvent,
 } from "./audit";
@@ -158,9 +157,6 @@ import {
 } from "./delivery/routes";
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
-import { createPersonResponseTick } from "./approvals/person-response-sweep";
-import { startHttpServer } from "./http-server";
-import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { DeliveryRefusedError } from "./delivery/types";
 import { createDemonstrationRecorder } from "./demonstrations/recording";
 import { createDemonstrationStore } from "./demonstrations/store";
@@ -169,6 +165,7 @@ import {
   HostAccessRefusedError,
 } from "./host-access/broker";
 import { hostAccessTools } from "./host-access/tools";
+import { startHttpServer } from "./http-server";
 import { githubCallbackRoutes } from "./identity/github-callback";
 import { retireIdentityLinks, retireOwnedAccounts } from "./identity/retire";
 import { slackCodeRedeemer } from "./identity/slack-redeem";
@@ -254,7 +251,6 @@ import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
-import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
@@ -266,19 +262,13 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { markUntrusted } from "./untrusted-content";
 import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";
 import { createVoiceSessionStore } from "./voice/sessions";
 import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
-import {
-  createWorkQueue,
-  startWorkOfferedListener,
-  type WorkOfferedListener,
-} from "./work/queue";
-import { serverTurnAdmission } from "./agents/turn-admission";
+import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -2541,139 +2531,16 @@ const personResponseSweep = repeatAfterEach(
 let workOfferedListener: WorkOfferedListener | undefined;
 
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
-  const runner = createHandoffRunner({
-    queue: createWorkQueue(database),
-    owner: workOwner("handoff"),
-    auditStore: bootAuditStore,
-    /*
-     * The signed statement of the run the addressed Bot is about to start, carrying how deep the
-     * chain has gone. Minted here, where the key lives, and one deeper than the run that asked.
-     */
-    sign: (work, claim) =>
-      signHandoffDeliveryRun(work, config.keyEncryptionKey, undefined, claim),
-    delivery: createHandoffDelivery({
-      admission: serverTurnAdmission,
-      /*
-       * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a
-       * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
-       * agreed to, and the person was told it never answered.
-       */
-      agentFor: async ({ actorId, botId, fromBotId, initiator }) => {
-        const actor = await actorFor(actorId).catch(() => null);
-        if (!actor) {
-          throw new Error(
-            "who this is for could not be confirmed, so the Bot was not run",
-          );
-        }
-        return copilotRuntime.agentFor({
-          actor,
-          botId,
-          initiator: handoffInitiator(fromBotId, initiator),
-        });
-      },
-      history: copilotRuntime.history,
-      lock: copilotRuntime.threadLock,
-      /*
-       * A scratch thread of the addressed Bot's own, one per hop.
-       *
-       * An Intelligence thread has exactly one agent, so a second Bot cannot answer inside the first
-       * Bot's conversation however it asks. Its turn runs here instead, unmapped to any channel, and
-       * what it said comes back to the conversation that asked through the relay — in the asking
-       * Bot's voice, which is the only voice that thread admits. Minted with the deployment's own
-       * identity, like every thread this deployment starts.
-       */
-      mintThreadId: () => threadIdentity.mint(),
-      /*
-       * The roster, told that a relayed answer landed. The delivery knows only the thread it ran
-       * in; this resolves which channel shows that thread — a scratch thread maps to nothing and
-       * announces nowhere, which is the point of a scratch thread.
-       */
-      announce: async (input) => {
-        const [mapped] = await database
-          .select({ channelId: intelligenceChannelMappings.channelId })
-          .from(intelligenceChannelMappings)
-          .where(eq(intelligenceChannelMappings.threadId, input.threadId))
-          .limit(1);
-        // A Bot's group thread maps to no channel; its answer goes to the shared transcript.
-        if (!mapped) {
-          await groupConversations.announceHandoff(input);
-          return;
-        }
-        const actor = await actorFor(input.actorId).catch(() => null);
-        if (!actor) return;
-        await channelStore.recordActivity(actor, mapped.channelId, {
-          text: input.text,
-          agentId: input.agentId,
-          at: new Date(),
-        });
-      },
-      // The asking conversation shown as working while a hop runs in it. Keyed by thread, resolved
-      // to its channel by the store; a scratch thread maps to none and signals nowhere.
-      setBusy: (input) => channelStore.signalBusy(input.threadId, input.busy),
-      newRunId: () => randomUUID(),
-      // The same address and the same token the runtime uses. Assembling either from configuration
-      // produced a runner every join was refused for, because the thread's active run is a lock the
-      // platform issues rather than something an API key can claim.
-      runner: new IntelligenceAgentRunner(
-        copilotRuntime.runnerConnection(),
-      ) as never,
-    }),
+  workOfferedListener = await startHandoffDelivery({
+    config,
+    database,
+    bootAuditStore,
+    actorFor,
+    copilotRuntime,
+    threadIdentity,
+    groupConversations,
+    channelStore,
   });
-
-  const sweep = async () => {
-    try {
-      const report = await runner.sweep();
-      if (report.delivered.length > 0 || report.skipped.length > 0) {
-        console.info(JSON.stringify({ type: "bot-handoff", ...report }));
-      }
-    } catch (error) {
-      // A sweep that failed must not take the loop with it: the next one may find the database back.
-      console.warn(
-        "[handoff] a sweep could not run:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-  };
-
-  /*
-   * ONE SWEEP AT A TIME ON THIS REPLICA, from both callers below. A sweep poked while one is
-   * running is remembered rather than started, and runs once the current one ends — a wake-up
-   * that arrived mid-sweep may be for a hop the running sweep's claim already missed.
-   */
-  let sweeping = false;
-  let sweepAgain = false;
-  const kick = async () => {
-    if (sweeping) {
-      sweepAgain = true;
-      return;
-    }
-    sweeping = true;
-    try {
-      do {
-        sweepAgain = false;
-        await sweep();
-      } while (sweepAgain);
-    } finally {
-      sweeping = false;
-    }
-  };
-
-  /*
-   * Woken by the queue itself, from any replica: a person is waiting through every hop, and the
-   * poll below would spend up to two seconds per leg doing nothing. The poll stays as the
-   * backstop — a notification is a latency optimisation, and one lost in transit costs one
-   * interval, never the work. See repeatAfterEach for why an interval must not be used: an
-   * interval would start another sweep every two seconds while a five-minute delivery runs, each
-   * claiming a different batch, and this replica's concurrent agent runs would grow with the
-   * backlog rather than stopping at the limit it was asked for.
-   */
-  workOfferedListener = await startWorkOfferedListener(
-    config.databaseUrl,
-    (kind) => {
-      if (kind === HANDOFF_KIND) void kick();
-    },
-  );
-  repeatAfterEach(kick, 2_000);
 }
 
 /*
