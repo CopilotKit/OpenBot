@@ -16,7 +16,8 @@ describe("the default memory source for an app", () => {
     ["allOf", { allOf: [{ required: ["query"] }] }],
     ["anyOf", { anyOf: [{ required: ["query"] }] }],
     ["oneOf", { oneOf: [{ required: ["query"] }] }],
-    ["a conditional", { if: {}, then: { required: ["query"] } }],
+    // JSON Schema's conditional really is named `then`; parsed, so it is never a thenable literal.
+    ["a conditional", JSON.parse('{"if":{},"then":{"required":["query"]}}')],
     ["a $ref", { $ref: "#/$defs/search" }],
     ["top level", { required: ["query"] }],
   ])(
