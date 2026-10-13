@@ -4,7 +4,6 @@ import {
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
-import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import { workOwner } from "@openbot/shared/work-owner";
 import { createTurnRunner } from "@openbot/toolkit/run-turn";
 import { and, eq, isNull } from "drizzle-orm";
@@ -56,11 +55,7 @@ import {
 } from "./approvals/questions";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { createApprovalStore } from "./approvals/store";
-import {
-  ApprovalRefusedError,
-  parseApprovalContinuation,
-  parseApprovalResult,
-} from "./approvals/types";
+import { ApprovalRefusedError } from "./approvals/types";
 import { createServerApprovalService } from "./approvals/wiring";
 import {
   type AuditInitiator,
@@ -226,10 +221,6 @@ import {
   inboundEmailConfigFromEnv,
 } from "./responsibilities/email";
 import {
-  createResponsibilityEngine,
-  type ResponsibilityEngine,
-} from "./responsibilities/engine";
-import {
   createSlackTriggerIngest,
   slackAccessFrom,
   useSlackChannelMembership,
@@ -241,6 +232,7 @@ import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
+import { createServerResponsibilityEngine } from "./responsibilities/wiring";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
@@ -252,7 +244,6 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
-import { markUntrusted } from "./untrusted-content";
 import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";
 import { createVoiceSessionStore } from "./voice/sessions";
@@ -1614,115 +1605,22 @@ const copilotRuntime = mountCopilotRuntime(
   },
 );
 
-const responsibilityQueue = createWorkQueue(database);
-const responsibilityEngine: ResponsibilityEngine = createResponsibilityEngine({
-  store: responsibilityStore,
-  queue: responsibilityQueue,
-  runTurn: async (context) => {
-    const initiator: AuditInitiator = {
-      kind: "responsibility",
-      id: context.responsibilityId,
-    };
-    const tools = responsibilityTools({
-      store: responsibilityStore,
-      engine: responsibilityEngine,
-      ownerUserId: context.ownerUserId,
-      agentId: context.agentId,
-      channelId: context.channelId,
-      responsibilityRunId: context.runId,
-    });
-    const runner = createTurnRunner({
-      admission: serverTurnAdmission,
-      intelligence: routineIntelligence,
-      runner: routineAgentRunner,
-      components: componentCatalog,
-      buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
-      toolsForTurn: async () => {
-        const actor = await actorFor(context.ownerUserId);
-        // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
-        const computer =
-          computerGateway &&
-          canUseComputer(
-            await agentProfileStore
-              .get(actor, context.agentId)
-              .catch(() => null),
-            actor,
-          )
-            ? createHeadlessComputerTools({
-                gateway: computerGateway,
-                botId: context.agentId,
-                actor: { id: actor.id, userId: actor.id, initiator },
-                auditStore: bootAuditStore,
-                ...(signInService ? { signIn: signInService } : {}),
-              })
-            : [];
-        return [
-          ...computer,
-          ...tools.map((tool) => ({
-            definition: {
-              name: tool.name,
-              description: tool.description,
-              parameters: z.toJSONSchema(tool.parameters),
-            },
-            execute: (args: unknown) => tool.execute(args),
-          })),
-        ];
-      },
-      learningContainerForThread: (input) =>
-        copilotRuntime.learning?.containerForThread(input) ??
-        Promise.resolve(undefined),
-    });
-    const saved = context.continuation;
-    const snapshot = saved
-      ? parseApprovalContinuation(saved.waiting.continuation)
-      : undefined;
-    const toolResult = saved ? parseApprovalResult(saved.response) : undefined;
-    return runner({
-      ownerUserId: context.ownerUserId,
-      routineId: context.responsibilityId,
-      agentId: context.agentId,
-      threadId: context.threadId,
-      initiator,
-      signal: context.signal,
-      ...(snapshot && toolResult
-        ? {
-            continuation: {
-              snapshot,
-              result: toolResult,
-              messageId: `responsibility-result:${context.runId}:${snapshot.toolCallId}`,
-            },
-          }
-        : {}),
-      instruction: buildResponsibilityTurn({
-        instruction: context.instruction,
-        successCriteria: context.successCriteria,
-        progress: context.progress,
-        trigger: context.event,
-        eventData: markUntrusted(
-          JSON.stringify(context.event.payload),
-          `${context.event.source} event`,
-        ),
-        responsibilityId: context.responsibilityId,
-      }),
-    });
-  },
-  onReply: async (context, text) => {
-    await channelStore.recordActivity(
-      await actorFor(context.ownerUserId),
-      context.channelId,
-      { text, agentId: context.agentId, at: new Date() },
-      { id: `responsibility:${context.runId}` },
-    );
-    await deliveryNotifications(
-      {
-        ownerUserId: context.ownerUserId,
-        channelId: context.channelId,
-        agentId: context.agentId,
-        threadId: context.threadId,
-      },
-      { id: `responsibility:${context.runId}`, kind: "reply", text },
-    );
-  },
+const responsibilityEngine = createServerResponsibilityEngine({
+  database,
+  responsibilityStore,
+  routineIntelligence,
+  routineAgentRunner,
+  componentCatalog,
+  buildAgentFor,
+  actorFor,
+  computerGateway,
+  agentProfileStore,
+  bootAuditStore,
+  signInService,
+  copilotRuntime,
+  channelStore,
+  // Assigned further down, once delivery is wired.
+  notify: (scope, input) => deliveryNotifications(scope, input),
 });
 /**
  * A turn for a responsibility that is not one of the engine's own firings: a person answering the
