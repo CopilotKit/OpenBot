@@ -49,7 +49,11 @@
                     "message": "The toolkit runs turns without the server. Take what it needs as a port in toolkit/ports.ts instead of importing server code."
                   },
                   {
-                    "group": ["./copilotkit/**"],
+                    "group": [
+                      "./copilotkit/**",
+                      "@openbot/toolkit/copilotkit",
+                      "@openbot/toolkit/copilotkit/**"
+                    ],
                     "message": "The toolkit core does not depend on CopilotKit. Code that needs @copilotkit/runtime lives in toolkit/src/copilotkit and imports the core, not the other way round."
                   },
                   {
