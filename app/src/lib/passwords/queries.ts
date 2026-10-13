@@ -25,6 +25,8 @@ export type SignInRequest = {
   method: "typed" | "saved" | "takeover" | null;
   /** The last thing that happened, e.g. why a submitted login did not work. */
   outcome: string | null;
+  /** The open chat's tool call that asked, so its card can find this request. */
+  toolCallId: string | null;
   controlRequestId: string | null;
   createdAt: string;
   expiresAt: string;
@@ -46,6 +48,7 @@ export const passwordKeys = {
   all: ["passwords"] as const,
   logins: () => ["passwords", "logins"] as const,
   signIn: (id: string) => ["passwords", "sign-in", id] as const,
+  pending: () => ["passwords", "sign-in-requests"] as const,
 };
 
 export const FINAL_SIGN_IN: readonly SignInStatus[] = [
@@ -64,6 +67,21 @@ export function signInRequestQueryOptions(id: string) {
           fallback: "Could not load this sign-in request",
         })
       ).json(),
+  });
+}
+
+/** This person's open sign-in requests, newest first. */
+export function pendingSignInRequestsQueryOptions() {
+  return queryOptions({
+    queryKey: passwordKeys.pending(),
+    queryFn: async (): Promise<SignInRequest[]> =>
+      (
+        (await (
+          await client("/api/sign-in-requests", {
+            fallback: "Could not load your sign-in requests",
+          })
+        ).json()) as { requests: SignInRequest[] }
+      ).requests,
   });
 }
 
