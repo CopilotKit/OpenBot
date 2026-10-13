@@ -11,7 +11,7 @@ import {
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
 import { withApprovalContext } from "../approvals/types";
-import type { AuditInitiator } from "../audit";
+import type { AuditInitiator } from "./initiator";
 
 /** Client tools supplied by OpenBot when the caller has no browser. */
 export type HeadlessTool = {

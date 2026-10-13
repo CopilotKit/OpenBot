@@ -13,6 +13,7 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
+import type { AuditInitiator } from "./toolkit/initiator";
 import type { AuditSink } from "./toolkit/ports";
 
 const sensitiveKeys = new Set([
@@ -555,14 +556,7 @@ export const auditEventTypes = [
 
 export type AuditEventType = (typeof auditEventTypes)[number];
 
-/** What caused a row, where `actorUserId` is only whose authority it borrowed. */
-export type AuditInitiator =
-  | { kind: "person" }
-  | { kind: "deployment" }
-  | { kind: "routine"; id: string }
-  | { kind: "responsibility"; id: string }
-  | { kind: "memory"; id: string }
-  | { kind: "handoff"; id: string; origin?: AuditInitiator };
+export type { AuditInitiator };
 
 export const PERSON_INITIATOR: AuditInitiator = { kind: "person" };
 

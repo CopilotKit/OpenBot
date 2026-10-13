@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AuditInitiator } from "../audit";
+import type { AuditInitiator } from "./initiator";
 
 /** A tool a Bot holds, as the built-in runtime is handed it and executes it on the server. */
 export type GrantedTool = {
