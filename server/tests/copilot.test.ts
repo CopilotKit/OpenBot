@@ -1882,7 +1882,7 @@ describe("where an attachment reaches the model, and where it deliberately does 
   ];
 
   test("a built-in Bot's run fails naming the attachment it could not load", async () => {
-    // Protects `BuiltInAgentWithSaneHistory.run` (copilot.ts:~924). Drop the
+    // Protects `BuiltInAgentWithSaneHistory.run` (toolkit/src/copilotkit/agents.ts). Drop the
     // `inlineAttachments` call there and this run completes instead of erroring.
     const agents = await buildAgents(
       [assistant],
@@ -1953,7 +1953,7 @@ describe("where an attachment reaches the model, and where it deliberately does 
 
   test("the narrowed built-in path reads the attachment once, not twice", async () => {
     /*
-     * Protects the exclusion: `RunBuiltAgent.run` (copilot.ts:~989) deliberately does not call
+     * Protects the exclusion: `RunBuiltAgent.run` (toolkit/src/copilotkit/agents.ts) deliberately does not call
      * `resolveAttachmentParts` itself. It only delegates to the built-in agent its `build()`
      * produces, and that agent's own `run` is what inlines the attachment. Re-adding the call at
      * `RunBuiltAgent.run` would read the same attachment a second time, which is what turns this
