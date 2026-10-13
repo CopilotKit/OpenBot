@@ -5,9 +5,10 @@ import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { defaultModelFor } from "@openbot/shared/model-providers";
 import { EMPTY, lastValueFrom } from "rxjs";
 import { z } from "zod";
-import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";
@@ -217,6 +218,30 @@ describe("deployment model selection", () => {
       expect(request.model).toBe("gpt-5.6-terra");
     },
   );
+
+  /*
+   * Switching the provider away from the package's own, without naming a model. The two fallbacks are
+   * not the same source: OpenAI's is the built-in Bot's own (it speaks the Responses API), Anthropic's
+   * is the shared spec's. See BUILT_IN_OPENAI_FALLBACK_MODEL in copilot.ts.
+   */
+  test("switched to OpenAI with no model named, the built-in Bot falls back to its own OpenAI model", () => {
+    const model = runtimeModelForEnvironment(
+      { provider: "anthropic", defaultModel: "claude-from-package" },
+      { BOT_PROVIDER: "openai" },
+    );
+    expect(model.provider).toBe("openai");
+    expect(model.defaultModel).toBe("gpt-5.6-terra");
+  });
+
+  test("switched to Anthropic with no model named, the built-in Bot falls back to the shared spec's", () => {
+    const model = runtimeModelForEnvironment(
+      { provider: "openai", defaultModel: "gpt-from-package" },
+      { BOT_PROVIDER: "anthropic" },
+    );
+    expect(model.provider).toBe("anthropic");
+    expect(model.defaultModel).toBe(defaultModelFor("anthropic"));
+    expect(model.defaultModel).toBe("claude-sonnet-4-5");
+  });
 });
 
 describe("registered Copilot agents", () => {

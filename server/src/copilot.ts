@@ -8,6 +8,12 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { defaultModelFor } from "@openbot/shared/model-providers";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { parametersFor } from "@openbot/toolkit/granted-tool";
+import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
+import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
+import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
 import { z } from "zod";
@@ -15,7 +21,6 @@ import {
   type ActorAgentResolver,
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
-import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { createIntelligenceThreadLock } from "./agents/intelligence-thread-lock";
 import {
   PLAN_RUN_COMPLETED,
@@ -24,7 +29,6 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import {
   executeNativeApprovalTool,
   nativeApprovalRun,
@@ -60,10 +64,7 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import type { GrantedTool } from "@openbot/toolkit/granted-tool";
-import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { grantedToolGuidance } from "./plugins/tools";
-import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**
@@ -206,6 +207,18 @@ export function normalizeModelBaseUrls(
   }
 }
 
+/**
+ * The OpenAI model the built-in Bot falls back to when someone switches it to OpenAI and names none.
+ *
+ * DELIBERATELY NOT `defaultModelFor("openai")`, which is `gpt-5.5`. That default is for the remote
+ * Bots: `agent-bot` and several framework Bots speak `/v1/chat/completions`, where the 5.6 models
+ * refuse function tools (`agent-bot/src/index.ts`, and `docker-compose.yml` on `AGENT_BOT_MODEL`).
+ * The built-in Bot speaks the Responses API, so it can run the newer model, and matches the tenant
+ * package's own default (`examples/fintech/model.yaml`). The Anthropic fallback has no such split and
+ * is read from the shared spec.
+ */
+const BUILT_IN_OPENAI_FALLBACK_MODEL = "gpt-5.6-terra";
+
 export function runtimeModelForEnvironment(
   packageModel: RuntimeModel,
   environment: Record<string, string | undefined> = process.env,
@@ -224,8 +237,8 @@ export function runtimeModelForEnvironment(
     provider === packageModel.provider
       ? packageModel.defaultModel
       : provider === "anthropic"
-        ? "claude-sonnet-4-5"
-        : "gpt-5.6-terra";
+        ? defaultModelFor("anthropic")
+        : BUILT_IN_OPENAI_FALLBACK_MODEL;
   const selectedModelApplies =
     provider === "anthropic" ||
     ((!selectedProvider || selectedProvider === "openai") &&
