@@ -203,6 +203,7 @@ import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
+import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
@@ -1124,6 +1125,21 @@ const intentRouter = createIntentRouter({
         environment: process.env,
       }),
   }),
+});
+
+// Said once at boot: whether the key can call the model the Bots run on. A key without access to it
+// otherwise passes every start-up check and fails at the first message, in front of whoever sent it.
+void reportModelAvailability({
+  provider: runtimeModel.provider,
+  model: runtimeModel.defaultModel,
+  apiKey: () =>
+    resolveModelApiKey({
+      encryptionKey: config.keyEncryptionKey,
+      reader: credentialStore,
+      provider: runtimeModel.provider,
+      keyId: tenantPackage.model.credentialSecretRef,
+      environment: process.env,
+    }),
 });
 
 /**

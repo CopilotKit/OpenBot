@@ -1158,6 +1158,8 @@ model:
 
 `provider` must be `openai` or `anthropic`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
 
+At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and start-up never waits for the answer.
+
 ### `knowledge.yaml`
 
 ```yaml

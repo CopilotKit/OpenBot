@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The server says at boot when its key cannot call the configured model
+
+A key without access to the tenant package's `default_model` passed every start-up check and failed at
+the first message, as "The model … does not exist or you do not have access to it", in front of
+whoever sent it. The server now asks the provider once at start-up and logs `model-unavailable` with
+the model and the fix, or `model-credential-rejected` for a refused key. It asks only OpenAI and
+Anthropic themselves, not an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, says nothing
+while no key is configured, and never delays start-up.
+
 **Before upgrading.** Four things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
