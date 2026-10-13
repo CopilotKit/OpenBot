@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { accessFor } from "../plugins/access";
 import type { Decides } from "../plugins/broker";
 import { catalogueEntry } from "../plugins/catalogue";
+import { asksForArguments } from "../plugins/composio";
 import { type AccountAnswer, accountFor } from "../plugins/shared-accounts";
 import { PluginRefusedError, type PluginStore } from "../plugins/store";
 import type { MemoryStore } from "./store";
@@ -158,11 +159,14 @@ export function defaultSourceTool<T extends SourceTool>(tools: T[]): T | null {
       CONTENT_READS.find(([pattern]) => pattern.test(lower))?.[1] ?? 0;
     return content - (BOOKKEEPING.test(lower) ? 4 : 0);
   };
-  const runnable = tools.filter((tool) => {
-    if (tool.effect !== "read" || tool.destructive) return false;
-    const required = tool.inputSchema.required;
-    return !Array.isArray(required) || required.length === 0;
-  });
+  // The same reading of "asks for arguments" the catalogue uses: a requirement nested in allOf,
+  // anyOf, oneOf or a conditional asks just as much as a top-level one, and a $ref cannot be read.
+  const runnable = tools.filter(
+    (tool) =>
+      tool.effect === "read" &&
+      !tool.destructive &&
+      !asksForArguments(tool.inputSchema),
+  );
   runnable.sort(
     (a, b) =>
       score(b.name) - score(a.name) ||

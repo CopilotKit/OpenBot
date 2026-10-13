@@ -28,8 +28,8 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   type ContainerProbe,
-  type KeyProject,
-  keyProject,
+  type KeyIdentity,
+  keyIdentity,
   probeLearningContainer,
   runtimeKeyClient,
 } from "./auto-assign";
@@ -45,7 +45,7 @@ export type RunCli = (args: string[], directory: string) => Promise<CliResult>;
 /** What the configured runtime key can answer about its own project. */
 export type KeyIntelligence = {
   probe: (containerId: string) => Promise<ContainerProbe>;
-  project: () => Promise<KeyProject | undefined>;
+  project: () => Promise<KeyIdentity | undefined>;
 };
 
 export function keyIntelligence(
@@ -56,7 +56,7 @@ export function keyIntelligence(
   const client = runtimeKeyClient(apiUrl, apiKey, wsUrl);
   return {
     probe: (containerId) => probeLearningContainer(client, containerId),
-    project: () => keyProject(client),
+    project: () => keyIdentity(client),
   };
 }
 
@@ -281,9 +281,17 @@ async function createWithServiceToken(input: {
 }
 
 /** One project the CLI login can see, as `copilotkit project list --json` prints it. */
-type ListedProject = { id: string; slug: string; organizationId: string };
+type ListedProject = {
+  id: string;
+  slug: string;
+  name: string;
+  organizationId: string;
+};
 
-function listedProjects(result: CliResult): ListedProject[] | undefined {
+/** The projects in the CLI login's active organization, and that organization's Clerk ID. */
+function listedProjects(
+  result: CliResult,
+): { organizationId: string; projects: ListedProject[] } | undefined {
   if (result.exitCode !== 0) return undefined;
   let value: Record<string, unknown>;
   try {
@@ -291,21 +299,72 @@ function listedProjects(result: CliResult): ListedProject[] | undefined {
   } catch {
     return undefined;
   }
-  if (!Array.isArray(value.projects)) return undefined;
-  return value.projects.flatMap((project) =>
-    object(project) &&
-    typeof project.id === "string" &&
-    typeof project.slug === "string" &&
-    typeof project.organizationId === "string"
-      ? [
-          {
-            id: project.id,
-            slug: project.slug,
-            organizationId: project.organizationId,
-          },
-        ]
-      : [],
+  if (
+    !Array.isArray(value.projects) ||
+    typeof value.organizationId !== "string"
+  )
+    return undefined;
+  return {
+    organizationId: value.organizationId,
+    projects: value.projects.flatMap((project) =>
+      object(project) &&
+      typeof project.id === "string" &&
+      typeof project.slug === "string" &&
+      typeof project.name === "string" &&
+      typeof project.organizationId === "string"
+        ? [
+            {
+              id: project.id,
+              slug: project.slug,
+              name: project.name,
+              organizationId: project.organizationId,
+            },
+          ]
+        : [],
+    ),
+  };
+}
+
+/** The CLI login's active organization, by name and Clerk ID, from `copilotkit whoami`. */
+async function loginOrganization(
+  run: RunCli,
+  directory: string,
+): Promise<{ name: string; clerkOrgId: string } | undefined> {
+  const result = await run(["whoami"], directory);
+  if (result.exitCode !== 0) return undefined;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: strips terminal colour codes.
+  const text = result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+  const name = /^Organization:[ \t]*(.+)$/m.exec(text)?.[1]?.trim();
+  const clerkOrgId = /^Clerk Org ID:[ \t]*(.+)$/m.exec(text)?.[1]?.trim();
+  return name && clerkOrgId ? { name, clerkOrgId } : undefined;
+}
+
+/**
+ * The project to create in, proven to be the runtime key's BEFORE anything is written: the login's
+ * active organization must carry the key's organization name (the CLI never reports a slug), and the
+ * project must be the one there with the key's slug and name, and the selected one when one is. Any
+ * doubt is undefined, and nothing is created. The key's own probe after the write still decides.
+ */
+function keysProject(
+  owner: KeyIdentity | undefined,
+  organization: { name: string; clerkOrgId: string } | undefined,
+  listing: { organizationId: string; projects: ListedProject[] },
+  selectedId?: string,
+): ListedProject | undefined {
+  if (!owner || !organization) return undefined;
+  if (
+    organization.clerkOrgId !== listing.organizationId ||
+    organization.name !== owner.organizationName
+  )
+    return undefined;
+  const matches = listing.projects.filter(
+    (project) =>
+      project.organizationId === listing.organizationId &&
+      project.slug === owner.projectSlug &&
+      project.name === owner.projectName &&
+      (selectedId === undefined || project.id === selectedId),
   );
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 async function getOrCreate(
@@ -396,11 +455,25 @@ export async function ensureLearningContainer(input: {
           "The selected project is invalid. Run npx --yes copilotkit@latest project select again.",
         );
       }
-      if (
-        !owner ||
-        typeof selected.projectSlug !== "string" ||
-        selected.projectSlug !== owner.projectSlug
-      ) {
+      const confirmed =
+        owner &&
+        typeof selected.projectSlug === "string" &&
+        selected.projectSlug === owner.projectSlug
+          ? await (async () => {
+              const listing = listedProjects(
+                await run(["project", "list", "--json"], input.directory),
+              );
+              return listing
+                ? keysProject(
+                    owner,
+                    await loginOrganization(run, input.directory),
+                    listing,
+                    projectId,
+                  )
+                : undefined;
+            })()
+          : undefined;
+      if (!confirmed) {
         throw new Error(
           `The CopilotKit CLI's selected project could not be confirmed as the one this runtime key belongs to, so nothing was created. Select the key's project in the CLI, ${CREATE_IN_INTELLIGENCE}`,
         );
@@ -412,24 +485,23 @@ export async function ensureLearningContainer(input: {
       // from a scratch directory so this checkout's selection is never made or changed.
       const scratch = await mkdtemp(join(tmpdir(), "openbot-learning-"));
       try {
-        const projects = listedProjects(
+        const listing = listedProjects(
           await run(["project", "list", "--json"], scratch),
         );
-        if (!projects) {
+        if (!listing) {
           if (input.nonInteractive) return "skipped";
           throw new Error(
             `This runtime key's Intelligence project has no openbot Learning container, and no CopilotKit CLI login is here to create one with. Sign in with npx --yes copilotkit@latest login and run this helper again, ${CREATE_IN_INTELLIGENCE}`,
           );
         }
-        const matches = owner
-          ? projects.filter((project) => project.slug === owner.projectSlug)
-          : [];
-        if (matches.length !== 1 || !matches[0]) {
+        const project = owner
+          ? keysProject(owner, await loginOrganization(run, scratch), listing)
+          : undefined;
+        if (!project) {
           throw new Error(
             `None of the projects this CopilotKit CLI login can see could be confirmed as the one this runtime key belongs to, so nothing was created. Sign in to the key's organization with npx --yes copilotkit@latest login, ${CREATE_IN_INTELLIGENCE}`,
           );
         }
-        const project = matches[0];
         await mkdir(join(scratch, ".copilotkit"));
         await writeFile(
           join(scratch, ".copilotkit/project.json"),

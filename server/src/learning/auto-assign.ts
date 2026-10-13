@@ -107,6 +107,53 @@ export async function keyProject(
   }
 }
 
+/** A runtime key's project by slug and by name: everything the key can say about where it lives. */
+export type KeyIdentity = KeyProject & {
+  organizationName: string;
+  projectName: string;
+};
+
+/**
+ * The key's project slugs (see `keyProject`) and the organization and project names its Inspector
+ * metadata carries. The names are what a CopilotKit CLI login can be compared on: the CLI reports
+ * its organization by name and Clerk ID, never by slug. Anything unreadable is `undefined`.
+ */
+export async function keyIdentity(
+  client: Pick<
+    CopilotKitIntelligence,
+    "getInspectorLearning" | "getInspectorMetadata"
+  >,
+  timeoutMs = 10_000,
+): Promise<KeyIdentity | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const [slugs, metadata] = await Promise.all([
+      keyProject(client, timeoutMs),
+      Promise.race([
+        client.getInspectorMetadata(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Inspector metadata timed out")),
+            timeoutMs,
+          );
+        }),
+      ]),
+    ]);
+    const identity = metadata?.identity;
+    if (!slugs || !identity?.organizationName || !identity.projectName)
+      return undefined;
+    return {
+      ...slugs,
+      organizationName: identity.organizationName,
+      projectName: identity.projectName,
+    };
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A client holding only a runtime key, for helpers that run without the server. */
 export function runtimeKeyClient(
   apiUrl: string,
