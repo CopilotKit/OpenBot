@@ -12,9 +12,9 @@ import {
   withApprovalContext,
 } from "../src/approvals/types";
 import { createComputerGateway } from "../src/computer/gateway";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { CatalogueEntryUnknownError } from "../src/plugins/store";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 
 const context = {
   runId: "run",

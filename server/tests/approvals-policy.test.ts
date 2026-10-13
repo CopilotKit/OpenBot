@@ -27,9 +27,9 @@ import {
   type ApprovalTeamSettings,
   withApprovalContext,
 } from "../src/approvals/types";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 
 const candidate = (
   over: Partial<ApprovalCandidate> = {},

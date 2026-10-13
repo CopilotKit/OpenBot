@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { RunAssertion } from "../agents/callback-token";
 import type { AuditInitiator } from "../audit";
-import type { HeadlessTool } from "../computer/headless-tools";
 import { PluginRefusedError } from "../plugins/store";
 import type { GrantedTool } from "../plugins/tools";
+import type { HeadlessTool } from "../toolkit/headless-tools";
 import { isApprovalRecheck } from "./service";
 import {
   type ApprovalAction,

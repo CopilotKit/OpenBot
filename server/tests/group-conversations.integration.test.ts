@@ -15,7 +15,6 @@ import {
 } from "../src/channels/group";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
@@ -28,6 +27,7 @@ import {
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import type { TurnRunner } from "../src/routines/runner";
 import { createTeamBots } from "../src/team-bots/team-bots";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 

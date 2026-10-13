@@ -24,6 +24,7 @@ import {
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import { withUntrustedNotice } from "../untrusted-content";
 import {
   ComputerStoppedError,
@@ -31,7 +32,6 @@ import {
   createComputerTransport,
   StaleSnapshotError,
 } from "./client";
-import { HeadlessToolSuspension } from "./headless-tools";
 import { checkComputerAddress } from "./target";
 
 export {

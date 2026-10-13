@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import { markUntrusted } from "../untrusted-content";
 import type { SelectableSkill } from "./selection";
 import {

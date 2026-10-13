@@ -3,13 +3,13 @@ import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
 import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import {
   createTurnRunner,
   drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
 } from "../src/routines/run-turn";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.

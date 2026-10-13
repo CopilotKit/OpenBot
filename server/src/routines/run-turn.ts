@@ -73,7 +73,7 @@ import {
   HeadlessToolSuspension,
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
-} from "../computer/headless-tools";
+} from "../toolkit/headless-tools";
 import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**

@@ -1,5 +1,5 @@
 import { BOT_PAUSED_REASON, isBotPaused } from "../agents/lifecycle";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import type { WorkQueue } from "../work/queue";
 import type { ResponsibilityRunContext, ResponsibilityStore } from "./types";
 

@@ -1,8 +1,8 @@
 import { expect, spyOn, test } from "bun:test";
 import { z } from "zod";
-import { buildAgents } from "../src/copilot";
 import { currentApprovalContext } from "../src/approvals/types";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
+import { buildAgents } from "../src/copilot";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 
 test("a real built-in native tool carries provider call identity and suspends AG-UI without a fake tool result", async () => {
   const transport = spyOn(globalThis, "fetch").mockImplementation(

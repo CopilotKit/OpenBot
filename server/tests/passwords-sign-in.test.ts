@@ -12,10 +12,7 @@ import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import type { ComputerGateway } from "../src/computer/gateway";
-import {
-  createHeadlessComputerTools,
-  HeadlessToolSuspension,
-} from "../src/computer/headless-tools";
+import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import type { SignInFillInput, SignInFillResult } from "../src/computer/schema";
 import {
   createPasswordRoutes,
@@ -28,6 +25,7 @@ import {
 import { createMemoryPasswordStore } from "../src/passwords/store";
 import { originOf, type SignInRequestRecord } from "../src/passwords/types";
 import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 
 /**
  * The private sign-in request and the Passwords vault, as properties:

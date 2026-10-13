@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
 import {
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
-import { REFUSAL_MARKER, type GrantedTool } from "../plugins/tools";
-import { HostAccessRefusedError, type HostAccessBroker } from "./broker";
+import { type GrantedTool, REFUSAL_MARKER } from "../plugins/tools";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import { type HostAccessBroker, HostAccessRefusedError } from "./broker";
 
 const empty = z.object({});
 

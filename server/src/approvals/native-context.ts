@@ -9,7 +9,7 @@ import {
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
 import type { AuditInitiator } from "../audit";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import { withApprovalContext } from "./types";
 
 type NativeRun = {

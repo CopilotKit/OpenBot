@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HeadlessWaiting } from "../computer/headless-tools";
+import type { HeadlessWaiting } from "../toolkit/headless-tools";
 
 export const responsibilitySources = [
   "manual",

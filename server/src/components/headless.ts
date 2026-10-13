@@ -1,11 +1,11 @@
-import { z } from "zod";
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
+import { z } from "zod";
 import {
   type AuditInitiator,
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
-import type { HeadlessTool } from "../computer/headless-tools";
+import type { HeadlessTool } from "../toolkit/headless-tools";
 import type { ComponentStore } from "./store";
 
 /**

@@ -5,13 +5,13 @@ import {
   CopilotKitIntelligence,
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
-import { serve } from "bun";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { z } from "zod";
 import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
 import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
 import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import { workOwner } from "@openbot/shared/work-owner";
+import { serve } from "bun";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
   auditRoutineStore,
@@ -122,10 +122,7 @@ import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
-import {
-  createHeadlessComputerTools,
-  HeadlessToolSuspension,
-} from "./computer/headless-tools";
+import { createHeadlessComputerTools } from "./computer/headless-tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
 import { withPolicyPushOnWake } from "./computer/policy-network";
@@ -185,7 +182,6 @@ import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
-import { clearLearningRevisionFallback } from "./learning/runtime";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -198,6 +194,7 @@ import {
   keyIntelligence,
   learningSetupInstructions,
 } from "./learning/ensure-container";
+import { clearLearningRevisionFallback } from "./learning/runtime";
 import { createLearningSettingsStore } from "./learning/settings";
 import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
@@ -274,6 +271,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { HeadlessToolSuspension } from "./toolkit/headless-tools";
 import { markUntrusted } from "./untrusted-content";
 import { createUserInstructionsStore } from "./user-instructions";
 import { createUserPreferencesStore } from "./user-preferences";

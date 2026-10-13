@@ -28,7 +28,7 @@ import type { AgentActor } from "../agents/profile-types";
 import type { ApprovalContinuation } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
 import type { ChannelStore } from "../channels/routes";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import type { RoutineStore } from "./store";
 
 /** Everything a headless turn needs, injectable so tests never dial a model. */
