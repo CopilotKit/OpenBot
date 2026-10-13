@@ -27,12 +27,17 @@ export const TURN_LIMITS = {
    * held, their browser's next message is refused with 409 "Thread lock denied" (`run.mjs:91`), so a
    * lock leaked by a failed routine locks them out of their own conversation for that long.
    *
-   * ADVISORY. The Intelligence platform currently ignores the requested lifetime: its acquire and
-   * renew both apply its own fixed 120 seconds (`THREAD_LOCK_TTL_SECONDS` in
-   * `apps/app-api/src/routes/thread-lock.ts`). So a leaked lock lasts up to two minutes today, and
-   * this number only takes effect if the platform starts honouring it. Renewing every 15s is well
-   * inside either.
+   * 120 SECONDS, THE PLATFORM'S OWN. The Intelligence platform currently ignores the requested
+   * lifetime and applies its fixed 120 seconds on acquire and renew (`THREAD_LOCK_TTL_SECONDS` in
+   * `apps/app-api/src/routes/thread-lock.ts`), so asking for the same number keeps this one true. It
+   * was 20, which never took effect.
+   *
+   * And it is the right number if the platform starts honouring it. A renewal that merely failed is
+   * skipped rather than ending the turn (see `keepLease`), so the lifetime is what carries a turn
+   * across a missed renewal: 120 seconds survives about seven at a 15-second heartbeat, where 20
+   * would have lost the lock to one. The cost is how long a crashed turn holds the conversation,
+   * which is two minutes either way today.
    */
-  lockTtlSeconds: 20,
+  lockTtlSeconds: 120,
   heartbeatMs: 15_000,
 } as const;

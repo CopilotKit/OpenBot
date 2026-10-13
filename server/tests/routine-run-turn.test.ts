@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
 import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import { TURN_LIMITS } from "@openbot/toolkit/limits";
 import type { TurnAdmission } from "@openbot/toolkit/ports";
 import {
   createTurnRunner,
@@ -757,7 +758,11 @@ describe("one run id, everywhere", () => {
     expect(typeof runId).toBe("string");
     expect(calls.renewed.length).toBeGreaterThan(1);
     for (const renew of calls.renewed) {
-      expect(renew).toEqual({ threadId: THREAD_ID, runId, ttlSeconds: 20 });
+      expect(renew).toEqual({
+        threadId: THREAD_ID,
+        runId,
+        ttlSeconds: TURN_LIMITS.lockTtlSeconds,
+      });
     }
     expect(calls.cleaned).toEqual([{ threadId: THREAD_ID, runId }]);
     expect(calls.runs[0]?.input.runId).toBe(runId);
