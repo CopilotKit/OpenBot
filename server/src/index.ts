@@ -590,6 +590,100 @@ const authoriseQuestion = async (question: PersonQuestion) => {
     throw new ApprovalRefusedError("That Bot is no longer available to you.");
 };
 const storedApprovals = createApprovalStore(database);
+const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
+
+/**
+ * Pass one of tool selection: which skills a message needs, on the deployment's own model.
+ *
+ * Built once rather than per request, because it holds nothing about a person: the key is resolved
+ * on every call, so a credential rotated a moment ago is used by the next run.
+ */
+const chooseSkills = createModelCompleter({
+  model: runtimeModel,
+  resolveApiKey: () =>
+    resolveModelApiKey({
+      encryptionKey: config.keyEncryptionKey,
+      reader: credentialStore,
+      provider: runtimeModel.provider,
+      keyId: tenantPackage.model.credentialSecretRef,
+      environment: process.env,
+    }),
+});
+
+/**
+ * Who a routine acts as, resolved the way {@link resolveRequestActor} resolves it.
+ *
+ * THE ROLE IS READ, NOT ASSUMED. Which coworkers exist is decided per person and an administrator
+ * sees Bots a user does not, so hardcoding `role: "user"` here would hide an administrator's own Bots
+ * from their own routine — the routine would fail with "that Bot is no longer registered" for a Bot
+ * sitting in front of them in chat. This asks the same repository the request path asks, so a routine
+ * sees exactly the coworkers its owner sees.
+ */
+const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
+  // One person, and they are an administrator. The id stays the routine owner's rather than being
+  // rewritten to DEV_ACTOR's: in this mode they are the same person, and if they ever were not,
+  // silently borrowing the dev actor's identity would be worse than finding nothing.
+  if (config.singleUser) return { id: ownerUserId, role: DEV_ACTOR.role };
+  const roles = await roleRepository.rolesForUser(ownerUserId);
+  if (!roles.includes("admin") && !roles.includes("user")) {
+    throw new Error("A routine requires an authorized owner.");
+  }
+  return {
+    id: ownerUserId,
+    role: roles.includes("admin") ? "admin" : "user",
+  };
+};
+
+/*
+ * A run's source conversation: a channel's own thread, or a Bot's thread in a group conversation.
+ * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
+ */
+const sourceForCoordinationRun = async (run: RunAssertion) =>
+  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
+
+/*
+ * The pair a headless turn is driven through, built ONCE.
+ *
+ * Not the runtime's own pair: `mountCopilotRuntime` keeps its client and its runner inside
+ * `CopilotRuntime` and hands neither back, and reaching into that object would be a worse seam than
+ * building our own from the same three settings. Built from `config.runtime.intelligence`, which is
+ * required and not optional — `RuntimeCapabilities` has exactly one mode and every Intelligence field
+ * with it (`config.ts:10-22`), and `loadConfig` refuses to boot without them — so there is no
+ * not-in-Intelligence-mode branch to write here. If a second mode is ever added, THIS is the line that
+ * has to grow a guard, and the routine runner must then be left off `createApp` entirely.
+ *
+ * One runner for the process, reused across firings: it opens a socket per run and holds no idle
+ * connection, but its `threads` map is per instance, and a runner per turn would fragment the
+ * already-running check that keeps two turns off one thread. See `toolkit/run-turn.ts`.
+ */
+const routineIntelligence = observeIntelligenceAuthentication(
+  new CopilotKitIntelligence({
+    apiUrl: config.runtime.intelligence.apiUrl,
+    wsUrl: config.runtime.intelligence.gatewayWsUrl,
+    apiKey: config.runtime.intelligence.apiKey,
+  }),
+);
+const approvalComputerTools = async (
+  ownerUserId: string,
+  agentId: string,
+  initiator: AuditInitiator,
+) => {
+  const actor = await actorFor(ownerUserId);
+  const profile = await agentProfileStore.get(actor, agentId);
+  if (!profile)
+    throw new ApprovalRefusedError("That Bot is no longer available to you.");
+  // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+  return computerGateway && canUseComputer(profile, actor)
+    ? createHeadlessComputerTools({
+        gateway: computerGateway,
+        botId: agentId,
+        actor: { id: actor.id, userId: actor.id, initiator },
+        auditStore: bootAuditStore,
+        ...(signInService ? { signIn: signInService } : {}),
+      })
+    : [];
+};
+
 const approvalService = createApprovalService(
   {
     ...storedApprovals,
@@ -1090,7 +1184,6 @@ const stallGuard = createStallGuard({
 });
 
 normalizeModelBaseUrls();
-const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
 
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
@@ -1104,24 +1197,6 @@ const intentRouter = createIntentRouter({
         environment: process.env,
       }),
   }),
-});
-
-/**
- * Pass one of tool selection: which skills a message needs, on the deployment's own model.
- *
- * Built once rather than per request, because it holds nothing about a person: the key is resolved
- * on every call, so a credential rotated a moment ago is used by the next run.
- */
-const chooseSkills = createModelCompleter({
-  model: runtimeModel,
-  resolveApiKey: () =>
-    resolveModelApiKey({
-      encryptionKey: config.keyEncryptionKey,
-      reader: credentialStore,
-      provider: runtimeModel.provider,
-      keyId: tenantPackage.model.credentialSecretRef,
-      environment: process.env,
-    }),
 });
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
@@ -1464,37 +1539,6 @@ const agentFetch = createAgentFetch({
     });
   },
 });
-
-/**
- * Who a routine acts as, resolved the way {@link resolveRequestActor} resolves it.
- *
- * THE ROLE IS READ, NOT ASSUMED. Which coworkers exist is decided per person and an administrator
- * sees Bots a user does not, so hardcoding `role: "user"` here would hide an administrator's own Bots
- * from their own routine — the routine would fail with "that Bot is no longer registered" for a Bot
- * sitting in front of them in chat. This asks the same repository the request path asks, so a routine
- * sees exactly the coworkers its owner sees.
- */
-const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
-  // One person, and they are an administrator. The id stays the routine owner's rather than being
-  // rewritten to DEV_ACTOR's: in this mode they are the same person, and if they ever were not,
-  // silently borrowing the dev actor's identity would be worse than finding nothing.
-  if (config.singleUser) return { id: ownerUserId, role: DEV_ACTOR.role };
-  const roles = await roleRepository.rolesForUser(ownerUserId);
-  if (!roles.includes("admin") && !roles.includes("user")) {
-    throw new Error("A routine requires an authorized owner.");
-  }
-  return {
-    id: ownerUserId,
-    role: roles.includes("admin") ? "admin" : "user",
-  };
-};
-
-/*
- * A run's source conversation: a channel's own thread, or a Bot's thread in a group conversation.
- * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
- */
-const sourceForCoordinationRun = async (run: RunAssertion) =>
-  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
 const channelSourceForRun = async (run: RunAssertion) => {
   if (!run.threadId) return null;
   const sources = await database
@@ -1584,29 +1628,6 @@ const buildAgentFor = async ({
   }
   return agent;
 };
-
-/*
- * The pair a headless turn is driven through, built ONCE.
- *
- * Not the runtime's own pair: `mountCopilotRuntime` keeps its client and its runner inside
- * `CopilotRuntime` and hands neither back, and reaching into that object would be a worse seam than
- * building our own from the same three settings. Built from `config.runtime.intelligence`, which is
- * required and not optional — `RuntimeCapabilities` has exactly one mode and every Intelligence field
- * with it (`config.ts:10-22`), and `loadConfig` refuses to boot without them — so there is no
- * not-in-Intelligence-mode branch to write here. If a second mode is ever added, THIS is the line that
- * has to grow a guard, and the routine runner must then be left off `createApp` entirely.
- *
- * One runner for the process, reused across firings: it opens a socket per run and holds no idle
- * connection, but its `threads` map is per instance, and a runner per turn would fragment the
- * already-running check that keeps two turns off one thread. See `toolkit/run-turn.ts`.
- */
-const routineIntelligence = observeIntelligenceAuthentication(
-  new CopilotKitIntelligence({
-    apiUrl: config.runtime.intelligence.apiUrl,
-    wsUrl: config.runtime.intelligence.gatewayWsUrl,
-    apiKey: config.runtime.intelligence.apiKey,
-  }),
-);
 const routineAgentRunner = new IntelligenceAgentRunner({
   url: routineIntelligence.ɵgetRunnerWsUrl(),
   authToken: routineIntelligence.ɵgetRunnerAuthToken(),
@@ -1882,26 +1903,6 @@ const responsibilitySweep = repeatAfterEach(async () => {
 
 const approvalQueue = createWorkQueue(database);
 const approvalOwner = workOwner("approval");
-const approvalComputerTools = async (
-  ownerUserId: string,
-  agentId: string,
-  initiator: AuditInitiator,
-) => {
-  const actor = await actorFor(ownerUserId);
-  const profile = await agentProfileStore.get(actor, agentId);
-  if (!profile)
-    throw new ApprovalRefusedError("That Bot is no longer available to you.");
-  // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
-  return computerGateway && canUseComputer(profile, actor)
-    ? createHeadlessComputerTools({
-        gateway: computerGateway,
-        botId: agentId,
-        actor: { id: actor.id, userId: actor.id, initiator },
-        auditStore: bootAuditStore,
-        ...(signInService ? { signIn: signInService } : {}),
-      })
-    : [];
-};
 const executeApprovedAction = createApprovedActionExecutor({
   sourceFor: sourceForCoordinationRun,
   gate: approvalService.gate,
