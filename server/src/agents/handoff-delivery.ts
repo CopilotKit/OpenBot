@@ -12,6 +12,7 @@
  * the work over, the second says it answered, and no row anywhere agrees.
  */
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
+import { THREAD_LOCK_TTL_SECONDS } from "@openbot/toolkit/copilotkit/thread-lock";
 import { keepLease } from "@openbot/toolkit/lease";
 import type { ThreadLock, TurnAdmission } from "@openbot/toolkit/ports";
 import type { Observable } from "rxjs";
@@ -135,6 +136,11 @@ export function createHandoffDelivery(options: {
   /** How often the lock is renewed while the Bot works. Overridden by tests; see `LOCK_RENEW_EVERY_MS`. */
   renewEveryMs?: number;
   /**
+   * How long the lock lives without a renewal. Renewals failing for longer than this mean it has
+   * lapsed, and the hop stops. Overridden by tests; the platform applies its own 120 seconds.
+   */
+  lockLifetimeMs?: number;
+  /**
    * The same admission every headless turn meets: the pause guard and the enterprise controls. See
    * `serverTurnAdmission` in turn-admission.ts.
    */
@@ -152,6 +158,7 @@ export function createHandoffDelivery(options: {
     newRunId,
     deadlineMs = DEFAULT_DELIVERY_DEADLINE_MS,
     renewEveryMs = LOCK_RENEW_EVERY_MS,
+    lockLifetimeMs = THREAD_LOCK_TTL_SECONDS * 1000,
   } = options;
 
   return {
@@ -344,6 +351,7 @@ export function createHandoffDelivery(options: {
         const heartbeat = keepLease({
           renew: () => lock.renew({ threadId: where.threadId, runId }),
           everyMs: renewEveryMs,
+          lifetimeMs: lockLifetimeMs,
           onLost: (error) => lockLost.abort(error),
         });
 

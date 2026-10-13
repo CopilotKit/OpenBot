@@ -398,6 +398,7 @@ async function takeLease(input: {
   const heartbeat = keepLease({
     renew: () => intelligence.ɵrenewThreadLock({ threadId, runId, ttlSeconds }),
     everyMs: heartbeatMs,
+    lifetimeMs: ttlSeconds * 1000,
     onLost,
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isLockConflict, keepLease } from "../src/lease";
+import { isLockConflict, keepLease, LockLapsedError } from "../src/lease";
 
 function platformError(status: number): Error {
   const error = new Error(`Intelligence platform error ${status}`);
@@ -32,6 +32,7 @@ describe("keepLease", () => {
         renewals += 1;
       },
       everyMs: 2,
+      lifetimeMs: 60_000,
       onLost: () => {
         throw new Error("not lost");
       },
@@ -53,6 +54,7 @@ describe("keepLease", () => {
         throw platformError(409);
       },
       everyMs: 2,
+      lifetimeMs: 60_000,
       onLost: (error) => lost.push(error),
     });
     await wait(30);
@@ -69,11 +71,78 @@ describe("keepLease", () => {
         throw renewals % 2 ? new TypeError("fetch failed") : platformError(503);
       },
       everyMs: 2,
+      lifetimeMs: 60_000,
       onLost: (error) => lost.push(error),
     });
     await wait(30);
     lease.stop();
     expect(renewals).toBeGreaterThan(2);
+    expect(lost).toEqual([]);
+  });
+
+  /*
+   * The time limit, on a clock each renewal moves forward by 10ms, so how many renewals fit in the
+   * lifetime is exact rather than a matter of how fast the machine is.
+   */
+  test("failures that outlast the lifetime lose the lock, once, whatever they were", async () => {
+    let clock = 0;
+    let renewals = 0;
+    const lost: unknown[] = [];
+    keepLease({
+      renew: async () => {
+        renewals += 1;
+        clock += 10;
+        throw platformError(503);
+      },
+      everyMs: 1,
+      lifetimeMs: 35,
+      now: () => clock,
+      onLost: (error) => lost.push(error),
+    });
+    await wait(40);
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toBeInstanceOf(LockLapsedError);
+    // Asked at 0, 10, 20 and 30; at 40 the lock has gone 40ms unrenewed, past its 35.
+    expect(renewals).toBe(4);
+  });
+
+  test("a renewal that never settles still loses the lock when the lifetime passes", async () => {
+    let clock = 0;
+    const lost: unknown[] = [];
+    keepLease({
+      renew: () => {
+        clock += 10;
+        return new Promise(() => {});
+      },
+      everyMs: 1,
+      lifetimeMs: 35,
+      now: () => clock,
+      onLost: (error) => lost.push(error),
+    });
+    await wait(40);
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toBeInstanceOf(LockLapsedError);
+  });
+
+  test("a success inside the lifetime starts it again, so occasional blips never lose the lock", async () => {
+    let clock = 0;
+    let renewals = 0;
+    const lost: unknown[] = [];
+    const lease = keepLease({
+      renew: async () => {
+        renewals += 1;
+        clock += 10;
+        // Two failures, then a success, over and over: never 35ms without a renewal landing.
+        if (renewals % 3) throw new TypeError("fetch failed");
+      },
+      everyMs: 1,
+      lifetimeMs: 35,
+      now: () => clock,
+      onLost: (error) => lost.push(error),
+    });
+    await wait(40);
+    lease.stop();
+    expect(renewals).toBeGreaterThan(6);
     expect(lost).toEqual([]);
   });
 });

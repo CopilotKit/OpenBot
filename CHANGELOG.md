@@ -39,8 +39,9 @@ lock on the conversation while they run and renew it as they go.
 
 - **A failed renewal no longer stops the turn.** Before, any failed renewal stopped a routine or
   responsibility turn, including a network blip. A stopped turn is retried from the start, so a Bot
-  that had already sent an email could send it again. Now a turn stops only when Intelligence says
-  the conversation belongs to another run (409).
+  that had already sent an email could send it again. Now a turn stops when Intelligence says the
+  conversation belongs to another run (409), or when no renewal has succeeded for the lock's whole
+  lifetime (120 seconds), whatever the failures were. A shorter blip rides through.
 - **A handoff that loses its lock now stops.** Before, a handoff ignored every failed renewal and
   kept writing, even into a person's own channel after they started typing there. Now it stops, gives
   the conversation back and is retried a minute later.

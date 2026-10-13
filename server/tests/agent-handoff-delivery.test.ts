@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AbstractAgent, BaseEvent, Message } from "@ag-ui/client";
+import { LockLapsedError } from "@openbot/toolkit/lease";
 import { Observable } from "rxjs";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import type { HandoffWork } from "../src/agents/handoff-runner";
@@ -401,6 +402,46 @@ describe("a delivery that never finishes", () => {
    * most likely the person, typing in their own channel. The hop stops rather than write its answer
    * into their run, gives the lock back, and fails into a retry with the platform's reason.
    */
+  /*
+   * Renewals that never answer at all. No error ever arrives to say the lock was lost, so the only
+   * thing that can stop the hop is the lock's lifetime running out.
+   */
+  test("renewals that never settle stop the hop once the lock's lifetime has passed", async () => {
+    const stopped: string[] = [];
+    const released: string[] = [];
+    const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
+      deadlineMs: 5_000,
+      renewEveryMs: 2,
+      lockLifetimeMs: 20,
+      agentFor: async () => stubAgent(),
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: () => new Promise(() => {}),
+        release: async (input) => {
+          released.push(input.threadId);
+        },
+      },
+      runner: {
+        // A run that would go on for ever, so only the lapsed lock can end it.
+        run: () => new Observable<BaseEvent>(() => {}),
+        stop: async (input) => {
+          stopped.push(input.runId);
+          return true;
+        },
+      },
+    });
+
+    await expect(
+      hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+    ).rejects.toBeInstanceOf(LockLapsedError);
+    expect(stopped).toEqual(["platform-run"]);
+    expect(released).toEqual(["scratch-thread"]);
+  });
+
   test("a renewal refused as a conflict stops the hop and gives the lock back", async () => {
     const conflict = Object.assign(
       new Error("Intelligence platform error 409: THREAD_LOCK_RENEWAL_FAILED"),
