@@ -102,8 +102,31 @@ describe("keepLease", () => {
     await wait(40);
     expect(lost).toHaveLength(1);
     expect(lost[0]).toBeInstanceOf(LockLapsedError);
-    // Asked at 0, 10, 20 and 30; at 40 the lock has gone 40ms unrenewed, past its 35.
+    // Asked at 0, 10, 20 and 30; at 40 the lock has gone 40ms unrenewed, past 35 - 1.
     expect(renewals).toBe(4);
+  });
+
+  test("it gives up one interval before the lifetime, while the lock is still held", async () => {
+    // The clock moves one interval per tick here, as it does for real.
+    let clock = 0;
+    let renewals = 0;
+    const lostAt: number[] = [];
+    keepLease({
+      renew: async () => {
+        renewals += 1;
+        clock += 10;
+        throw platformError(503);
+      },
+      everyMs: 10,
+      lifetimeMs: 35,
+      now: () => clock,
+      onLost: () => lostAt.push(clock),
+    });
+    await wait(80);
+    // Asked at 0, 10 and 20. At 30 the next tick would land at 40, past the 35ms lifetime, so it
+    // stops now, at 30, with the lock still its own.
+    expect(renewals).toBe(3);
+    expect(lostAt).toEqual([30]);
   });
 
   test("a renewal that never settles still loses the lock when the lifetime passes", async () => {

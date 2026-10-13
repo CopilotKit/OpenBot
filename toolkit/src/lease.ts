@@ -22,12 +22,15 @@ export function isLockConflict(error: unknown): boolean {
   );
 }
 
-/** The lock was not renewed for as long as it lives, so it has lapsed whatever the reason was. */
+/**
+ * No renewal has succeeded for nearly as long as the lock lives, so it will have lapsed before the
+ * next one could land, whatever the reason was.
+ */
 export class LockLapsedError extends Error {
   override name = "LockLapsedError";
   constructor(lifetimeMs: number) {
     super(
-      `The conversation's lock was not renewed for ${Math.round(lifetimeMs / 1000)}s, so it has lapsed and may be somebody else's.`,
+      `The conversation's lock has not been renewed within its ${Math.round(lifetimeMs / 1000)}s lifetime, so it is lapsing and may be somebody else's.`,
     );
   }
 }
@@ -38,9 +41,11 @@ export class LockLapsedError extends Error {
  * Lost means one of two things, and either one stops the heartbeat and calls `onLost`, once:
  *
  * - A renewal is refused as a conflict ({@link isLockConflict}): somebody else holds it now.
- * - No renewal has succeeded for longer than `lifetimeMs`: the lock has lapsed, whatever the
- *   failures were — network errors, 5xx, 401, a request that never settles. Checked on each tick
- *   rather than when a renewal fails, because a renewal that hangs never fails.
+ * - No renewal has succeeded for so long that the lock will have lapsed before the next tick:
+ *   longer than `lifetimeMs - everyMs`, whatever the failures were — network errors, 5xx, 401, a
+ *   request that never settles. Checked on each tick rather than when a renewal fails, because a
+ *   renewal that hangs never fails. One interval short of the lifetime, so the turn stops while the
+ *   lock is still its own rather than up to one interval after it has gone.
  *
  * Anything else is a renewal that did not land this time and is skipped; the next tick tries again.
  * That is the point of the lifetime: a blip shorter than it rides through, instead of stopping the
@@ -56,6 +61,8 @@ export function keepLease(input: {
   now?: () => number;
 }): { stop: () => void } {
   const { renew, everyMs, lifetimeMs, onLost, now = Date.now } = input;
+  // The last moment a tick can find the lock unrenewed and still stop before it lapses.
+  const giveUpAfterMs = Math.max(lifetimeMs - everyMs, 0);
   let renewedAt = now();
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stop = () => {
@@ -69,7 +76,7 @@ export function keepLease(input: {
     onLost(error);
   };
   heartbeat = setInterval(() => {
-    if (now() - renewedAt > lifetimeMs) {
+    if (now() - renewedAt > giveUpAfterMs) {
       lose(new LockLapsedError(lifetimeMs));
       return;
     }
