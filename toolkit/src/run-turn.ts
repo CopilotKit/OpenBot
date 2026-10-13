@@ -68,6 +68,7 @@ import {
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
 import { keepLease } from "./lease";
+import { TURN_LIMITS } from "./limits";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
 
@@ -96,32 +97,6 @@ export type TurnRunner = (input: {
 
 /** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
 export type DrawnComponent = { name: string; args: Record<string, unknown> };
-
-/**
- * The gap between stopping a turn and giving up on it.
- *
- * `abortRun` on `RunSelectedAgent` reaches the agent the run turned into, and that agent does not
- * exist until `build()` resolves (`copilot.ts:649, 664-673`): during that window the wrapper has no
- * `inner`, so abort is a no-op and the deadline cannot actually stop anything. This is the backstop
- * that settles the promise anyway, so a firing cannot hang for ever on a build that never finishes.
- *
- * Injectable only so the test can exercise the backstop without waiting five real seconds for it.
- */
-const DEFAULT_ABORT_GRACE_MS = 5_000;
-
-/** How long one headless turn may take before it is stopped. */
-const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000;
-
-/**
- * The lock TTL and how often it is renewed.
- *
- * The same relationship the runtime's own handler uses: renew comfortably inside the TTL so one slow
- * request does not drop a lock we still hold. The TTL matters to a person: while it is held, their
- * browser's next message is refused with 409 "Thread lock denied" (`run.mjs:91`), so a lock leaked by
- * a failed routine locks them out of their own conversation for exactly this long.
- */
-const DEFAULT_LOCK_TTL_SECONDS = 20;
-const DEFAULT_HEARTBEAT_MS = 15_000;
 
 /**
  * One row of Intelligence history, as `ThreadMessagesResponse` declares it
@@ -596,7 +571,7 @@ export function createTurnRunner(options: {
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
   heartbeatMs?: number;
-  /** See {@link DEFAULT_ABORT_GRACE_MS}. */
+  /** See `TURN_LIMITS.abortGraceMs`; injectable so a test need not wait five real seconds. */
   abortGraceMs?: number;
 }): TurnRunner {
   const {
@@ -607,10 +582,10 @@ export function createTurnRunner(options: {
     learningContainerForThread,
     toolsForTurn,
     components,
-    turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
-    lockTtlSeconds = DEFAULT_LOCK_TTL_SECONDS,
-    heartbeatMs = DEFAULT_HEARTBEAT_MS,
-    abortGraceMs = DEFAULT_ABORT_GRACE_MS,
+    turnTimeoutMs = TURN_LIMITS.turnTimeoutMs,
+    lockTtlSeconds = TURN_LIMITS.lockTtlSeconds,
+    heartbeatMs = TURN_LIMITS.heartbeatMs,
+    abortGraceMs = TURN_LIMITS.abortGraceMs,
   } = options;
 
   return async ({
