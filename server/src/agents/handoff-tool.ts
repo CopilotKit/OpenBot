@@ -14,7 +14,7 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { HANDED_OVER } from "../../../shared/handoff-markers";
+import { HANDED_OVER } from "@openbot/shared/handoff-markers";
 import {
   type ApprovalGate,
   ApprovalRefusedError,

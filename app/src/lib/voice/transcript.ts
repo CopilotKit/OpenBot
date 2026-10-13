@@ -1,4 +1,4 @@
-import type { VoiceTranscriptEntry } from "../../../../shared/voice-session";
+import type { VoiceTranscriptEntry } from "@openbot/shared/voice-session";
 import type { VoiceEvent } from "./types";
 
 export const VOICE_CONTEXT_ITEM_ID = "openbot-voice-context";

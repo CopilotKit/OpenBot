@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NOT_SHOWN, NOT_SHOWN_TAIL } from "../../../shared/component-markers";
+import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import {
   type AuditInitiator,
   type AuditStore,

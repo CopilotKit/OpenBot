@@ -7,7 +7,7 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { VoiceTranscriptEntry } from "../../../../shared/voice-session";
+import type { VoiceTranscriptEntry } from "@openbot/shared/voice-session";
 import { channels, users } from "./core";
 import { jsonb } from "./json";
 

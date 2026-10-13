@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import type {
   BrowserChallenge,
   ComputerControlState,
-} from "../../shared/computer-control";
+} from "@openbot/shared/computer-control";
 import type { AppVariables } from "../src/auth/guards";
 import { createComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";

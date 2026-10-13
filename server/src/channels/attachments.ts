@@ -25,7 +25,7 @@ import {
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
   namesNoFormat,
-} from "../../../shared/attachments";
+} from "@openbot/shared/attachments";
 import type { StoredAttachment } from "./attachment-parts";
 import { sniffMimeType } from "./attachment-mime";
 

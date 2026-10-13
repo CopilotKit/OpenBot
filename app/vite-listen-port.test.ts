@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { listenPort } from "../shared/listen-port";
+import { listenPort } from "@openbot/shared/listen-port";
 
 /**
  * The app Vite config used `Number.parseInt(process.env.APP_PORT ?? "3010", 10)` (and the same

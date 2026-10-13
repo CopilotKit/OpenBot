@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { LearningPage } from "@/routes/_authed/admin/learning";
-import type { LearningSettings } from "../../shared/learning";
+import type { LearningSettings } from "@openbot/shared/learning";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());

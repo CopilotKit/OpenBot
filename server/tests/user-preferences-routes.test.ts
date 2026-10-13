@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import {
   DEFAULT_USER_PREFERENCES,
   type UserPreferences,
-} from "../../shared/user-preferences";
+} from "@openbot/shared/user-preferences";
 import type { UserPreferencesStore } from "../src/user-preferences";
 import { userPreferencesRoutes } from "../src/user-preferences-routes";
 

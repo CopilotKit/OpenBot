@@ -10,7 +10,7 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
 import { z } from "zod";
-import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
 import {
   type ActorAgentResolver,
   CoworkerUnavailableError,

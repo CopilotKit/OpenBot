@@ -7,7 +7,7 @@ import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY, lastValueFrom } from "rxjs";
 import { z } from "zod";
-import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { PROVENANCE_GUIDANCE } from "@openbot/shared/bot-prompt";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import { MAX_INLINED_BYTES_PER_RUN } from "../src/channels/attachment-parts";
 import { loadConfig } from "../src/config";

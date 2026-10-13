@@ -1,7 +1,7 @@
 import type {
   BrowserChallenge,
   ComputerControlState,
-} from "../../../shared/computer-control";
+} from "@openbot/shared/computer-control";
 /**
  * The computer-use contract.
  *

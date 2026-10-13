@@ -5,7 +5,7 @@ import {
   DICTATION_TIMEOUT_MS,
   dictationMediaType,
   MAX_DICTATION_BYTES,
-} from "../../../shared/dictation";
+} from "@openbot/shared/dictation";
 import type { AppVariables } from "../auth/guards";
 import { TranscriptionError, type TranscriptionProvider } from "./provider";
 

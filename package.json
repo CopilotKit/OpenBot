@@ -7,7 +7,8 @@
   "workspaces": [
     "app",
     "server",
-    "worker"
+    "worker",
+    "shared"
   ],
   "scripts": {
     "build": "bun run generate:app-config && bun run --filter '*' build",

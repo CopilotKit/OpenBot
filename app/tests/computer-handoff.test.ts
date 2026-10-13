@@ -9,7 +9,7 @@ import {
 import type {
   ComputerControlState,
   HandoffStatus,
-} from "../../shared/computer-control";
+} from "@openbot/shared/computer-control";
 import {
   awaitHandoff,
   runHelpRequest,

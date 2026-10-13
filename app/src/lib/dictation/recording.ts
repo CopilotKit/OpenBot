@@ -3,7 +3,7 @@ import {
   dictationExtension,
   dictationMediaType,
   MAX_DICTATION_BYTES,
-} from "../../../../shared/dictation";
+} from "@openbot/shared/dictation";
 
 export interface Recording {
   /** Shared with the visualizer; the recorder owns this stream's lifetime. */

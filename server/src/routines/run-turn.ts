@@ -55,8 +55,8 @@ import type {
   RunAgentInput,
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
-import { NOT_SHOWN } from "../../../shared/component-markers";
-import { frameFiring } from "../../../shared/routine-firing";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
+import { frameFiring } from "@openbot/shared/routine-firing";
 import { headlessTurnRefusal } from "../admin/controls";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { guardBotTurn } from "../agents/lifecycle";

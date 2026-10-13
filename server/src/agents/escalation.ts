@@ -19,7 +19,7 @@
  */
 
 import { z } from "zod";
-import { PUT_TO } from "../../../shared/handoff-markers";
+import { PUT_TO } from "@openbot/shared/handoff-markers";
 import {
   type AuditInitiator,
   type AuditStore,

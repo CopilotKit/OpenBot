@@ -8,11 +8,5 @@
     "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"]
   },
-  "include": [
-    "src",
-    "tests",
-    "vite.config.ts",
-    "../shared/handoff-markers.ts",
-    "../shared/listen-port.ts"
-  ]
+  "include": ["src", "tests", "vite.config.ts"]
 }

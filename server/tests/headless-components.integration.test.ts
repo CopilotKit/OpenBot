@@ -10,7 +10,7 @@ import {
 import { inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
-import { NOT_SHOWN } from "../../shared/component-markers";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import type { AuditEventInput } from "../src/audit";
 import { createHeadlessComponentTools } from "../src/components/headless";
 import { createComponentStore } from "../src/components/store";

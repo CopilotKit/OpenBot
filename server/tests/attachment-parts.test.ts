@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_EXTRACTED_CHARACTERS } from "../../shared/attachments";
+import { MAX_EXTRACTED_CHARACTERS } from "@openbot/shared/attachments";
 import {
   newInlineBudget,
   resolveAttachmentParts,

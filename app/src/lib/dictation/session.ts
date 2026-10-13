@@ -1,4 +1,4 @@
-import { MAX_DICTATION_SECONDS } from "../../../../shared/dictation";
+import { MAX_DICTATION_SECONDS } from "@openbot/shared/dictation";
 import type { Recording } from "./recording";
 
 export type DictationState = {

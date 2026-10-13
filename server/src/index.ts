@@ -8,10 +8,10 @@ import {
 import { serve } from "bun";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
-import { DICTATION_HTTP_IDLE_SECONDS } from "../../shared/dictation";
-import { buildResponsibilityTurn } from "../../shared/responsibility-turn";
-import { workOwner } from "../../shared/work-owner";
+import { COMPUTER_GUIDANCE } from "@openbot/shared/bot-prompt";
+import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
+import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
+import { workOwner } from "@openbot/shared/work-owner";
 import { createActivityStore } from "./activity/activity";
 import {
   auditRoutineStore,

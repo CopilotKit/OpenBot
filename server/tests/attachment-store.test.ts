@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { MAX_IMAGE_BYTES } from "../../shared/attachments";
+import { MAX_IMAGE_BYTES } from "@openbot/shared/attachments";
 import { createApp, UPLOAD_BODY_LIMIT_BYTES } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
 import {

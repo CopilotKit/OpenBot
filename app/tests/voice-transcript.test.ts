@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { SaveVoiceSessionInput } from "../../shared/voice-session";
+import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
 import {
   VoiceTranscript,
   VOICE_CONTEXT_ITEM_ID,

@@ -5,4 +5,4 @@
  * file exists so the browser code keeps importing through `@/`, and so the path to `shared/` is
  * written down once rather than in every renderer.
  */
-export { HANDED_OVER, PUT_TO } from "../../../../shared/handoff-markers";
+export { HANDED_OVER, PUT_TO } from "@openbot/shared/handoff-markers";
