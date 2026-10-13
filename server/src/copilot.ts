@@ -13,6 +13,10 @@ import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
+import {
+  executeNativeApprovalTool,
+  nativeApprovalRun,
+} from "@openbot/toolkit/native-approval";
 import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
@@ -29,10 +33,6 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import {
-  executeNativeApprovalTool,
-  nativeApprovalRun,
-} from "./approvals/native-context";
 import type { AuditInitiator } from "./audit";
 import {
   attachmentIdsIn,

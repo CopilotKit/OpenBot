@@ -8,12 +8,12 @@ import {
   type RunAgentInput,
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
-import type { AuditInitiator } from "../audit";
+import { withApprovalContext } from "./continuation";
 import {
   HeadlessToolSuspension,
   OPENBOT_WAITING_METADATA,
-} from "@openbot/toolkit/headless-tools";
-import { withApprovalContext } from "./types";
+} from "./headless-tools";
+import type { AuditInitiator } from "./initiator";
 
 export { OPENBOT_WAITING_METADATA };
 
