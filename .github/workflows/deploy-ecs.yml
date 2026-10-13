@@ -1,0 +1,167 @@
+name: Deploy to ECS
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecs-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY }}
+      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+      ECS_SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
+      ECS_SECURITY_GROUP_IDS: ${{ vars.ECS_SECURITY_GROUP_IDS }}
+      ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: openbot-ecs-deploy
+
+      - uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Build and push image to ECR
+        id: image
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION ECR_REPOSITORY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Set the GitHub repository variable $name."
+              exit 1
+            fi
+          done
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          image_tag="${SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="${registry}/${ECR_REPOSITORY}:${image_tag}"
+
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$registry"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --push \
+            --tag "$image" \
+            .
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare task definitions
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          for name in ECS_CLUSTER ECS_SERVICE ECS_TASK_FAMILY ECS_CONTAINER_NAME \
+                      ECS_SUBNET_IDS ECS_SECURITY_GROUP_IDS ECS_ASSIGN_PUBLIC_IP; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Set the GitHub repository variable $name."
+              exit 1
+            fi
+          done
+          case "$ECS_ASSIGN_PUBLIC_IP" in
+            ENABLED | DISABLED) ;;
+            *) echo "::error::ECS_ASSIGN_PUBLIC_IP must be ENABLED or DISABLED."; exit 1 ;;
+          esac
+
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query taskDefinition \
+            --output json > /tmp/task-definition.json
+
+          jq --arg name "$ECS_CONTAINER_NAME" --arg image "$IMAGE" '
+            if any(.containerDefinitions[]; .name == $name) then
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+              | .containerDefinitions |= map(
+                  if .name == $name then .image = $image else . end
+                )
+            else
+              error("ECS_CONTAINER_NAME does not match a container in the task definition")
+            end
+          ' /tmp/task-definition.json > /tmp/deploy-task-definition.json
+
+          jq --arg name "$ECS_CONTAINER_NAME" '
+            .containerDefinitions |= map(
+              if .name == $name then
+                .entryPoint = ["sh"]
+                | .command = ["-c", "cd /app/server && bun scripts/migrate.ts"]
+              else . end
+            )
+          ' /tmp/deploy-task-definition.json > /tmp/migration-task-definition.json
+
+      - name: Run database migrations
+        id: migrate
+        run: |
+          set -euo pipefail
+          migration_definition="$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/migration-task-definition.json \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)"
+
+          network="awsvpcConfiguration={subnets=[$ECS_SUBNET_IDS],securityGroups=[$ECS_SECURITY_GROUP_IDS],assignPublicIp=$ECS_ASSIGN_PUBLIC_IP}"
+          result="$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --launch-type FARGATE \
+            --task-definition "$migration_definition" \
+            --network-configuration "$network" \
+            --output json)"
+          task_arn="$(printf '%s' "$result" | jq -r '.tasks[0].taskArn // empty')"
+          if [ -z "$task_arn" ]; then
+            echo "::error::ECS could not start the migration task."
+            printf '%s\n' "$result"
+            exit 1
+          fi
+
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$task_arn"
+          task="$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$task_arn" --output json)"
+          exit_code="$(printf '%s' "$task" | jq -r --arg name "$ECS_CONTAINER_NAME" \
+            '.tasks[0].containers[] | select(.name == $name) | .exitCode // empty')"
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::The database migration task did not exit successfully."
+            printf '%s\n' "$task"
+            exit 1
+          fi
+
+      - name: Update ECS service
+        run: |
+          set -euo pipefail
+          task_definition="$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/deploy-task-definition.json \
+            --query taskDefinition.taskDefinitionArn \
+            --output text)"
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$task_definition" \
+            --force-new-deployment
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"

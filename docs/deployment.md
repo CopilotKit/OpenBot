@@ -188,10 +188,54 @@ container under gVisor, which Chromium is sensitive to; test a navigation before
 `gcloud run compose up` will also deploy the whole compose file if you want a throwaway database
 alongside.
 
-**AWS.** ECS Express Mode provisions the cluster, load balancer, HTTPS and autoscaling from an image
-in ECR, and is what AWS points App Runner users at now that App Runner takes no new customers.
-Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
-No shared-memory configuration is needed or possible.
+**AWS ECS on Fargate.** This repository's [Deploy to ECS workflow](../.github/workflows/deploy-ecs.yml)
+deploys after the `CI` workflow succeeds for a push to `main`. It checks out and builds the exact
+commit CI checked, pushes it to ECR, runs the database migration as a one-off Fargate task, then
+updates the ECS service and waits for it to become stable. The deploy build is a separate build from
+CI's test image. It uses GitHub OIDC rather than long-lived AWS access keys. The workflow assumes you
+have provisioned the AWS resources below; it does not create them.
+
+Before enabling it:
+
+- Create an ECR repository and an ECS cluster, Fargate service, task definition, and task execution
+  role. The task definition must use `awsvpc` and `X86_64`, include the application container, and
+  reference the RDS connection and application secrets from Secrets Manager. Give its task role and
+  execution role the permissions they need. The GitHub OIDC role needs ECR image-push permissions,
+  ECS describe/register/run/update permissions, and `iam:PassRole` for the task and execution roles;
+  scope its trust policy to this repository's `main` branch.
+- Configure the ECS service's ALB target group to forward to port `3001` and use `/health` for its
+  health check. Permit inbound traffic to the task only from the load balancer. The task needs
+  outbound access to ECR, Secrets Manager, and RDS.
+- Use RDS PostgreSQL with the `vector` extension enabled. Set `EMBEDDED_POSTGRES=off` and provide
+  `DATABASE_URL` in the task definition. The workflow runs
+  `bun scripts/migrate.ts` with the image's entrypoint replaced, before updating the service; do not
+  run migrations independently at task startup when using multiple tasks.
+- Configure these GitHub repository settings. `AWS_ROLE_ARN` is a secret; the rest are variables.
+  Subnet and security group IDs are comma-separated lists without spaces.
+
+  | Name | Value |
+  | --- | --- |
+  | `AWS_ROLE_ARN` | ARN of the GitHub OIDC role |
+  | `AWS_REGION` | AWS region containing the resources |
+  | `ECR_REPOSITORY` | Existing ECR repository name |
+  | `ECS_CLUSTER` | ECS cluster name |
+  | `ECS_SERVICE` | ECS service name |
+  | `ECS_TASK_FAMILY` | Task definition family to use as the deployment template |
+  | `ECS_CONTAINER_NAME` | Application container name in that task definition |
+  | `ECS_SUBNET_IDS` | Subnets used to launch the migration task |
+  | `ECS_SECURITY_GROUP_IDS` | Security groups used by the migration task |
+  | `ECS_ASSIGN_PUBLIC_IP` | `ENABLED` or `DISABLED` |
+
+The task should start with at least **1 vCPU and 2 GB memory**; **2 vCPU and 4 GB** is recommended.
+Fargate does not support configuring shared memory, and this image already uses Chromium's
+`--disable-dev-shm-usage` mode. Its writable `/workspace` and `/profiles` directories are task-local
+unless you configure persistent storage. Replacing a task without persistent storage loses browser
+profiles and workspace files; multiple tasks also have separate browsers. Decide on the desired
+persistence and scaling behavior before increasing the service's task count.
+
+The image does not run the routines or staged-attachment sweeps on a schedule. If you rely on either,
+configure a separate scheduled ECS task for the corresponding script as described above. ECS Express
+Mode is another AWS option, but this workflow targets a standard Fargate service behind an ALB.
 
 **Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
 and it is the only one that gives a Bot a computer of its own, runs the routines schedule without
