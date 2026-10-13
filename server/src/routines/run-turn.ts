@@ -59,7 +59,6 @@ import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { frameFiring } from "@openbot/shared/routine-firing";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { historyOrEmpty } from "../agents/thread-history";
-import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
 import type { AuditInitiator } from "../audit";
 import {
   createHeadlessComponentTools,
@@ -71,6 +70,7 @@ import {
   HeadlessToolSuspension,
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
+  OPENBOT_WAITING_METADATA,
 } from "../toolkit/headless-tools";
 import type { AuditSink, TurnAdmission } from "../toolkit/ports";
 import type { DrawnComponent, TurnRunner } from "./runner";

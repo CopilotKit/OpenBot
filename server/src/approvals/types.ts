@@ -1,8 +1,11 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import type { Message, RunAgentInput } from "@ag-ui/client";
 import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import type { AuditInitiator } from "../audit";
+import {
+  type ApprovalContinuation,
+  currentApprovalContext,
+  withApprovalContext,
+} from "../toolkit/continuation";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
 export type ApprovalDecision =
@@ -47,24 +50,11 @@ export type ApprovalPolicyOutcome = {
     failedClosed?: boolean;
   };
 };
-export type ApprovalContinuation = {
-  runId: string;
-  threadId: string;
-  toolCallId: string;
-  toolName: string;
-  args: unknown;
-  messages: Message[];
-  state: unknown;
-  context: RunAgentInput["context"];
-  forwardedProps: unknown;
-  initiator?: AuditInitiator;
+export {
+  type ApprovalContinuation,
+  currentApprovalContext,
+  withApprovalContext,
 };
-const actionContext = new AsyncLocalStorage<ApprovalContinuation>();
-export const withApprovalContext = <T>(
-  context: ApprovalContinuation,
-  run: () => Promise<T>,
-): Promise<T> => actionContext.run(context, run);
-export const currentApprovalContext = () => actionContext.getStore();
 
 export type ApprovalCandidate = {
   actorId: string;

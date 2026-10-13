@@ -10,7 +10,7 @@ import {
   type ToolCall,
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
-import { withApprovalContext } from "../approvals/types";
+import { withApprovalContext } from "./continuation";
 import type { AuditInitiator } from "./initiator";
 
 /** Client tools supplied by OpenBot when the caller has no browser. */
@@ -26,6 +26,9 @@ export type HeadlessTool = {
     context: { toolCallId: string; signal: AbortSignal },
   ): Promise<unknown>;
 };
+
+/** Where a suspended run's waiting details ride on its AG-UI interrupt. */
+export const OPENBOT_WAITING_METADATA = "openbotWaiting";
 
 export type HeadlessWaiting = {
   kind: string;

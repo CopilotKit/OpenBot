@@ -9,8 +9,13 @@ import {
 } from "@ag-ui/client";
 import { Observable, type Subscription } from "rxjs";
 import type { AuditInitiator } from "../audit";
-import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import {
+  HeadlessToolSuspension,
+  OPENBOT_WAITING_METADATA,
+} from "../toolkit/headless-tools";
 import { withApprovalContext } from "./types";
+
+export { OPENBOT_WAITING_METADATA };
 
 type NativeRun = {
   input: RunAgentInput;
@@ -21,9 +26,6 @@ type NativeRun = {
   suspend(error: HeadlessToolSuspension): void;
 };
 const nativeRuns = new AsyncLocalStorage<NativeRun>();
-
-/** Where a suspended run's waiting details ride on its AG-UI interrupt. */
-export const OPENBOT_WAITING_METADATA = "openbotWaiting";
 
 export async function executeNativeApprovalTool<T>(
   name: string,
