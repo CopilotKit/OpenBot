@@ -12,7 +12,7 @@ Setting it up takes three hands, and none of them can do another's:
 
 | Who              | Does                                                                       | Where                                                             |
 | ---------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment. There is no screen for it           |
+| Whoever deploys  | Sets `COMPOSIO_API_KEY`                                                    | The deployment's environment, or `secrets.composioApiKey` in the Helm chart. There is no screen for it |
 | An administrator | Enables an app                                                             | `/admin/plugins/composio`                                         |
 | An administrator | Grants its actions to a Bot                                                | `/admin/plugins/composio-<slug>`, then that page's per-Bot screen |
 | Each person      | Connects their own account to that app                                     | `/settings/connected-accounts`                                    |

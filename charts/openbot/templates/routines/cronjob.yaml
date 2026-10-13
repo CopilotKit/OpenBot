@@ -71,10 +71,18 @@ spec:
 {{ include "openbot.commonEnv" . | indent 16 }}
                 - name: SERVER_INTERNAL_URL
                   value: http://{{ include "openbot.componentName" (dict "root" . "component" "server") }}:{{ .Values.server.service.port }}
+              {{- with .Values.config.extraVolumeMounts }}
+              volumeMounts:
+{{ toYaml . | indent 16 }}
+              {{- end }}
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
                 limits:
                   memory: 512Mi
+          {{- with .Values.config.extraVolumes }}
+          volumes:
+{{ toYaml . | indent 12 }}
+          {{- end }}
 {{- end }}

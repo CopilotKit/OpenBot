@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Helm chart pins by digest, mounts a tenant package, and takes a Composio key
+
+Three things a deployment on Kubernetes did by hand now have values of their own:
+
+- `image.digest` deploys exactly the image a release's `container-images.json` names, as
+  `repository:tag@digest`. It refuses anything that is not `sha256:` and 64 hex characters.
+- `config.extraVolumes` and `config.extraVolumeMounts` mount volumes on the server and on the routines
+  and computer-culler CronJobs, the pods that load the configuration. A tenant package from a
+  ConfigMap no longer needs a custom image.
+- `secrets.composioApiKey`, or `composio-api-key` named in `externalSecrets.data`, reaches the server
+  as `COMPOSIO_API_KEY`. Only the server receives it, not the CronJobs.
+
+With none of them set, every target renders exactly as before.
+
 **Before upgrading.** Four things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
