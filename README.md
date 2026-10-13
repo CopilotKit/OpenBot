@@ -93,14 +93,16 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
    The helper provisions the selected project's runtime key, creates or reuses its
    `openbot` Learning container, then writes both settings to `.env`. It preserves
-   custom container assignments and refuses to replace an existing OpenBot key.
+   custom container assignments and never replaces an existing OpenBot key; with one
+   set, it only creates `openbot` in that key's project if it is missing.
    For fresh self-hosted setup, set `INTELLIGENCE_API_URL` to that deployment's
    HTTPS API origin (or `http://localhost` for a local one) and run the helper
    without the two `npx` commands. It opens an isolated Chrome or Edge window for
    your usual sign-in and project choice; install either browser first. It writes
    the API URL, the key and the container, not `INTELLIGENCE_GATEWAY_WS_URL`, so
-   set that one to the same deployment yourself. Existing key-only setups can assign a container
-   through [Admin → Automatic Learning](docs/automatic-learning.md).
+   set that one to the same deployment yourself. Once `openbot` exists, the server assigns it
+   as the default by itself unless [Admin → Automatic Learning](docs/automatic-learning.md)
+   has a saved setting.
    Managed Intelligence needs no separate licence token.
 
 3. Fill the remaining required values:

@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../src/auth/guards";
+import {
+  createLearningAutoAssign,
+  withLearningAutoAssign,
+} from "../src/learning/auto-assign";
 import { createLearningRoutes } from "../src/learning/routes";
 import { createLearningSettingsStore } from "../src/learning/settings";
 
@@ -100,4 +104,98 @@ test("upstream errors never expose credentials", async () => {
   const response = await app.request("/overview");
   expect(response.status).toBe(502);
   expect(await response.text()).not.toContain("secret-project-key");
+});
+
+test("the settings page assigns a newly created container on load and says why not otherwise", async () => {
+  const store = createLearningSettingsStore();
+  let probe: "absent" | "present" = "absent";
+  const autoAssign = createLearningAutoAssign({
+    enabled: true,
+    store,
+    probe: async () => probe,
+    log: () => {},
+    minIntervalMs: 0,
+  });
+  const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async (
+    context,
+    next,
+  ) => {
+    context.set("actor", {
+      id: "person",
+      email: "person@example.com",
+      role: "admin",
+    });
+    await next();
+  };
+  const app = createLearningRoutes(
+    { store: withLearningAutoAssign(store, autoAssign), autoAssign },
+    requireUser,
+  );
+  expect(await (await app.request("/settings")).json()).toEqual({
+    settings: { enabled: true, defaultTarget: null, agents: {} },
+    automatic: {
+      state: "absent",
+      containerId: "openbot",
+      canCreate: false,
+      instructions: expect.stringContaining("bun scripts/setup-learning.ts"),
+    },
+  });
+  probe = "present";
+  expect(await (await app.request("/settings")).json()).toEqual({
+    settings: {
+      enabled: true,
+      defaultTarget: { containerId: "openbot" },
+      agents: {},
+    },
+    automatic: { state: "assigned", containerId: "openbot" },
+  });
+});
+
+test("an administrator creates the container with the deployment's credential, same-origin only", async () => {
+  const store = createLearningSettingsStore();
+  let probe: "absent" | "present" = "absent";
+  let creates = 0;
+  const autoAssign = createLearningAutoAssign({
+    enabled: true,
+    store,
+    probe: async () => probe,
+    // As at boot: the first attempt finds nothing to create with yet.
+    create: async () => {
+      creates++;
+      if (creates === 1) return "skipped";
+      probe = "present";
+      return "created";
+    },
+    log: () => {},
+  });
+  await autoAssign.check();
+  const actor = (role: "admin" | "user") =>
+    (async (context, next) => {
+      context.set("actor", {
+        id: "person",
+        email: "person@example.com",
+        role,
+      });
+      await next();
+    }) as MiddlewareHandler<{ Variables: AppVariables }>;
+  const post = (app: ReturnType<typeof createLearningRoutes>, origin: string) =>
+    app.request("https://openbot.example.com/container", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: "{}",
+    });
+  const member = createLearningRoutes({ store, autoAssign }, actor("user"));
+  expect((await post(member, "https://openbot.example.com")).status).toBe(403);
+  const admin = createLearningRoutes({ store, autoAssign }, actor("admin"));
+  expect((await post(admin, "https://evil.example")).status).toBe(403);
+  expect(creates).toBe(1);
+  const response = await post(admin, "https://openbot.example.com");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    automatic: { state: "assigned", containerId: "openbot" },
+  });
+  expect(creates).toBe(2);
+  expect((await store.read()).defaultTarget).toEqual({
+    containerId: "openbot",
+  });
 });

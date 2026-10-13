@@ -1,4 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { setDefaultAutoSelectFamily } from "node:net";
 import { join } from "node:path";
 import { serve } from "bun";
 import type { Page } from "playwright";
@@ -52,6 +53,7 @@ import { type BotSession, createSessions } from "./sessions";
 import { createShell } from "./shell";
 import { fillSignIn, parseSignInFill } from "./sign-in";
 import { startVirtualDisplay } from "./virtual-display";
+import { applyWebBotAuthPush } from "./web-bot-auth";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -104,6 +106,15 @@ if (!COMPUTER_TOKEN) {
   );
   process.exit(1);
 }
+
+/*
+ * No multi-address connect anywhere in this process. Bun turns it on by default, and its timer can
+ * throw from `internalConnectMultipleTimeout` after the connection is gone, which exits the process
+ * (oven-sh/bun#25633, fixed in Bun 1.4.0, kept as defence in depth). The egress filter already
+ * connects one checked address at a time (see `connectInTurn`); this covers every other connect here,
+ * such as reaching an upstream proxy by name.
+ */
+setDefaultAutoSelectFamily(false);
 
 const RUNTIME = browserRuntimeFromEnv(process.env);
 const BROWSER_MODE = RUNTIME.mode;
@@ -303,6 +314,73 @@ async function currentPage(
   if (session.livePage && session.livePage !== page) session.snapshotId += 1;
   session.livePage = page;
   return page;
+}
+
+/** A browser that has not been sent anywhere, which is what a restarted one shows. */
+function isBlankPage(url: string): boolean {
+  return (
+    url === "" ||
+    url === "about:blank" ||
+    url.startsWith("chrome://newtab") ||
+    url.startsWith("chrome://new-tab-page")
+  );
+}
+
+/**
+ * Put the page a handoff is about back in front of the person, when the browser came back blank.
+ *
+ * A browser restarts underneath a waiting request more often than it should: Chromium crashing, the
+ * idle sweep or the cap closing it, the whole computer restarting. Each of those relaunches onto
+ * `about:blank`, and before this a person who took control was handed a blank screen with nothing to
+ * solve while the Bot waited for them to solve it. The request carries the page it was raised on, so
+ * the computer opens it again first. Through the same navigation the Bot uses, so the egress filter
+ * and the page-access rule still decide whether it may load.
+ *
+ * Only a blank browser is touched. A person or a site that moved the page somewhere else meant to.
+ * Best effort: a page that will not load is logged and the handoff goes ahead, because a person in
+ * front of a blank browser can still type the address, and a refused handoff helps nobody.
+ */
+const restoringPages = new Set<string>();
+async function restoreHandoffPage(botId: string): Promise<void> {
+  // One at a time per Bot: the help call and "Take control" both start one, and the second would
+  // navigate again over the first while it is still loading.
+  if (restoringPages.has(botId)) return;
+  const session = sessions.for(botId);
+  const want = session.control.pageToRestore();
+  if (!want) return;
+  // Run in the background, so the help call and "Take control" answer at once. Starting the browser
+  // can take a while; by the time it is up the person may already be driving, or the request over.
+  const inputsBefore = session.humanInputs;
+  restoringPages.add(botId);
+  try {
+    const target = await currentPage(botId);
+    if (!isBlankPage(target.url())) return;
+    if (
+      session.humanInputs !== inputsBefore ||
+      session.control.pageToRestore() !== want
+    )
+      return;
+    await navigateWebPage(target, want, RUNTIME.backend, NAVIGATION_TIMEOUT_MS);
+    // A new document, so every ref handed out before it is retired, as after any navigation.
+    session.snapshotId += 1;
+    console.info(
+      JSON.stringify({
+        type: "computer-handoff-page-restored",
+        botId,
+        origin: new URL(want).origin,
+      }),
+    );
+  } catch (error) {
+    console.info(
+      JSON.stringify({
+        type: "computer-handoff-page-not-restored",
+        botId,
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  } finally {
+    restoringPages.delete(botId);
+  }
 }
 
 /**
@@ -598,6 +676,7 @@ serve<StreamData>({
         ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
         return;
       }
+      session.humanInputs += 1;
       try {
         const recorded = ws.data.recordingId
           ? await describeHumanGesture(
@@ -678,8 +757,16 @@ serve<StreamData>({
       return json({ error: "That is not a usable bot id." }, 400);
     }
     // The admin network policy, pushed by the server on every change; applied without a restart.
-    if (url.pathname === "/egress-policy" && request.method === "PUT")
-      return handleEgressPolicyRequest(botId, request);
+    // The deployment's Web Bot Auth key rides the same push (see `web-bot-auth.ts`).
+    if (url.pathname === "/egress-policy" && request.method === "PUT") {
+      const body = (await request
+        .clone()
+        .json()
+        .catch(() => null)) as { webBotAuth?: unknown } | null;
+      const applied = await handleEgressPolicyRequest(botId, request);
+      if (applied.ok) await applyWebBotAuthPush(body?.webBotAuth);
+      return applied;
+    }
     const session = sessions.for(botId);
 
     /*
@@ -750,9 +837,19 @@ serve<StreamData>({
           typeof body.toolCallId !== "string"
         )
           return json({ error: "toolCallId must be a string." }, 400);
-        return json(
-          session.control.requestHelp(body?.reason, body?.toolCallId),
+        // The page the Bot is stuck on, recorded with the request. A browser that will not start is
+        // no reason to refuse the request: the person is the one who can see why.
+        const stuckOn = await currentPage(botId).catch(() => undefined);
+        const state = session.control.requestHelp(
+          body?.reason,
+          body?.toolCallId,
+          "model",
+          stuckOn?.url(),
         );
+        // Not awaited: reopening the page can take a navigation timeout plus a cold browser start,
+        // and the Bot's help call must not wait on it. It catches its own errors.
+        void restoreHandoffPage(botId);
+        return json(state);
       }
 
       // The Bot asking for one value it must not be told. It has already focused the field.
@@ -872,8 +969,13 @@ serve<StreamData>({
         } | null;
         if (typeof body?.requestId !== "string" || !body.requestId.trim())
           return json({ error: "A requestId is required." }, 400);
-        if (url.pathname === "/control/take")
-          return json(await session.control.take(body.requestId));
+        if (url.pathname === "/control/take") {
+          const taken = await session.control.take(body.requestId);
+          // The browser may have restarted while the request waited; give the person the page. In the
+          // background, so "Take control" answers at once; the live screen shows the page as it loads.
+          void restoreHandoffPage(botId);
+          return json(taken);
+        }
         if (url.pathname === "/control/cancel")
           return json(session.control.cancel(body.requestId));
         return json(session.control.release(body.requestId));
@@ -886,6 +988,7 @@ serve<StreamData>({
         if (!session.control.humanMayDrive()) {
           return json({ error: TAKE_CONTROL_FIRST }, 409);
         }
+        session.humanInputs += 1;
         const body = (await request.json().catch(() => null)) as Record<
           string,
           unknown

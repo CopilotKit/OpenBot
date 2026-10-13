@@ -119,6 +119,14 @@ migrations:
 config:
   # Where people reach this deployment. Sets the OAuth callback and the trusted origin.
   publicUrl: ""
+  # Web Bot Auth: every request a Bot's browser makes is signed as coming from this deployment, and
+  # the public key is published at `<publicUrl>/.well-known/http-message-signatures-directory`, so a
+  # site behind Cloudflare that allows signed agents lets the Bot through instead of challenging it.
+  # Off unless "on": signing announces the deployment's URL to every site a Bot visits. "on" needs an
+  # https `publicUrl` (verifiers fetch the key from it) and earns nothing until the deployment is
+  # registered with Cloudflare, a manual step described in the chart README. The key is derived from
+  # `secrets.keyEncryptionKey` unless `secrets.webBotAuthKey` gives one.
+  webBotAuth: ""
   # Administrators by email address, comma-separated. Required unless singleUser is on.
   initialAdminEmails: ""
   # Email domains admitted at sign-in, comma-separated. Empty admits everybody, which is what the
@@ -161,13 +169,43 @@ config:
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
   # Learning defaults on; collection and delivery require an existing, assigned container.
-  # Fresh self-hosted setup: run scripts/setup-learning.ts on a computer with Chrome/Edge access
-  # to Intelligence, then transfer its runtime key through your secret manager and use openbot here.
-  # Existing key-only installs create it through authenticated Intelligence administration first.
+  # With nothing saved in Admin and no containerId below, the server assigns the project's openbot
+  # container on its own once it exists. The runtime key cannot create it, so `setup` below gives the
+  # chart a credential that can; without one, the server log and Admin → Automatic Learning say
+  # exactly what to run (scripts/setup-learning.ts, from a computer that can sign in to Intelligence).
   # Optional initial defaults; saved Admin → Automatic Learning settings take precedence, including off.
   learning:
     containerId: ""
     revision: ""
+    # false stops the automatic assignment (OPENBOT_LEARNING_AUTO_ASSIGN=false).
+    autoAssign: true
+    # Creating the container. Name either Secret and a Job runs on every install and upgrade that
+    # creates it in the runtime key's project, proves it with that key, and exits; the server then
+    # assigns it. Both Secrets are yours: create them before installing.
+    setup:
+      # A CopilotKit CLI login, for managed Intelligence. Sign in into an empty folder and store the
+      # file it writes (a person's 30-day session, so keep the Secret as tight as that warrants):
+      #   COPILOTKIT_CONFIG_DIR="$(mktemp -d)"; export COPILOTKIT_CONFIG_DIR
+      #   npx --yes copilotkit@latest login
+      #   kubectl create secret generic openbot-copilotkit-cli \
+      #     --from-file=config.json="$COPILOTKIT_CONFIG_DIR/auth/config.json"
+      # The Job reads it once. The server never holds it.
+      cliLoginSecret:
+        name: ""
+        key: config.json
+      # An Intelligence service token, which creates Learning containers on a CopilotKit local
+      # evaluation install only. Requires projectId: the numeric ID of the runtime key's project.
+      # Passed to the server too, so Admin → Automatic Learning can create the container again.
+      serviceTokenSecret:
+        name: ""
+        key: token
+      projectId: ""
+  # Memory sources and background research, on by default for each person and Bot (OpenBot turns
+  # them on when a person talks to a Bot, and never back on once the person turns one off or removes
+  # it). false stops new defaults for the whole deployment; existing settings are left as they are.
+  memory:
+    sourceDefaults: true
+    researchDefaults: true
   # How far one Bot may hand work to another.
   #
   # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what
@@ -344,6 +382,28 @@ computers:
   maxBrowsers: ""
   browserIdleMs: ""
 
+  # Which Chromium a Bot's computer runs. `headed` is full Chromium drawing to the pod's own X server
+  # (Xvfb, started by the computer), behind the same streamed screen: it is what sites see from a
+  # person's browser, and Cloudflare's bot check challenges it far less than headless Chromium. Costs
+  # a little more memory and CPU than `headless`, which is still available.
+  browserMode: headed
+
+  # A residential or ISP proxy for every Bot's outbound traffic. OFF BY DEFAULT, and an operator's
+  # choice to make knowingly: through one, a Bot's traffic leaves from an address a consumer ISP owns,
+  # so a site sees what looks like a person at home rather than a datacenter. That is the point (a
+  # datacenter address is the other thing bot checks key on) and also the thing to be comfortable
+  # with. The credentialed URL (`http://user:password@gateway.provider.example:8000`) is a secret:
+  # `secrets.egressProxyUrl`, or a key in a Secret of your own. It reaches every computer as
+  # `EGRESS_PROXY_DEFAULT`, behind the egress filter, so the network policy still decides what a Bot
+  # may reach. With `networkPolicy.enabled`, also name the proxy in
+  # `networkPolicy.computerExtraEgress`. One Bot's own proxy is still `EGRESS_PROXY_<BOT>` in
+  # `extraEnv` below.
+  egressProxy:
+    enabled: false
+    # Empty uses the chart's Secret (`secrets.egressProxyUrl`).
+    existingSecret: ""
+    existingSecretKey: egress-proxy-url
+
   persistence:
     # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS. Naming `gp3` or `pd-balanced` is how a chart stops
     # installing on a bare-metal cluster. Note that the ordinary block volume on every cloud is
@@ -358,7 +418,8 @@ computers:
   resources:
     requests:
       cpu: 500m
-      # Chromium is roughly 200-500MB headless and up to 2GB with real pages open.
+      # Chromium is roughly 200-500MB per browser (a little more headed, plus a few MB for Xvfb) and
+      # up to 2GB with real pages open.
       memory: 1Gi
     limits:
       memory: 4Gi
@@ -567,6 +628,12 @@ secrets:
   # logs ones are unset.
   otelLogsHeaders: ""
   otelHeaders: ""
+  # Optional, with `config.webBotAuth`. An Ed25519 private key as a JSON Web Key, to sign with instead
+  # of the one derived from `keyEncryptionKey`. Read from key `web-bot-auth-key` of whichever Secret
+  # this chart uses, when present.
+  webBotAuthKey: ""
+  # Required when `computers.egressProxy.enabled` and no `existingSecret` is named there.
+  egressProxyUrl: ""
 
 externalSecrets:
   enabled: false

@@ -109,7 +109,7 @@ import {
   createGroupStore,
   groupSourceForRun,
 } from "./channels/group";
-import { createChannelStore } from "./channels/routes";
+import { type ChannelStore, createChannelStore } from "./channels/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
 import {
@@ -186,8 +186,22 @@ import {
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
 import { clearLearningRevisionFallback } from "./learning/runtime";
+import {
+  createLearningAutoAssign,
+  probeLearningContainer,
+  withLearningAutoAssign,
+} from "./learning/auto-assign";
+import {
+  cliLoginPresent,
+  ensureLearningContainer,
+  intelligenceApiOrigin,
+  keyIntelligence,
+  learningSetupInstructions,
+} from "./learning/ensure-container";
 import { createLearningSettingsStore } from "./learning/settings";
+import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
+import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
 import { memoryTools } from "./memory/tools";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
@@ -344,7 +358,68 @@ const port = config.port;
 const database = createDatabase(config.databaseUrl);
 // Every dispatch point asks this database whether its person paused the Bot. See agents/lifecycle.ts.
 configureBotLifecycle({ database });
-const learningSettings = createLearningSettingsStore(database, config.learning);
+const learningSettingsStore = createLearningSettingsStore(
+  database,
+  config.learning,
+);
+// Its own client, like the self-host banner's: the constructor opens nothing.
+const learningProbeIntelligence = createIntelligenceClient(
+  config.runtime.intelligence,
+);
+/*
+ * Who can create the `openbot` container here: never the runtime key. A service token the operator
+ * configured (local evaluation installs), or a CopilotKit CLI login on this machine, which is what a
+ * laptop running `bun run start` has. Neither, and the log and Admin say exactly what to run instead.
+ */
+const learningApiOrigin = (() => {
+  try {
+    return intelligenceApiOrigin(config.runtime.intelligence.apiUrl);
+  } catch {
+    return undefined;
+  }
+})();
+const learningCanCreate =
+  learningApiOrigin !== undefined &&
+  (config.learningSetup !== undefined || cliLoginPresent());
+const learningAutoAssign = createLearningAutoAssign({
+  enabled: config.learningAutoAssign,
+  store: learningSettingsStore,
+  probe: (containerId) =>
+    probeLearningContainer(learningProbeIntelligence, containerId),
+  ...(learningApiOrigin
+    ? { instructions: learningSetupInstructions(learningApiOrigin) }
+    : {}),
+  ...(learningCanCreate && learningApiOrigin
+    ? {
+        create: () =>
+          ensureLearningContainer({
+            directory: process.cwd(),
+            apiUrl: learningApiOrigin,
+            nonInteractive: true,
+            key: keyIntelligence(
+              learningApiOrigin,
+              config.runtime.intelligence.apiKey,
+              config.runtime.intelligence.gatewayWsUrl,
+            ),
+            cliLogin: cliLoginPresent(),
+            ...(config.learningSetup
+              ? {
+                  serviceToken: {
+                    token: config.learningSetup.serviceToken,
+                    projectId: config.learningSetup.projectId,
+                  },
+                }
+              : {}),
+          }),
+      }
+    : {}),
+  audit: createAuditStore(database),
+});
+const learningSettings = withLearningAutoAssign(
+  learningSettingsStore,
+  learningAutoAssign,
+);
+learningAutoAssign.start();
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
@@ -366,11 +441,23 @@ const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
 const threadIdentity = createThreadIdentity(
   config.deploymentId ?? tenantPackage.tenantId,
 );
-const channelStore = createChannelStore(
+const baseChannelStore = createChannelStore(
   database,
   agentProfileStore,
   threadIdentity,
 );
+/**
+ * A person spoke in one of their conversations. Bound once memory defaults exist (memory/defaults.ts):
+ * a conversation with one Bot switches on that Bot's research and memory sources for this person.
+ */
+let personSpoke: ((ownerUserId: string, channelId: string) => void) | undefined;
+const channelStore: ChannelStore = {
+  ...baseChannelStore,
+  async recordActivity(actor, channelId, activity, source) {
+    await baseChannelStore.recordActivity(actor, channelId, activity, source);
+    if (activity.agentId === null) personSpoke?.(actor.id, channelId);
+  },
+};
 const channelEvents = createChannelEventHub();
 /**
  * Which components each Bot may answer with.
@@ -452,6 +539,7 @@ const computerProvider = config.computer
   ? withPolicyPushOnWake(createComputerProvider(config.computer), {
       policyForBot: (botId) => enterpriseControls()?.policyForBot(botId),
       ...(config.computer.token ? { token: config.computer.token } : {}),
+      ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
     })
   : undefined;
 
@@ -1078,7 +1166,14 @@ const hostAccessBroker = createHostAccessBroker(Date.now, {
 // grant, the policy and the audit row are exactly where they were. Host-folder tools are also
 // server-dispatched: the selected Bot and the signed-in owner are bound here, then the desktop worker
 // receives only opaque grant ids and relative paths.
-const personalMemoryStore = createMemoryStore(database);
+// Memory lives in CopilotKit Intelligence when this deployment is entitled to it, and in OpenBot's own
+// tables when it is not; see memory/store.ts. Its own client, like the thread reader's: the
+// constructor opens nothing.
+const personalMemoryStore = createMemoryStore(database, {
+  intelligence: createIntelligenceMemory({
+    client: createIntelligenceClient(config.runtime.intelligence),
+  }),
+});
 const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
@@ -1099,8 +1194,32 @@ const memoryIngestion = createMemoryIngestion({
 });
 // Proactive research may only read; see proactive/restriction.ts. Read from the catalogue per call.
 const proactiveReadOnlyRefs = createReadOnlyClassifier(pluginStore);
-const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) =>
-  memoryIngestion.contextFor(ownerUserId, botId);
+/*
+ * Memory sources and background research, on by default for each person and Bot, and never switched
+ * back on once the person turns one down. See memory/defaults.ts.
+ */
+const memoryDefaults = createMemoryDefaults({
+  database,
+  ingestion: memoryIngestion,
+  sources: config.memoryDefaults.sources,
+  research: config.memoryDefaults.research,
+  channelBots: async (ownerUserId, channelId) =>
+    (await channelStore.get(await actorFor(ownerUserId), channelId))
+      ?.agentIds ?? null,
+  // The same rule research delivery uses, read when a person speaks (long after it is defined).
+  canDeliver: async (ownerUserId, channelId, agentId) =>
+    (await deliveryScopeFor(ownerUserId, channelId, agentId)) !== null,
+  mintThreadId: () => threadIdentity.mint(),
+  // Read when a Bot turn starts, long after `teamBots` below is defined.
+  publishedByAnother: (ownerUserId, agentId) =>
+    teamBots.publishedByAnother(ownerUserId, agentId),
+});
+personSpoke = memoryDefaults.personSpoke;
+const loadPersonalMemoryForActor = (ownerUserId: string) => (botId: string) => {
+  // Apps connected since this Bot's last turn become its memory sources. Never waits.
+  memoryDefaults.botTurn(ownerUserId, botId);
+  return memoryIngestion.contextFor(ownerUserId, botId);
+};
 const memorySweep = repeatAfterEach(async () => {
   try {
     await memoryIngestion.syncDue();
@@ -1110,6 +1229,20 @@ const memorySweep = repeatAfterEach(async () => {
         type: "memory-sweep-error",
         error: error instanceof Error ? error.name : "UnknownError",
         context: { operation: "syncDue" },
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
+  // Mirror to Intelligence what is out of step: the backfill on the first passes after a deployment
+  // becomes entitled, and afterwards whatever an outage left behind. A no-op without Intelligence.
+  try {
+    await personalMemoryStore.mirrorPending();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "memory-sweep-error",
+        error: error instanceof Error ? error.name : "UnknownError",
+        context: { operation: "mirrorPending" },
         timestamp: new Date().toISOString(),
       }),
     );
@@ -2868,6 +3001,7 @@ await installEnterpriseControls({
   auditStore: bootAuditStore,
   ...(computerProvider ? { provider: computerProvider } : {}),
   ...(config.computer?.token ? { computerToken: config.computer.token } : {}),
+  ...(config.webBotAuth ? { webBotAuth: config.webBotAuth } : {}),
   builtInModel: `${runtimeModel.provider}/${runtimeModel.defaultModel}`,
   people: peopleStore,
   initialAdminEmails: config.auth?.initialAdminEmails ?? [],
@@ -3034,6 +3168,7 @@ const app = createApp(
   },
   {
     store: learningSettings,
+    autoAssign: learningAutoAssign,
     status: copilotRuntime.learning?.status,
     inspect: copilotRuntime.learning?.inspect,
   },

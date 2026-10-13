@@ -285,6 +285,21 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: BETTER_AUTH_URL
   value: {{ .Values.config.publicUrl | quote }}
 {{- end }}
+{{- /* Guarded: absent on a release upgraded with --reuse-values, which leaves the server's default. */}}
+{{- with (.Values.config).webBotAuth }}
+- name: WEB_BOT_AUTH
+  value: {{ . | quote }}
+{{- end }}
+{{- /*
+  Optional on purpose: the server derives a key from KEY_ENCRYPTION_KEY when this one is absent, so
+  a Secret of your own, or the chart's without `secrets.webBotAuthKey`, simply does not carry it.
+*/}}
+- name: WEB_BOT_AUTH_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: web-bot-auth-key
+      optional: true
 {{- if .Values.config.initialAdminEmails }}
 - name: INITIAL_ADMIN_EMAILS
   value: {{ .Values.config.initialAdminEmails | quote }}
@@ -359,6 +374,21 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 {{- with $learning.revision }}
 - name: CPK_INTELLIGENCE_SKILLS_REVISION
   value: {{ . | quote }}
+{{- end }}
+{{- /* Absent, as it is under `--reuse-values`, means on: only an explicit false is written. */}}
+{{- if eq (toString $learning.autoAssign) "false" }}
+- name: OPENBOT_LEARNING_AUTO_ASSIGN
+  value: "false"
+{{- end }}
+{{- /* Absent, as under `--reuse-values`, means on, like autoAssign: only an explicit false is written. */}}
+{{- $memory := .Values.config.memory | default dict }}
+{{- if eq (toString $memory.sourceDefaults) "false" }}
+- name: OPENBOT_MEMORY_SOURCE_DEFAULTS
+  value: "false"
+{{- end }}
+{{- if eq (toString $memory.researchDefaults) "false" }}
+- name: OPENBOT_PROACTIVE_DEFAULTS
+  value: "false"
 {{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
@@ -625,6 +655,31 @@ podAntiAffinity:
 {{- end -}}
 
 {{/*
+The computer settings this chart has values for, as a JSON list of env entries.
+
+One definition, read by the shared StatefulSet and by the per-Bot sandbox template, so a computer
+cannot be headed in one mode and headless in the other, or proxied in one and not the other.
+
+Each key is reached through a guard, because `helm upgrade --reuse-values` hands an existing release
+none of the keys this release added (see scripts/check-new-values-keys.ts). Absent `browserMode`
+leaves the computer to its own default, which is headed on Linux, the same thing.
+*/}}
+{{- define "openbot.computerEnv" -}}
+{{- $env := list -}}
+{{- $computers := .Values.computers | default dict -}}
+{{- with $computers.browserMode -}}
+{{- $env = append $env (dict "name" "COMPUTER_BROWSER_MODE" "value" (toString .)) -}}
+{{- end -}}
+{{- $egressProxy := $computers.egressProxy | default dict -}}
+{{- if $egressProxy.enabled -}}
+{{- $env = append $env (dict "name" "EGRESS_PROXY_DEFAULT" "valueFrom" (dict "secretKeyRef" (dict
+  "name" (default (include "openbot.secretName" .) $egressProxy.existingSecret)
+  "key" (ternary (default "egress-proxy-url" $egressProxy.existingSecretKey) "egress-proxy-url" (not (empty $egressProxy.existingSecret)))))) -}}
+{{- end -}}
+{{- toJson $env -}}
+{{- end -}}
+
+{{/*
 The pod and volumes every Bot's computer is cut from, as JSON.
 
 One definition, used by the ConfigMap the server reads and by the SandboxTemplate a warm pool cuts
@@ -644,6 +699,7 @@ therefore set here instead. See `computers.podSecurityContext` in values.yaml fo
 1001 and what is deliberately NOT set alongside it.
 */}}
 {{- define "openbot.sandboxPodTemplate" -}}
+{{- $computerEnv := include "openbot.computerEnv" . | fromJsonArray -}}
 {{- $spec := dict
   "podTemplate" (dict
     "metadata" (dict "labels" (dict
@@ -669,6 +725,7 @@ therefore set here instead. See `computers.podSecurityContext` in values.yaml fo
             (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
               "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
               "key" "computer-token"))))
+          $computerEnv
           .Values.computers.extraEnv)
         "volumeMounts" (list
           (dict "name" "profiles" "mountPath" "/profiles")
@@ -721,5 +778,31 @@ than anything that names the cause.
 */}}
 {{- define "openbot.automountToken" -}}
 {{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
+{{- end -}}
+
+{{- /*
+  The operator's credential for creating the openbot Learning container (values: config.learning.setup).
+
+  Read through `default dict` at every level, because `setup` is a key this chart did not have before
+  and `helm upgrade --reuse-values` hands back the previous release's values without it.
+*/}}
+{{- define "openbot.learningSetup" -}}
+{{- $learning := .Values.config.learning | default dict -}}
+{{- toYaml ($learning.setup | default dict) -}}
+{{- end -}}
+
+{{- /* INTELLIGENCE_SERVICE_TOKEN and INTELLIGENCE_PROJECT_ID, when the operator named a token Secret. */}}
+{{- define "openbot.learningServiceTokenEnv" -}}
+{{- $setup := include "openbot.learningSetup" . | fromYaml -}}
+{{- $token := $setup.serviceTokenSecret | default dict -}}
+{{- if $token.name }}
+- name: INTELLIGENCE_SERVICE_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $token.name | quote }}
+      key: {{ $token.key | default "token" | quote }}
+- name: INTELLIGENCE_PROJECT_ID
+  value: {{ $setup.projectId | toString | quote }}
+{{- end }}
 {{- end -}}
 

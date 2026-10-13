@@ -19,6 +19,7 @@ import {
   parseEgressRules,
 } from "../computer/policy-network";
 import { mcpServers } from "../db/schema";
+import { parsePageLimit } from "../paging";
 import { otelConfigured } from "../telemetry/otel";
 import {
   CAPABILITIES,
@@ -28,6 +29,40 @@ import {
 } from "./capabilities";
 import { ACTION_RECORD_RETENTION_DAYS, enterpriseControls } from "./controls";
 import type { EnterpriseSettings } from "./settings-store";
+
+/**
+ * Strict readers for the two paged enterprise GETs, matching the shared `parsePageLimit`
+ * rule every other paged list follows: a run of digits is clamped into range, anything
+ * else is a 400 naming the parameter rather than a silently coerced page.
+ *
+ * `GET /models/usage?days=` used `Number(raw) || 30`, so `?days=abc`, `?days=12abc`
+ * and `?days=` all quietly returned the 30-day view, and `?days=3.9` averaged a
+ * fractional window. `GET /actions?limit=` did the same with the 100-row default.
+ * Exported pure so the 400 paths are unit-tested without standing up the controls.
+ */
+export const ENTERPRISE_DAYS_ERROR =
+  'Query parameter "days" must be a positive integer.';
+
+export function parseEnterpriseDays(
+  raw: string | null,
+): { ok: true; days: number } | { ok: false; error: string } {
+  if (raw === null || raw.trim() === "") return { ok: true, days: 30 };
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed))
+    return { ok: false, error: ENTERPRISE_DAYS_ERROR };
+  return {
+    ok: true,
+    days: Math.min(Math.max(Number.parseInt(trimmed, 10), 1), 365),
+  };
+}
+
+export function parseEnterpriseActionsLimit(
+  raw: string | null,
+): { ok: true; limit: number } | { ok: false; error: string } {
+  const parsed = parsePageLimit(raw, 500);
+  if (!parsed.ok) return parsed;
+  return { ok: true, limit: parsed.limit ?? 100 };
+}
 
 const capabilityInput = z.strictObject({
   scopeKind: z.enum(["organization", "role", "group"]),
@@ -326,10 +361,11 @@ export function createEnterpriseAdminRoutes(
   routes.get("/models/usage", async (context) => {
     const controls = enterpriseControls();
     if (!controls) return unavailable(context);
-    const days = Math.min(
-      Math.max(Number(context.req.query("days") ?? 30) || 30, 1),
-      365,
-    );
+    const parsedDays = parseEnterpriseDays(context.req.query("days") ?? null);
+    if (!parsedDays.ok) {
+      return context.json({ error: parsedDays.error }, 400);
+    }
+    const days = parsedDays.days;
     const summary = await controls.store.modelUsageSummary(days);
     const recent = await controls.store.recentModelUsage(50);
     const emails = await controls.store.usersById([
@@ -348,8 +384,15 @@ export function createEnterpriseAdminRoutes(
   routes.get("/actions", async (context) => {
     const controls = enterpriseControls();
     if (!controls) return unavailable(context);
-    const limit = Number(context.req.query("limit") ?? 100) || 100;
-    return context.json({ actions: await controls.store.actions(limit) });
+    const parsedLimit = parseEnterpriseActionsLimit(
+      context.req.query("limit") ?? null,
+    );
+    if (!parsedLimit.ok) {
+      return context.json({ error: parsedLimit.error }, 400);
+    }
+    return context.json({
+      actions: await controls.store.actions(parsedLimit.limit),
+    });
   });
 
   routes.post("/people/:userId/terminate-computers", async (context) => {

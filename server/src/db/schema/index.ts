@@ -6,6 +6,7 @@ export * from "./components";
 export * from "./computer";
 export * from "./core";
 export * from "./coworker";
+export * from "./defaults";
 export * from "./delivery";
 export * from "./demonstrations";
 export * from "./group";

@@ -114,7 +114,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           Add source
         </Button>
       }
-      description="Opt in to a read from an app this Bot can already access. Enabled sources refresh every 15 minutes, and their facts are available to this Bot only."
+      description="Each app you connected in your own account that this Bot can read becomes a source on its own, and you can add more. Enabled sources refresh every 15 minutes, and their facts are available to this Bot only. Turn one off or remove it and it stays that way."
       title="Connected app sources"
     >
       {sources.isPending ? null : sources.error ? (

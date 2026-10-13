@@ -20,6 +20,10 @@
  * already queued is cancelled), and the standing permissions they gave it ("Always allow" and
  * "pre-approved" rules, which include always sharing private information). Rules that make the Bot
  * ask first or hand work back protect the person, so a reset keeps those.
+ *
+ * For the same reason a reset keeps the person's "no" to a default: a memory source or background
+ * research they had turned off is recorded as turned down (`memory/defaults.ts`), so starting fresh
+ * never switches back on what they switched off. What they left on comes back on by default.
  */
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
@@ -36,6 +40,7 @@ import {
   routines,
   workItems,
 } from "../db/schema";
+import { lockDefaults, recordOptOut, sourceServerId } from "../memory/defaults";
 import { PROACTIVE_RUN_KIND } from "../proactive/engine";
 import type { AgentActor } from "./profile-types";
 import { WAKE_UP_KIND } from "./wake-up";
@@ -234,8 +239,14 @@ export function createBotReset(options: {
         await softDeleteChannel(actor, channelId);
 
       return database.transaction(async (transaction) => {
+        // The lock defaults adoption takes, so no default is adopted between these reads and the deletes.
+        await lockDefaults(transaction, ownerUserId, agentId);
         const sources = await transaction
-          .select({ id: memorySources.id })
+          .select({
+            id: memorySources.id,
+            toolRef: memorySources.toolRef,
+            enabled: memorySources.enabled,
+          })
           .from(memorySources)
           .where(
             and(
@@ -243,6 +254,14 @@ export function createBotReset(options: {
               eq(memorySources.agentId, agentId),
             ),
           );
+        for (const source of sources)
+          if (!source.enabled)
+            await recordOptOut(transaction, {
+              ownerUserId,
+              agentId,
+              feature: "memory_source",
+              scope: sourceServerId(source.toolRef),
+            });
         const memories =
           sources.length === 0
             ? []
@@ -302,9 +321,18 @@ export function createBotReset(options: {
           .where(formedMemories(ownerUserId, agentId))
           .returning({ id: personalMemories.id });
         const settings = await transaction
-          .select({ id: proactiveSettings.id })
+          .select({
+            id: proactiveSettings.id,
+            enabled: proactiveSettings.enabled,
+          })
           .from(proactiveSettings)
           .where(research(ownerUserId, agentId));
+        if (settings.some((setting) => !setting.enabled))
+          await recordOptOut(transaction, {
+            ownerUserId,
+            agentId,
+            feature: "proactive_research",
+          });
         if (settings.length > 0) {
           const ids = settings.map((setting) => setting.id);
           // A run already queued for the setting would find it gone; cancel it rather than fail it.

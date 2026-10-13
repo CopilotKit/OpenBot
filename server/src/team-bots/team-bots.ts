@@ -403,6 +403,12 @@ export function createTeamBots(options: {
         );
     },
 
+    /** Whether this is a Team Bot somebody else published, where this person's accounts need their consent. */
+    async publishedByAnother(actorId: string, botId: string): Promise<boolean> {
+      const owner = (await publication(botId))?.ownerUserId;
+      return Boolean(owner) && owner !== actorId;
+    },
+
     /** Whether this Bot is in this person's sidebar by assignment, which they cannot hide. */
     async isAssignedTo(actorId: string, botId: string): Promise<boolean> {
       const [row] = await database

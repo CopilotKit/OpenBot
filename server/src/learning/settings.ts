@@ -13,6 +13,16 @@ import {
 export type LearningSettingsStore = {
   read(): Promise<LearningSettings>;
   write(settings: LearningSettings): Promise<LearningSettings>;
+  /** Whether an administrator has saved settings, including a saved off. */
+  saved(): Promise<boolean>;
+  /**
+   * Save `target` as the default only while nothing is saved, and say whether this call saved it.
+   *
+   * One conditional insert, so replicas racing at boot cannot overwrite each other or an
+   * administrator who saved between the check and the write: the first row wins and every later
+   * call returns false.
+   */
+  adoptDefault(target: LearningTarget): Promise<boolean>;
   bindThread(input: {
     userId: string;
     threadId: string;
@@ -89,8 +99,39 @@ export function createLearningSettingsStore(
     agents: {},
   };
   let current = structuredClone(fallback);
+  let written = false;
   const bindings = new Map<string, string | null>();
   return {
+    async saved() {
+      if (!database) return written;
+      const [row] = await database
+        .select({ id: learningSettings.id })
+        .from(learningSettings)
+        .where(eq(learningSettings.id, "current"))
+        .limit(1);
+      return row !== undefined;
+    },
+    async adoptDefault(target) {
+      const settings: LearningSettings = {
+        enabled: true,
+        defaultTarget: { containerId: target.containerId },
+        agents: {},
+      };
+      const parsed = parseLearningSettings(settings);
+      if (!parsed.ok) throw new TypeError(parsed.error);
+      if (!database) {
+        if (written) return false;
+        current = structuredClone(parsed.settings);
+        written = true;
+        return true;
+      }
+      const inserted = await database
+        .insert(learningSettings)
+        .values({ id: "current", settings: parsed.settings })
+        .onConflictDoNothing({ target: learningSettings.id })
+        .returning({ id: learningSettings.id });
+      return inserted.length > 0;
+    },
     async read() {
       if (!database) return structuredClone(current);
       const [row] = await database
@@ -114,7 +155,10 @@ export function createLearningSettingsStore(
             target: learningSettings.id,
             set: { settings: parsed.settings, updatedAt: new Date() },
           });
-      } else current = structuredClone(parsed.settings);
+      } else {
+        current = structuredClone(parsed.settings);
+        written = true;
+      }
       return structuredClone(parsed.settings);
     },
     async bindThread(input) {

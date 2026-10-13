@@ -587,14 +587,20 @@ address: its page and the Bot both say inbound email is not configured on this d
 ## Automatic Learning
 
 Learning is on by default; with no container assigned, nothing is collected or delivered and the
-deployment still starts and chats. Both variables are optional defaults that an administrator's saved
-settings under **Admin → Automatic Learning** override, including a saved off. See
-[automatic-learning.md](automatic-learning.md).
+deployment still starts and chats. Until something is saved, the server assigns its Intelligence
+project's `openbot` container as the default by itself once that container exists. The variables
+below are optional; an administrator's saved settings under **Admin → Automatic Learning** override
+them, including a saved off. See [automatic-learning.md](automatic-learning.md).
 
 | Variable                                 | Meaning                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` | Default Learning container for this deployment's Bots. 1 to 64 lowercase letters, digits and single hyphens, or the server refuses to start. |
 | `CPK_INTELLIGENCE_SKILLS_REVISION`       | An exact published skills revision to pin. Read only beside a container id. Unset follows the latest. |
+| `OPENBOT_LEARNING_AUTO_ASSIGN`           | `false` or `0` stops the server assigning the project's `openbot` container automatically. On otherwise, and off whenever `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is set. |
+| `INTELLIGENCE_SERVICE_TOKEN`             | An Intelligence service token that creates the `openbot` Learning container (local evaluation installs only; see [Creating the container](automatic-learning.md#creating-the-container)). Requires `INTELLIGENCE_PROJECT_ID`. |
+| `INTELLIGENCE_PROJECT_ID`                | The numeric ID of the runtime key's Intelligence project, where the service token creates the container. Set both or neither, or the server refuses to start. |
+| `OPENBOT_MEMORY_SOURCE_DEFAULTS`         | `false` or `0` stops OpenBot making each app a person connected into a memory source for the Bots they talk to. On otherwise. Existing sources are left as they are. |
+| `OPENBOT_PROACTIVE_DEFAULTS`             | `false` or `0` stops OpenBot switching on background research for the Bots a person talks to. On otherwise. Existing settings are left as they are. |
 
 ## OpenTelemetry export
 
@@ -622,7 +628,9 @@ is still the record.
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_BROWSER_BACKEND`           | `managed` by default (full bundled Chromium); `local-chrome` opts into installed Chrome with dedicated profiles and a loopback API. |
-| `COMPUTER_BROWSER_MODE`              | Managed defaults to `headless` (full Chromium's new headless mode). `headed` uses Xvfb on Linux and a native window on macOS/Windows. Local Chrome requires `headed`. |
+| `COMPUTER_BROWSER_MODE`              | Managed defaults to `headed` on Linux, which is every hosted computer (a container, a pod, the desktop app's engine): full Chromium on the computer's own Xvfb display. A computer run directly on macOS or Windows defaults to `headless`, where headed would open windows on the desktop. `headless` is full Chromium's new headless mode. Local Chrome requires `headed`. See [Getting past bot checks](#getting-past-bot-checks). |
+| `WEB_BOT_AUTH`                       | `on` or `off`. Unset means off. `on` needs an https public URL. See [Web Bot Auth](#web-bot-auth). |
+| `WEB_BOT_AUTH_KEY`                   | The Web Bot Auth signing key, an Ed25519 private JWK. Unset derives one from `KEY_ENCRYPTION_KEY`. Never logged. |
 | `OPENBOT_LOCAL_COMPUTER_DIR`         | Local startup helper's absolute data root. Defaults to the platform's OpenBot user-data directory; contains `profiles/` and `workspace/`. |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
@@ -649,29 +657,34 @@ docker ps -aq --filter "label=openbot.namespace=openbot" | xargs -r docker rm -f
 
 The supervisor recreates each computer with the same named volumes on its next request.
 
-### Headed managed Chromium in Docker or Helm
+### Headed or headless managed Chromium in Docker or Helm
 
 The managed backend uses Playwright's full `chromium` channel in either mode. The Docker image
-already installs that browser and Xvfb; it does not require Google Chrome. For Compose, set
-`COMPUTER_BROWSER_MODE=headed` in the deployment environment and recreate the shared computer or
-supervisor as applicable:
+already installs that browser and Xvfb; it does not require Google Chrome. Headed is the default in
+Compose (`agent-computer` and the computers the supervisor creates) and in the Helm chart
+(`computers.browserMode: headed`). The computer starts its own Xvfb, so nothing appears on any screen
+and the live screen, take control and hand back work exactly as before. Headed costs a little more
+memory and CPU than headless.
+
+To run headless instead, set `COMPUTER_BROWSER_MODE=headless` for Compose and recreate the shared
+computer or supervisor as applicable:
 
 ```sh
 docker compose up -d --force-recreate agent-computer supervisor
 ```
 
 Existing supervisor-created computers retain their mode until recreated as described above. The
-same per-Bot profile volumes and streamed viewer continue to work. For Helm, add to your values:
+same per-Bot profile volumes and streamed viewer continue to work. For Helm:
 
 ```yaml
 computers:
-  extraEnv:
-    - name: COMPUTER_BROWSER_MODE
-      value: headed
+  browserMode: headless
 ```
 
 Apply the Helm upgrade. A newly created computer uses the new setting; recreate existing supervised
-computers through your deployment's lifecycle controls while keeping their persistent volumes.
+computers through your deployment's lifecycle controls while keeping their persistent volumes. A
+headless computer no longer calls itself `HeadlessChrome`: its user agent and client hints report what
+the same browser reports headed.
 
 ### Installed Chrome for a local API deployment
 
@@ -812,6 +825,113 @@ docker volume ls -q --filter "label=openbot.namespace=openbot" | xargs -r docker
 ```
 
 Proxy credentials may appear in proxy URLs, but the computer strips them before reporting proxy status.
+
+### Getting past bot checks
+
+Sites behind Cloudflare and similar services (ChatGPT, Canva and many more) decide on every request
+whether it comes from a person, a known good bot, or something to challenge. A Bot's browser gives
+them three answers, in order of how much each one is in the operator's hands, and then a fallback
+for when none of them is enough.
+
+1. **A real browser.** Headed Chromium, the default for hosted computers (see above). Headless
+   Chromium is what bot checks are best at spotting, and is challenged even from a residential
+   address.
+2. **Web Bot Auth, off unless you switch it on.** The browser signs every request as coming from
+   this deployment, the way OpenAI's agent does. A site that allows signed agents lets it through.
+   See below.
+3. **Where the traffic leaves from.** A datacenter address is the other thing bot checks key on. A
+   residential or ISP proxy changes it. See [Residential or ISP proxy](#residential-or-isp-proxy).
+4. **The handoff, which is the designed fallback.** When a site still challenges (a "Verify you are
+   human" check, a CAPTCHA, a sign-in), the Bot asks for help, the person takes control in the live
+   screen, solves it, and hands back. OpenBot never solves a challenge on anyone's behalf. The page
+   survives a computer restart: the handoff reopens it rather than showing a blank browser.
+
+#### Web Bot Auth
+
+[Web Bot Auth](https://developers.cloudflare.com/bots/reference/bot-verification/web-bot-auth/) is
+Cloudflare's signed-agent scheme, built on HTTP Message Signatures (RFC 9421). With it on:
+
+- The server holds one Ed25519 key and publishes its public half, signed, at
+  `<public URL>/.well-known/http-message-signatures-directory` (content type
+  `application/http-message-signatures-directory+json`).
+- Every request a Bot's browser sends carries `Signature-Agent: "<public URL>"`, plus `Signature-Input`
+  and `Signature` over `@authority` and `signature-agent`, with `created`, a 60 second `expires`, a
+  nonce, `tag="web-bot-auth"` and the key's JWK thumbprint as `keyid`. The headers are added inside
+  the browser as each request leaves it, so the egress filter still judges every connection, TLS is
+  still Chromium's own, cookies are unchanged, and no CORS preflight is added.
+
+**When it is on.** Only when `WEB_BOT_AUTH=on` (on Helm, `config.webBotAuth: "on"`). Unset or `off`
+means off, whatever the address. An OpenBot deployment is private by design, and signing announces
+it: every site a Bot visits sees the deployment's URL, and Cloudflare will only register a key
+directory it can fetch from the internet. So it is a deliberate choice, made by an operator whose
+public URL is reachable and who wants sites to know their Bots. `on` needs `OPENBOT_PUBLIC_URL` (or
+`BETTER_AUTH_URL`) to be https and not this machine, and is refused at start-up otherwise. A private
+https address (`10.x`, `192.168.x`, `*.internal`, a single-label name) is accepted, because only the
+operator knows whether their verifier reaches it.
+
+**The key.** Derived from `KEY_ENCRYPTION_KEY` (one way, with HKDF), so every replica and restart
+signs with the same key and nothing new is needed to start. `WEB_BOT_AUTH_KEY` names one instead, an
+Ed25519 private JWK (on Helm, `secrets.webBotAuthKey`). The server hands it to each computer with
+the network policy it already pushes, because the browser is what signs: a Bot's computer can sign as
+this deployment, which is what it is for, and nothing else the deployment holds can be recovered from
+it. Rotate by setting a new `WEB_BOT_AUTH_KEY` and registering again.
+
+**Registering with Cloudflare (manual, once).** Signing earns nothing until Cloudflare knows the key:
+
+1. Check the directory answers from the internet:
+   `curl -i https://openbot.example.com/.well-known/http-message-signatures-directory` shows `200`,
+   the content type above, `Signature` and `Signature-Input` headers, and one key.
+2. In the [Cloudflare dashboard](https://dash.cloudflare.com/), choose your account, then
+   **Manage Account** > **Configurations** > **Bot Submission Form**.
+3. For **Verification Method**, choose **Request Signature**. For **Validation Instructions**, give
+   the key directory URL from step 1. Submit.
+4. Follow the request under **BotBase** > **Submission history**.
+
+Until it is approved, signed requests are treated like any others. Other services that verify Web
+Bot Auth read the same directory.
+
+**What it tells sites.** Every site a Bot visits, Cloudflare-fronted or not, sees this deployment's
+public URL in `Signature-Agent`. That is the point (an honest agent says who it is), and it is why
+it is off unless switched on.
+
+**What is signed.** Every request the browser sends, whatever sent it: pages, redirects,
+subresources, cross-site frames running in processes of their own, dedicated workers, and service
+workers, including their script fetches. The signing happens in one browser-level DevTools session,
+so no kind of target can be missed by not being attached. The identity is per deployment, not per
+Bot. The local Chrome backend never signs: it is the person's own browser.
+
+#### Residential or ISP proxy
+
+`EGRESS_PROXY_DEFAULT` (and `EGRESS_PROXY_<BOT_ID>`, see [Per-Bot egress](#per-bot-egress)) takes a
+residential or ISP proxy's gateway URL, credentials included:
+
+```sh
+# egress.env
+EGRESS_PROXY_DEFAULT=http://customer-user:password@gateway.residential.example:8000
+```
+
+On Helm, put the URL in a Secret and turn it on:
+
+```yaml
+computers:
+  egressProxy:
+    enabled: true
+    # existingSecret: my-proxy        # or let the chart hold it in secrets.egressProxyUrl
+    # existingSecretKey: egress-proxy-url
+networkPolicy:
+  computerExtraEgress:                # needed when networkPolicy.enabled
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 8000, protocol: TCP }]
+```
+
+It reaches the shared computer and every per-Bot computer as `EGRESS_PROXY_DEFAULT`. The egress
+filter chains to it, so the network policy still decides what a Bot may reach, and the proxy's
+credentials are split out before Chromium or any status report sees them.
+
+**This is the operator's choice, and it is off by default.** Through a residential proxy, a Bot's
+traffic leaves from an address a consumer ISP owns, so a site sees what looks like a person at home
+rather than a datacenter. That is why it works, and it is a choice to make knowingly: it changes
+what the Bot appears to be, where Web Bot Auth says what it is. They can be used together.
 
 ## Attested identity
 

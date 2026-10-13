@@ -1,0 +1,118 @@
+{{- $setup := include "openbot.learningSetup" . | fromYaml -}}
+{{- $cli := $setup.cliLoginSecret | default dict -}}
+{{- $token := $setup.serviceTokenSecret | default dict -}}
+{{- if or $cli.name $token.name }}
+{{- $component := "learning-setup" -}}
+{{/*
+Creates this project's openbot Learning container, with the credential the operator named.
+
+The runtime key cannot create Learning containers: Intelligence serves that to a person's session, a
+CopilotKit CLI login, or a service token on a local evaluation install. So this runs only when the
+operator gave the chart one of the last two (config.learning.setup), once per release revision. It runs
+`server/src/learning/ensure-container.ts`, which creates the container if it is missing, proves it with
+the runtime key, and exits. The server assigns it on its next check.
+
+AN ORDINARY JOB, NOT A HOOK. It needs Intelligence and nothing in this release, and a hook that fails
+fails the whole install over something the server tells Admin how to fix anyway. A failed Job is kept
+for an hour so its one line of output is readable with `kubectl logs job/<name>`.
+
+THE CLI LOGIN IS COPIED, NOT MOUNTED IN PLACE. The CLI rewrites its store each time it mints a
+short-lived credential, which a read-only Secret volume refuses, so the file goes to an emptyDir first.
+The server never holds it: a person's session is used here once and goes with the pod.
+
+No NetworkPolicy selects this pod, like the migrations Job: it runs once and is torn down, and it
+needs the registry (npx copilotkit) and Intelligence, which is where the server's egress already goes.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}-{{ .Release.Revision }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+    spec:
+      restartPolicy: Never
+      # Talks to Intelligence and the npm registry, never to the cluster.
+      automountServiceAccountToken: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: learning-setup
+          image: {{ include "openbot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          workingDir: /app/server
+          {{- with .Values.securityContext }}
+          securityContext:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              {{- if $cli.name }}
+              mkdir -p "$COPILOTKIT_CONFIG_DIR/auth"
+              cp /var/run/copilotkit-login/config.json "$COPILOTKIT_CONFIG_DIR/auth/config.json"
+              chmod 600 "$COPILOTKIT_CONFIG_DIR/auth/config.json"
+              {{- end }}
+              exec /usr/local/bin/bun src/learning/ensure-container.ts
+          env:
+            - name: HOME
+              value: /tmp/home
+            - name: npm_config_cache
+              value: /tmp/npm
+            - name: INTELLIGENCE_API_URL
+              value: {{ .Values.config.intelligence.apiUrl | quote }}
+            - name: INTELLIGENCE_GATEWAY_WS_URL
+              value: {{ .Values.config.intelligence.gatewayWsUrl | quote }}
+            - name: INTELLIGENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openbot.secretName" . }}
+                  key: intelligence-api-key
+            {{- if $cli.name }}
+            - name: COPILOTKIT_CONFIG_DIR
+              value: /var/run/copilotkit
+            {{- end }}
+            {{- with (include "openbot.learningServiceTokenEnv" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $cli.name }}
+            - name: copilotkit
+              mountPath: /var/run/copilotkit
+            - name: copilotkit-login
+              mountPath: /var/run/copilotkit-login
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $cli.name }}
+        - name: copilotkit
+          emptyDir: {}
+        - name: copilotkit-login
+          secret:
+            secretName: {{ $cli.name | quote }}
+            # Readable by the image's non-root user: a Secret file is root's, and the chart sets no
+            # fsGroup by default. The script copies it to a 0600 file of its own before use.
+            defaultMode: 0444
+            items:
+              - key: {{ $cli.key | default "config.json" | quote }}
+                path: config.json
+        {{- end }}
+{{- end }}

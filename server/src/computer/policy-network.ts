@@ -22,6 +22,7 @@ import {
   parseEgressRules,
 } from "../../../agent-computer/src/egress";
 import type { NetworkPolicyRow } from "../admin/settings-store";
+import type { WebBotAuth } from "../web-bot-auth";
 import type { ComputerProvider } from "./provider";
 
 export type { EgressPolicy, EgressRule };
@@ -76,6 +77,7 @@ export async function pushEgressPolicies(options: {
   provider: ComputerProvider;
   token?: string;
   policyForBot: (botId: string) => Promise<EgressPolicy>;
+  webBotAuth?: WebBotAuth;
   fetchImpl?: typeof fetch;
 }): Promise<EgressPushReport> {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -87,6 +89,7 @@ export async function pushEgressPolicies(options: {
       const policy = await options.policyForBot(computer.botId);
       await pushEgressPolicy(computer.url, computer.botId, policy, {
         ...(options.token ? { token: options.token } : {}),
+        ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
         fetchImpl,
       });
       report.pushed.push(computer.botId);
@@ -100,12 +103,21 @@ export async function pushEgressPolicies(options: {
   return report;
 }
 
-/** Push one computer one Bot's policy. Throws with the reason when the computer does not take it. */
+/**
+ * Push one computer one Bot's policy. Throws with the reason when the computer does not take it.
+ *
+ * The deployment's Web Bot Auth key travels in the same body when it is on, so every computer that
+ * has a policy also has the key its browser signs with, and one pushed no key stops signing.
+ */
 export async function pushEgressPolicy(
   url: string,
   botId: string,
   policy: EgressPolicy,
-  options: { token?: string; fetchImpl?: typeof fetch } = {},
+  options: {
+    token?: string;
+    webBotAuth?: WebBotAuth;
+    fetchImpl?: typeof fetch;
+  } = {},
 ): Promise<void> {
   const response = await (options.fetchImpl ?? fetch)(
     `${url.replace(/\/$/, "")}/egress-policy`,
@@ -118,6 +130,14 @@ export async function pushEgressPolicy(
       },
       body: JSON.stringify({
         policy: { mode: policy.mode, rules: policy.rules },
+        ...(options.webBotAuth
+          ? {
+              webBotAuth: {
+                agent: options.webBotAuth.agent,
+                jwk: options.webBotAuth.privateJwk,
+              },
+            }
+          : {}),
       }),
       signal: AbortSignal.timeout(5_000),
     },
@@ -149,6 +169,7 @@ export function withPolicyPushOnWake(
       botId: string,
     ) => Promise<EgressPolicy | undefined> | undefined;
     token?: string;
+    webBotAuth?: WebBotAuth;
     fetchImpl?: typeof fetch;
   },
 ): ComputerProvider {
@@ -170,6 +191,7 @@ export function withPolicyPushOnWake(
       if (!policy) return;
       await pushEgressPolicy(url, botId, policy, {
         ...(options.token ? { token: options.token } : {}),
+        ...(options.webBotAuth ? { webBotAuth: options.webBotAuth } : {}),
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       });
       pushed.set(botId, { run, at: Date.now() });

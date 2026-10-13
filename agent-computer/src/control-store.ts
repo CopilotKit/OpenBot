@@ -36,6 +36,8 @@ const statuses = new Set([
   "interrupted",
 ]);
 const sources = new Set(["model", "manual", "cloudflare", "visible-challenge"]);
+/** The longest page address a request keeps. Longer ones are not kept rather than cut. */
+export const MAX_REQUEST_URL = 2048;
 const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 const timestamp = (v: unknown): v is string =>
@@ -60,6 +62,9 @@ function validRequest(v: unknown): v is HandoffRequest {
     (v.expiresAt === undefined || timestamp(v.expiresAt)) &&
     (v.finishedAt === undefined || timestamp(v.finishedAt)) &&
     (v.interruption === undefined || typeof v.interruption === "string") &&
+    (v.url === undefined ||
+      (typeof v.url === "string" && v.url.length <= MAX_REQUEST_URL)) &&
+    (v.keepsPage === undefined || typeof v.keepsPage === "boolean") &&
     (v.status !== "waiting" || timestamp(v.expiresAt)) &&
     (v.status === "waiting" || v.expiresAt === undefined) &&
     (v.status === "waiting" || v.status === "taken"

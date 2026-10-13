@@ -318,7 +318,9 @@ cluster with no Sandbox CRD; both an Ingress and an HTTPRoute are enabled; both 
 an existing Secret are named; a Bot endpoint is named with no token to call it with; a browser is
 asked for inside more than one API replica; `networkPolicy.enabled` is set with an external database
 and no `networkPolicy.extraEgress`, or with `computers.mode: sandbox` and no
-`networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks; or
+`networkPolicy.kubernetesApiCidr`; a computer proxy is named that the network policy blocks, or
+`computers.egressProxy` is turned on with policies and no `networkPolicy.computerExtraEgress`, or with
+no `secrets.egressProxyUrl` where this chart writes the Secret; or
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
 `worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
 `secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
@@ -350,11 +352,44 @@ nobody can talk to.
 ## Automatic Learning
 
 Learning is on by default, and it needs a container in the Intelligence project before it collects or
-delivers anything. `config.learning.containerId` sets the initial default container
+delivers anything. With nothing saved in Admin and no `config.learning.containerId`, the server
+assigns the project's `openbot` container as the default by itself once it exists. The runtime key
+cannot create it, so give the chart a credential that can and a setup Job creates it on install and
+every upgrade:
+
+- Managed Intelligence: a CopilotKit CLI login. Sign in into an empty folder and store the file it
+  writes, then set `config.learning.setup.cliLoginSecret.name: openbot-copilotkit-cli`:
+
+  ```sh
+  COPILOTKIT_CONFIG_DIR="$(mktemp -d)"; export COPILOTKIT_CONFIG_DIR
+  npx --yes copilotkit@latest login
+  kubectl create secret generic openbot-copilotkit-cli \
+    --from-file=config.json="$COPILOTKIT_CONFIG_DIR/auth/config.json"
+  ```
+
+  It is a person's 30-day session; only the Job reads it, never the server.
+- A CopilotKit local evaluation install: a service token Secret in
+  `config.learning.setup.serviceTokenSecret` with the project's numeric ID in
+  `config.learning.setup.projectId`. The server gets it too, so Admin can create the container again.
+
+Without either, create it once with `bun scripts/setup-learning.ts` from a computer that can sign in
+to Intelligence, or in Intelligence itself; the server log and Admin → Automatic Learning say exactly
+that. `config.learning.autoAssign: false` turns the automatic assignment off.
+`config.learning.containerId` sets the initial default container
 (`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`) and `config.learning.revision` the skills revision
 (`CPK_INTELLIGENCE_SKILLS_REVISION`). Both are only starting values: settings saved in Admin →
 Automatic Learning take precedence, including switching it off. See
 [docs/automatic-learning.md](../../docs/automatic-learning.md).
+
+## Memory and background research
+
+Both are on by default: when a person talks to one of their Bots in a conversation with that Bot
+alone, OpenBot switches on read-only background research by that Bot, and from any turn by a Bot it
+makes each app the person connected in their own account a memory source for it (not on a Team Bot
+somebody else published, where their accounts need consent). A person who turns either off, or
+removes it, keeps it that way, through a Bot reset too.
+`config.memory.sourceDefaults: false` and `config.memory.researchDefaults: false` stop new defaults
+for the whole deployment.
 
 ## Slack, Teams, text messages, push, SCIM, inbound email and OpenTelemetry
 
@@ -527,6 +562,55 @@ networkPolicy:
 `EGRESS_PROXY_DEFAULT` covers every Bot and `EGRESS_PROXY_<BOT>` names one, with the Bot's id
 upper-cased and anything unusual replaced. Naming a proxy the policy provably blocks is refused at
 install rather than found as a browser that fails on every page.
+
+## Getting past bot checks
+
+Sites behind Cloudflare decide per request whether to challenge. Three settings change what a Bot's
+browser looks like to them, and the handoff (the Bot asks, a person takes control, solves the check
+and hands back) is the designed fallback when they are not enough. The full explanation is in
+[docs/configuration.md](../../docs/configuration.md#getting-past-bot-checks).
+
+**Headed Chromium, on by default.** `computers.browserMode: headed` runs full Chromium on the pod's
+own Xvfb, in `shared` and `sandbox` mode alike, behind the same live screen. `headless` is still
+there and uses less memory; it is the browser bot checks are best at spotting.
+
+**Web Bot Auth, off unless `config.webBotAuth: "on"`.** Every request a Bot's browser sends is
+then signed as coming from this deployment, and the key is published at
+`<publicUrl>/.well-known/http-message-signatures-directory`. It announces the deployment's URL to
+every site a Bot visits, and it needs an https `config.publicUrl` that Cloudflare can reach, so a
+private deployment leaves it off. The key is derived from `secrets.keyEncryptionKey`; `secrets.webBotAuthKey`
+(an Ed25519 private JWK, key `web-bot-auth-key` in a Secret of your own) replaces it. It earns
+nothing until the deployment is registered with Cloudflare, once, by hand:
+
+1. `curl -i https://<publicUrl>/.well-known/http-message-signatures-directory` answers `200` with
+   `Signature` and `Signature-Input` headers.
+2. In the Cloudflare dashboard: **Manage Account** > **Configurations** > **Bot Submission Form**.
+3. **Verification Method**: **Request Signature**. **Validation Instructions**: the directory URL.
+   Submit, and follow it under **BotBase** > **Submission history**.
+
+**A residential or ISP proxy, off by default and the operator's choice.** The Bots' traffic then
+leaves from an address a consumer ISP owns, so sites see what looks like a person at home rather than
+a datacenter. The credentialed URL is a secret:
+
+```yaml
+computers:
+  egressProxy:
+    enabled: true
+    # existingSecret: residential-proxy      # else the chart writes secrets.egressProxyUrl
+    # existingSecretKey: egress-proxy-url
+networkPolicy:
+  computerExtraEgress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 8000
+          protocol: TCP
+```
+
+It reaches every computer as `EGRESS_PROXY_DEFAULT`, behind the egress filter, so the network
+policy still decides what a Bot may reach. Turning it on with `networkPolicy.enabled` and no
+`computerExtraEgress`, or with no URL where this chart holds the Secret, is refused at install.
 
 ## Upgrades
 

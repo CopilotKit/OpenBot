@@ -3,72 +3,42 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
 import {
+  cliLoginPresent,
+  containerMissing,
+  ensureLearningContainer,
+  json,
+  type KeyIntelligence,
+  keyIntelligence,
+  learningSetupInstructions,
+  MANAGED_API,
+  object,
+  type RunCli,
+  runCli,
+  verifiedContainer,
+} from "../server/src/learning/ensure-container";
+import {
   intelligenceApiOrigin,
   type LearningConnection,
   setupSelfHostedLearning,
 } from "./self-hosted-learning";
 
+export type { KeyIntelligence } from "../server/src/learning/ensure-container";
+
 const CONTAINER = "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID";
-const MANAGED_API = "https://api.intelligence.copilotkit.ai";
-type CliResult = { exitCode: number; stdout: string };
-type RunCli = (args: string[], directory: string) => Promise<CliResult>;
 
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function json(text: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(text);
-    if (object(value)) return value;
-  } catch {}
-  throw new Error(
-    "CopilotKit returned an invalid setup response. No Learning assignment was saved.",
-  );
-}
-
-async function runCli(args: string[], directory: string): Promise<CliResult> {
-  const child = Bun.spawn(["npx", "--yes", "copilotkit@latest", ...args], {
-    cwd: directory,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const timeout = setTimeout(() => child.kill(), 120_000);
-  try {
-    const [exitCode, stdout] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      // CLI output can contain account or credential details. Never relay it to logs.
-      new Response(child.stderr).text(),
-    ]);
-    return { exitCode, stdout };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function verifiedContainer(
-  result: CliResult,
-  projectId: string,
-  action: string,
-) {
-  const value = json(result.stdout);
-  if (
-    result.exitCode !== 0 ||
-    value.schemaVersion !== 1 ||
-    value.command !== `learning containers ${action}` ||
-    value.status !== "success" ||
-    value.projectId !== projectId ||
-    !object(value.container) ||
-    value.container.id !== "openbot" ||
-    String(value.container.projectId) !== projectId
-  ) {
-    throw new Error(
-      "The openbot container could not be verified in the selected project. Check Learning access in Intelligence, then run this helper again.",
-    );
-  }
-}
+/**
+ * - `configured`: fresh setup wrote a runtime key and the container to `.env`.
+ * - `preserved`: the environment already names a container.
+ * - `present`: the runtime key's project already has `openbot`; the server assigns it.
+ * - `created`: `openbot` was created in the runtime key's project; the server assigns it.
+ * - `skipped`: run without a person (`--non-interactive`) and nothing can be done without one.
+ */
+export type SetupLearningResult =
+  | "configured"
+  | "preserved"
+  | "present"
+  | "created"
+  | "skipped";
 
 function upsert(content: string, name: string, value: string) {
   const without = content
@@ -90,7 +60,7 @@ async function saveEnvironment(envPath: string, content: string) {
   }
 }
 
-async function interactiveSelfHosted(apiUrl: string) {
+async function interactiveSelfHosted(apiUrl: string, existingKey?: string) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   process.once("SIGINT", cancel);
@@ -99,6 +69,7 @@ async function interactiveSelfHosted(apiUrl: string) {
   try {
     return await setupSelfHostedLearning({
       apiUrl,
+      ...(existingKey ? { existingKey } : {}),
       signal: controller.signal,
       selectProject: async (projects, signal) => {
         if (projects.length === 1) return projects[0].id;
@@ -134,9 +105,24 @@ export async function setupLearning(
     directory?: string;
     environment?: Record<string, string | undefined>;
     runCli?: RunCli;
-    setupSelfHosted?: (apiUrl: string) => Promise<LearningConnection>;
+    setupSelfHosted?: (
+      apiUrl: string,
+      existingKey?: string,
+    ) => Promise<LearningConnection>;
+    /** No browser, no prompt and no new key: what `scripts/start.sh` runs on every start. */
+    nonInteractive?: boolean;
+    /**
+     * Whether a CopilotKit CLI login may be on this machine. False skips the CLI entirely, so a
+     * start on a machine that never signed in does not download it. Unset means try it.
+     */
+    cliLogin?: boolean;
+    keyIntelligence?: (
+      apiUrl: string,
+      apiKey: string,
+      wsUrl?: string,
+    ) => KeyIntelligence;
   } = {},
-): Promise<"configured" | "preserved"> {
+): Promise<SetupLearningResult> {
   const directory = resolve(options.directory ?? process.cwd());
   const environment = options.environment ?? process.env;
   const run = options.runCli ?? runCli;
@@ -150,11 +136,46 @@ export async function setupLearning(
   const effective = (name: string) =>
     (environment[name] || values[name] || "").trim();
   if (effective(CONTAINER)) return "preserved";
-  if (effective("INTELLIGENCE_API_KEY")) {
-    throw new Error(
-      "An OpenBot runtime key is already configured. It was preserved. Create a container in that key's Intelligence project and assign it in Admin → Automatic Learning; this helper cannot prove which project a manually supplied key belongs to.",
-    );
+  const existingKey = effective("INTELLIGENCE_API_KEY");
+  if (existingKey) {
+    /*
+     * The key cannot create containers, and it is never replaced here. Creation goes through a
+     * credential that can (learning/ensure-container.ts) and counts only once the key itself can see
+     * the result. The server then assigns it; nothing is written to `.env`.
+     */
+    const apiUrl = intelligenceApiOrigin(effective("INTELLIGENCE_API_URL"));
+    const serviceToken = effective("INTELLIGENCE_SERVICE_TOKEN");
+    const projectId = effective("INTELLIGENCE_PROJECT_ID");
+    const setupSelfHosted = options.setupSelfHosted ?? interactiveSelfHosted;
+    return ensureLearningContainer({
+      directory,
+      apiUrl,
+      nonInteractive: options.nonInteractive === true,
+      run,
+      key: (options.keyIntelligence ?? keyIntelligence)(
+        apiUrl,
+        existingKey,
+        effective("INTELLIGENCE_GATEWAY_WS_URL") || undefined,
+      ),
+      ...(serviceToken && projectId
+        ? { serviceToken: { token: serviceToken, projectId } }
+        : {}),
+      ...(options.cliLogin === undefined ? {} : { cliLogin: options.cliLogin }),
+      setupSelfHosted: async () => {
+        const connection = await setupSelfHosted(apiUrl, existingKey);
+        if (
+          connection.apiKey !== existingKey ||
+          connection.learningContainerId !== "openbot"
+        ) {
+          throw new Error(
+            "Intelligence returned an invalid setup connection. Nothing was saved.",
+          );
+        }
+      },
+    });
   }
+  // Provisioning a key edits .env and may need a browser: a person runs that, not a start script.
+  if (options.nonInteractive) return "skipped";
   const apiUrl = intelligenceApiOrigin(effective("INTELLIGENCE_API_URL"));
   if (apiUrl !== MANAGED_API) {
     const connection = await (options.setupSelfHosted ?? interactiveSelfHosted)(
@@ -226,15 +247,7 @@ export async function setupLearning(
     ["learning", "containers", "get", "openbot", "--json"],
     directory,
   );
-  const found = json(get.stdout);
-  // The CLI reports ordinary absence in JSON; current releases exit zero for it.
-  if (
-    found.schemaVersion === 1 &&
-    found.command === "learning containers get" &&
-    found.status === "error" &&
-    object(found.error) &&
-    found.error.code === "LEARNING_CONTAINER_NOT_FOUND"
-  ) {
+  if (containerMissing(json(get.stdout))) {
     const created = await run(
       [
         "learning",
@@ -278,20 +291,60 @@ export async function setupLearning(
   return "configured";
 }
 
-if (import.meta.main) {
+const RESULT_MESSAGES: Record<
+  Exclude<SetupLearningResult, "skipped">,
+  string
+> = {
+  configured:
+    "Configured the selected project's openbot Learning container and OpenBot runtime key in .env. Saved Admin settings still take precedence.",
+  preserved: "Preserved the existing Learning container assignment.",
+  present:
+    "This runtime key's project has the openbot Learning container. OpenBot assigns it as the default on start unless Admin → Automatic Learning has a saved setting.",
+  created:
+    "Created the openbot Learning container in this runtime key's project. OpenBot assigns it as the default on start unless Admin → Automatic Learning has a saved setting.",
+};
+
+/** What to run instead, for the Intelligence this checkout points at. */
+async function skippedMessage(directory: string) {
+  const values = parseEnv(
+    await readFile(resolve(directory, ".env"), "utf8").catch(() => ""),
+  );
+  let apiUrl = MANAGED_API;
   try {
-    const result = await setupLearning();
+    apiUrl = intelligenceApiOrigin(
+      (
+        process.env.INTELLIGENCE_API_URL ||
+        values.INTELLIGENCE_API_URL ||
+        MANAGED_API
+      ).trim(),
+    );
+  } catch {}
+  return `Automatic Learning: no openbot container was created, because nothing here can create one without a person. ${learningSetupInstructions(apiUrl)}`;
+}
+
+if (import.meta.main) {
+  const nonInteractive = process.argv.slice(2).includes("--non-interactive");
+  try {
+    const result = await setupLearning({
+      nonInteractive,
+      // A start script on a machine that never signed in should not download the CLI to find out.
+      ...(nonInteractive ? { cliLogin: cliLoginPresent() } : {}),
+    });
     console.log(
-      result === "configured"
-        ? "Configured the selected project's openbot Learning container and OpenBot runtime key in .env. Saved Admin settings still take precedence."
-        : "Preserved the existing Learning container assignment.",
+      result === "skipped"
+        ? await skippedMessage(process.cwd())
+        : RESULT_MESSAGES[result],
     );
   } catch (error) {
-    console.error(
+    const message =
       error instanceof Error
         ? error.message
-        : "Learning setup failed; no assignment was saved.",
-    );
-    process.exitCode = 1;
+        : "Learning setup failed; no assignment was saved.";
+    // Run by scripts/start.sh, a failure here must not stop OpenBot starting: say it and move on.
+    if (nonInteractive) console.log(`Automatic Learning: ${message}`);
+    else {
+      console.error(message);
+      process.exitCode = 1;
+    }
   }
 }

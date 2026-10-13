@@ -287,6 +287,14 @@ This template renders nothing.
   a public one at template time, so this misses that case rather than guessing at it. A proxy
   supplied through `extraEnvFrom` is not readable here at all.
 */}}
+{{- /*
+  The residential proxy is a Secret this template cannot read, so where it is cannot be checked: with
+  network policies on, the computer reaches 80 and 443 on public addresses and nothing else, and
+  residential gateways almost always listen elsewhere. Asked for by name rather than guessed at.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) ((.Values.computers).egressProxy | default dict).enabled }}
+{{- fail "computers.egressProxy.enabled with networkPolicy.enabled needs the proxy named in networkPolicy.computerExtraEgress (its address and port), or every page a Bot opens would fail at the computer's network policy." }}
+{{- end }}
 {{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) }}
 {{- range .Values.computers.extraEnv }}
 {{- if hasPrefix "EGRESS_PROXY" (.name | default "") }}
@@ -378,4 +386,15 @@ This template renders nothing.
 {{- if and (.Values.config.scim | default dict).enabled (not (has "scim-bearer-token" $named)) }}
 {{- fail "config.scim.enabled but externalSecrets.data does not name scim-bearer-token, so the server pod cannot start." }}
 {{- end }}
+{{- end }}
+
+{{- /*
+  The Learning service token, without the project it creates the container in.
+
+  The server refuses INTELLIGENCE_SERVICE_TOKEN without a numeric INTELLIGENCE_PROJECT_ID at boot, so
+  the same rule is applied at install, with the value named.
+*/}}
+{{- $learningSetup := include "openbot.learningSetup" . | fromYaml }}
+{{- if and ($learningSetup.serviceTokenSecret | default dict).name (not (regexMatch "^[1-9][0-9]{0,15}$" ($learningSetup.projectId | toString))) }}
+{{- fail "config.learning.setup.serviceTokenSecret needs config.learning.setup.projectId: the numeric ID of the Intelligence project the runtime key belongs to, where the token creates the openbot Learning container." }}
 {{- end }}

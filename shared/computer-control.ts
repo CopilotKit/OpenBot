@@ -22,6 +22,16 @@ export type HandoffRequest = {
   expiresAt?: string;
   finishedAt?: string;
   interruption?: string;
+  /**
+   * The page the request was raised on, so a browser that comes back blank can be sent there again
+   * before a person is asked to solve it. http(s) only; absent when the page was blank.
+   */
+  url?: string;
+  /**
+   * Set only on a request a restart interrupted while it still holds its page: the one case a later
+   * request may reopen that page. A stop or reset clears it, and so does the help TTL running out.
+   */
+  keepsPage?: boolean;
 };
 export type ComputerControlState = {
   holder: "bot" | "human";

@@ -130,3 +130,121 @@ test("active and hidden Bots both have participation controls", async () => {
   await view.findByLabelText("hidden-bot participation");
   expect(view.queryByLabelText("active-bot participation")).not.toBeNull();
 });
+
+function serve(body: unknown) {
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/settings")) return Response.json(body);
+      if (path.includes("/api/agents")) return Response.json({ agents: [] });
+      return Response.json({ error: "unavailable" }, { status: 502 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+}
+
+test.each([
+  [
+    { enabled: true, defaultTarget: null, agents: {} },
+    { state: "absent", containerId: "openbot" },
+    'This Intelligence project has no "openbot" Learning container yet',
+  ],
+  [
+    { enabled: true, defaultTarget: { containerId: "openbot" }, agents: {} },
+    { state: "assigned", containerId: "openbot" },
+    'OpenBot assigned this Intelligence project\'s "openbot" container automatically',
+  ],
+  [
+    { enabled: true, defaultTarget: null, agents: {} },
+    { state: "not_entitled" },
+    "plan does not include Learning",
+  ],
+] as const)(
+  "the page says what automatic assignment found (%#)",
+  async (settings, automatic, expected) => {
+    serve({ settings, automatic });
+    const view = page();
+    await view.findByText(expected, { exact: false });
+  },
+);
+
+test("a deployment that chose its own container hears nothing about automatic assignment", async () => {
+  serve({
+    settings: {
+      enabled: true,
+      defaultTarget: { containerId: "support" },
+      agents: {},
+    },
+    automatic: { state: "saved" },
+  });
+  const view = page();
+  await view.findByLabelText("Default container ID");
+  await waitFor(() =>
+    expect(view.queryByText("Loading Learning settings…")).toBeNull(),
+  );
+  expect(view.queryByText("OpenBot assigned", { exact: false })).toBeNull();
+  expect(
+    view.queryByText("Learning container yet", { exact: false }),
+  ).toBeNull();
+});
+
+test("a missing container shows exactly what to run, and a Create button only when the deployment can", async () => {
+  const instructions =
+    "Sign in once with npx --yes copilotkit@latest login, then run bun scripts/setup-learning.ts.";
+  serve({
+    settings: { enabled: true, defaultTarget: null, agents: {} },
+    automatic: { state: "absent", containerId: "openbot", instructions },
+  });
+  const cannot = page();
+  await cannot.findByText(instructions, { exact: false });
+  expect(
+    cannot.queryByRole("button", { name: "Create the openbot container" }),
+  ).toBeNull();
+  cleanup();
+
+  let created = 0;
+  const settings = { enabled: true, defaultTarget: null, agents: {} };
+  global.fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/container") && init?.method === "POST") {
+        created++;
+        return Response.json({
+          automatic: { state: "assigned", containerId: "openbot" },
+        });
+      }
+      if (path.endsWith("/settings"))
+        return Response.json({
+          settings:
+            created > 0
+              ? { ...settings, defaultTarget: { containerId: "openbot" } }
+              : settings,
+          automatic:
+            created > 0
+              ? { state: "assigned", containerId: "openbot" }
+              : {
+                  state: "absent",
+                  containerId: "openbot",
+                  instructions,
+                  canCreate: true,
+                },
+        });
+      if (path.includes("/api/agents")) return Response.json({ agents: [] });
+      return Response.json({ error: "unavailable" }, { status: 502 });
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+  const can = page();
+  fireEvent.click(
+    await can.findByRole("button", { name: "Create the openbot container" }),
+  );
+  await can.findByText("container automatically", { exact: false });
+  expect(created).toBe(1);
+  // Let the refetch the creation started settle before the DOM is torn down.
+  await waitFor(() =>
+    expect(
+      can.queryByRole("button", { name: "Create the openbot container" }),
+    ).toBeNull(),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+});

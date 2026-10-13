@@ -58,6 +58,7 @@ import {
   type EnterpriseStore,
   type NetworkPolicyRow,
 } from "./settings-store";
+import type { WebBotAuth } from "../web-bot-auth";
 
 /** Action Recording keeps 90 days, as Grok Bot's does. */
 export const ACTION_RECORD_RETENTION_DAYS = 90;
@@ -77,6 +78,8 @@ export type EnterpriseDeps = {
   auditStore: AuditStore;
   provider?: ComputerProvider;
   computerToken?: string;
+  /** Pushed to every computer with its policy; see `computer/policy-network.ts`. */
+  webBotAuth?: WebBotAuth;
   /** `provider/model` the built-in Bot runs on, for the model allowlist and usage view. */
   builtInModel?: string;
   /** Offboarding: ends sessions and deny-lists, and retires what a person granted. */
@@ -383,6 +386,7 @@ export async function installEnterpriseControls(
           provider: deps.provider as ComputerProvider,
           token: deps.computerToken,
           policyForBot,
+          ...(deps.webBotAuth ? { webBotAuth: deps.webBotAuth } : {}),
         });
         if (report.failed.length > 0) {
           console.warn(

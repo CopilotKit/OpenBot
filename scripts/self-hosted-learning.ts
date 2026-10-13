@@ -124,9 +124,15 @@ function verifiedContainer(body: unknown, projectId: string): boolean {
   );
 }
 
-/** Cookies stay in this temporary browser. Only the newly minted project key leaves it. */
+/**
+ * Cookies stay in this temporary browser. Only the newly minted project key leaves it.
+ *
+ * With `existingKey`, a deployment that already has a runtime key only gains the container: no key
+ * is minted, and the one passed in is returned unchanged. It is never sent to Intelligence here.
+ */
 export async function setupSelfHostedLearning(options: {
   apiUrl: string;
+  existingKey?: string;
   selectProject: (
     projects: SetupProject[],
     signal: AbortSignal,
@@ -272,6 +278,14 @@ export async function setupSelfHostedLearning(options: {
       throw new SetupError(
         "The openbot container could not be verified in the selected project. Check Learning access in Intelligence.",
       );
+    }
+    if (options.existingKey) {
+      signal.throwIfAborted();
+      return {
+        apiKey: options.existingKey,
+        apiUrl,
+        learningContainerId: "openbot",
+      };
     }
     const key = await request(`/api/projects/${projectId}/api-keys`, "POST", {
       name: "OpenBot",

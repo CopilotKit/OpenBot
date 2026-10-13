@@ -53,6 +53,11 @@ export type BotSession = {
    * whoever is. An empty slot is a Bot nobody is watching; there is no second way to say that.
    */
   viewer: ViewerSlot;
+  /**
+   * How many inputs a person has sent this browser. A background page restore compares it before
+   * navigating, so it never moves a page out from under someone who has started driving.
+   */
+  humanInputs: number;
 };
 
 export type SessionsOptions = {
@@ -127,6 +132,7 @@ export function createSessions(options: SessionsOptions) {
       },
       run: mintRun(),
       viewer: createViewerSlot(),
+      humanInputs: 0,
     };
     sessions.set(botId, created);
     // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
@@ -174,8 +180,12 @@ export function createSessions(options: SessionsOptions) {
       const existing = sessions.get(botId);
       // Nothing to renew: a Bot nobody has touched yet gets a session, and its run is already new.
       if (!existing) return sessionFor(botId).run;
+      // A browser that closed or was replaced underneath the request is a restart, so its page stays
+      // for a request raised from the blank browser that follows. A deliberate stop or reset clears
+      // it straight after, in its own route.
       existing.control.interrupt(
         "The browser was stopped or replaced; request help again to continue.",
+        { keepPage: true },
       );
       existing.livePage = undefined;
       existing.browserContext = undefined;
