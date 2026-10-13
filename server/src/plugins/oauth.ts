@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { seal, unseal } from "../auth/signed-value";
+import { OAUTH_REQUEST_TIMEOUT_MS } from "../timeouts";
 import type { CatalogueAuth } from "./catalogue";
 
 /**
@@ -375,7 +376,7 @@ export async function redeemAuthorizationCode(input: {
        * Manual leaves the 3xx as the response, which is not `ok`, so it falls into the refusal below.
        */
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     /*
@@ -482,7 +483,7 @@ export async function registerDynamicClient(input: {
       // The registration endpoint is pinned in the catalogue, so a redirect is somebody else deciding
       // where this deployment introduces itself. Left as the response, which is not `ok`.
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     // Logged for the same reason the redemption above is: the caller's 502 tells an administrator
