@@ -503,6 +503,7 @@ describe("headless turns obey the same switches", () => {
   test("a Bot-to-Bot hand-off meets the same switches", async () => {
     let ran = 0;
     const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
       deadlineMs: 5_000,
       agentFor: async () =>
         ({

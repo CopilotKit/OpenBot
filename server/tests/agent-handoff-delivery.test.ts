@@ -3,6 +3,7 @@ import type { AbstractAgent, BaseEvent, Message } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import type { HandoffWork } from "../src/agents/handoff-runner";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * Turning a hop into a turn.
@@ -60,6 +61,7 @@ function delivery(
     released,
     builtFor,
     delivery: createHandoffDelivery({
+      admission: serverTurnAdmission,
       ...(options.deadlineMs === undefined
         ? {}
         : { deadlineMs: options.deadlineMs }),
@@ -332,6 +334,7 @@ describe("a delivery that never finishes", () => {
     });
     // A run that emits nothing and never completes, which is what a stalled Bot looks like.
     const stalled = createHandoffDelivery({
+      admission: serverTurnAdmission,
       deadlineMs: 20,
       agentFor: async () => stubAgent(),
       history: async () => PRIOR,
@@ -356,13 +359,13 @@ describe("a delivery that never finishes", () => {
   });
 
   /*
-   * TODAY'S BEHAVIOUR, PINNED SO CHANGING IT IS A DECISION. A renewal that fails is ignored and the
-   * hop carries on; the headless turn runner stops the turn instead (`run-turn.ts`, "a failed
-   * heartbeat stops the turn"). Folding the engines into one is expected to change this assertion.
+   * A renewal that did not arrive is not a lock that was lost. Stopped here, the hop would be retried
+   * from the start, and a Bot that had already acted would act again.
    */
-  test("a renewal that fails does not stop the hop", async () => {
+  test("a renewal that merely failed does not stop the hop", async () => {
     let renewals = 0;
     const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
       deadlineMs: 5_000,
       renewEveryMs: 2,
       agentFor: async () => stubAgent(),
@@ -373,7 +376,7 @@ describe("a delivery that never finishes", () => {
         acquire: async () => ({ runId: "platform-run" }),
         renew: () => {
           renewals += 1;
-          return Promise.reject(new Error("lock lost"));
+          return Promise.reject(new TypeError("fetch failed"));
         },
         release: async () => {},
       },
@@ -391,6 +394,50 @@ describe("a delivery that never finishes", () => {
 
     await hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" });
     expect(renewals).toBeGreaterThan(0);
+  });
+
+  /*
+   * A renewal refused as a conflict means somebody else holds the conversation now — on a relay,
+   * most likely the person, typing in their own channel. The hop stops rather than write its answer
+   * into their run, gives the lock back, and fails into a retry with the platform's reason.
+   */
+  test("a renewal refused as a conflict stops the hop and gives the lock back", async () => {
+    const conflict = Object.assign(
+      new Error("Intelligence platform error 409: THREAD_LOCK_RENEWAL_FAILED"),
+      { name: "PlatformRequestError", status: 409 },
+    );
+    const stopped: string[] = [];
+    const released: string[] = [];
+    const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
+      deadlineMs: 5_000,
+      renewEveryMs: 2,
+      agentFor: async () => stubAgent(),
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: () => Promise.reject(conflict),
+        release: async (input) => {
+          released.push(input.threadId);
+        },
+      },
+      runner: {
+        // A run that would go on for ever, so only the lost lock can end it.
+        run: () => new Observable<BaseEvent>(() => {}),
+        stop: async (input) => {
+          stopped.push(input.runId);
+          return true;
+        },
+      },
+    });
+
+    await expect(
+      hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+    ).rejects.toBe(conflict);
+    expect(stopped).toEqual(["platform-run"]);
+    expect(released).toEqual(["scratch-thread"]);
   });
 
   test("the lock is given back on the conversation it was taken on", async () => {
@@ -487,6 +534,7 @@ describe("the working indicator", () => {
   function withBusy() {
     const busy: Array<{ threadId: string; busy: boolean }> = [];
     const deliver = createHandoffDelivery({
+      admission: serverTurnAdmission,
       agentFor: async () => stubAgent(),
       history: async () => PRIOR,
       newRunId: () => "run-2",
@@ -573,6 +621,7 @@ describe("what comes back for the relay", () => {
   /** A runner that drives the agent the way the real one does, then completes. */
   function throughTheAgent(agent: AbstractAgent) {
     return createHandoffDelivery({
+      admission: serverTurnAdmission,
       agentFor: async () => agent,
       history: async () => PRIOR,
       newRunId: () => "run-2",
@@ -648,6 +697,7 @@ describe("what comes back for the relay", () => {
       { type: "TEXT_MESSAGE_END" },
     ]);
     const deliver = createHandoffDelivery({
+      admission: serverTurnAdmission,
       agentFor: async () => agent,
       history: async () => PRIOR,
       newRunId: () => "run-2",
@@ -790,6 +840,7 @@ describe("a history read that fails", () => {
   test("takes no lock, so nothing is leaked for the retry to collide with", async () => {
     const lockCalls: string[] = [];
     const deliver = createHandoffDelivery({
+      admission: serverTurnAdmission,
       agentFor: async () => stubAgent(),
       history: async () => {
         throw new Error("the platform answered 500");
@@ -875,6 +926,7 @@ describe("a hop to a Bot that is paused while it works", () => {
       started = resolve;
     });
     const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
       deadlineMs: 5_000,
       agentFor: async () => stubAgent(),
       history: async () => PRIOR,
@@ -917,12 +969,11 @@ describe("a hop to a Bot that is paused while it works", () => {
   });
 
   /*
-   * TODAY'S BEHAVIOUR, PINNED SO CHANGING IT IS A DECISION. A hop checks the pause after it has taken
-   * the lock, so a Bot that was already paused still takes and gives back the conversation's lock.
-   * The headless turn runner checks first and never touches the lock. Folding the engines into one is
-   * expected to change this assertion.
+   * Admitted before the lock, as every headless turn is. A hop used to take the conversation's lock
+   * first and only then find the Bot paused, so a paused Bot's relay held the person's own channel
+   * for a moment on every retry.
    */
-  test("a Bot paused before the hop takes the lock, gives it back and never runs", async () => {
+  test("a Bot paused before the hop never touches the lock and never runs", async () => {
     const { BotPausedError, configureBotLifecycle, resetBotLifecycleForTests } =
       await import("../src/agents/lifecycle");
     const query = {
@@ -938,6 +989,7 @@ describe("a hop to a Bot that is paused while it works", () => {
     const lockCalls: string[] = [];
     let runs = 0;
     const hop = createHandoffDelivery({
+      admission: serverTurnAdmission,
       agentFor: async () => stubAgent(),
       history: async () => PRIOR,
       newRunId: () => "run-2",
@@ -963,7 +1015,7 @@ describe("a hop to a Bot that is paused while it works", () => {
       await expect(
         hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
       ).rejects.toBeInstanceOf(BotPausedError);
-      expect(lockCalls).toEqual(["acquire", "release"]);
+      expect(lockCalls).toEqual([]);
       expect(runs).toBe(0);
     } finally {
       resetBotLifecycleForTests();

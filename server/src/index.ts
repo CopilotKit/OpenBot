@@ -2802,6 +2802,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
     sign: (work, claim) =>
       signHandoffDeliveryRun(work, config.keyEncryptionKey, undefined, claim),
     delivery: createHandoffDelivery({
+      admission: serverTurnAdmission,
       /*
        * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a
        * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
