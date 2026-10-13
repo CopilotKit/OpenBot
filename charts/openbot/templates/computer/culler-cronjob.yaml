@@ -90,6 +90,9 @@ spec:
                 - name: sandbox-template
                   mountPath: /etc/openbot
                   readOnly: true
+                {{- with (include "openbot.extraVolumeMounts" . | trim) }}
+                {{- . | nindent 16 }}
+                {{- end }}
               resources:
                 requests:
                   cpu: 50m
@@ -100,4 +103,7 @@ spec:
             - name: sandbox-template
               configMap:
                 name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
+            {{- with (include "openbot.extraVolumes" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
 {{- end }}
