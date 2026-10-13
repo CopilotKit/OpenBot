@@ -1,5 +1,5 @@
 import type { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import type { ThreadLock } from "./handoff-delivery";
+import type { ThreadLock } from "../ports";
 
 /**
  * How long a conversation's lock is held before it lapses on its own.

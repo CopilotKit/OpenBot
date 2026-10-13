@@ -3,7 +3,7 @@ import {
   createIntelligenceThreadLock,
   THREAD_LOCK_TTL_SECONDS,
   type ThreadLockClient,
-} from "../src/agents/intelligence-thread-lock";
+} from "../src/copilotkit/thread-lock";
 
 /**
  * The lock a hop takes on a conversation, as the platform issues it.

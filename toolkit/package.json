@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ag-ui/client": "1.0.1",
+    "@copilotkit/runtime": "1.77.0",
     "@openbot/shared": "workspace:*",
     "rxjs": "7.8.1",
     "zod": "^4.4.3"
