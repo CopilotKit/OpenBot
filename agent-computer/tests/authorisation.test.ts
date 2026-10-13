@@ -120,6 +120,8 @@ describe("what the wheel stops while a person is driving", () => {
       "/scroll",
       "/exec",
       "/files/write",
+      "/sign-in/fill",
+      "/sign-in/code",
     ]) {
       expect(actsOnTheComputer(path)).toBeTrue();
     }

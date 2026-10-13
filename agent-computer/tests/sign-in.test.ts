@@ -7,7 +7,13 @@ import {
   SECRET_ATTRIBUTE,
   sensitiveRefs,
 } from "../src/secret-masking";
-import { fillSignIn, originOfUrl, parseSignInFill } from "../src/sign-in";
+import {
+  fillSignIn,
+  fillSignInCode,
+  originOfUrl,
+  parseSignInCode,
+  parseSignInFill,
+} from "../src/sign-in";
 
 /**
  * The computer's half of the private sign-in, against a real Chromium and a real login page served
@@ -22,6 +28,7 @@ import { fillSignIn, originOfUrl, parseSignInFill } from "../src/sign-in";
  */
 const asked = process.env.OPENBOT_COMPUTER_BROWSER === "1";
 const PASSWORD = "hunter2-not-for-the-model";
+const CODE = "482913";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 let origin = "";
@@ -57,6 +64,40 @@ beforeAll(async () => {
         return page(`<form method="post" action="/session">
           <input name="email" type="email" value="${url.searchParams.get("username") ?? ""}">
           <input name="password" type="password"></form>`);
+      // A site that asks for a one-time code only once the password is accepted, the way MFA works.
+      if (url.pathname === "/mfa-login")
+        return page(`<form method="post" action="/mfa-session">
+          <label>Email <input name="email" type="email"></label>
+          <label>Password <input name="password" type="password"></label>
+          <button>Sign in</button></form>`);
+      if (url.pathname === "/mfa-session" && request.method === "POST") {
+        const form = await request.formData();
+        return form.get("password") === PASSWORD
+          ? Response.redirect(`${origin}/mfa-code`, 303)
+          : Response.redirect(`${origin}/mfa-login`, 303);
+      }
+      if (url.pathname === "/mfa-code")
+        return page(`<p>We sent a code to your phone.</p>
+          <form method="post" action="/mfa-verify">
+          <label>Verification code <input name="otp" autocomplete="one-time-code" inputmode="numeric"></label>
+          <button>Verify</button></form>`);
+      // The same, with the code field drawn as a password input, as some sites do.
+      if (url.pathname === "/masked-login")
+        return page(`<form method="post" action="/masked-session">
+          <input name="email" type="email"><input name="password" type="password">
+          <button>Sign in</button></form>`);
+      if (url.pathname === "/masked-session" && request.method === "POST")
+        return page(`<form method="post" action="/mfa-verify">
+          <input name="otp" type="password" autocomplete="one-time-code">
+          <button>Verify</button></form>`);
+      if (url.pathname === "/mfa-verify" && request.method === "POST") {
+        const form = await request.formData();
+        return form.get("otp") === CODE
+          ? Response.redirect(`${origin}/home`, 303)
+          : page(`<p>That code is not right.</p>
+              <form method="post" action="/mfa-verify">
+              <input name="otp" autocomplete="one-time-code"><button>Verify</button></form>`);
+      }
       if (url.pathname === "/home") return page("<h1>Welcome back</h1>");
       return new Response("not found", { status: 404 });
     },
@@ -94,6 +135,23 @@ describe("parsing what the server sends", () => {
     });
     expect(originOfUrl("about:blank")).toBe("");
   });
+
+  test("a code is never part of the login, and comes on its own once the site asks", () => {
+    // Sent with the password by an older client: dropped, so it can never be typed early.
+    expect(parseSignInFill({ origin, password: PASSWORD, code: CODE })).toEqual(
+      { origin, password: PASSWORD },
+    );
+    expect(parseSignInCode({ origin, code: "" })).toBe(
+      "A verification code is required.",
+    );
+    expect(parseSignInCode({ origin: "nope", code: CODE })).toBe(
+      "A sign-in names the website's origin.",
+    );
+    expect(parseSignInCode({ origin: `${origin}/x`, code: CODE })).toEqual({
+      origin,
+      code: CODE,
+    });
+  });
 });
 
 describe.skipIf(!asked)("typing a login", () => {
@@ -107,6 +165,7 @@ describe.skipIf(!asked)("typing a login", () => {
     expect(result).toEqual({
       submitted: true,
       passwordFieldVisible: false,
+      codeRequested: false,
       url: `${origin}/home`,
     });
     expect(JSON.stringify(result)).not.toContain(PASSWORD);
@@ -153,6 +212,90 @@ describe.skipIf(!asked)("typing a login", () => {
     await tab.close();
   });
 });
+
+describe.skipIf(!asked)(
+  "a site that asks for a code after the password",
+  () => {
+    test("stops at the code page and says so, then types the code it is given and finishes", async () => {
+      const tab = await open("/mfa-login");
+      const login = await fillSignIn(tab, {
+        origin,
+        username: "a@example.test",
+        password: PASSWORD,
+      });
+      // The password went in and the site moved on to ask for a code. Nothing was guessed at it.
+      expect(login).toEqual({
+        submitted: true,
+        passwordFieldVisible: false,
+        codeRequested: true,
+        url: `${origin}/mfa-code`,
+      });
+      expect(await tab.locator("input[name=otp]").inputValue()).toBe("");
+
+      const finished = await fillSignInCode(tab, { origin, code: CODE });
+      expect(finished).toEqual({
+        submitted: true,
+        codeFieldVisible: false,
+        passwordFieldVisible: false,
+        url: `${origin}/home`,
+      });
+      expect(JSON.stringify([login, finished])).not.toContain(PASSWORD);
+      expect(JSON.stringify([login, finished])).not.toContain(CODE);
+      await tab.close();
+    });
+
+    test("a code field drawn as a password input is the code step, not a refused login", async () => {
+      const tab = await open("/masked-login");
+      const login = await fillSignIn(tab, {
+        origin,
+        username: "a@example.test",
+        password: PASSWORD,
+      });
+      expect(login).toMatchObject({
+        submitted: true,
+        passwordFieldVisible: false,
+        codeRequested: true,
+      });
+      const finished = await fillSignInCode(tab, { origin, code: CODE });
+      expect(finished.url).toBe(`${origin}/home`);
+      await tab.close();
+    });
+
+    test("a code the site refuses leaves its code field showing, which is the failure signal", async () => {
+      const tab = await open("/mfa-login");
+      await fillSignIn(tab, {
+        origin,
+        username: "a@example.test",
+        password: PASSWORD,
+      });
+      const refused = await fillSignInCode(tab, { origin, code: "000000" });
+      expect(refused).toMatchObject({
+        submitted: true,
+        codeFieldVisible: true,
+      });
+      // And the right one still finishes from there.
+      const finished = await fillSignInCode(tab, { origin, code: CODE });
+      expect(finished).toMatchObject({ codeFieldVisible: false });
+      expect(finished.url).toBe(`${origin}/home`);
+      await tab.close();
+    });
+
+    test("types no code when the page is not asking for one, or is on another origin", async () => {
+      const tab = await open("/home");
+      expect(await fillSignInCode(tab, { origin, code: CODE })).toMatchObject({
+        submitted: false,
+        error: "The site is not asking for a verification code any more.",
+      });
+      const elsewhere = await fillSignInCode(tab, {
+        origin: "https://example.com",
+        code: CODE,
+      });
+      expect(elsewhere.submitted).toBe(false);
+      expect(elsewhere.error).toContain("not on https://example.com");
+      await tab.close();
+    });
+  },
+);
 
 describe.skipIf(!asked)("secrets typed into the page are not read back", () => {
   test("the aria snapshot shows a password's value, and the masked snapshot does not", async () => {

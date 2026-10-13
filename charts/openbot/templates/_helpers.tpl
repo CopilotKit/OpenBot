@@ -190,7 +190,50 @@ actually exists. A named `image.tag` is used verbatim.
 */}}
 {{- define "openbot.image" -}}
 {{- $tag := .Values.image.tag | default (printf "v%s" .Chart.AppVersion) -}}
+{{- with .Values.image.digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" .) -}}
+{{- fail (printf "image.digest must be sha256: followed by 64 hex characters, as in a release's container-images.json; got %q." .) -}}
+{{- end -}}
+{{- printf "%s:%s@%s" $.Values.image.repository $tag . -}}
+{{- else -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Where a key of this chart's Secret comes from, for an optional credential.
+
+`chart` and `store` mean the key is certainly there: this chart writes it from the literal, or
+`externalSecrets.data` names it. `unknown` is `secrets.existingSecret`, which cannot be read at
+template time, so the reference is made optional and a Secret without the key still starts. Empty
+means nothing provides it and the variable is left out.
+
+Called with (dict "root" . "key" "composio-api-key" "literal" .Values.secrets.composioApiKey).
+*/}}
+{{- define "openbot.secretKeySource" -}}
+{{- $root := .root -}}
+{{- if .literal -}}
+chart
+{{- else if $root.Values.externalSecrets.enabled -}}
+{{- $named := list -}}
+{{- range $root.Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end -}}
+{{- if has .key $named }}store{{ end -}}
+{{- else if $root.Values.secrets.existingSecret -}}
+unknown
+{{- end -}}
+{{- end -}}
+
+{{/* `config.extraVolumeMounts` and `config.extraVolumes`, for the pods that load the configuration. */}}
+{{- define "openbot.extraVolumeMounts" -}}
+{{- with .Values.config.extraVolumeMounts }}
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
+{{- define "openbot.extraVolumes" -}}
+{{- with .Values.config.extraVolumes }}
+{{ toYaml . }}
+{{- end }}
 {{- end -}}
 
 {{- define "openbot.secretName" -}}
@@ -375,12 +418,18 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: intelligence-api-key
-{{- if .Values.secrets.licenseToken }}
+{{- /* From a store or an existingSecret too: emitted for the literal alone, a synced token reached
+     the Secret and never the pod, and a self-hosted Intelligence ran unlicensed. */}}
+{{- $license := include "openbot.secretKeySource" (dict "root" . "key" "license-token" "literal" .Values.secrets.licenseToken) }}
+{{- if $license }}
 - name: COPILOTKIT_LICENSE_TOKEN
   valueFrom:
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: license-token
+      {{- if eq $license "unknown" }}
+      optional: true
+      {{- end }}
 {{- end }}
 {{- with .Values.config.managedAgent.url }}
 - name: MANAGED_AGENT_AG_UI_URL

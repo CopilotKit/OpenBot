@@ -29,7 +29,10 @@ checked as a set, so a partial set is refused as a misconfiguration rather than 
 unconfigured.
 
 `COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
-self-hosted Intelligence that has one sets this and has it forwarded to the runtime.
+self-hosted Intelligence that has one sets this and has it forwarded to the runtime. That
+Intelligence needs the same licence on its own deployment as well, or it refuses memory and the
+other licensed features while conversations carry on. OpenBot asks Intelligence once at boot and
+logs `intelligence-entitlement-not-ready`, naming the fix, when the answer is not ready.
 
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
@@ -1157,6 +1160,8 @@ model:
 ```
 
 `provider` must be `openai` or `anthropic`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.
+
+At start-up the server asks OpenAI or Anthropic, once, whether the configured key can call `default_model`. A key that cannot (a project key whose model allowlist leaves it out, say) would otherwise fail at the first message; instead the log says `model-unavailable`, naming the model and the fix. A rejected key logs `model-credential-rejected`. Nothing is asked with no key configured yet, or of an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, and start-up never waits for the answer.
 
 ### `knowledge.yaml`
 

@@ -104,6 +104,18 @@ spec:
             {{- with (include "openbot.learningServiceTokenEnv" . | trim) }}
             {{- . | nindent 12 }}
             {{- end }}
+            {{- /* Also the server's alone: only the API calls Composio, so the CronJobs are not handed the key. */}}
+            {{- $composio := include "openbot.secretKeySource" (dict "root" . "key" "composio-api-key" "literal" .Values.secrets.composioApiKey) }}
+            {{- if $composio }}
+            - name: COMPOSIO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openbot.secretName" . }}
+                  key: composio-api-key
+                  {{- if eq $composio "unknown" }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "openbot.configMapName" . }}
@@ -140,20 +152,31 @@ spec:
             periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
-          {{- if eq .Values.computers.mode "sandbox" }}
-          {{- /* The shape of a Bot's computer, as a file rather than as a permission to read one. */}}
+          {{- $sandbox := eq .Values.computers.mode "sandbox" }}
+          {{- if or $sandbox .Values.config.extraVolumeMounts }}
           volumeMounts:
+            {{- if $sandbox }}
+            {{- /* The shape of a Bot's computer, as a file rather than as a permission to read one. */}}
             - name: sandbox-template
               mountPath: /etc/openbot
               readOnly: true
+            {{- end }}
+            {{- with (include "openbot.extraVolumeMounts" . | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.server.resources }}
           resources:
 {{ toYaml . | indent 12 }}
           {{- end }}
-      {{- if eq .Values.computers.mode "sandbox" }}
+      {{- if or (eq .Values.computers.mode "sandbox") .Values.config.extraVolumes }}
       volumes:
+        {{- if eq .Values.computers.mode "sandbox" }}
         - name: sandbox-template
           configMap:
             name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
+        {{- end }}
+        {{- with (include "openbot.extraVolumes" . | trim) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- end }}

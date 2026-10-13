@@ -278,7 +278,9 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 
 `COPILOTKIT_LICENSE_TOKEN` is optional. A self-hosted Intelligence with its own
 licence can still set it and it is forwarded to the runtime; managed Intelligence
-does not issue one and startup no longer asks for it.
+does not issue one and startup no longer asks for it. A self-hosted Intelligence
+also needs the licence on its own deployment, or it refuses memory; OpenBot logs
+`intelligence-entitlement-not-ready` at boot when that is missing.
 
 Settings worth knowing:
 

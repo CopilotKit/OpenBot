@@ -177,6 +177,7 @@ import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
+import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
@@ -237,6 +238,7 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
@@ -1115,6 +1117,21 @@ const intentRouter = createIntentRouter({
         environment: process.env,
       }),
   }),
+});
+
+// Said once at boot: whether the key can call the model the Bots run on. A key without access to it
+// otherwise passes every start-up check and fails at the first message, in front of whoever sent it.
+void reportModelAvailability({
+  provider: runtimeModel.provider,
+  model: runtimeModel.defaultModel,
+  apiKey: () =>
+    resolveModelApiKey({
+      encryptionKey: config.keyEncryptionKey,
+      reader: credentialStore,
+      provider: runtimeModel.provider,
+      keyId: tenantPackage.model.credentialSecretRef,
+      environment: process.env,
+    }),
 });
 
 // Named collaborators are bound once in actorAgentResolver for chat, hops, and headless turns.
@@ -2249,6 +2266,12 @@ auditRoutineStore(routineStore, bootAuditStore);
 const selfHostBannerIntelligence = createIntelligenceClient(
   config.runtime.intelligence,
 );
+
+// Said once, at boot, whether Intelligence will let this deployment use what it is licensed for. A
+// self-hosted Intelligence without a licence refuses memory quietly; this is the line that says why.
+void reportIntelligenceEntitlement({
+  entitlements: () => selfHostBannerIntelligence.getRuntimeEntitlements(),
+});
 
 const identityGithubCallback =
   config.githubApp && config.publicUrl

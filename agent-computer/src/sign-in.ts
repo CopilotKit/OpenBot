@@ -3,8 +3,13 @@
  *
  * The private sign-in form posts a username and password to the server, the server posts them here,
  * and this types them. The Bot is never involved: it does not pick the fields, it does not see the
- * values, and what comes back says only whether a form was submitted and whether a password field is
- * still showing.
+ * values, and what comes back says only whether a form was submitted, whether a password field is
+ * still showing, and whether the site went on to ask for a verification code.
+ *
+ * A verification code is never asked for up front. It comes after the password, and only when the
+ * site, having accepted the password, shows a one-time-code field: `fillSignIn` reports that and
+ * stops, the person is asked for the code the site just sent, and `fillSignInCode` types it into the
+ * page that is still waiting for it.
  *
  * Three refusals, before anything is typed:
  *  - the page must be on the exact origin the person was asked to sign in to, so a login cannot be
@@ -23,11 +28,23 @@ export type SignInFillInput = {
   origin: string;
   username?: string;
   password: string;
-  code?: string;
 };
 
 export type SignInFillResult = {
   submitted: boolean;
+  passwordFieldVisible: boolean;
+  /** The site accepted the password and is now showing a one-time-code field, on this origin. */
+  codeRequested: boolean;
+  url: string;
+  error?: string;
+};
+
+export type SignInCodeInput = { origin: string; code: string };
+
+export type SignInCodeResult = {
+  submitted: boolean;
+  /** Whether a code field is still showing after submitting: the plainest sign the code was refused. */
+  codeFieldVisible: boolean;
   passwordFieldVisible: boolean;
   url: string;
   error?: string;
@@ -58,14 +75,25 @@ export function parseSignInFill(body: unknown): SignInFillInput | string {
     return "A sign-in needs a password.";
   if (input.username !== undefined && typeof input.username !== "string")
     return "The username must be text.";
-  if (input.code !== undefined && typeof input.code !== "string")
-    return "The code must be text.";
+  // A `code` is not read: one is only ever typed after the site asks for it, by `fillSignInCode`.
   return {
     origin: originOfUrl(input.origin),
     password: input.password,
     ...(input.username ? { username: input.username } : {}),
-    ...(input.code ? { code: input.code } : {}),
   };
+}
+
+/** Parse the verification-code body, the same way. */
+export function parseSignInCode(body: unknown): SignInCodeInput | string {
+  if (!body || typeof body !== "object") return "A sign-in needs a JSON body.";
+  const input = body as Record<string, unknown>;
+  if (typeof input.origin !== "string" || !originOfUrl(input.origin))
+    return "A sign-in names the website's origin.";
+  if (typeof input.code !== "string" || !input.code.trim())
+    return "A verification code is required.";
+  if (input.code.length > 64)
+    return "A verification code is at most 64 characters.";
+  return { origin: originOfUrl(input.origin), code: input.code.trim() };
 }
 
 /**
@@ -123,23 +151,39 @@ function markLoginFields(attribute: string) {
   return { username: Boolean(username), password: Boolean(password) };
 }
 
-/** Find a one-time-code field. Runs in the page. */
+/**
+ * Find a one-time-code field. Runs in the page.
+ *
+ * The site's own `autocomplete="one-time-code"` first; otherwise a visible text-like field whose name,
+ * id or label reads as a verification code. Any earlier mark is cleared, so a field that has gone
+ * away is never typed into.
+ */
 function markCodeField(attribute: string) {
+  for (const node of document.querySelectorAll(`[${attribute}="code"]`))
+    node.removeAttribute(attribute);
   const inputs = [
     ...document.querySelectorAll<HTMLInputElement>("input"),
   ].filter((input) => {
     const box = input.getBoundingClientRect();
+    const style = getComputedStyle(input);
     return (
       box.width > 0 &&
       box.height > 0 &&
+      style.visibility !== "hidden" &&
+      style.display !== "none" &&
       !input.disabled &&
-      input.type !== "hidden"
+      !input.readOnly &&
+      ["text", "tel", "number", "password", ""].includes(input.type)
     );
   });
   const code =
     inputs.find((input) => /one-time-code/.test(input.autocomplete)) ??
-    inputs.find((input) =>
-      /code|otp|totp|2fa|mfa|verif|token/i.test(`${input.name} ${input.id}`),
+    inputs.find(
+      (input) =>
+        input.type !== "password" &&
+        /code|otp|totp|2fa|mfa|verif|passcode/i.test(
+          `${input.name} ${input.id} ${input.getAttribute("aria-label") ?? ""}`,
+        ),
     );
   if (code) code.setAttribute(attribute, "code");
   return Boolean(code);
@@ -188,8 +232,13 @@ async function settle(page: Page) {
     .catch(() => undefined);
 }
 
+/** A password field still showing, other than a one-time-code field a site drew as one. */
 async function passwordVisible(page: Page) {
-  return (await page.locator("input[type=password]:visible").count()) > 0;
+  return (
+    (await page
+      .locator(`input[type=password]:visible:not([${LOGIN_ATTRIBUTE}="code"])`)
+      .count()) > 0
+  );
 }
 
 async function typeSecret(field: Locator, value: string) {
@@ -204,6 +253,7 @@ export async function fillSignIn(
   const answer = (error: string, submitted = false): SignInFillResult => ({
     submitted,
     passwordFieldVisible: false,
+    codeRequested: false,
     url: page.url(),
     error,
   });
@@ -246,30 +296,70 @@ export async function fillSignIn(
     await typeSecret(passwordField, input.password);
     await submitFrom(page, passwordField);
     await settle(page);
-    if (input.code) {
-      if (originOfUrl(page.url()) !== input.origin)
-        return answer(
-          `The sign-in moved to ${originOfUrl(page.url()) || "another page"} before the code was asked for. Take over the browser to finish.`,
-          true,
-        );
-      let hasCode = await page.evaluate(markCodeField, LOGIN_ATTRIBUTE);
-      if (!hasCode) {
-        await page.waitForTimeout(2_000);
-        hasCode = await page.evaluate(markCodeField, LOGIN_ATTRIBUTE);
-      }
-      if (hasCode) {
-        const codeField = page.locator(`[${LOGIN_ATTRIBUTE}="code"]`);
-        await typeSecret(codeField, input.code);
-        await submitFrom(page, codeField);
-        await settle(page);
-      }
+    // A password field still showing is a refused login; the server says so. Only past that is a
+    // code field the site asking for a second step. The code field is looked for first, so one a
+    // site draws as a password input is not mistaken for the login's own, and is then given a
+    // moment to appear.
+    let codeRequested = await page.evaluate(markCodeField, LOGIN_ATTRIBUTE);
+    const refused = await passwordVisible(page);
+    if (!codeRequested && !refused) {
+      await page.waitForTimeout(2_000);
+      codeRequested = await page.evaluate(markCodeField, LOGIN_ATTRIBUTE);
     }
+    if (codeRequested && originOfUrl(page.url()) !== input.origin)
+      return answer(
+        `The sign-in moved to ${originOfUrl(page.url()) || "another page"} to ask for a verification code. Take over the browser to finish signing in there.`,
+        true,
+      );
     return {
       submitted: true,
-      passwordFieldVisible: await passwordVisible(page),
+      passwordFieldVisible: codeRequested ? false : refused,
+      codeRequested,
       url: page.url(),
     };
   } catch {
     return answer("The login could not be typed into the page.");
+  }
+}
+
+/**
+ * Type the verification code a site asked for into the page that is waiting for it.
+ *
+ * Only after `fillSignIn` reported `codeRequested`, and with the same refusals: the page must still
+ * be on the origin the person was asked to sign in to, and must still be showing a code field.
+ */
+export async function fillSignInCode(
+  page: Page,
+  input: SignInCodeInput,
+): Promise<SignInCodeResult> {
+  const answer = (error: string, submitted = false): SignInCodeResult => ({
+    submitted,
+    codeFieldVisible: false,
+    passwordFieldVisible: false,
+    url: page.url(),
+    error,
+  });
+  if (originOfUrl(page.url()) !== input.origin)
+    return answer(
+      `The Bot's browser is not on ${input.origin} any more. Take over the browser to finish signing in.`,
+    );
+  try {
+    if (!(await page.evaluate(markCodeField, LOGIN_ATTRIBUTE)))
+      return answer("The site is not asking for a verification code any more.");
+    const codeField = page.locator(`[${LOGIN_ATTRIBUTE}="code"]`);
+    await typeSecret(codeField, input.code);
+    await submitFrom(page, codeField);
+    await settle(page);
+    const codeFieldVisible =
+      originOfUrl(page.url()) === input.origin &&
+      (await page.evaluate(markCodeField, LOGIN_ATTRIBUTE));
+    return {
+      submitted: true,
+      codeFieldVisible,
+      passwordFieldVisible: await passwordVisible(page),
+      url: page.url(),
+    };
+  } catch {
+    return answer("The verification code could not be typed into the page.");
   }
 }
