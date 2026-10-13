@@ -24,7 +24,7 @@ import {
 } from "../src/passwords/service";
 import { createMemoryPasswordStore } from "../src/passwords/store";
 import { originOf, type SignInRequestRecord } from "../src/passwords/types";
-import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { createTurnRunner, type RunnerLike } from "../src/toolkit/run-turn";
 import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 

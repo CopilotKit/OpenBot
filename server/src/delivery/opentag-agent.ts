@@ -13,7 +13,7 @@ import {
   ingestSlackEvent,
   type SlackTriggerEvent,
 } from "../responsibilities/slack";
-import type { DrawnComponent } from "../routines/runner";
+import type { DrawnComponent } from "../toolkit/run-turn";
 import {
   agUiStream,
   approvalFields,

@@ -277,7 +277,7 @@ describe("resolving stored attachment references into model-readable content", (
     /*
      * "note" is what an older message gets, because history is replayed on
      * every turn and a throw there would fail this channel for ever — the
-     * failure `agents/history-sanitize.ts` records finding in production
+     * failure `toolkit/history-sanitize.ts` records finding in production
      * twice. The part still SAYS the file is gone, so nothing answers as
      * though it were there.
      */

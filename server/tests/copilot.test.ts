@@ -2054,7 +2054,7 @@ describe("where an attachment reaches the model, and where it deliberately does 
      * The permanence half of the same argument. `inlineAttachments` maps over the WHOLE history and
      * history is replayed every turn, so a row deleted by the sweeper after an interrupted send
      * would otherwise fail this channel's every future turn for ever, exactly as the dangling call
-     * in `agents/history-sanitize.ts` did in production. The old part says the file is gone; the
+     * in `toolkit/history-sanitize.ts` did in production. The old part says the file is gone; the
      * one the person is actually asking about still arrives as bytes.
      */
     const agent = await builtInWith(async (id) =>

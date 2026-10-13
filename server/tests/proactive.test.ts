@@ -20,7 +20,7 @@ import {
 } from "../src/proactive/restriction";
 import type { ProactiveStore } from "../src/proactive/store";
 import type { ProactiveSetting } from "../src/proactive/types";
-import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { createTurnRunner, type RunnerLike } from "../src/toolkit/run-turn";
 import type { WorkQueue } from "../src/work/queue";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 

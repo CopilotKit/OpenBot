@@ -57,18 +57,44 @@ import type {
 import { EventType } from "@ag-ui/client";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { frameFiring } from "@openbot/shared/routine-firing";
-import { sanitizeSeededHistory } from "../agents/history-sanitize";
-import { historyOrEmpty } from "../agents/thread-history";
-import type { AuditInitiator } from "../audit";
+import type { ApprovalContinuation } from "./continuation";
 import {
   type HeadlessTool,
   HeadlessToolSuspension,
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
   OPENBOT_WAITING_METADATA,
-} from "../toolkit/headless-tools";
-import type { ComponentCatalog, TurnAdmission } from "../toolkit/ports";
-import type { DrawnComponent, TurnRunner } from "./runner";
+} from "./headless-tools";
+import { sanitizeSeededHistory } from "./history-sanitize";
+import type { AuditInitiator } from "./initiator";
+import type { ComponentCatalog, TurnAdmission } from "./ports";
+import { historyOrEmpty } from "./thread-history";
+
+/** Everything a headless turn needs, injectable so tests never dial a model. */
+export type TurnRunner = (input: {
+  ownerUserId: string; // the actor the run asserts — grants and connections resolve to them
+  routineId: string; // what the trail names as having started this turn, rather than the owner
+  agentId: string;
+  threadId: string; // the owner's thread for the routine's channel
+  instruction: string; // the user message of this turn
+  initiator?: AuditInitiator;
+  signal?: AbortSignal;
+  continuation?: {
+    snapshot: ApprovalContinuation;
+    result: { content: string; error?: string };
+    messageId: string;
+  };
+  userMessage?: Message;
+  /** Durable inbound delivery id; reused by lock, runner and emitted events. */
+  runId?: string;
+  /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
+  depth?: number;
+  /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
+  onText?: (text: string) => void;
+}) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
+
+/** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
+export type DrawnComponent = { name: string; args: Record<string, unknown> };
 
 /**
  * The gap between stopping a turn and giving up on it.
@@ -210,10 +236,9 @@ function toAgentMessage(message: ThreadHistoryMessage): Message {
 }
 
 /**
- * Re-exported from `agents/history-sanitize.ts`, where it now lives, because a chat turn needs
- * it too and this module cannot be imported from `copilot.ts`, since the import already runs the
- * other way. Kept as a name on this module because this is where the reasoning was found and where the
- * tests that cover the seeding path still reach for it.
+ * Re-exported from `./history-sanitize.ts`, where it lives because a chat turn needs it too. Kept as
+ * a name on this module because this is where the reasoning was found and where the tests that
+ * cover the seeding path still reach for it.
  */
 export { sanitizeSeededHistory };
 

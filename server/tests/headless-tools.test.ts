@@ -11,7 +11,7 @@ import { parseApprovalContinuation } from "../src/approvals/types";
 import type { AuditEventInput } from "../src/audit";
 import { createComputerGateway } from "../src/computer/gateway";
 import * as headless from "../src/computer/headless-tools";
-import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { createTurnRunner, type RunnerLike } from "../src/toolkit/run-turn";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 const definition = {

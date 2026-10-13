@@ -25,7 +25,7 @@ import {
   workItems,
 } from "../src/db/schema";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
-import type { TurnRunner } from "../src/routines/runner";
+import type { TurnRunner } from "../src/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
 import { createWorkQueue } from "../src/work/queue";

@@ -261,7 +261,7 @@ import { createTriggerIngressRoutes } from "./responsibilities/trigger-routes";
 import { useTriggerTools } from "./responsibilities/trigger-tools";
 import { createTriggerStore } from "./responsibilities/triggers";
 import type { Responsibility } from "./responsibilities/types";
-import { createTurnRunner } from "./routines/run-turn";
+import { createTurnRunner } from "./toolkit/run-turn";
 import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
@@ -1819,7 +1819,7 @@ const buildAgentFor = async ({
  *
  * One runner for the process, reused across firings: it opens a socket per run and holds no idle
  * connection, but its `threads` map is per instance, and a runner per turn would fragment the
- * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
+ * already-running check that keeps two turns off one thread. See `toolkit/run-turn.ts`.
  */
 const routineIntelligence = observeIntelligenceAuthentication(
   new CopilotKitIntelligence({

@@ -22,40 +22,12 @@
  * within a firing never sees the routine that fails cleanly, once, every single night.
  */
 
-import type { Message } from "@ag-ui/client";
 import { BOT_PAUSED_REASON, isBotPaused } from "../agents/lifecycle";
 import type { AgentActor } from "../agents/profile-types";
-import type { ApprovalContinuation } from "../approvals/types";
-import type { AuditInitiator } from "../audit";
 import type { ChannelStore } from "../channels/routes";
 import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import type { TurnRunner } from "../toolkit/run-turn";
 import type { RoutineStore } from "./store";
-
-/** Everything a headless turn needs, injectable so tests never dial a model. */
-export type TurnRunner = (input: {
-  ownerUserId: string; // the actor the run asserts — grants and connections resolve to them
-  routineId: string; // what the trail names as having started this turn, rather than the owner
-  agentId: string;
-  threadId: string; // the owner's thread for the routine's channel
-  instruction: string; // the user message of this turn
-  initiator?: AuditInitiator;
-  signal?: AbortSignal;
-  continuation?: {
-    snapshot: ApprovalContinuation;
-    result: { content: string; error?: string };
-    messageId: string;
-  };
-  userMessage?: Message;
-  /** Durable inbound delivery id; reused by lock, runner and emitted events. */
-  runId?: string;
-  /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
-  depth?: number;
-  /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
-  onText?: (text: string) => void;
-}) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
-
-/** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
-export type DrawnComponent = { name: string; args: Record<string, unknown> };
 
 export type RoutineRunner = { run(routineRunId: string): Promise<void> };
 

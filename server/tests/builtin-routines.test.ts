@@ -167,7 +167,7 @@ describe("the tool list", () => {
     // A live firing did nothing and reported success because its instruction was written in
     // schedule-speak ("Every run, append …"): the model read it as a question about scheduling,
     // checked that the routine existed, and answered "already configured". The firing turn now says
-    // it is a firing (`routines/run-turn.ts`), and this is the other half — the authoring side, so
+    // it is a firing (`toolkit/run-turn.ts`), and this is the other half — the authoring side, so
     // the instruction is written as work in the first place.
     const tools = await listTools();
     const create = tools.find((tool) => tool.name === "create_routine");

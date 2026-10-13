@@ -76,7 +76,7 @@ export function useRoutineTools(tools: RoutineTools | null): void {
  * HOW THE INSTRUCTION IS PHRASED IS PART OF THAT CONTRACT, and it was learned the hard way: a
  * routine stored as "Every run, append the current date and time to the Notion page …" fired, and the
  * turn read its own schedule-shaped text as a question about SCHEDULING — it checked that the routine
- * existed, said so, and appended nothing, successfully. `routines/run-turn.ts` now frames the firing
+ * existed, said so, and appended nothing, successfully. `toolkit/run-turn.ts` now frames the firing
  * turn as a firing; this is the other half, so the sentence is written as work to begin with.
  */
 const TOOLS: readonly McpTool[] = Object.freeze([

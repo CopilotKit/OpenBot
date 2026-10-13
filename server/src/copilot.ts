@@ -15,7 +15,7 @@ import {
   type ActorAgentResolver,
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
-import { sanitizeSeededHistory } from "./agents/history-sanitize";
+import { sanitizeSeededHistory } from "./toolkit/history-sanitize";
 import { createIntelligenceThreadLock } from "./agents/intelligence-thread-lock";
 import {
   PLAN_RUN_COMPLETED,
@@ -24,7 +24,7 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { historyOrEmpty } from "./agents/thread-history";
+import { historyOrEmpty } from "./toolkit/thread-history";
 import {
   executeNativeApprovalTool,
   nativeApprovalRun,
@@ -695,7 +695,7 @@ export type MarkAttachmentsSent = (
  *
  * OLDER MESSAGES DEGRADE INSTEAD. This maps over the WHOLE history, and history is replayed on every
  * turn, so one vanished row failing here would fail this channel's every future turn for ever — the
- * same geometry as the dangling tool call in `agents/history-sanitize.ts`, which opens by recording
+ * same geometry as the dangling tool call in `toolkit/history-sanitize.ts`, which opens by recording
  * that exact failure found in production twice: a permanent failure grown out of transient damage,
  * and nothing the person did wrong. It is reachable the same way, too: a send whose run is stopped
  * before the load never stamps `attachedAt`, and the sweeper deletes the row a day later. So an
@@ -1601,7 +1601,7 @@ class CloningRemoteAgent extends AbstractAgent {
  * The guard has to be on this side of `run`. `BuiltInAgent.run` converts `input.messages` itself,
  * with no seam in between, so wrapping the agent is the only place left to stand. The reasoning for
  * why a dangling call is DROPPED rather than repaired, and why ids are never changed, is in
- * `agents/history-sanitize.ts`, where the routines path found the same failure first.
+ * `toolkit/history-sanitize.ts`, where the routines path found the same failure first.
  *
  * A RESUMED CALL IS NOT A DANGLE. `run` appends a tool result for each `input.resume` entry by
  * `interruptId` AFTER converting the messages, so a call that a resume is about to answer must

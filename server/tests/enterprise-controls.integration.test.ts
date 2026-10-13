@@ -34,7 +34,7 @@ import {
   teamBotPublications,
   users,
 } from "../src/db/schema";
-import { createTurnRunner } from "../src/routines/run-turn";
+import { createTurnRunner } from "../src/toolkit/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { serverTurnAdmission } from "../src/agents/turn-admission";

@@ -5,7 +5,8 @@ import type {
   ChannelActivity,
   ChannelStore,
 } from "../src/channels/routes";
-import { createRoutineRunner, type TurnRunner } from "../src/routines/runner";
+import type { TurnRunner } from "../src/toolkit/run-turn";
+import { createRoutineRunner } from "../src/routines/runner";
 import type {
   RoutineRunContext,
   RoutineRunOutcome,

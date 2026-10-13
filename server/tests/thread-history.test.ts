@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { historyOrEmpty, isMissingThread } from "../src/agents/thread-history";
+import { historyOrEmpty, isMissingThread } from "../src/toolkit/thread-history";
 
 /**
  * Reading history on a thread the platform has never seen.

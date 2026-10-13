@@ -21,7 +21,7 @@ import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
 import { agents, componentExclusions, components } from "../src/db/schema";
-import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
+import { createTurnRunner, type RunnerLike } from "../src/toolkit/run-turn";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 

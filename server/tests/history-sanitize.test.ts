@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
-import { sanitizeSeededHistory } from "../src/agents/history-sanitize";
+import { sanitizeSeededHistory } from "../src/toolkit/history-sanitize";
 
 /**
  * The filter itself, asserted as a function rather than through either turn path.
