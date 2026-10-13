@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
+import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
+import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import {
   createTurnRunner,
   drawnComponents,
@@ -886,6 +888,106 @@ describe("recovering what was said", () => {
     await expect(run()).rejects.toThrow(
       "The turn stopped to ask a question, and a routine has nobody to ask.",
     );
+  });
+});
+
+/**
+ * The waiting details travel two ways: as an `openbot.headless.waiting` CUSTOM event, and on the
+ * interrupt's metadata for when that event did not survive the trip. Both must end the turn as a
+ * suspension that names the open request, never as the generic "nobody to ask" failure, or the
+ * request the person still has to answer is lost.
+ */
+describe("a turn waiting on a person", () => {
+  const WAITING = {
+    kind: "approval",
+    requestId: "request_1",
+    message: "Waiting for Ada to approve the transfer.",
+  };
+
+  const interruptCarrying = (metadata: Record<string, unknown>) =>
+    // biome-ignore lint/suspicious/noExplicitAny: only the metadata is the subject.
+    ({ id: "interrupt_1", metadata }) as any;
+
+  test("a waiting carried on the interrupt suspends the turn with its details", async () => {
+    const { run, calls } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        observer.complete();
+      },
+    });
+
+    const error = await run().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeadlessToolSuspension);
+    expect((error as HeadlessToolSuspension).message).toBe(WAITING.message);
+    expect((error as HeadlessToolSuspension).waiting).toEqual(WAITING);
+    expect(calls.cleaned).toHaveLength(1);
+  });
+
+  test("a carried waiting without its own message gets the default sentence", async () => {
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({
+            [OPENBOT_WAITING_METADATA]: { kind: "question" },
+          }),
+        ];
+        observer.complete();
+      },
+    });
+
+    await expect(run()).rejects.toThrow("The turn is waiting for human input.");
+  });
+
+  test("a carried waiting wins over whatever the turn said before it stopped", async () => {
+    const { run } = harness({
+      drive: (context) => {
+        context.agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        answers(context);
+      },
+    });
+
+    await expect(run()).rejects.toBeInstanceOf(HeadlessToolSuspension);
+  });
+
+  test("metadata without a kind is not a waiting, and reads as an interrupt", async () => {
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({
+            [OPENBOT_WAITING_METADATA]: { requestId: "request_1" },
+          }),
+        ];
+        observer.complete();
+      },
+    });
+
+    await expect(run()).rejects.toThrow("nobody to ask");
+  });
+
+  test("the CUSTOM event wins over the copy carried on the interrupt", async () => {
+    const fromEvent = { kind: "approval", requestId: "request_event" };
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        observer.next({
+          type: EventType.CUSTOM,
+          name: "openbot.headless.waiting",
+          value: fromEvent,
+          // biome-ignore lint/suspicious/noExplicitAny: the harness observer types only RUN_ERROR.
+        } as any);
+        agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        observer.complete();
+      },
+    });
+
+    const error = await run().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeadlessToolSuspension);
+    expect((error as HeadlessToolSuspension).waiting).toEqual(fromEvent);
   });
 });
 
