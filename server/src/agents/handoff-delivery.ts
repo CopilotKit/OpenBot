@@ -164,6 +164,8 @@ export function createHandoffDelivery(options: {
    * conversation it was asked in locked against them for as long as the process lives.
    */
   deadlineMs?: number;
+  /** How often the lock is renewed while the Bot works. Overridden by tests; see `LOCK_RENEW_EVERY_MS`. */
+  renewEveryMs?: number;
 }): HandoffDelivery {
   const {
     agentFor,
@@ -175,6 +177,7 @@ export function createHandoffDelivery(options: {
     setBusy,
     newRunId,
     deadlineMs = DEFAULT_DELIVERY_DEADLINE_MS,
+    renewEveryMs = LOCK_RENEW_EVERY_MS,
   } = options;
 
   return {
@@ -347,7 +350,7 @@ export function createHandoffDelivery(options: {
          */
         const heartbeat = setInterval(() => {
           void lock.renew({ threadId: where.threadId, runId }).catch(() => {});
-        }, LOCK_RENEW_EVERY_MS);
+        }, renewEveryMs);
 
         try {
           /*

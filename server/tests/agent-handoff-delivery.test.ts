@@ -355,6 +355,44 @@ describe("a delivery that never finishes", () => {
     void deliver;
   });
 
+  /*
+   * TODAY'S BEHAVIOUR, PINNED SO CHANGING IT IS A DECISION. A renewal that fails is ignored and the
+   * hop carries on; the headless turn runner stops the turn instead (`run-turn.ts`, "a failed
+   * heartbeat stops the turn"). Folding the engines into one is expected to change this assertion.
+   */
+  test("a renewal that fails does not stop the hop", async () => {
+    let renewals = 0;
+    const hop = createHandoffDelivery({
+      deadlineMs: 5_000,
+      renewEveryMs: 2,
+      agentFor: async () => stubAgent(),
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: () => {
+          renewals += 1;
+          return Promise.reject(new Error("lock lost"));
+        },
+        release: async () => {},
+      },
+      runner: {
+        run: () =>
+          new Observable<BaseEvent>((subscriber) => {
+            const finish = setTimeout(() => {
+              for (const event of FINISHED) subscriber.next(event);
+              subscriber.complete();
+            }, 30);
+            return () => clearTimeout(finish);
+          }),
+      },
+    });
+
+    await hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" });
+    expect(renewals).toBeGreaterThan(0);
+  });
+
   test("the lock is given back on the conversation it was taken on", async () => {
     const { delivery: deliver, released } = delivery(FINISHED);
 
@@ -873,6 +911,60 @@ describe("a hop to a Bot that is paused while it works", () => {
       await expect(delivered).rejects.toBeInstanceOf(BotPausedError);
       expect(stopped).toEqual(["platform-run"]);
       expect(released).toEqual(["scratch-thread"]);
+    } finally {
+      resetBotLifecycleForTests();
+    }
+  });
+
+  /*
+   * TODAY'S BEHAVIOUR, PINNED SO CHANGING IT IS A DECISION. A hop checks the pause after it has taken
+   * the lock, so a Bot that was already paused still takes and gives back the conversation's lock.
+   * The headless turn runner checks first and never touches the lock. Folding the engines into one is
+   * expected to change this assertion.
+   */
+  test("a Bot paused before the hop takes the lock, gives it back and never runs", async () => {
+    const { BotPausedError, configureBotLifecycle, resetBotLifecycleForTests } =
+      await import("../src/agents/lifecycle");
+    const query = {
+      from: () => query,
+      where: () => query,
+      limit: async () => [{ pausedAt: new Date() }],
+    };
+    configureBotLifecycle({
+      database: { select: () => query } as unknown as Parameters<
+        typeof configureBotLifecycle
+      >[0]["database"],
+    });
+    const lockCalls: string[] = [];
+    let runs = 0;
+    const hop = createHandoffDelivery({
+      agentFor: async () => stubAgent(),
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => {
+          lockCalls.push("acquire");
+          return { runId: "platform-run" };
+        },
+        renew: async () => {},
+        release: async () => {
+          lockCalls.push("release");
+        },
+      },
+      runner: {
+        run: () => {
+          runs += 1;
+          return new Observable<BaseEvent>(() => {});
+        },
+      },
+    });
+    try {
+      await expect(
+        hop.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+      ).rejects.toBeInstanceOf(BotPausedError);
+      expect(lockCalls).toEqual(["acquire", "release"]);
+      expect(runs).toBe(0);
     } finally {
       resetBotLifecycleForTests();
     }
