@@ -7,6 +7,7 @@ import {
   isLearningContainerId,
   type LearningTarget,
 } from "../../shared/learning";
+import { DEFAULT_SAVED_CALL_WAIT_MS } from "./approvals/saved-call";
 import { singleUserEnabled } from "./auth/dev-actor";
 import { normalizeDomain } from "./auth/email-domain";
 import { organizationAuthority } from "./auth/organization";
@@ -291,6 +292,12 @@ export type DeploymentConfig = {
    * deployment does not acquire it without being asked.
    */
   agentStallTimeoutMs: number;
+  /**
+   * How long a computer action waits for its tool call to appear, complete, in the conversation
+   * Intelligence has saved, in milliseconds. Intelligence saves a streaming run behind the stream;
+   * an action whose call is not there by then is refused.
+   */
+  savedCallWaitMs: number;
   /**
    * How many days of audit trail this deployment keeps, or undefined to keep everything.
    *
@@ -1272,6 +1279,25 @@ function agentStallTimeoutMs(environment: Environment): number {
   return milliseconds;
 }
 
+function savedCallWaitMs(environment: Environment): number {
+  const raw = optional(environment, "COMPUTER_SAVED_CALL_WAIT");
+  if (!raw) return DEFAULT_SAVED_CALL_WAIT_MS;
+  let milliseconds: number;
+  try {
+    milliseconds = durationMs(raw);
+  } catch (error) {
+    throw new Error(
+      `COMPUTER_SAVED_CALL_WAIT: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (milliseconds < 1) {
+    throw new Error(
+      "COMPUTER_SAVED_CALL_WAIT must be a duration above zero, such as 15s. With no wait, every computer action races the save and is refused.",
+    );
+  }
+  return milliseconds;
+}
+
 /** Where the API listens when nothing says otherwise: what `.env.example` and the image ship. */
 const DEFAULT_PORT = 3001;
 
@@ -1371,6 +1397,7 @@ export function loadConfig(
       research: switchedOn(environment, "OPENBOT_PROACTIVE_DEFAULTS"),
     },
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
+    savedCallWaitMs: savedCallWaitMs(environment),
     auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
     auth,

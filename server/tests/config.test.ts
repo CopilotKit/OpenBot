@@ -634,6 +634,21 @@ describe("deployment configuration", () => {
     expect(loadConfig(baseEnvironment).agentStallTimeoutMs).toBe(0);
   });
 
+  test("waits 15s for a computer action's saved call unless told otherwise", () => {
+    expect(loadConfig(baseEnvironment).savedCallWaitMs).toBe(15_000);
+    expect(
+      loadConfig({ ...baseEnvironment, COMPUTER_SAVED_CALL_WAIT: "30s" })
+        .savedCallWaitMs,
+    ).toBe(30_000);
+  });
+
+  // No wait refuses every action that races the save, which is nearly all of them.
+  test.each(["0", "soon"])("refuses COMPUTER_SAVED_CALL_WAIT=%p", (value) => {
+    expect(() =>
+      loadConfig({ ...baseEnvironment, COMPUTER_SAVED_CALL_WAIT: value }),
+    ).toThrow("COMPUTER_SAVED_CALL_WAIT");
+  });
+
   test("takes a timeout in milliseconds, and zero as switching it off", () => {
     expect(
       loadConfig({ ...baseEnvironment, AGENT_STALL_TIMEOUT_MS: "120000" })
