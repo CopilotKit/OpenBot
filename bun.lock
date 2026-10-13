@@ -82,6 +82,7 @@
         "@mastra/core": "^1.64.0",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "@openbot/shared": "workspace:*",
+        "@openbot/toolkit": "workspace:*",
         "@opentelemetry/api-logs": "0.221.0",
         "@opentelemetry/exporter-logs-otlp-http": "0.221.0",
         "@opentelemetry/resources": "2.10.0",
@@ -107,6 +108,18 @@
     },
     "shared": {
       "name": "@openbot/shared",
+      "devDependencies": {
+        "typescript": "^5.9.3",
+      },
+    },
+    "toolkit": {
+      "name": "@openbot/toolkit",
+      "dependencies": {
+        "@ag-ui/client": "1.0.1",
+        "@openbot/shared": "workspace:*",
+        "rxjs": "7.8.1",
+        "zod": "^4.4.3",
+      },
       "devDependencies": {
         "typescript": "^5.9.3",
       },
@@ -520,6 +533,8 @@
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
     "@openbot/shared": ["@openbot/shared@workspace:shared"],
+
+    "@openbot/toolkit": ["@openbot/toolkit@workspace:toolkit"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 

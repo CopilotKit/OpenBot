@@ -1,8 +1,8 @@
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import { z } from "zod";
 import type { AuditInitiator, AuditSink } from "../audit";
-import type { HeadlessTool } from "../toolkit/headless-tools";
-import type { ComponentCatalog } from "../toolkit/ports";
+import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
+import type { ComponentCatalog } from "@openbot/toolkit/ports";
 import type { ComponentStore } from "./store";
 
 /**

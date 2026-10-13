@@ -43,8 +43,8 @@ import {
 import { groupBotThreads, groupMessages } from "../db/schema/group";
 import { workItems } from "../db/schema/work";
 import type { CheckPrivateShare } from "../proactive/private-share";
-import type { TurnRunner } from "../toolkit/run-turn";
-import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import type { WorkQueue } from "../work/queue";
 
 export const GROUP_TURN_KIND = "group.turn";

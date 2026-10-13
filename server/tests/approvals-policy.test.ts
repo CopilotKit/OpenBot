@@ -29,7 +29,7 @@ import {
 } from "../src/approvals/types";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
-import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 const candidate = (
   over: Partial<ApprovalCandidate> = {},

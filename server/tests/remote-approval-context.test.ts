@@ -4,7 +4,7 @@ import { of } from "rxjs";
 import { z } from "zod";
 import { currentApprovalContext } from "../src/approvals/types";
 import { buildAgents } from "../src/copilot";
-import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 async function fixture(answered = false) {
   const requests: RunAgentInput[] = [];

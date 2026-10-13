@@ -26,6 +26,7 @@
     "@mastra/core": "^1.64.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openbot/shared": "workspace:*",
+    "@openbot/toolkit": "workspace:*",
     "@opentelemetry/api-logs": "0.221.0",
     "@opentelemetry/exporter-logs-otlp-http": "0.221.0",
     "@opentelemetry/resources": "2.10.0",

@@ -10,9 +10,9 @@ import {
   drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
-} from "../src/toolkit/run-turn";
-import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
-import type { TurnAdmission } from "../src/toolkit/ports";
+} from "@openbot/toolkit/run-turn";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type { TurnAdmission } from "@openbot/toolkit/ports";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.

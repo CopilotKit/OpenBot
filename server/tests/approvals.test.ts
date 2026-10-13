@@ -14,7 +14,7 @@ import {
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHostAccessBroker } from "../src/host-access/broker";
 import { CatalogueEntryUnknownError } from "../src/plugins/store";
-import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 const context = {
   runId: "run",

@@ -3,13 +3,13 @@ import type { Message } from "@ag-ui/client";
 import {
   HeadlessToolSuspension,
   OPENBOT_WAITING_METADATA,
-} from "../src/toolkit/headless-tools";
+} from "../src/headless-tools";
 import {
   settle,
   type TurnEvidence,
   turnInput,
   turnMessages,
-} from "../src/toolkit/run-turn";
+} from "../src/run-turn";
 
 /**
  * How a headless turn ends, decided without running one.

@@ -1,7 +1,7 @@
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
-import { type GrantedTool, parametersFor } from "../toolkit/granted-tool";
-import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { markUntrusted } from "../untrusted-content";
 import type { SelectableSkill } from "./selection";
 import {

@@ -12,7 +12,7 @@ import type { AuditInitiator } from "../audit";
 import {
   HeadlessToolSuspension,
   OPENBOT_WAITING_METADATA,
-} from "../toolkit/headless-tools";
+} from "@openbot/toolkit/headless-tools";
 import { withApprovalContext } from "./types";
 
 export { OPENBOT_WAITING_METADATA };

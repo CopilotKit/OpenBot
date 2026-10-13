@@ -5,7 +5,7 @@ import {
   type ApprovalContinuation,
   currentApprovalContext,
   withApprovalContext,
-} from "../toolkit/continuation";
+} from "@openbot/toolkit/continuation";
 
 /** `handled` answers a hand-off: the person did it themselves, so it is never executed for them. */
 export type ApprovalDecision =

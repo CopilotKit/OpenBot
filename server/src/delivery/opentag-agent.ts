@@ -13,7 +13,7 @@ import {
   ingestSlackEvent,
   type SlackTriggerEvent,
 } from "../responsibilities/slack";
-import type { DrawnComponent } from "../toolkit/run-turn";
+import type { DrawnComponent } from "@openbot/toolkit/run-turn";
 import {
   agUiStream,
   approvalFields,

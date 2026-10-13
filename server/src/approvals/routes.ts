@@ -33,7 +33,7 @@ const ruleChange = z
     "Change at least one field.",
   );
 
-import { HeadlessToolSuspension } from "../toolkit/headless-tools";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 
 export function createApprovalRoutes(
   service: ApprovalService,

@@ -42,7 +42,7 @@ import {
   routineSweeps,
   routines,
 } from "../db/schema";
-import type { HeadlessWaiting } from "../toolkit/headless-tools";
+import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 const SWEEP_ID = "routines";

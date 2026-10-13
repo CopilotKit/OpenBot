@@ -15,7 +15,7 @@ import {
   type ActorAgentResolver,
   CoworkerUnavailableError,
 } from "./agents/agent-resolver";
-import { sanitizeSeededHistory } from "./toolkit/history-sanitize";
+import { sanitizeSeededHistory } from "@openbot/toolkit/history-sanitize";
 import { createIntelligenceThreadLock } from "./agents/intelligence-thread-lock";
 import {
   PLAN_RUN_COMPLETED,
@@ -24,7 +24,7 @@ import {
   planModelForEnvironment,
 } from "./agents/plan-model";
 import type { AgentActor } from "./agents/profile-types";
-import { historyOrEmpty } from "./toolkit/thread-history";
+import { historyOrEmpty } from "@openbot/toolkit/thread-history";
 import {
   executeNativeApprovalTool,
   nativeApprovalRun,
@@ -60,10 +60,10 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import type { GrantedTool } from "./toolkit/granted-tool";
-import { parametersFor } from "./toolkit/granted-tool";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { parametersFor } from "@openbot/toolkit/granted-tool";
 import { grantedToolGuidance } from "./plugins/tools";
-import { HeadlessToolsMiddleware } from "./toolkit/headless-tools";
+import { HeadlessToolsMiddleware } from "@openbot/toolkit/headless-tools";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 
 /**

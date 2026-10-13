@@ -23,7 +23,7 @@ import {
 import { type AuditStore, PERSON_INITIATOR, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
-import type { GrantedTool } from "../toolkit/granted-tool";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { REFUSAL_MARKER } from "../plugins/tools";
 import type {
   CheckPrivateShare,
