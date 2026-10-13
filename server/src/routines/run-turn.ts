@@ -60,6 +60,7 @@ import { frameFiring } from "@openbot/shared/routine-firing";
 import { headlessTurnRefusal } from "../admin/controls";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { guardBotTurn } from "../agents/lifecycle";
+import { historyOrEmpty } from "../agents/thread-history";
 import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
 import type { AuditInitiator, AuditStore } from "../audit";
 import {
@@ -73,7 +74,6 @@ import {
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
 } from "../computer/headless-tools";
-import { historyOrEmpty } from "../copilot";
 import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
