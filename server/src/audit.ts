@@ -13,6 +13,7 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
+import type { AuditSink } from "./toolkit/ports";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -701,6 +702,11 @@ export async function recordAuditEvent(
     ...event,
     payload: redactAuditPayload(event.payload) as Record<string, unknown>,
   });
+}
+
+/** The turn code's view of the trail: one store, written through `recordAuditEvent`. */
+export function auditSink(store: AuditStore): AuditSink {
+  return { record: (event) => recordAuditEvent(store, event) };
 }
 
 function initiatorColumns(initiator: AuditInitiator | undefined) {

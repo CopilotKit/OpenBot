@@ -11,7 +11,7 @@ import { inArray } from "drizzle-orm";
 import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
-import type { AuditEventInput } from "../src/audit";
+import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
 import { createHeadlessComponentTools } from "../src/components/headless";
 import { createComponentStore } from "../src/components/store";
 import { createComputerGateway } from "../src/computer/gateway";
@@ -222,7 +222,10 @@ function harness(agent: AbstractAgent, botId: string) {
         botId,
         actor: { id: ownerUserId, userId: ownerUserId, initiator },
       }),
-    components: { store, auditStore },
+    components: {
+      store,
+      audit: auditSink(auditStore as unknown as AuditStore),
+    },
   });
   return {
     persisted,

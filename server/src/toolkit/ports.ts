@@ -1,8 +1,9 @@
+import type { AuditEventInput } from "../audit";
+
 /**
  * What the toolkit needs from its host, named so the turn code can be read without the server.
  *
- * Each port is the narrowest shape the turn code calls. The server supplies the implementations; see
- * docs/specs/2026-10-13-toolkit-extraction.md for the full list and what each one replaces.
+ * Each port is the narrowest shape the turn code calls. The server supplies the implementations.
  */
 
 /**
@@ -17,3 +18,13 @@ export type TurnAdmission = (input: {
   agentId: string;
   signal?: AbortSignal;
 }) => Promise<AbortSignal>;
+
+/**
+ * Where a turn writes what it refused or did, for the audit trail.
+ *
+ * A sink rather than the store, so turn code never touches the database. The server's sink is
+ * `auditSink` in audit.ts, which redacts the payload the same way every other write does.
+ */
+export type AuditSink = {
+  record: (event: AuditEventInput) => Promise<void>;
+};

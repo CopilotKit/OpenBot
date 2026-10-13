@@ -60,7 +60,7 @@ import { frameFiring } from "@openbot/shared/routine-firing";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { historyOrEmpty } from "../agents/thread-history";
 import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
-import type { AuditInitiator, AuditStore } from "../audit";
+import type { AuditInitiator } from "../audit";
 import {
   createHeadlessComponentTools,
   HEADLESS_COMPONENTS,
@@ -72,7 +72,7 @@ import {
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
 } from "../toolkit/headless-tools";
-import type { TurnAdmission } from "../toolkit/ports";
+import type { AuditSink, TurnAdmission } from "../toolkit/ports";
 import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
@@ -303,7 +303,7 @@ export function createTurnRunner(options: {
    * The governed gallery, so a turn with no browser can still answer with a chart. Offered and
    * decided exactly as the browser would for this Bot; see `components/headless.ts`.
    */
-  components?: { store: ComponentStore; auditStore?: AuditStore };
+  components?: { store: ComponentStore; audit?: AuditSink };
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
@@ -476,9 +476,7 @@ export function createTurnRunner(options: {
             botId: agentId,
             ownerUserId,
             initiator,
-            ...(components.auditStore
-              ? { auditStore: components.auditStore }
-              : {}),
+            ...(components.audit ? { audit: components.audit } : {}),
           })
         : []),
     ];

@@ -1,11 +1,8 @@
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import { z } from "zod";
-import {
-  type AuditInitiator,
-  type AuditStore,
-  recordAuditEvent,
-} from "../audit";
+import type { AuditInitiator } from "../audit";
 import type { HeadlessTool } from "../toolkit/headless-tools";
+import type { AuditSink } from "../toolkit/ports";
 import type { ComponentStore } from "./store";
 
 /**
@@ -343,7 +340,7 @@ export async function createHeadlessComponentTools(options: {
   botId: string;
   ownerUserId: string;
   initiator: AuditInitiator;
-  auditStore?: AuditStore;
+  audit?: AuditSink;
   specs?: readonly HeadlessComponentSpec[];
 }): Promise<HeadlessTool[]> {
   const {
@@ -351,7 +348,7 @@ export async function createHeadlessComponentTools(options: {
     botId,
     ownerUserId,
     initiator,
-    auditStore,
+    audit,
     specs = HEADLESS_COMPONENTS,
   } = options;
   const held = new Map(
@@ -366,8 +363,8 @@ export async function createHeadlessComponentTools(options: {
     reason: string,
     extra: Record<string, unknown> = {},
   ) => {
-    if (auditStore)
-      await recordAuditEvent(auditStore, {
+    if (audit)
+      await audit.record({
         eventType: extra.function
           ? "component.function_refused"
           : "component.refused",

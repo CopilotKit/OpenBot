@@ -80,6 +80,7 @@ import {
 } from "./approvals/types";
 import {
   type AuditInitiator,
+  auditSink,
   createAuditReader,
   createAuditStore,
   DEPLOYMENT_INITIATOR,
@@ -1833,7 +1834,7 @@ const routineRunner = createRoutineRunner({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, auditStore: bootAuditStore },
+    components: { store: componentStore, audit: auditSink(bootAuditStore) },
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
@@ -1930,7 +1931,7 @@ const responsibilityEngine: ResponsibilityEngine = createResponsibilityEngine({
       admission: serverTurnAdmission,
       intelligence: routineIntelligence,
       runner: routineAgentRunner,
-      components: { store: componentStore, auditStore: bootAuditStore },
+      components: { store: componentStore, audit: auditSink(bootAuditStore) },
       buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
       toolsForTurn: async () => {
         const actor = await actorFor(context.ownerUserId);
@@ -2047,7 +2048,7 @@ const responsibilityAnswerTurn = ({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, auditStore: bootAuditStore },
+    components: { store: componentStore, audit: auditSink(bootAuditStore) },
     buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
     toolsForTurn: async () => [
       ...(await approvalComputerTools(
@@ -2142,7 +2143,7 @@ const approvalContinuationRunner = createTurnRunner({
   admission: serverTurnAdmission,
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
-  components: { store: componentStore, auditStore: bootAuditStore },
+  components: { store: componentStore, audit: auditSink(bootAuditStore) },
   buildAgentFor,
   toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
     approvalComputerTools(ownerUserId, agentId, initiator),
@@ -2518,7 +2519,7 @@ const wakeUpRunner = createWakeUpRunner({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, auditStore: bootAuditStore },
+    components: { store: componentStore, audit: auditSink(bootAuditStore) },
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
@@ -2600,7 +2601,7 @@ const groupConversations = createGroupConversations({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, auditStore: bootAuditStore },
+    components: { store: componentStore, audit: auditSink(bootAuditStore) },
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
