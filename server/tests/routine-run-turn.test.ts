@@ -5,7 +5,6 @@ import {
   HeadlessToolSuspension,
   OPENBOT_WAITING_METADATA,
 } from "@openbot/toolkit/headless-tools";
-import { TURN_LIMITS } from "@openbot/toolkit/limits";
 import type { TurnAdmission } from "@openbot/toolkit/ports";
 import {
   createTurnRunner,
@@ -763,7 +762,8 @@ describe("one run id, everywhere", () => {
       expect(renew).toEqual({
         threadId: THREAD_ID,
         runId,
-        ttlSeconds: TURN_LIMITS.lockTtlSeconds,
+        // The literal, not the constant, so moving the lifetime off the platform's 120 fails here.
+        ttlSeconds: 120,
       });
     }
     expect(calls.cleaned).toEqual([{ threadId: THREAD_ID, runId }]);

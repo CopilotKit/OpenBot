@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   createIntelligenceThreadLock,
-  THREAD_LOCK_TTL_SECONDS,
   type ThreadLockClient,
 } from "../src/copilotkit/thread-lock";
 
@@ -154,7 +153,8 @@ describe("keeping and giving back the lock", () => {
         input: {
           threadId: "thread-1",
           runId: "platform-run",
-          ttlSeconds: THREAD_LOCK_TTL_SECONDS,
+          // The literal, not the constant, so moving the lifetime off the platform's 120 fails here.
+          ttlSeconds: 120,
         },
       },
     ]);
