@@ -60,8 +60,9 @@ import {
   SELECTION_FLOOR,
   selectTools,
 } from "./plugins/selection";
-import type { GrantedTool } from "./plugins/tools";
-import { grantedToolGuidance, parametersFor } from "./plugins/tools";
+import type { GrantedTool } from "./toolkit/granted-tool";
+import { parametersFor } from "./toolkit/granted-tool";
+import { grantedToolGuidance } from "./plugins/tools";
 import { HeadlessToolsMiddleware } from "./toolkit/headless-tools";
 import { UNTRUSTED_GUIDANCE } from "./untrusted-content";
 

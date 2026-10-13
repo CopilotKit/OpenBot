@@ -23,7 +23,8 @@ import {
 import { type AuditStore, PERSON_INITIATOR, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
-import { type GrantedTool, REFUSAL_MARKER } from "../plugins/tools";
+import type { GrantedTool } from "../toolkit/granted-tool";
+import { REFUSAL_MARKER } from "../plugins/tools";
 import type {
   CheckPrivateShare,
   PrivateShareInput,

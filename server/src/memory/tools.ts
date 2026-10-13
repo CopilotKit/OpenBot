@@ -6,7 +6,7 @@ import {
 } from "@ag-ui/client";
 import { defer, from, type Observable, switchMap } from "rxjs";
 import { z } from "zod";
-import type { GrantedTool } from "../plugins/tools";
+import type { GrantedTool } from "../toolkit/granted-tool";
 import type { MemoryIngestion } from "./ingestion";
 import type { MemoryStore } from "./store";
 import {

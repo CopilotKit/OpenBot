@@ -20,7 +20,7 @@ import {
   type RuntimeModel,
 } from "../src/copilot";
 import type { Selection } from "../src/plugins/selection";
-import type { GrantedTool } from "../src/plugins/tools";
+import type { GrantedTool } from "../src/toolkit/granted-tool";
 import { createModelCompleter } from "../src/routing/model";
 
 declare global {

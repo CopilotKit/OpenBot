@@ -8,7 +8,7 @@ import {
 import { Observable } from "rxjs";
 import { z } from "zod";
 import type { ApprovalRecord } from "../src/approvals/types";
-import type { GrantedTool } from "../src/plugins/tools";
+import type { GrantedTool } from "../src/toolkit/granted-tool";
 import { createProactiveEngine } from "../src/proactive/engine";
 import { createPrivateShareCheck } from "../src/proactive/private-share";
 import {

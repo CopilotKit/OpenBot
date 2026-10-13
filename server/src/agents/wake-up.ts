@@ -22,7 +22,7 @@ import { recordAuditEvent } from "../audit";
 import type { AgentChannel } from "../channels/routes";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema/work";
-import type { GrantedTool } from "../plugins/tools";
+import type { GrantedTool } from "../toolkit/granted-tool";
 import { REFUSAL_MARKER } from "../plugins/tools";
 import { HeadlessToolSuspension } from "../toolkit/headless-tools";
 import type { WorkQueue } from "../work/queue";

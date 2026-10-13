@@ -8,7 +8,8 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "../src/plugins/catalogue";
-import { type GrantedTool, grantedToolGuidance } from "../src/plugins/tools";
+import type { GrantedTool } from "../src/toolkit/granted-tool";
+import { grantedToolGuidance } from "../src/plugins/tools";
 
 const tool = (server: string, name: string): GrantedTool => ({
   name: `mcp__${server}__${name}`,
