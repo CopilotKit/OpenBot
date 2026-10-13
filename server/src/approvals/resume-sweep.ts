@@ -21,9 +21,8 @@ import type { ApprovalResumeDependencies, ApprovalService } from "./service";
  * One pass of the approval resume loop: claim a decided approval, carry it out, and pick the waiting
  * turn back up — a responsibility run, a group conversation or a routine run — then tell the channel.
  *
- * Moved out of index.ts verbatim. `groupConversations` and `notify` are taken as functions because
- * index.ts declares them after this loop is created: the loop reads them when it runs, never when
- * it is built, and taking them as values would read them before they exist.
+ * Moved out of index.ts verbatim. `notify` is taken as a function because index.ts assigns delivery
+ * after this loop is created: the loop reads it when it runs, never when it is built.
  */
 export function createApprovalResumeTick(deps: {
   approvalQueue: WorkQueue;
@@ -32,7 +31,7 @@ export function createApprovalResumeTick(deps: {
   executeApprovedAction: ApprovalResumeDependencies["execute"];
   database: Database;
   responsibilityStore: ResponsibilityStore;
-  groupConversations: () => Pick<GroupConversations, "continueWaiting">;
+  groupConversations: Pick<GroupConversations, "continueWaiting">;
   approvalContinuationRunner: TurnRunner;
   channelStore: ChannelStore;
   actorFor: (ownerUserId: string) => Promise<AgentActor>;
@@ -48,6 +47,7 @@ export function createApprovalResumeTick(deps: {
     executeApprovedAction,
     database,
     responsibilityStore,
+    groupConversations,
     approvalContinuationRunner,
     channelStore,
     actorFor,
@@ -112,9 +112,9 @@ export function createApprovalResumeTick(deps: {
               approvalId,
             );
             // A group turn's approval also writes the resumed reply into the shared transcript.
-            const outcome = await deps
-              .groupConversations()
-              .continueWaiting(approvalId, () =>
+            const outcome = await groupConversations.continueWaiting(
+              approvalId,
+              () =>
                 approvalContinuationRunner({
                   ownerUserId: input.ownerUserId,
                   routineId: "approval",
@@ -124,7 +124,7 @@ export function createApprovalResumeTick(deps: {
                   initiator: snapshot.initiator ?? PERSON_INITIATOR,
                   continuation: { snapshot, result, messageId },
                 }),
-              );
+            );
             const [source] = await database
               .select({ channelId: intelligenceChannelMappings.channelId })
               .from(intelligenceChannelMappings)

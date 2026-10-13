@@ -558,6 +558,64 @@ let deliveryNotifications: (
 ) => Promise<void> = async () => {
   throw new Error("Delivery is not initialized.");
 };
+
+/**
+ * Who a routine acts as, resolved the way {@link resolveRequestActor} resolves it.
+ *
+ * THE ROLE IS READ, NOT ASSUMED. Which coworkers exist is decided per person and an administrator
+ * sees Bots a user does not, so hardcoding `role: "user"` here would hide an administrator's own Bots
+ * from their own routine — the routine would fail with "that Bot is no longer registered" for a Bot
+ * sitting in front of them in chat. This asks the same repository the request path asks, so a routine
+ * sees exactly the coworkers its owner sees.
+ */
+const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
+  // One person, and they are an administrator. The id stays the routine owner's rather than being
+  // rewritten to DEV_ACTOR's: in this mode they are the same person, and if they ever were not,
+  // silently borrowing the dev actor's identity would be worse than finding nothing.
+  if (config.singleUser) return { id: ownerUserId, role: DEV_ACTOR.role };
+  const roles = await roleRepository.rolesForUser(ownerUserId);
+  if (!roles.includes("admin") && !roles.includes("user")) {
+    throw new Error("A routine requires an authorized owner.");
+  }
+  return {
+    id: ownerUserId,
+    role: roles.includes("admin") ? "admin" : "user",
+  };
+};
+const channelSourceForRun = async (run: RunAssertion) => {
+  if (!run.threadId) return null;
+  const sources = await database
+    .select({ channelId: channels.id, botId: channelAgents.agentId })
+    .from(intelligenceChannelMappings)
+    .innerJoin(channels, eq(channels.id, intelligenceChannelMappings.channelId))
+    .innerJoin(
+      channelMemberships,
+      and(
+        eq(channelMemberships.channelId, channels.id),
+        eq(channelMemberships.userId, run.actorId),
+      ),
+    )
+    .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+    .where(
+      and(
+        eq(intelligenceChannelMappings.threadId, run.threadId),
+        eq(intelligenceChannelMappings.userId, run.actorId),
+        isNull(channels.deletedAt),
+      ),
+    );
+  return (
+    sources.find((source) => source.botId === run.botId) ??
+    (run.handoff ? (sources[0] ?? null) : null)
+  );
+};
+
+/*
+ * A run's source conversation: a channel's own thread, or a Bot's thread in a group conversation.
+ * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
+ */
+const sourceForCoordinationRun = async (run: RunAssertion) =>
+  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
+
 const authoriseQuestion = async (question: PersonQuestion) => {
   const source = await sourceForCoordinationRun({
     ...question,
@@ -598,37 +656,6 @@ const chooseSkills = createModelCompleter({
       environment: process.env,
     }),
 });
-
-/**
- * Who a routine acts as, resolved the way {@link resolveRequestActor} resolves it.
- *
- * THE ROLE IS READ, NOT ASSUMED. Which coworkers exist is decided per person and an administrator
- * sees Bots a user does not, so hardcoding `role: "user"` here would hide an administrator's own Bots
- * from their own routine — the routine would fail with "that Bot is no longer registered" for a Bot
- * sitting in front of them in chat. This asks the same repository the request path asks, so a routine
- * sees exactly the coworkers its owner sees.
- */
-const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
-  // One person, and they are an administrator. The id stays the routine owner's rather than being
-  // rewritten to DEV_ACTOR's: in this mode they are the same person, and if they ever were not,
-  // silently borrowing the dev actor's identity would be worse than finding nothing.
-  if (config.singleUser) return { id: ownerUserId, role: DEV_ACTOR.role };
-  const roles = await roleRepository.rolesForUser(ownerUserId);
-  if (!roles.includes("admin") && !roles.includes("user")) {
-    throw new Error("A routine requires an authorized owner.");
-  }
-  return {
-    id: ownerUserId,
-    role: roles.includes("admin") ? "admin" : "user",
-  };
-};
-
-/*
- * A run's source conversation: a channel's own thread, or a Bot's thread in a group conversation.
- * The group lookup applies the same live-membership and own-Bot checks. See channels/group.ts.
- */
-const sourceForCoordinationRun = async (run: RunAssertion) =>
-  (await channelSourceForRun(run)) ?? groupSourceForRun(database, run);
 
 /*
  * The pair a headless turn is driven through, built ONCE.
@@ -889,6 +916,8 @@ const responsibilityBindings = createResponsibilityBindingStore(database, {
   reader: credentialStore,
   encryptionKey: config.keyEncryptionKey,
 });
+const deliveryStore = createDeliveryStore(database);
+
 /*
  * Event triggers. Every kind authenticates with its vendor's own scheme and then goes through the
  * responsibility engine's one ingest (event + run + queue in one transaction), so dispatch is the
@@ -1137,6 +1166,34 @@ const memoryIngestion = createMemoryIngestion({
 });
 // Proactive research may only read; see proactive/restriction.ts. Read from the catalogue per call.
 const proactiveReadOnlyRefs = createReadOnlyClassifier(pluginStore);
+/** Team Bots: published Bots, their audiences, and teammates' consent to their own accounts. */
+const teamBots = createTeamBots({
+  database,
+  connectedServers: async (userId) =>
+    new Set(
+      [
+        ...(await pluginStore.connectionsFor(userId)),
+        ...(await pluginStore.brokeredConnectionsFor(userId)),
+      ].map((connection) => connection.serverId),
+    ),
+});
+const deliveryScopeFor: DeliveryScopeResolver = async (
+  ownerUserId,
+  channelId,
+  agentId,
+) => {
+  const person = await peopleStore.find(ownerUserId);
+  if (!person || person.revoked) return null;
+  const actor = await actorFor(ownerUserId);
+  const [channel, bot] = await Promise.all([
+    channelStore.get(actor, channelId),
+    agentProfileStore.get(actor, agentId),
+  ]);
+  return channel?.active && bot && channel.agentIds.includes(agentId)
+    ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
+    : null;
+};
+
 /*
  * Memory sources and background research, on by default for each person and Bot, and never switched
  * back on once the person turns one down. See memory/defaults.ts.
@@ -1193,17 +1250,6 @@ const memorySweep = repeatAfterEach(async () => {
 }, 60_000);
 // Follow-ups a Bot schedules for itself, on the shared work queue. See agents/wake-up.ts.
 const wakeUpStore = createWakeUpStore(database, { auditStore: bootAuditStore });
-/** Team Bots: published Bots, their audiences, and teammates' consent to their own accounts. */
-const teamBots = createTeamBots({
-  database,
-  connectedServers: async (userId) =>
-    new Set(
-      [
-        ...(await pluginStore.connectionsFor(userId)),
-        ...(await pluginStore.brokeredConnectionsFor(userId)),
-      ].map((connection) => connection.serverId),
-    ),
-});
 
 const loadToolsForActor =
   (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
@@ -1428,32 +1474,6 @@ const agentFetch = createAgentFetch({
     });
   },
 });
-const channelSourceForRun = async (run: RunAssertion) => {
-  if (!run.threadId) return null;
-  const sources = await database
-    .select({ channelId: channels.id, botId: channelAgents.agentId })
-    .from(intelligenceChannelMappings)
-    .innerJoin(channels, eq(channels.id, intelligenceChannelMappings.channelId))
-    .innerJoin(
-      channelMemberships,
-      and(
-        eq(channelMemberships.channelId, channels.id),
-        eq(channelMemberships.userId, run.actorId),
-      ),
-    )
-    .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
-    .where(
-      and(
-        eq(intelligenceChannelMappings.threadId, run.threadId),
-        eq(intelligenceChannelMappings.userId, run.actorId),
-        isNull(channels.deletedAt),
-      ),
-    );
-  return (
-    sources.find((source) => source.botId === run.botId) ??
-    (run.handoff ? (sources[0] ?? null) : null)
-  );
-};
 const { coordination, coordinationForActor } = wireCoordination({
   handoffDesk,
   config,
@@ -1733,6 +1753,80 @@ const approvalContinuationRunner = createTurnRunner({
     copilotRuntime.learning?.containerForThread(input) ??
     Promise.resolve(undefined),
 });
+/**
+ * Conversations with several Bots. Each Bot turn is an ordinary headless AG-UI turn into that Bot's
+ * own group thread, built exactly as a routine's is, so governance, learning and the computer tools
+ * apply unchanged; Bots answering each other reuse the handoff desk's grant and caps.
+ */
+const groupConversations = createGroupConversations({
+  store: createGroupStore(database, () => threadIdentity.mint()),
+  queue: createWorkQueue(database),
+  owner: workOwner("group"),
+  roster: async (ownerUserId, channelId) => {
+    const actor = await actorFor(ownerUserId);
+    const channel = await channelStore.get(actor, channelId);
+    if (!channel || channel.agentIds.length < 2) return null;
+    const bots: { id: string; name: string }[] = [];
+    for (const agentId of channel.agentIds) {
+      const profile = await agentProfileStore.get(actor, agentId);
+      if (profile) bots.push({ id: agentId, name: profile.name });
+    }
+    return bots;
+  },
+  runTurn: createTurnRunner({
+    admission: serverTurnAdmission,
+    intelligence: routineIntelligence,
+    runner: routineAgentRunner,
+    components: componentCatalog,
+    buildAgentFor,
+    toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
+      if (!computerGateway) return [];
+      const actor = await actorFor(ownerUserId);
+      const profile = await agentProfileStore.get(actor, agentId);
+      if (!profile) throw new Error("That Bot is not available to this owner.");
+      // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
+      if (!canUseComputer(profile, actor)) return [];
+      return createHeadlessComputerTools({
+        gateway: computerGateway,
+        botId: agentId,
+        actor: { id: actor.id, userId: actor.id, initiator },
+        auditStore: bootAuditStore,
+        ...(signInService ? { signIn: signInService } : {}),
+      });
+    },
+    learningContainerForThread: (input) =>
+      copilotRuntime.learning?.containerForThread(input) ??
+      Promise.resolve(undefined),
+  }),
+  caps: config.handoff,
+  // The handoff desk's own grant check, read per hop and failing closed.
+  mayAddress: async (fromBotId, toBotId) =>
+    (
+      await pluginStore.botsReachableFrom(fromBotId).catch(() => [] as string[])
+    ).includes(toBotId),
+  auditStore: bootAuditStore,
+  activity: async (turn, agentId, text, sourceId) =>
+    channelStore.recordActivity(
+      await actorFor(turn.ownerUserId),
+      turn.channelId,
+      { text, agentId, at: new Date() },
+      { id: sourceId },
+    ),
+  busy: async (turn, busy) =>
+    channelStore.signalChannelBusy(
+      await actorFor(turn.ownerUserId),
+      turn.channelId,
+      busy,
+    ),
+  createChannel: async (ownerUserId, agentIds) =>
+    channelStore.create(await actorFor(ownerUserId), agentIds),
+  // The owner says whether a Bot's words may reach the other people in a group.
+  privateShare: createPrivateShareCheck({ approvals: approvalService.store }),
+  // A Team Bot's consent card raised in a group turn is drawn in the shared transcript.
+  listenForConsent: (ownerUserId, agentId) =>
+    teamBots.listenForConsent(ownerUserId, agentId),
+});
+
 const approvalSweep = repeatAfterEach(
   createApprovalResumeTick({
     approvalQueue,
@@ -1741,8 +1835,7 @@ const approvalSweep = repeatAfterEach(
     executeApprovedAction,
     database,
     responsibilityStore,
-    // Declared further down; read when the loop runs, not now.
-    groupConversations: () => groupConversations,
+    groupConversations,
     approvalContinuationRunner,
     channelStore,
     actorFor,
@@ -1751,7 +1844,6 @@ const approvalSweep = repeatAfterEach(
   }),
   2_000,
 );
-const deliveryStore = createDeliveryStore(database);
 const deliveryProviders = configuredDeliveryProviders(
   config.publicUrl ?? config.auth?.baseUrl ?? `http://localhost:${config.port}`,
 );
@@ -1761,22 +1853,6 @@ useSlackChannelMembership((input) =>
     ? deliveryProviders.slack.isMember(input)
     : Promise.resolve(false),
 );
-const deliveryScopeFor: DeliveryScopeResolver = async (
-  ownerUserId,
-  channelId,
-  agentId,
-) => {
-  const person = await peopleStore.find(ownerUserId);
-  if (!person || person.revoked) return null;
-  const actor = await actorFor(ownerUserId);
-  const [channel, bot] = await Promise.all([
-    channelStore.get(actor, channelId),
-    agentProfileStore.get(actor, agentId),
-  ]);
-  return channel?.active && bot && channel.agentIds.includes(agentId)
-    ? { ownerUserId, channelId, agentId, threadId: channel.threadId }
-    : null;
-};
 const authoriseDeliveryScope = async (scope: DeliveryScope) =>
   (await deliveryScopeFor(scope.ownerUserId, scope.channelId, scope.agentId))
     ?.threadId === scope.threadId;
@@ -1994,79 +2070,6 @@ const deliverySweeps = DELIVERY_WORK_KINDS.map((kind) =>
 );
 
 const personResponseOwner = workOwner("person-response");
-/**
- * Conversations with several Bots. Each Bot turn is an ordinary headless AG-UI turn into that Bot's
- * own group thread, built exactly as a routine's is, so governance, learning and the computer tools
- * apply unchanged; Bots answering each other reuse the handoff desk's grant and caps.
- */
-const groupConversations = createGroupConversations({
-  store: createGroupStore(database, () => threadIdentity.mint()),
-  queue: createWorkQueue(database),
-  owner: workOwner("group"),
-  roster: async (ownerUserId, channelId) => {
-    const actor = await actorFor(ownerUserId);
-    const channel = await channelStore.get(actor, channelId);
-    if (!channel || channel.agentIds.length < 2) return null;
-    const bots: { id: string; name: string }[] = [];
-    for (const agentId of channel.agentIds) {
-      const profile = await agentProfileStore.get(actor, agentId);
-      if (profile) bots.push({ id: agentId, name: profile.name });
-    }
-    return bots;
-  },
-  runTurn: createTurnRunner({
-    admission: serverTurnAdmission,
-    intelligence: routineIntelligence,
-    runner: routineAgentRunner,
-    components: componentCatalog,
-    buildAgentFor,
-    toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
-      if (!computerGateway) return [];
-      const actor = await actorFor(ownerUserId);
-      const profile = await agentProfileStore.get(actor, agentId);
-      if (!profile) throw new Error("That Bot is not available to this owner.");
-      // A Team Bot's teammate uses the Bot, not its owner's signed-in computer.
-      if (!canUseComputer(profile, actor)) return [];
-      return createHeadlessComputerTools({
-        gateway: computerGateway,
-        botId: agentId,
-        actor: { id: actor.id, userId: actor.id, initiator },
-        auditStore: bootAuditStore,
-        ...(signInService ? { signIn: signInService } : {}),
-      });
-    },
-    learningContainerForThread: (input) =>
-      copilotRuntime.learning?.containerForThread(input) ??
-      Promise.resolve(undefined),
-  }),
-  caps: config.handoff,
-  // The handoff desk's own grant check, read per hop and failing closed.
-  mayAddress: async (fromBotId, toBotId) =>
-    (
-      await pluginStore.botsReachableFrom(fromBotId).catch(() => [] as string[])
-    ).includes(toBotId),
-  auditStore: bootAuditStore,
-  activity: async (turn, agentId, text, sourceId) =>
-    channelStore.recordActivity(
-      await actorFor(turn.ownerUserId),
-      turn.channelId,
-      { text, agentId, at: new Date() },
-      { id: sourceId },
-    ),
-  busy: async (turn, busy) =>
-    channelStore.signalChannelBusy(
-      await actorFor(turn.ownerUserId),
-      turn.channelId,
-      busy,
-    ),
-  createChannel: async (ownerUserId, agentIds) =>
-    channelStore.create(await actorFor(ownerUserId), agentIds),
-  // The owner says whether a Bot's words may reach the other people in a group.
-  privateShare: createPrivateShareCheck({ approvals: approvalService.store }),
-  // A Team Bot's consent card raised in a group turn is drawn in the shared transcript.
-  listenForConsent: (ownerUserId, agentId) =>
-    teamBots.listenForConsent(ownerUserId, agentId),
-});
 const groupSweep = repeatAfterEach(async () => {
   try {
     while (await groupConversations.sweep()) {}
