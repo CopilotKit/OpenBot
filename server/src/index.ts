@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type { AbstractAgent } from "@ag-ui/client";
 import {
   CopilotKitIntelligence,
@@ -52,18 +51,17 @@ import { createApp } from "./app";
 import { createApprovedActionExecutor } from "./approvals/execute";
 import { createPersonResponseTick } from "./approvals/person-response-sweep";
 import {
-  createApprovalQuestions,
   type PersonQuestion,
   questionConversationBot,
 } from "./approvals/questions";
 import { createApprovalResumeTick } from "./approvals/resume-sweep";
-import { createApprovalService } from "./approvals/service";
 import { createApprovalStore } from "./approvals/store";
 import {
   ApprovalRefusedError,
   parseApprovalContinuation,
   parseApprovalResult,
 } from "./approvals/types";
+import { createServerApprovalService } from "./approvals/wiring";
 import {
   type AuditInitiator,
   auditSink,
@@ -684,120 +682,20 @@ const approvalComputerTools = async (
     : [];
 };
 
-const approvalService = createApprovalService(
-  {
-    ...storedApprovals,
-    open: async (action) => {
-      const request = await storedApprovals.open(action);
-      if (request.status === "pending") {
-        const forwarded = action.continuation?.forwardedProps;
-        const signed =
-          forwarded &&
-          typeof forwarded === "object" &&
-          "openbotRun" in forwarded
-            ? readRunAssertion(forwarded.openbotRun, config.keyEncryptionKey)
-            : null;
-        const run =
-          signed &&
-          signed.actorId === action.actorId &&
-          signed.botId === action.botId
-            ? signed
-            : {
-                actorId: action.actorId,
-                botId: action.botId,
-                runId: action.runId,
-                threadId: action.threadId,
-                depth: 0,
-              };
-        const source = await sourceForCoordinationRun(run);
-        const botName = source
-          ? ((
-              await agentProfileStore
-                .get(await actorFor(action.actorId), action.botId)
-                .catch(() => null)
-            )?.name ?? action.botId)
-          : action.botId;
-        if (source && run.threadId)
-          await deliveryNotifications(
-            {
-              ownerUserId: action.actorId,
-              channelId: source.channelId,
-              agentId: source.botId,
-              threadId: run.threadId,
-            },
-            {
-              id: request.id,
-              kind: "approval",
-              requestId: request.id,
-              text: `${botName} asks for approval to use ${action.toolRef}. Open the Bot's page in OpenBot to review this action.`,
-            },
-          );
-      }
-      return request;
-    },
-  },
-  createApprovalQuestions(database, authoriseQuestion),
-  async (ownerUserId, botId, snapshot) => {
-    const source = await sourceForCoordinationRun({
-      actorId: ownerUserId,
-      botId,
-      threadId: snapshot.threadId,
-      runId: snapshot.runId,
-      depth: 0,
-      initiator: PERSON_INITIATOR,
-    });
-    if (!source)
-      throw new ApprovalRefusedError(
-        "That conversation is no longer available to this Bot and person.",
-      );
-    // Intelligence saves a streaming run's messages a moment behind the stream, and the browser runs
-    // the tool as soon as the call arrives. A call that is not saved yet is waited for briefly; one
-    // that never appears is refused below.
-    let history = await routineIntelligence.getThreadMessages({
-      threadId: snapshot.threadId,
-      userId: ownerUserId,
-    });
-    const findCall = () =>
-      history.messages
-        .flatMap((message) => message.toolCalls ?? [])
-        .find((call) => call.id === snapshot.toolCallId);
-    for (let attempt = 0; !findCall() && attempt < 10; attempt++) {
-      await Bun.sleep(500);
-      history = await routineIntelligence.getThreadMessages({
-        threadId: snapshot.threadId,
-        userId: ownerUserId,
-      });
-    }
-    const canonicalCall = findCall();
-    if (
-      !canonicalCall ||
-      canonicalCall.name !== snapshot.toolName ||
-      !isDeepStrictEqual(JSON.parse(canonicalCall.args), snapshot.args) ||
-      history.messages.some(
-        (message) =>
-          message.role === "tool" && message.toolCallId === snapshot.toolCallId,
-      )
-    )
-      throw new ApprovalRefusedError(
-        "That unanswered tool call is not saved in this conversation.",
-      );
-    const tools = await approvalComputerTools(
-      ownerUserId,
-      botId,
-      PERSON_INITIATOR,
-    );
-    const tool = tools.find(
-      (tool) => tool.definition.name === snapshot.toolName,
-    );
-    if (!tool)
-      throw new ApprovalRefusedError("That computer tool is not available.");
-    return tool.execute(snapshot.args, {
-      toolCallId: snapshot.toolCallId,
-      signal: new AbortController().signal,
-    });
-  },
-  { review: (prompt, signal) => chooseSkills(prompt, signal) },
-);
+const approvalService = createServerApprovalService({
+  storedApprovals,
+  config,
+  sourceForCoordinationRun,
+  agentProfileStore,
+  actorFor,
+  database,
+  authoriseQuestion,
+  routineIntelligence,
+  approvalComputerTools,
+  review: (prompt, signal) => chooseSkills(prompt, signal),
+  // Assigned further down, once delivery is wired.
+  notify: (scope, input) => deliveryNotifications(scope, input),
+});
 // Housekeeping on a schedule: audit rows when asked for, screenshots always, one timer. See audit-retention.ts.
 const retentionSweeps = startRetentionSweeps(
   config.databaseUrl,
