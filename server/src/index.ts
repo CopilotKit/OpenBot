@@ -10,7 +10,7 @@ import { DICTATION_HTTP_IDLE_SECONDS } from "@openbot/shared/dictation";
 import { buildResponsibilityTurn } from "@openbot/shared/responsibility-turn";
 import { workOwner } from "@openbot/shared/work-owner";
 import { serve } from "bun";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, } from "drizzle-orm";
 import { z } from "zod";
 import { createActivityStore } from "./activity/activity";
 import {
@@ -18,7 +18,6 @@ import {
   enterpriseControls,
   guardDeliveryStore,
   guardHostAccess,
-  headlessTurnRefusal,
   installEnterpriseControls,
 } from "./admin/controls";
 import {
@@ -68,7 +67,6 @@ import {
   questionConversationBot,
 } from "./approvals/questions";
 import {
-  type ApprovalResumeDependencies,
   createApprovalService,
 } from "./approvals/service";
 import { createApprovalStore } from "./approvals/store";
@@ -158,8 +156,6 @@ import {
   channelMemberships,
   channels,
   intelligenceChannelMappings,
-  responsibilityRuns,
-  routineRuns,
 } from "./db/schema";
 import { createDeliveryRouter, DELIVERY_WORK_KINDS } from "./delivery/router";
 import {
@@ -168,6 +164,7 @@ import {
 } from "./delivery/routes";
 import { createDeliveryStore } from "./delivery/store";
 import type { DeliveryScope } from "./delivery/types";
+import { createApprovalResumeTick } from "./approvals/resume-sweep";
 import { DeliveryRefusedError } from "./delivery/types";
 import { createDemonstrationRecorder } from "./demonstrations/recording";
 import { createDemonstrationStore } from "./demonstrations/store";
@@ -282,7 +279,6 @@ import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
-  DEFAULT_MAX_ATTEMPTS,
   startWorkOfferedListener,
   type WorkOfferedListener,
 } from "./work/queue";
@@ -2157,189 +2153,24 @@ const approvalContinuationRunner = createTurnRunner({
     copilotRuntime.learning?.containerForThread(input) ??
     Promise.resolve(undefined),
 });
-const approvalSweep = repeatAfterEach(async () => {
-  try {
-    const [item] = await approvalQueue.claim({
-      kind: "approval.resume",
-      owner: approvalOwner,
-      leaseMs: 15 * 60_000,
-      limit: 1,
-    });
-    if (!item) return;
-    // Set once the item is understood, so its last failed try can still tell the Bot.
-    let abandon: ((reason: string) => Promise<void>) | undefined;
-    try {
-      const input = z
-        .object({
-          ownerUserId: z.string().min(1),
-          approvalId: z.string().min(1),
-        })
-        .parse(item.payload);
-      const resumeDependencies: ApprovalResumeDependencies = {
-        // Asked before the action runs: with Use Bots off, or the Bot's model off the allowlist,
-        // nothing is carried out and the refusal is final rather than retried.
-        refusal: (action) =>
-          headlessTurnRefusal({
-            ownerUserId: action.actorId,
-            agentId: action.botId,
-          }),
-        validate: (action) =>
-          approvalService.validateReentry(action, () =>
-            executeApprovedAction(action),
-          ),
-        execute: executeApprovedAction,
-        continue: async ({
-          continuation: snapshot,
-          result,
-          messageId,
-          approvalId,
-        }) => {
-          const [waitingRun] = await database
-            .select({ id: responsibilityRuns.id })
-            .from(responsibilityRuns)
-            .where(
-              and(
-                eq(responsibilityRuns.status, "waiting"),
-                sql`${responsibilityRuns.waiting}->>'approvalId' = ${approvalId}`,
-              ),
-            )
-            .limit(1);
-          if (waitingRun) {
-            await responsibilityStore.resumeWaiting(
-              input.ownerUserId,
-              waitingRun.id,
-              result,
-            );
-            return;
-          }
-          const request = await approvalService.store.get(
-            input.ownerUserId,
-            approvalId,
-          );
-          // A group turn's approval also writes the resumed reply into the shared transcript.
-          const outcome = await groupConversations.continueWaiting(
-            approvalId,
-            () =>
-              approvalContinuationRunner({
-                ownerUserId: input.ownerUserId,
-                routineId: "approval",
-                agentId: request.action.botId,
-                threadId: snapshot.threadId,
-                instruction: "",
-                initiator: snapshot.initiator ?? PERSON_INITIATOR,
-                continuation: { snapshot, result, messageId },
-              }),
-          );
-          const [source] = await database
-            .select({ channelId: intelligenceChannelMappings.channelId })
-            .from(intelligenceChannelMappings)
-            .where(
-              and(
-                eq(intelligenceChannelMappings.userId, input.ownerUserId),
-                eq(intelligenceChannelMappings.threadId, snapshot.threadId),
-              ),
-            )
-            .limit(1);
-          if (source && outcome.replyText)
-            await channelStore.recordActivity(
-              await actorFor(input.ownerUserId),
-              source.channelId,
-              {
-                text: outcome.replyText,
-                agentId: request.action.botId,
-                at: new Date(),
-              },
-              { id: messageId },
-            );
-          // A decision made in Slack, SMS or the phone gets its result back there too.
-          if (source && outcome.replyText)
-            await deliveryNotifications(
-              {
-                ownerUserId: input.ownerUserId,
-                channelId: source.channelId,
-                agentId: request.action.botId,
-                threadId: snapshot.threadId,
-              },
-              { id: messageId, text: outcome.replyText, kind: "reply" },
-            );
-          await database
-            .update(routineRuns)
-            .set({
-              status: "succeeded",
-              finishedAt: new Date(),
-              error: null,
-              waiting: null,
-            })
-            .where(
-              and(
-                eq(routineRuns.status, "waiting"),
-                sql`${routineRuns.waiting}->>'approvalId' = ${approvalId}`,
-              ),
-            );
-        },
-      };
-      abandon = (reason) =>
-        approvalService.abandon(
-          input.ownerUserId,
-          input.approvalId,
-          reason,
-          resumeDependencies,
-        );
-      await approvalService.resume(
-        input.ownerUserId,
-        input.approvalId,
-        resumeDependencies,
-      );
-      if (
-        !(await approvalQueue.finish({
-          kind: item.kind,
-          key: item.key,
-          owner: approvalOwner,
-        }))
-      )
-        throw new Error("The approval work lease was lost before completion.");
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      // The queue will not hand this item out again, so the conversation hears now or never.
-      if (abandon && item.attempts >= DEFAULT_MAX_ATTEMPTS) {
-        try {
-          await abandon(reason);
-          await approvalQueue.finish({
-            kind: item.kind,
-            key: item.key,
-            owner: approvalOwner,
-          });
-          return;
-        } catch (failure) {
-          console.error(
-            JSON.stringify({
-              type: "approval-abandon-error",
-              error:
-                failure instanceof Error ? failure.message : String(failure),
-              timestamp: new Date().toISOString(),
-            }),
-          );
-        }
-      }
-      await approvalQueue.release({
-        kind: item.kind,
-        key: item.key,
-        owner: approvalOwner,
-        delayMs: 10_000,
-        reason,
-      });
-      throw error;
-    }
-  } catch (error) {
-    console.error(
-      JSON.stringify({
-        type: "approval-resume-error",
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      }),
-    );
-  }
-}, 2_000);
+const approvalSweep = repeatAfterEach(
+  createApprovalResumeTick({
+    approvalQueue,
+    approvalOwner,
+    approvalService,
+    executeApprovedAction,
+    database,
+    responsibilityStore,
+    // Declared further down; read when the loop runs, not now.
+    groupConversations: () => groupConversations,
+    approvalContinuationRunner,
+    channelStore,
+    actorFor,
+    // Assigned further down, once delivery is wired.
+    notify: (scope, input) => deliveryNotifications(scope, input),
+  }),
+  2_000,
+);
 const deliveryStore = createDeliveryStore(database);
 const deliveryProviders = configuredDeliveryProviders(
   config.publicUrl ?? config.auth?.baseUrl ?? `http://localhost:${config.port}`,
