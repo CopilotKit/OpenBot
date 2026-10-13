@@ -8,7 +8,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-**Before upgrading.** Four things change for an existing deployment:
+**Before upgrading.** Five things change for an existing deployment:
 - A hosted computer's browser is now headed by default. It uses a little more memory than headless
   did; set `COMPUTER_BROWSER_MODE=headless` (Helm: `computers.browserMode: headless`) to keep the old
   behaviour.
@@ -28,6 +28,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   comes back on their next conversation with that Bot (one they turned off and kept stays off).
   `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`)
   prevent it.
+- Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
+  `code_required` (below). A server and a computer must be upgraded together: an older computer has
+  no `/sign-in/code`.
+
+### A sign-in's verification code is asked for after the password
+
+The private sign-in form used to ask for a username, a password and "a verification code, if the
+site asks for one" all at once, so a person had to guess whether a code was coming and type one
+before the site had sent it. Now the form asks only for the username and password. If the site,
+once it has the password, shows a one-time-code field, the request waits in a new `code_required`
+state and the form asks for the code the site just sent, on its own. A wrong code keeps asking; a
+code nobody enters expires with the request, and the person can still take over the browser or
+cancel. The Bot is told only how it ended, never the code, and a saved login still never stores one.
+The step is audited as `computer.sign_in_code_requested`, and a failed code as
+`computer.sign_in_failed` with `step: "code"`.
 
 ### Fewer "Verify you are human" pages
 

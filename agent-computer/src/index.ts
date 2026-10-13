@@ -51,7 +51,12 @@ import {
 } from "./secret-masking";
 import { type BotSession, createSessions } from "./sessions";
 import { createShell } from "./shell";
-import { fillSignIn, parseSignInFill } from "./sign-in";
+import {
+  fillSignIn,
+  fillSignInCode,
+  parseSignInCode,
+  parseSignInFill,
+} from "./sign-in";
 import { startVirtualDisplay } from "./virtual-display";
 import { applyWebBotAuthPush } from "./web-bot-auth";
 import {
@@ -954,6 +959,21 @@ serve<StreamData>({
         const target = await currentPage(botId);
         const result = await fillSignIn(target, input);
         // The page moved on, so every ref handed out before it is retired, as after a navigation.
+        if (result.submitted) session.snapshotId += 1;
+        return json(result);
+      }
+
+      /**
+       * The verification code a site asked for after the password, from the same private form.
+       *
+       * Handled exactly as the login above: read once, typed by `fillSignInCode` into the page that is
+       * waiting for it, and dropped.
+       */
+      if (url.pathname === "/sign-in/code" && request.method === "POST") {
+        const input = parseSignInCode(await request.json().catch(() => null));
+        if (typeof input === "string") return json({ error: input }, 400);
+        const target = await currentPage(botId);
+        const result = await fillSignInCode(target, input);
         if (result.submitted) session.snapshotId += 1;
         return json(result);
       }

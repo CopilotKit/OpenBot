@@ -111,9 +111,22 @@ export function createSignInRoutes(
         {
           username: field(body, "username", { max: 512 }),
           password: field(body, "password", { required: true }) as string,
-          code: field(body, "code", { max: 64 }),
+          // No `code`: one is asked for only after the site has the password. See `/:id/code`.
           save: body?.save === true,
         },
+      ),
+    );
+  });
+
+  /** The verification code a site asked for, once the request is `code_required`. */
+  routes.post("/:id/code", async (context) => {
+    const body = await readBody(context.req.raw);
+    return context.json(
+      await service.submitCode(
+        context.var.actor.id,
+        context.req.param("id"),
+        actorOf(context),
+        { code: field(body, "code", { required: true, max: 64 }) as string },
       ),
     );
   });
@@ -130,7 +143,6 @@ export function createSignInRoutes(
             required: true,
             max: 200,
           }) as string,
-          code: field(body, "code", { max: 64 }),
         },
       ),
     );

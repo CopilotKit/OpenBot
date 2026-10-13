@@ -77,6 +77,8 @@ import type {
   ScrollInput,
   SecretRequest,
   SecretResult,
+  SignInCodeInput,
+  SignInCodeResult,
   SignInFillInput,
   SignInFillResult,
   SnapshotElement,
@@ -246,6 +248,12 @@ export interface ComputerGateway {
     input: SignInFillInput,
     signal?: AbortSignal,
   ): Promise<SignInFillResult>;
+  /** Type the verification code a site asked for after the password. See passwords/service.ts. */
+  signInCode(
+    botId: string,
+    input: SignInCodeInput,
+    signal?: AbortSignal,
+  ): Promise<SignInCodeResult>;
   humanInput(botId: string, input: HumanInput): Promise<HumanInputResult>;
   computers(): Promise<{
     isolation: "per-bot" | "shared";
@@ -950,6 +958,17 @@ export function createComputerGateway(
       );
     },
 
+    /** The code a site asked for once the password was in, on the same path and terms as the login. */
+    signInCode(botId: string, input: SignInCodeInput, signal?: AbortSignal) {
+      return post<SignInCodeResult>(
+        botId,
+        "/sign-in/code",
+        input,
+        signal,
+        SIGN_IN_BACKSTOP_MS,
+      );
+    },
+
     async supplySecret(botId: string, actor: ActionActor, text: string) {
       const result = await post<SecretResult>(botId, "/human/secret", { text });
       await writeControlEvent(auditStore, "computer.secret_supplied", {
@@ -1439,7 +1458,7 @@ async function writeControlEvent(
 const PAGE_FIELDS = ["title", "text"] as const;
 const SNAPSHOT_FIELDS = ["title", "elements"] as const;
 
-/** A two-step login can take two page loads and a code; this outlasts the computer's own waits. */
+/** A two-step login can take two page loads and a wait for a code field; this outlasts the computer's own waits. */
 const SIGN_IN_BACKSTOP_MS = 75_000;
 
 export function hostOf(url: string): string {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { ActionActor, ComputerGateway } from "../computer/gateway";
-import type { SignInFillResult } from "../computer/schema";
+import type { SignInCodeResult, SignInFillResult } from "../computer/schema";
 import { decryptSecret, encryptSecret } from "../credentials";
 import {
   originOf,
@@ -21,13 +21,18 @@ import {
  * Bot learns a request id, the person is sent to a form that is not part of the conversation, and the
  * turn waits. The form answers one of four ways:
  *
- *  - typed: a username and password (and a code, when the site asks) go from the form to this
- *    service to the Bot's computer, which types them into the page itself;
+ *  - typed: a username and password go from the form to this service to the Bot's computer, which
+ *    types them into the page itself;
  *  - saved: the person picks one of their saved logins for exactly this site. Choosing it in the form
  *    IS the confirmation Dot requires for using a saved login on a new sign-in: nothing here fills a
  *    saved login without that request from its owner;
  *  - takeover: the person takes the Bot's browser and signs in by hand;
  *  - cancel.
+ *
+ * A verification code is never asked for up front. When the site, having taken the password, shows a
+ * one-time-code field, the request moves to `code_required` and the form asks for the code the site
+ * just sent; `submitCode` has the computer type it into the page that is waiting. A wrong code keeps
+ * the request there, and an unanswered one expires like any other request.
  *
  * Whatever happens, the Bot is told the outcome and never the credential. The audit rows say which
  * site, which request and how it was answered; they carry no username, password or code.
@@ -36,7 +41,7 @@ export type SignInService = ReturnType<typeof createSignInService>;
 
 export type SignInServiceDependencies = {
   store: PasswordStore;
-  gateway: Pick<ComputerGateway, "signIn" | "requestHelp">;
+  gateway: Pick<ComputerGateway, "signIn" | "signInCode" | "requestHelp">;
   /** The deployment's KEY_ENCRYPTION_KEY, the same one `credentials.ts` encrypts under. */
   encryptionKey: string;
   auditStore?: AuditStore;
@@ -57,7 +62,11 @@ export type SignInServiceDependencies = {
 };
 
 const DEFAULT_TTL_MS = 15 * 60_000;
-const OPEN: readonly SignInStatus[] = ["pending", "taken_over"];
+const OPEN: readonly SignInStatus[] = [
+  "pending",
+  "code_required",
+  "taken_over",
+];
 /**
  * How long one attempt may hold a request in `filling`. Past the computer's own sign-in backstop
  * (75s), so a live attempt is never reopened under itself; a server that died mid-fill leaves the
@@ -123,6 +132,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
   async function audit(
     eventType:
       | "computer.sign_in_requested"
+      | "computer.sign_in_code_requested"
       | "computer.sign_in_completed"
       | "computer.sign_in_failed"
       | "computer.sign_in_cancelled"
@@ -154,10 +164,15 @@ export function createSignInService(deps: SignInServiceDependencies) {
       request.fillingUntil !== null &&
       request.fillingUntil <= new Date()
     ) {
+      // `method` is set once the site has taken the password, so an attempt abandoned while typing
+      // the code goes back to asking for the code, not for the whole login again.
+      const codeStep = request.method !== null;
       const reopened = await store.transition(owner, id, ["filling"], {
-        status: "pending",
+        status: codeStep ? "code_required" : "pending",
         fillingUntil: null,
-        outcome: "The last sign-in attempt did not finish. Try again.",
+        outcome: codeStep
+          ? "The last attempt to enter the code did not finish. Try again."
+          : "The last sign-in attempt did not finish. Try again.",
       });
       if (reopened) return load(owner, id);
       return (await store.request(owner, id)) ?? request;
@@ -165,7 +180,10 @@ export function createSignInService(deps: SignInServiceDependencies) {
     if (OPEN.includes(request.status) && request.expiresAt <= new Date()) {
       const expired = await store.transition(owner, id, OPEN, {
         status: "expired",
-        outcome: `Nobody signed in to ${request.origin} before the request expired. Do not ask for the login another way.`,
+        outcome:
+          request.status === "code_required"
+            ? `Nobody entered the verification code for ${request.origin} before the request expired. Do not ask for the login or the code another way.`
+            : `Nobody signed in to ${request.origin} before the request expired. Do not ask for the login another way.`,
         resolvedAt: new Date(),
       });
       if (expired) {
@@ -216,6 +234,142 @@ export function createSignInService(deps: SignInServiceDependencies) {
   }
 
   /**
+   * Save a typed login the site has accepted. Never a code: a verification code is good once.
+   *
+   * Called after the request has already moved on, so a save that fails is reported with `whenFailed`
+   * and a 409, and never leaves the request stuck.
+   */
+  async function saveTyped(
+    actor: ActionActor,
+    owner: string,
+    id: string,
+    origin: string,
+    username: string,
+    password: string,
+    whenFailed: string,
+  ) {
+    try {
+      const saved = await store.saveLogin({
+        ownerUserId: owner,
+        origin,
+        username,
+        encryptedPassword: await encryptSecret(deps.encryptionKey, password),
+      });
+      await audit("password.saved", actor, "password", saved.id, {
+        site: origin,
+        login: saved.id,
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "password-save-failed",
+          request: id,
+          error: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+      throw new SignInRefusedError(whenFailed, 409);
+    }
+  }
+
+  /**
+   * Type the verification code a site asked for, and record how it went.
+   *
+   * Only from `code_required`. The code lives in this function's arguments and the one request to
+   * the computer, as a password does in `fill`.
+   */
+  async function enterCode(
+    owner: string,
+    id: string,
+    actor: ActionActor,
+    code: string,
+  ): Promise<SignInRequestRecord> {
+    const request = await load(owner, id);
+    if (request.status !== "code_required")
+      throw new SignInRefusedError(
+        request.status === "filling"
+          ? "This sign-in is already being entered."
+          : request.status === "pending" || request.status === "taken_over"
+            ? "The site is not asking for a verification code."
+            : "This sign-in request is no longer open.",
+        409,
+      );
+    const claimed = await store.transition(owner, id, ["code_required"], {
+      status: "filling",
+      fillingUntil: new Date(Date.now() + FILLING_LEASE_MS),
+    });
+    if (!claimed)
+      throw new SignInRefusedError(
+        "This sign-in is already being entered.",
+        409,
+      );
+    let result: SignInCodeResult | undefined;
+    let failure: string | undefined;
+    // Where a failure leaves the request: asking for the code again, unless the site fell back to
+    // its login page, when only the whole login again can help.
+    let back: "code_required" | "pending" = "code_required";
+    try {
+      result = await gateway.signInCode(claimed.botId, {
+        origin: claimed.origin,
+        code,
+      });
+      if (result.error) failure = scrub(result.error, [code]);
+      else if (!result.submitted)
+        failure = "The verification code could not be submitted.";
+      else if (result.passwordFieldVisible) {
+        back = "pending";
+        failure =
+          "The site went back to its sign-in page, so the code did not finish signing in. Enter the login again.";
+      } else if (result.codeFieldVisible)
+        failure =
+          "The site did not accept that code. Check it, or ask the site for a new one, and try again.";
+    } catch (error) {
+      failure = scrub(
+        error instanceof Error
+          ? error.message
+          : "The Bot's computer did not respond.",
+        [code],
+      );
+    }
+    if (failure) {
+      const reopened = await store.transition(owner, id, ["filling"], {
+        status: back,
+        fillingUntil: null,
+        outcome: failure,
+        ...(back === "pending" ? { method: null } : {}),
+      });
+      await audit("computer.sign_in_failed", actor, "computer", claimed.botId, {
+        bot: claimed.botId,
+        request: id,
+        site: claimed.origin,
+        ...(claimed.method ? { method: claimed.method } : {}),
+        step: "code",
+        failure,
+      });
+      throw new SignInRefusedError(failure, reopened ? 409 : 400);
+    }
+    const page = result?.url ? scrub(result.url, [code]) : undefined;
+    const done = await store.transition(owner, id, ["filling"], {
+      status: "signed_in",
+      fillingUntil: null,
+      outcome: `Signed in to ${claimed.origin}${page ? `; the page is now ${page}` : ""}.`,
+      resolvedAt: new Date(),
+    });
+    if (!done)
+      throw new Error(
+        "The sign-in request changed while it was being entered.",
+      );
+    await audit("computer.sign_in_completed", actor, "computer", done.botId, {
+      bot: done.botId,
+      request: id,
+      site: done.origin,
+      ...(done.method ? { method: done.method } : {}),
+      verificationCode: true,
+    });
+    await resolved(done);
+    return done;
+  }
+
+  /**
    * Type a login into the Bot's browser, and record how it went.
    *
    * The credential lives in this function's arguments and the one request to the computer. It is not
@@ -225,7 +379,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
     owner: string,
     id: string,
     actor: ActionActor,
-    credential: { username?: string; password: string; code?: string },
+    credential: { username?: string; password: string },
     method: "typed" | "saved",
     extra: { loginId?: string; save?: boolean },
   ): Promise<SignInRequestRecord> {
@@ -255,7 +409,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
         "This sign-in is already being entered.",
         409,
       );
-    const secrets = [credential.password, credential.username, credential.code];
+    const secrets = [credential.password, credential.username];
     let result: SignInFillResult | undefined;
     let failure: string | undefined;
     try {
@@ -263,7 +417,6 @@ export function createSignInService(deps: SignInServiceDependencies) {
         origin: claimed.origin,
         ...(credential.username ? { username: credential.username } : {}),
         password: credential.password,
-        ...(credential.code ? { code: credential.code } : {}),
       });
       if (result.error) failure = scrub(result.error, secrets);
       else if (!result.submitted)
@@ -292,6 +445,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
         request: id,
         site: claimed.origin,
         method,
+        step: "login",
         ...(extra.loginId ? { savedLogin: extra.loginId } : {}),
         failure,
       });
@@ -299,6 +453,48 @@ export function createSignInService(deps: SignInServiceDependencies) {
     }
     if (method === "saved" && extra.loginId)
       await store.touchLogin(owner, extra.loginId);
+    if (result?.codeRequested) {
+      /*
+       * The site took the password and sent a code. Nothing is final and the Bot is told nothing: the
+       * request waits for the person to enter the code the site just sent. `method` is recorded now,
+       * which is also how an abandoned code attempt knows to reopen at the code step.
+       */
+      const waiting = await store.transition(owner, id, ["filling"], {
+        status: "code_required",
+        method,
+        fillingUntil: null,
+        outcome: null,
+      });
+      if (!waiting)
+        throw new Error(
+          "The sign-in request changed while it was being entered.",
+        );
+      await audit(
+        "computer.sign_in_code_requested",
+        actor,
+        "computer",
+        waiting.botId,
+        {
+          bot: waiting.botId,
+          request: id,
+          site: waiting.origin,
+          method,
+          ...(extra.loginId ? { savedLogin: extra.loginId } : {}),
+        },
+      );
+      // The password was accepted, so it is saved now, while it is still in hand. Never the code.
+      if (saving && credential.username)
+        await saveTyped(
+          actor,
+          owner,
+          id,
+          waiting.origin,
+          credential.username,
+          credential.password,
+          "The site accepted the password, but the login could not be saved. Enter the code to finish, then save it again from Passwords.",
+        );
+      return waiting;
+    }
     /*
      * Signed in is recorded, and the Bot told, BEFORE the optional save. The site accepted the login
      * either way; a save that fails afterwards must not leave the request stuck in `filling` with the
@@ -323,36 +519,16 @@ export function createSignInService(deps: SignInServiceDependencies) {
       ...(extra.loginId ? { savedLogin: extra.loginId } : {}),
     });
     await resolved(done);
-    if (saving && credential.username) {
-      try {
-        const saved = await store.saveLogin({
-          ownerUserId: owner,
-          origin: claimed.origin,
-          username: credential.username,
-          encryptedPassword: await encryptSecret(
-            deps.encryptionKey,
-            credential.password,
-          ),
-        });
-        await audit("password.saved", actor, "password", saved.id, {
-          site: claimed.origin,
-          login: saved.id,
-        });
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            type: "password-save-failed",
-            request: id,
-            error: error instanceof Error ? error.name : "UnknownError",
-          }),
-        );
-        throw new SignInRefusedError(
-          "You are signed in, but the login could not be saved. Save it again from Passwords.",
-          // The request has moved on (it is signed in); only the optional save did not happen.
-          409,
-        );
-      }
-    }
+    if (saving && credential.username)
+      await saveTyped(
+        actor,
+        owner,
+        id,
+        claimed.origin,
+        credential.username,
+        credential.password,
+        "You are signed in, but the login could not be saved. Save it again from Passwords.",
+      );
     return done;
   }
 
@@ -428,7 +604,6 @@ export function createSignInService(deps: SignInServiceDependencies) {
       input: {
         username?: string;
         password: string;
-        code?: string;
         save?: boolean;
       },
     ) {
@@ -441,12 +616,27 @@ export function createSignInService(deps: SignInServiceDependencies) {
       );
     },
 
+    /** The verification code the site sent, once the request is `code_required`. */
+    async submitCode(
+      owner: string,
+      id: string,
+      actor: ActionActor,
+      input: { code: string },
+    ) {
+      const code = input.code?.trim();
+      if (!code)
+        throw new SignInRefusedError(
+          "Enter the verification code the site sent.",
+        );
+      return view(await enterCode(owner, id, actor, code));
+    },
+
     /** The person confirming one of their saved logins for this sign-in. */
     async useSaved(
       owner: string,
       id: string,
       actor: ActionActor,
-      input: { loginId: string; code?: string },
+      input: { loginId: string },
     ) {
       if (!(await managerOn(owner)))
         throw new SignInRefusedError(
@@ -470,11 +660,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
           owner,
           id,
           actor,
-          {
-            username: login.username,
-            password,
-            ...(input.code ? { code: input.code } : {}),
-          },
+          { username: login.username, password },
           "saved",
           { loginId: login.id },
         ),
@@ -484,7 +670,9 @@ export function createSignInService(deps: SignInServiceDependencies) {
     /** Sign in by hand instead: hand the person the Bot's browser. */
     async takeOver(owner: string, id: string, actor: ActionActor) {
       const request = await load(owner, id);
-      if (request.status !== "pending")
+      // From the code step too: a person may rather type the code into the site themselves.
+      const from: readonly SignInStatus[] = ["pending", "code_required"];
+      if (!from.includes(request.status))
         throw new SignInRefusedError(
           "This sign-in request is no longer open.",
           409,
@@ -495,7 +683,7 @@ export function createSignInService(deps: SignInServiceDependencies) {
         `Sign in to ${request.origin}${request.reason ? `: ${request.reason}` : ""}`,
         request.toolCallId ?? undefined,
       );
-      const next = await store.transition(owner, id, ["pending"], {
+      const next = await store.transition(owner, id, from, {
         status: "taken_over",
         controlRequestId: state.request?.id ?? null,
       });
