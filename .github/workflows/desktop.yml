@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
   push:
-    branches: [main]
+    branches: [none]
     paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
 
