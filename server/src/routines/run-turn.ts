@@ -57,9 +57,7 @@ import type {
 import { EventType } from "@ag-ui/client";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { frameFiring } from "@openbot/shared/routine-firing";
-import { headlessTurnRefusal } from "../admin/controls";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
-import { guardBotTurn } from "../agents/lifecycle";
 import { historyOrEmpty } from "../agents/thread-history";
 import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
 import type { AuditInitiator, AuditStore } from "../audit";
@@ -74,6 +72,7 @@ import {
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
 } from "../toolkit/headless-tools";
+import type { TurnAdmission } from "../toolkit/ports";
 import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
@@ -279,6 +278,8 @@ export { frameFiring };
 export function createTurnRunner(options: {
   intelligence: IntelligenceLike;
   runner: RunnerLike;
+  /** Checked before anything else; see `serverTurnAdmission` in agents/turn-admission.ts. */
+  admission: TurnAdmission;
   learningContainerForThread?: (input: {
     threadId: string;
     agentId: string;
@@ -313,6 +314,7 @@ export function createTurnRunner(options: {
   const {
     intelligence,
     runner,
+    admission,
     buildAgentFor,
     learningContainerForThread,
     toolsForTurn,
@@ -338,16 +340,8 @@ export function createTurnRunner(options: {
     onText,
   }) => {
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
-    // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
-    signal = await guardBotTurn({ ownerUserId, agentId, signal });
-    // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
-    // crosses that gate, so every one of them meets the same check here instead.
-    const refused = await headlessTurnRefusal({ ownerUserId, agentId });
-    if (refused) {
-      const error = new Error(refused);
-      error.name = "CapabilityRefusedError";
-      throw error;
-    }
+    // A paused Bot or a refused capability throws here; a pause mid-turn aborts the returned signal.
+    signal = await admission({ ownerUserId, agentId, signal });
     if (continuation && continuation.snapshot.threadId !== threadId)
       throw new Error(
         "The interrupted conversation does not match this thread.",

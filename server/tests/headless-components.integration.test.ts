@@ -20,6 +20,7 @@ import { createDatabase } from "../src/db/client";
 import { agents, componentExclusions, components } from "../src/db/schema";
 import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * An unattended routine turn that browses a page and answers with a chart, against the real
@@ -205,6 +206,7 @@ function harness(agent: AbstractAgent, botId: string) {
     stop: async () => true,
   };
   const run = createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: {
       getOrCreateThread: async () => undefined,
       getThreadMessages: async () => ({ messages: [] }),

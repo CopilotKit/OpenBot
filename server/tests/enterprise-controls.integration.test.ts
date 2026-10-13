@@ -37,6 +37,7 @@ import {
 import { createTurnRunner } from "../src/routines/run-turn";
 import { createTeamBots } from "../src/team-bots/team-bots";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The enterprise controls against a real PostgreSQL, through the same seams production uses: the
@@ -442,6 +443,7 @@ function headlessTurn(agentId: string) {
     stop: async () => true,
   };
   const runTurn = createTurnRunner({
+    admission: serverTurnAdmission,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.

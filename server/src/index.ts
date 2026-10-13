@@ -284,6 +284,7 @@ import {
   startWorkOfferedListener,
   type WorkOfferedListener,
 } from "./work/queue";
+import { serverTurnAdmission } from "./agents/turn-admission";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -1829,6 +1830,7 @@ const routineRunner = createRoutineRunner({
   routineStore,
   channelStore,
   runTurn: createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     components: { store: componentStore, auditStore: bootAuditStore },
@@ -1925,6 +1927,7 @@ const responsibilityEngine: ResponsibilityEngine = createResponsibilityEngine({
       responsibilityRunId: context.runId,
     });
     const runner = createTurnRunner({
+      admission: serverTurnAdmission,
       intelligence: routineIntelligence,
       runner: routineAgentRunner,
       components: { store: componentStore, auditStore: bootAuditStore },
@@ -2041,6 +2044,7 @@ const responsibilityAnswerTurn = ({
     ...(responsibilityRunId ? { responsibilityRunId } : {}),
   });
   return createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     components: { store: componentStore, auditStore: bootAuditStore },
@@ -2135,6 +2139,7 @@ const executeApprovedAction = createApprovedActionExecutor({
   personInitiator: PERSON_INITIATOR,
 });
 const approvalContinuationRunner = createTurnRunner({
+  admission: serverTurnAdmission,
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
   components: { store: componentStore, auditStore: bootAuditStore },
@@ -2436,6 +2441,7 @@ const proactiveEngine = createProactiveEngine({
   queue: createWorkQueue(database),
   owner: workOwner("proactive"),
   runTurn: createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     buildAgentFor,
@@ -2509,6 +2515,7 @@ const wakeUpRunner = createWakeUpRunner({
   actorFor,
   channels: channelStore,
   runTurn: createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     components: { store: componentStore, auditStore: bootAuditStore },
@@ -2590,6 +2597,7 @@ const groupConversations = createGroupConversations({
     return bots;
   },
   runTurn: createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
     components: { store: componentStore, auditStore: bootAuditStore },

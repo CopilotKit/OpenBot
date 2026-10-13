@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
 import {
   createTurnRunner,
@@ -10,6 +11,7 @@ import {
   sanitizeSeededHistory,
 } from "../src/routines/run-turn";
 import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
+import type { TurnAdmission } from "../src/toolkit/ports";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.
@@ -111,6 +113,8 @@ function harness(options: {
   heartbeatMs?: number;
   lockTtlSeconds?: number;
   learningContainerId?: string;
+  /** Defaults to the server's own, which admits everything while nothing is configured. */
+  admission?: TurnAdmission;
 }) {
   const order: string[] = [];
   const calls = {
@@ -202,6 +206,7 @@ function harness(options: {
 
   const builtFor: { initiator: { kind: string; id?: string } }[] = [];
   const runTurn = createTurnRunner({
+    admission: options.admission ?? serverTurnAdmission,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
@@ -888,6 +893,63 @@ describe("recovering what was said", () => {
     await expect(run()).rejects.toThrow(
       "The turn stopped to ask a question, and a routine has nobody to ask.",
     );
+  });
+});
+
+/**
+ * Admission is the first thing a turn does: a refused one has touched nothing, and the signal it
+ * hands back is the one a pause uses to stop a turn already running.
+ */
+describe("a turn's admission", () => {
+  test("is asked with the owner and the Bot, before the thread is touched", async () => {
+    const asked: { ownerUserId: string; agentId: string }[] = [];
+    const { run, order } = harness({
+      admission: async ({ ownerUserId, agentId, signal }) => {
+        asked.push({ ownerUserId, agentId });
+        order.push("admission");
+        return signal ?? new AbortController().signal;
+      },
+    });
+
+    await run();
+
+    expect(asked).toEqual([{ ownerUserId: OWNER, agentId: AGENT_ID }]);
+    expect(order[0]).toBe("admission");
+  });
+
+  test("a refusal ends the turn before any thread, lock or run", async () => {
+    const { run, order, builtFor } = harness({
+      admission: async () => {
+        const error = new Error("Use Bots is off for this person.");
+        error.name = "CapabilityRefusedError";
+        throw error;
+      },
+    });
+
+    await expect(run()).rejects.toThrow("Use Bots is off for this person.");
+    expect(order).toEqual([]);
+    expect(builtFor).toEqual([]);
+  });
+
+  test("aborting the signal it handed back stops a running turn and gives the lock back", async () => {
+    const paused = new AbortController();
+    let started: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { run, calls } = harness({
+      admission: async () => paused.signal,
+      // A run that never finishes on its own, so only the abort can end it.
+      drive: () => started(),
+    });
+
+    const turn = run();
+    await running;
+    paused.abort();
+
+    await expect(turn).rejects.toThrow("The headless turn was cancelled.");
+    expect(calls.stops).toHaveLength(1);
+    expect(calls.cleaned).toHaveLength(1);
   });
 });
 

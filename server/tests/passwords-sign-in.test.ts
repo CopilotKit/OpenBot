@@ -26,6 +26,7 @@ import { createMemoryPasswordStore } from "../src/passwords/store";
 import { originOf, type SignInRequestRecord } from "../src/passwords/types";
 import { createTurnRunner, type RunnerLike } from "../src/routines/run-turn";
 import { HeadlessToolSuspension } from "../src/toolkit/headless-tools";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 /**
  * The private sign-in request and the Passwords vault, as properties:
@@ -503,6 +504,7 @@ describe("an unattended turn that needs a sign-in", () => {
       stop: async () => true,
     };
     const run = createTurnRunner({
+      admission: serverTurnAdmission,
       intelligence: {
         getOrCreateThread: async () => undefined,
         getThreadMessages: async () => ({ messages: [] }),
