@@ -634,8 +634,8 @@ describe("deployment configuration", () => {
     expect(loadConfig(baseEnvironment).agentStallTimeoutMs).toBe(0);
   });
 
-  test("waits 15s for a computer action's saved call unless told otherwise", () => {
-    expect(loadConfig(baseEnvironment).savedCallWaitMs).toBe(15_000);
+  test("waits 60s for a computer action's saved call unless told otherwise", () => {
+    expect(loadConfig(baseEnvironment).savedCallWaitMs).toBe(60_000);
     expect(
       loadConfig({ ...baseEnvironment, COMPUTER_SAVED_CALL_WAIT: "30s" })
         .savedCallWaitMs,

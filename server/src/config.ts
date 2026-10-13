@@ -1292,7 +1292,7 @@ function savedCallWaitMs(environment: Environment): number {
   }
   if (milliseconds < 1) {
     throw new Error(
-      "COMPUTER_SAVED_CALL_WAIT must be a duration above zero, such as 15s. With no wait, every computer action races the save and is refused.",
+      "COMPUTER_SAVED_CALL_WAIT must be a duration above zero, such as 60s. With no wait, every computer action races the save and is refused.",
     );
   }
   return milliseconds;
