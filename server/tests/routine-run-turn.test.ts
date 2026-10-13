@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
-import { EMPTY } from "rxjs";
-import { serverTurnAdmission } from "../src/agents/turn-admission";
-import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
-import { HEADLESS_COMPONENTS } from "../src/components/headless";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
+import type { TurnAdmission } from "@openbot/toolkit/ports";
 import {
   createTurnRunner,
   drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
 } from "@openbot/toolkit/run-turn";
-import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
-import type { TurnAdmission } from "@openbot/toolkit/ports";
+import { EMPTY } from "rxjs";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
+import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
+import { HEADLESS_COMPONENTS } from "../src/components/headless";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.
@@ -50,6 +50,16 @@ type HistoryRow = {
   toolCalls?: { id: string; name: string; args: string }[];
   toolCallId?: string;
 };
+
+/** The platform refusing a renewal for a lock this run no longer owns, as the client raises it. */
+function lockConflict(): Error {
+  const error = new Error(
+    "Intelligence platform error 409: THREAD_LOCK_RENEWAL_FAILED",
+  );
+  error.name = "PlatformRequestError";
+  (error as Error & { status?: number }).status = 409;
+  return error;
+}
 
 /** A `PlatformRequestError` as `isMissingThread` matches it: the name and the status, nothing else. */
 function threadNotFound(): Error {
@@ -667,18 +677,18 @@ describe("the lock is released on every exit path", () => {
     ]);
   });
 
-  test("when a heartbeat renew rejects", async () => {
+  test("when a heartbeat renew is refused as a conflict", async () => {
     const { run, calls } = harness({
       drive: ({ agent, observer }) => {
         agent.onAbort = () => observer.complete();
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("somebody else holds this lock");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("somebody else holds this lock");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
 
     expect(calls.cleaned).toEqual([
       { threadId: THREAD_ID, runId: calls.acquired[0]?.runId ?? "" },
@@ -778,7 +788,7 @@ describe("one run id, everywhere", () => {
       turnTimeoutMs: 20,
       abortGraceMs: 50,
       renew: () => {
-        throw new Error("somebody else holds this lock");
+        throw lockConflict();
       },
     });
 
@@ -788,7 +798,7 @@ describe("one run id, everywhere", () => {
   });
 });
 
-describe("a failed heartbeat stops the turn", () => {
+describe("a heartbeat refused as a conflict stops the turn", () => {
   test("aborts the agent, stops the run, and rethrows", async () => {
     const { run, calls, agent } = harness({
       drive: ({ agent: driven, observer }) => {
@@ -796,11 +806,11 @@ describe("a failed heartbeat stops the turn", () => {
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("lock lost");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("lock lost");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
 
     expect(agent.aborts).toBe(1);
     expect(calls.stops).toEqual([
@@ -817,12 +827,48 @@ describe("a failed heartbeat stops the turn", () => {
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("lock lost");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("lock lost");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
   });
+});
+
+/*
+ * A renewal that did not arrive is not a lock that was lost. Stopped here, the turn would be retried
+ * from the start, and a Bot that had already acted would act again.
+ */
+describe("a heartbeat that merely failed does not stop the turn", () => {
+  for (const [name, failure] of [
+    ["a network failure", () => new TypeError("fetch failed")],
+    [
+      "a platform outage",
+      () => {
+        const error = new Error("Intelligence platform error 503");
+        error.name = "PlatformRequestError";
+        (error as Error & { status?: number }).status = 503;
+        return error;
+      },
+    ],
+  ] as const) {
+    test(`${name} is skipped and the turn answers`, async () => {
+      const { run, calls, agent } = harness({
+        drive: (context) => {
+          setTimeout(() => answers(context), 30);
+        },
+        heartbeatMs: 2,
+        renew: () => {
+          throw failure();
+        },
+      });
+
+      expect(await run()).toEqual({ replyText: "Three things happened." });
+      expect(calls.renewed.length).toBeGreaterThan(1);
+      expect(agent.aborts).toBe(0);
+      expect(calls.stops).toEqual([]);
+    });
+  }
 });
 
 describe("recovering what was said", () => {

@@ -67,6 +67,7 @@ import {
 } from "./headless-tools";
 import { sanitizeSeededHistory } from "./history-sanitize";
 import type { AuditInitiator } from "./initiator";
+import { keepLease } from "./lease";
 import type { ComponentCatalog, TurnAdmission } from "./ports";
 import { historyOrEmpty } from "./thread-history";
 
@@ -372,9 +373,14 @@ export function turnInput(input: {
  * The thread's lock for one run, held until it is released.
  *
  * Acquired with this run's own id and renewed on a heartbeat with the same id, so the lock the
- * cleanup releases is the lock that was taken. A renew that fails means somebody else is in this
- * thread — the person, most likely, having just typed something — so the heartbeat stops and
- * `onLost` is told, once; the caller stops the turn rather than write its events into their run.
+ * cleanup releases is the lock that was taken. A renew refused as a conflict means somebody else is
+ * in this thread — the person, most likely, having just typed something — so the heartbeat stops
+ * and `onLost` is told, once; the caller stops the turn rather than write its events into their
+ * run. A renew that merely failed is skipped; see `keepLease`.
+ *
+ * This is a deliberate departure from the runtime's own channel runner (`channel-manager.mjs:257-273`),
+ * which stops on any renewal error: a turn stopped by a network blip is retried from the start, and
+ * a Bot that already sent an email sends it again.
  */
 type Lease = {
   /** Stop renewing. Safe to call more than once. */
@@ -414,26 +420,14 @@ async function takeLease(input: {
     ...(learningContainerId ? { learningContainerId } : {}),
   });
 
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stopHeartbeat = () => {
-    if (heartbeat === undefined) return;
-    clearInterval(heartbeat);
-    heartbeat = undefined;
-  };
-  heartbeat = setInterval(() => {
-    void intelligence
-      .ɵrenewThreadLock({ threadId, runId, ttlSeconds })
-      .catch((error: unknown) => {
-        if (heartbeat === undefined) return;
-        stopHeartbeat();
-        onLost(error);
-      });
-  }, heartbeatMs);
-  // So a heartbeat that is still pending cannot hold a one-shot process open.
-  heartbeat.unref?.();
+  const heartbeat = keepLease({
+    renew: () => intelligence.ɵrenewThreadLock({ threadId, runId, ttlSeconds }),
+    everyMs: heartbeatMs,
+    onLost,
+  });
 
   return {
-    stopHeartbeat,
+    stopHeartbeat: heartbeat.stop,
     release: () =>
       intelligence
         .ɵcleanupThreadLock({ threadId, runId })
