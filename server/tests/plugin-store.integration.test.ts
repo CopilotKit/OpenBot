@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
@@ -6442,32 +6442,43 @@ describe("a query of this deployment's own that failed", () => {
    * above owns the behaviour of the reachable path; this owns the shape of every path.
    */
   test("no recording site in the plugin store reads a caught message without asking", () => {
-    const source = readFileSync(
-      join(import.meta.dir, "..", "src", "plugins", "store.ts"),
-      "utf8",
-    );
+    // Every file the store is made of: the assembly in `store.ts` and the modules it was split into.
+    const plugins = join(import.meta.dir, "..", "src", "plugins");
+    const files = [
+      "store.ts",
+      ...readdirSync(join(plugins, "plugin-store"))
+        .filter((name) => name.endsWith(".ts"))
+        .map((name) => `plugin-store/${name}`),
+    ];
     /*
-     * Comments blanked rather than removed, because this file argues about `error.message` at
+     * Comments blanked rather than removed, because these files argue about `error.message` at
      * length — the prose naming the hazard must not be mistaken for the hazard, and the line
-     * numbers reported below have to stay the file's own so a failure names where to look.
+     * numbers reported below have to stay each file's own so a failure names where to look.
      */
-    const code = source
-      .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
-      .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1");
+    const code = files.map((file) => ({
+      file,
+      code: readFileSync(join(plugins, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
+        .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1"),
+    }));
 
     // Listed rather than matched, so a failure prints the line to correct instead of the file.
     expect(
-      code
-        .split("\n")
-        .flatMap((line, index) =>
-          /\berror\.message\b/.test(line)
-            ? [`${index + 1}: ${line.trim()}`]
-            : [],
-        ),
+      code.flatMap(({ file, code: text }) =>
+        text
+          .split("\n")
+          .flatMap((line, index) =>
+            /\berror\.message\b/.test(line)
+              ? [`${file}:${index + 1}: ${line.trim()}`]
+              : [],
+          ),
+      ),
     ).toEqual([]);
     // And the door is genuinely in use, so the assertion above cannot be satisfied by deleting the
     // read altogether and saying nothing.
-    expect(code).toMatch(/\b(withoutStatement|reasonWithoutStatement)\(/);
+    expect(code.map(({ code: text }) => text).join("\n")).toMatch(
+      /\b(withoutStatement|reasonWithoutStatement)\(/,
+    );
   });
 });
 
