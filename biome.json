@@ -36,6 +36,36 @@
       }
     },
     {
+      "includes": ["server/src/toolkit/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["../**"],
+                    "message": "The toolkit runs turns without the server. Take what it needs as a port in toolkit/ports.ts instead of importing server code."
+                  },
+                  {
+                    "group": [
+                      "@copilotkit/**",
+                      "drizzle-orm",
+                      "drizzle-orm/**",
+                      "hono",
+                      "hono/**"
+                    ],
+                    "message": "The toolkit core depends on @ag-ui, rxjs, zod and @openbot/shared only. CopilotKit-specific adapters stay on the server for now."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["app/src/components/ui/**"],
       "linter": {
         "rules": {
