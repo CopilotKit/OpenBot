@@ -1,5 +1,5 @@
 import { IconLock } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
@@ -16,6 +16,7 @@ import {
 import { readSignIn, requestSignIn } from "@/lib/passwords/mutations";
 import {
   FINAL_SIGN_IN,
+  passwordKeys,
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
 import { useActiveBotHolder } from "./active-bot";
@@ -64,6 +65,8 @@ function parse(result: string | undefined): Outcome {
  */
 export function SignInTool() {
   const bot = useActiveBotHolder();
+  // Stable for the provider's life, so the SDK's once-registered handler may keep it.
+  const queryClient = useQueryClient();
   // A sign-in is typed into the Bot's computer; see useComputerAvailable.
   const available = useComputerAvailable();
   useFrontendTool({
@@ -97,6 +100,9 @@ export function SignInTool() {
       );
       if (!asked.ok) return { ok: false, reason: asked.reason };
       const id = asked.request.id;
+      // Draw the button now: a background tab does not poll, and the card may have looked before
+      // the request existed.
+      void queryClient.invalidateQueries({ queryKey: passwordKeys.pending() });
       const deadline = Date.now() + WAIT_MS;
       while (Date.now() < deadline) {
         if (signal?.aborted)

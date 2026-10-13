@@ -1,7 +1,11 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentType, ReactNode } from "react";
 import { SignInTool } from "@/lib/copilot/sign-in-tool";
@@ -27,6 +31,7 @@ afterAll(async () => {
 const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
+  focusManager.setFocused(undefined);
 });
 
 const TOOL_CALL_ID = "call-sign-in";
@@ -49,7 +54,7 @@ const signInRequest = {
   savedLogins: [],
 };
 
-function serving() {
+function serving(open: (typeof signInRequest)[]) {
   global.fetch = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input), "http://127.0.0.1").pathname;
@@ -57,7 +62,7 @@ function serving() {
       if (path === "/api/sign-in-requests" && method === "POST")
         return Response.json(signInRequest, { status: 201 });
       if (path === "/api/sign-in-requests")
-        return Response.json({ requests: [signInRequest] });
+        return Response.json({ requests: open });
       if (path === `/api/sign-in-requests/${signInRequest.id}`)
         return Response.json(signInRequest);
       return Response.json({ error: "Not found" }, { status: 404 });
@@ -99,7 +104,7 @@ function Providers({
 }
 
 test("the waiting card offers the private sign-in once the request exists", async () => {
-  serving();
+  serving([]);
   const queries = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -112,16 +117,9 @@ test("the waiting card offers the private sign-in once the request exists", asyn
   );
   await waitFor(() => expect(kept.handler).toBeDefined());
 
-  // The model calls the tool: the handler opens the request on the server and waits on it.
-  const stop = new AbortController();
-  const answered = kept.handler?.(
-    { site: SITE },
-    { signal: stop.signal, toolCall: { id: TOOL_CALL_ID } },
-  );
-
-  // The chat draws the call while it runs, through the renderer the SDK kept at first render.
+  // The chat draws the call as soon as it streams in, before the handler has opened the request.
   const Kept = kept.renderer as Renderer;
-  tree.rerender(
+  const drawn = (
     <Providers queries={queries}>
       <SignInTool />
       <Capture kept={kept} />
@@ -131,7 +129,23 @@ test("the waiting card offers the private sign-in once the request exists", asyn
         status="executing"
         toolCallId={TOOL_CALL_ID}
       />
-    </Providers>,
+    </Providers>
+  );
+  serving([]);
+  tree.rerender(drawn);
+  await tree.findByText("Waiting for you to sign in");
+  // Long enough for a card that looks the request up to have looked once and found nothing.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // In a background tab nothing polls, so the request has to reach the card without a timer.
+  focusManager.setFocused(false);
+  serving([signInRequest]);
+
+  // The model calls the tool: the handler opens the request on the server and waits on it.
+  const stop = new AbortController();
+  const answered = kept.handler?.(
+    { site: SITE },
+    { signal: stop.signal, toolCall: { id: TOOL_CALL_ID } },
   );
 
   const open = await tree.findByRole(
@@ -139,6 +153,7 @@ test("the waiting card offers the private sign-in once the request exists", asyn
     { name: /Open private sign-in/ },
     { timeout: 4000 },
   );
+  focusManager.setFocused(undefined);
   fireEvent.click(open);
   await tree.findByText(`Sign in to ${SITE}`);
   await tree.findByText(/Goes to your Bot's browser/);
