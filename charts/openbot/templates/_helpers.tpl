@@ -236,30 +236,6 @@ unknown
 {{- end }}
 {{- end -}}
 
-{{- /*
-  Whether the Secret carries a licence token, and how sure the chart can be.
-
-  `chart` and `store` mean the key is certainly there: this chart wrote it from
-  `secrets.licenseToken`, or `externalSecrets.data` names it. `unknown` is a Secret somebody made
-  (`secrets.existingSecret`), which the chart cannot read at template time, so the reference is
-  optional and a Secret without the key still starts. Empty means no licence: managed Intelligence
-  issues none.
-
-  It used to be emitted for `secrets.licenseToken` alone, so a token synced from a store reached the
-  Secret and never the pod, and a self-hosted Intelligence ran unlicensed with nothing saying why.
-*/ -}}
-{{- define "openbot.licenseTokenSource" -}}
-{{- if .Values.secrets.licenseToken -}}
-chart
-{{- else if .Values.externalSecrets.enabled -}}
-{{- $named := list -}}
-{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end -}}
-{{- if has "license-token" $named }}store{{ end -}}
-{{- else if .Values.secrets.existingSecret -}}
-unknown
-{{- end -}}
-{{- end -}}
-
 {{- define "openbot.secretName" -}}
 {{- default (printf "%s-secrets" (include "openbot.fullname" .)) .Values.secrets.existingSecret -}}
 {{- end -}}
@@ -442,7 +418,9 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: intelligence-api-key
-{{- $license := include "openbot.licenseTokenSource" . }}
+{{- /* From a store or an existingSecret too: emitted for the literal alone, a synced token reached
+     the Secret and never the pod, and a self-hosted Intelligence ran unlicensed. */}}
+{{- $license := include "openbot.secretKeySource" (dict "root" . "key" "license-token" "literal" .Values.secrets.licenseToken) }}
 {{- if $license }}
 - name: COPILOTKIT_LICENSE_TOKEN
   valueFrom:
