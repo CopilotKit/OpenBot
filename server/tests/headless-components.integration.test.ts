@@ -12,7 +12,10 @@ import { Observable } from "rxjs";
 import { GALLERY } from "../../app/src/components/gallery/charts";
 import { NOT_SHOWN } from "@openbot/shared/component-markers";
 import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
-import { createHeadlessComponentTools } from "../src/components/headless";
+import {
+  createHeadlessComponentTools,
+  headlessComponentCatalog,
+} from "../src/components/headless";
 import { createComponentStore } from "../src/components/store";
 import { createComputerGateway } from "../src/computer/gateway";
 import { createHeadlessComputerTools } from "../src/computer/headless-tools";
@@ -222,10 +225,10 @@ function harness(agent: AbstractAgent, botId: string) {
         botId,
         actor: { id: ownerUserId, userId: ownerUserId, initiator },
       }),
-    components: {
+    components: headlessComponentCatalog({
       store,
       audit: auditSink(auditStore as unknown as AuditStore),
-    },
+    }),
   });
   return {
     persisted,

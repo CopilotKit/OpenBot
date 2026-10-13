@@ -1,8 +1,8 @@
 import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import { z } from "zod";
-import type { AuditInitiator } from "../audit";
+import type { AuditInitiator, AuditSink } from "../audit";
 import type { HeadlessTool } from "../toolkit/headless-tools";
-import type { AuditSink } from "../toolkit/ports";
+import type { ComponentCatalog } from "../toolkit/ports";
 import type { ComponentStore } from "./store";
 
 /**
@@ -325,6 +325,28 @@ export const HEADLESS_COMPONENTS: readonly HeadlessComponentSpec[] = [
 /** The same sentence the browser answers a refused call with, so transcript and card agree. */
 export function notShown(title: string, reason: string): string {
   return `${NOT_SHOWN}${title}. ${reason}${NOT_SHOWN_TAIL}`;
+}
+
+/**
+ * The governed gallery as a headless turn sees it: every component's name, and the tools for one
+ * Bot, decided by the component store and refused into the audit trail.
+ */
+export function headlessComponentCatalog(options: {
+  store: ComponentStore;
+  audit?: AuditSink;
+}): ComponentCatalog {
+  const { store, audit } = options;
+  return {
+    names: new Set(HEADLESS_COMPONENTS.map(({ name }) => name)),
+    toolsForTurn: ({ agentId, ownerUserId, initiator }) =>
+      createHeadlessComponentTools({
+        store,
+        botId: agentId,
+        ownerUserId,
+        initiator,
+        ...(audit ? { audit } : {}),
+      }),
+  };
 }
 
 /**

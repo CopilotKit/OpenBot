@@ -120,6 +120,7 @@ import {
 } from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
 import { createChannelTitler } from "./channels/titler";
+import { headlessComponentCatalog } from "./components/headless";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -576,6 +577,11 @@ const policyListener = await startPolicyListener(
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
+// The gallery every headless turn offers its Bot, refusals written to the same trail.
+const componentCatalog = headlessComponentCatalog({
+  store: componentStore,
+  audit: auditSink(bootAuditStore),
+});
 // One store: the gateway writes through it, a route reads it, and the sweep below takes the old ones out.
 const pageFrameStore = createPageFrameStore(database);
 let deliveryNotifications: (
@@ -1834,7 +1840,7 @@ const routineRunner = createRoutineRunner({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, audit: auditSink(bootAuditStore) },
+    components: componentCatalog,
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
@@ -1931,7 +1937,7 @@ const responsibilityEngine: ResponsibilityEngine = createResponsibilityEngine({
       admission: serverTurnAdmission,
       intelligence: routineIntelligence,
       runner: routineAgentRunner,
-      components: { store: componentStore, audit: auditSink(bootAuditStore) },
+      components: componentCatalog,
       buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
       toolsForTurn: async () => {
         const actor = await actorFor(context.ownerUserId);
@@ -2048,7 +2054,7 @@ const responsibilityAnswerTurn = ({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, audit: auditSink(bootAuditStore) },
+    components: componentCatalog,
     buildAgentFor: (input) => buildAgentFor({ ...input, initiator }),
     toolsForTurn: async () => [
       ...(await approvalComputerTools(
@@ -2143,7 +2149,7 @@ const approvalContinuationRunner = createTurnRunner({
   admission: serverTurnAdmission,
   intelligence: routineIntelligence,
   runner: routineAgentRunner,
-  components: { store: componentStore, audit: auditSink(bootAuditStore) },
+  components: componentCatalog,
   buildAgentFor,
   toolsForTurn: async ({ ownerUserId, agentId, initiator }) =>
     approvalComputerTools(ownerUserId, agentId, initiator),
@@ -2519,7 +2525,7 @@ const wakeUpRunner = createWakeUpRunner({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, audit: auditSink(bootAuditStore) },
+    components: componentCatalog,
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];
@@ -2601,7 +2607,7 @@ const groupConversations = createGroupConversations({
     admission: serverTurnAdmission,
     intelligence: routineIntelligence,
     runner: routineAgentRunner,
-    components: { store: componentStore, audit: auditSink(bootAuditStore) },
+    components: componentCatalog,
     buildAgentFor,
     toolsForTurn: async ({ ownerUserId, agentId, initiator }) => {
       if (!computerGateway) return [];

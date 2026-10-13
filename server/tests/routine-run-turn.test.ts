@@ -4,6 +4,7 @@ import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
 import { serverTurnAdmission } from "../src/agents/turn-admission";
 import { OPENBOT_WAITING_METADATA } from "../src/approvals/native-context";
+import { HEADLESS_COMPONENTS } from "../src/components/headless";
 import {
   createTurnRunner,
   drawnComponents,
@@ -1131,7 +1132,10 @@ test("drawnComponents returns the charts that were drawn, never a refused or unk
     { id: "t3", role: "tool", toolCallId: "c3", content: "ok" },
     { id: "t4", role: "tool", toolCallId: "c4", content: "saved" },
   ];
-  expect(drawnComponents(messages)).toEqual([
+  const names = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
+  expect(drawnComponents(messages, names)).toEqual([
     { name: "showBarChart", args: { title: "Top", points: [] } },
   ]);
+  // A turn with no catalog drew nothing, whatever its tool calls were named.
+  expect(drawnComponents(messages, new Set())).toEqual([]);
 });

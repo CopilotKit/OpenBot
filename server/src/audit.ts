@@ -14,7 +14,6 @@ import type { Database } from "./db/client";
 import { auditEvents } from "./db/schema";
 import { parsePageLimit } from "./paging";
 import type { AuditInitiator } from "./toolkit/initiator";
-import type { AuditSink } from "./toolkit/ports";
 
 const sensitiveKeys = new Set([
   "access_token",
@@ -698,7 +697,16 @@ export async function recordAuditEvent(
   });
 }
 
-/** The turn code's view of the trail: one store, written through `recordAuditEvent`. */
+/**
+ * Where code that should not hold the store writes to the trail.
+ *
+ * A sink rather than the store, so that code never touches the database. Written through
+ * `recordAuditEvent`, which redacts the payload the same way every other write does.
+ */
+export type AuditSink = {
+  record: (event: AuditEventInput) => Promise<void>;
+};
+
 export function auditSink(store: AuditStore): AuditSink {
   return { record: (event) => recordAuditEvent(store, event) };
 }

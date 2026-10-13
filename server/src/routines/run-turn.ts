@@ -61,18 +61,13 @@ import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { historyOrEmpty } from "../agents/thread-history";
 import type { AuditInitiator } from "../audit";
 import {
-  createHeadlessComponentTools,
-  HEADLESS_COMPONENTS,
-} from "../components/headless";
-import type { ComponentStore } from "../components/store";
-import {
   type HeadlessTool,
   HeadlessToolSuspension,
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
   OPENBOT_WAITING_METADATA,
 } from "../toolkit/headless-tools";
-import type { AuditSink, TurnAdmission } from "../toolkit/ports";
+import type { ComponentCatalog, TurnAdmission } from "../toolkit/ports";
 import type { DrawnComponent, TurnRunner } from "./runner";
 
 /**
@@ -231,13 +226,14 @@ function assistantText(message: Message): string | undefined {
     : undefined;
 }
 
-const COMPONENT_NAMES = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
-
 /**
  * The display components this turn drew, in order: a component call whose result is not a refusal.
  * A chat surface that cannot open the conversation (Teams, Slack) draws them from this.
  */
-export function drawnComponents(messages: Message[]): DrawnComponent[] {
+export function drawnComponents(
+  messages: Message[],
+  componentNames: ReadonlySet<string>,
+): DrawnComponent[] {
   const results = new Map<string, string>();
   for (const message of messages)
     if (message.role === "tool" && typeof message.content === "string")
@@ -246,7 +242,7 @@ export function drawnComponents(messages: Message[]): DrawnComponent[] {
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
-      if (!COMPONENT_NAMES.has(call.function.name)) continue;
+      if (!componentNames.has(call.function.name)) continue;
       const result = results.get(call.id);
       if (result === undefined || result.startsWith(NOT_SHOWN)) continue;
       try {
@@ -301,9 +297,10 @@ export function createTurnRunner(options: {
   }) => Promise<HeadlessTool[]>;
   /**
    * The governed gallery, so a turn with no browser can still answer with a chart. Offered and
-   * decided exactly as the browser would for this Bot; see `components/headless.ts`.
+   * decided exactly as the browser would for this Bot. Absent, nothing is offered and nothing is
+   * reported as drawn.
    */
-  components?: { store: ComponentStore; audit?: AuditSink };
+  components?: ComponentCatalog;
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
@@ -470,15 +467,11 @@ export function createTurnRunner(options: {
         threadId,
         runId,
       })) ?? []),
-      ...(components
-        ? await createHeadlessComponentTools({
-            store: components.store,
-            botId: agentId,
-            ownerUserId,
-            initiator,
-            ...(components.audit ? { audit: components.audit } : {}),
-          })
-        : []),
+      ...((await components?.toolsForTurn({
+        agentId,
+        ownerUserId,
+        initiator,
+      })) ?? []),
     ];
     if (headlessTools.length > 0)
       agent.use(new HeadlessToolsMiddleware(headlessTools, initiator));
@@ -752,7 +745,7 @@ export function createTurnRunner(options: {
       throw new Error("The turn finished without saying anything.");
     }
 
-    const drawn = drawnComponents(added);
+    const drawn = drawnComponents(added, components?.names ?? new Set());
     return drawn.length > 0 ? { replyText, components: drawn } : { replyText };
   };
 }

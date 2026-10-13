@@ -1,4 +1,5 @@
-import type { AuditEventInput } from "../audit";
+import type { HeadlessTool } from "./headless-tools";
+import type { AuditInitiator } from "./initiator";
 
 /**
  * What the toolkit needs from its host, named so the turn code can be read without the server.
@@ -20,11 +21,16 @@ export type TurnAdmission = (input: {
 }) => Promise<AbortSignal>;
 
 /**
- * Where a turn writes what it refused or did, for the audit trail.
- *
- * A sink rather than the store, so turn code never touches the database. The server's sink is
- * `auditSink` in audit.ts, which redacts the payload the same way every other write does.
+ * The display components a Bot can draw in a turn with no browser, so it can still answer with a
+ * chart. The server's catalog is `headlessComponentCatalog` in components/headless.ts.
  */
-export type AuditSink = {
-  record: (event: AuditEventInput) => Promise<void>;
+export type ComponentCatalog = {
+  /** Every component's tool name, so a turn can tell which of its tool calls drew one. */
+  names: ReadonlySet<string>;
+  /** The component tools this Bot is offered, decided as the browser would decide them. */
+  toolsForTurn: (input: {
+    agentId: string;
+    ownerUserId: string;
+    initiator: AuditInitiator;
+  }) => Promise<HeadlessTool[]>;
 };
