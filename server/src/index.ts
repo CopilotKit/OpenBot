@@ -639,6 +639,8 @@ const authoriseQuestion = async (question: PersonQuestion) => {
     throw new ApprovalRefusedError("That Bot is no longer available to you.");
 };
 const storedApprovals = createApprovalStore(database);
+// Before anything reads the model environment: blank base URLs removed, Anthropic given its `/v1`.
+normalizeModelBaseUrls();
 const runtimeModel = runtimeModelForEnvironment(tenantPackage.model);
 
 /**
@@ -1102,8 +1104,6 @@ const stallGuard = createStallGuard({
   stallMs: config.agentStallTimeoutMs,
   auditStore: bootAuditStore,
 });
-
-normalizeModelBaseUrls();
 
 const intentRouter = createIntentRouter({
   complete: createModelCompleter({
