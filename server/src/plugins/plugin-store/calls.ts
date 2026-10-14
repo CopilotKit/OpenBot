@@ -8,7 +8,7 @@ import {
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
 import { mcpTools, pluginGrants } from "../../db/schema";
-import { classifyTool } from "../catalogue";
+import { classifyTool, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
 import { shareTargetOf } from "../share-target";
@@ -476,6 +476,7 @@ export function callMethods(context: StoreContext) {
           {
             url: effectiveUrl(row, entry),
             token,
+            tokenHeader: tokenHeaderFor(entry),
             actorId: vendorUserId ?? input.credentialActorId ?? input.actorId,
             botId: input.botId,
           },
