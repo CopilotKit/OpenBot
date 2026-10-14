@@ -715,7 +715,7 @@ function RouteComponent() {
                 <ItemContent>
                   <ItemTitle>Access token</ItemTitle>
                   <ItemDescription>
-                    Sent as a bearer token on every call to this vendor.
+                    Sent with every call to this vendor.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

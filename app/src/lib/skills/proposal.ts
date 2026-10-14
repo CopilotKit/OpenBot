@@ -244,5 +244,10 @@ export function describeToolRefs(servers: readonly PluginServer[]): string {
     );
     return [`${server.title} (${server.id}):`, ...tools].join("\n");
   });
-  return ["Refs are `serverId/toolName`.", ...blocks].join("\n");
+  return [
+    "Refs are `serverId/toolName`.",
+    // The server resolves these against its catalogue, so a research skill outlives a provider swap.
+    "For public-web research, declare `@research/search` and `@research/fetch` instead of one provider's tools: they stand for search and page reading on whichever research connector the Bot holds.",
+    ...blocks,
+  ].join("\n");
 }
