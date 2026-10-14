@@ -34,13 +34,14 @@ agents:
       - whats-changed
       - who-owns-this
       - implement-a-ticket
+  # Endpoint follows MANAGED_AGENT_AG_UI_URL so a blank env omits this Bot from sync (see tenant-package.test.ts).
   - id: risk-analyst
     name: Risk Analyst
     title: Risk & Compliance
     role_description: Investigate policies, controls, and compliance questions.
     avatar_seed: risk-analyst
     type: remote-ag-ui
-    endpoint: http://127.0.0.1:5999/ag-ui
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
   - id: developer
     name: Developer Agent
     title: GitHub and engineering
