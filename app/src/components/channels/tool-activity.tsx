@@ -282,7 +282,7 @@ const KIND_ICONS = {
 
 function StepIcon({
   kind,
-  size = "size-3.5",
+  size = "size-4",
 }: {
   kind: StepKind;
   size?: string;
@@ -304,11 +304,11 @@ function IconStack({ kinds }: { kinds: StepKind[] }) {
         <span
           key={kind}
           style={{ zIndex: kinds.length - index }}
-          className={`relative flex size-5 items-center justify-center rounded-full bg-muted text-muted-foreground ring-2 ring-background ${
-            index > 0 ? "-ml-1" : ""
+          className={`relative flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground ring-2 ring-background ${
+            index > 0 ? "-ml-1.5" : ""
           }`}
         >
-          <StepIcon kind={kind} size="size-3" />
+          <StepIcon kind={kind} size="size-4" />
         </span>
       ))}
     </span>
@@ -355,7 +355,7 @@ function StepRow({ step, active }: { step: StepDetails; active: boolean }) {
   );
   const reason =
     step.failed && step.kind === "browser" ? (
-      <p className="mt-0.5 pl-5.5 text-destructive">
+      <p className="mt-0.5 pl-6 text-destructive">
         {step.reason ?? "This step could not be completed."}
       </p>
     ) : null;
