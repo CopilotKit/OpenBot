@@ -25,7 +25,7 @@ export function useNeedsYou(botId: string | undefined, when: boolean): boolean {
           state &&
             (state.requested ||
               state.holder === "human" ||
-              state.request?.status === "interrupted" ||
+              state.recoveryRequired ||
               state.secretWanted !== undefined),
         ),
       );

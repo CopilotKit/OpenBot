@@ -207,6 +207,7 @@ export function createControl(
         (active(live) || data.holder === "human" || data.recoveryRequired) &&
         barrier.pending() > 0,
       resumeSnapshotRequired: data.resumeSnapshotRequired,
+      recoveryRequired: data.recoveryRequired,
       ...(secret
         ? {
             secretWanted: secret.label,

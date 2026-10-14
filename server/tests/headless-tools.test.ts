@@ -344,6 +344,7 @@ function computerHarness(deny: string[] = []) {
           transitioning: false,
           since: "now",
           resumeSnapshotRequired: false,
+          recoveryRequired: false,
           request: {
             id: "durable-handoff",
             status: "waiting",

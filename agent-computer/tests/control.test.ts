@@ -121,6 +121,7 @@ describe("request-aware handoff", () => {
       status: "interrupted",
       interruption: "The browser restarted.",
     });
+    expect(control.get().recoveryRequired).toBe(true);
     expect(control.humanMayDrive()).toBe(false);
     expect(() => control.admitBotAction(true)).toThrow(ControlError);
     expect(() => control.release(interrupted.id)).toThrow();
@@ -131,6 +132,7 @@ describe("request-aware handoff", () => {
     const unanswered = request();
     control.interrupt("The browser restarted.");
     expect(control.get(unanswered.id).request?.status).toBe("interrupted");
+    expect(control.get().recoveryRequired).toBe(false);
     // The page is as the Bot left it, so a fresh look is all it needs, not a person.
     expect(() => control.admitBotAction(true)).toThrow(SnapshotRequiredError);
     control.snapshotTaken();
