@@ -42,6 +42,10 @@ See [docs/web-research.md](docs/web-research.md).
 - **The research guidance follows whichever provider a Bot holds.** It used to switch on only for
   Parallel's two tools. Now a Bot holding any provider's search and fetch tools is told how to use
   them, and a Bot holding more than one uses the one the person asks for.
+- **A Bot holding a research provider searches without being asked** when an answer depends on facts
+  that change, such as current figures, rankings or recent events, and stops after a search or two.
+  Before, every Bot was told not to go looking, so one holding a search tool still answered from
+  memory. A Bot with only its browser now says it can open pages but cannot search.
 - **The shipped `research-public-web` skill declares roles, not Parallel.** Its tools are now
   `@research/search` and `@research/fetch`, which match the search and fetch tools of every research
   provider the Bot was granted. A skill written by a person can declare the same roles, and the

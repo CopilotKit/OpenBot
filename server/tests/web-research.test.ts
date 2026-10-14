@@ -115,6 +115,11 @@ describe("what a Bot is told about research", () => {
       expect(guidance).toContain("do not connect a person's private account");
       // Described, not preferred: a Bot holding another search tool is not told to pass it over.
       expect(guidance).not.toContain("by default");
+      // Searches unprompted for facts that change, and only a little.
+      expect(guidance).toContain(
+        "Search before answering when the answer depends on facts that change",
+      );
+      expect(guidance).toContain("a search or two");
       expect(grantedToolGuidance(pair(server).slice(0, 1))).not.toContain(
         "public-web research",
       );

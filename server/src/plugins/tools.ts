@@ -202,6 +202,10 @@ function researchProviders(tools: GrantedTool[]): ResearchProvider[] {
  *
  * Described, not preferred: a Bot holding one of these and some other search tool is not told to
  * pass the other over. With more than one, the person's choice decides.
+ *
+ * Told to search unprompted for facts that change, because a Bot holding these answered "top five
+ * countries by GDP" from memory and then, asked, said it could search. The bound in the next line
+ * is what keeps that from becoming the open-web hunt the provenance guidance warns about.
  */
 function researchGuidance(providers: ResearchProvider[]): string[] {
   if (providers.length === 0) return [];
@@ -216,6 +220,8 @@ function researchGuidance(providers: ResearchProvider[]): string[] {
           "Use the one the person asks for. Otherwise pick one and keep to it for the conversation.",
         ]
       : []),
+    "Search before answering when the answer depends on facts that change: current figures, rankings, prices, who holds a role, recent events. Do not answer those from memory while you hold these tools, even when the person did not ask you to search.",
+    "Keep it bounded: a search or two and a read of the best sources, then answer, and say what you could not confirm.",
     "These search the public web; they do not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents.",
     ...providers.flatMap(({ entry }) =>
       (entry.research?.notes ?? []).map((note) => `${entry.vendor}: ${note}`),

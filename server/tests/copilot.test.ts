@@ -1155,6 +1155,13 @@ describe("where a Bot says its answer came from", () => {
     expect(guidance).toContain("do not go hunting the open web");
   });
 
+  test("it leaves finding sources to a search tool, and offers to check one without", () => {
+    // Without this, a Bot granted a search tool still answered current figures from memory.
+    const guidance = PROVENANCE_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    expect(guidance).toContain("finding sources is what a search tool is for");
+    expect(guidance).toContain("offer to check a source the person names");
+  });
+
   test("it names the answers that must not be stated without a source", () => {
     // The general rule is easy to read past. The list is what makes it bite on the turn that
     // produced this: a threshold, a deadline, a filing obligation, a figure.
