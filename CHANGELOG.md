@@ -32,6 +32,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### Public-web research works with Exa and Firecrawl, not only Parallel
+
+Four new catalogue entries give a Bot public-web search and page reading without its browser:
+**Exa Search** (free, rate-limited), **Exa Search (API key)**, **Firecrawl** (free) and **Firecrawl
+(API key)**. They sit beside the two Parallel entries, and nothing is granted to any Bot until an administrator does it.
+See [docs/web-research.md](docs/web-research.md).
+
+- **The research guidance follows whichever provider a Bot holds.** It used to switch on only for
+  Parallel's two tools. Now a Bot holding any provider's search and fetch tools is told how to use
+  them, and a Bot holding more than one uses the one the person asks for.
+- **The shipped `research-public-web` skill declares roles, not Parallel.** Its tools are now
+  `@research/search` and `@research/fetch`, which match the search and fetch tools of every research
+  provider the Bot was granted. A skill written by a person can declare the same roles, and the
+  Skills page offers them under "Public-web research". A role grants nothing.
+- **Exa and Firecrawl list their reads.** Every other tool they advertise counts as a write, so a
+  Firecrawl monitor deletion or an Exa agent run goes through the same policy as any write.
+- **An API key can go in the vendor's own header.** Exa reads `x-api-key`; the deployment key for
+  that entry is sent there. The admin page now says the key is "Sent with every call to this vendor"
+  rather than calling it a bearer token.
+
 ### Bot turns hold their conversation more carefully
 
 Routines, responsibilities, background research, wake-ups, group turns and Bot-to-Bot handoffs keep a
