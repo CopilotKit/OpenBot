@@ -389,7 +389,12 @@ export function createProductEngineerRunner(
 
       const latest = [...runs].sort((a, b) =>
         String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")),
-      )[0]!;
+      )[0];
+      if (!latest) {
+        throw new Error(
+          `Cursor returned no runs for agent ${existing.agentId}.`,
+        );
+      }
       const status = (latest.status ?? "").toUpperCase();
       const prUrl =
         prFromRuns(runs) ?? extractPrUrl(existing.progress) ?? existing.prUrl;

@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -290,6 +290,7 @@ function DocumentForm({
     body: string;
   }) => Promise<void>;
 }) {
+  const fieldId = useId();
   const [docTitle, setDocTitle] = useState(document?.title ?? "");
   const [category, setCategory] = useState(document?.category ?? "");
   const [body, setBody] = useState(document?.body ?? "");
@@ -331,24 +332,30 @@ function DocumentForm({
       width="wide"
     >
       <div className="mt-8 space-y-4">
-        <label className="flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5" htmlFor={`${fieldId}-title`}>
           <span className="text-sm text-muted-foreground">Title</span>
           <Input
+            id={`${fieldId}-title`}
             value={docTitle}
             onChange={(event) => setDocTitle(event.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1.5">
+        <label
+          className="flex flex-col gap-1.5"
+          htmlFor={`${fieldId}-category`}
+        >
           <span className="text-sm text-muted-foreground">Category</span>
           <Input
+            id={`${fieldId}-category`}
             placeholder="Engineering"
             value={category}
             onChange={(event) => setCategory(event.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5" htmlFor={`${fieldId}-body`}>
           <span className="text-sm text-muted-foreground">Body</span>
           <Textarea
+            id={`${fieldId}-body`}
             className="min-h-64"
             value={body}
             onChange={(event) => setBody(event.target.value)}

@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AgentForce">
+  <title>AgentForce</title>
   <rect width="64" height="64" rx="16" fill="#0c1b2e"/>
   <path d="M18 43V21h15.5c8 0 13 4.1 13 11s-5 11-13 11H18Zm8-7h7c3.5 0 5.5-1.4 5.5-4S36.5 28 33 28h-7v8Z" fill="#fff"/>
   <circle cx="47" cy="17" r="6" fill="#d4a853"/>

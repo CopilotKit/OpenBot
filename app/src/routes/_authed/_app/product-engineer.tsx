@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +93,7 @@ function ProductEngineerPage() {
     abandonProductEngineerRunMutationOptions(queryClient),
   );
 
+  const startTicketFieldId = useId();
   const [ticketId, setTicketId] = useState("");
   const [feedbackByTicket, setFeedbackByTicket] = useState<
     Record<string, string>
@@ -125,11 +126,15 @@ function ProductEngineerPage() {
           className="flex flex-col gap-3 sm:flex-row sm:items-end"
           onSubmit={onStart}
         >
-          <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <label
+            className="flex min-w-0 flex-1 flex-col gap-1.5"
+            htmlFor={startTicketFieldId}
+          >
             <span className="text-sm text-muted-foreground">
               Linear ticket id
             </span>
             <Input
+              id={startTicketFieldId}
               autoComplete="off"
               placeholder="ORC-424"
               value={ticketId}
@@ -298,7 +303,7 @@ function ProductEngineerPage() {
                         render={(props) => (
                           <a
                             {...props}
-                            href={run.prUrl!}
+                            href={run.prUrl}
                             target="_blank"
                             rel="noreferrer"
                           />
@@ -336,11 +341,15 @@ function ProductEngineerPage() {
                         No plan text on this run.
                       </p>
                     )}
-                    <label className="flex flex-col gap-1.5">
+                    <label
+                      className="flex flex-col gap-1.5"
+                      htmlFor={`pe-plan-feedback-${run.ticketId}`}
+                    >
                       <span className="text-sm text-muted-foreground">
                         Feedback to revise the plan (optional for approve)
                       </span>
                       <Textarea
+                        id={`pe-plan-feedback-${run.ticketId}`}
                         placeholder="What should change in the plan before coding?"
                         rows={3}
                         value={feedback}
@@ -428,11 +437,15 @@ function ProductEngineerPage() {
 
                 {run.status === "awaiting_review" ? (
                   <div className="space-y-3">
-                    <label className="flex flex-col gap-1.5">
+                    <label
+                      className="flex flex-col gap-1.5"
+                      htmlFor={`pe-resume-feedback-${run.ticketId}`}
+                    >
                       <span className="text-sm text-muted-foreground">
                         Feedback to resume
                       </span>
                       <Textarea
+                        id={`pe-resume-feedback-${run.ticketId}`}
                         placeholder="What should the Product Engineer change?"
                         rows={4}
                         value={feedback}

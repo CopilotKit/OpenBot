@@ -305,6 +305,8 @@ describe("Product Engineer", () => {
     );
     expect(entry?.writeTools).toEqual([
       "start_product_engineer_run",
+      "approve_product_engineer_plan",
+      "reject_product_engineer_plan",
       "resume_product_engineer_run",
       "approve_product_engineer_run",
     ]);

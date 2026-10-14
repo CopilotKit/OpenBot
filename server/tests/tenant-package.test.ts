@@ -402,33 +402,24 @@ describe("tenant YAML validation", () => {
       fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
     );
 
-    expect(tenantPackage.tenantId).toBe("openbot");
+    expect(tenantPackage.tenantId).toBe("plugiq-agentforce");
     expect(tenantPackage.stylesheet).toBeNull();
     expect(tenantPackage.themeCss).toBe("");
     expect(tenantPackage.checksum).toMatch(/^[a-f0-9]{64}$/);
     expect(tenantPackage.agents).toContainEqual({
       id: "general-assistant",
       name: "General Assistant",
-      title: "Everyday Work",
+      title: "Your everyday AI assistant",
       roleDescription:
-        "Help with everyday work using clear, concise, and accurate answers.",
+        "Help Descasio colleagues plan, write, research, and get everyday work done.",
       avatarSeed: "general-assistant",
       type: "built_in",
       configuration: {
         systemPrompt:
-          "You are a helpful general assistant. Give clear, concise, and accurate answers.",
+          "You are AgentForce, Descasio's helpful general assistant. Give clear, concise, accurate answers and be explicit when a requested company source or integration is unavailable. When someone asks to implement, code, or open a pull request for a Linear ticket, use the Product Engineer tools. Do not claim you edited a repository yourself.",
       },
-      /*
-       * One skill each, and both are gates rather than preferences. `bot-creator` is what makes the
-       * app offer `list_bots`, `read_bot`, `list_bot_skills` and `save_bot`; `skill-creator` is what
-       * makes it offer the four tools that turn an interview into a saved skill. Dropped from the
-       * package, either feature stops working with nothing on any screen to say why, which is why the
-       * pairing is asserted here rather than left to whoever edits the YAML next.
-       */
-      skills: ["bot-creator", "skill-creator"],
+      skills: ["bot-creator", "skill-creator", "implement-a-ticket"],
     });
-    // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
-    // tools rather than being offered everything its grants hold.
     expect(
       tenantPackage.agents.find((agent) => agent.id === "knowledge")?.skills,
     ).toEqual([
@@ -436,6 +427,7 @@ describe("tenant YAML validation", () => {
       "check-a-claim",
       "whats-changed",
       "who-owns-this",
+      "implement-a-ticket",
     ]);
     /*
      * The skill that writes skills, shipped with no declared tools on purpose. Its tools are the app's
@@ -453,7 +445,7 @@ describe("tenant YAML validation", () => {
     expect(tenantPackage.channels).toContainEqual({
       id: "general-assistant",
       name: "General Assistant",
-      description: "Ask for help with everyday work.",
+      description: "Plan, write, research, and get everyday work done.",
       permittedAgents: ["general-assistant"],
       allowedGroups: ["all"],
     });

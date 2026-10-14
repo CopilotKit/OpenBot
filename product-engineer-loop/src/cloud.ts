@@ -24,13 +24,16 @@ export type ProgressUpdate = {
 
 export type OnProgress = (update: ProgressUpdate) => void | Promise<void>;
 
+type CloudAgent = Awaited<ReturnType<typeof Agent.create>>;
+type CloudAgentRun = Awaited<ReturnType<CloudAgent["send"]>>;
+
 function tail(text: string, max = 2_500): string {
   if (text.length <= max) return text;
   return `…${text.slice(-max)}`;
 }
 
 async function streamAndWait(
-  run: Awaited<ReturnType<Awaited<ReturnType<typeof Agent.create>>["send"]>>,
+  run: CloudAgentRun,
   log: (line: string) => void = console.log,
   onProgress?: OnProgress,
 ): Promise<RunOutcome> {
@@ -100,7 +103,7 @@ export async function runImplement(
   onProgress?: OnProgress,
 ): Promise<TicketRun> {
   log("Creating cloud agent…");
-  let agent;
+  let agent: CloudAgent;
   try {
     agent = await Agent.create({
       apiKey: config.cursorApiKey,
@@ -122,7 +125,7 @@ export async function runImplement(
     progress: `Cloud agent created (${agent.agentId}). Open Cursor → Agents → SDK to watch it live.`,
   });
 
-  let run;
+  let run: CloudAgentRun;
   try {
     run = await agent.send(buildImplementPrompt(issue));
   } catch (error) {
@@ -202,7 +205,7 @@ export async function runResume(
     progress: "Resumed cloud agent; waiting for revisions…",
   });
 
-  let run;
+  let run: CloudAgentRun;
   try {
     run = await agent.send(buildResumePrompt(feedback, existing.ticketId));
   } catch (error) {
