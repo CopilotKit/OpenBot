@@ -19,4 +19,9 @@ export {
   reduceQueue,
 } from "./queue";
 export { PLACEHOLDER_COMMANDS } from "./sources";
-export { type AgentOption, type DocumentOption, toAgentOptions, toDocumentOptions } from "./triggers";
+export {
+  type AgentOption,
+  type DocumentOption,
+  toAgentOptions,
+  toDocumentOptions,
+} from "./triggers";

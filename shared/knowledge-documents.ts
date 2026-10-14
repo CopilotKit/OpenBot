@@ -7,7 +7,9 @@ export const KNOWLEDGE_DOCUMENTS_MARKER = "[[openbot-knowledge-documents:";
 export function knowledgeDocumentsSystemContent(
   documentIds: readonly string[],
 ): string | null {
-  const unique = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))];
+  const unique = [
+    ...new Set(documentIds.map((id) => id.trim()).filter(Boolean)),
+  ];
   if (unique.length === 0) return null;
   return `${KNOWLEDGE_DOCUMENTS_MARKER}${unique.join(",")}]]`;
 }

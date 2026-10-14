@@ -150,9 +150,7 @@ export function buildPlanFromIssue(
     "## Out of scope",
     "- Merging the PR",
     "- Work outside the attached repositories",
-    feedback
-      ? ["", "## Revision notes from human", feedback].join("\n")
-      : "",
+    feedback ? ["", "## Revision notes from human", feedback].join("\n") : "",
     "",
     "## After approval",
     "Cursor cloud coding starts only once a human approves this plan in AgentForce.",

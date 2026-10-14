@@ -1920,9 +1920,7 @@ export function createRequestAgents(
    * How `#`-attached company documents are expanded, resolved for whoever is asking.
    * Appended last. Absent means markers stay unexpanded.
    */
-  loadKnowledgeDocumentsForActor?: (
-    actorId: string,
-  ) => LoadKnowledgeDocuments,
+  loadKnowledgeDocumentsForActor?: (actorId: string) => LoadKnowledgeDocuments,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -2102,9 +2100,7 @@ export function mountCopilotRuntime(
    * How `#`-attached company documents are expanded, resolved per person, on both paths below.
    * Appended last. Absent means markers stay unexpanded.
    */
-  loadKnowledgeDocumentsForActor?: (
-    actorId: string,
-  ) => LoadKnowledgeDocuments,
+  loadKnowledgeDocumentsForActor?: (actorId: string) => LoadKnowledgeDocuments,
 ) {
   const { intelligence } = config.runtime;
 

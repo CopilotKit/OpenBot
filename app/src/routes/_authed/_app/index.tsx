@@ -8,7 +8,11 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
-import { Composer, toAgentOptions, toDocumentOptions } from "@/components/channels/composer";
+import {
+  Composer,
+  toAgentOptions,
+  toDocumentOptions,
+} from "@/components/channels/composer";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";

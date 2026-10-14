@@ -10,7 +10,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { knowledgeDocumentsSystemContent } from "../../../../shared/knowledge-documents";
 import { attachmentModality } from "@/components/channels/chat-messages";
-import { toAgentOptions, toDocumentOptions } from "@/components/channels/composer";
+import {
+  toAgentOptions,
+  toDocumentOptions,
+} from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
 import {
   seedMessage,
@@ -741,7 +744,8 @@ export function ChannelChat({
     // A pasted screenshot with no caption is still a message to send: `canSendDraft` already
     // unlocks the button for exactly this case, so refusing it here would leave the button
     // enabled and inert.
-    if (!trimmed && attachments.length === 0 && documentIds.length === 0) return;
+    if (!trimmed && attachments.length === 0 && documentIds.length === 0)
+      return;
 
     turnsRef.current += 1;
     setTurnsInFlight(turnsRef.current);

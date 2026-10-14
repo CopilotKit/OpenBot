@@ -1,9 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
-import {
-  documentKeys,
-  type KnowledgeDocument,
-} from "./queries";
+import { documentKeys, type KnowledgeDocument } from "./queries";
 
 const FALLBACK = "That document could not be saved.";
 
@@ -13,11 +10,7 @@ function invalidateDocuments(queryClient: QueryClient) {
 
 export function createDocumentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (input: {
-      title: string;
-      category: string;
-      body: string;
-    }) =>
+    mutationFn: (input: { title: string; category: string; body: string }) =>
       client<KnowledgeDocument>("/api/documents", "document", {
         method: "POST",
         body: input,

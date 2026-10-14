@@ -151,7 +151,11 @@ function mapError(
   if (/Could not find Linear issue|Linear GraphQL/i.test(message)) {
     return context.json({ error: message }, 404);
   }
-  if (/resume only works|approve only works|approve plan only|revise plan only|no Cursor agent|no plan to approve/i.test(message)) {
+  if (
+    /resume only works|approve only works|approve plan only|revise plan only|no Cursor agent|no plan to approve/i.test(
+      message,
+    )
+  ) {
     return context.json({ error: message }, 409);
   }
   console.error("[product-engineer]", error);

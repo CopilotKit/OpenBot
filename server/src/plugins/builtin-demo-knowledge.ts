@@ -7,7 +7,9 @@ import type { KnowledgeDocumentStore } from "../documents/store";
  */
 let documentStore: KnowledgeDocumentStore | null = null;
 
-export function useKnowledgeDocuments(store: KnowledgeDocumentStore | null): void {
+export function useKnowledgeDocuments(
+  store: KnowledgeDocumentStore | null,
+): void {
   documentStore = store;
 }
 

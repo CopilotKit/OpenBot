@@ -45,13 +45,18 @@ function DocumentsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const listQuery = useQuery(documentsQueryOptions(search));
-  const detailId =
-    mode.kind === "view" || mode.kind === "edit" ? mode.id : "";
+  const detailId = mode.kind === "view" || mode.kind === "edit" ? mode.id : "";
   const detailQuery = useQuery(documentQueryOptions(detailId));
 
-  const createMutation = useMutation(createDocumentMutationOptions(queryClient));
-  const updateMutation = useMutation(updateDocumentMutationOptions(queryClient));
-  const deleteMutation = useMutation(deleteDocumentMutationOptions(queryClient));
+  const createMutation = useMutation(
+    createDocumentMutationOptions(queryClient),
+  );
+  const updateMutation = useMutation(
+    updateDocumentMutationOptions(queryClient),
+  );
+  const deleteMutation = useMutation(
+    deleteDocumentMutationOptions(queryClient),
+  );
 
   if (mode.kind === "create") {
     return (
@@ -256,9 +261,7 @@ function DocumentDetail({
       {loading ? (
         <p className="mt-8 text-sm text-muted-foreground">Loading…</p>
       ) : null}
-      {error ? (
-        <p className="mt-4 text-sm text-destructive">{error}</p>
-      ) : null}
+      {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
       {document ? (
         <article className="mt-8 whitespace-pre-wrap rounded-2xl border bg-card p-6 text-sm leading-relaxed">
           {document.body}
@@ -351,9 +354,7 @@ function DocumentForm({
             onChange={(event) => setBody(event.target.value)}
           />
         </label>
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </div>
     </PageShell>
   );

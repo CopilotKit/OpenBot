@@ -191,7 +191,9 @@ function describe(run: ProductEngineerRunRow): string {
   const lines = [
     `${run.ticketId} — ${run.title}`,
     `status: ${run.status}`,
-    run.agentId ? `cursor agent: ${run.agentId}` : "cursor agent: not assigned yet",
+    run.agentId
+      ? `cursor agent: ${run.agentId}`
+      : "cursor agent: not assigned yet",
     run.prUrl ? `pull request: ${run.prUrl}` : "pull request: none yet",
     `linear: ${run.linearUrl}`,
     `updated: ${run.updatedAt}`,
@@ -224,9 +226,12 @@ export async function callTool(
     switch (toolName) {
       case "start_product_engineer_run": {
         const ticketId = stringArg(args, "ticketId");
-        if (!ticketId) return failure("ticketId is required, for example ORC-424.");
+        if (!ticketId)
+          return failure("ticketId is required, for example ORC-424.");
         if (!connection.actorId) {
-          return failure("This run has no signed-in person to attribute it to.");
+          return failure(
+            "This run has no signed-in person to attribute it to.",
+          );
         }
         const run = await runner.start(ticketId, connection.actorId);
         return asResult(

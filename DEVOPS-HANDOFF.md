@@ -102,5 +102,3 @@ Leave `MANAGED_AGENT_AG_UI_URL` unset in the container unless a Bot is actually 
 Kubernetes: Helm chart is `charts/openbot/`. Full notes: `docs/deployment.md`.
 
 **Size:** 2 GB RAM minimum, 4 GB recommended. Do not set shared memory; Chromium uses `/tmp`.
-
-<!-- CI trigger: verify pipeline (2026-03-18) -->

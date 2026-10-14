@@ -1,10 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
-import {
-  MAX_DOCUMENT_BODY_CHARS,
-  type KnowledgeDocumentStore,
-} from "./store";
+import { MAX_DOCUMENT_BODY_CHARS, type KnowledgeDocumentStore } from "./store";
 
 function parseWriteBody(body: unknown): {
   title: string;
