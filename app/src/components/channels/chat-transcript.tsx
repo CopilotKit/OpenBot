@@ -62,10 +62,10 @@ import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
-  BrowserActivity,
-  groupBrowserSteps,
+  groupToolSteps,
+  ToolActivity,
   type TranscriptItem,
-} from "./browser-activity";
+} from "./tool-activity";
 import {
   attachmentModality,
   type SentAttachment,
@@ -1525,7 +1525,7 @@ export function ChatTranscript({
    * cost was markdown parsing and chart SVGs, and those are skipped by the memoised children below,
    * which is where the 25x came from. This runs per render and is not worth guarding.
    */
-  const items = groupBrowserSteps(toVisibleChatItems(messages));
+  const items = groupToolSteps(toVisibleChatItems(messages));
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -1668,12 +1668,12 @@ export function ChatTranscript({
             </div>
             {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
-              item.kind === "browser" ? (
+              item.kind === "tools" ? (
                 <MessageScrollerItem key={item.id} messageId={item.id}>
                   <Arriving
                     delay={delays.delayFor(item.id, index, items.length)}
                   >
-                    <BrowserActivity
+                    <ToolActivity
                       group={item}
                       active={busy && index === items.length - 1}
                     />

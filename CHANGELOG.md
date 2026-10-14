@@ -32,6 +32,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### A reply's tool calls fold into one line
+
+A Bot that searched, read two pages and checked Drive before answering drew four lines above its
+answer. Adjacent connector calls and browser steps now fold into one line that says what was done,
+such as "Searched the web and read 2 pages", with an icon for each kind of step. It names the step in
+progress while the Bot works, and counts issues when a step was blocked or failed. Opened, it lists
+each step with its query, page or connector, and each step opens to what it was given and what came
+back. A single connector call keeps its own line, and approvals, connection requests and anything the
+app draws itself stay outside the fold.
+
 ### Public-web research works with Exa and Firecrawl, not only Parallel
 
 Four new catalogue entries give a Bot public-web search and page reading without its browser:
