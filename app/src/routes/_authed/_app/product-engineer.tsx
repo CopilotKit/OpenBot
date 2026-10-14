@@ -303,7 +303,7 @@ function ProductEngineerPage() {
                         render={(props) => (
                           <a
                             {...props}
-                            href={run.prUrl}
+                            href={run.prUrl ?? undefined}
                             target="_blank"
                             rel="noreferrer"
                           />

@@ -120,6 +120,7 @@ WORKDIR /app
 # present and broken.
 COPY --from=deps /prod/node_modules node_modules
 COPY --from=deps /prod/server/node_modules server/node_modules
+COPY --from=deps /prod/product-engineer-loop product-engineer-loop
 COPY --from=deps /src/package.json package.json
 COPY --from=deps /src/bun.lock bun.lock
 # The browser's tree is a separate install root with its own lockfile rather than a workspace of the
