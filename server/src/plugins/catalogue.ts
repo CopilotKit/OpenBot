@@ -31,7 +31,10 @@
 import { isNeverAllowedHostname } from "../computer/target";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
 import type { CuratedTransportKind } from "./transport";
-import type { ResearchRole } from "@openbot/shared/research";
+import {
+  type ResearchRole,
+  researchRoleOfTool,
+} from "@openbot/shared/research";
 
 export type CatalogueAuth =
   /** Answers without any credential at all. */
@@ -156,28 +159,7 @@ export type CatalogueEntry = {
    * monitor deletion nobody listed would otherwise classify as a read.
    */
   readTools?: readonly string[];
-  /**
-   * Which of this server's tools do public-web research, by role.
-   *
-   * The roles are what the Bot's guidance and a skill's `@research/search` and `@research/fetch`
-   * declarations are written against, so a research skill works on whichever provider a
-   * deployment connected. The vendor's own names stay here, beside the host they belong to.
-   */
-  research?: ResearchTools;
   docsUrl: string;
-};
-
-/**
- * One provider's public-web research tools.
- *
- * `search` finds sources for a query and `fetch` reads pages by URL. Both are required, because a
- * Bot that can find a page and cannot read it has links and no evidence.
- */
-export type ResearchTools = {
-  search: string;
-  fetch: string;
-  /** How this provider's own parameters are best used, added to the shared guidance verbatim. */
-  notes?: readonly string[];
 };
 
 /** The research role a granted `serverId/toolName` ref plays, or null when it plays none. */
@@ -186,26 +168,8 @@ export function researchRoleFor(ref: string): ResearchRole | null {
   if (typeof ref !== "string") return null;
   const slash = ref.indexOf("/");
   if (slash <= 0) return null;
-  const research = catalogueEntry(ref.slice(0, slash))?.research;
-  const tool = ref.slice(slash + 1);
-  if (research?.search === tool) return "search";
-  if (research?.fetch === tool) return "fetch";
-  return null;
+  return researchRoleOfTool(ref.slice(0, slash), ref.slice(slash + 1));
 }
-
-const PARALLEL_RESEARCH: ResearchTools = Object.freeze({
-  search: "web_search",
-  fetch: "web_fetch",
-  notes: Object.freeze([
-    "Generate one session_id for the conversation and reuse it on related search and fetch calls.",
-    "Omit model_name unless the exact configured model identifier is known.",
-  ]),
-});
-
-const EXA_RESEARCH: ResearchTools = Object.freeze({
-  search: "web_search_exa",
-  fetch: "web_fetch_exa",
-});
 
 /** Exa's research and multi-step agent tools spend credits, so only the three that read are reads. */
 const EXA_READ_TOOLS = Object.freeze([
@@ -213,11 +177,6 @@ const EXA_READ_TOOLS = Object.freeze([
   "web_fetch_exa",
   "web_search_advanced_exa",
 ]);
-
-const FIRECRAWL_RESEARCH: ResearchTools = Object.freeze({
-  search: "firecrawl_search",
-  fetch: "firecrawl_scrape",
-});
 
 /** Crawls, agents, browser sessions and feedback start work or change state at Firecrawl. */
 const FIRECRAWL_WRITE_TOOLS = Object.freeze([
@@ -265,7 +224,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     path: "/mcp",
     auth: { kind: "none" },
     writeTools: Object.freeze([]),
-    research: PARALLEL_RESEARCH,
     docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
   },
   {
@@ -278,7 +236,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     path: "/mcp",
     auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([]),
-    research: PARALLEL_RESEARCH,
     docsUrl: "https://docs.parallel.ai/integrations/mcp/search-mcp",
   },
   {
@@ -292,7 +249,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     auth: { kind: "none" },
     writeTools: Object.freeze([]),
     readTools: EXA_READ_TOOLS,
-    research: EXA_RESEARCH,
     docsUrl: "https://exa.ai/docs/reference/exa-mcp",
   },
   {
@@ -307,7 +263,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     auth: { kind: "deployment-bearer", header: "x-api-key" },
     writeTools: Object.freeze([]),
     readTools: EXA_READ_TOOLS,
-    research: EXA_RESEARCH,
     docsUrl: "https://exa.ai/docs/reference/exa-mcp",
   },
   {
@@ -321,7 +276,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     auth: { kind: "none" },
     writeTools: FIRECRAWL_WRITE_TOOLS,
     readTools: FIRECRAWL_READ_TOOLS,
-    research: FIRECRAWL_RESEARCH,
     docsUrl: "https://docs.firecrawl.dev/mcp-server",
   },
   {
@@ -335,7 +289,6 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     auth: { kind: "deployment-bearer" },
     writeTools: FIRECRAWL_WRITE_TOOLS,
     readTools: FIRECRAWL_READ_TOOLS,
-    research: FIRECRAWL_RESEARCH,
     docsUrl: "https://docs.firecrawl.dev/mcp-server",
   },
 

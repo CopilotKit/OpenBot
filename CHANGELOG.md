@@ -46,6 +46,9 @@ See [docs/web-research.md](docs/web-research.md).
   that change, such as current figures, rankings or recent events, and stops after a search or two.
   Before, every Bot was told not to go looking, so one holding a search tool still answered from
   memory. A Bot with only its browser now says it can open pages but cannot search.
+- **A conversation doesn't say which provider searched.** Research calls show as "Search the web"
+  and "Read web pages" rather than "Web search exa", and the Bot doesn't name the provider unless
+  asked. The Bot's access page still shows which provider it holds.
 - **The shipped `research-public-web` skill declares roles, not Parallel.** Its tools are now
   `@research/search` and `@research/fetch`, which match the search and fetch tools of every research
   provider the Bot was granted. A skill written by a person can declare the same roles, and the

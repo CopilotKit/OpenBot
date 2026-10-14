@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { GrantedTool } from "@openbot/toolkit/granted-tool";
-import { researchRoleOf } from "@openbot/shared/research";
+import {
+  RESEARCH_TOOLS as SHARED_RESEARCH_TOOLS,
+  researchRoleOf,
+} from "@openbot/shared/research";
 import { parse } from "yaml";
 import { z } from "zod";
 import {
@@ -52,7 +55,7 @@ describe("research providers in the catalogue", () => {
   test("names its search and fetch tools, and both read", () => {
     for (const [key, [search, fetch]] of Object.entries(RESEARCH_TOOLS)) {
       const entry = catalogueEntry(key)!;
-      expect(entry.research).toMatchObject({ search, fetch });
+      expect(SHARED_RESEARCH_TOOLS[key]).toMatchObject({ search, fetch });
       expect(classifyTool(entry, search, true)).toBe("read");
       expect(classifyTool(entry, fetch, true)).toBe("read");
       expect(classifyTool(entry, "not_advertised", false)).toBe("write");
@@ -61,6 +64,9 @@ describe("research providers in the catalogue", () => {
       expect(researchRoleFor(`${key}/${fetch}`)).toBe("fetch");
     }
     expect(researchRoleFor("notion/notion-search")).toBeNull();
+    // The app labels research from this table, so every key must be a real catalogue entry.
+    for (const key of Object.keys(SHARED_RESEARCH_TOOLS))
+      expect(catalogueEntry(key)).not.toBeNull();
     // Instructions are built from these, so a tool missing its ref must not throw.
     expect(researchRoleFor(undefined as never)).toBeNull();
     expect(
@@ -136,6 +142,7 @@ describe("what a Bot is told about research", () => {
       "- Exa: mcp__exa__web_search_exa finds sources and mcp__exa__web_fetch_exa reads selected pages.",
     );
     expect(exa).not.toContain("session_id");
+    expect(exa).toContain("Do not name the provider in your answer");
     expect(grantedToolGuidance(pair())).toContain(
       "Parallel: Generate one session_id",
     );

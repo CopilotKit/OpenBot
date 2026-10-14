@@ -8,7 +8,7 @@ import {
   catalogueEntry,
   researchRoleFor,
 } from "./catalogue";
-import type { ResearchRole } from "@openbot/shared/research";
+import { type ResearchRole, RESEARCH_TOOLS } from "@openbot/shared/research";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -224,8 +224,11 @@ function researchGuidance(providers: ResearchProvider[]): string[] {
     "Keep it bounded: a search or two and a read of the best sources, then answer, and say what you could not confirm.",
     "These search the public web; they do not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents.",
     ...providers.flatMap(({ entry }) =>
-      (entry.research?.notes ?? []).map((note) => `${entry.vendor}: ${note}`),
+      (RESEARCH_TOOLS[entry.key]?.notes ?? []).map(
+        (note) => `${entry.vendor}: ${note}`,
+      ),
     ),
+    "Do not name the provider in your answer unless the person asks which one you used: cite the sources you read.",
     "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
   ];
 }

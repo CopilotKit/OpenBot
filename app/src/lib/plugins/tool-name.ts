@@ -1,3 +1,8 @@
+import {
+  RESEARCH_ROLE_LABELS,
+  researchRoleOfTool,
+} from "@openbot/shared/research";
+
 /**
  * A tool call, named the way the person watching would name it.
  *
@@ -22,6 +27,13 @@ export function readToolName(name: string): ToolName {
 
   const [, server, ...rest] = parts;
   const tool = rest.join("__");
+  /*
+   * Research is named for what it did, not for who did it. `web_search_exa` would read "Web search
+   * exa", which tells the person which vendor this deployment buys search from and nothing about
+   * their answer. Which provider is granted is an administrator's fact, on the Bot's access page.
+   */
+  const role = researchRoleOfTool(server ?? "", tool);
+  if (role) return { label: RESEARCH_ROLE_LABELS[role] };
   const label = humanise(tool);
 
   /*

@@ -25,6 +25,8 @@ A skill names the research tools it needs as `@research/search` and `@research/f
 
 ## Choice and controls
 
+In a conversation, research calls are labelled for what they did, "Search the web" and "Read web pages", whichever provider made them, and the Bot does not name the provider unless asked. Which provider a Bot holds is shown on its access page.
+
 A Bot holding more than one provider is told about each and uses the one the person asks for. Administrators can revoke tools, remove a connector or grant another provider. Every call goes through `PluginStore.callTool`, with the usual grants, action policies and audit records; no raw MCP server is added to the agent configuration.
 
 Exa and Firecrawl name the tools that only read (`readTools` in the catalogue), and every other tool they advertise counts as a write. Firecrawl publishes tool families such as `firecrawl_monitor_*`, and Exa's agent tools spend credits, so neither can be safely described by a list of writes alone.
@@ -33,6 +35,6 @@ The provider receives model-selected objectives, search queries, requested publi
 
 ## Adding a provider
 
-A provider is a catalogue entry in `server/src/plugins/catalogue.ts` with a `research: { search, fetch, notes? }` field naming its two tools, plus `readTools` when its write tools cannot be listed exhaustively. A vendor that reads its key from its own header names it in `auth: { kind: "deployment-bearer", header }`. The Bot guidance and the skill roles pick the new entry up with no other change.
+A provider is a catalogue entry in `server/src/plugins/catalogue.ts`, plus its two tools in `RESEARCH_TOOLS` in `shared/research.ts` (`{ search, fetch, notes? }`, keyed by the entry's key). The table is shared because the app labels these tools too. Add `readTools` to the entry when its write tools cannot be listed exhaustively. A vendor that reads its key from its own header names it in `auth: { kind: "deployment-bearer", header }`. The Bot guidance, the skill roles and the transcript labels pick the new entry up with no other change.
 
 Provider documentation: [Parallel](https://docs.parallel.ai/integrations/mcp/search-mcp), [Exa](https://exa.ai/docs/reference/exa-mcp), [Firecrawl](https://docs.firecrawl.dev/mcp-server).
