@@ -41,11 +41,11 @@ jobs:
       ECS_SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
       ECS_SECURITY_GROUP_IDS: ${{ vars.ECS_SECURITY_GROUP_IDS }}
       ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}
-      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_SHA: ${{ github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
