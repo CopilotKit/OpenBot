@@ -132,7 +132,7 @@ jobs:
             .containerDefinitions |= map(
               if .name == $name then
                 .entryPoint = ["sh"]
-                | .command = ["-c", "cd /app/server && bun scripts/migrate.ts"]
+                | .command = ["-c", "cd /app/server && bun scripts/migrate.ts --ssl=require"]
               else . end
             )
           ' /tmp/deploy-task-definition.json > /tmp/migration-task-definition.json
