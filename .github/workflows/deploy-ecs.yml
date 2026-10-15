@@ -172,7 +172,7 @@ jobs:
             printf 'Stop reason: %s\n' "$(printf '%s' "$task" | jq -r '.tasks[0].stoppedReason // "unknown"')"
             printf 'Container exit code: %s\n' "${exit_code:-unknown}"
             printf 'Container reason: %s\n' "$(printf '%s' "$task" | jq -r --arg name "$ECS_CONTAINER_NAME" \
-              '.tasks[0].containers[] | select(.name == $name) | .reason // "none")"
+              '.tasks[0].containers[] | select(.name == $name) | .reason // "none"')"
 
             log_options="$(jq -c --arg name "$ECS_CONTAINER_NAME" \
               '.containerDefinitions[] | select(.name == $name) | .logConfiguration // {}' \
