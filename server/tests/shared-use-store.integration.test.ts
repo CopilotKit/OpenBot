@@ -435,3 +435,7 @@ describe("an app with a duplicate row at its url", () => {
     }
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

@@ -262,3 +262,7 @@ describe("adding a server by URL over HTTP", () => {
     expect(row?.url).toBe("https://legit.vendor.example/mcp");
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

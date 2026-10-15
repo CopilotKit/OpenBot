@@ -1,5 +1,12 @@
 // server/tests/shared-wiring.integration.test.ts
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
@@ -137,4 +144,8 @@ describe("a deployment built without them", () => {
     );
     expect(response.status).toBe(503);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

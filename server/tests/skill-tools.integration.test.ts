@@ -205,3 +205,7 @@ describe("a skill going away", () => {
     expect(left).toHaveLength(0);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

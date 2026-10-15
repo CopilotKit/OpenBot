@@ -1,5 +1,12 @@
 // server/tests/shared-brokered-store.integration.test.ts
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -538,4 +545,8 @@ describe("a duplicate row at an app's url", () => {
       { id: duplicate, accountMode: "shared" },
     ]);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });
