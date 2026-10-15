@@ -1177,6 +1177,6 @@ export function assertActivatable(
   }
   if (otherProviderRows === 0) return;
   throw new BrokerRefusalError(
-    `${self} cannot be activated while ${otherProviderRows} brokered connection${otherProviderRows === 1 ? "" : "s"} still belong${otherProviderRows === 1 ? "s" : ""} to ${other}. Keep both API keys set, and end those connections through the ${other} sunset flow first; switching providers by changing the environment would leave accounts nobody can revoke.`,
+    `${self} cannot be activated while ${otherProviderRows} brokered connection${otherProviderRows === 1 ? "" : "s"} still belong${otherProviderRows === 1 ? "s" : ""} to ${other}. Keep ${other} active — its API key set and OPENBOT_BROKER_PROVIDER=${other.toLowerCase()} — and end those connections first: each person disconnects their own on the connected-accounts page, an administrator disconnects a Shared app's account, or an administrator removes an app, which ends every account connected to it. There is no single action that ends them all. Switching providers by changing the environment would leave accounts nobody can revoke.`,
   );
 }

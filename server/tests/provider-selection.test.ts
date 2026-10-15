@@ -89,7 +89,12 @@ describe("activeProvider", () => {
  * The activation refusal keys on ROWS, never on keys: no database, no key, no vendor package.
  */
 describe("assertActivatable", () => {
-  test("rows for the other provider refuse activation, naming the sunset flow", () => {
+  /*
+   * The refusal names what an operator can actually do today — keep the old provider active and end
+   * its connections through the disconnects and app removal that exist — and never a flow that is
+   * not built.
+   */
+  test("rows for the other provider refuse activation, naming how to end them today", () => {
     let caught: unknown;
     try {
       assertActivatable("arcade", 3);
@@ -97,9 +102,12 @@ describe("assertActivatable", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(BrokerRefusalError);
-    const sentence = brokerSentence(caught);
-    expect(sentence).toContain("sunset");
+    const sentence = brokerSentence(caught) ?? "";
     expect(sentence).toContain("Composio");
+    expect(sentence).toContain("OPENBOT_BROKER_PROVIDER=composio");
+    expect(sentence).toContain("connected-accounts page");
+    expect(sentence).toContain("removes an app");
+    expect(sentence).not.toContain("sunset");
   });
 
   test("zero rows for the other provider lets activation proceed", () => {
@@ -146,7 +154,8 @@ describe("assertActivatable", () => {
     const sentence = brokerSentence(caught);
     expect(sentence).toContain("Composio cannot be activated");
     expect(sentence).toContain("1 brokered connection still belongs to Arcade");
-    expect(sentence).toContain("sunset");
+    expect(sentence).toContain("OPENBOT_BROKER_PROVIDER=arcade");
+    expect(sentence).not.toContain("sunset");
   });
 });
 

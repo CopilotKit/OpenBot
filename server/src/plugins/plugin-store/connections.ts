@@ -377,8 +377,8 @@ export function connectionMethods(context: StoreContext) {
        * below at the ACTIVE provider's canonical url, so another provider's row would be silently
        * dropped from the page. What keeps that unreachable is the startup activation refusal
        * (`assertActivatable`, called from `server/src/index.ts`): it will not boot when the
-       * configured provider differs from the one on the existing rows. The provider sunset flow
-       * relaxes that refusal, and whoever builds it must add the `brokerProvider` predicate here.
+       * configured provider differs from the one on the existing rows. No flow relaxes that refusal
+       * today; whoever builds one must add the `brokerProvider` predicate here.
        */
       const connections = await database
         .select({
@@ -3207,9 +3207,8 @@ export function connectionMethods(context: StoreContext) {
        * revocation requested at the wrong vendor, which would not recognise the connection, and an
        * audit row claiming `vendorRevocationRequested` about access that was never removed. What
        * keeps that unreachable is the startup activation refusal (`assertActivatable`, called from
-       * `server/src/index.ts`): a deployment holding both providers' rows cannot boot. The provider
-       * sunset flow relaxes that refusal, and whoever builds it must add the `brokerProvider`
-       * predicate here.
+       * `server/src/index.ts`): a deployment holding both providers' rows cannot boot. No flow relaxes
+       * that refusal today; whoever builds one must add the `brokerProvider` predicate here.
        */
       const brokered = await database
         .select({ toolkit: brokeredConnections.app })

@@ -38,7 +38,7 @@ export type ProviderWiring = {
  *
  * `misnamed` AND `ambiguous` ARE REFUSED RATHER THAN DEGRADED. A named provider whose key is unset
  * or blank is an operator typo. Both keys set with nothing named is an operator half-way through a
- * sunset who has not said which vendor is live — not a state anybody wants on purpose, because the
+ * switch who has not said which vendor is live — not a state anybody wants on purpose, because the
  * deployment comes up holding two vendor keys and brokering nothing, so every brokered feature is
  * dead. Returning null wiring for either would be a failure nobody is told about at boot: the
  * symptom surfaces much later and far away, as features that simply do not work, and sends an
@@ -146,8 +146,9 @@ function requiredKey(
  * ROWS AT BOTH VENDORS WITH NOTHING ACTIVE IS REFUSED, which is {@link assertActivatable}'s refusal
  * from the other side: that one stops a deployment activating one provider while the other holds
  * rows, and this one stops a deployment reading one vendor's rows as the other's while NOTHING is
- * active. Both say the same thing to an operator — name a provider, and end the other's connections
- * through its own sunset flow.
+ * active. Neither can be got past from inside the deployment: with rows at both vendors every
+ * provider's activation is refused, so the refusal says so and names the manual way out — end one
+ * vendor's accounts in its own dashboard and delete those rows — rather than a flow that is not built.
  *
  * AND NO ROWS AT ALL NAMES AN EMPTY SLICE. A `BrokerProvider` has to be spelled, and with no row of
  * either vendor there is no row to misfile: every `eq(provider, …)` selects nothing whichever name
@@ -176,7 +177,7 @@ export function storedProvider(
         decision.kind === "ambiguous"
           ? `${decision.configured.map((p) => BROKERED_PROFILE[p].envVar).join(" and ")} are both set and OPENBOT_BROKER_PROVIDER is unset`
           : "no broker API key is set"
-      }. Set OPENBOT_BROKER_PROVIDER to the provider those connections are to be read as, and end the other provider's connections through its own sunset flow.`,
+      }. Nothing in this deployment can end them while both are held: activating either provider is refused while the other still holds connections. End one vendor's accounts in that vendor's own dashboard and delete its rows from brokered_connections by hand, then set OPENBOT_BROKER_PROVIDER to the other.`,
     );
   }
   const owner = owners[0];

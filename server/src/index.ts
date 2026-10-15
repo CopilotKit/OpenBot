@@ -799,7 +799,7 @@ const composio =
     : null;
 /*
  * Activation is refused while the OTHER provider still holds connection rows. Keyed on rows, never
- * on keys: having both keys set is the expected state while a sunset is in progress.
+ * on keys: having both keys set is the expected state while the old provider's connections are ended.
  */
 if (wiredProvider) {
   const [{ count: otherProviderRows }] = await database

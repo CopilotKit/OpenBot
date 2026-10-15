@@ -76,6 +76,17 @@ describe("a deployment that cannot name a provider takes the name from its rows"
     expect(() => storedProvider(decision, ["composio", "arcade"])).toThrow(
       /OPENBOT_BROKER_PROVIDER/,
     );
+    // It names the way out that exists — by hand, at a vendor — and never an unbuilt flow.
+    let message = "";
+    try {
+      storedProvider(decision, ["composio", "arcade"]);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain(
+      "delete its rows from brokered_connections by hand",
+    );
+    expect(message).not.toContain("sunset");
   });
 });
 
