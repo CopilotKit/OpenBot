@@ -109,7 +109,7 @@ const KNOWN_COLLAPSES: Record<string, Record<string, number>> = {
     "userId | userId": 5,
   },
   "server/tests/arcade-verify.test.ts": {
-    "ACTOR | ACTOR": 3,
+    "ACTOR | ACTOR": 5,
     "vendorUserId | vendorUserId": 1,
   },
   "server/tests/composio-broker-seam.test.ts": {

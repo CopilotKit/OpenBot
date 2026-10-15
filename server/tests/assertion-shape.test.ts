@@ -877,9 +877,9 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "app/tests/connected-accounts-authorized-notice.test.tsx",
-    line: 101,
+    line: 103,
     shape: "d",
-    finding: "round 2 — connected-accounts-authorized-notice.test.tsx:101-113",
+    finding: "round 2 — connected-accounts-authorized-notice.test.tsx:103-115",
     why: 'test.each([ "no-attempt", "toString", "constructor", "__proto__",',
   },
   {
