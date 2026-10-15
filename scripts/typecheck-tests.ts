@@ -15,6 +15,13 @@
 // is unsound: it drags `src` in under options the project does not use and emits a flood of errors
 // that are artefacts of the flags rather than defects. Any baseline produced that way is garbage.
 //
+// KEYED BY FILE + CODE + MESSAGE, NEVER BY `path:line`. The same discipline as
+// `scripts/mutation-register.ts`: a line-keyed list goes red when someone adds an import above a
+// baselined error, every shifted error reads as "new", and people learn to run `--update` without
+// reading — which is exactly how real debt gets silenced. An entry names the error, not where it
+// sits. The comparison is a MULTISET, so position-free keys lose nothing: two identical errors in
+// one file need two entries, and a third one fails.
+//
 // Usage:
 //   bun scripts/typecheck-tests.ts            # check against the baseline; exit 1 on a new error
 //   bun scripts/typecheck-tests.ts --update   # rewrite the baseline from the current output
@@ -35,8 +42,9 @@ const baselinePath = join(
 const header = [
   "# Frozen type errors in `server/tests`, as reported by",
   "#   bunx tsc --noEmit -p server/tsconfig.tests.json",
-  "# One line per error: <file>:<line>: error TS<code>: <message>. Column and the indented",
-  "# elaboration lines are dropped so the baseline does not churn on reformatting.",
+  "# One line per error: <file>: error TS<code>: <message>. NO line or column: an entry names the",
+  '# error, not where it sits, so adding a line above it does not turn it into a "new" error.',
+  "# The indented elaboration lines are dropped too.",
   "#",
   "# This file is a RECORD OF DEBT, not a list of things that are fine. Every line is a real defect",
   "# that the suite could not see because it was never type-checked. Fixing one and deleting its",
@@ -45,7 +53,8 @@ const header = [
   "# after a deliberate decision that the new entries are pre-existing debt being surfaced rather",
   "# than debt being created.",
   "#",
-  "# Sorted. Duplicates are significant: a repeated line means that many identical errors.",
+  "# Sorted. Duplicates are significant: a line repeated N times allows exactly N identical errors",
+  "# in that file, and an N+1th is new.",
 ];
 
 // `path(line,col): error TScode: message` — the first line of a diagnostic. Elaborations are
@@ -62,8 +71,15 @@ function runTsc(): string {
   return `${result.stdout.toString()}${result.stderr.toString()}`;
 }
 
-function parse(output: string): string[] {
-  const errors: string[] = [];
+// One diagnostic: `key` is what the baseline compares on (file, code, message — no position);
+// `line` is kept only to point at a new error in the failure report.
+interface Diagnostic {
+  key: string;
+  line: number;
+}
+
+function parse(output: string): Diagnostic[] {
+  const errors: Diagnostic[] = [];
   for (const raw of output.split("\n")) {
     const match = DIAGNOSTIC.exec(raw.trimEnd());
     if (!match) continue;
@@ -71,13 +87,15 @@ function parse(output: string): string[] {
     // tsc prints the project-relative path in the location, but absolute paths inside some
     // messages (TS6142 names the resolved file). Strip the checkout prefix so the baseline is
     // the same on a laptop, in a worktree and on CI.
-    const normalized = `${file}:${line}: error ${code}: ${message}`.replaceAll(
+    const key = `${file}: error ${code}: ${message}`.replaceAll(
       `${repoRoot}/`,
       "",
     );
-    errors.push(normalized);
+    errors.push({ key, line: Number(line) });
   }
-  return errors.sort();
+  return errors.sort((a, b) =>
+    a.key === b.key ? a.line - b.line : a.key < b.key ? -1 : 1,
+  );
 }
 
 function readBaseline(): string[] {
@@ -89,7 +107,8 @@ function readBaseline(): string[] {
 }
 
 // Multiset difference: three identical errors in the baseline and four in the output is ONE new
-// error, not zero. A set would swallow it.
+// error, not zero. A set would swallow it. This is what makes a position-free key safe: a second
+// copy of an already-baselined error in the same file still fails.
 function subtract(from: string[], remove: string[]): string[] {
   const counts = new Map<string, number>();
   for (const line of remove) counts.set(line, (counts.get(line) ?? 0) + 1);
@@ -103,7 +122,8 @@ function subtract(from: string[], remove: string[]): string[] {
 }
 
 const output = runTsc();
-const actual = parse(output);
+const diagnostics = parse(output);
+const actual = diagnostics.map((d) => d.key);
 
 // A tsc crash, a bad config or a missing dependency produces output with no parseable diagnostic
 // and a non-empty body. Treat that as a failure rather than as "zero errors, all good" — a gate
@@ -118,6 +138,16 @@ if (process.argv.includes("--update")) {
   writeFileSync(baselinePath, `${[...header, ...actual].join("\n")}\n`);
   console.log(`Wrote ${actual.length} baseline entries to ${baselinePath}`);
   process.exit(0);
+}
+
+// A missing baseline is not "no known debt" — it is a checkout or merge that lost the file, and
+// reporting every frozen error as NEW would bury that. Say what actually happened.
+if (!existsSync(baselinePath) && actual.length > 0) {
+  console.error(
+    `No baseline at ${baselinePath}, and tsc reports ${actual.length} error(s) in server/tests.` +
+      "\nRestore the file; do not regenerate it with --update to get past this.",
+  );
+  process.exit(1);
 }
 
 const baseline = readBaseline();
@@ -137,7 +167,17 @@ if (added.length > 0) {
   console.error(
     `${added.length} NEW type error(s) in server/tests, not in the baseline:\n`,
   );
-  for (const line of added) console.error(`  ${line}`);
+  // The key carries no position, and when a key occurs more often than the baseline allows there
+  // is no telling WHICH occurrence is the new one. So print every line it occurs on.
+  for (const key of new Set(added)) {
+    const lines = diagnostics.filter((d) => d.key === key).map((d) => d.line);
+    const extra = added.filter((k) => k === key).length;
+    const where =
+      lines.length === extra
+        ? `line ${lines.join(", ")}`
+        : `${extra} new among lines ${lines.join(", ")}`;
+    console.error(`  ${key}\n    (${where})`);
+  }
   console.error(
     "\nFix them. Do not run --update to silence them: the baseline records debt that predates" +
       "\nthe gate, and an error reported here was introduced after it.",
