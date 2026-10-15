@@ -72,7 +72,7 @@ jobs:
             | docker login --username AWS --password-stdin "$registry"
           docker buildx build \
             --file Dockerfile \
-            --platform linux/amd64 \
+            --platform linux/arm64 \
             --push \
             --tag "$image" \
             .
