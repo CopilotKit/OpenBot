@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { createPostgresJsClient } from "../db/postgres-js";
 
 /**
  * Live channel activity, from whoever ran an agent to everybody else in the channel.
@@ -128,7 +128,7 @@ export async function startChannelActivityListener(
   databaseUrl: string,
   hub: ChannelEventHub,
 ): Promise<ChannelActivityListener> {
-  const connection = postgres(databaseUrl, { max: 1 });
+  const connection = createPostgresJsClient(databaseUrl, { max: 1 });
 
   /*
    * `onlisten` fires on every establish, reconnects included — the same hook `policy-listener.ts`

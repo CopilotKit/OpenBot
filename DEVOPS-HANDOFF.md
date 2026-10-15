@@ -81,7 +81,7 @@ docker run --rm --env-file .env --entrypoint sh agentforce \
 
 | Variable                                                                      | Notes                                                                |
 | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `DATABASE_URL`                                                                | Postgres with the `vector` extension. Skip if `EMBEDDED_POSTGRES=on` |
+| `DATABASE_URL`                                                                | Postgres with the `vector` extension. Skip if `EMBEDDED_POSTGRES=on`. For RDS/managed DB use `?sslmode=require` on the URL (see `server/src/db/client.ts` and `server/src/db/postgres-js.ts`). Optional: `DATABASE_SSL=require` forces TLS for postgres.js paths (migrations, listeners). |
 | `KEY_ENCRYPTION_KEY`                                                          | `openssl rand -base64 32`. The example key is refused in production  |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence (`cpk-...` key)                              |
 | `OPENAI_API_KEY`                                                              | or whichever model provider you configured                           |

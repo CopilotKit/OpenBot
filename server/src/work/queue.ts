@@ -16,7 +16,7 @@
  * from under the first. Both then ran it. Every time this file names a moment it names it in SQL.
  */
 import { and, eq, gte, isNull, like, lt, or, sql } from "drizzle-orm";
-import postgres from "postgres";
+import { createPostgresJsClient } from "../db/postgres-js";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
 
@@ -45,7 +45,7 @@ export async function startWorkOfferedListener(
   databaseUrl: string,
   onOffered: (kind: string) => void,
 ): Promise<WorkOfferedListener> {
-  const connection = postgres(databaseUrl, { max: 1 });
+  const connection = createPostgresJsClient(databaseUrl, { max: 1 });
 
   await connection.listen(WORK_OFFERED_TOPIC, (payload) => {
     try {

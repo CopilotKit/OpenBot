@@ -15,7 +15,7 @@
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
+import { createPostgresJsClient } from "../src/db/postgres-js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -30,7 +30,10 @@ if (!databaseUrl) {
  * Migrations are a single ordered conversation with the database, and a pool would let two
  * statements that must be ordered land on different connections.
  */
-const client = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+const client = createPostgresJsClient(databaseUrl, {
+  max: 1,
+  onnotice: () => {},
+});
 
 try {
   await migrate(drizzle(client), {
