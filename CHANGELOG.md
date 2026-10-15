@@ -32,6 +32,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### No-sign-in startup rejects addresses without a host
+
+With `OPENBOT_SINGLE_USER=true`, an address such as `example.com:3010` in `OPENBOT_PUBLIC_URL`,
+`OPENBOT_APP_URL` or `TRUSTED_ORIGINS` now refuses startup. It previously counted as a private
+network address and only warned, even though the missing URL scheme left its host unidentified.
+
 ### A reply's tool calls fold into one line
 
 A Bot that searched, read two pages and checked Drive before answering drew four lines above its
