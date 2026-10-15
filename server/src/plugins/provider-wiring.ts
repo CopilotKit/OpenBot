@@ -184,3 +184,33 @@ export function storedProvider(
   // No rows of either vendor. See the last paragraph above: this labels an empty set.
   return "composio";
 }
+
+/**
+ * Where Arcade's custom user verifier must point: the plugin routes are mounted at `/api/plugins`
+ * (`app.ts`) and the verify route is `/arcade/verify` on them (`route-groups/connections.ts`).
+ */
+export const ARCADE_VERIFY_PATH = "/api/plugins/arcade/verify";
+
+/**
+ * The startup warning an Arcade deployment prints about its verifier, because nothing can check it.
+ *
+ * THE SETTING IS NOT READABLE. Which verifier an Arcade project uses is set by hand in Arcade's
+ * dashboard, and neither the SDK this deployment pins (`@arcadeai/arcadejs`, whose admin surface is
+ * auth providers, secrets and user connections) nor Arcade's documented API reads it back. So the
+ * deployment cannot tell a correctly pointed project from one left at Arcade's built-in verifier,
+ * and says so once at startup rather than staying silent about the one step it depends on.
+ *
+ * LEFT AT THE DEFAULT, THIS DEPLOYMENT'S VERIFY ROUTE IS NEVER CALLED. That route is the return leg
+ * that binds a consent to the attempt that started it, records the connection and files its audit
+ * entry; with Arcade's own verifier none of that runs, and nothing in this deployment's logs says so.
+ *
+ * Takes the configured public origin (`OPENBOT_PUBLIC_URL`, else `BETTER_AUTH_URL`, already stripped
+ * of trailing slashes by config) and names the exact address to paste, or says which variable is
+ * missing when there is none.
+ */
+export function arcadeVerifierNotice(publicUrl: string | undefined): string {
+  const address = publicUrl
+    ? `${publicUrl.replace(/\/+$/, "")}${ARCADE_VERIFY_PATH}`
+    : `<this deployment's public origin>${ARCADE_VERIFY_PATH} (OPENBOT_PUBLIC_URL and BETTER_AUTH_URL are both unset, so this deployment does not know its own origin; set one)`;
+  return `Arcade is the active broker, and this deployment cannot check which user verifier its Arcade project uses: Arcade has no API that reads that setting. Unless the project's verifier is set to custom, pointing at ${address}, this deployment's verify route is never called: no consent is bound to the attempt that started it, and none is recorded or audited when it returns. Set it in the Arcade dashboard; see docs/plugins/arcade.md, "The verifier URL is the one dashboard-only step".`;
+}

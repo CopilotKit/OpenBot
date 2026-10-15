@@ -200,6 +200,7 @@ import {
   createSharedUseStore,
 } from "./plugins/shared-use-store";
 import {
+  arcadeVerifierNotice,
   selectProviderWiring,
   storedProvider,
 } from "./plugins/provider-wiring";
@@ -806,6 +807,13 @@ if (wiredProvider) {
     .from(brokeredConnections)
     .where(ne(brokeredConnections.provider, wiredProvider));
   assertActivatable(wiredProvider, otherProviderRows);
+}
+/*
+ * Arcade's verifier is set by hand in Arcade's dashboard and cannot be read back, so an Arcade
+ * deployment says once, at startup, which address it must be set to. See `arcadeVerifierNotice`.
+ */
+if (wiredProvider === "arcade") {
+  console.warn(arcadeVerifierNotice(config.publicUrl));
 }
 
 /**

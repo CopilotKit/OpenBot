@@ -107,6 +107,23 @@ followed by the path, so paste:
 It is the API's origin, not the browser app's, where the two differ. A browser that arrives there
 is sent on to the connected-accounts page, with a reason beside it if the consent was refused.
 
+**Nothing checks this setting, so the deployment warns about it instead.** Arcade has no API that
+reads which verifier a project uses, so this deployment cannot tell a correctly pointed project from
+one left at Arcade's default. Every time it starts with Arcade active it logs a warning naming the
+exact address to set — built from `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`) — and pointing here.
+
+**If the project is left at Arcade's built-in verifier, this deployment's verify route is never
+called.** That route is the return leg that binds a consent to the attempt that started it, checks
+that the identity returning is the one the attempt was minted for, records the connection and files
+its `mcp.account_connected` audit entry. None of that happens, and nothing in this deployment's logs
+says why. What was observed by hand (see the top of this page) is that Arcade's built-in verifier
+refuses a consent for any `user_id` that is not a member of the Arcade project — and the ids this
+deployment sends are its own internal ids, not project members — so in practice **nobody can
+connect**: the person is left on Arcade's
+page with _"the authorization process was not completed"_. A consent that does complete at Arcade
+that way is bound to no attempt; the connected-accounts page may later record it when it asks Arcade
+whether the person is connected, but without the identity check the verify leg exists to make.
+
 > **Do not save the custom-verifier setting without a URL.** It switches off the path that currently
 > works and switches on nothing — and it presents as _this deployment's own code failing_: consents
 > that used to complete stop completing, with nothing in this deployment's logs to explain it. It is
