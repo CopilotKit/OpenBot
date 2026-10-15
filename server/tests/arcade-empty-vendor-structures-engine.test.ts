@@ -269,7 +269,7 @@ describe("an Arcade action is recorded under a name a model may be offered", () 
     /*
      * ONLY THE VENDOR'S OWN PREFIX IS REMOVED. A listing that qualifies an action with some other
      * name is not something to repair by guessing: the name is kept as it stands and the guard in
-     * `storableTools` is what refuses it, by name, where it has a provenance.
+     * `storableTools` is what leaves it out and names it, where it has a provenance.
      */
     engine([{ ...toolRow("Other", null), qualified_name: "Elsewhere.Other" }]);
 

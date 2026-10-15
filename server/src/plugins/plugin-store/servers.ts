@@ -48,6 +48,7 @@ import {
   PluginInvariantError,
   type ServerAddress,
   type ServerRecord,
+  type StorableTool,
   schemeFor,
   storableTools,
   unlistedAdvertisedTools,
@@ -1660,6 +1661,9 @@ export function serverMethods(context: StoreContext) {
        * refreshes before it answers, so the add died AFTER its server row and its audit row had
        * committed, leaving a configured app nobody had finished configuring.
        *
+       * A NAME NO MODEL COULD BE OFFERED IS NOT ONE OF THESE THROWS. It costs only its own action:
+       * it comes back in `skipped` and is reported below, while the rest of the listing is stored.
+       *
        * RECORDED RATHER THAN RAISED, which is the same answer the vendor `try` gives, because this
        * is the same kind of event: the app was reached, it answered, and its answer is not something
        * this deployment can write down. The actions it already holds are kept, no `toolsRefreshedAt`
@@ -1669,9 +1673,10 @@ export function serverMethods(context: StoreContext) {
        * `withoutStatement` rather than `error.message`, so that the one shape whose message must
        * never travel cannot reach the column even from a line that should never produce one.
        */
-      let storable: ReturnType<typeof storableTools>;
+      let storable: StorableTool[];
+      let skipped: string[];
       try {
-        storable = storableTools(serverId, listed);
+        ({ rows: storable, skipped } = storableTools(serverId, listed));
       } catch (error) {
         const reason =
           error instanceof Error ? withoutStatement(error) : String(error);
@@ -1690,6 +1695,65 @@ export function serverMethods(context: StoreContext) {
           })
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
+      }
+
+      /*
+       * ACTIONS LEFT OUT FOR THEIR NAMES, said where the person who pressed Refresh will read it.
+       *
+       * CRITERION. A name {@link storableTools} skipped is named in `lastError` — the column the
+       * Plugins page draws and the refresh route hands back — and in a warning with the server id,
+       * and costs only itself: every other action in the listing is still recorded.
+       *
+       * REASON. The guard used to refuse the whole listing over one name, and the MCP spec allows a
+       * dot in a tool name, so a custom server with one dotted action stored nothing on its add and
+       * froze on every refresh after. Skipped silently instead, the action would simply be missing
+       * with nobody told why. `lastError` rather than a column of its own, because it is already
+       * the one sentence an administrator reads about the last refresh, and this is that sentence.
+       *
+       * Capped at 400 like every other sentence in the column; the warning carries every name
+       * whatever the cap keeps.
+       */
+      const skippedSentence =
+        skipped.length > 0
+          ? `This app listed ${skipped.length === 1 ? "an action" : `${skipped.length} actions`} that cannot be offered to a model, so ${skipped.length === 1 ? "it was" : "they were"} left out: ${skipped.map((name) => `"${name}"`).join(", ")}. A tool name may only use letters, digits, underscores and hyphens.`
+          : null;
+      if (skipped.length > 0) {
+        console.warn(
+          JSON.stringify({
+            type: "mcp-tools-unofferable-names-skipped",
+            serverId,
+            names: skipped,
+          }),
+        );
+      }
+
+      /*
+       * A LISTING WHERE NOTHING SURVIVED THE GUARD IS THE EMPTY ANSWER BY ANOTHER ROUTE, and is kept
+       * like one — see the guard on an empty listing above. Before names were skipped, a listing of
+       * nothing but unofferable names threw and kept what was held; replacing with nothing here
+       * would be the deletion that guard exists to prevent, arriving through a vendor that renamed
+       * every action at once.
+       */
+      if (storable.length === 0 && skippedSentence !== null) {
+        const held = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+
+        if (held.length > 0) {
+          await database
+            .update(mcpServers)
+            .set({
+              lastError:
+                `Nothing else was listed, so the ${held.length} actions already recorded for this app were kept rather than deleted. ${skippedSentence}`.slice(
+                  0,
+                  400,
+                ),
+              updatedAt: new Date(),
+            })
+            .where(eq(mcpServers.id, serverId));
+          return { tools: held.length };
+        }
       }
 
       /*
@@ -1750,7 +1814,8 @@ export function serverMethods(context: StoreContext) {
         .update(mcpServers)
         .set({
           toolsRefreshedAt: new Date(),
-          lastError: null,
+          // Cleared on a clean listing; on one with names left out, those names — see above.
+          lastError: skippedSentence?.slice(0, 400) ?? null,
           updatedAt: new Date(),
         })
         .where(eq(mcpServers.id, serverId));

@@ -483,9 +483,12 @@ export async function listTools(connection: {
  *
  * ONLY THE VENDOR'S OWN PREFIX IS REMOVED, and only when the remainder stands on its own. Anything
  * else — a differently-qualified name, a second dot, a character no tool name may carry — is left
- * for the guard in `storableTools` to refuse by name, because a listing this does not recognise is
- * not something to repair by guessing. Dropped here rather than refused outright for the one case
- * the vendor's own schema permits and this deployment can do nothing with: an empty remainder.
+ * for the guard in `storableTools`, which leaves that one action out and names it on the app's page
+ * while the rest of the toolkit is recorded, because a listing this does not recognise is not
+ * something to repair by guessing. That guard is the safety net this function relies on: whatever
+ * passes through here unrepaired never reaches a model. Dropped here rather than skipped there for
+ * the one case the vendor's own schema permits and this deployment can do nothing with: an empty
+ * remainder.
  */
 function offerableName(qualifiedName: string, toolkit: string): string | null {
   const prefix = `${toolkit}.`;

@@ -607,21 +607,17 @@ export function storableSchema(
  *
  * FIRST OCCURRENCE WINS, and the order is the vendor's own. Anything else needs a rule for which
  * of two identical names is the real one, and there is no such rule.
+ *
+ * CRITERION FOUR. No row carries a name a model cannot be offered, and every name left out for that
+ * reason comes back in `skipped`, once, spelled as the vendor listed it — so the caller can say
+ * which actions were not recorded rather than leave their absence for somebody to notice.
  */
-export function storableTools(serverId: string, listed: ListedTool[]) {
-  const byName = new Map<
-    string,
-    {
-      serverId: string;
-      name: string;
-      vendorName: string;
-      description: string;
-      inputSchema: Record<string, unknown>;
-      effect: "read" | "write" | null;
-      destructive: boolean;
-      version: string | null;
-    }
-  >();
+export function storableTools(
+  serverId: string,
+  listed: ListedTool[],
+): { rows: StorableTool[]; skipped: string[] } {
+  const byName = new Map<string, StorableTool>();
+  const skipped = new Set<string>();
 
   for (const tool of listed) {
     const name = tool.name.replaceAll(NUL, "");
@@ -635,15 +631,16 @@ export function storableTools(serverId: string, listed: ListedTool[]) {
      * request naming `tools[47]`, with no mention of the app, the action or the refresh that
      * recorded it. A person reading that has nothing to act on.
      *
-     * SO IT REFUSES HERE, WHERE THE NAME HAS A PROVENANCE. `refreshTools` runs this before its
-     * transaction and maps a throw to "nothing was refreshed and the actions already recorded are
-     * kept", so an app that starts publishing an unofferable name keeps working with what it had
-     * and says what is wrong on its own page.
+     * SKIPPED AND NAMED, NOT REFUSED. This used to throw, which cost the whole listing for one
+     * name: the MCP spec allows a dot in a tool name, so a custom server with a single dotted
+     * action stored none of its others on an add and froze its list on every refresh after. The
+     * guarantee that matters — the name never reaches a model — holds either way; what skipping
+     * changes is that the rest of the app keeps working. The name comes back to the caller, which
+     * says on the app's own page what was left out.
      */
     if (!OFFERABLE_TOOL_NAME.test(name)) {
-      throw new PluginInvariantError(
-        `${serverId} published an action named "${name}", which cannot be offered to a model: a tool name may only use letters, digits, underscores and hyphens. Nothing was refreshed and the actions already recorded for this app are kept.`,
-      );
+      skipped.add(name);
+      continue;
     }
     if (byName.has(name)) continue;
     byName.set(name, {
@@ -684,8 +681,20 @@ export function storableTools(serverId: string, listed: ListedTool[]) {
     });
   }
 
-  return [...byName.values()];
+  return { rows: [...byName.values()], skipped: [...skipped] };
 }
+
+/** One row {@link storableTools} hands to the `mcp_tools` insert. */
+export type StorableTool = {
+  serverId: string;
+  name: string;
+  vendorName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  effect: "read" | "write" | null;
+  destructive: boolean;
+  version: string | null;
+};
 
 export function isDeploymentFault(error: unknown): error is Error {
   return (
@@ -752,9 +761,10 @@ export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
  * THE ONLY SHAPE A MODEL TOOL NAME MAY TAKE, as the model API enforces it: `^[a-zA-Z0-9_-]+$`.
  *
  * Declared here beside {@link toolNameFor}, which is the function that has to satisfy it, and
- * applied in {@link storableTools}, which is the one door every transport's listing goes through.
- * The prefix and separator this module splices in are themselves made of these characters, so a
- * `name` that passes is an offered name that passes.
+ * applied in {@link storableTools}, which is the one door every transport's listing goes through and
+ * which leaves out — and reports — any name that fails it. The prefix and separator this module
+ * splices in are themselves made of these characters, so a `name` that passes is an offered name
+ * that passes.
  */
 export const OFFERABLE_TOOL_NAME = /^[a-zA-Z0-9_-]+$/;
 

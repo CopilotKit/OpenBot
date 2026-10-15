@@ -3320,6 +3320,127 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * A name the model API would refuse costs that one action, not the whole listing.
+   *
+   * CRITERION. A listing with one dotted name among valid ones stores the valid ones, stamps the
+   * refresh, and names the dotted one in `lastError`, which is what the Plugins page draws.
+   *
+   * REASON. The MCP spec allows a dot in a tool name, and `storableTools` used to refuse the whole
+   * listing over one. A custom server with a single such action then stored nothing on its add and
+   * kept whatever it had on every refresh after, frozen, with the one sentence about it the only
+   * sign anything had happened.
+   */
+  test("a dotted MCP tool name is skipped and named, and the rest are stored", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion-fetch",
+          description: "An ordinary name.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "notion.export",
+          description: "A name the MCP spec allows and a model API refuses.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "notion-create-pages",
+          description: "Another ordinary name.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 2 });
+
+        const rows = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId))
+          .orderBy(asc(mcpTools.name));
+        expect(rows.map((row) => row.name)).toEqual([
+          "notion-create-pages",
+          "notion-fetch",
+        ]);
+
+        const [server] = await database
+          .select({
+            lastError: mcpServers.lastError,
+            toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+          })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        // Something was learned, so the refresh is stamped — and the one thing not learned is
+        // said where the administrator who pressed Refresh will read it.
+        expect(server?.toolsRefreshedAt).not.toBeNull();
+        expect(server?.lastError).toContain('"notion.export"');
+        expect(server?.lastError).not.toContain("notion-fetch");
+      },
+    );
+  });
+
+  /**
+   * A listing where NOTHING survives is the empty answer by another route, and is kept like one.
+   *
+   * CRITERION. Held actions are not deleted when every name the vendor listed was skipped; the
+   * skipped names are reported and the held count is returned.
+   *
+   * REASON. Before skipping, a wholly unofferable listing threw and kept what was held. Skipping
+   * without this would turn that into a replace with nothing — the same deletion the empty-listing
+   * guard exists to prevent, arriving through a vendor that renamed everything.
+   */
+  test("a listing whose every name is skipped keeps the actions already held", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    await withMockedNotionListing(
+      dynamicServerId,
+      [
+        {
+          name: "notion.fetch",
+          description: "Renamed, and unofferable as renamed.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => {
+        await database
+          .delete(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId));
+        await database.insert(mcpTools).values({
+          serverId: dynamicServerId,
+          name: "notion-fetch",
+          vendorName: "notion-fetch",
+          description: "Held from an earlier listing.",
+        });
+
+        expect(
+          await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+        ).toEqual({ tools: 1 });
+
+        const rows = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, dynamicServerId));
+        expect(rows.map((row) => row.name)).toEqual(["notion-fetch"]);
+
+        const [server] = await database
+          .select({ lastError: mcpServers.lastError })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, dynamicServerId));
+        expect(server?.lastError).toContain('"notion.fetch"');
+        expect(server?.lastError).toContain("kept");
+      },
+    );
+  });
+
+  /**
    * What a failed refresh writes into `lastError`, and how much of it.
    *
    * The column is drawn on the admin page and parts of the sentence come from a vendor, so it is not

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   OFFERABLE_TOOL_NAME,
-  PluginInvariantError,
   storableTools,
   toolNameFor,
 } from "../src/plugins/plugin-store/model";
@@ -17,27 +16,35 @@ import {
  * whole request, naming an index, mentioning neither the app nor the action nor the refresh that
  * recorded it. Whoever read that had nothing to act on.
  */
-describe("a listing may not record a name the model API would refuse", () => {
+describe("a listing never records a name the model API would refuse", () => {
   const listed = (name: string) => [{ name, description: "", inputSchema: {} }];
 
-  test("a dotted name is refused, and the sentence names the app and the action", () => {
-    expect(() =>
-      storableTools("arcade-Gmail", listed("Gmail.ListEmails")),
-    ).toThrow(PluginInvariantError);
-
+  test("a dotted name is skipped and named, and the rest of the listing is stored", () => {
     /*
-     * THE TWO THINGS A READER NEEDS, checked rather than assumed: which app published it and what
-     * it was called. The old failure carried neither.
+     * SKIPPED, NOT REFUSED. The MCP spec allows a dot in a tool name, so a custom server with one
+     * dotted action among forty ordinary ones is a server working as its author meant. Refusing the
+     * whole listing stored none of the forty on an add, and froze the list on every refresh after;
+     * skipping the one name keeps it away from the model and keeps the rest offered.
      */
-    try {
-      storableTools("arcade-Gmail", listed("Gmail.ListEmails"));
-      throw new Error("expected a refusal");
-    } catch (error) {
-      expect((error as Error).message).toContain("arcade-Gmail");
-      expect((error as Error).message).toContain("Gmail.ListEmails");
-      // And says what was NOT done, because a refused refresh leaves the held actions standing.
-      expect((error as Error).message).toContain("kept");
-    }
+    const { rows, skipped } = storableTools("notes", [
+      { name: "search", description: "", inputSchema: {} },
+      { name: "notes.export", description: "", inputSchema: {} },
+      { name: "create-note", description: "", inputSchema: {} },
+    ]);
+
+    expect(rows.map((row) => row.name)).toEqual(["search", "create-note"]);
+    // The name as the vendor listed it, which is what an administrator will look for.
+    expect(skipped).toEqual(["notes.export"]);
+  });
+
+  test("a name skipped twice is reported once", () => {
+    const { rows, skipped } = storableTools("arcade-Gmail", [
+      ...listed("Gmail.ListEmails"),
+      ...listed("Gmail.ListEmails"),
+    ]);
+
+    expect(rows).toEqual([]);
+    expect(skipped).toEqual(["Gmail.ListEmails"]);
   });
 
   test("the names the other transports publish are untouched", () => {
@@ -46,11 +53,15 @@ describe("a listing may not record a name the model API would refuse", () => {
      * deployment: the only non-alphanumeric character in any name those transports publish is `_`.
      * A guard that refused them would take every working connector down with it.
      */
-    const rows = storableTools("gmail", listed("GMAIL_FETCH_EMAILS"));
+    const { rows, skipped } = storableTools(
+      "gmail",
+      listed("GMAIL_FETCH_EMAILS"),
+    );
 
     expect(rows).toMatchObject([
       { name: "GMAIL_FETCH_EMAILS", vendorName: "GMAIL_FETCH_EMAILS" },
     ]);
+    expect(skipped).toEqual([]);
   });
 
   test("a transport that draws no distinction records the same string twice", () => {
@@ -60,13 +71,13 @@ describe("a listing may not record a name the model API would refuse", () => {
      * about to be made or a gate about to be answered; a tri-state there is a branch each one could
      * get wrong separately.
      */
-    expect(storableTools("notes", listed("search"))).toMatchObject([
+    expect(storableTools("notes", listed("search")).rows).toMatchObject([
       { name: "search", vendorName: "search" },
     ]);
   });
 
   test("a transport's own spelling is kept when it gives one", () => {
-    const rows = storableTools("arcade-Gmail", [
+    const { rows } = storableTools("arcade-Gmail", [
       {
         name: "ListEmails",
         vendorName: "Gmail.ListEmails",
@@ -93,7 +104,7 @@ describe("a listing may not record a name the model API would refuse", () => {
       "ListEmails",
       "a-b_C9",
     ]) {
-      const [row] = storableTools("server-id", listed(name));
+      const [row] = storableTools("server-id", listed(name)).rows;
       expect(OFFERABLE_TOOL_NAME.test(row!.name)).toBe(true);
       expect(toolNameFor(`server-id/${row!.name}`)).toMatch(/^[a-zA-Z0-9_-]+$/);
     }
