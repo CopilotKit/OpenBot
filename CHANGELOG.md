@@ -32,6 +32,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### `setup-learning.ts` runs on Windows
+
+On Windows, `bun scripts/setup-learning.ts` stopped at once with `spawn npx.cmd EINVAL` and wrote
+nothing to `.env`. Since CVE-2024-27980, Node and Bun refuse to start a `.cmd` without a shell, and
+`npx` is one there. The CopilotKit CLI is now started through `cmd.exe` on Windows. An argument the
+shell would run or expand, such as a project id containing `&` or `%`, is refused instead of passed.
+A CLI that outlives its two minutes now has its whole process tree stopped. The server's own
+Learning setup at boot calls the CLI the same way, and is fixed with it.
+
 ### A reply's tool calls fold into one line
 
 A Bot that searched, read two pages and checked Drive before answering drew four lines above its
