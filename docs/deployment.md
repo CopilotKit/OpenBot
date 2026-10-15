@@ -198,7 +198,8 @@ have provisioned the AWS resources below; it does not create them.
 Before enabling it:
 
 - Create an ECR repository and an ECS cluster, Fargate service, task definition, and task execution
-  role. The task definition must use `awsvpc` and `X86_64`, include the application container, and
+  role. The task definition must use `awsvpc` and `ARM64` to match the image built by this workflow,
+  include the application container, and
   reference the RDS connection and application secrets from Secrets Manager. Give its task role and
   execution role the permissions they need. The GitHub OIDC role needs ECR image-push permissions,
   ECS describe/register/run/update permissions, and `iam:PassRole` for the task and execution roles;

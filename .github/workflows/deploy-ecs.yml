@@ -69,16 +69,30 @@ jobs:
           account_id="$(aws sts get-caller-identity --query Account --output text)"
           registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           image_tag="${SOURCE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          image="${registry}/${ECR_REPOSITORY}:${image_tag}"
+          tagged_image="${registry}/${ECR_REPOSITORY}:${image_tag}"
 
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$registry"
           docker buildx build \
             --file Dockerfile \
             --platform linux/arm64 \
+            --provenance=false \
             --push \
-            --tag "$image" \
+            --tag "$tagged_image" \
             .
+
+          # ECS/Fargate should pull the exact single-platform manifest that was just pushed,
+          # rather than resolving a mutable tag at task start.
+          digest="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$image_tag" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::ECR did not return a valid digest for $tagged_image (got: $digest)."
+            exit 1
+          fi
+          image="${registry}/${ECR_REPOSITORY}@${digest}"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Prepare task definitions
@@ -153,7 +167,26 @@ jobs:
             '.tasks[0].containers[] | select(.name == $name) | .exitCode // empty')"
           if [ "$exit_code" != "0" ]; then
             echo "::error::The database migration task did not exit successfully."
-            printf '%s\n' "$task"
+            printf 'Task: %s\n' "$task_arn"
+            printf 'Stop code: %s\n' "$(printf '%s' "$task" | jq -r '.tasks[0].stopCode // "unknown"')"
+            printf 'Stop reason: %s\n' "$(printf '%s' "$task" | jq -r '.tasks[0].stoppedReason // "unknown"')"
+            printf 'Container exit code: %s\n' "${exit_code:-unknown}"
+            printf 'Container reason: %s\n' "$(printf '%s' "$task" | jq -r --arg name "$ECS_CONTAINER_NAME" \
+              '.tasks[0].containers[] | select(.name == $name) | .reason // "none")"
+
+            log_options="$(jq -c --arg name "$ECS_CONTAINER_NAME" \
+              '.containerDefinitions[] | select(.name == $name) | .logConfiguration // {}' \
+              /tmp/task-definition.json)"
+            log_group="$(printf '%s' "$log_options" | jq -r '.options["awslogs-group"] // empty')"
+            log_prefix="$(printf '%s' "$log_options" | jq -r '.options["awslogs-stream-prefix"] // empty')"
+            if [ -n "$log_group" ] && [ -n "$log_prefix" ]; then
+              task_id="${task_arn##*/}"
+              printf 'CloudWatch log group: %s\n' "$log_group"
+              printf 'CloudWatch log stream: %s/%s/%s\n' \
+                "$log_prefix" "$ECS_CONTAINER_NAME" "$task_id"
+            else
+              echo "No awslogs group/stream prefix is configured for this container; inspect the stopped task in the ECS console."
+            fi
             exit 1
           fi
 
