@@ -11,8 +11,21 @@ page is about those, and about what to tell somebody when a connection looks wro
 Read [Composio](composio.md) first if you have not: what a broker is, what Personal and Shared mean,
 the approval rules and the audit trail are the same here and are not repeated.
 
-Some things on this page are stated as **unproven**, and the last section lists them. Everything
-else marked _measured_ was observed against a live Arcade project.
+Some things on this page are stated as **unproven**, and the last section lists them. What is
+marked _measured_ was observed by hand against a live Arcade project during development, in two
+rounds, and **nothing in CI dials Arcade** — the vendor's behaviour can change without any check
+here noticing:
+
+- **Before this page was first written (2026-10-12)**, with a throwaway script that is not in this
+  repository: the toolkit classification counts, GitHub's 43 of 43, Google's first 11 of 30, and the
+  default-verifier failure below.
+- **Once, on 2026-10-13**, with `server/tests/arcade-live.test.ts` (`ARCADE_API_KEY=… bun run
+  test:live-arcade`), which drives this deployment's Arcade adapter against the real API with a
+  stand-in for its verify route, and needs a person at a browser to consent: the `provider_id`
+  shapes, the shared Google connection, Google's 0 → 11 of 30, and the wrong-user answer. That run
+  came back 9 passed, 3 failed — all three the suite's own mistakes, corrected afterwards from what
+  it measured — and the corrected suite has not been run since. Without a key every case in it
+  skips, which is what CI does.
 
 ## Who sets what, and where
 
@@ -136,7 +149,7 @@ The shape is Composio's: enable an app, grant its actions to a Bot, and each per
 own account (or an administrator connects a Shared app's account). Two things are different and
 worth reading before pressing **Add**.
 
-### Toolkits are curated or they are wrappers, and the difference is measured
+### Toolkits are curated or they are wrappers, and the difference was measured
 
 Every action carries a classification — whether it reads or writes, whether it is destructive — and
 what OpenBot asks before running it depends on that classification. Arcade publishes it as
@@ -161,18 +174,19 @@ Do not tell anybody that Arcade gives least-privilege access. It is true for som
 false for others, and the same product is on both sides of the line.
 
 Arcade asks for consent per action. What that consent _covers_ depends on whether the provider
-issues per-request scopes. Measured, through a completed consent, from a clean baseline:
+issues per-request scopes. Measured by hand (see the top of this page), through a completed consent,
+from a clean baseline:
 
 | Provider                  | Scopes per action                                   | One read consent authorized | Isolation |
 | ------------------------- | --------------------------------------------------- | --------------------------- | --------- |
 | Google (`Gmail`)          | `gmail.readonly` vs `gmail.send` vs `gmail.compose` | **11 of 30**                | yes       |
 | GitHub (via a GitHub App) | **none, for any action**                            | **43 of 43**                | no        |
 
-The Google row has since been re-measured through this deployment's own code against the live API,
-from a clean baseline and one real consent: before consenting, **0 of 30** scope-carrying `Gmail`
-actions were authorized; after consenting to a single action (`Gmail.GetEmail`), **11 of 30** — and
-**nothing outside the scopes that consent granted**. Per-action isolation on Google holds, measured
-twice now and no longer resting on the throwaway harness that first found it.
+The Google row was observed a second time in the one run of the live suite on 2026-10-13, through
+this deployment's Arcade adapter, from a clean baseline and one real consent: before consenting,
+**0 of 30** scope-carrying `Gmail` actions were authorized; after consenting to a single action
+(`Gmail.GetEmail`), **11 of 30** — and **nothing outside the scopes that consent granted**. So
+per-action isolation on Google held both times it was looked at, by hand; nothing re-checks it.
 
 On Google, consenting to a read authorizes the reads that share its scope and nothing that sends.
 On GitHub, consenting to `Github.CountStargazers` — **a read** — flipped all 43 actions to
@@ -204,7 +218,7 @@ above), the tool grant is therefore the entire narrowing — the same position a
 
 An operator reading an Arcade dashboard, or an API response, or a refusal this deployment quotes,
 will meet the field `provider_id` on three different objects — and it means something different on
-each. _Measured_ against a live project:
+each. _Measured_ in the 2026-10-13 live-suite run:
 
 | Where you are reading it                            | What it is                                       | Example                              |
 | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------ |
@@ -212,7 +226,7 @@ each. _Measured_ against a live project:
 | A **user connection** row                            | the provider **instance** — a configuration      | `google-openbot`, `cpk-poc`          |
 | An **auth provider** config                          | `id` is the instance, `provider_id` is the type  | `id: arcade-google` of type `google` |
 
-The auth-provider config is the only bridge between the other two. Verbatim, from a live project:
+The auth-provider config is the only bridge between the other two. Verbatim, from that run:
 
 ```
 {"id":"cpk-poc",        "provider_id":"github", "type":"oauth2", "status":"active"}
@@ -244,11 +258,11 @@ cannot attribute alone rather than guess which vendor it belongs to.
 
 ## Disconnecting one app may end another
 
-Arcade's connections are per **auth provider**, not per app, and the sharing is _measured_ rather
-than inferred: on a live project the provider behind both `Gmail` and `GoogleCalendar` is the single
-type `google` (`{"Gmail":["google"],"GoogleCalendar":["google"]}`), named after neither toolkit. One
-Google connection serves them both, and **no narrower instrument exists** — there is nothing to
-disconnect that ends only one of them. **Somebody disconnecting Gmail can end their Calendar**, in
+Arcade's connections are per **auth provider**, not per app, and the sharing was _measured_ rather
+than inferred: in the 2026-10-13 live-suite run the provider behind both `Gmail` and
+`GoogleCalendar` was the single type `google` (`{"Gmail":["google"],"GoogleCalendar":["google"]}`),
+named after neither toolkit. One Google connection serves them both, and **no narrower instrument
+exists** — there is nothing to disconnect that ends only one of them. **Somebody disconnecting Gmail can end their Calendar**, in
 production, today.
 
 So before somebody confirms a disconnect, OpenBot names the apps that genuinely share the
@@ -288,8 +302,9 @@ one. A connection that works and has never been "checked" is the normal state, n
 
 A consent that completes but belongs to a different identity than the attempt it is returning to is
 refused, and nothing is written either way. **What Arcade answers in that case carries no reason**:
-_measured_, confirming a return as the wrong user answers a generic `400`, `coordinator_error`,
-message `"Bad request"`, with nothing in it that names an identity mismatch.
+_measured_ in the 2026-10-13 live-suite run, confirming a return as the wrong user answers a
+generic `400`, `coordinator_error`, message `"Bad request"`, with nothing in it that names an
+identity mismatch.
 
 So the refusal a person sees is the ordinary **vendor-unavailable** one, not a sentence about the
 wrong account. That is a worse message and nothing more: the attempt row is left untouched, and
@@ -300,8 +315,9 @@ causes, because the vendor will not say.
 
 ## What is unproven
 
-The measurements above were taken against a live Arcade project, most of them through this
-deployment's own code. What remains unproven is listed here, and nothing else on the page is.
+The measurements above were taken by hand against a live Arcade project, when and how the top of
+this page says; none is re-checked by CI, so each holds as of its date. What was never observed at
+all is listed here.
 
 - **The agentic-client checkbox was not exercised.** Google's _"Use this client for an AI-powered
   agent"_ declaration was deliberately left unticked for the measurements, so that it was not a
