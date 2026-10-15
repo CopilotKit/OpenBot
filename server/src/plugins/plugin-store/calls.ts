@@ -7,7 +7,7 @@ import {
   policyInitiator,
 } from "../../computer/policy";
 import { withoutStatement } from "../../db/query-failure";
-import { mcpTools, pluginGrants } from "../../db/schema";
+import { mcpTools, pluginGrants, vendorNameOf } from "../../db/schema";
 import { classifyTool, tokenHeaderFor } from "../catalogue";
 import { VERSION_ARG } from "../composio";
 import { inspectToolArguments } from "../content-governance";
@@ -133,7 +133,7 @@ export function callMethods(context: StoreContext) {
       const advertised = await database
         .select({
           name: mcpTools.name,
-          vendorName: mcpTools.vendorName,
+          vendorName: vendorNameOf(),
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,

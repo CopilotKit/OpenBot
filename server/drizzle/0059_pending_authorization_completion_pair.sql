@@ -1,1 +1,0 @@
-ALTER TABLE "pending_authorizations" ADD CONSTRAINT "pending_authorizations_completion_check" CHECK (("pending_authorizations"."completed_at" IS NULL) = ("pending_authorizations"."outcome" IS NULL));

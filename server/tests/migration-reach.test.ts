@@ -364,7 +364,7 @@ describe("the migrations this repository ships", () => {
      *
      * Before the merge, the arcade work shipped as `0053_adorable_frank_castle` (1791773482676) and
      * `0054_spicy_wallflower` (1791774497487). The merge renumbered it to `0057_arcade_provider`
-     * (1791908858814) and put main's `0053_identity_links` (1791547580808) in its place — a stamp
+     * (1791908858814, since squashed and restamped) and put main's `0053_identity_links` (1791547580808) in its place — a stamp
      * OLDER than what such a database had already recorded. Everything up to `0052` is byte for
      * byte the same file on both sides of the merge, so those rows are built from this folder.
      *

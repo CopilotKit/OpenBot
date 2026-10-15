@@ -9,6 +9,7 @@ import {
   mcpUserCredentials,
   pendingAuthorizations,
   users,
+  vendorNameOf,
 } from "../../db/schema";
 import { BROKERED_PROFILE, toolkitOfFor } from "../access";
 import {
@@ -738,7 +739,7 @@ export function connectionMethods(context: StoreContext) {
            * Identical to `name` on every transport this path actually reaches. See
            * {@link mcpTools.vendorName}.
            */
-          name: mcpTools.vendorName,
+          name: vendorNameOf(),
           inputSchema: mcpTools.inputSchema,
           effect: mcpTools.effect,
           destructive: mcpTools.destructive,

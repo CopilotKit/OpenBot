@@ -8,6 +8,7 @@ import {
   pluginGrants,
   skills,
   skillTools,
+  vendorNameOf,
 } from "../../db/schema";
 import type { StoreContext } from "./context";
 import { PluginRefusedError, type SkillActor, type SkillRecord } from "./model";
@@ -153,11 +154,9 @@ export function skillMethods(context: StoreContext) {
     ): Promise<boolean> {
       if (!serverId || !action) return false;
       const [row] = await database
-        .select({ name: mcpTools.vendorName })
+        .select({ name: vendorNameOf() })
         .from(mcpTools)
-        .where(
-          and(eq(mcpTools.serverId, serverId), eq(mcpTools.vendorName, action)),
-        )
+        .where(and(eq(mcpTools.serverId, serverId), eq(vendorNameOf(), action)))
         .limit(1);
       return row !== undefined;
     },

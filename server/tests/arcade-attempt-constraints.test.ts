@@ -265,8 +265,8 @@ describe("pending_authorizations keys the people it names", () => {
 
   test("a user_id that is not a person is refused", async () => {
     // The actor IS a person here, so only the second column can be what refuses: a case that left
-    // both unseeded would pass on the actor key alone and say nothing about `user_id`. Since `0062`
-    // what refuses it is the user-is-actor CHECK, not a key of its own: `user_id` names a person
+    // both unseeded would pass on the actor key alone and say nothing about `user_id`. What refuses
+    // it is the user-is-actor CHECK, not a key of its own: `user_id` names a person
     // exactly when it names the actor, who is one.
     const actorId = `keyed-actor-${randomUUID().slice(0, 8)}`;
     await seedPeople(database, [actorId]);
@@ -310,7 +310,7 @@ describe("pending_authorizations keys the people it names", () => {
    *
    * The keys are read from `pg_constraint` rather than listed, so a key added later is held to the
    * same rule without anybody remembering this test — and the list is pinned too, so dropping or
-   * adding one is a visible edit. `user_id` lost its key (and its index) in `0062`; see the
+   * adding one is a visible edit. `user_id` has no key (and no index) of its own; see the
    * user-is-actor cases below.
    */
   test("every foreign key on the table has an index leading with its column", async () => {
@@ -343,7 +343,7 @@ describe("pending_authorizations keys the people it names", () => {
  * The row is keyed by `actor_id` — one attempt per actor, by primary key — so it is the actor's.
  * `user_id` is whose account the attempt is for, and for a `person` attempt that is always the
  * actor too: `accountRefFor` answers a Personal app with `{ userId: actorId }`, and the only writer
- * (`claimAuthorizationAttempt`) copies that ref. Before `0062` nothing in the DATABASE said so, and
+ * (`claimAuthorizationAttempt`) copies that ref. In an earlier draft of this table nothing in the DATABASE said so, and
  * `user_id` carried a cascading key of its own — so a row naming two people died with EITHER of
  * them, and one person's deletion destroyed an attempt somebody else had started.
  *

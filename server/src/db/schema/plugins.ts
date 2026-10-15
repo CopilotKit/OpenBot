@@ -190,10 +190,16 @@ export const mcpTools = pgTable(
      *
      * EQUAL TO `name` FOR EVERY OTHER TRANSPORT, and that is not a placeholder. Composio's
      * `GMAIL_FETCH_EMAILS` and an MCP server's names are already offerable as they stand, so there
-     * are no two spellings to keep apart and the column says so. Migration 0063 backfilled it that
-     * way for the same reason.
+     * are no two spellings to keep apart and the column says so. The `arcade_provider_backfill`
+     * migration filled the rows that predate the column that way for the same reason.
+     *
+     * NULLABLE, AND NULL MEANS "THE SAME AS `name`". Every writer in this build sets it, but a
+     * rolling deploy serves from the previous build's replicas after the migration has run, and
+     * those insert rows without this column; under `NOT NULL` every listing they refreshed would
+     * fail. So the column ships nullable (see `docs/development.md`, Migrations), every reader
+     * resolves it through {@link vendorNameOf}, and tightening it belongs to a later release.
      */
-    vendorName: text("vendor_name").notNull(),
+    vendorName: text("vendor_name"),
     description: text("description").notNull().default(""),
     /** The tool's own JSON Schema, passed to the model unchanged. */
     inputSchema: jsonb("input_schema").notNull().default({}),
@@ -248,6 +254,14 @@ export const mcpTools = pgTable(
   },
   (table) => [primaryKey({ columns: [table.serverId, table.name] })],
 );
+
+/**
+ * The name an `mcp_tools` row's action is executed by: `vendor_name`, or `name` where a replica of
+ * the previous build wrote the row without one. The one way a query reads that column, so a null
+ * never reaches a vendor or fails a comparison. See {@link mcpTools.vendorName}.
+ */
+export const vendorNameOf = () =>
+  sql<string>`coalesce(${mcpTools.vendorName}, ${mcpTools.name})`;
 
 /**
  * One person's Composio connection to one app.
@@ -499,7 +513,7 @@ export const brokeredConnections = pgTable(
  * `{ userId: actorId }`, and nothing lets one person consent into another's account. So the database
  * holds `user_id IS NULL OR user_id = actor_id` (`pending_authorizations_user_is_actor_check`), and
  * through that CHECK `user_id` names a person exactly when `actor_id` does. It carried a cascading
- * key of its own from `0060` to `0062`, and with nothing making the two columns equal that key let a
+ * key of its own in an earlier draft of this table, and with nothing making the two columns equal that key let a
  * row name two people and die with EITHER: deleting one person took an attempt a DIFFERENT person
  * had started. An attempt is evidence of somebody's consent in progress, and the one person whose
  * deletion may end it is the one who started it.

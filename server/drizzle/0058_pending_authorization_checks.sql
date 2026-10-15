@@ -1,2 +1,0 @@
-ALTER TABLE "pending_authorizations" ADD CONSTRAINT "pending_authorizations_holder_check" CHECK (("pending_authorizations"."holder" = 'person' AND "pending_authorizations"."user_id" IS NOT NULL) OR ("pending_authorizations"."holder" = 'deployment' AND "pending_authorizations"."user_id" IS NULL));--> statement-breakpoint
-ALTER TABLE "pending_authorizations" ADD CONSTRAINT "pending_authorizations_outcome_check" CHECK ("pending_authorizations"."outcome" IS NULL OR "pending_authorizations"."outcome" IN ('completed', 'failed', 'unreconciled', 'withdrawn'));

@@ -1,5 +1,5 @@
 {
-  "id": "529de577-9b19-43d1-9885-dd32ddae9bd6",
+  "id": "a7a9a0f5-afc2-442d-928f-fe15c2e5202a",
   "prevId": "1e95338a-aa54-4146-9f37-32111c369e75",
   "version": "7",
   "dialect": "postgresql",
@@ -2897,6 +2897,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "vendor_name": {
+          "name": "vendor_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "description": {
           "name": "description",
           "type": "text",
@@ -3149,8 +3155,37 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "pending_authorizations_server_idx": {
+          "name": "pending_authorizations_server_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
+        "pending_authorizations_actor_id_users_id_fk": {
+          "name": "pending_authorizations_actor_id_users_id_fk",
+          "tableFrom": "pending_authorizations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "pending_authorizations_server_id_mcp_servers_id_fk": {
           "name": "pending_authorizations_server_id_mcp_servers_id_fk",
           "tableFrom": "pending_authorizations",
@@ -3168,7 +3203,24 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "pending_authorizations_holder_check": {
+          "name": "pending_authorizations_holder_check",
+          "value": "(\"pending_authorizations\".\"holder\" = 'person' AND \"pending_authorizations\".\"user_id\" IS NOT NULL) OR (\"pending_authorizations\".\"holder\" = 'deployment' AND \"pending_authorizations\".\"user_id\" IS NULL)"
+        },
+        "pending_authorizations_outcome_check": {
+          "name": "pending_authorizations_outcome_check",
+          "value": "\"pending_authorizations\".\"outcome\" IS NULL OR \"pending_authorizations\".\"outcome\" IN ('completed', 'failed', 'unreconciled', 'withdrawn')"
+        },
+        "pending_authorizations_completion_check": {
+          "name": "pending_authorizations_completion_check",
+          "value": "(\"pending_authorizations\".\"completed_at\" IS NULL) = (\"pending_authorizations\".\"outcome\" IS NULL)"
+        },
+        "pending_authorizations_user_is_actor_check": {
+          "name": "pending_authorizations_user_is_actor_check",
+          "value": "\"pending_authorizations\".\"user_id\" IS NULL OR \"pending_authorizations\".\"user_id\" = \"pending_authorizations\".\"actor_id\""
+        }
+      },
       "isRLSEnabled": false
     },
     "public.plugin_grants": {

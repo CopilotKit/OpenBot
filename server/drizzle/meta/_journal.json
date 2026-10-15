@@ -404,50 +404,15 @@
     {
       "idx": 57,
       "version": "7",
-      "when": 1791908858814,
+      "when": 1792099944352,
       "tag": "0057_arcade_provider",
       "breakpoints": true
     },
     {
       "idx": 58,
       "version": "7",
-      "when": 1791924168752,
-      "tag": "0058_pending_authorization_checks",
-      "breakpoints": true
-    },
-    {
-      "idx": 59,
-      "version": "7",
-      "when": 1791942141206,
-      "tag": "0059_pending_authorization_completion_pair",
-      "breakpoints": true
-    },
-    {
-      "idx": 60,
-      "version": "7",
-      "when": 1791943538845,
-      "tag": "0060_pending_authorization_person_keys",
-      "breakpoints": true
-    },
-    {
-      "idx": 61,
-      "version": "7",
-      "when": 1791943598343,
-      "tag": "0061_settle_brokered_account_mode",
-      "breakpoints": true
-    },
-    {
-      "idx": 62,
-      "version": "7",
-      "when": 1791994602603,
-      "tag": "0062_pending_authorization_user_is_actor",
-      "breakpoints": true
-    },
-    {
-      "idx": 63,
-      "version": "7",
-      "when": 1792012124232,
-      "tag": "0063_mcp_tool_vendor_name",
+      "when": 1792099950842,
+      "tag": "0058_arcade_provider_backfill",
       "breakpoints": true
     }
   ]

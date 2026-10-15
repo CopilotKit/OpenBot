@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { mcpServers } from "../src/db/schema";
+import { mcpServers, mcpTools } from "../src/db/schema";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**
@@ -29,7 +29,7 @@ const JOURNAL = (await Bun.file(
 ).json()) as { entries: { idx: number; tag: string }[] };
 
 const entry = JOURNAL.entries.find((candidate) =>
-  candidate.tag.endsWith("_settle_brokered_account_mode"),
+  candidate.tag.endsWith("_arcade_provider_backfill"),
 );
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -118,6 +118,60 @@ describe("the account-mode backfill migration", () => {
       [`${PREFIX}custom`]: null,
       [`${PREFIX}firstparty`]: null,
       [chosen]: "shared",
+    });
+  });
+
+  test("gives every recorded action without a vendor spelling its own name, and leaves one that has it", async () => {
+    const migration = await Bun.file(
+      new URL(`../drizzle/${entry?.tag}.sql`, import.meta.url),
+    ).text();
+
+    /*
+     * `bare` is a row as the previous build's replicas write it during a rolling deploy: no
+     * `vendor_name` at all. `spelled` is an Arcade row this build wrote, whose vendor spelling is
+     * NOT its name and must survive the backfill untouched.
+     */
+    const server = `${PREFIX}tools`;
+    const observed = new Map<string, string | null>();
+
+    try {
+      await database.transaction(async (tx) => {
+        await tx.insert(mcpServers).values({
+          id: server,
+          title: server,
+          vendor: "Arcade",
+          url: `arcade://${server}`,
+          provenance: "arcade",
+          authScheme: "OAUTH2",
+        });
+        await tx.insert(mcpTools).values([
+          { serverId: server, name: "GMAIL_FETCH_EMAILS" },
+          {
+            serverId: server,
+            name: "ListEmails",
+            vendorName: "Gmail.ListEmails",
+          },
+        ]);
+
+        for (const statement of migration.split("--> statement-breakpoint")) {
+          if (statement.trim()) await tx.execute(sql.raw(statement));
+        }
+
+        const after = await tx
+          .select({ name: mcpTools.name, vendorName: mcpTools.vendorName })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, server));
+        for (const row of after) observed.set(row.name, row.vendorName);
+
+        throw new Rollback();
+      });
+    } catch (error) {
+      if (!(error instanceof Rollback)) throw error;
+    }
+
+    expect(Object.fromEntries(observed)).toEqual({
+      GMAIL_FETCH_EMAILS: "GMAIL_FETCH_EMAILS",
+      ListEmails: "Gmail.ListEmails",
     });
   });
 });

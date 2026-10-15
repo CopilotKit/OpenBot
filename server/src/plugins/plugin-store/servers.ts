@@ -858,7 +858,7 @@ export function serverMethods(context: StoreContext) {
        *
        * ROWS ALREADY STUCK IN THE NULL STATE ARE NOT REACHED FROM HERE AT ALL, because an enabled
        * app cannot be re-added without first being removed. They are repaired by
-       * `0059_settle_brokered_account_mode`, which is the same decision written once against the
+       * `0058_arcade_provider_backfill`, which is the same decision written once against the
        * table; see `tests/brokered-account-mode-backfill.integration.test.ts`.
        */
       const [settled] = await database

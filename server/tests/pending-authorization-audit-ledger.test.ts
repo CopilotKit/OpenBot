@@ -116,16 +116,6 @@ const STATEMENTS: Record<
   "completeAuthorizationAttempt :: UPDATE pending_authorizations": {
     decidedAtCallers: true,
   },
-  '0060_pending_authorization_person_keys.sql :: DELETE FROM "pending_authorizations"':
-    {
-      transitions: [
-        {
-          name: "orphan purge before the person keys were added",
-          waived:
-            "A one-shot data migration that removes attempts whose actor or person row was ALREADY deleted. It is not a lifecycle event of any live attempt. There is no actor to attribute it to, and nobody can ever complete these rows: the person they would bind to does not exist. It runs at deploy, before the application exists to file anything. An event here would say that a migration ran, and the migration history already says that.",
-        },
-      ],
-    },
 };
 
 /**
@@ -289,8 +279,8 @@ const CASCADES: Record<string, Transition> = {
     debt: "B5e",
     note: "`retireConnectionsFor` files rows for the connections it retires. An attempt that dies with its actor, possibly minted and live at the vendor, is not among them.",
   },
-  // `pending_authorizations_user_id_users_id_fk` was a third row here (debt B5e) until `0062`
-  // dropped it: with nothing making `user_id` equal `actor_id`, it let one person's deletion take an
+  // `pending_authorizations_user_id_users_id_fk` was a third row here (debt B5e) until an earlier
+  // draft of this table's migration dropped it: with nothing making `user_id` equal `actor_id`, it let one person's deletion take an
   // attempt a DIFFERENT person had started. `pending_authorizations_user_is_actor_check` now holds
   // the equality and the actor key above is the only cascade from `users`. Removed with the key,
   // and DEBT_CEILING lowered with it — not relabelled.
