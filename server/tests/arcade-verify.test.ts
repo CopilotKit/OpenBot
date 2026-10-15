@@ -496,6 +496,7 @@ test("the reasons the verifier can refuse with are a closed set", () => {
     "not-finished",
     "authorization-failed",
     "context-changed",
+    "not-permitted",
     "not-recorded",
   ]);
 });
@@ -1297,6 +1298,83 @@ describe("a consent whose account context has moved on", () => {
     expect(line).toContain(
       "the vendor would not say which provider holds this",
     );
+  });
+});
+
+/**
+ * AN ADMINISTRATOR DEMOTED WHILE THEIR CONSENT WAS OPEN DOES NOT GET TO END THE TEAM'S ACCOUNT.
+ *
+ * The freshness check re-resolves the app's account through `brokeredAccountFor`, which refuses a
+ * Shared app to anybody who is not an administrator. The route used to read that refusal as "the
+ * context moved" and withdraw the attempt's account — which, for a Shared app, IS the deployment's
+ * live account, the one every person's calls on that app and its siblings go out under. Nothing
+ * moved: only the person lost the authority to finish what they started. So nothing is withdrawn,
+ * the team's rows stand, and the attempt is closed rather than left for a retry that can only be
+ * refused again.
+ */
+describe("a Shared-app consent finished by somebody who is no longer an administrator", () => {
+  const siblingApp = () => `${TOOLKIT}+calendar`;
+
+  test("refuses without withdrawing the deployment's live account or clearing its rows", async () => {
+    await database
+      .update(mcpServers)
+      .set({ accountMode: "shared", sharedVendorUserId: SHARED_IDENTITY })
+      .where(eq(mcpServers.id, APP));
+    // The team's live connection for this app and for a sibling on the same auth provider.
+    for (const app of [TOOLKIT, siblingApp()]) {
+      await database.insert(brokeredConnections).values({
+        provider: "arcade",
+        app,
+        holder: "deployment",
+        userId: null,
+        vendorUserId: SHARED_IDENTITY,
+        verified: true,
+      });
+    }
+    // Started while the actor WAS an administrator, so the attempt is the deployment's.
+    await database.insert(pendingAuthorizations).values({
+      actorId: ACTOR,
+      serverId: APP,
+      action: ACTION,
+      holder: "deployment",
+      userId: null,
+      vendorUserId: SHARED_IDENTITY,
+      authId: MINTED,
+      createdAt: new Date(Math.floor(Date.now() / 1000) * 1000),
+    });
+    statusAnswer = async () => ({
+      status: "completed",
+      userId: SHARED_IDENTITY,
+      scopes: ["gmail.read"],
+    });
+
+    // And finished after the role was taken away.
+    const response = await verify(ACTOR, "?flow_id=flow-abc", {
+      roles: ["user"],
+    });
+
+    // THE WHOLE FINDING, FIRST: the vendor was never asked to end the team's account.
+    expect(revokeCalls).toEqual([]);
+    await expectRefusal(response, "not-permitted");
+
+    // The team's rows are exactly as they were, and no completion was written over them.
+    const live = await database
+      .select({ app: brokeredConnections.app })
+      .from(brokeredConnections)
+      .where(
+        and(
+          inArray(brokeredConnections.app, [TOOLKIT, siblingApp()]),
+          eq(brokeredConnections.vendorUserId, SHARED_IDENTITY),
+        ),
+      )
+      .orderBy(asc(brokeredConnections.app));
+    expect(live.map((row) => row.app)).toEqual([TOOLKIT, siblingApp()].sort());
+    expect((await written()).events.length).toBe(0);
+
+    // CLOSED, AND NOT AS A WITHDRAWAL: nothing was withdrawn, and the consent is live at the vendor.
+    const row = await attemptRow();
+    expect(row?.outcome).toBe("unreconciled");
+    expect(row?.completedAt).not.toBeNull();
   });
 });
 

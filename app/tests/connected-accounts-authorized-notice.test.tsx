@@ -36,6 +36,7 @@ test("every reason the verifier can send has a sentence here, and no others", ()
     "not-finished",
     "authorization-failed",
     "context-changed",
+    "not-permitted",
     "not-recorded",
   ]);
 });

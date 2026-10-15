@@ -2152,12 +2152,12 @@ export function mountConnectionRoutes({
        * disconnected in between it would quietly resurrect the account.
        *
        * AND THE GRANT MAY ALREADY BE LIVE AT THE VENDOR, because the person completed it there
-       * before this deployment looked. So the RETIRED identity's connection is withdrawn — keyed on
-       * that identity and on this app, which CANNOT TOUCH THE CURRENT ACCOUNT: a connection is keyed
-       * `(user_id, provider_id)` and the retired identity is not the current one. Where that
-       * withdrawal succeeds the attempt is marked `withdrawn`; where it fails, is not attempted or
-       * answers `false` it is kept as `unreconciled` rather than closed, because a grant
-       * we know about and could not end is worth a row somebody can act on.
+       * before this deployment looked. So where the account REALLY MOVED, the RETIRED identity's
+       * connection is withdrawn — keyed on that identity and on this app, which CANNOT TOUCH THE
+       * CURRENT ACCOUNT: a connection is keyed `(user_id, provider_id)` and the retired identity is
+       * not the current one. Where that withdrawal succeeds the attempt is marked `withdrawn`; where
+       * it fails, is not attempted or answers `false` it is kept as `unreconciled` rather than
+       * closed, because a grant we know about and could not end is worth a row somebody can act on.
        */
       /*
        * THE RETIRED IDENTITY IS THE ATTEMPT'S OWN, READ ONCE AT THE TOP AND NOT REBUILT HERE. A
@@ -2166,7 +2166,52 @@ export function mountConnectionRoutes({
        */
       const retired: AccountRef = attemptAccount;
       const fresh = await brokeredAccountFor(context, attempt.serverId);
-      if (fresh.refusal || !sameAccount(fresh.account, retired)) {
+      /*
+       * A REFUSAL IS NOT A MOVE, AND ONLY A MOVE WITHDRAWS ANYTHING.
+       *
+       * `brokeredAccountFor` refusing says this person may not act on the app's account NOW. That
+       * is two different facts. One is that the account moved AND this person is not an
+       * administrator — a Personal app switched to Shared under a person's open consent — and there
+       * the retired account is theirs and is withdrawn below as for any move. The other is that the
+       * account is exactly where it was and only the PERSON changed: an administrator who started a
+       * Shared app's consent and lost the role before finishing it. This branch used to read both
+       * as a move and withdraw `retired` — which in the second case IS the deployment's LIVE
+       * account, so one demoted administrator's late return ended the team's grant at the vendor
+       * and cleared every sibling app's row with it.
+       *
+       * So they are told apart by asking again with `readOnly`, which lifts the administrator
+       * requirement and nothing else: the account it answers is the app's current one whoever
+       * asks. A different account is a move. The same account, or none at all (the app stopped
+       * resolving to one), is not, and nothing is withdrawn on the strength of it.
+       *
+       * THE ATTEMPT IS THEN CLOSED, because no return can ever complete it — the person cannot pass
+       * this check again — and it is closed `unreconciled`, the existing verdict for "the vendor
+       * answered and this deployment could not settle it", which is exactly true: the consent is
+       * live at the vendor on an account nothing here will record it against. Not `withdrawn`,
+       * which would claim a withdrawal, and not `failed`, which would say the person declined. The
+       * line says the rest, which the row cannot.
+       */
+      const current = fresh.refusal
+        ? await brokeredAccountFor(context, attempt.serverId, {
+            readOnly: true,
+          })
+        : fresh;
+      const moved = !current.refusal && !sameAccount(current.account, retired);
+      if (fresh.refusal && !moved) {
+        console.error(
+          JSON.stringify({
+            type: "arcade-completion-not-permitted",
+            server: attempt.serverId,
+            action: attempt.action,
+            authorizationId: authId,
+            holder: retired.holder,
+            note: "A person returned from a consent screen who may no longer act on this app's account, so nothing was recorded and nothing was withdrawn. The consent is live at the vendor on the account the attempt was for; the attempt was closed unreconciled. Nothing needs undoing unless that grant should not stand.",
+          }),
+        );
+        await store.markAuthorizationUnreconciled({ actorId, authId });
+        return refusedWith("not-permitted");
+      }
+      if (fresh.refusal || moved) {
         const row = await store.serverAddress(attempt.serverId);
         const retiredApp = row ? appOfUrl(row.url) : null;
         let withdrawn = false;

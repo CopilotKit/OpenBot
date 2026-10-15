@@ -152,7 +152,7 @@ export function signInUrlFor(
  * rather than in two that drift. The parameter is `?authorized=`, a channel of its own: `?connected=`
  * belongs to the Composio OAuth callback and is neither reused nor widened here.
  *
- * ASSERTED AS A SET so an eleventh cannot be added without a test going red, and so the app's own map
+ * ASSERTED AS A SET so another cannot be added without a test going red, and so the app's own map
  * can be held to exactly the same list.
  */
 export const AUTHORIZATION_REFUSALS = [
@@ -175,6 +175,9 @@ export const AUTHORIZATION_REFUSALS = [
   "authorization-failed",
   // The app's account context moved on while the consent was open (D28).
   "context-changed",
+  // The person can no longer act on the app's account — a Shared app's administrator was demoted,
+  // or the app itself stopped resolving to an account — so the consent was closed and nothing moved.
+  "not-permitted",
   // This deployment could not write what it had, so it wrote none of it.
   "not-recorded",
 ] as const;

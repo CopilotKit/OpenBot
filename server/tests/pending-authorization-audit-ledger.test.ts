@@ -242,6 +242,16 @@ const CALL_SITES: Record<
   "server/src/plugins/route-groups/connections.ts :: markAuthorizationUnreconciled":
     [
       {
+        anchor: "arcade-completion-not-permitted",
+        transitions: [
+          {
+            name: "unreconciled (the person may no longer act on the app's account; nothing withdrawn)",
+            debt: "B5e",
+            note: "A consent live at the vendor that this deployment closed without recording or withdrawing — most often an administrator demoted mid-consent on a Shared app. The only record is a console line.",
+          },
+        ],
+      },
+      {
         anchor: "else await store.markAuthorizationUnreconciled",
         transitions: [
           {
@@ -316,7 +326,7 @@ const NON_WRITES: Record<
  * go DOWN. A fix that converts a row lowers it in the same diff. A new debt row has to raise it,
  * and that edit is the record that somebody decided to add one.
  */
-const DEBT_CEILING = 12;
+const DEBT_CEILING = 13;
 
 /*
  * ─── THE SCAN ────────────────────────────────────────────────────────────────────────────────

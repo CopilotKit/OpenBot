@@ -148,6 +148,10 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
     "That app's account changed while the authorization was open, so nothing was recorded and anything granted for the old account was withdrawn. Start it again from the app's page.",
   ],
   [
+    "not-permitted",
+    "You can no longer connect that app's account — your access or the app's set-up changed while the authorization was open — so nothing was recorded. Ask an administrator if you expected to finish it.",
+  ],
+  [
     "not-recorded",
     "This deployment could not record that authorization, so none of it was saved. Start it again from the app's page, and tell an administrator if it persists.",
   ],
