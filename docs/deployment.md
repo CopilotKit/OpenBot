@@ -181,8 +181,8 @@ against an empty database. The script uses the migrator inside `drizzle-orm`, wh
 dependency, and keeps the same journal, so a database migrated by either is migrated. It is what
 this image's own start-up path and the Helm chart's migration Job both run.
 
-**If a migration run refuses with "the migrator only runs migrations stamped after the newest one it
-finds"**, this database has recorded a migration stamped later than one it is now being asked to
+**If a migration run refuses with "the migrator only runs migrations stamped after the row it
+reads"**, this database has recorded a migration stamped later than one it is now being asked to
 apply, and nothing has been applied. The migrator decides what to run by comparing journal
 timestamps against the newest timestamp in `drizzle.__drizzle_migrations` and nothing else, so a
 migration stamped below that mark would be walked past and the run reported as a success over the
