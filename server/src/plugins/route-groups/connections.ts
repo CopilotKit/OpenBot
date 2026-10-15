@@ -2364,9 +2364,10 @@ export function mountConnectionRoutes({
 
       /*
        * ONE TRANSACTION, AND A REPLAY IS A NO-OP RATHER THAN AN ERROR. The attempt row is the
-       * serialization point: zero rows updated means somebody else completed this attempt first, and
-       * the loser is answered exactly as the winner is and writes nothing. See
-       * {@link PluginStore.completeAuthorizationAttempt}.
+       * serialization point: zero rows updated writes nothing and answers `{ claimed: false }`,
+       * which is either somebody else having completed this attempt first or the attempt having
+       * ended underneath this request — see the branch after the completion, which tells the two
+       * apart. See {@link PluginStore.completeAuthorizationAttempt}.
        *
        * `authProvider` IS ASKED OF THE BROKER AND NEVER DERIVED FROM THE TOOLKIT NAME. The two
        * coincide only where an operator happened to name their provider configuration after the
@@ -2445,8 +2446,9 @@ export function mountConnectionRoutes({
        * {@link reasonWithoutStatement}, because a `DrizzleQueryError`'s own message is the failed
        * statement and every value bound to it — which here includes the scope list and the account.
        */
+      let claimed: boolean;
       try {
-        await store.completeAuthorizationAttempt({
+        ({ claimed } = await store.completeAuthorizationAttempt({
           actorId,
           authId,
           toolkit: fresh.toolkit,
@@ -2454,8 +2456,8 @@ export function mountConnectionRoutes({
           action: attempt.action,
           scopes: settled.scopes,
           authProvider: authProvider ?? "",
-        });
-        recorded = true;
+        }));
+        recorded = claimed;
       } catch (error) {
         recorded = await store
           .authorizationAttemptCompleted({ actorId, authId })
@@ -2475,6 +2477,97 @@ export function mountConnectionRoutes({
           }),
         );
         if (!recorded) return refusedWith("not-recorded");
+        claimed = true;
+      }
+
+      /*
+       * THE COMPLETION CLAIMED NOTHING, AND THAT IS NOT ALWAYS SOMEBODY ELSE'S SUCCESS.
+       *
+       * Zero rows used to be answered with the landing, on the reading that a rival callback had
+       * completed this attempt first. That is one way to get here. The other is the person's own
+       * Cancel: its DELETE can land after the vendor confirmed this return and before the UPDATE
+       * above, and then the person was told they were connected while the trail said cancelled
+       * and the grant stood live at the vendor. So the row is ASKED, as the `catch` above asks it,
+       * and only `completed` earns the landing.
+       *
+       * ANYTHING ELSE IS REFUSED, AND THE GRANT THIS RETURN CARRIED IS WITHDRAWN — but only where
+       * withdrawing ends nothing besides it. On Arcade a revoke ends the whole `(identity, auth
+       * provider)` connection, so if this account already held the app, or holds a sibling on the
+       * same connection, or a sibling could not be ruled out, the revoke would take away a
+       * connection nobody asked to end — for a Shared app, the team's. Those are left live and the
+       * line says so; disconnecting the app here is what ends them on purpose. The siblings are
+       * resolved and bounded exactly as the freshness branch above resolves them.
+       *
+       * THE ATTEMPT ROW IS NOT TOUCHED. Whatever ended it — the cancel's deletion, or a verdict on
+       * another leg — already settled it, and the cancel filed `mcp.authorization_cancelled` for
+       * itself. A probe that cannot be reached withdraws nothing and refuses as `not-recorded`, the
+       * reading the `catch` above gives an unreachable probe, for the same reason.
+       */
+      if (!claimed) {
+        const completedElsewhere = await store
+          .authorizationAttemptCompleted({ actorId, authId })
+          .catch(() => null);
+        if (completedElsewhere === null) return refusedWith("not-recorded");
+        if (!completedElsewhere) {
+          const account = fresh.account;
+          const app = fresh.toolkit;
+          let leftLive: string | null = null;
+          let failure: unknown = null;
+          let collateral: { siblings: string[]; unanswered: number } | null =
+            null;
+          if (await store.brokeredConnection({ toolkit: app, account })) {
+            leftLive = "the account already held this app's connection";
+          } else {
+            try {
+              collateral = await withVendorDeadline(() =>
+                store.siblingApps({ toolkit: app, account }),
+              );
+            } catch (error) {
+              leftLive =
+                "the apps sharing this connection could not be resolved";
+              failure = error;
+            }
+          }
+          if (
+            collateral &&
+            (collateral.siblings.length > 0 || collateral.unanswered > 0)
+          ) {
+            leftLive = "other apps share this connection";
+          }
+          if (!leftLive) {
+            try {
+              // Read, not dropped: `false` is "nothing there", which is not a withdrawal either.
+              if (
+                !(await withVendorDeadline(() =>
+                  composio.broker.revoke({ account, toolkit: app }),
+                ))
+              ) {
+                leftLive = "the vendor found nothing to withdraw";
+              }
+            } catch (error) {
+              leftLive =
+                "the withdrawal raised, so whether it happened is unknown";
+              failure = error;
+            }
+          }
+          if (leftLive) {
+            console.error(
+              JSON.stringify({
+                type: "arcade-cancelled-grant-left-live",
+                server: attempt.serverId,
+                app,
+                action: attempt.action,
+                authorizationId: authId,
+                why: leftLive,
+                siblings: collateral?.siblings ?? [],
+                note: "A person's consent completed at the vendor after their attempt was cancelled, so nothing was recorded. The grant was not withdrawn, so it may still be live at the vendor. Disconnect the app here to end it if it should not stand.",
+                ...(failure ? { error: reasonWithoutStatement(failure) } : {}),
+              }),
+            );
+          }
+          return refusedWith("cancelled");
+        }
+        recorded = true;
       }
 
       return context.redirect(landing, 303);
@@ -2482,12 +2575,13 @@ export function mountConnectionRoutes({
       /*
        * AND THE BLANKET `catch` IS NO LONGER WHERE A LOST COMPLETION GOES QUIET. It stands over the
        * reads that happen BEFORE the completion — the guard's session and role reads, the attempt
-       * read, and the refusals' own string building — so `not-recorded` is true of everything that
+       * read, and the refusals' own string building — and over the reads after a completion that
+       * claimed nothing, which wrote nothing either — so `not-recorded` is true of everything that
        * reaches it: the completion above answers for itself, under its own `catch`, and never falls
        * through to here still thinking it might have landed.
        *
-       * `recorded` IS LOGGED RATHER THAN ASSUMED FALSE. The only step left after the completion is
-       * the redirect, and the sole way it can throw is a `Location` this deployment's own `appUrl`
+       * `recorded` IS LOGGED RATHER THAN ASSUMED FALSE. The only step left after a completion that
+       * claimed its row is the redirect, and the sole way it can throw is a `Location` this deployment's own `appUrl`
        * made unencodable — which would equally defeat the refusal built below, so there is no
        * honest second answer to give here and the flag is what makes the claim checkable in a
        * deployment rather than only in this comment.

@@ -265,7 +265,7 @@ const CALL_SITES: Record<
   "server/src/plugins/route-groups/connections.ts :: completeAuthorizationAttempt":
     [
       {
-        anchor: "recorded = true",
+        anchor: "recorded = claimed",
         transitions: [
           {
             name: "completed",
@@ -310,6 +310,13 @@ const NON_WRITES: Record<
     name: "cancel refused because the attempt had already completed",
     debt: "B2c",
     note: "The person asked to retract consent and the consent stood. The 409 tells them, and the trail records nothing about the request. The discard deleted nothing, so no write site exists for this guard to find.",
+  },
+  "completion that found its attempt already cancelled": {
+    file: "server/src/plugins/route-groups/connections.ts",
+    anchor: 'return refusedWith("cancelled")',
+    name: "completion claimed nothing because the attempt was cancelled during the return leg",
+    waived:
+      "This branch ends no attempt: the cancel's deletion already ended it and filed `mcp.authorization_cancelled`, so a second row would record the same withdrawal twice. What the branch adds is a vendor-side withdrawal of the grant the return carried, or an `arcade-cancelled-grant-left-live` line where that would end more than the cancelled consent.",
   },
   "mint that found its attempt already cancelled": {
     file: "server/src/plugins/route-groups/connections.ts",

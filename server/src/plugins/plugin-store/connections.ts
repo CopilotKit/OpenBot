@@ -1191,13 +1191,16 @@ export function connectionMethods(context: StoreContext) {
      * could collide with — it would simply hold two rows for one connection, and the connection
      * upsert would have run twice on the way there.
      *
-     * ZERO ROWS MEANS STOP, AND THE CALLER IS TOLD NOTHING, which is deliberate. Zero rows is
-     * either somebody else completing this attempt first or a callback naming an attempt that is
-     * not this one, and NEITHER is a thing this deployment can tell apart or should act on
-     * differently: both wrote nothing and both leave the browser looking at an account that is
-     * connected. So this answers the same for the loser as for the winner, and a replayed callback
-     * is a no-op rather than an error somebody has to explain. A caller wanting to know what the
-     * row says reads {@link authorizationAttemptFor}.
+     * ZERO ROWS MEANS STOP, AND THE CALLER IS TOLD SO: `{ claimed: false }`, with nothing written.
+     * It is still not an error — a replayed callback is a no-op rather than something somebody has
+     * to explain — but it is no longer silent, because zero rows is not one fact. It is somebody
+     * else completing this attempt first, where the account IS connected; or the attempt having
+     * ended some other way underneath the caller — most sharply the person's own Cancel, whose
+     * DELETE can land after the vendor confirmed the return and before this UPDATE, leaving a grant
+     * live at the vendor that the person asked not to have. This used to answer the same for all
+     * of them, and the verifier then told a person who had just cancelled that they were
+     * connected. Which one it was is not this method's to decide: a caller holding `false` asks
+     * {@link authorizationAttemptCompleted} whether the row says `completed`.
      *
      * THE CONNECTION AND THE AUDIT ROW ARE IN THE SAME TRANSACTION AS THAT UPDATE and not merely
      * after it. A failure between them used to leave the attempt consumed and nothing recording
@@ -1227,8 +1230,8 @@ export function connectionMethods(context: StoreContext) {
       action: string;
       scopes: string[];
       authProvider: string;
-    }): Promise<void> {
-      await database.transaction(async (transaction) => {
+    }): Promise<{ claimed: boolean }> {
+      return await database.transaction(async (transaction) => {
         /*
          * ONE STATEMENT, AND THE FIRST ONE. `completed_at` is truncated to milliseconds for the
          * reason `claimAuthorizationAttempt` truncates `created_at`: a `Date` carries only
@@ -1245,7 +1248,7 @@ export function connectionMethods(context: StoreContext) {
              AND completed_at IS NULL
           RETURNING actor_id
         `);
-        if (claimed.length === 0) return;
+        if (claimed.length === 0) return { claimed: false };
 
         // Read inside the transaction, under the attempt's lock, so the answer the audit row
         // carries is the one this very write acted on rather than one a rival moved underneath it.
@@ -1351,6 +1354,7 @@ export function connectionMethods(context: StoreContext) {
             },
           },
         );
+        return { claimed: true };
       });
     },
 

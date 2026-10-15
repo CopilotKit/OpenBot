@@ -497,6 +497,7 @@ test("the reasons the verifier can refuse with are a closed set", () => {
     "authorization-failed",
     "context-changed",
     "not-permitted",
+    "cancelled",
     "not-recorded",
   ]);
 });
@@ -1783,6 +1784,85 @@ const lines = (said: unknown[][]): string[] =>
  * committed was reported to the person as not recorded, and a completion that had genuinely been
  * lost left an operator no trace to act on.
  */
+/**
+ * A CANCEL THAT LANDS WHILE THE RETURN LEG IS RUNNING, AND IT IS THE CANCEL THAT WINS.
+ *
+ * The person's Cancel deletes the attempt row. Landing after the vendor confirmed the return and
+ * before the completion's conditional UPDATE, it leaves that UPDATE nothing to claim — and the
+ * completion used to return quietly over zero rows, so the route sent the person to the page that
+ * says they are connected while the trail said cancelled and the grant was live at the vendor.
+ *
+ * The cancel is landed from inside the status read, which is the last vendor call before the
+ * completion: the DELETE below is the one `discardAuthorizationAttempt` issues.
+ */
+describe("a cancel that lands between the confirmation and the completion", () => {
+  function cancelDuringTheReturnLeg() {
+    statusAnswer = async () => {
+      await database
+        .delete(pendingAuthorizations)
+        .where(eq(pendingAuthorizations.actorId, ACTOR));
+      return { status: "completed", userId: ACTOR, scopes: ["gmail.read"] };
+    };
+  }
+
+  test("is refused rather than reported connected, and the grant is withdrawn at the vendor", async () => {
+    await giveAttempt({ authId: MINTED, ageMinutes: 1 });
+    cancelDuringTheReturnLeg();
+    // A provider of its own, so rows earlier cases leave on this identity are not siblings of it.
+    authProviderAnswer = async (toolkit) =>
+      toolkit === TOOLKIT ? `alone-${suite}` : "google";
+
+    const response = await verify(ACTOR, "?flow_id=flow-abc");
+
+    expect(response.headers.get("location")).not.toBe(LANDING);
+    await expectRefusal(response, "cancelled");
+    // The consent this person retracted is ended where it lives.
+    expect(revokeCalls).toEqual([
+      {
+        account: { holder: "person", userId: ACTOR, vendorUserId: ACTOR },
+        toolkit: TOOLKIT,
+      },
+    ]);
+    await expectNothingWritten();
+    // The cancel's deletion stands: nothing here re-created or re-settled the attempt.
+    expect(await attemptRow()).toBeNull();
+  });
+
+  /**
+   * AND A WITHDRAWAL THAT WOULD END MORE THAN THE CANCELLED CONSENT IS NOT MADE. On Arcade a revoke
+   * ends the whole `(identity, auth provider)` connection, so where this account already held the
+   * app before this consent, withdrawing would take away a connection the person never asked to
+   * end. That is left live and said out loud instead.
+   */
+  test("leaves a connection that predates the consent alone, and says so", async () => {
+    await giveAttempt({ authId: MINTED, ageMinutes: 1 });
+    await database.insert(brokeredConnections).values({
+      provider: "arcade",
+      app: TOOLKIT,
+      holder: "person",
+      userId: ACTOR,
+      vendorUserId: ACTOR,
+      verified: true,
+    });
+    cancelDuringTheReturnLeg();
+
+    const [response, said] = await heard(() =>
+      verify(ACTOR, "?flow_id=flow-abc"),
+    );
+
+    await expectRefusal(response, "cancelled");
+    expect(revokeCalls).toEqual([]);
+    const { connections, events } = await written();
+    expect(connections.length).toBe(1);
+    expect(events.length).toBe(0);
+    const line = lines(said).find((text) =>
+      text.includes("arcade-cancelled-grant-left-live"),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain(`"authorizationId":"${MINTED}"`);
+  });
+});
+
 describe("a completion the deployment could not report", () => {
   test("one that rolled back refuses as not-recorded AND leaves an operator a line", async () => {
     await giveAttempt({ authId: MINTED, ageMinutes: 1 });

@@ -178,6 +178,8 @@ export const AUTHORIZATION_REFUSALS = [
   // The person can no longer act on the app's account — a Shared app's administrator was demoted,
   // or the app itself stopped resolving to an account — so the consent was closed and nothing moved.
   "not-permitted",
+  // The attempt was cancelled, or otherwise ended, while its return leg was being finished.
+  "cancelled",
   // This deployment could not write what it had, so it wrote none of it.
   "not-recorded",
 ] as const;

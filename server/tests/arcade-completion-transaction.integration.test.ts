@@ -364,7 +364,7 @@ describe("completeAuthorizationAttempt", () => {
     },
   );
 
-  test("two CONCURRENT calls write exactly one connection and one audit event, and the loser answers as the winner would", async () => {
+  test("two CONCURRENT calls write exactly one connection and one audit event, and only the winner says it claimed the row", async () => {
     const a = await actor("race");
     const app = toolkit("race");
     await attemptWith(a, "ar_race");
@@ -383,9 +383,12 @@ describe("completeAuthorizationAttempt", () => {
     // CONCURRENTLY, on the real pool. A sequential replay passes against an implementation with no
     // serialization at all, so it would be no evidence about this method.
     const answers = await Promise.all([call(), call()]);
-    // The loser is indistinguishable from the winner by its answer, which is the point: a replay is
-    // a no-op and not an error.
-    expect(answers).toEqual([undefined, undefined]);
+    // Neither throws — a replay is a no-op and not an error — but the loser SAYS it claimed nothing,
+    // so a caller can tell a rival's completion from its own and ask the row which it was.
+    expect(answers.map((answer) => answer.claimed).sort()).toEqual([
+      false,
+      true,
+    ]);
 
     expect((await connectionsFor(app)).length).toBe(1);
     expect((await connectedEventsFor(app)).length).toBe(1);
