@@ -51,8 +51,13 @@ COPY app/package.json app/package.json
 COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 COPY product-engineer-loop/package.json product-engineer-loop/package.json
-COPY product-engineer-loop/dist product-engineer-loop/dist
 RUN bun install --frozen-lockfile
+
+# The workspace package exports its compiled files, but dist is generated and is not present in a
+# fresh checkout. Build it inside the image instead of requiring callers to prepare the build context.
+COPY product-engineer-loop/src product-engineer-loop/src
+COPY product-engineer-loop/tsconfig.json product-engineer-loop/tsconfig.json
+RUN bun run --filter product-engineer-loop build
 
 # The lockfile travels with the manifest, because `--frozen-lockfile` with no lockfile in the context
 # is not an error: bun resolves afresh, succeeds, and the flag has decorated nothing. With both files
