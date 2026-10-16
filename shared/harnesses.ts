@@ -46,7 +46,13 @@ export type Harness = {
   webCreate: boolean;
 };
 
-export const HARNESSES: readonly Harness[] = catalogue.harnesses;
+/*
+ * Asserted rather than inferred: a JSON import widens `credential` and `maintainer` to `string`,
+ * and the point of naming them as unions is that a typo in the file is caught. `harnesses.test.ts`
+ * is what actually checks the data, including that every mark it names is vendored.
+ */
+export const HARNESSES: readonly Harness[] =
+  catalogue.harnesses as readonly Harness[];
 
 /** What the web dialog may offer, in the catalogue's own order. */
 export const WEB_HARNESSES: readonly Harness[] = HARNESSES.filter(
