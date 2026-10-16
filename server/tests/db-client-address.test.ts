@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createDatabase } from "../src/db/client";
+import {
+  createDatabase,
+  databaseOptionsFromUrl,
+} from "../src/db/client";
 import { testDatabaseUrl } from "./support/database";
 
 /**
@@ -112,6 +115,23 @@ describe("the database address", () => {
 });
 
 describe("connection parameters on the URL", () => {
+  test("maps sslmode=require to Bun TLS instead of a PostgreSQL startup parameter", () => {
+    const options = databaseOptionsFromUrl(
+      "postgres://openbot:secret@db.example:5432/openbot?sslmode=require&application_name=openbot_test",
+    );
+
+    expect(options.tls).toBe(true);
+    expect(options.connection).toEqual({ application_name: "openbot_test" });
+  });
+
+  test("leaves TLS disabled for a URL without sslmode=require", () => {
+    const options = databaseOptionsFromUrl(
+      "postgres://openbot:secret@127.0.0.1:5432/openbot",
+    );
+
+    expect("tls" in options).toBe(false);
+  });
+
   test("survive, because a dropped application_name turns a lock test into a timeout", async () => {
     const address = new URL(testDatabaseUrl());
     address.searchParams.set("application_name", "db_client_address_probe");

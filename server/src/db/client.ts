@@ -35,7 +35,7 @@ function decodePart(value: string, part: string): string {
  * Passing the parts leaves nothing to parse. The behaviour is identical where the URL already
  * worked, since these are the same values Bun would have derived.
  */
-function addressOf(databaseUrl: string) {
+export function databaseOptionsFromUrl(databaseUrl: string) {
   let url: URL;
   try {
     url = new URL(databaseUrl);
@@ -60,14 +60,21 @@ function addressOf(databaseUrl: string) {
     );
   }
   /*
-   * The query string is carried across as connection parameters, not dropped.
+   * Connection parameters are carried across, except sslmode.
    *
    * `?application_name=…` is the one that matters here: the profile store's serialization tests
    * name a session that way and then look for it in `pg_stat_activity`, so losing it turns a lock
-   * test into a three second timeout with nothing to say why. Anything else Postgres accepts on a
-   * URL, `sslmode` and the rest, travels the same way.
+   * test into a three second timeout with nothing to say why. `sslmode` is different: Bun SQL
+   * accepts TLS through its top-level `tls` option, not as a PostgreSQL startup parameter. Passing
+   * sslmode only inside `connection` does not enable encryption.
    */
-  const connection = Object.fromEntries(url.searchParams);
+  const connection = Object.fromEntries(
+    [...url.searchParams].filter(([name]) => name.toLowerCase() !== "sslmode"),
+  );
+  const sslMode = url.searchParams.get("sslmode")?.trim().toLowerCase();
+  const tlsRequired =
+    process.env.DATABASE_SSL?.trim().toLowerCase() === "require" ||
+    sslMode === "require";
 
   /*
    * A port that is not a port is refused before a socket is ever opened.
@@ -94,6 +101,7 @@ function addressOf(databaseUrl: string) {
     username: decodePart(url.username, "username"),
     password: decodePart(url.password, "password"),
     database,
+    ...(tlsRequired ? { tls: true } : {}),
     ...(Object.keys(connection).length > 0 ? { connection } : {}),
   };
 }
@@ -138,7 +146,7 @@ export function createDatabase(
   delete process.env.DATABASE_URL;
 
   const client = new SQL({
-    ...addressOf(databaseUrl),
+    ...databaseOptionsFromUrl(databaseUrl),
     ...(options.max === undefined ? {} : { max: options.max }),
   });
 
