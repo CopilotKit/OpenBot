@@ -29,9 +29,23 @@ test("draws the vendored mark for a brand that has one", () => {
  * nothing is drawn to fill the gap. A monogram we drew would read as the vendor's own, which is the
  * thing a trade mark holder actually objects to.
  */
-test("draws nothing at all for a brand with no usable mark", () => {
+test("draws no image at all for a brand with no usable mark", () => {
   const { container } = render(<HarnessMark id={null} name="Agno" />);
-  expect(container.firstChild).toBeNull();
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.textContent).toBe("");
+});
+
+/*
+ * Empty space is not an invented mark. Four of the twelve rows have no mark, and with the box
+ * collapsed their names began a tile's width to the left of the others, which read as a ragged
+ * list rather than as four brands without artwork.
+ */
+test("still holds the tile's width, so unmarked rows line up with marked ones", () => {
+  const marked = render(<HarnessMark id="langgraph" name="LangGraph" />);
+  const tile = marked.container.firstElementChild?.className;
+  cleanup();
+  const bare = render(<HarnessMark id={null} name="Agno" />);
+  expect(bare.container.firstElementChild?.className).toBe(tile);
 });
 
 test("never announces the brand twice, because the name is drawn beside it", () => {

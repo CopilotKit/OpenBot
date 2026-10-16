@@ -3,12 +3,16 @@ name: Desktop
 # The shell is the one thing here that cannot be proved by running it on Linux: it is a macOS app, a
 # Windows app and a Linux app built from one tree, and the ways they differ are exactly the ways
 # this fails. So it tests and builds on all three, on every change to it.
+# `shared/harnesses.json` and `shared/marks/**` are watched here even though they are not under
+# desktop/: the catalogue the setup window draws moved there so the web app could read one copy, and
+# these jobs are the only ones that prove it still deserializes into `Harness` — `catalogue()` parses
+# it at runtime with an `expect`, so a bad row panics the window rather than failing a type check.
 on:
   pull_request:
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
   push:
     branches: [main]
-    paths: ["desktop/**", "package.json", ".github/workflows/desktop.yml"]
+    paths: ["desktop/**", "shared/harnesses.json", "shared/marks/**", "package.json", ".github/workflows/desktop.yml"]
   workflow_call:
     secrets:
       OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET:

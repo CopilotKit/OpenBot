@@ -13,7 +13,13 @@ import { markFor } from "@/lib/marks";
  */
 export function HarnessMark({ id, name }: { id: string | null; name: string }) {
   const uri = markFor(id);
-  if (!uri) return null;
+  /*
+   * An empty box of the same size, not nothing. Four of the twelve rows have no mark, and a
+   * collapsed box started their names a tile's width to the left of the rest — a ragged list rather
+   * than four brands without artwork. Reserving the column draws no mark and invents none, which is
+   * what the README forbids; it only keeps the names in line.
+   */
+  if (!uri) return <span aria-hidden="true" className="size-5 shrink-0" />;
   return (
     <img
       alt=""
