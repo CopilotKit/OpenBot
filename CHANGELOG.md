@@ -32,6 +32,38 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### The Bot's screen opens only when there is something to watch
+
+Asking a Bot a question it answered in words could still open its computer beside the conversation,
+on a still screen, for an action that never happened.
+
+- **A call that never reaches the screen no longer opens it.** Reading, writing or listing a file,
+  and running a command, happen on the computer rather than on its display. Only work that happens
+  on the screen opens it.
+- **A refused action takes its screen back.** The screen is announced before the action so a page
+  can be watched while it loads; an action a policy, a capability switch or a network rule refuses
+  never touches the browser, so the screen it opened closes again. A refusal does not close a screen
+  some earlier action in the same run legitimately opened, and an action that was permitted and
+  failed keeps its screen, because the page may have moved.
+- **A Bot is no longer given computer tools this deployment would refuse.** Admin → Controls already
+  decided whether anybody may use a Bot's browser (`Cloud browser use`), its files and shell
+  (`Cloud computer use`) and the network (`Cloud network access`), and the boundary enforced all
+  three — but the Bot was still offered the tools, so it reached for one, was refused, and spent the
+  turn saying so. The tools a switch turns off are now withheld from the Bot in the first place.
+
+### An app you have not connected is offered where you are reading
+
+A Bot asked to use an app whose account the person had not connected answered with the name of a
+screen somewhere else: "Connect it in Settings and ask again." The conversation now carries the
+thing itself — a card naming the app, with a Connect button.
+
+- Pressing Connect opens the vendor's consent in a **new tab**, so the conversation is not replaced
+  by a page load and the question is still there afterwards. The card watches for the account to
+  appear and says so only once the server lists it, never merely because somebody came back.
+- It covers an account that was never connected, one disconnected while a call was in flight, and
+  access that was withdrawn. An app shared across the deployment still says to ask an administrator,
+  since the person reading cannot connect it.
+
 ### A reply's tool calls fold into one line
 
 A Bot that searched, read two pages and checked Drive before answering drew four lines above its
