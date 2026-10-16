@@ -396,6 +396,20 @@ describe("scrubbing commands", () => {
       'curl -u "admin:s3 cret" https://x.test',
       "curl -u admin:[REDACTED] https://x.test",
     ],
+    [
+      "curl --proxy-user bob:hunter2 -x http://proxy.test:3128 https://x.test",
+      "curl --proxy-user bob:[REDACTED] -x http://proxy.test:3128 https://x.test",
+    ],
+    // `-p` bare asks mysql for the password and leaves the database name after it alone: the two are
+    // separated by a space, and the attached form is what carries a password.
+    ["mysql -h db -p", "mysql -h db -p"],
+    ["mysql -u root -p mydb", "mysql -u root -p mydb"],
+    ["docker login -u bob -p hunter2", "docker login -u bob -p [REDACTED]"],
+    ["sshpass -p hunter2 ssh user@host", "sshpass -p [REDACTED] ssh user@host"],
+    ["redis-cli -a hunter2 SET k v", "redis-cli -a [REDACTED] SET k v"],
+    ["redis-cli -ahunter2 SET k v", "redis-cli -a[REDACTED] SET k v"],
+    ["redis-cli --pass hunter2 SET k v", "redis-cli --pass [REDACTED] SET k v"],
+    ["redis://:hunter2@cache:6379", "redis://:[REDACTED]@cache:6379"],
   ];
   for (const [input, output] of cases) {
     test(input, () => expect(scrubCommand(input)).toBe(output));

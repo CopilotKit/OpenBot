@@ -300,6 +300,18 @@ in a channel is cancelled. GitHub links through a GitHub App's user sign-in, set
 with them and no public URL. Nothing reads the links yet: they are what GitHub alerts and reviews will
 build on. Migration `0053_identity_links` only adds tables.
 
+### A credential written as the word after a flag is redacted
+
+`docker login -p secret`, `sshpass -p secret` and `redis-cli -a secret` were recorded with the
+password in clear: the rules recognised a flag whose name says what it carries, and mysql's attached
+`-psecret`, but not a credential passed as the word after the flag. `redis-cli -ahunter2` was worse —
+the attached form reads as a flag called `-asecret`, so the rule for a flag named after a secret
+redacted the word *after* it and left the password. A URL with no user, `redis://:secret@host`, was
+missed the same way, and so were curl's proxy credentials in `--proxy-user` where `-u` and `--user`
+were covered. All of them are now redacted, in the command kept for Action Recording and in the copy
+exported to a telemetry collector. A password separated from `-p` by a space is left alone: mysql
+asks for it at the prompt and the word after the flag is the database name.
+
 ### An app's account can belong to the team
 
 An administrator can make a Composio app Shared: one account, connected once, that every Bot granted
