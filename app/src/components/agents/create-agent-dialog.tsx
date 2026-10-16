@@ -61,7 +61,13 @@ export function CreateAgentDialog({
 }) {
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open={open}>
-      <DialogContent>
+      {/* A floor of 70% of the viewport, against the popup's usual grow-to-fit. The three steps are
+          very different heights — two choices on one, three fields on another, four plus an
+          endpoint test on the last — and a dialog that resized itself between each made the
+          wizard feel like three unrelated popups. The floor sits under the 85svh ceiling the popup
+          already carries, so the two never fight: every step lands in that 70–85% band, and the
+          shortest one pays for it with empty room below the question. */}
+      <DialogContent className="min-h-[70svh]">
         {/* All wizard state lives below DialogContent, whose portal unmounts on close: dismissing
             the dialog mid-way discards the half-answered steps rather than pickling them. */}
         <CreateAgentWizard onClose={onClose} onCreated={onCreated} />
@@ -248,6 +254,9 @@ function CreateAgentWizard({
       <DialogTitle className="sr-only">New coworker</DialogTitle>
       <DialogBody className="overflow-y-auto">
         <Questionnaire
+          /* Fills the body so the empty room the min-height buys falls between the step and the
+             buttons, rather than below buttons floating in the middle of the popup. */
+          className="flex-1"
           item={STEPS[step]}
           noValidate
           /*
@@ -297,7 +306,15 @@ function CreateAgentWizard({
                 >
                   <motion.div
                     animate="active"
-                    className="pt-4"
+                    /*
+                     * `pb-2` is slack under the pane, not spacing: the frame above animates its
+                     * height to whatever this measures, and clips at that edge. Without it the
+                     * last line of a step sits exactly on the clip, so the spring's tail — still
+                     * 4px short at 320ms, 1px at 400ms — shaves the bottom off that line for a
+                     * visible moment on the way back to a taller step, and any rounding against
+                     * it clips the line outright at rest.
+                     */
+                    className="pt-4 pb-2"
                     custom={direction}
                     exit="exit"
                     initial="initial"
@@ -347,7 +364,9 @@ function CreateAgentWizard({
             </p>
           ) : null}
 
-          <div className="mt-6 flex justify-between gap-2">
+          {/* `mt-auto` pins the row to the bottom when the step is short; `pt-6` is the gap it
+              keeps once the step is tall enough to have pushed it there itself. */}
+          <div className="mt-auto flex justify-between gap-2 pt-6">
             <Button
               onClick={step === 0 ? onClose : () => go(step - 1)}
               type="button"
@@ -411,13 +430,14 @@ function IdentityStep({
     <StepItem name="identity">
       <QuestionnaireTitle>Who is this coworker?</QuestionnaireTitle>
       <QuestionnaireDescription>
-        The role you write here applies in every channel this coworker works in.
+        A name to call it by, a line describing it, and the job it does.
       </QuestionnaireDescription>
       <FieldGroup>
         <Field data-invalid={errors.name ? true : undefined}>
           <FieldLabel htmlFor="create-agent-name">Name</FieldLabel>
           <Input
             aria-invalid={errors.name ? true : undefined}
+            autoComplete="off"
             id="create-agent-name"
             onChange={(event) => set("name", event.target.value)}
             placeholder="Expense Manager"
@@ -431,6 +451,7 @@ function IdentityStep({
           <FieldLabel htmlFor="create-agent-title">Title</FieldLabel>
           <Input
             aria-invalid={errors.title ? true : undefined}
+            autoComplete="off"
             id="create-agent-title"
             onChange={(event) => set("title", event.target.value)}
             placeholder="Finance Operations"
@@ -438,12 +459,17 @@ function IdentityStep({
           />
           {errors.title ? (
             <FieldError errors={[{ message: errors.title }]} />
-          ) : null}
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              A few words, shown beneath its name in lists.
+            </p>
+          )}
         </Field>
         <Field data-invalid={errors.roleDescription ? true : undefined}>
-          <FieldLabel htmlFor="create-agent-role">Role</FieldLabel>
+          <FieldLabel htmlFor="create-agent-role">What it does</FieldLabel>
           <Textarea
             aria-invalid={errors.roleDescription ? true : undefined}
+            autoComplete="off"
             id="create-agent-role"
             onChange={(event) => set("roleDescription", event.target.value)}
             placeholder="Review receipts, categorize expenses, and prepare reimbursement reports."
@@ -452,7 +478,15 @@ function IdentityStep({
           />
           {errors.roleDescription ? (
             <FieldError errors={[{ message: errors.roleDescription }]} />
-          ) : null}
+          ) : (
+            /* Said here rather than above the three fields, where it used to sit: it is true of
+               this field alone, and "Role" next to "Title" read as a second job title rather than
+               as the standing instruction it becomes. */
+            <p className="text-muted-foreground text-sm">
+              Its standing instruction in every channel. Messages in a channel
+              are tasks within it.
+            </p>
+          )}
         </Field>
       </FieldGroup>
     </StepItem>
