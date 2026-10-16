@@ -76,8 +76,14 @@ export function CreateAgentDialog({
   );
 }
 
-/** The steps, in the order they are asked. The name is the questionnaire item's name. */
-const STEPS = ["identity", "visibility", "kind"] as const;
+/**
+ * The steps, in the order they are asked. The name is the questionnaire item's name.
+ *
+ * Visibility is last because it is the only question whose answer does not change what the person
+ * is making. Asked second, it arrived before they had decided anything that makes private or public
+ * mean something, and it was the step people had the least to go on.
+ */
+const STEPS = ["identity", "kind", "visibility"] as const;
 type StepName = (typeof STEPS)[number];
 
 /** The two ways a coworker can be seen. */
@@ -281,11 +287,11 @@ function CreateAgentWizard({
           }}
           onSubmit={(event) => event.preventDefault()}
         >
-          {/* A plain element rather than QuestionnaireProgress: only the active step is mounted,
-              so the primitive would count one question and announce the wrong total. */}
-          <p className="text-xs font-medium text-muted-foreground tabular-nums">
-            Step {step + 1} of {STEPS.length}
-          </p>
+          {/* No step counter. The wizard is three questions for a Bot that runs here and four for
+              one at an address somebody hosts, and a counter whose total changes under the reader
+              mid-way is worse than none: it reads as the thing having got longer. Each step says
+              what it is asking in its own heading, which is the part that was carrying the reader
+              anyway. */}
           <MotionConfig
             transition={{ duration: 0.5, type: "spring", bounce: 0 }}
           >
