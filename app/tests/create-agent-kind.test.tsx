@@ -8,6 +8,7 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -115,22 +116,33 @@ test("leads with the Bot this deployment runs itself", async () => {
   expect(view.getByRole("button", { name: /Run it here/ })).toBeTruthy();
 });
 
-test("shows three frameworks, and the rest only on request", async () => {
-  const { view, user } = await atKindStep();
-  expect(view.getAllByTestId("harness-option")).toHaveLength(3);
-  await user.click(view.getByTestId("harness-more"));
-  expect(view.getAllByTestId("harness-option").length).toBeGreaterThan(3);
+test("shows every offerable framework at once, behind no disclosure", async () => {
+  const { view } = await atKindStep();
+  expect(view.getAllByTestId("harness-option")).toHaveLength(
+    WEB_HARNESSES.length,
+  );
+  expect(view.queryByTestId("harness-more")).toBeNull();
+});
+
+/*
+ * The list is what scrolls, not the step: bounding it is what keeps the question above it and the
+ * Back button below it where they were when the step was drawn.
+ */
+test("scrolls the list rather than the step", async () => {
+  const { view } = await atKindStep();
+  const scroller = view
+    .getAllByTestId("harness-option")[0]
+    ?.closest("div")?.parentElement;
+  expect(scroller?.className).toContain("overflow-y-auto");
 });
 
 test("a framework with no vendored mark still names itself", async () => {
-  const { view, user } = await atKindStep();
-  await user.click(view.getByTestId("harness-more"));
+  const { view } = await atKindStep();
   expect(view.getByRole("button", { name: /Agno/ })).toBeTruthy();
 });
 
 test("never offers Mastra, which this create path cannot make work", async () => {
-  const { view, user } = await atKindStep();
-  await user.click(view.getByTestId("harness-more"));
+  const { view } = await atKindStep();
   expect(view.queryByRole("button", { name: /Mastra/ })).toBeNull();
 });
 
@@ -145,12 +157,16 @@ test("offers Run it here only where the deployment has a Bot of its own", async 
   ).toBe(false);
 });
 
-test("says the deployment was never pointed at a Bot, not that none exists", async () => {
+/*
+ * The defect this replaced read as "there isn't one" when the truth is that nobody has switched it
+ * on. Worded for the person in front of the dialog, who is not the person who can fix it.
+ */
+test("says the Bot can be switched on, not that none exists", async () => {
   builtInAvailable = false;
   const { view } = await atKindStep();
   expect(
     view.getByRole("button", { name: /Run it here/ }).textContent,
-  ).toContain("has not been pointed at");
+  ).toContain("switch this on");
 });
 
 test("choosing a framework moves straight on, with no Continue to press", async () => {

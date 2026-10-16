@@ -586,15 +586,6 @@ function KindStep({
   kind: AgentKind | null;
   onChoose: (kind: AgentKind, harness: string | null) => void;
 }) {
-  /*
-   * Three, then the rest. Twelve names at once is a wall on the step somebody reaches knowing only
-   * that they want a Bot, and the catalogue is already ranked, so the three at the top are the
-   * three most people are looking for. The disclosure stays open once opened: somebody who went
-   * looking for their own is not helped by it closing under them.
-   */
-  const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? WEB_HARNESSES : WEB_HARNESSES.slice(0, 3);
-
   return (
     <StepItem name="kind">
       <QuestionnaireTitle>Where does it run?</QuestionnaireTitle>
@@ -611,8 +602,8 @@ function KindStep({
             <span className="block font-medium text-sm">Run it here</span>
             <span className="block text-muted-foreground text-xs">
               {builtInAvailable
-                ? "On this deployment's own Bot. Nothing to host or connect — it is ready the moment it is created."
-                : "Not yet: this deployment has not been pointed at a Bot of its own. Whoever runs it can set one."}
+                ? "OpenBot runs it for you. Nothing to set up — it can start work as soon as it is made."
+                : "Not available yet. Whoever set OpenBot up has to switch this on first."}
             </span>
           </span>
         </button>
@@ -623,35 +614,37 @@ function KindStep({
           <span className="h-px flex-1 bg-border" />
         </div>
 
-        {shown.map((harness) => (
-          <button
-            aria-pressed={kind === "managed" && chosen === harness.id}
-            className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted aria-pressed:border-primary/40 aria-pressed:bg-primary/5"
-            data-testid="harness-option"
-            key={harness.id}
-            onClick={() => onChoose("managed", harness.id)}
-            type="button"
-          >
-            <HarnessMark id={harness.mark} name={harness.name} />
-            <span className="min-w-0">
-              <span className="block font-medium text-sm">{harness.name}</span>
-              <span className="block text-muted-foreground text-xs">
-                {summaryFor(harness)}
-              </span>
-            </span>
-          </button>
-        ))}
-
-        {showAll ? null : (
-          <button
-            className="self-start text-muted-foreground text-xs underline-offset-4 hover:underline"
-            data-testid="harness-more"
-            onClick={() => setShowAll(true)}
-            type="button"
-          >
-            Show {WEB_HARNESSES.length - shown.length} more
-          </button>
-        )}
+        {/*
+         * Every framework, always, behind a scroller rather than a disclosure. A "show more" made
+         * somebody who did not find their own on the first three press a control before they could
+         * even look; scrolling is the gesture people already try on a list. The scroller is bounded
+         * so it is the list that moves and not the step: the question above it and the Back button
+         * below stay exactly where they were.
+         */}
+        <div className="-mr-1 max-h-64 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-2">
+            {WEB_HARNESSES.map((harness) => (
+              <button
+                aria-pressed={kind === "managed" && chosen === harness.id}
+                className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted aria-pressed:border-primary/40 aria-pressed:bg-primary/5"
+                data-testid="harness-option"
+                key={harness.id}
+                onClick={() => onChoose("managed", harness.id)}
+                type="button"
+              >
+                <HarnessMark id={harness.mark} name={harness.name} />
+                <span className="min-w-0">
+                  <span className="block font-medium text-sm">
+                    {harness.name}
+                  </span>
+                  <span className="block text-muted-foreground text-xs">
+                    {summaryFor(harness)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </StepItem>
   );
