@@ -157,19 +157,46 @@ function unfoldHeaders(block: string) {
   }
   return headers;
 }
-function decodeBody(body: string, encoding: string | undefined) {
+/**
+ * The text a part's transfer-encoded bytes spell, in the charset its Content-Type names.
+ *
+ * Base64 and quoted-printable carry bytes, not text: a `charset=iso-8859-1` part saying "caf=E9" is
+ * "café", and reading those bytes as UTF-8 turned every accented letter into U+FFFD. A charset the
+ * runtime does not know falls back to UTF-8, as before.
+ */
+function decodeBytes(bytes: Buffer, charset: string | undefined) {
+  if (charset) {
+    try {
+      return new TextDecoder(charset).decode(bytes);
+    } catch {
+      // unknown label: read as UTF-8
+    }
+  }
+  return bytes.toString("utf8");
+}
+function decodeBody(
+  body: string,
+  encoding: string | undefined,
+  charset: string | undefined,
+) {
   const kind = encoding?.toLowerCase();
   if (kind === "base64")
-    return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
+    return decodeBytes(
+      Buffer.from(body.replace(/\s+/g, ""), "base64"),
+      charset,
+    );
   if (kind === "quoted-printable")
-    return Buffer.from(
-      body
-        .replace(/=\r?\n/g, "")
-        .replace(/=([0-9A-F]{2})/gi, (_, hex: string) =>
-          String.fromCharCode(Number.parseInt(hex, 16)),
-        ),
-      "latin1",
-    ).toString("utf8");
+    return decodeBytes(
+      Buffer.from(
+        body
+          .replace(/=\r?\n/g, "")
+          .replace(/=([0-9A-F]{2})/gi, (_, hex: string) =>
+            String.fromCharCode(Number.parseInt(hex, 16)),
+          ),
+        "latin1",
+      ),
+      charset,
+    );
   return body;
 }
 /** Minimal MIME walk: the first text/plain part, else text/html with tags stripped. */
@@ -199,7 +226,11 @@ export function extractEmailText(raw: string, depth = 0): string {
       plain ?? texts.find((part) => /^text\/html/i.test(part.type));
     return chosen ? extractEmailText(chosen.part, depth + 1) : "";
   }
-  const decoded = decodeBody(body, headers.get("content-transfer-encoding"));
+  const decoded = decodeBody(
+    body,
+    headers.get("content-transfer-encoding"),
+    /charset="?([^";\s]+)"?/i.exec(type)?.[1],
+  );
   return /^text\/html/i.test(type)
     ? decoded
         .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, "")
