@@ -18,6 +18,7 @@ import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
+import { settleReactWork } from "./settle-react-work";
 
 /**
  * The order the wizard asks its questions in, and the counter it no longer draws.
@@ -33,7 +34,15 @@ import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
-afterAll(() => GlobalRegistrator.unregister());
+/*
+ * Drain React's scheduler before the document goes away: `cleanup` unmounts, but it does not
+ * retract a callback the scheduler has already posted, and one firing after `unregister()` reports
+ * as "Unhandled error between tests" with zero failing tests and a non-zero exit.
+ */
+afterAll(async () => {
+  await settleReactWork();
+  GlobalRegistrator.unregister();
+});
 
 const originalFetch = global.fetch;
 
