@@ -9,9 +9,9 @@
  * security question at all.
  *
  * A row without an entry here is not an error: three of the twelve brands have no mark in any
- * maintained set, and their rows show the name alone. See `src/marks/README.md`.
+ * maintained set, and their rows show the name alone. See `shared/marks/README.md`.
  */
-const files = import.meta.glob("./marks/*.svg", {
+const files = import.meta.glob("../../shared/marks/*.svg", {
   eager: true,
   query: "?inline",
   import: "default",
@@ -19,7 +19,7 @@ const files = import.meta.glob("./marks/*.svg", {
 
 const byId = new Map<string, string>(
   Object.entries(files).map(([path, uri]) => [
-    path.replace("./marks/", "").replace(".svg", ""),
+    path.replace(/^.*\/marks\//, "").replace(".svg", ""),
     uri,
   ]),
 );

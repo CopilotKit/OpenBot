@@ -775,7 +775,7 @@ mod tests {
         for harness in catalogue() {
             let Some(mark) = harness.mark else { continue };
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../src/marks")
+                .join("../../shared/marks")
                 .join(format!("{mark}.svg"));
             assert!(
                 path.exists(),

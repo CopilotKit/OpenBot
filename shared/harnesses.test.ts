@@ -43,6 +43,19 @@ test("gives a web-specific summary only where the installer's is false here", ()
   expect(rewritten.sort()).toEqual(["byo-url", "claude-agent-sdk"]);
 });
 
+/*
+ * The web app and the desktop both resolve a mark by globbing this directory, and a glob that
+ * matches nothing fails silently: every row simply shows its name, which is also what a brand with
+ * no mark legitimately looks like. Only this assertion tells the two apart.
+ */
+test("every named mark is vendored where both apps look for it", async () => {
+  for (const harness of HARNESSES) {
+    if (harness.mark === null) continue;
+    const file = Bun.file(`${import.meta.dir}/marks/${harness.mark}.svg`);
+    expect(await file.exists()).toBe(true);
+  }
+});
+
 test("every row an image publishes names the directory it is built from", () => {
   const crewai = HARNESSES.find((h) => h.id === "crewai");
   expect(crewai?.image).toBe("agent-crewai");
