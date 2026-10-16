@@ -172,7 +172,7 @@ test("the new-coworker wizard does not move on from the Enter that confirms a co
   const name = await view.findByLabelText("Name");
   await type(name, "経費");
   await type(view.getByLabelText("Title"), "Finance Operations");
-  await type(view.getByLabelText("Role"), "Review receipts.");
+  await type(view.getByLabelText("What it does"), "Review receipts.");
 
   await confirmComposedCharacter(name);
   await settle();
