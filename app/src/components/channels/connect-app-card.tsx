@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
@@ -31,15 +32,25 @@ export function ConnectAppCard({
   message: string;
 }) {
   const [waiting, setWaiting] = useState(false);
+  /** This app takes a key somebody types, so there is no page to send them to. */
+  const [needsKey, setNeedsKey] = useState(false);
+  /** The authorization url, when the browser refused to open the tab holding it. */
+  const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
   const connect = useMutation(connectAccountMutationOptions());
   const connections = useQuery({
     ...connectionsQueryOptions(),
     // Only while a consent is open in the other tab; otherwise this is an ordinary cached read.
     refetchInterval: waiting ? 2_000 : false,
   });
+  /*
+   * A ROW IS NOT ACCESS, which is the whole reason `revoked` is read here. Withdrawing somebody's
+   * access leaves their row in place pointing at a revoked credential, so a card drawn over the
+   * "your access was withdrawn" refusal would have said the app was connected and taken away the
+   * button that is the only way to get it back.
+   */
   const connected = personalConnections(
     connections.data?.connections ?? [],
-  ).some((row) => row.serverId === serverId);
+  ).some((row) => row.serverId === serverId && row.revoked !== true);
 
   /*
    * The grants a Bot holds are read per conversation, so the turn that follows has to be asked
@@ -54,14 +65,47 @@ export function ConnectAppCard({
     was.current = connected;
   }, [connected]);
 
-  const open = () =>
+  /**
+   * The tab, opened on the click itself rather than on the answer to it.
+   *
+   * A BROWSER ONLY LETS A PAGE OPEN A TAB WHILE A CLICK IS STILL RECENT. Chrome's transient
+   * activation lasts about five seconds, and the request that mints the authorization url has to
+   * finish first — so on a slow deployment `window.open` was called with the activation already
+   * expired, the tab was blocked, and the card cheerfully said to finish in a tab that did not
+   * exist. The blank tab is claimed first and navigated once the url arrives.
+   *
+   * `noopener` CANNOT BE PASSED HERE: it makes `window.open` answer null, and null is a handle
+   * nothing can navigate later. The opener is severed on the handle instead, which is the same
+   * guarantee by a different route.
+   */
+  const claimTab = (): Window | null => {
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    return tab;
+  };
+
+  const open = () => {
+    const tab = claimTab();
     connect.mutate(serverId, {
       onSuccess: (authorizationUrl) => {
-        if (!authorizationUrl) return;
+        /*
+         * No url means this app is connected by typing a key rather than by visiting a page — the
+         * route answers `{ fields }` and the mutation unwraps nothing. Saying so, with the page
+         * that has the form, beats a button that silently does nothing.
+         */
+        if (!authorizationUrl) {
+          tab?.close();
+          setNeedsKey(true);
+          return;
+        }
         setWaiting(true);
-        window.open(authorizationUrl, "_blank", "noopener,noreferrer");
+        if (tab) tab.location.replace(authorizationUrl);
+        // The tab was blocked. The url is still good, so offer it as something to click.
+        else setBlockedUrl(authorizationUrl);
       },
+      onError: () => tab?.close(),
     });
+  };
 
   return (
     <div
@@ -76,6 +120,19 @@ export function ConnectAppCard({
         <p className="text-sm" role="status">
           {title} is connected. Ask again and the Bot can use it.
         </p>
+      ) : needsKey ? (
+        <p className="text-sm" role="status">
+          {title} is connected with a key you hold rather than by visiting a
+          page.{" "}
+          <Link
+            className="underline underline-offset-2"
+            params={{ key: serverId }}
+            to="/settings/connected-accounts/$key"
+          >
+            Enter it on {title}'s page
+          </Link>
+          , then ask again.
+        </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           {/* The heading above already names the app; the button says what pressing it does. */}
@@ -85,6 +142,20 @@ export function ConnectAppCard({
           {waiting ? (
             <p className="text-muted-foreground text-sm" role="status">
               Finish in the tab that opened, then come back here.
+            </p>
+          ) : null}
+          {blockedUrl ? (
+            <p className="text-sm" role="status">
+              This browser blocked the tab.{" "}
+              <a
+                className="underline underline-offset-2"
+                href={blockedUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open {title}'s sign-in
+              </a>
+              .
             </p>
           ) : null}
           {connect.isError ? (
