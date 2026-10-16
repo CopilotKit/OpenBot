@@ -174,6 +174,11 @@ Three things a deployment on Kubernetes did by hand now have values of their own
 
 With none of them set, every target renders exactly as before.
 
+- Migration `0056_bot_scoped_memory_dedupe` rebuilds the Bot-memory dedupe index per Bot. A fact
+  one Bot remembered used to be swallowed as a duplicate when a second Bot formed it, leaving the
+  second Bot unable to recall it; each Bot now keeps its own row. The migration only rebuilds an
+  index and keeps every row.
+
 ### Fewer "Verify you are human" pages
 
 Sites behind Cloudflare challenged a Bot's browser on sight, and opening one could restart the

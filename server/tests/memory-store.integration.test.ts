@@ -356,3 +356,66 @@ test("the same fact formed at once by two runs is stored once", async () => {
   expect(new Set(results.map((result) => result.id)).size).toBe(1);
   expect(results.filter((result) => !result.duplicate)).toHaveLength(1);
 });
+test("the same fact formed by two different Bots is stored for each of them", async () => {
+  const content = `Cross-bot fact ${randomUUID()}`;
+  const first = await store.formMemory(owner, {
+    agentId: bot,
+    content,
+    sourceApp: "Docs",
+    sourceRef: ref,
+  });
+  const second = await store.formMemory(owner, {
+    agentId: otherBot,
+    content,
+    sourceApp: "Docs",
+    sourceRef: ref,
+  });
+  expect(first.duplicate).toBe(false);
+  expect(second.duplicate).toBe(false);
+  expect(second.id).not.toBe(first.id);
+  const rows = await database
+    .select({
+      id: personalMemories.id,
+      formedByAgentId: personalMemories.formedByAgentId,
+    })
+    .from(personalMemories)
+    .where(
+      and(
+        eq(personalMemories.ownerUserId, owner),
+        eq(personalMemories.content, content),
+      ),
+    );
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map((row) => row.formedByAgentId))).toEqual(
+    new Set([bot, otherBot]),
+  );
+});
+
+test("the same Bot forming the same fact twice is still deduplicated", async () => {
+  const content = `Same-bot fact ${randomUUID()}`;
+  const first = await store.formMemory(owner, {
+    agentId: bot,
+    content,
+    sourceApp: "Docs",
+    sourceRef: ref,
+  });
+  const again = await store.formMemory(owner, {
+    agentId: bot,
+    content,
+    sourceApp: "Docs",
+    sourceRef: ref,
+  });
+  expect(first.duplicate).toBe(false);
+  expect(again.duplicate).toBe(true);
+  expect(again.id).toBe(first.id);
+  const rows = await database
+    .select({ id: personalMemories.id })
+    .from(personalMemories)
+    .where(
+      and(
+        eq(personalMemories.ownerUserId, owner),
+        eq(personalMemories.content, content),
+      ),
+    );
+  expect(rows).toHaveLength(1);
+});
