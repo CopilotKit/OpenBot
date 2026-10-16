@@ -592,7 +592,7 @@ function KindStep({
       <div className="flex flex-col gap-2">
         <button
           aria-pressed={kind === "builtin"}
-          className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary/40 aria-pressed:bg-primary/5"
+          className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary/40 aria-pressed:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           disabled={!builtInAvailable}
           onClick={() => onChoose("builtin", null)}
           type="button"
@@ -621,21 +621,23 @@ function KindStep({
          * so it is the list that moves and not the step: the question above it and the Back button
          * below stay exactly where they were.
          *
-         * `overflow-y-auto` computes `overflow-x` to `auto` as well, so this box clips sideways as
-         * much as it does downward. The padding is what keeps a row's border and focus ring off
-         * that edge, and it is inset on BOTH sides: with room on the right alone, the row under the
-         * pointer had its left border shaved off. The negative margin hands the padding back so the
-         * rows stay the width of the button above them.
+         * FLUSH, WITH NOTHING WIDER THAN THE FRAME ABOVE IT. The frame that animates each step's
+         * height hides its overflow, and it hides it on both axes. A negative margin here — put in
+         * to stop a row's border meeting the clip edge — made this box three pixels wider than that
+         * frame, and focusing the step scrolled the frame four pixels sideways to reveal them.
+         * Every child then drew four pixels to the left of where it belonged, so the step's own
+         * heading lost the left of its first letter and each row lost its left border. Horizontal
+         * room is bought with an inset focus ring on the rows instead, which cannot overflow.
          *
          * Bounded in `svh` rather than at a fixed height, because the popup it sits in is already
          * sized that way: at `max-h-64` the list stopped short and left a third of the step empty.
          */}
-        <div className="-mx-1 max-h-[42svh] overflow-y-auto px-1">
+        <div className="max-h-[42svh] overflow-y-auto">
           <div className="flex flex-col gap-2">
             {WEB_HARNESSES.map((harness) => (
               <button
                 aria-pressed={kind === "managed" && chosen === harness.id}
-                className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted aria-pressed:border-primary/40 aria-pressed:bg-primary/5"
+                className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted aria-pressed:border-primary/40 aria-pressed:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 data-testid="harness-option"
                 key={harness.id}
                 onClick={() => onChoose("managed", harness.id)}

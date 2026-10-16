@@ -128,12 +128,20 @@ test("shows every offerable framework at once, behind no disclosure", async () =
  * The list is what scrolls, not the step: bounding it is what keeps the question above it and the
  * Back button below it where they were when the step was drawn.
  */
-test("scrolls the list rather than the step", async () => {
+/*
+ * The step is drawn inside a frame that animates its height and hides its overflow — on BOTH axes.
+ * Anything wider than that frame can be scrolled into view sideways, and when it is, every child
+ * draws to the left of where it belongs: the heading loses the left of its first letter and each
+ * row loses its left border. This asserts the width, which is the property that actually broke,
+ * rather than a class name on a wrapper.
+ */
+test("puts nothing inside the step wider than the frame that clips it", async () => {
   const { view } = await atKindStep();
-  const scroller = view
-    .getAllByTestId("harness-option")[0]
-    ?.closest("div")?.parentElement;
-  expect(scroller?.className).toContain("overflow-y-auto");
+  const frame = view.baseElement.querySelector(".relative.overflow-hidden");
+  expect(frame).toBeTruthy();
+  expect((frame as HTMLElement).scrollWidth).toBeLessThanOrEqual(
+    (frame as HTMLElement).clientWidth,
+  );
 });
 
 test("a framework with no vendored mark still names itself", async () => {
