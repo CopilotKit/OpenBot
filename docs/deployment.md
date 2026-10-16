@@ -210,7 +210,10 @@ Before enabling it:
 - Use RDS PostgreSQL with the `vector` extension enabled. Set `EMBEDDED_POSTGRES=off` and provide
   `DATABASE_URL` in the task definition. The workflow runs
   `bun scripts/migrate.ts` with the image's entrypoint replaced, before updating the service; do not
-  run migrations independently at task startup when using multiple tasks.
+  run migrations independently at task startup when using multiple tasks. The task definition is a
+  template: the workflow clears any configured container `entryPoint` and `command` for the service
+  so the image's `/init` entrypoint starts the API, then adds the shell/migration command only to the
+  one-off migration task.
 - Configure these GitHub repository settings. `AWS_ROLE_ARN` is a secret; the rest are variables.
   Subnet and security group IDs are comma-separated lists without spaces.
 

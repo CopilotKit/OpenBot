@@ -123,7 +123,10 @@ jobs:
               del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
               | .containerDefinitions |= map(
-                  if .name == $name then .image = $image else . end
+                  if .name == $name then
+                    .image = $image
+                    | del(.entryPoint, .command)
+                  else . end
                 )
             else
               error("ECS_CONTAINER_NAME does not match a container in the task definition")
@@ -134,7 +137,7 @@ jobs:
             .containerDefinitions |= map(
               if .name == $name then
                 .entryPoint = ["sh"]
-                | .command = ["-c", "cd /app/server && bun scripts/migrate.ts --ssl=require"]
+                | .command = ["-c", "cd /app/server && bun scripts/migrate.ts"]
               else . end
             )
           ' /tmp/deploy-task-definition.json > /tmp/migration-task-definition.json
