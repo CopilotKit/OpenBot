@@ -1,8 +1,14 @@
-import { z } from "zod";
 import { ApprovalRefusedError } from "../approvals/types";
 import type { AuditInitiator } from "../audit";
-import { HeadlessToolSuspension } from "../computer/headless-tools";
+import { type GrantedTool, parametersFor } from "@openbot/toolkit/granted-tool";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { markUntrusted } from "../untrusted-content";
+import {
+  type CatalogueEntry,
+  catalogueEntry,
+  researchRoleFor,
+} from "./catalogue";
+import { type ResearchRole, RESEARCH_TOOLS } from "@openbot/shared/research";
 import type { SelectableSkill } from "./selection";
 import {
   isDeploymentFault,
@@ -64,38 +70,6 @@ export function vendorAnswer(result: { text: string; isError: boolean }) {
     : markUntrusted(result.text, "connector result");
 }
 
-export type GrantedTool = {
-  name: string;
-  description: string;
-  parameters: z.ZodType;
-  execute: (args: unknown) => Promise<string>;
-  initiator?: AuditInitiator;
-  /**
-   * `<serverId>/<toolName>`, carried alongside the name the model is offered.
-   *
-   * The two spellings exist because a model tool name may not contain a slash, and selection has to
-   * compare a tool against what a skill declared, which is written in the ref spelling because that
-   * is how a grant is written. Carried rather than derived at the comparison, so there is one place
-   * the two forms are converted (`toolNameFor`) and no second parser to drift from it.
-   */
-  ref: string;
-};
-
-/**
- * A vendor's JSON Schema as something the model can be handed.
- *
- * Anything that is not an object schema describes something other than a tool's arguments, and a
- * schema we cannot read must not stop the tool being offered: an open object lets the model call it
- * and lets the vendor be the one to reject a bad argument, which is where that error belongs.
- */
-export function parametersFor(inputSchema: Record<string, unknown>): z.ZodType {
-  try {
-    const converted = z.fromJSONSchema(inputSchema as never);
-    if (converted instanceof z.ZodObject) return converted;
-  } catch {}
-  return z.object({}).catchall(z.unknown());
-}
-
 /**
  * What this Bot holds, said in its instructions rather than left to be inferred from a tool list.
  *
@@ -142,19 +116,7 @@ export function grantedToolGuidance(
     (system) => !held.includes(system),
   );
 
-  const researchConnector = ["parallel-authenticated", "parallel"].find(
-    (server) =>
-      ["web_search", "web_fetch"].every((name) =>
-        tools.some((tool) => tool.ref === `${server}/${name}`),
-      ),
-  );
-  const researchTools = researchConnector
-    ? tools.filter(
-        (tool) =>
-          tool.ref === `${researchConnector}/web_search` ||
-          tool.ref === `${researchConnector}/web_fetch`,
-      )
-    : [];
+  const research = researchProviders(tools);
 
   return [
     ...(tools.length > 0
@@ -177,13 +139,7 @@ export function grantedToolGuidance(
           "access, and the thing that is missing is yours, not theirs.",
         ]
       : []),
-    ...(researchConnector
-      ? [
-          `Parallel provides public-web search and extraction: ${researchTools.map((tool) => tool.name).join(" and ")} discover sources and read selected pages.`,
-          "Parallel searches the public web; it does not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents. Generate one session_id for the conversation and reuse it on related search/fetch calls. Omit model_name unless the exact configured model identifier is known.",
-          "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
-        ]
-      : []),
+    ...researchGuidance(research),
     /*
      * The vendors this deployment connects to and this Bot does not hold.
      *
@@ -204,6 +160,77 @@ export function grantedToolGuidance(
         ]
       : []),
   ].join("\n");
+}
+
+type ResearchProvider = {
+  entry: CatalogueEntry;
+  search: GrantedTool;
+  fetch: GrantedTool;
+};
+
+/**
+ * The research providers this Bot can actually use: a search tool and a fetch tool from one server.
+ *
+ * One per vendor. A deployment that added a vendor twice, once free and once with its key, has
+ * granted the keyed one for its limits, so that is the one the Bot is told about.
+ */
+function researchProviders(tools: GrantedTool[]): ResearchProvider[] {
+  const byServer = new Map<
+    string,
+    Partial<Record<ResearchRole, GrantedTool>>
+  >();
+  for (const tool of tools) {
+    const role = researchRoleFor(tool.ref);
+    if (!role) continue;
+    const server = tool.ref.slice(0, tool.ref.indexOf("/"));
+    byServer.set(server, { ...byServer.get(server), [role]: tool });
+  }
+  const byVendor = new Map<string, ResearchProvider>();
+  for (const [server, held] of byServer) {
+    const entry = catalogueEntry(server);
+    if (!entry || !held.search || !held.fetch) continue;
+    const provider = { entry, search: held.search, fetch: held.fetch };
+    const existing = byVendor.get(entry.vendor);
+    if (!existing || entry.auth.kind === "deployment-bearer")
+      byVendor.set(entry.vendor, provider);
+  }
+  return [...byVendor.values()];
+}
+
+/**
+ * What a Bot is told about public-web research, the same for every provider.
+ *
+ * Described, not preferred: a Bot holding one of these and some other search tool is not told to
+ * pass the other over. With more than one, the person's choice decides.
+ *
+ * Told to search unprompted for facts that change, because a Bot holding these answered "top five
+ * countries by GDP" from memory and then, asked, said it could search. The bound in the next line
+ * is what keeps that from becoming the open-web hunt the provenance guidance warns about.
+ */
+function researchGuidance(providers: ResearchProvider[]): string[] {
+  if (providers.length === 0) return [];
+  return [
+    "For public-web research you can use:",
+    ...providers.map(
+      ({ entry, search, fetch }) =>
+        `- ${entry.vendor}: ${search.name} finds sources and ${fetch.name} reads selected pages.`,
+    ),
+    ...(providers.length > 1
+      ? [
+          "Use the one the person asks for. Otherwise pick one and keep to it for the conversation.",
+        ]
+      : []),
+    "Search before answering when the answer depends on facts that change: current figures, rankings, prices, who holds a role, recent events. Do not answer those from memory while you hold these tools, even when the person did not ask you to search.",
+    "Keep it bounded: a search or two and a read of the best sources, then answer, and say what you could not confirm.",
+    "These search the public web; they do not connect a person's private account. Send only the research objective, necessary search queries and requested URLs, not a full transcript or private documents.",
+    ...providers.flatMap(({ entry }) =>
+      (RESEARCH_TOOLS[entry.key]?.notes ?? []).map(
+        (note) => `${entry.vendor}: ${note}`,
+      ),
+    ),
+    "Do not name the provider in your answer unless the person asks which one you used: cite the sources you read.",
+    "Cite source URLs and distinguish excerpts from full-page reads. Report provider errors or missing sources; do not invent evidence or quietly bypass a denial. Interactive browser work still uses the authorized computer tools when needed.",
+  ];
 }
 
 /**

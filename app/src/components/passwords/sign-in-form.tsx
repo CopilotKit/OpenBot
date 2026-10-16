@@ -1,4 +1,9 @@
-import { IconKey, IconLock, IconPointer } from "@tabler/icons-react";
+import {
+  IconKey,
+  IconLock,
+  IconPointer,
+  IconShieldCheck,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -19,6 +24,7 @@ import {
   cancelSignInMutationOptions,
   confirmSavedLoginMutationOptions,
   finishSignInMutationOptions,
+  submitSignInCodeMutationOptions,
   submitSignInMutationOptions,
   takeOverSignInMutationOptions,
 } from "@/lib/passwords/mutations";
@@ -37,6 +43,10 @@ import { queryClient } from "@/query-client";
  * component's state until it is sent and is cleared the moment it is.
  *
  * Four answers: type a login, confirm a saved one, take over the browser, or decline.
+ *
+ * A verification code is never asked for here up front. If the site, once it has the password, sends
+ * one, the server reports `code_required` and this form asks for that code alone, then sends it on
+ * its own, cleared from state the same way.
  */
 export function SignInForm({ requestId }: { requestId: string }) {
   const request = useQuery({
@@ -48,6 +58,7 @@ export function SignInForm({ requestId }: { requestId: string }) {
         : 3_000,
   });
   const submit = useMutation(submitSignInMutationOptions(queryClient));
+  const submitCode = useMutation(submitSignInCodeMutationOptions(queryClient));
   const confirmSaved = useMutation(
     confirmSavedLoginMutationOptions(queryClient),
   );
@@ -70,11 +81,13 @@ export function SignInForm({ requestId }: { requestId: string }) {
   const data = request.data;
   const busy =
     submit.isPending ||
+    submitCode.isPending ||
     confirmSaved.isPending ||
     takeOver.isPending ||
     finish.isPending ||
     cancel.isPending;
   const failure =
+    submitCode.error ??
     submit.error ??
     confirmSaved.error ??
     takeOver.error ??
@@ -87,6 +100,73 @@ export function SignInForm({ requestId }: { requestId: string }) {
         <p className="text-muted-foreground text-sm">
           {data.outcome ?? "This sign-in request is no longer open."}
         </p>
+      </PageSection>
+    );
+
+  if (data.status === "code_required")
+    return (
+      <PageSection
+        title="Enter the verification code"
+        description="The site sent a verification code. Enter it to finish signing in."
+      >
+        <form
+          className="flex flex-col gap-3"
+          autoComplete="off"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = code.trim();
+            if (!value) return;
+            submitCode.mutate(
+              { id: requestId, code: value },
+              // Cleared whatever happened: a code is good once, and a wrong one is retyped.
+              { onSettled: () => setCode("") },
+            );
+          }}
+        >
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-code`}>
+            Verification code
+            <Input
+              id={`${id}-code`}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              name="code"
+              required
+              autoFocus
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </label>
+          {failure || data.outcome ? (
+            <p className="text-destructive text-sm" role="alert">
+              {failure?.message ?? data.outcome}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" type="submit" disabled={busy || !code.trim()}>
+              <IconShieldCheck />
+              {submitCode.isPending ? "Checking…" : "Finish signing in"}
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => takeOver.mutate(requestId)}
+            >
+              <IconPointer />
+              Take over to finish
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => cancel.mutate(requestId)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
       </PageSection>
     );
 
@@ -159,14 +239,10 @@ export function SignInForm({ requestId }: { requestId: string }) {
                       size="sm"
                       disabled={busy}
                       onClick={() =>
-                        confirmSaved.mutate(
-                          {
-                            id: requestId,
-                            loginId: login.id,
-                            ...(code ? { code } : {}),
-                          },
-                          { onSettled: () => setCode("") },
-                        )
+                        confirmSaved.mutate({
+                          id: requestId,
+                          loginId: login.id,
+                        })
                       }
                     >
                       Confirm and sign in
@@ -194,16 +270,12 @@ export function SignInForm({ requestId }: { requestId: string }) {
                 input: {
                   ...(username ? { username } : {}),
                   password,
-                  ...(code ? { code } : {}),
                   save,
                 },
               },
               {
                 // Cleared whatever happened: a failed attempt is retyped, never kept.
-                onSettled: () => {
-                  setPassword("");
-                  setCode("");
-                },
+                onSettled: () => setPassword(""),
               },
             );
           }}
@@ -234,18 +306,6 @@ export function SignInForm({ requestId }: { requestId: string }) {
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-code`}>
-            Verification code, if the site asks for one
-            <Input
-              id={`${id}-code`}
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              name="code"
-              type="password"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
             />
           </label>
           {data.passwordManager ? (

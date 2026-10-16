@@ -5,7 +5,7 @@ import type {
   LearningDeliveryStatus,
   LearningOverview,
   LearningSettings,
-} from "../../../../shared/learning";
+} from "@openbot/shared/learning";
 
 export const learningKeys = {
   all: ["learning"] as const,

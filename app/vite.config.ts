@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { listenPort } from "../shared/listen-port";
+import { listenPort } from "@openbot/shared/listen-port";
 
 /*
  * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.

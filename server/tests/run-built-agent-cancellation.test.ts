@@ -10,7 +10,7 @@ import {
   type RuntimeModel,
   type ToolSelection,
 } from "../src/copilot";
-import type { GrantedTool } from "../src/plugins/tools";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import { createModelCompleter } from "../src/routing/model";
 
 const model: RuntimeModel = { provider: "openai", defaultModel: "gpt-5.5" };

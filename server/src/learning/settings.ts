@@ -3,7 +3,7 @@ import {
   isLearningContainerId,
   type LearningSettings,
   type LearningTarget,
-} from "../../../shared/learning";
+} from "@openbot/shared/learning";
 import type { Database } from "../db/client";
 import {
   learningSettings,

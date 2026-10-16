@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { seal, unseal } from "../auth/signed-value";
+import { OAUTH_REQUEST_TIMEOUT_MS } from "../timeouts";
 
 /**
  * Signing a person in with the deployment's GitHub App.
@@ -13,7 +14,6 @@ export const GITHUB_CALLBACK_PATH = "/api/identity/github/callback";
 
 const STATE_LABEL = "identity-github-connect";
 const STATE_TTL_MS = 10 * 60_000;
-const REQUEST_TIMEOUT_MS = 15_000;
 
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const TOKEN_URL = "https://github.com/login/oauth/access_token";
@@ -131,7 +131,7 @@ export async function exchangeGithubCode(
       }),
       // The request carries a client secret and a code; a redirect is a refusal, not a detour.
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
   } catch {
     throw new GithubOAuthError("GitHub could not be reached");
@@ -184,7 +184,7 @@ export async function fetchGithubUser(
         "X-GitHub-Api-Version": "2022-11-28",
       },
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS),
     });
   } catch {
     throw new GithubOAuthError("GitHub could not be reached");

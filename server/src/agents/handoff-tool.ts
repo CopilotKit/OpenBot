@@ -14,7 +14,7 @@
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { HANDED_OVER } from "../../../shared/handoff-markers";
+import { HANDED_OVER } from "@openbot/shared/handoff-markers";
 import {
   type ApprovalGate,
   ApprovalRefusedError,
@@ -23,7 +23,8 @@ import {
 import { type AuditStore, PERSON_INITIATOR, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
-import { type GrantedTool, REFUSAL_MARKER } from "../plugins/tools";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
+import { REFUSAL_MARKER } from "../plugins/tools";
 import type {
   CheckPrivateShare,
   PrivateShareInput,

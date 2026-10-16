@@ -8,7 +8,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import type { HeadlessWaiting } from "../../computer/headless-tools";
 import type {
   TriggerConfig,
   TriggerKind,
@@ -18,6 +17,7 @@ import type {
   ResponsibilitySource,
   ResponsibilitySubscription,
 } from "../../responsibilities/types";
+import type { HeadlessWaiting } from "@openbot/toolkit/headless-tools";
 import { agents, credentials, users } from "./core";
 import { jsonb } from "./json";
 

@@ -8,7 +8,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
-} from "../../shared/attachments";
+} from "@openbot/shared/attachments";
 import { createApp, UPLOAD_BODY_LIMIT_BYTES } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
 import { resolveAttachmentParts } from "../src/channels/attachment-parts";

@@ -1,4 +1,4 @@
-import { workOwner } from "../../shared/work-owner";
+import { workOwner } from "@openbot/shared/work-owner";
 
 /**
  * What the worker needs from its environment, parsed and ready to use.

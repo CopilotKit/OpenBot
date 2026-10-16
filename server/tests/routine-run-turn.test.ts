@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import type { Message } from "@ag-ui/client";
 import { AbstractAgent, EventType } from "@ag-ui/client";
-import { EMPTY } from "rxjs";
+import {
+  HeadlessToolSuspension,
+  OPENBOT_WAITING_METADATA,
+} from "@openbot/toolkit/headless-tools";
+import type { TurnAdmission } from "@openbot/toolkit/ports";
 import {
   createTurnRunner,
   drawnComponents,
   frameFiring,
   sanitizeSeededHistory,
-} from "../src/routines/run-turn";
+} from "@openbot/toolkit/run-turn";
+import { EMPTY } from "rxjs";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
+import { HEADLESS_COMPONENTS } from "../src/components/headless";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.
@@ -45,6 +52,16 @@ type HistoryRow = {
   toolCalls?: { id: string; name: string; args: string }[];
   toolCallId?: string;
 };
+
+/** The platform refusing a renewal for a lock this run no longer owns, as the client raises it. */
+function lockConflict(): Error {
+  const error = new Error(
+    "Intelligence platform error 409: THREAD_LOCK_RENEWAL_FAILED",
+  );
+  error.name = "PlatformRequestError";
+  (error as Error & { status?: number }).status = 409;
+  return error;
+}
 
 /** A `PlatformRequestError` as `isMissingThread` matches it: the name and the status, nothing else. */
 function threadNotFound(): Error {
@@ -109,6 +126,8 @@ function harness(options: {
   heartbeatMs?: number;
   lockTtlSeconds?: number;
   learningContainerId?: string;
+  /** Defaults to the server's own, which admits everything while nothing is configured. */
+  admission?: TurnAdmission;
 }) {
   const order: string[] = [];
   const calls = {
@@ -200,6 +219,7 @@ function harness(options: {
 
   const builtFor: { initiator: { kind: string; id?: string } }[] = [];
   const runTurn = createTurnRunner({
+    admission: options.admission ?? serverTurnAdmission,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
@@ -659,18 +679,18 @@ describe("the lock is released on every exit path", () => {
     ]);
   });
 
-  test("when a heartbeat renew rejects", async () => {
+  test("when a heartbeat renew is refused as a conflict", async () => {
     const { run, calls } = harness({
       drive: ({ agent, observer }) => {
         agent.onAbort = () => observer.complete();
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("somebody else holds this lock");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("somebody else holds this lock");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
 
     expect(calls.cleaned).toEqual([
       { threadId: THREAD_ID, runId: calls.acquired[0]?.runId ?? "" },
@@ -739,7 +759,12 @@ describe("one run id, everywhere", () => {
     expect(typeof runId).toBe("string");
     expect(calls.renewed.length).toBeGreaterThan(1);
     for (const renew of calls.renewed) {
-      expect(renew).toEqual({ threadId: THREAD_ID, runId, ttlSeconds: 20 });
+      expect(renew).toEqual({
+        threadId: THREAD_ID,
+        runId,
+        // The literal, not the constant, so moving the lifetime off the platform's 120 fails here.
+        ttlSeconds: 120,
+      });
     }
     expect(calls.cleaned).toEqual([{ threadId: THREAD_ID, runId }]);
     expect(calls.runs[0]?.input.runId).toBe(runId);
@@ -770,7 +795,7 @@ describe("one run id, everywhere", () => {
       turnTimeoutMs: 20,
       abortGraceMs: 50,
       renew: () => {
-        throw new Error("somebody else holds this lock");
+        throw lockConflict();
       },
     });
 
@@ -780,7 +805,7 @@ describe("one run id, everywhere", () => {
   });
 });
 
-describe("a failed heartbeat stops the turn", () => {
+describe("a heartbeat refused as a conflict stops the turn", () => {
   test("aborts the agent, stops the run, and rethrows", async () => {
     const { run, calls, agent } = harness({
       drive: ({ agent: driven, observer }) => {
@@ -788,11 +813,11 @@ describe("a failed heartbeat stops the turn", () => {
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("lock lost");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("lock lost");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
 
     expect(agent.aborts).toBe(1);
     expect(calls.stops).toEqual([
@@ -809,12 +834,48 @@ describe("a failed heartbeat stops the turn", () => {
       },
       heartbeatMs: 2,
       renew: () => {
-        throw new Error("lock lost");
+        throw lockConflict();
       },
     });
 
-    await expect(run()).rejects.toThrow("lock lost");
+    await expect(run()).rejects.toThrow("THREAD_LOCK_RENEWAL_FAILED");
   });
+});
+
+/*
+ * A renewal that did not arrive is not a lock that was lost. Stopped here, the turn would be retried
+ * from the start, and a Bot that had already acted would act again.
+ */
+describe("a heartbeat that merely failed does not stop the turn", () => {
+  for (const [name, failure] of [
+    ["a network failure", () => new TypeError("fetch failed")],
+    [
+      "a platform outage",
+      () => {
+        const error = new Error("Intelligence platform error 503");
+        error.name = "PlatformRequestError";
+        (error as Error & { status?: number }).status = 503;
+        return error;
+      },
+    ],
+  ] as const) {
+    test(`${name} is skipped and the turn answers`, async () => {
+      const { run, calls, agent } = harness({
+        drive: (context) => {
+          setTimeout(() => answers(context), 30);
+        },
+        heartbeatMs: 2,
+        renew: () => {
+          throw failure();
+        },
+      });
+
+      expect(await run()).toEqual({ replyText: "Three things happened." });
+      expect(calls.renewed.length).toBeGreaterThan(1);
+      expect(agent.aborts).toBe(0);
+      expect(calls.stops).toEqual([]);
+    });
+  }
 });
 
 describe("recovering what was said", () => {
@@ -886,6 +947,163 @@ describe("recovering what was said", () => {
     await expect(run()).rejects.toThrow(
       "The turn stopped to ask a question, and a routine has nobody to ask.",
     );
+  });
+});
+
+/**
+ * Admission is the first thing a turn does: a refused one has touched nothing, and the signal it
+ * hands back is the one a pause uses to stop a turn already running.
+ */
+describe("a turn's admission", () => {
+  test("is asked with the owner and the Bot, before the thread is touched", async () => {
+    const asked: { ownerUserId: string; agentId: string }[] = [];
+    const { run, order } = harness({
+      admission: async ({ ownerUserId, agentId, signal }) => {
+        asked.push({ ownerUserId, agentId });
+        order.push("admission");
+        return signal ?? new AbortController().signal;
+      },
+    });
+
+    await run();
+
+    expect(asked).toEqual([{ ownerUserId: OWNER, agentId: AGENT_ID }]);
+    expect(order[0]).toBe("admission");
+  });
+
+  test("a refusal ends the turn before any thread, lock or run", async () => {
+    const { run, order, builtFor } = harness({
+      admission: async () => {
+        const error = new Error("Use Bots is off for this person.");
+        error.name = "CapabilityRefusedError";
+        throw error;
+      },
+    });
+
+    await expect(run()).rejects.toThrow("Use Bots is off for this person.");
+    expect(order).toEqual([]);
+    expect(builtFor).toEqual([]);
+  });
+
+  test("aborting the signal it handed back stops a running turn and gives the lock back", async () => {
+    const paused = new AbortController();
+    let started: () => void = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { run, calls } = harness({
+      admission: async () => paused.signal,
+      // A run that never finishes on its own, so only the abort can end it.
+      drive: () => started(),
+    });
+
+    const turn = run();
+    await running;
+    paused.abort();
+
+    await expect(turn).rejects.toThrow("The headless turn was cancelled.");
+    expect(calls.stops).toHaveLength(1);
+    expect(calls.cleaned).toHaveLength(1);
+  });
+});
+
+/**
+ * The waiting details travel two ways: as an `openbot.headless.waiting` CUSTOM event, and on the
+ * interrupt's metadata for when that event did not survive the trip. Both must end the turn as a
+ * suspension that names the open request, never as the generic "nobody to ask" failure, or the
+ * request the person still has to answer is lost.
+ */
+describe("a turn waiting on a person", () => {
+  const WAITING = {
+    kind: "approval",
+    requestId: "request_1",
+    message: "Waiting for Ada to approve the transfer.",
+  };
+
+  const interruptCarrying = (metadata: Record<string, unknown>) =>
+    // biome-ignore lint/suspicious/noExplicitAny: only the metadata is the subject.
+    ({ id: "interrupt_1", metadata }) as any;
+
+  test("a waiting carried on the interrupt suspends the turn with its details", async () => {
+    const { run, calls } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        observer.complete();
+      },
+    });
+
+    const error = await run().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeadlessToolSuspension);
+    expect((error as HeadlessToolSuspension).message).toBe(WAITING.message);
+    expect((error as HeadlessToolSuspension).waiting).toEqual(WAITING);
+    expect(calls.cleaned).toHaveLength(1);
+  });
+
+  test("a carried waiting without its own message gets the default sentence", async () => {
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({
+            [OPENBOT_WAITING_METADATA]: { kind: "question" },
+          }),
+        ];
+        observer.complete();
+      },
+    });
+
+    await expect(run()).rejects.toThrow("The turn is waiting for human input.");
+  });
+
+  test("a carried waiting wins over whatever the turn said before it stopped", async () => {
+    const { run } = harness({
+      drive: (context) => {
+        context.agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        answers(context);
+      },
+    });
+
+    await expect(run()).rejects.toBeInstanceOf(HeadlessToolSuspension);
+  });
+
+  test("metadata without a kind is not a waiting, and reads as an interrupt", async () => {
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        agent.pendingInterrupts = [
+          interruptCarrying({
+            [OPENBOT_WAITING_METADATA]: { requestId: "request_1" },
+          }),
+        ];
+        observer.complete();
+      },
+    });
+
+    await expect(run()).rejects.toThrow("nobody to ask");
+  });
+
+  test("the CUSTOM event wins over the copy carried on the interrupt", async () => {
+    const fromEvent = { kind: "approval", requestId: "request_event" };
+    const { run } = harness({
+      drive: ({ agent, observer }) => {
+        observer.next({
+          type: EventType.CUSTOM,
+          name: "openbot.headless.waiting",
+          value: fromEvent,
+          // biome-ignore lint/suspicious/noExplicitAny: the harness observer types only RUN_ERROR.
+        } as any);
+        agent.pendingInterrupts = [
+          interruptCarrying({ [OPENBOT_WAITING_METADATA]: WAITING }),
+        ];
+        observer.complete();
+      },
+    });
+
+    const error = await run().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HeadlessToolSuspension);
+    expect((error as HeadlessToolSuspension).waiting).toEqual(fromEvent);
   });
 });
 
@@ -967,7 +1185,10 @@ test("drawnComponents returns the charts that were drawn, never a refused or unk
     { id: "t3", role: "tool", toolCallId: "c3", content: "ok" },
     { id: "t4", role: "tool", toolCallId: "c4", content: "saved" },
   ];
-  expect(drawnComponents(messages)).toEqual([
+  const names = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
+  expect(drawnComponents(messages, names)).toEqual([
     { name: "showBarChart", args: { title: "Top", points: [] } },
   ]);
+  // A turn with no catalog drew nothing, whatever its tool calls were named.
+  expect(drawnComponents(messages, new Set())).toEqual([]);
 });

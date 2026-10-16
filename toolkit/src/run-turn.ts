@@ -55,52 +55,48 @@ import type {
   RunAgentInput,
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
-import { NOT_SHOWN } from "../../../shared/component-markers";
-import { frameFiring } from "../../../shared/routine-firing";
-import { headlessTurnRefusal } from "../admin/controls";
-import { sanitizeSeededHistory } from "../agents/history-sanitize";
-import { guardBotTurn } from "../agents/lifecycle";
-import { OPENBOT_WAITING_METADATA } from "../approvals/native-context";
-import type { AuditInitiator, AuditStore } from "../audit";
-import {
-  createHeadlessComponentTools,
-  HEADLESS_COMPONENTS,
-} from "../components/headless";
-import type { ComponentStore } from "../components/store";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
+import { frameFiring } from "@openbot/shared/routine-firing";
+import type { ApprovalContinuation } from "./continuation";
 import {
   type HeadlessTool,
   HeadlessToolSuspension,
   HeadlessToolsMiddleware,
   type HeadlessWaiting,
-} from "../computer/headless-tools";
-import { historyOrEmpty } from "../copilot";
-import type { DrawnComponent, TurnRunner } from "./runner";
+  OPENBOT_WAITING_METADATA,
+} from "./headless-tools";
+import { sanitizeSeededHistory } from "./history-sanitize";
+import type { AuditInitiator } from "./initiator";
+import { keepLease } from "./lease";
+import { TURN_LIMITS } from "./limits";
+import type { ComponentCatalog, TurnAdmission } from "./ports";
+import { historyOrEmpty } from "./thread-history";
 
-/**
- * The gap between stopping a turn and giving up on it.
- *
- * `abortRun` on `RunSelectedAgent` reaches the agent the run turned into, and that agent does not
- * exist until `build()` resolves (`copilot.ts:649, 664-673`): during that window the wrapper has no
- * `inner`, so abort is a no-op and the deadline cannot actually stop anything. This is the backstop
- * that settles the promise anyway, so a firing cannot hang for ever on a build that never finishes.
- *
- * Injectable only so the test can exercise the backstop without waiting five real seconds for it.
- */
-const DEFAULT_ABORT_GRACE_MS = 5_000;
+/** Everything a headless turn needs, injectable so tests never dial a model. */
+export type TurnRunner = (input: {
+  ownerUserId: string; // the actor the run asserts — grants and connections resolve to them
+  routineId: string; // what the trail names as having started this turn, rather than the owner
+  agentId: string;
+  threadId: string; // the owner's thread for the routine's channel
+  instruction: string; // the user message of this turn
+  initiator?: AuditInitiator;
+  signal?: AbortSignal;
+  continuation?: {
+    snapshot: ApprovalContinuation;
+    result: { content: string; error?: string };
+    messageId: string;
+  };
+  userMessage?: Message;
+  /** Durable inbound delivery id; reused by lock, runner and emitted events. */
+  runId?: string;
+  /** How deep in a Bot-to-Bot chain this turn is. Absent is a person's own turn, depth zero. */
+  depth?: number;
+  /** The reply so far, each time more of it arrives, for a surface that shows a turn in progress. */
+  onText?: (text: string) => void;
+}) => Promise<{ replyText: string; components?: DrawnComponent[] }>;
 
-/** How long one headless turn may take before it is stopped. */
-const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000;
-
-/**
- * The lock TTL and how often it is renewed.
- *
- * The same relationship the runtime's own handler uses: renew comfortably inside the TTL so one slow
- * request does not drop a lock we still hold. The TTL matters to a person: while it is held, their
- * browser's next message is refused with 409 "Thread lock denied" (`run.mjs:91`), so a lock leaked by
- * a failed routine locks them out of their own conversation for exactly this long.
- */
-const DEFAULT_LOCK_TTL_SECONDS = 20;
-const DEFAULT_HEARTBEAT_MS = 15_000;
+/** A display component the Bot drew in a turn and the server allowed, with the props it drew. */
+export type DrawnComponent = { name: string; args: Record<string, unknown> };
 
 /**
  * One row of Intelligence history, as `ThreadMessagesResponse` declares it
@@ -216,10 +212,9 @@ function toAgentMessage(message: ThreadHistoryMessage): Message {
 }
 
 /**
- * Re-exported from `agents/history-sanitize.ts`, where it now lives, because a chat turn needs
- * it too and this module cannot be imported from `copilot.ts`, since the import already runs the
- * other way. Kept as a name on this module because this is where the reasoning was found and where the
- * tests that cover the seeding path still reach for it.
+ * Re-exported from `./history-sanitize.ts`, where it lives because a chat turn needs it too. Kept as
+ * a name on this module because this is where the reasoning was found and where the tests that
+ * cover the seeding path still reach for it.
  */
 export { sanitizeSeededHistory };
 
@@ -232,13 +227,14 @@ function assistantText(message: Message): string | undefined {
     : undefined;
 }
 
-const COMPONENT_NAMES = new Set(HEADLESS_COMPONENTS.map(({ name }) => name));
-
 /**
  * The display components this turn drew, in order: a component call whose result is not a refusal.
  * A chat surface that cannot open the conversation (Teams, Slack) draws them from this.
  */
-export function drawnComponents(messages: Message[]): DrawnComponent[] {
+export function drawnComponents(
+  messages: Message[],
+  componentNames: ReadonlySet<string>,
+): DrawnComponent[] {
   const results = new Map<string, string>();
   for (const message of messages)
     if (message.role === "tool" && typeof message.content === "string")
@@ -247,7 +243,7 @@ export function drawnComponents(messages: Message[]): DrawnComponent[] {
   for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
-      if (!COMPONENT_NAMES.has(call.function.name)) continue;
+      if (!componentNames.has(call.function.name)) continue;
       const result = results.get(call.id);
       if (result === undefined || result.startsWith(NOT_SHOWN)) continue;
       try {
@@ -276,9 +272,277 @@ export function drawnComponents(messages: Message[]): DrawnComponent[] {
  */
 export { frameFiring };
 
+/**
+ * What a turn is given, and what it may persist.
+ *
+ * `messages` is the conversation the run sees: the seeded history plus this turn's message, or, for a
+ * continuation, the snapshot it stopped on plus the answer to the call it was waiting for.
+ *
+ * `persistedInputMessages` is WHAT THIS RUN IS ALLOWED TO PERSIST, and it is mandatory. `run.mjs:117-127`:
+ * the set subtraction on ids, not on positions. The runner defaults it to the WHOLE input
+ * (`intelligence.mjs:283`), so omitting it re-persists every message in the thread on every firing — a
+ * transcript that doubles in size every night until the person's channel is unreadable.
+ */
+export function turnMessages(input: {
+  /** The thread's history as the platform holds it, already converted and sanitized. */
+  seeded: Message[];
+  /** The ids of that history, before sanitizing, which is what the platform already holds. */
+  historicIds: ReadonlySet<string>;
+  /** This turn's own message; ignored for a continuation. */
+  turn: Message;
+  continuation?: Parameters<TurnRunner>[0]["continuation"];
+}): { messages: Message[]; persistedInputMessages: Message[] } {
+  const { seeded, historicIds, turn, continuation } = input;
+  const messages: Message[] = continuation
+    ? sanitizeSeededHistory([
+        ...continuation.snapshot.messages,
+        {
+          id: continuation.messageId,
+          role: "tool",
+          toolCallId: continuation.snapshot.toolCallId,
+          ...continuation.result,
+        },
+      ])
+    : [...seeded, turn];
+  return {
+    messages,
+    persistedInputMessages: messages.filter(
+      (message) => !historicIds.has(message.id),
+    ),
+  };
+}
+
+/** The run's input: this run's id, the conversation, the tools it is offered, and any resume. */
+export function turnInput(input: {
+  threadId: string;
+  runId: string;
+  messages: Message[];
+  state: unknown;
+  tools: readonly HeadlessTool[];
+  continuation?: Parameters<TurnRunner>[0]["continuation"];
+}): RunAgentInput {
+  const { threadId, runId, messages, state, tools, continuation } = input;
+  return {
+    threadId,
+    runId,
+    messages,
+    state,
+    tools: tools.filter((tool) => !tool.hidden).map((tool) => tool.definition),
+    context: continuation?.snapshot.context ?? [],
+    forwardedProps: continuation?.snapshot.forwardedProps,
+    ...(continuation
+      ? {
+          resume: [
+            {
+              interruptId: continuation.snapshot.toolCallId,
+              status: "resolved" as const,
+              payload: continuation.result.content,
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+/**
+ * The thread's lock for one run, held until it is released.
+ *
+ * Acquired with this run's own id and renewed on a heartbeat with the same id, so the lock the
+ * cleanup releases is the lock that was taken. A renew refused as a conflict means somebody else is
+ * in this thread — the person, most likely, having just typed something — so the heartbeat stops
+ * and `onLost` is told, once; the caller stops the turn rather than write its events into their
+ * run. A renew that merely failed is skipped; see `keepLease`.
+ *
+ * This is a deliberate departure from the runtime's own channel runner (`channel-manager.mjs:257-273`),
+ * which stops on any renewal error: a turn stopped by a network blip is retried from the start, and
+ * a Bot that already sent an email sends it again.
+ */
+type Lease = {
+  /** Stop renewing. Safe to call more than once. */
+  stopHeartbeat: () => void;
+  /** Give the lock back. Never rejects: the TTL is the backstop for a cleanup that cannot be reached. */
+  release: () => Promise<void>;
+};
+
+async function takeLease(input: {
+  intelligence: IntelligenceLike;
+  threadId: string;
+  runId: string;
+  userId: string;
+  agentId: string;
+  ttlSeconds: number;
+  learningContainerId?: string;
+  heartbeatMs: number;
+  onLost: (error: unknown) => void;
+}): Promise<Lease> {
+  const {
+    intelligence,
+    threadId,
+    runId,
+    userId,
+    agentId,
+    ttlSeconds,
+    learningContainerId,
+    heartbeatMs,
+    onLost,
+  } = input;
+  await intelligence.ɵacquireThreadLock({
+    threadId,
+    runId,
+    userId,
+    agentId,
+    ttlSeconds,
+    ...(learningContainerId ? { learningContainerId } : {}),
+  });
+
+  const heartbeat = keepLease({
+    renew: () => intelligence.ɵrenewThreadLock({ threadId, runId, ttlSeconds }),
+    everyMs: heartbeatMs,
+    lifetimeMs: ttlSeconds * 1000,
+    onLost,
+  });
+
+  return {
+    stopHeartbeat: heartbeat.stop,
+    release: () =>
+      intelligence
+        .ɵcleanupThreadLock({ threadId, runId })
+        .catch(() => undefined),
+  };
+}
+
+/**
+ * How a headless turn ended: exactly one of these per turn, decided by {@link settle} and turned into
+ * a reply or an error only by {@link conclude}.
+ */
+export type TurnOutcome =
+  /** The Bot answered. */
+  | { kind: "completed"; replyText: string; components: DrawnComponent[] }
+  /** The run itself failed: a RUN_ERROR, a broken stream, a cancellation, or a stop that never landed. */
+  | { kind: "failed"; error: unknown }
+  /** The thread's lock was lost partway through, so whatever the turn said is not an answer. */
+  | { kind: "lockLost"; error: unknown }
+  /** The deadline stopped the run; whatever it had said is half a sentence. */
+  | { kind: "timedOut" }
+  /** The turn is waiting on a person, with a durable request open. */
+  | { kind: "suspended"; suspension: HeadlessToolSuspension }
+  /** The turn stopped to ask a question with nobody there to answer it. */
+  | { kind: "interrupted" }
+  /** The run finished and said nothing. */
+  | { kind: "empty" };
+
+/** Everything a finished run left behind, which is all {@link settle} decides from. */
+export type TurnEvidence = {
+  /** Set when the run's own promise rejected; wrapped because the rejection itself may be anything. */
+  failed?: { error: unknown };
+  /** The renew failure that lost the lock, when one did. */
+  heartbeatError?: unknown;
+  /** Whether the deadline stopped the run. */
+  stopped: boolean;
+  /** The waiting the run announced through its `openbot.headless.waiting` event. */
+  waiting?: HeadlessToolSuspension;
+  /** The messages this run added to the agent. */
+  added: Message[];
+  /** What was streamed, for when nothing was added. */
+  chunks: string[];
+  pendingInterrupts: AbstractAgent["pendingInterrupts"];
+  componentNames: ReadonlySet<string>;
+};
+
+/**
+ * The one decision about how a turn ended, in this order and no other.
+ *
+ * A failure that escaped the run wins, because nothing after it was reached. Then a lost lock and the
+ * deadline: a turn that lost its lock or was stopped is not a turn that answered, however much text it
+ * produced first. Then a waiting, announced or carried on the interrupt, which names the request a
+ * person still has to answer. Then a bare interrupt, checked BEFORE the empty reply: a turn that
+ * interrupted before saying anything has both conditions true at once, and "finished without saying
+ * anything" would be a lie about a turn that in fact stopped to ask a question.
+ */
+export function settle(evidence: TurnEvidence): TurnOutcome {
+  if (evidence.failed) return { kind: "failed", error: evidence.failed.error };
+  if (evidence.heartbeatError !== undefined)
+    return { kind: "lockLost", error: evidence.heartbeatError };
+  if (evidence.stopped) return { kind: "timedOut" };
+  if (evidence.waiting)
+    return { kind: "suspended", suspension: evidence.waiting };
+
+  // The diff first, the streamed chunks as the fallback: the diff is what was persisted, which is
+  // what the person will read in the channel, and the chunks are only what went past.
+  const said = evidence.added
+    .map(assistantText)
+    .filter((text): text is string => text !== undefined);
+  const replyText = (said.length > 0 ? said : evidence.chunks).join("\n\n");
+
+  // The waiting details, when the CUSTOM event did not survive the trip, ride on the interrupt.
+  const carried = evidence.pendingInterrupts
+    .map((interrupt) => interrupt.metadata?.[OPENBOT_WAITING_METADATA])
+    .find(
+      (value): value is HeadlessWaiting & { message?: string } =>
+        !!value &&
+        typeof value === "object" &&
+        typeof (value as { kind?: unknown }).kind === "string",
+    );
+  if (carried)
+    return {
+      kind: "suspended",
+      suspension: new HeadlessToolSuspension(
+        carried.message ?? "The turn is waiting for human input.",
+        carried,
+      ),
+    };
+  if (evidence.pendingInterrupts.length > 0) return { kind: "interrupted" };
+  if (replyText.length === 0) return { kind: "empty" };
+  return {
+    kind: "completed",
+    replyText,
+    components: drawnComponents(evidence.added, evidence.componentNames),
+  };
+}
+
+/**
+ * The outcome as the caller receives it: a reply, or the error that names what happened.
+ *
+ * For a lost lock and a deadline, `stopped` is awaited first — the reference's own order
+ * (`channel-manager.mjs:311-313`) — so a stop this turn itself requested has actually settled before
+ * it is reported on, not just been requested.
+ */
+async function conclude(
+  outcome: TurnOutcome,
+  stopped: Promise<unknown> | undefined,
+  turnTimeoutMs: number,
+): Promise<{ replyText: string; components?: DrawnComponent[] }> {
+  switch (outcome.kind) {
+    case "failed":
+      throw outcome.error;
+    case "lockLost":
+      await stopped;
+      throw outcome.error;
+    case "timedOut":
+      await stopped;
+      throw new Error(
+        `The routine's turn was stopped after ${Math.round(turnTimeoutMs / 1000)}s.`,
+      );
+    case "suspended":
+      throw outcome.suspension;
+    case "interrupted":
+      throw new Error(
+        "The turn stopped to ask a question, and a routine has nobody to ask.",
+      );
+    case "empty":
+      throw new Error("The turn finished without saying anything.");
+    case "completed":
+      return outcome.components.length > 0
+        ? { replyText: outcome.replyText, components: outcome.components }
+        : { replyText: outcome.replyText };
+  }
+}
+
 export function createTurnRunner(options: {
   intelligence: IntelligenceLike;
   runner: RunnerLike;
+  /** Checked before anything else; see `serverTurnAdmission` in agents/turn-admission.ts. */
+  admission: TurnAdmission;
   learningContainerForThread?: (input: {
     threadId: string;
     agentId: string;
@@ -300,27 +564,29 @@ export function createTurnRunner(options: {
   }) => Promise<HeadlessTool[]>;
   /**
    * The governed gallery, so a turn with no browser can still answer with a chart. Offered and
-   * decided exactly as the browser would for this Bot; see `components/headless.ts`.
+   * decided exactly as the browser would for this Bot. Absent, nothing is offered and nothing is
+   * reported as drawn.
    */
-  components?: { store: ComponentStore; auditStore?: AuditStore };
+  components?: ComponentCatalog;
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
   lockTtlSeconds?: number;
   heartbeatMs?: number;
-  /** See {@link DEFAULT_ABORT_GRACE_MS}. */
+  /** See `TURN_LIMITS.abortGraceMs`; injectable so a test need not wait five real seconds. */
   abortGraceMs?: number;
 }): TurnRunner {
   const {
     intelligence,
     runner,
+    admission,
     buildAgentFor,
     learningContainerForThread,
     toolsForTurn,
     components,
-    turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
-    lockTtlSeconds = DEFAULT_LOCK_TTL_SECONDS,
-    heartbeatMs = DEFAULT_HEARTBEAT_MS,
-    abortGraceMs = DEFAULT_ABORT_GRACE_MS,
+    turnTimeoutMs = TURN_LIMITS.turnTimeoutMs,
+    lockTtlSeconds = TURN_LIMITS.lockTtlSeconds,
+    heartbeatMs = TURN_LIMITS.heartbeatMs,
+    abortGraceMs = TURN_LIMITS.abortGraceMs,
   } = options;
 
   return async ({
@@ -338,16 +604,8 @@ export function createTurnRunner(options: {
     onText,
   }) => {
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
-    // Paused Bots do not start; a pause while running aborts this signal. See agents/lifecycle.ts.
-    signal = await guardBotTurn({ ownerUserId, agentId, signal });
-    // "Use Bots" and the model allowlist, which a browser run meets at the HTTP gate. No headless turn
-    // crosses that gate, so every one of them meets the same check here instead.
-    const refused = await headlessTurnRefusal({ ownerUserId, agentId });
-    if (refused) {
-      const error = new Error(refused);
-      error.name = "CapabilityRefusedError";
-      throw error;
-    }
+    // A paused Bot or a refused capability throws here; a pause mid-turn aborts the returned signal.
+    signal = await admission({ ownerUserId, agentId, signal });
     if (continuation && continuation.snapshot.threadId !== threadId)
       throw new Error(
         "The interrupted conversation does not match this thread.",
@@ -421,30 +679,12 @@ export function createTurnRunner(options: {
         role: "user",
         content: frameFiring(instruction),
       } as Message);
-    const messages: Message[] = continuation
-      ? sanitizeSeededHistory([
-          ...continuation.snapshot.messages,
-          {
-            id: continuation.messageId,
-            role: "tool",
-            toolCallId: continuation.snapshot.toolCallId,
-            ...continuation.result,
-          },
-        ])
-      : [...seeded, turn];
-
-    /*
-     * WHAT THIS RUN IS ALLOWED TO PERSIST, and it is mandatory.
-     *
-     * `run.mjs:117-127`: the set subtraction on ids, not on positions. The runner defaults it to the
-     * WHOLE input (`intelligence.mjs:283`), so omitting it re-persists every message in the thread on
-     * every firing — a transcript that doubles in size every night until the person's channel is
-     * unreadable.
-     */
-    const historicIds = new Set(history.messages.map((message) => message.id));
-    const persistedInputMessages = messages.filter(
-      (message) => !historicIds.has(message.id),
-    );
+    const { messages, persistedInputMessages } = turnMessages({
+      seeded,
+      historicIds: new Set(history.messages.map((message) => message.id)),
+      turn,
+      ...(continuation ? { continuation } : {}),
+    });
 
     /*
      * The Bot, resolved as its owner, and pointed at this thread.
@@ -476,44 +716,24 @@ export function createTurnRunner(options: {
         threadId,
         runId,
       })) ?? []),
-      ...(components
-        ? await createHeadlessComponentTools({
-            store: components.store,
-            botId: agentId,
-            ownerUserId,
-            initiator,
-            ...(components.auditStore
-              ? { auditStore: components.auditStore }
-              : {}),
-          })
-        : []),
+      ...((await components?.toolsForTurn({
+        agentId,
+        ownerUserId,
+        initiator,
+      })) ?? []),
     ];
     if (headlessTools.length > 0)
       agent.use(new HeadlessToolsMiddleware(headlessTools, initiator));
     if (signal?.aborted) throw new Error("The headless turn was cancelled.");
 
-    const input: RunAgentInput = {
+    const input = turnInput({
       threadId,
       runId,
       messages,
       state: agent.state,
-      tools: headlessTools
-        .filter((tool) => !tool.hidden)
-        .map((tool) => tool.definition),
-      context: continuation?.snapshot.context ?? [],
-      forwardedProps: continuation?.snapshot.forwardedProps,
-      ...(continuation
-        ? {
-            resume: [
-              {
-                interruptId: continuation.snapshot.toolCallId,
-                status: "resolved" as const,
-                payload: continuation.result.content,
-              },
-            ],
-          }
-        : {}),
-    };
+      tools: headlessTools,
+      ...(continuation ? { continuation } : {}),
+    });
 
     /*
      * The reply is recovered by diffing the agent, because the runner throws away what `runAgent`
@@ -544,22 +764,14 @@ export function createTurnRunner(options: {
         : {}),
     });
 
-    await intelligence.ɵacquireThreadLock({
-      threadId,
-      runId,
-      userId: ownerUserId,
-      agentId,
-      ttlSeconds: lockTtlSeconds,
-      ...(learningContainerId ? { learningContainerId } : {}),
-    });
-
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let backstop: ReturnType<typeof setTimeout> | undefined;
     let heartbeatError: unknown;
     let waiting: HeadlessToolSuspension | undefined;
-    /** Whether the deadline stopped this turn. See the throw below the `finally`. */
+    /** Whether the deadline stopped this turn. See `settle`. */
     let stopped = false;
+    /** Set when the run's promise rejected, so it can be reported after the lock is released. */
+    let failed: { error: unknown } | undefined;
     /**
      * `stopCanonicalRun`'s shape (`channel-manager.mjs:222-229`): one promise for the whole turn,
      * not one per caller. Both the heartbeat-reject path and the deadline path call `stopTurn`, and
@@ -570,12 +782,6 @@ export function createTurnRunner(options: {
      */
     let stopPromise: Promise<boolean | undefined> | undefined;
     let cancelTurn: (() => void) | undefined;
-
-    const clearHeartbeat = () => {
-      if (heartbeat === undefined) return;
-      clearInterval(heartbeat);
-      heartbeat = undefined;
-    };
 
     /** Stop this exact run, both ends: the agent's own abort and the runner's stop flag. */
     const stopTurn = () => {
@@ -590,23 +796,25 @@ export function createTurnRunner(options: {
       stopPromise ??= runner.stop({ threadId, runId }).catch(() => undefined);
     };
 
-    heartbeat = setInterval(() => {
-      void intelligence
-        .ɵrenewThreadLock({ threadId, runId, ttlSeconds: lockTtlSeconds })
-        .catch((error: unknown) => {
-          if (heartbeat === undefined) return;
-          /*
-           * A lock we no longer hold means somebody else is in this thread — the person, most
-           * likely, having just typed something. Continuing would write this turn's events into
-           * their run, so the turn is stopped and the failure is raised rather than recovered.
-           */
-          clearHeartbeat();
-          heartbeatError = error;
-          stopTurn();
-        });
-    }, heartbeatMs);
-    // So a heartbeat that is still pending cannot hold a one-shot process open.
-    heartbeat.unref?.();
+    const lease = await takeLease({
+      intelligence,
+      threadId,
+      runId,
+      userId: ownerUserId,
+      agentId,
+      ttlSeconds: lockTtlSeconds,
+      ...(learningContainerId ? { learningContainerId } : {}),
+      heartbeatMs,
+      /*
+       * A lock we no longer hold means somebody else is in this thread — the person, most likely,
+       * having just typed something. Continuing would write this turn's events into their run, so
+       * the turn is stopped and the failure is raised rather than recovered.
+       */
+      onLost: (error) => {
+        heartbeatError = error;
+        stopTurn();
+      },
+    });
 
     try {
       const cancelled = new Promise<never>((_resolve, reject) => {
@@ -675,6 +883,8 @@ export function createTurnRunner(options: {
       });
 
       await Promise.race([completed, timeout, cancelled]);
+    } catch (error) {
+      failed = { error };
     } finally {
       /*
        * THE SINGLE MOST IMPORTANT LINES IN THIS FILE, on every exit path — success, a thrown run, the
@@ -683,84 +893,30 @@ export function createTurnRunner(options: {
        * While this lock is held, the person's next browser message is refused with 409 "Thread lock
        * denied" (`run.mjs:85-92`) for the whole TTL. A routine that fails quietly and leaks its lock
        * does not just fail: it locks somebody out of their own conversation, at three in the morning,
-       * for a reason no screen explains. `.catch` because a cleanup that cannot be reached must not
-       * replace the real failure with a second one — the TTL is the backstop for that case.
+       * for a reason no screen explains. `release` never rejects, because a cleanup that cannot be
+       * reached must not replace the real failure with a second one — the TTL is the backstop for
+       * that case.
        */
-      clearHeartbeat();
+      lease.stopHeartbeat();
       if (cancelTurn) signal?.removeEventListener("abort", cancelTurn);
       if (signal?.aborted) await stopPromise;
       if (deadline !== undefined) clearTimeout(deadline);
       if (backstop !== undefined) clearTimeout(backstop);
       spoken.unsubscribe();
-      await intelligence
-        .ɵcleanupThreadLock({ threadId, runId })
-        .catch(() => undefined);
+      await lease.release();
     }
 
-    // Raised after the lock is released, and ahead of any reply: a turn that lost its lock partway
-    // through is not a turn that answered, however much text it produced first. `stopPromise` is
-    // awaited first — the reference's own order (`channel-manager.mjs:311-313`) — so a stop this
-    // path itself requested has actually settled before we report on it, not just been requested.
-    if (heartbeatError !== undefined) {
-      await stopPromise;
-      throw heartbeatError;
-    }
-
-    /*
-     * And the same for a turn the deadline stopped, even when the abort worked and the run then
-     * completed inside the grace window. A stopped run is a truncated one: whatever text it had
-     * reached is half a sentence, and returning it here would post it into the channel as the answer
-     * and close the firing as a success.
-     */
-    if (stopped) {
-      await stopPromise;
-      throw new Error(
-        `The routine's turn was stopped after ${Math.round(turnTimeoutMs / 1000)}s.`,
-      );
-    }
-    if (waiting) throw waiting;
-
-    const added = agent.messages.filter((message) => !before.has(message.id));
-    const said = added
-      .map(assistantText)
-      .filter((text): text is string => text !== undefined);
-    // The diff first, the streamed chunks as the fallback: the diff is what was persisted, which is
-    // what the person will read in the channel, and the chunks are only what went past.
-    const replyText = (said.length > 0 ? said : chunks).join("\n\n");
-
-    /*
-     * An interrupt is an unfinished turn with nobody to ask, and it is checked BEFORE the empty-reply
-     * case below. A turn that interrupted before saying anything has both conditions true at once,
-     * and only one sentence can go on the run row and into the channel: "finished without saying
-     * anything" would be a lie about a turn that in fact stopped to ask a question. The Bot stopped
-     * to put a question to a person who is not there, so whatever it said first is half of an
-     * exchange. Posting it as the answer would be the worst of the options: the routine would read as
-     * successful and the channel would carry a reply that is waiting on something.
-     */
-    // The waiting details, when the CUSTOM event did not survive the trip, ride on the interrupt.
-    const carried = agent.pendingInterrupts
-      .map((interrupt) => interrupt.metadata?.[OPENBOT_WAITING_METADATA])
-      .find(
-        (value): value is HeadlessWaiting & { message?: string } =>
-          !!value &&
-          typeof value === "object" &&
-          typeof value.kind === "string",
-      );
-    if (carried)
-      throw new HeadlessToolSuspension(
-        carried.message ?? "The turn is waiting for human input.",
-        carried,
-      );
-    if (agent.pendingInterrupts.length > 0) {
-      throw new Error(
-        "The turn stopped to ask a question, and a routine has nobody to ask.",
-      );
-    }
-    if (replyText.length === 0) {
-      throw new Error("The turn finished without saying anything.");
-    }
-
-    const drawn = drawnComponents(added);
-    return drawn.length > 0 ? { replyText, components: drawn } : { replyText };
+    // Decided and reported only now, after the lock is released, on every path.
+    const outcome = settle({
+      ...(failed ? { failed } : {}),
+      heartbeatError,
+      stopped,
+      ...(waiting ? { waiting } : {}),
+      added: agent.messages.filter((message) => !before.has(message.id)),
+      chunks,
+      pendingInterrupts: agent.pendingInterrupts,
+      componentNames: components?.names ?? new Set(),
+    });
+    return conclude(outcome, stopPromise, turnTimeoutMs);
   };
 }

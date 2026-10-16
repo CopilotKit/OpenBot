@@ -1,11 +1,8 @@
+import { NOT_SHOWN, NOT_SHOWN_TAIL } from "@openbot/shared/component-markers";
 import { z } from "zod";
-import { NOT_SHOWN, NOT_SHOWN_TAIL } from "../../../shared/component-markers";
-import {
-  type AuditInitiator,
-  type AuditStore,
-  recordAuditEvent,
-} from "../audit";
-import type { HeadlessTool } from "../computer/headless-tools";
+import type { AuditInitiator, AuditSink } from "../audit";
+import type { HeadlessTool } from "@openbot/toolkit/headless-tools";
+import type { ComponentCatalog } from "@openbot/toolkit/ports";
 import type { ComponentStore } from "./store";
 
 /**
@@ -331,6 +328,28 @@ export function notShown(title: string, reason: string): string {
 }
 
 /**
+ * The governed gallery as a headless turn sees it: every component's name, and the tools for one
+ * Bot, decided by the component store and refused into the audit trail.
+ */
+export function headlessComponentCatalog(options: {
+  store: ComponentStore;
+  audit?: AuditSink;
+}): ComponentCatalog {
+  const { store, audit } = options;
+  return {
+    names: new Set(HEADLESS_COMPONENTS.map(({ name }) => name)),
+    toolsForTurn: ({ agentId, ownerUserId, initiator }) =>
+      createHeadlessComponentTools({
+        store,
+        botId: agentId,
+        ownerUserId,
+        initiator,
+        ...(audit ? { audit } : {}),
+      }),
+  };
+}
+
+/**
  * The component tools for one headless turn, bound to the Bot and its owner outside the arguments.
  *
  * Offered exactly what the browser would offer this Bot: published, not withheld, with the
@@ -343,7 +362,7 @@ export async function createHeadlessComponentTools(options: {
   botId: string;
   ownerUserId: string;
   initiator: AuditInitiator;
-  auditStore?: AuditStore;
+  audit?: AuditSink;
   specs?: readonly HeadlessComponentSpec[];
 }): Promise<HeadlessTool[]> {
   const {
@@ -351,7 +370,7 @@ export async function createHeadlessComponentTools(options: {
     botId,
     ownerUserId,
     initiator,
-    auditStore,
+    audit,
     specs = HEADLESS_COMPONENTS,
   } = options;
   const held = new Map(
@@ -366,8 +385,8 @@ export async function createHeadlessComponentTools(options: {
     reason: string,
     extra: Record<string, unknown> = {},
   ) => {
-    if (auditStore)
-      await recordAuditEvent(auditStore, {
+    if (audit)
+      await audit.record({
         eventType: extra.function
           ? "component.function_refused"
           : "component.refused",

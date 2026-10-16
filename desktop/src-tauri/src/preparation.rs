@@ -11,7 +11,7 @@ pub const REQUIRED: &str = "Finish installing OpenBot's local software before si
 pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
-const PACKAGES: [&str; 4] = ["", "server", "app", "worker"];
+const PACKAGES: [&str; 6] = ["", "server", "app", "worker", "shared", "toolkit"];
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {

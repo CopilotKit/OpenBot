@@ -41,6 +41,8 @@ export type ComputerControlState = {
   request?: HandoffRequest;
   transitioning: boolean;
   resumeSnapshotRequired: boolean;
+  /** A person had the page when the computer stopped, so they must check it before the Bot acts. */
+  recoveryRequired: boolean;
   secretWanted?: string;
   secretRef?: string;
   secretSnapshotId?: number;

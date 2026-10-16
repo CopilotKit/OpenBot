@@ -3,7 +3,7 @@ import type {
   Responsibility,
   ResponsibilityStore,
 } from "../responsibilities/types";
-import type { TurnRunner } from "../routines/runner";
+import type { TurnRunner } from "@openbot/toolkit/run-turn";
 import {
   type PersonQuestion,
   questionConversationBot,

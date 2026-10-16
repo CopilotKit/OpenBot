@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { GrantedTool } from "../plugins/tools";
+import type { GrantedTool } from "@openbot/toolkit/granted-tool";
 import type { ResponsibilityEngine } from "./engine";
 import {
   ResponsibilityNotFoundError,

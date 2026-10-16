@@ -5,7 +5,7 @@ import type {
   LearningAutoAssignState,
   LearningDeliveryStatus,
   LearningOverview,
-} from "../../../shared/learning";
+} from "@openbot/shared/learning";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
 import type { LearningAutoAssign } from "./auto-assign";

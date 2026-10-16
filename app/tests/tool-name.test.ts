@@ -8,6 +8,27 @@ import { readToolName } from "../src/lib/plugins/tool-name";
  * that exists to keep two vendors' `search` apart. A reader should never see either.
  */
 describe("naming a tool call", () => {
+  test("a research call says what it did and not which provider did it", () => {
+    for (const name of [
+      "mcp__exa__web_search_exa",
+      "mcp__exa-authenticated__web_search_exa",
+      "mcp__parallel__web_search",
+      "mcp__firecrawl__firecrawl_search",
+    ]) {
+      expect(readToolName(name)).toEqual({ label: "Search the web" });
+    }
+    expect(readToolName("mcp__exa__web_fetch_exa")).toEqual({
+      label: "Read web pages",
+    });
+    expect(readToolName("mcp__firecrawl__firecrawl_scrape")).toEqual({
+      label: "Read web pages",
+    });
+    // Only the research pair is relabelled; a provider's other tools keep their own names.
+    expect(readToolName("mcp__firecrawl__firecrawl_map").label).toBe(
+      "Firecrawl map",
+    );
+  });
+
   test("an MCP tool reads as an action against a named server", () => {
     expect(readToolName("mcp__slack__post_message")).toEqual({
       label: "Post message",

@@ -7,7 +7,6 @@ import {
 } from "../src/approvals/service";
 import { createApprovalStore } from "../src/approvals/store";
 import type { ApprovalCandidate } from "../src/approvals/types";
-import { HeadlessToolSuspension } from "../src/computer/headless-tools";
 import { createDatabase } from "../src/db/client";
 import {
   approvalTeamRules,
@@ -16,6 +15,7 @@ import {
 } from "../src/db/schema";
 import { users } from "../src/db/schema/core";
 import { workItems } from "../src/db/schema/work";
+import { HeadlessToolSuspension } from "@openbot/toolkit/headless-tools";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 /**

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { AbstractAgent, type Message, type RunAgentInput } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
-import { createTurnRunner } from "../src/routines/run-turn";
+import { createTurnRunner } from "@openbot/toolkit/run-turn";
+import { serverTurnAdmission } from "../src/agents/turn-admission";
 
 class Agent extends AbstractAgent {
   run() {
@@ -46,6 +47,7 @@ test("verified inbound person message keeps canonical run ID and persists exact 
     stop: async () => true,
   };
   const turn = createTurnRunner({
+    admission: serverTurnAdmission,
     intelligence,
     runner,
     buildAgentFor: async (input) => {

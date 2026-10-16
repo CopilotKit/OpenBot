@@ -1,5 +1,5 @@
 {
-  "id": "04882312-37f8-42fb-8c6f-eda6b496cd3f",
+  "id": "1e95338a-aa54-4146-9f37-32111c369e75",
   "prevId": "d319c213-0cdb-4fe0-aa1b-813c9dbcf3c4",
   "version": "7",
   "dialect": "postgresql",
@@ -5373,12 +5373,6 @@
               "nulls": "last"
             },
             {
-              "expression": "formed_by_agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
               "expression": "import_digest",
               "isExpression": false,
               "asc": true,
@@ -8854,7 +8848,7 @@
       "checkConstraints": {
         "sign_in_requests_status_check": {
           "name": "sign_in_requests_status_check",
-          "value": "\"sign_in_requests\".\"status\" IN ('pending', 'filling', 'taken_over', 'signed_in', 'failed', 'cancelled', 'expired')"
+          "value": "\"sign_in_requests\".\"status\" IN ('pending', 'filling', 'code_required', 'taken_over', 'signed_in', 'failed', 'cancelled', 'expired')"
         },
         "sign_in_requests_method_check": {
           "name": "sign_in_requests_method_check",

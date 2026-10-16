@@ -10,6 +10,8 @@
 export type SignInStatus =
   | "pending"
   | "filling"
+  /** The site accepted the password and sent a verification code; the form now asks for only that. */
+  | "code_required"
   | "taken_over"
   | "signed_in"
   | "failed"

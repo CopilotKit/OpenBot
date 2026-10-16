@@ -1,4 +1,6 @@
 import { textOf } from "../agents/message-text";
+import { researchRoleOf } from "@openbot/shared/research";
+import { researchRoleFor } from "./catalogue";
 /**
  * Choosing which of a Bot's tools to put in front of the model, one run at a time.
  *
@@ -197,7 +199,15 @@ function declaredBy(
 ): Set<string> {
   const refs = new Set<string>();
   for (const skill of skills) {
-    for (const ref of skill.tools) if (granted.has(ref)) refs.add(ref);
+    for (const ref of skill.tools) {
+      if (granted.has(ref)) refs.add(ref);
+      // A research role stands for that role on every provider, still only among what is granted.
+      const role = researchRoleOf(ref);
+      if (role) {
+        for (const held of granted)
+          if (researchRoleFor(held) === role) refs.add(held);
+      }
+    }
   }
   return refs;
 }

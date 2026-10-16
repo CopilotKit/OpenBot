@@ -9,8 +9,8 @@ import { GALLERY as DECISIONS } from "../../app/src/components/gallery/decisions
 import { GALLERY as FORM } from "../../app/src/components/gallery/form";
 import { GALLERY as QUOTE } from "../../app/src/components/gallery/quote";
 import { GALLERY as TABLE } from "../../app/src/components/gallery/table";
-import { NOT_SHOWN } from "../../shared/component-markers";
-import type { AuditEventInput } from "../src/audit";
+import { NOT_SHOWN } from "@openbot/shared/component-markers";
+import { type AuditEventInput, type AuditStore, auditSink } from "../src/audit";
 import {
   createHeadlessComponentTools,
   HEADLESS_COMPONENTS,
@@ -193,7 +193,7 @@ describe("headless component tools", () => {
       botId: "bot",
       ownerUserId: "owner",
       initiator,
-      auditStore,
+      audit: auditSink(auditStore as unknown as AuditStore),
     });
     const bar = refused.find((tool) => tool.definition.name === "showBarChart");
     expect(bar?.hidden).toBeTrue();

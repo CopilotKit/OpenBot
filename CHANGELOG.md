@@ -28,6 +28,151 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   comes back on their next conversation with that Bot (one they turned off and kept stays off).
   `OPENBOT_MEMORY_SOURCE_DEFAULTS=false` and `OPENBOT_PROACTIVE_DEFAULTS=false` (Helm: `config.memory.*`)
   prevent it.
+- Migration `0056_sign_in_code_step` widens the check on `sign_in_requests.status` to allow
+  `code_required` (below). A server and a computer must be upgraded together: an older computer has
+  no `/sign-in/code`.
+
+### The Bot's screen opens only when there is something to watch
+
+Asking a Bot a question it answered in words could still open its computer beside the conversation,
+on a still screen, for an action that never happened.
+
+- **A call that never reaches the screen no longer opens it.** Reading, writing or listing a file,
+  and running a command, happen on the computer rather than on its display. Only work that happens
+  on the screen opens it.
+- **A refused action takes its screen back.** The screen is announced before the action so a page
+  can be watched while it loads; an action a policy, a capability switch or a network rule refuses
+  never touches the browser, so the screen it opened closes again. A refusal does not close a screen
+  some earlier action in the same run legitimately opened, and an action that was permitted and
+  failed keeps its screen, because the page may have moved.
+- **A Bot is no longer given computer tools this deployment would refuse.** Admin → Controls already
+  decided whether anybody may use a Bot's browser (`Cloud browser use`), its files and shell
+  (`Cloud computer use`) and the network (`Cloud network access`), and the boundary enforced all
+  three — but the Bot was still offered the tools, so it reached for one, was refused, and spent the
+  turn saying so. The tools a switch turns off are now withheld from the Bot in the first place.
+
+### An app you have not connected is offered where you are reading
+
+A Bot asked to use an app whose account the person had not connected answered with the name of a
+screen somewhere else: "Connect it in Settings and ask again." The conversation now carries the
+thing itself — a card naming the app, with a Connect button.
+
+- Pressing Connect opens the vendor's consent in a **new tab**, so the conversation is not replaced
+  by a page load and the question is still there afterwards. The card watches for the account to
+  appear and says so only once the server lists it, never merely because somebody came back.
+- It covers an account that was never connected, one disconnected while a call was in flight, and
+  access that was withdrawn. An app shared across the deployment still says to ask an administrator,
+  since the person reading cannot connect it.
+
+### A reply's tool calls fold into one line
+
+A Bot that searched, read two pages and checked Drive before answering drew four lines above its
+answer. Adjacent connector calls and browser steps now fold into one line that says what was done,
+such as "Searched the web and read 2 pages", with an icon for each kind of step. It names the step in
+progress while the Bot works, and counts issues when a step was blocked or failed. Opened, it lists
+each step with its query, page or connector, and each step opens to what it was given and what came
+back. A single connector call keeps its own line, and approvals, connection requests and anything the
+app draws itself stay outside the fold.
+
+### Public-web research works with Exa and Firecrawl, not only Parallel
+
+Four new catalogue entries give a Bot public-web search and page reading without its browser:
+**Exa Search** (free, rate-limited), **Exa Search (API key)**, **Firecrawl** (free) and **Firecrawl
+(API key)**. They sit beside the two Parallel entries, and nothing is granted to any Bot until an administrator does it.
+See [docs/web-research.md](docs/web-research.md).
+
+- **The research guidance follows whichever provider a Bot holds.** It used to switch on only for
+  Parallel's two tools. Now a Bot holding any provider's search and fetch tools is told how to use
+  them, and a Bot holding more than one uses the one the person asks for.
+- **A Bot holding a research provider searches without being asked** when an answer depends on facts
+  that change, such as current figures, rankings or recent events, and stops after a search or two.
+  Before, every Bot was told not to go looking, so one holding a search tool still answered from
+  memory. A Bot with only its browser now says it can open pages but cannot search.
+- **A conversation doesn't say which provider searched.** Research calls show as "Search the web"
+  and "Read web pages" rather than "Web search exa", and the Bot doesn't name the provider unless
+  asked. The Bot's access page still shows which provider it holds.
+- **The shipped `research-public-web` skill declares roles, not Parallel.** Its tools are now
+  `@research/search` and `@research/fetch`, which match the search and fetch tools of every research
+  provider the Bot was granted. A skill written by a person can declare the same roles, and the
+  Skills page offers them under "Public-web research". A role grants nothing.
+- **Exa and Firecrawl list their reads.** Every other tool they advertise counts as a write, so a
+  Firecrawl monitor deletion or an Exa agent run goes through the same policy as any write.
+- **An API key can go in the vendor's own header.** Exa reads `x-api-key`; the deployment key for
+  that entry is sent there. The admin page now says the key is "Sent with every call to this vendor"
+  rather than calling it a bearer token.
+
+### Bot turns hold their conversation more carefully
+
+Routines, responsibilities, background research, wake-ups, group turns and Bot-to-Bot handoffs keep a
+lock on the conversation while they run and renew it as they go.
+
+- **A failed renewal no longer stops the turn.** Before, any failed renewal stopped a routine or
+  responsibility turn, including a network blip. A stopped turn is retried from the start, so a Bot
+  that had already sent an email could send it again. Now a turn stops when Intelligence says the
+  conversation belongs to another run (409), or when renewals have failed for so long that the lock
+  (120 seconds) would lapse before the next one, whatever the failures were. It stops while the lock
+  is still its own. A shorter blip rides through.
+- **A handoff that loses its lock now stops.** Before, a handoff ignored every failed renewal and
+  kept writing, even into a person's own channel after they started typing there. Now it stops, gives
+  the conversation back and is retried a minute later.
+- **A paused Bot's handoff no longer locks the conversation.** A handoff now checks that the Bot is
+  not paused, and that "Use Bots" and the model allowlist allow it, before taking the lock. Before,
+  every retry took the lock briefly and could refuse the person's own message.
+- **Routine turns ask for a 120-second lock.** This is the lifetime Intelligence already applies, so
+  nothing changes on today's platform.
+
+### A sign-in's verification code is asked for after the password
+
+The private sign-in form used to ask for a username, a password and "a verification code, if the
+site asks for one" all at once, so a person had to guess whether a code was coming and type one
+before the site had sent it. Now the form asks only for the username and password. If the site,
+once it has the password, shows a one-time-code field, the request waits in a new `code_required`
+state and the form asks for the code the site just sent, on its own. A wrong code keeps asking; a
+code nobody enters expires with the request, and the person can still take over the browser or
+cancel. The Bot is told only how it ended, never the code, and a saved login still never stores one.
+The step is audited as `computer.sign_in_code_requested`, and a failed code as
+`computer.sign_in_failed` with `step: "code"`.
+
+### A licence token from a store reaches the server
+
+The Helm chart passed `COPILOTKIT_LICENSE_TOKEN` to the server only when `secrets.licenseToken` was
+written as a literal. A token synced through `externalSecrets`, which the chart's own EKS example
+does, reached the Secret and never the pod, so a self-hosted deployment ran unlicensed with nothing
+saying why. It is now passed whenever `externalSecrets.data` names `license-token`, and as an optional
+reference with `secrets.existingSecret`, where the chart cannot see the Secret's keys. The chart's
+CI check now also fails a render in which a store syncs a key that nothing reads.
+
+### OpenBot says at boot when Intelligence will refuse memory
+
+A self-hosted Intelligence needs its own licence. Without one it answers every runtime entitlement
+read with `RUNTIME_ENTITLEMENTS_SELF_HOSTED_MISCONFIGURED` and refuses memory, while conversations
+carry on and nothing in OpenBot's log says why. The server now asks once at start-up and logs
+`intelligence-entitlement-not-ready` with the code and where the licence goes, and
+`intelligence-entitlement-unreadable` when Intelligence cannot be asked. Start-up does not wait for
+the answer.
+
+### The server says at boot when its key cannot call the configured model
+
+A key without access to the tenant package's `default_model` passed every start-up check and failed at
+the first message, as "The model … does not exist or you do not have access to it", in front of
+whoever sent it. The server now asks the provider once at start-up and logs `model-unavailable` with
+the model and the fix, or `model-credential-rejected` for a refused key. It asks only OpenAI and
+Anthropic themselves, not an endpoint set by `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`, says nothing
+while no key is configured, and never delays start-up.
+
+### The Helm chart pins by digest, mounts a tenant package, and takes a Composio key
+
+Three things a deployment on Kubernetes did by hand now have values of their own:
+
+- `image.digest` deploys exactly the image a release's `container-images.json` names, as
+  `repository:tag@digest`. It refuses anything that is not `sha256:` and 64 hex characters.
+- `config.extraVolumes` and `config.extraVolumeMounts` mount volumes on the server and on the routines
+  and computer-culler CronJobs, the pods that load the configuration. A tenant package from a
+  ConfigMap no longer needs a custom image.
+- `secrets.composioApiKey`, or `composio-api-key` named in `externalSecrets.data`, reaches the server
+  as `COMPOSIO_API_KEY`. Only the server receives it, not the CronJobs.
+
+With none of them set, every target renders exactly as before.
 
 - Migration `0056_bot_scoped_memory_dedupe` rebuilds the Bot-memory dedupe index per Bot. A fact
   one Bot remembered used to be swallowed as a duplicate when a second Bot formed it, leaving the

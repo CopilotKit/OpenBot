@@ -8,9 +8,10 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
@@ -4440,11 +4441,46 @@ test("a Composio call by somebody who has not connected the app is refused with 
       botId: "bot_helper",
       actorId: "user_asker",
     }),
-  ).rejects.toThrow(/connect it in settings/i);
+  ).rejects.toThrow(/connect it and ask again/i);
 
   // Refused here rather than at Composio, so a person is told what to do instead of being shown
   // somebody else's error, and so no call is spent finding out.
   expect(reached).toEqual([]);
+});
+
+test("a refusal nobody but the asker can clear carries the app to connect", async () => {
+  /*
+   * THE CARD IS DRAWN FROM THIS STRING. The transcript turns this refusal into a Connect button
+   * (see `app/src/components/channels/connect-app-card.tsx`), and the only thing telling it which
+   * app to connect is the prompt inside the sentence. A refusal that stops carrying it degrades
+   * silently: the English still reads correctly and the button quietly stops being offered.
+   */
+  const { store, database } = await freshStore();
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () => vendorAnswered(),
+  });
+  await seedComposioGmail(database, store, { connect: false });
+
+  const refusal = await store
+    .callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "user_asker",
+    })
+    .then(
+      () => null,
+      (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+    );
+
+  expect(readConnectPrompt(refusal)).toEqual({
+    serverId: "gmail",
+    title: "Gmail",
+    message:
+      "You have not connected your Gmail account. Connect it and ask again.",
+  });
 });
 
 /**
@@ -4484,7 +4520,7 @@ test("a Composio call by somebody who has not connected the app is refused even 
       botId: "bot_helper",
       actorId: "user_stranger",
     }),
-  ).rejects.toThrow(/connect it in settings/i);
+  ).rejects.toThrow(/connect it and ask again/i);
 
   // Never dialled, which is the half that matters: a call let through here is spent at the broker
   // in a stranger's name, and the person asking sees somebody else's mailbox or somebody else's
@@ -4550,7 +4586,7 @@ test("a Composio call whose row id and url name different apps is refused", asyn
       botId: "bot_helper",
       actorId: "user_asker",
     }),
-  ).rejects.toThrow(/connect it in settings/i);
+  ).rejects.toThrow(/connect it and ask again/i);
 
   // The gate keys on the app the url names, because that is the app the transport dials. Keyed on
   // the row id, this call completed: it ran a Slack action against a Gmail connection, sent the
@@ -4626,7 +4662,7 @@ test("an app whose accounts are somebody's still refuses without a row, and name
       botId: "bot_helper",
       actorId: "user_asker",
     }),
-  ).rejects.toThrow(/connect it in settings/i);
+  ).rejects.toThrow(/connect it and ask again/i);
 
   // Never dialled. The refusal is local so the person is told their own next step instead of shown
   // the broker's error about an account it cannot find, and no call is spent finding that out.
@@ -6442,32 +6478,43 @@ describe("a query of this deployment's own that failed", () => {
    * above owns the behaviour of the reachable path; this owns the shape of every path.
    */
   test("no recording site in the plugin store reads a caught message without asking", () => {
-    const source = readFileSync(
-      join(import.meta.dir, "..", "src", "plugins", "store.ts"),
-      "utf8",
-    );
+    // Every file the store is made of: the assembly in `store.ts` and the modules it was split into.
+    const plugins = join(import.meta.dir, "..", "src", "plugins");
+    const files = [
+      "store.ts",
+      ...readdirSync(join(plugins, "plugin-store"))
+        .filter((name) => name.endsWith(".ts"))
+        .map((name) => `plugin-store/${name}`),
+    ];
     /*
-     * Comments blanked rather than removed, because this file argues about `error.message` at
+     * Comments blanked rather than removed, because these files argue about `error.message` at
      * length — the prose naming the hazard must not be mistaken for the hazard, and the line
-     * numbers reported below have to stay the file's own so a failure names where to look.
+     * numbers reported below have to stay each file's own so a failure names where to look.
      */
-    const code = source
-      .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
-      .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1");
+    const code = files.map((file) => ({
+      file,
+      code: readFileSync(join(plugins, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
+        .replace(/^([^\n"'`]*?)\/\/.*$/gm, "$1"),
+    }));
 
     // Listed rather than matched, so a failure prints the line to correct instead of the file.
     expect(
-      code
-        .split("\n")
-        .flatMap((line, index) =>
-          /\berror\.message\b/.test(line)
-            ? [`${index + 1}: ${line.trim()}`]
-            : [],
-        ),
+      code.flatMap(({ file, code: text }) =>
+        text
+          .split("\n")
+          .flatMap((line, index) =>
+            /\berror\.message\b/.test(line)
+              ? [`${file}:${index + 1}: ${line.trim()}`]
+              : [],
+          ),
+      ),
     ).toEqual([]);
     // And the door is genuinely in use, so the assertion above cannot be satisfied by deleting the
     // read altogether and saying nothing.
-    expect(code).toMatch(/\b(withoutStatement|reasonWithoutStatement)\(/);
+    expect(code.map(({ code: text }) => text).join("\n")).toMatch(
+      /\b(withoutStatement|reasonWithoutStatement)\(/,
+    );
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { historyOrEmpty, isMissingThread } from "../src/copilot";
+import { historyOrEmpty, isMissingThread } from "../src/thread-history";
 
 /**
  * Reading history on a thread the platform has never seen.

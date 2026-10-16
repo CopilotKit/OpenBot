@@ -11,7 +11,7 @@ import type {
   LearningDeliveryStatus,
   LearningSettings,
   LearningTarget,
-} from "../../../shared/learning";
+} from "@openbot/shared/learning";
 import type { LearningSettingsStore } from "./settings";
 
 // This published internal export is pinned to runtime 1.73.1. Keep its use here: the SDK owns

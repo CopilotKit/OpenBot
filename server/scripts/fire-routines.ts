@@ -21,7 +21,7 @@ import {
   ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue } from "../src/work/queue";
-import { workOwner } from "../../shared/work-owner";
+import { workOwner } from "@openbot/shared/work-owner";
 
 const config = loadConfig(process.env);
 

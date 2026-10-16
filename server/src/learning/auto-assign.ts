@@ -2,7 +2,7 @@ import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import {
   AUTOMATIC_LEARNING_CONTAINER_ID,
   type LearningAutoAssignState,
-} from "../../../shared/learning";
+} from "@openbot/shared/learning";
 import {
   type AuditStore,
   DEPLOYMENT_INITIATOR,

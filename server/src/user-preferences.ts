@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import {
   DEFAULT_USER_PREFERENCES,
   type UserPreferences,
-} from "../../shared/user-preferences";
+} from "@openbot/shared/user-preferences";
 import type { Database } from "./db/client";
 import { users } from "./db/schema";
 

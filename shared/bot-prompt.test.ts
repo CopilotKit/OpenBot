@@ -22,4 +22,10 @@ describe("COMPUTER_GUIDANCE", () => {
       "Say what you found or did in plain language, briefly.",
     );
   });
+
+  test("does not let the browser pass for a web search", () => {
+    // Asked "can you search the web?", a Bot with only a browser said yes.
+    expect(COMPUTER_GUIDANCE).toContain("Opening a page is not a web search.");
+    expect(COMPUTER_GUIDANCE).toContain("cannot search");
+  });
 });

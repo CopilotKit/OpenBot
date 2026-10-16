@@ -19,6 +19,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { DELIVERY_REQUEST_TIMEOUT_MS } from "../timeouts";
 import {
   type BindingTransport,
   type ChatTransport,
@@ -116,7 +117,7 @@ export function createOpenTagTransport(config: OpenTagConfig) {
       try {
         response = await wire(new URL("/openbot/deliver", config.url), {
           method: "POST",
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(DELIVERY_REQUEST_TIMEOUT_MS),
           headers: {
             authorization: bearer,
             "content-type": "application/json",

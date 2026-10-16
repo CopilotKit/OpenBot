@@ -8,5 +8,8 @@
     "build": "tsc --noEmit",
     "dev": "bun --watch src/index.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openbot/shared": "workspace:*"
   }
 }

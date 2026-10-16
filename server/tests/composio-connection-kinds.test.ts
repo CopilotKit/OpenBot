@@ -34,7 +34,7 @@ import {
 } from "../src/plugins/broker";
 import type { ComposioActions } from "../src/plugins/composio";
 import { useComposioClient } from "../src/plugins/composio";
-import { connectionOf } from "../src/plugins/composio-adapter";
+import { connectionOf } from "../src/plugins/composio-vendor";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { AccountRef } from "../src/plugins/shared-accounts";
 import {

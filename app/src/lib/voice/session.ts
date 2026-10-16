@@ -1,4 +1,4 @@
-import type { SaveVoiceSessionInput } from "../../../../shared/voice-session";
+import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
 import { closingOf, openingOf } from "./cut";
 import { VOICE_CONTEXT_ITEM_ID, VoiceTranscript } from "./transcript";
 import type { ConnectVoice, VoiceConnection, VoiceEvent } from "./types";
