@@ -115,7 +115,7 @@ export const personalMemories = pgTable(
     // One Bot-formed fact per person, Bot, and content: two runs of the same Bot forming the
     // same fact at once store it once, which a read-then-insert cannot promise. A second Bot
     // forming the same fact keeps its own row so its readback can see it.
-    uniqueIndex("personal_memories_formed_digest_idx")
+    uniqueIndex("personal_memories_formed_bot_digest_idx")
       .on(table.ownerUserId, table.formedByAgentId, table.importDigest)
       .where(sql`${table.formedBy} = 'bot'`),
   ],

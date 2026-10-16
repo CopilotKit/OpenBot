@@ -5363,8 +5363,8 @@
           "method": "btree",
           "with": {}
         },
-        "personal_memories_formed_digest_idx": {
-          "name": "personal_memories_formed_digest_idx",
+        "personal_memories_formed_bot_digest_idx": {
+          "name": "personal_memories_formed_bot_digest_idx",
           "columns": [
             {
               "expression": "owner_user_id",
