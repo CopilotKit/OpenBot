@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { sql } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { createAuditReader } from "../src/audit";
@@ -157,4 +157,8 @@ describe("a cursor over rows written within one millisecond", () => {
 
     expect(await walk(targetId)).toEqual(expected);
   });
+});
+
+afterAll(async () => {
+  await database.$client.close();
 });

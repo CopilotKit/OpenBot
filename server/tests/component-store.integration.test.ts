@@ -404,3 +404,7 @@ describe("what a component may read", () => {
     expect(store.callFunction(`nothing_${suite}`, {})).rejects.toThrow();
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});

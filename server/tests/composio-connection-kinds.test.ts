@@ -2126,3 +2126,7 @@ describe("what a brokered connection writes into the append-only trail", () => {
     ]).toEqual([""]);
   });
 });
+
+afterAll(async () => {
+  await database.$client.close();
+});
