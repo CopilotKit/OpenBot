@@ -620,8 +620,17 @@ function KindStep({
          * even look; scrolling is the gesture people already try on a list. The scroller is bounded
          * so it is the list that moves and not the step: the question above it and the Back button
          * below stay exactly where they were.
+         *
+         * `overflow-y-auto` computes `overflow-x` to `auto` as well, so this box clips sideways as
+         * much as it does downward. The padding is what keeps a row's border and focus ring off
+         * that edge, and it is inset on BOTH sides: with room on the right alone, the row under the
+         * pointer had its left border shaved off. The negative margin hands the padding back so the
+         * rows stay the width of the button above them.
+         *
+         * Bounded in `svh` rather than at a fixed height, because the popup it sits in is already
+         * sized that way: at `max-h-64` the list stopped short and left a third of the step empty.
          */}
-        <div className="-mr-1 max-h-64 overflow-y-auto pr-1">
+        <div className="-mx-1 max-h-[42svh] overflow-y-auto px-1">
           <div className="flex flex-col gap-2">
             {WEB_HARNESSES.map((harness) => (
               <button
