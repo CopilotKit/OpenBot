@@ -82,7 +82,7 @@ export function createOrganizationAuth(options: {
   type Verdict =
     | { kind: "actor"; actor: AuthenticatedActor }
     | { kind: "refused"; authenticationFailed: boolean }
-    | { kind: "unexpected" };
+    | { kind: "unexpected"; status: number };
 
   /** Asks the organization about a cookie and reports what it said, with no side effects on Desktop's failure state. */
   async function verifyAtAuthority(cookie: string): Promise<Verdict> {
@@ -104,15 +104,12 @@ export function createOrganizationAuth(options: {
       throw new AuthorityUnavailable(
         "The organization is temporarily unavailable. Try again.",
       );
-    if (!response.ok)
-      return {
-        kind: "refused",
-        authenticationFailed:
-          response.status === 401 || response.status === 403,
-      };
+    if (response.status === 401 || response.status === 403)
+      return { kind: "refused", authenticationFailed: true };
+    if (!response.ok) return { kind: "unexpected", status: response.status };
     const user = actor(await response.json().catch(() => null));
-    if (!user) return { kind: "unexpected" };
-    return { kind: "actor", actor: user };
+    if (!user) return { kind: "unexpected", status: response.status };
+    return { kind: "actor", actor: await options.materializeUser(user) };
   }
 
   async function verify(cookie: string): Promise<AuthenticatedActor | null> {
@@ -126,9 +123,8 @@ export function createOrganizationAuth(options: {
       return null;
     }
     if (verdict.kind === "unexpected") return null;
-    const localUser = await options.materializeUser(verdict.actor);
     clearDesktopConnectionFailure("organization");
-    return localUser;
+    return verdict.actor;
   }
 
   function cookieFrom(headers: Headers): string | null {

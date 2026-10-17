@@ -5,7 +5,10 @@ import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { Hono } from "hono";
 import { desktopAuthPage } from "../src/auth/native-browser";
-import { createOrganizationAuth } from "../src/auth/organization";
+import {
+  AuthorityUnavailable,
+  createOrganizationAuth,
+} from "../src/auth/organization";
 import {
   clearDesktopConnectionFailure,
   mountDesktopConnectionFailure,
@@ -293,3 +296,87 @@ test.each(["google", "microsoft", "okta"])(
     expect(html).toContain("/api/auth/electron/transfer-user");
   },
 );
+
+describe("quiet verification of a forwarded cookie", () => {
+  let status = 200;
+  let body: unknown = null;
+  let authority: ReturnType<typeof Bun.serve>;
+  let auth: ReturnType<typeof createOrganizationAuth>;
+  let cookieHeader: string;
+  const materialized: string[] = [];
+
+  beforeEach(() => {
+    status = 200;
+    body = null;
+    materialized.length = 0;
+    authority = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        status === 302
+          ? new Response(null, {
+              status,
+              headers: { location: "https://elsewhere.example.test/" },
+            })
+          : status === 200
+            ? Response.json(body)
+            : new Response("answer", { status }),
+    });
+    auth = createOrganizationAuth({
+      authorityUrl: authority.url.origin,
+      // The local store upserts by email and can answer with its own id.
+      materializeUser: async (user) => {
+        materialized.push(user.id);
+        return { ...user, id: `local-${user.id}` };
+      },
+    });
+    const value = Buffer.from(
+      JSON.stringify({
+        authority: authority.url.origin,
+        cookie: "better-auth.session_token=abc",
+      }),
+    ).toString("base64url");
+    cookieHeader = `openbot.organization-session=${value}`;
+  });
+  afterEach(() => {
+    authority.stop(true);
+  });
+
+  test.each([400, 404, 408, 429, 302])(
+    "an authority answering %d is unavailable, never a sign-out",
+    async (answer) => {
+      status = answer;
+      await expect(
+        auth.verifySessionQuietly(cookieHeader),
+      ).rejects.toBeInstanceOf(AuthorityUnavailable);
+    },
+  );
+
+  test("a 2xx whose body is not an actor is unavailable", async () => {
+    body = { user: null };
+    await expect(
+      auth.verifySessionQuietly(cookieHeader),
+    ).rejects.toBeInstanceOf(AuthorityUnavailable);
+  });
+
+  test.each([401, 403])(
+    "a %d from the authority is a sign-out",
+    async (answer) => {
+      status = answer;
+      expect(await auth.verifySessionQuietly(cookieHeader)).toBeNull();
+    },
+  );
+
+  test("a malformed cookie is a sign-out", async () => {
+    expect(
+      await auth.verifySessionQuietly("openbot.organization-session=x"),
+    ).toBeNull();
+  });
+
+  test("a valid actor comes back as the local user", async () => {
+    body = { user: employee };
+    const user = await auth.verifySessionQuietly(cookieHeader);
+    expect(user?.id).toBe("local-employee-1");
+    expect(materialized).toEqual(["employee-1"]);
+  });
+});
