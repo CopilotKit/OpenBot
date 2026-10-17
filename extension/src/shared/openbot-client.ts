@@ -29,7 +29,13 @@ export function openbotRaw(
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (target.token) headers.set("Authorization", `Bearer ${target.token}`);
-  return fetch(new URL(path, target.openbotUrl), {
+  const url = new URL(path, target.openbotUrl);
+  if (url.origin !== new URL(target.openbotUrl).origin) {
+    throw new Error(
+      `Refusing to send the OpenBot bearer to ${url.origin}; "${path}" leaves ${new URL(target.openbotUrl).origin}.`,
+    );
+  }
+  return fetch(url, {
     ...init,
     headers,
     redirect: "error",
@@ -82,5 +88,7 @@ export async function openbotJson<T>(
       body,
     );
   }
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (response.status === 204 || text === "") return undefined as T;
+  return JSON.parse(text) as T;
 }
