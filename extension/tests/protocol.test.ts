@@ -1,0 +1,115 @@
+import { describe, expect, test } from "bun:test";
+import { RECORDER_PAGE_NETWORK_MESSAGE_BYTES } from "@openbot/shared/recorder-api";
+import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
+import {
+  parseContentMessage,
+  parseExternalMessage,
+} from "../src/protocol/messages";
+
+const click = {
+  kind: "click" as const,
+  url: "https://shop.example.test/cart",
+  target: { role: "button", name: "Checkout", sensitive: false },
+};
+const event = (value: unknown, timestamp = 1_700_000_000_000) => ({
+  type: "CUSTOM" as const,
+  name: "page",
+  timestamp,
+  value,
+});
+
+describe("parseContentMessage", () => {
+  test("returns a valid content.step", () => {
+    const message = { type: "content.step", action: click };
+    expect(parseContentMessage(message)).toEqual(message as never);
+  });
+
+  test("returns null for an unknown type", () => {
+    expect(parseContentMessage({ type: "content.unknown" })).toBeNull();
+  });
+
+  test("returns null for a content.event over 64 KiB", () => {
+    const message = {
+      type: "content.event",
+      event: event("x".repeat(70 * 1024)),
+    };
+    expect(parseContentMessage(message)).toBeNull();
+  });
+
+  test("returns null for a content.event with a timestamp of 253,402,300,800,000", () => {
+    const message = {
+      type: "content.event",
+      event: event("v", 253_402_300_800_000),
+    };
+    expect(parseContentMessage(message)).toBeNull();
+    const last = { type: "content.event", event: event("v", MAX_TIMESTAMP_MS) };
+    expect(parseContentMessage(last)).not.toBeNull();
+  });
+
+  test("returns null for a content.sensitive with a non-hex digest", () => {
+    expect(
+      parseContentMessage({ type: "content.sensitive", digest: "zz" }),
+    ).toBeNull();
+    expect(
+      parseContentMessage({
+        type: "content.sensitive",
+        digest: "a".repeat(64),
+      }),
+    ).not.toBeNull();
+  });
+
+  test("returns null for something that is not JSON-serialisable", () => {
+    expect(parseContentMessage(undefined)).toBeNull();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(parseContentMessage(cyclic)).toBeNull();
+  });
+});
+
+describe("parseExternalMessage", () => {
+  test("accepts a ping and a connect code", () => {
+    expect(parseExternalMessage({ type: "openbot.ping" })).toEqual({
+      type: "openbot.ping",
+    });
+    expect(
+      parseExternalMessage({ type: "openbot.connect", code: "obc_x" }),
+    ).toEqual({
+      type: "openbot.connect",
+      code: "obc_x",
+    });
+  });
+
+  test("never accepts an origin in the body", () => {
+    expect(
+      parseExternalMessage({
+        type: "openbot.connect",
+        code: "obc_x",
+        origin: "https://evil",
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null for an openbot.connect over 64 KiB", () => {
+    expect(
+      parseExternalMessage({
+        type: "openbot.connect",
+        code: `obc_${"x".repeat(70 * 1024)}`,
+      }),
+    ).toBeNull();
+  });
+
+  test("a recorder.page-network with a 1 MiB body parses, and one over its cap returns null", () => {
+    const ok = {
+      type: "recorder.page-network",
+      event: event({ response: { body: "x".repeat(1024 * 1024) } }),
+    };
+    expect(parseExternalMessage(ok)).not.toBeNull();
+    const tooBig = {
+      type: "recorder.page-network",
+      event: event({
+        response: { body: "x".repeat(RECORDER_PAGE_NETWORK_MESSAGE_BYTES) },
+      }),
+    };
+    expect(parseExternalMessage(tooBig)).toBeNull();
+  });
+});
