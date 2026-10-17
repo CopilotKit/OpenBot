@@ -91,6 +91,24 @@ describe("recorder database", () => {
     db.close();
   });
 
+  test("tx rejects with the failing request's error when work does not await it", async () => {
+    const db = await openRecorderDatabase(freshName());
+    await tx(db, ["steps"], "readwrite", (t) =>
+      requestToPromise(
+        t.objectStore("steps").add({ demonstrationId: "d", index: 0 }),
+      ),
+    );
+    const error = await tx(db, ["steps"], "readwrite", (t) => {
+      t.objectStore("steps").add({ demonstrationId: "d", index: 0 });
+      return "ok";
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect((error as Error | undefined)?.name).toBe("ConstraintError");
+    db.close();
+  });
+
   test("deleteDemonstrationData removes one demonstration and leaves another", async () => {
     const db = await openRecorderDatabase(freshName());
     const seed = (id: string, mediaId: string, bodiesId: string) =>

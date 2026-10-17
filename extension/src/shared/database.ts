@@ -97,10 +97,14 @@ export function tx<T>(
       completed = true;
       finish();
     };
-    t.onerror = () => {
+    // t.error is still null while the error event fires, so the cause is read from the failing request
+    t.onerror = (event) => {
       if (!failed) {
         failed = true;
-        failure = t.error ?? new Error("An IndexedDB transaction failed.");
+        failure =
+          (event.target as IDBRequest | null)?.error ??
+          t.error ??
+          new Error("An IndexedDB transaction failed.");
       }
     };
     t.onabort = () =>
