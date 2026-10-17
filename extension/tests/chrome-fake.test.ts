@@ -552,3 +552,37 @@ test("onDisconnect.called is false on the end that disconnected and true once th
   await Promise.resolve();
   expect(far2.onDisconnect.called).toBe(true);
 });
+
+test("tabs.remove closes tabs in order, fires onRemoved, and stops at the first unknown id as Chrome does", async () => {
+  const ids: number[] = [];
+  for (const site of ["a", "b", "c"])
+    ids.push(
+      (await chrome.tabs.create({ url: `https://${site}.example.test/` }))
+        .id as number,
+    );
+  const [first, second, third] = ids;
+  const seen: unknown[] = [];
+  chrome.tabs.onRemoved.addListener((tabId, info) => seen.push([tabId, info]));
+
+  await chrome.tabs.remove(first);
+  expect(fake.tabs.has(first)).toBe(false);
+  await expect(chrome.tabs.get(first)).rejects.toThrow(
+    `No tab with id: ${first}.`,
+  );
+  await expect(chrome.tabs.remove(first)).rejects.toThrow(
+    `No tab with id: ${first}.`,
+  );
+
+  // Chrome closes each id in turn and answers with the first unknown one: the tabs before it are closed.
+  await expect(chrome.tabs.remove([second, 999, third])).rejects.toThrow(
+    "No tab with id: 999.",
+  );
+  expect(fake.tabs.has(second)).toBe(false);
+  expect(fake.tabs.has(third)).toBe(true);
+  expect(fake.removed).toEqual([first, second]);
+  expect(seen).toEqual([
+    [first, { windowId: 1, isWindowClosing: false }],
+    [second, { windowId: 1, isWindowClosing: false }],
+  ]);
+  expect(fake.calls.filter((call) => call === "tabs.remove")).toHaveLength(3);
+});

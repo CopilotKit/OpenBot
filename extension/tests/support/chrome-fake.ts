@@ -98,6 +98,8 @@ export type ChromeFake = {
   tabs: Map<number, chrome.tabs.Tab>;
   opened: string[];
   updated: { tabId: number; props: chrome.tabs.UpdateProperties }[];
+  /** The tab ids chrome.tabs.remove closed, in order. */
+  removed: number[];
   /**
    * Simulates the service worker being torn down and started again: its listeners and the ports other contexts
    * hold to it are gone (the test re-registers them), while storage.session, storage.local, tabs, the offscreen
@@ -384,6 +386,7 @@ export function installChromeFake(
     tabs: new Map(),
     opened: [],
     updated: [],
+    removed: [],
     restartServiceWorker() {
       calls.push("serviceWorker.restart");
       for (const created of events) created.clear();
@@ -408,6 +411,7 @@ export function installChromeFake(
     onCreatedNavigationTarget: event("webNavigation.onCreatedNavigationTarget"),
   };
   const alarmEvents = { onAlarm: event("alarms.onAlarm") };
+  const tabEvents = { onRemoved: event("tabs.onRemoved") };
   const storageChanged = event("storage.onChanged");
   let nextTabId = 1000;
 
@@ -764,6 +768,21 @@ export function installChromeFake(
         if (props.url !== undefined) tab.url = props.url;
         return tab;
       },
+      /** As Chrome does: closes each id in turn and rejects at the first unknown one, leaving the earlier ones closed. */
+      async remove(tabIds: number | number[]) {
+        calls.push("tabs.remove");
+        for (const tabId of typeof tabIds === "number" ? [tabIds] : tabIds) {
+          const tab = fake.tabs.get(tabId);
+          if (!tab) throw new Error(`No tab with id: ${tabId}.`);
+          fake.tabs.delete(tabId);
+          fake.removed.push(tabId);
+          tabEvents.onRemoved.dispatch(tabId, {
+            windowId: tab.windowId,
+            isWindowClosing: false,
+          });
+        }
+      },
+      ...tabEvents,
     },
     action: {
       async setBadgeText(details: { text: string }) {

@@ -100,7 +100,8 @@ let realNow: () => number;
 let clock = 1_800_000_000_000;
 let policy: RecorderPolicy;
 let askDesktopCalls: number;
-let removed: { tabId: number; pendingOrigin?: string; opened: number }[];
+/** What was pending, and how many tabs had been opened, at each moment the fake closed a tab. */
+let closedWhile: { pendingOrigin?: string; opened: number }[];
 
 const openTab = async (url: string) => {
   opened.push(url);
@@ -129,29 +130,19 @@ beforeEach(() => {
   realNow = Date.now;
   clock = 1_800_000_000_000;
   Date.now = () => clock;
-  removed = [];
-  // The shared fake has no tabs.remove. This one closes the tab as Chrome does, and records what was pending and
-  // how many tabs had been opened at that moment, so a test can tell what happened before the close.
-  Object.assign(chrome.tabs, {
-    remove: async (tabId: number) => {
-      if (!fake.tabs.has(tabId)) throw new Error(`No tab with id: ${tabId}.`);
-      const pending = fake.storage.session.get("pendingConnect") as
-        | { origin: string }
-        | undefined;
-      removed.push({
-        tabId,
-        pendingOrigin: pending?.origin,
-        opened: opened.length,
-      });
-      fake.tabs.delete(tabId);
-    },
+  closedWhile = [];
+  // So a test can tell what happened before a connect tab was closed.
+  chrome.tabs.onRemoved.addListener(() => {
+    const pending = fake.storage.session.get("pendingConnect") as
+      | { origin: string }
+      | undefined;
+    closedWhile.push({ pendingOrigin: pending?.origin, opened: opened.length });
   });
 });
 afterEach(() => {
   releaseHeld();
   held = null;
   Date.now = realNow;
-  Reflect.deleteProperty(chrome.tabs, "remove");
   fake.uninstall();
 });
 
@@ -266,8 +257,9 @@ test("a different origin replacing a stale pending connect closes its connect ta
   clock += 6 * 60 * 1000;
   expect((await connect("obc_b", "https://b.example.test")).ok).toBe(true);
   // A's tab shows A's origin but would exchange B's code at B, so it is closed while A is still the pending connect.
-  expect(removed).toEqual([
-    { tabId: 41, pendingOrigin: "https://a.example.test", opened: 1 },
+  expect(fake.removed).toEqual([41]);
+  expect(closedWhile).toEqual([
+    { pendingOrigin: "https://a.example.test", opened: 1 },
   ]);
   expect(fake.tabs.has(41)).toBe(false);
   expect(opened).toHaveLength(2);
@@ -283,7 +275,7 @@ test("the same origin asking again after five minutes still reuses its open conn
   clock += 6 * 60 * 1000;
   expect((await connect("obc_2")).ok).toBe(true);
   expect(opened).toHaveLength(1);
-  expect(removed).toEqual([]);
+  expect(fake.removed).toEqual([]);
   expect(fake.updated).toEqual([{ tabId: 41, props: { active: true } }]);
   expect(await readSession("pendingConnect")).toMatchObject({
     origin,
@@ -475,8 +467,9 @@ test("a cancel that arrives while Desktop's handoff is being asked never clears 
   expect(await cancelling).toEqual({ ok: true });
   // The cancel was for the web connect: Desktop's handoff replaced it (closing its tab), and the cancel leaves
   // Desktop's own pending connect and tab alone.
-  expect(removed).toEqual([
-    { tabId: 41, pendingOrigin: "https://a.example.test", opened: 1 },
+  expect(fake.removed).toEqual([41]);
+  expect(closedWhile).toEqual([
+    { pendingOrigin: "https://a.example.test", opened: 1 },
   ]);
   expect(await readSession("pendingConnect")).toMatchObject({
     origin: "http://127.0.0.1:7470",
@@ -530,8 +523,9 @@ test("Desktop's handoff closes an open web connect tab before storing its own pe
     openTab,
     readPolicy: async () => policy,
   });
-  expect(removed).toEqual([
-    { tabId: 41, pendingOrigin: "https://a.example.test", opened: 1 },
+  expect(fake.removed).toEqual([41]);
+  expect(closedWhile).toEqual([
+    { pendingOrigin: "https://a.example.test", opened: 1 },
   ]);
   expect(fake.tabs.has(41)).toBe(false);
   expect(await readSession("pendingConnect")).toMatchObject({
@@ -695,7 +689,7 @@ test("a web connect and Desktop's handoff at once leave one pending connect, sho
     .map((tab) => tab.id);
   expect(openConnectTabs).toEqual([pending?.tabId]);
   // Any connect tab opened and then replaced was closed.
-  expect(opened.length - removed.length).toBe(1);
+  expect(opened.length - fake.removed.length).toBe(1);
 });
 
 test("a connect whose storage read fails rejects its caller, and the connect queued behind it still runs", async () => {
