@@ -197,3 +197,26 @@ test("refuses a path that leaves OpenBot's origin before any request is made", a
     expect(urls).toEqual([]);
   }
 });
+
+test("openbotRaw rejects rather than throws when it refuses a path", async () => {
+  for (const path of ["https://evil.test/x", "//evil.test/x"]) {
+    let rejected = false;
+    const { urls } = await recordFetch(async () => {
+      const pending = openbotRaw({ openbotUrl, token: "obr_t" }, path, {});
+      await expect(pending).rejects.toThrow();
+      rejected = true;
+    });
+    expect(rejected).toBe(true);
+    expect(urls).toEqual([]);
+  }
+});
+
+test("openbotRaw rejects rather than throws on an unparseable OpenBot URL", async () => {
+  let rejected = false;
+  await recordFetch(async () => {
+    const pending = openbotRaw({ openbotUrl: "not a url" }, "/x", {});
+    await expect(pending).rejects.toThrow();
+    rejected = true;
+  });
+  expect(rejected).toBe(true);
+});
