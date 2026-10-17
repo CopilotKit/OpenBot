@@ -29,8 +29,10 @@ RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
 # index.ts imports ../../shared/file-download at runtime (the other shared imports are type-only and
-# erased), so the one file it needs goes where that path resolves from /app/src.
+# erased), and demonstration.ts imports ../../shared/demonstration-rules at runtime too, so the files
+# they need go where those paths resolve from /app/src.
 COPY shared/file-download.ts /shared/file-download.ts
+COPY shared/demonstration-rules.ts /shared/demonstration-rules.ts
 
 # Durable working directory. Bot-produced files that must survive replacement live here.
 RUN mkdir -p /workspace
