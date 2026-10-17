@@ -274,6 +274,22 @@ describe("startEventCapture coalescing", () => {
     expect(sent.filter((event) => event.name === "input")).toHaveLength(1);
   });
 
+  test("a value with a NUL character reaches send with U+FFFD", () => {
+    document.body.innerHTML = `<input id="f1" name="f1">`;
+    const { timers, sent } = drive();
+    const field = document.getElementById("f1") as HTMLInputElement;
+    field.value = "a\u0000b";
+    field.dispatchEvent(
+      trustedEvent(new Event("input", { bubbles: true, composed: true })),
+    );
+    timers.advance(750);
+    const typed = sent.filter((event) => event.name === "input");
+    expect(typed).toHaveLength(1);
+    expect(JSON.stringify(typed[0])).toContain("a\uFFFDb");
+    expect(JSON.stringify(typed[0])).not.toContain("\\u0000");
+    expect(sent.filter((e) => e.name === "recorder.dropped")).toEqual([]);
+  });
+
   test("capture is clicks and inputs only", () => {
     document.body.innerHTML = `<button id="b">Save</button>`;
     const { sent } = drive();
@@ -315,6 +331,49 @@ describe("startEventCapture drop reports", () => {
     });
     timers.advance(60_000);
     expect(sent).toHaveLength(1);
+  });
+
+  test("collector errors are counted and reported once", () => {
+    document.body.innerHTML = `<button id="b">Save</button>`;
+    const timers = fakeTimers();
+    const sent: CapturedEvent[] = [];
+    const real = newTracker();
+    const tracker = {
+      ...real,
+      sensitiveForEvent: (name: string) => {
+        if (name === "click") throw new Error("tracker failed");
+        return real.sensitiveForEvent(name);
+      },
+    };
+    let calls = 0;
+    const capture = startEventCapture({
+      tracker,
+      send: (event) => {
+        calls++;
+        if (calls === 1) throw new Error("port gone");
+        sent.push(event);
+      },
+      timers,
+    });
+    stops.push(capture.stop);
+    const button = document.getElementById("b") as HTMLElement;
+    for (let i = 0; i < 2; i++)
+      button.dispatchEvent(
+        trustedEvent(
+          new MouseEvent("click", { bubbles: true, composed: true, button: 0 }),
+        ),
+      );
+    timers.advance(5_000);
+    const dropped = () => sent.filter((e) => e.name === "recorder.dropped");
+    expect(dropped()).toHaveLength(2);
+    expect(dropped().map((e) => e.value)).toEqual(
+      expect.arrayContaining([
+        { count: 2, reason: "INVALID_EVENT" },
+        { count: 1, reason: "PERSISTENCE_UNKNOWN" },
+      ]),
+    );
+    timers.advance(5_000);
+    expect(dropped()).toHaveLength(2);
   });
 
   test("a capture that cannot start is counted as CAPTURE_FAILED", () => {
