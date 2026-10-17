@@ -55,10 +55,10 @@ const withDefaults = (deps?: Partial<ConnectionDeps>): ConnectionDeps => ({
 
 const connectUrl = () => chrome.runtime.getURL("connect.html");
 
-/** A web connect and Desktop's handoff each read, then write, the pending connect (and a web connect the request
- * count) across storage awaits, so they run one at a time: run side by side, ten connects in one tick would each find
- * the slot empty and open a tab, and the limit would count one of them. A job that throws rejects its own caller and
- * the next job still runs. */
+/** A web connect, Desktop's handoff and a decision's clear (`clearPendingConnect`) each read, then write, the pending
+ * connect (and a web connect the request count) across storage awaits, so they run one at a time: run side by side,
+ * ten connects in one tick would each find the slot empty and open a tab, and the limit would count one of them. A
+ * job that throws rejects its own caller and the next job still runs. */
 let queue: Promise<unknown> = Promise.resolve();
 function serially<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
@@ -132,10 +132,12 @@ export async function handleConnectionMessage(
         pending: pending ? { origin: pending.origin, via: pending.via } : null,
       };
     }
-    case "page.connect.decide":
+    case "page.connect.decide": {
       if (message.approve) return approve(message.label);
-      await removeSession("pendingConnect");
+      const pending = await readSession("pendingConnect");
+      if (pending) await clearPendingConnect(pending);
       return { ok: true };
+    }
     case "page.disconnect": {
       const connection = await currentConnection();
       if (connection) {
@@ -189,10 +191,22 @@ async function approve(label: string): Promise<PageResponse> {
     via: pending.via,
     connectedAt: Date.now(),
   });
-  await removeSession("pendingConnect");
+  await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
   return { ok: true };
+}
+
+/** A decision clears only the pending connect it read when it arrived. Approve's exchange runs outside the queue, so
+ * a connect never waits on OpenBot's answer, and a decision can wait in the queue behind a connect or Desktop's
+ * handoff: either way another origin may have replaced the pending connect by now, and that newer one, with its open
+ * tab, is left alone. The check and the clear are one queued job, so no connect lands between them. */
+function clearPendingConnect(decided: PendingConnect): Promise<void> {
+  return serially(async () => {
+    const stored = await readSession("pendingConnect");
+    if (stored?.origin === decided.origin && stored.code === decided.code)
+      await removeSession("pendingConnect");
+  });
 }
 
 async function tabIsOpen(tabId: number | undefined): Promise<boolean> {

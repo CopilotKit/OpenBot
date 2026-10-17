@@ -30,6 +30,10 @@ let server: ReturnType<typeof Bun.serve>;
 let origin = "";
 const exchanges: Exchange[] = [];
 const hits: string[] = [];
+/** While set, OpenBot records an exchange, calls `arrived`, and holds its answer until `released` resolves. */
+let heldExchange: { arrived: () => void; released: Promise<void> } | null =
+  null;
+let releaseHeldExchange = () => {};
 let meAnswer: { status: number; body: object } = {
   status: 200,
   body: { user, connectionId: "c1", capabilities: { transcription: true } },
@@ -50,6 +54,10 @@ beforeAll(() => {
       ) {
         const body = (await request.json()) as Exchange;
         exchanges.push(body);
+        if (heldExchange) {
+          heldExchange.arrived();
+          await heldExchange.released;
+        }
         if (body.code === "obc_expired")
           return Response.json(
             { error: "That code has expired. Connect again from OpenBot." },
@@ -129,6 +137,8 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  releaseHeldExchange();
+  heldExchange = null;
   Date.now = realNow;
   Reflect.deleteProperty(chrome.tabs, "remove");
   fake.uninstall();
@@ -140,6 +150,15 @@ const connect = (code: string, from = origin) =>
     { origin: from },
     deps(),
   );
+
+/** Holds OpenBot's exchange answers until `release`; `arrived` resolves once a code has reached OpenBot. */
+function holdExchange(): { arrived: Promise<void>; release: () => void } {
+  const arrived = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  heldExchange = { arrived: arrived.resolve, released: released.promise };
+  releaseHeldExchange = released.resolve;
+  return { arrived: arrived.promise, release: released.resolve };
+}
 
 test("a web connect is confirmed on the extension's own page and exchanged at the sender's origin", async () => {
   const answer = await connect("obc_abc");
@@ -329,6 +348,67 @@ test("rejecting clears the pending connect and exchanges nothing", async () => {
     await handleConnectionMessage({ type: "page.connect.pending" }),
   ).toEqual({ ok: true, pending: null });
   expect(exchanges).toEqual([]);
+});
+
+test("an approve still exchanging when another origin replaces the stale pending connect leaves the new one in place", async () => {
+  const other = "https://b.example.test";
+  await connect("obc_a");
+  const exchange = holdExchange();
+  const approving = handleConnectionMessage({
+    type: "page.connect.decide",
+    approve: true,
+    label: "x",
+  });
+  await exchange.arrived;
+  clock += 6 * 60 * 1000;
+  expect((await connect("obc_b", other)).ok).toBe(true);
+  exchange.release();
+  expect(await approving).toEqual({ ok: true });
+  // The person approved this origin and OpenBot minted its token, so the connection stands...
+  expect(exchanges.map((e) => e.code)).toEqual(["obc_a"]);
+  expect(await readLocal("connection")).toMatchObject({
+    openbotUrl: origin,
+    token: "obr_fixture",
+  });
+  // ...and the other origin's connect tab still has its pending connect to show.
+  expect(
+    await handleConnectionMessage({ type: "page.connect.pending" }),
+  ).toEqual({ ok: true, pending: { origin: other, via: "web" } });
+  expect(await readSession("pendingConnect")).toMatchObject({
+    code: "obc_b",
+    tabId: 42,
+  });
+  expect(fake.tabs.has(42)).toBe(true);
+});
+
+test("a cancel that arrives while Desktop's handoff is being asked never clears Desktop's newer pending connect", async () => {
+  await connect("obc_w", "https://a.example.test");
+  const handoff = Promise.withResolvers<{ openbotUrl: string; code: string }>();
+  const offering = offerDesktopConnection({
+    askDesktop: () => handoff.promise,
+    openTab,
+    readPolicy: async () => policy,
+  });
+  const cancelling = handleConnectionMessage({
+    type: "page.connect.decide",
+    approve: false,
+    label: "x",
+  });
+  await settle();
+  handoff.resolve({ openbotUrl: "http://127.0.0.1:7470", code: "obc_d" });
+  expect(await offering).toBe(true);
+  expect(await cancelling).toEqual({ ok: true });
+  // The cancel was for the web connect: Desktop's handoff replaced it (closing its tab), and the cancel leaves
+  // Desktop's own pending connect and tab alone.
+  expect(removed).toEqual([
+    { tabId: 41, pendingOrigin: "https://a.example.test", opened: 1 },
+  ]);
+  expect(await readSession("pendingConnect")).toMatchObject({
+    origin: "http://127.0.0.1:7470",
+    via: "desktop",
+    tabId: 42,
+  });
+  expect(fake.tabs.has(42)).toBe(true);
 });
 
 test("Desktop availability is a ping that mints nothing", async () => {
