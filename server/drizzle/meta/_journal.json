@@ -400,6 +400,13 @@
       "when": 1791866936937,
       "tag": "0056_sign_in_code_step",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1792204804376,
+      "tag": "0057_recorder_extension",
+      "breakpoints": true
     }
   ]
 }
