@@ -680,6 +680,14 @@ let vendorHolds: string[] = [];
 let configWasStanding = false;
 
 const broker: ComposioBroker = {
+  // This stub stands in for Composio, whose grant is held locally; see `ConnectedAppBroker.grantIsLocal`.
+  grantIsLocal: true,
+  // Nothing here asks what auth provider a connection is held under.
+  authProviderOf: async () => null,
+  // Nothing here reads either member; both are declared because the seam requires a broker to
+  // SAY what it runs — see `ConnectedAppBroker.authorizations`.
+  authorizations: null,
+  grantsFor: unasked("read grants"),
   listApps: unasked("list the catalogue"),
   ensureAuthConfig: async (config) => {
     // Named by app AND kind, because the kind is what decides which config is created: an enable
@@ -776,6 +784,7 @@ const broker: ComposioBroker = {
 };
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore,
   broker,
@@ -933,6 +942,7 @@ async function addApp() {
   await database.insert(mcpTools).values({
     serverId: toolkit,
     name: actionName,
+    vendorName: actionName,
     description: "Fetch some items.",
     effect: "read",
     version: "20260903_00",
@@ -984,6 +994,7 @@ async function addProbedApp(options: { withProbe?: boolean } = {}) {
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -1010,6 +1021,7 @@ async function addCheckableApp(slug: string): Promise<void> {
   await database.insert(mcpTools).values({
     serverId: `composio-${slug}`,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -1037,6 +1049,7 @@ async function addRenamedApp() {
   await database.insert(mcpTools).values({
     serverId: renamedProbedId,
     name: renamedProbeAction,
+    vendorName: renamedProbeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -2126,6 +2139,7 @@ test("the probe skips an argument-less write for the read that sorts after it", 
       serverId: probeAppId,
       // Sorts first, asks for nothing, and charges somebody money. The whole test.
       name: "STRIPE_CREATE_BILLING_METER_EVENT_SESSION",
+      vendorName: "STRIPE_CREATE_BILLING_METER_EVENT_SESSION",
       description: "Creates a billing meter event session.",
       effect: "write",
       version: "20260903_00",
@@ -2133,6 +2147,7 @@ test("the probe skips an argument-less write for the read that sorts after it", 
     {
       serverId: probeAppId,
       name: "STRIPE_RETRIEVE_BALANCE",
+      vendorName: "STRIPE_RETRIEVE_BALANCE",
       description: "Retrieves the balance.",
       effect: "read",
       version: "20260903_00",
@@ -2171,6 +2186,7 @@ test("an app whose only read takes an argument has no probe", async () => {
   await database.insert(mcpTools).values({
     serverId: probeAppId,
     name: "APP_GET_PROJECT",
+    vendorName: "APP_GET_PROJECT",
     description: "Reads one project, by id.",
     effect: "read",
     inputSchema: {
@@ -2232,6 +2248,7 @@ test.each([
     await database.insert(mcpTools).values({
       serverId: probeAppId,
       name: "APP_GET_PROJECT",
+      vendorName: "APP_GET_PROJECT",
       description: "Reads one project.",
       effect: "read",
       inputSchema,
@@ -2261,6 +2278,7 @@ test("an action whose composed schema requires nothing is still a probe candidat
   await database.insert(mcpTools).values({
     serverId: probeAppId,
     name: "APP_GET_ME",
+    vendorName: "APP_GET_ME",
     description: "Reads the current account.",
     effect: "read",
     inputSchema: {
@@ -2303,6 +2321,7 @@ test("an app whose only safe read has no recorded version has no probe", async (
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to, at no version anybody recorded.",
     effect: "read",
     version: null,
@@ -2354,6 +2373,7 @@ test("the chooser passes over a versionless read for the one it could call", asy
       serverId: probeAppId,
       // Sorts first, is the preferred shape, and carries nothing to call it at.
       name: "THIN_GET_ME",
+      vendorName: "THIN_GET_ME",
       description: "Says who the key belongs to.",
       effect: "read",
       version: null,
@@ -2361,6 +2381,7 @@ test("the chooser passes over a versionless read for the one it could call", asy
     {
       serverId: probeAppId,
       name: "THIN_LIST_PROJECTS",
+      vendorName: "THIN_LIST_PROJECTS",
       description: "Lists the projects.",
       effect: "read",
       version: "20260903_00",
@@ -2407,6 +2428,7 @@ test("the probe skips a read the vendor also calls destructive", async () => {
       serverId: probeAppId,
       // Sorts first, asks for nothing, and Composio itself says calling it destroys something.
       name: "APP_ARCHIVE_EVERYTHING",
+      vendorName: "APP_ARCHIVE_EVERYTHING",
       description: "Archives the lot.",
       effect: "read",
       destructive: true,
@@ -2415,6 +2437,7 @@ test("the probe skips a read the vendor also calls destructive", async () => {
     {
       serverId: probeAppId,
       name: "APP_LIST_PROJECTS",
+      vendorName: "APP_LIST_PROJECTS",
       description: "Lists the projects.",
       effect: "read",
       destructive: false,
@@ -2474,6 +2497,7 @@ test("the probe prefers the identity read over the read that sorts first", async
       // Sorts first and is perfectly safe, which is what makes it the wrong answer rather than an
       // unsafe one: this is a test about which of two good candidates is chosen.
       name: "ZOO_ALL_ANIMALS",
+      vendorName: "ZOO_ALL_ANIMALS",
       description: "Lists the animals.",
       effect: "read",
       version: "20260903_00",
@@ -2481,6 +2505,7 @@ test("the probe prefers the identity read over the read that sorts first", async
     {
       serverId: probeAppId,
       name: "ZOO_GET_ME",
+      vendorName: "ZOO_GET_ME",
       description: "Says who the key belongs to.",
       effect: "read",
       version: "20260903_00",
@@ -2618,6 +2643,7 @@ test("an action listed after the fact does not rewrite what a key was checked wi
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -2682,6 +2708,7 @@ test("a key nothing was spent on becomes checkable when the app publishes someth
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the key belongs to.",
     effect: "read",
     version: probeVersion,
@@ -2786,6 +2813,7 @@ test("a probe never spends a key on the action of a row the composed id would hi
   await database.insert(mcpTools).values({
     serverId: decoyId,
     name: decoyAction,
+    vendorName: decoyAction,
     description: "Reads something belonging to another app entirely.",
     effect: "read",
     version: probeVersion,
@@ -2828,6 +2856,7 @@ test("a consent connection records no action, because none was spent", async () 
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the account belongs to.",
     effect: "read",
     version: probeVersion,
@@ -3757,6 +3786,7 @@ test("a duplicate row recording no-auth does not take the gate off an app", asyn
   await database.insert(mcpTools).values({
     serverId: noAuthTwinId,
     name: actionName,
+    vendorName: actionName,
     description: "Fetch some items.",
     effect: "read",
     version: "20260903_00",
@@ -4685,6 +4715,7 @@ test("a re-check against a consent connection refuses rather than spending its d
   await database.insert(mcpTools).values({
     serverId: probedId,
     name: probeAction,
+    vendorName: probeAction,
     description: "Says who the account belongs to.",
     effect: "read",
     version: probeVersion,

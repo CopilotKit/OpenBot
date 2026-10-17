@@ -1,6 +1,7 @@
 import type { BrokerApp, FieldScheme } from "../broker";
 import type { ComposioResult } from "../composio";
 import type {
+  AccountRow,
   CheckedAuthConfig,
   VendorAccountStatus,
   VendorAuthConfig,
@@ -420,7 +421,7 @@ export type ComposioVendor = {
        * same function reads `response.auth_config.id` (`:60`) on its way to building each row, so a
        * row that is not an object raises inside the vendor's code and never reaches this listing.
        */
-      items: { id?: unknown; data?: unknown }[];
+      items: AccountRow[];
       /**
        * The same truncation signal as the auth-config listing above, from the same vendor schema.
        *

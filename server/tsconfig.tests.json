@@ -1,0 +1,19 @@
+{
+  // The test tree, type-checked. `server/tsconfig.json` deliberately leaves `tests` out — see the
+  // comment there — so `bun run typecheck` reports CLEAN while real type errors sit in the suite:
+  // broken `import type` paths that silently degrade a value to `any`, stubs missing methods the
+  // interface requires, `number | undefined` passed where `number` is required. bun erases types
+  // rather than checking them, so running the suite never catches any of it.
+  //
+  // This config EXTENDS the project's own, so the test tree is checked under exactly the options
+  // `src` is checked under. Checking these files with an ad-hoc `tsc` invocation and hand-written
+  // flags is unsound: it drags `src` in under the wrong options and emits a flood of errors that
+  // are artefacts of the flags rather than defects.
+  //
+  // `include` is not merged by `extends`, it is replaced, so the inherited entries are repeated
+  // here with `tests` added. The errors that already exist are frozen in
+  // `server/tests/typecheck-baseline.txt`, and the gate fails only on an error that is not in it —
+  // see `scripts/typecheck-tests.ts`.
+  "extends": "./tsconfig.json",
+  "include": ["src", "scripts", "../scripts/composio-smoke.ts", "tests"]
+}

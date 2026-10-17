@@ -447,7 +447,16 @@ test("runs migrations after PostgreSQL becomes healthy", () => {
 
   expect(compose).toContain("migrate:");
   expect(compose).toContain("condition: service_healthy");
-  expect(compose).toContain('"drizzle-kit", "migrate"');
+  /*
+   * THE SERVER'S OWN MIGRATOR, NOT `drizzle-kit migrate`, AND THE DIFFERENCE IS THE POINT.
+   *
+   * `drizzle-kit` will skip a migration stamped below what the database has already recorded and
+   * still report success — the exact outcome `server/src/db/migration-reach.ts` exists to refuse,
+   * and a developer's database is one of the places it happens. `compose.yml` says the same thing
+   * at the service itself. Asserting the command here is what stops the stack quietly going back
+   * to the migrator that cannot see that case.
+   */
+  expect(compose).toContain('"bun", "scripts/migrate.ts"');
 });
 
 test("builds the deployment image with Playwright's Chromium payload only", () => {

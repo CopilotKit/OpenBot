@@ -9,9 +9,12 @@ import { skillMethods } from "./plugin-store/skills";
 export type { CatalogueEntry } from "./catalogue";
 export type {
   AccessToken,
+  BrokeredDisconnectReason,
   BrokeredProbe,
+  ConnectionFootprint,
   GrantedPlugins,
   OAuthClient,
+  PendingAuthorization,
   PluginDecision,
   PluginKind,
   PluginStoreOptions,
@@ -25,6 +28,7 @@ export type {
 export {
   BROKERED_PROBE_OUTCOMES,
   CatalogueEntryUnknownError,
+  connectionSiblings,
   CustomServerRefusedError,
   deploymentFaultSentence,
   exchangeRefreshTokenOverHttp,

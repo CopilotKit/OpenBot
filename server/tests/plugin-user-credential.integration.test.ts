@@ -92,6 +92,7 @@ let toolWasAlreadyAdvertised = false;
 const credentialIds: string[] = [];
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {
@@ -283,7 +284,12 @@ beforeAll(async () => {
     .onConflictDoNothing();
   await database
     .insert(mcpTools)
-    .values({ serverId, name: toolName, description: "Search files." })
+    .values({
+      serverId,
+      name: toolName,
+      vendorName: toolName,
+      description: "Search files.",
+    })
     .onConflictDoNothing();
 
   // The Bot holds the tool throughout. Everything here is about the person, not the grant.

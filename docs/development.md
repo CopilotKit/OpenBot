@@ -104,6 +104,14 @@ registered in the journal, and it is the only migration anybody should be writin
 CI enforces two things about this: `drizzle-kit check` for collisions and gaps between migrations,
 and a generate-and-fail-if-dirty probe that refuses a schema change with no migration written for it.
 
+**If `db:migrate` refuses with "the migrator only runs migrations stamped after the row it
+reads"**, your database ran a branch's migrations before that branch was merged. Merging renumbers
+the branch's migrations to sit after the ones it merged in, and those merged-in migrations are now
+stamped older than what your database already recorded — so the migrator would skip them and report
+success over the tables they should have created. Nothing is applied; the refusal names them. Drop
+and recreate the database, which is almost always the right answer for a development one; see
+[deployment.md](deployment.md) for how to repair one you have to keep.
+
 **If `drizzle-kit migrate` hangs and then exits non-zero with no error**, the journal names a
 migration file that is not there. A rebase does this: `meta/_journal.json` is a checked-in file, so
 restoring it can reinstate entries for migrations that were renamed. `drizzle-kit check` reports

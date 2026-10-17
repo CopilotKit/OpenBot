@@ -31,6 +31,7 @@ import { TEST_POOL, testDatabaseUrl } from "./support/database";
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: {

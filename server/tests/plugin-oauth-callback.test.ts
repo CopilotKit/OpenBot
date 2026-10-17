@@ -63,6 +63,7 @@ function app(input: {
   oauthClientFor?: () => Promise<{ clientId: string; clientSecret: string }>;
 }) {
   const store = {
+    brokerProvider: "composio" as const,
     // The brokered read the connect handler makes before anything about the consent flow. This
     // deployment has no brokered rows, so it answers nothing and the flow below is untouched.
     serverAddress: async () => undefined,

@@ -35,6 +35,16 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      # `typecheck` is `bun run --filter '*' typecheck`, and each workspace's `tsc --noEmit` reads
+      # its own tsconfig, none of which includes a test tree. The suite is therefore the one part
+      # of this repository that no type-checker has ever read: bun erases types rather than
+      # checking them, so a test could pass an options object where a connection string belongs,
+      # or import a type from a path that does not exist and silently get `any`, and every check
+      # here stayed green. This reads `server/tests` under the server's own compiler options and
+      # fails on any error that is not in `server/tests/typecheck-baseline.txt` — the errors that
+      # were already there when the check was turned on. New ones are new defects.
+      - name: server/tests types (baselined)
+        run: bun run typecheck:tests
       - name: Desktop version tracks the release version
         run: bun desktop/scripts/desktop-version.ts check
       # The chart's default image tag is its appVersion, and a release must move both together. They
@@ -349,9 +359,12 @@ jobs:
       # pinned by the desktop lockfile rather than the root one.
       - run: bun install --frozen-lockfile
         working-directory: desktop
-      # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
-      # comes from the job env instead, which drizzle.config.ts already reads.
-      - run: bunx drizzle-kit migrate --config=drizzle.config.ts
+      # The same migrator a deployment runs, rather than `drizzle-kit migrate`: it is the one that
+      # refuses a database holding a stamp newer than the migrations it is about to walk past
+      # (server/src/db/migration-reach.ts), and a CI database that is ever reused rather than
+      # recreated is one of the places that can happen. Not the db:migrate script, which loads
+      # ../.env; that file does not exist in CI, and DATABASE_URL comes from the job env instead.
+      - run: bun scripts/migrate.ts
         working-directory: server
       # A passing job must include the expected test floor. Import-time failures can otherwise skip
       # files before their tests are registered.

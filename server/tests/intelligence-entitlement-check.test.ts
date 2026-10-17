@@ -71,6 +71,20 @@ describe("what Intelligence's entitlement answer means for this deployment", () 
       entitlementWarning(notReady("unavailable", "SOMETHING_NEW"))?.fix,
     ).toContain("memory");
   });
+
+  /*
+   * The code is Intelligence's string, not ours, so a code borrowed from `Object.prototype` is as
+   * unknown as any other and deserves the same sentence. Looked up in a plain object, `toString` is
+   * answered with a function, which is truthy and so wins the `||` fallback — leaving `fix` a
+   * function where a sentence belongs, and a warning that says nothing wherever it is shown.
+   */
+  test("a code borrowed from Object.prototype is unknown like any other", () => {
+    for (const code of ["toString", "constructor", "valueOf"]) {
+      const fix = entitlementWarning(notReady("unavailable", code))?.fix;
+      expect(typeof fix).toBe("string");
+      expect(fix).toContain("memory");
+    }
+  });
 });
 
 describe("reporting it at boot", () => {

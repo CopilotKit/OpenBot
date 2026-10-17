@@ -1,11 +1,12 @@
 import { requireAdmin } from "../../auth/guards";
 import { reasonWithoutStatement } from "../../db/query-failure";
+import { BROKERED_PROFILE } from "../access";
 import {
   type BrokerApp,
   BrokerUnconfiguredError,
   brokerSentence,
 } from "../broker";
-import { toolkitOf, vendorSentence } from "../composio";
+import { vendorSentence } from "../composio";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
@@ -15,8 +16,9 @@ import {
 } from "../store";
 import {
   brokerRefusal,
-  DIRECTORY_UNAVAILABLE,
+  directoryUnavailable,
   type PluginRouteContext,
+  withVendorDeadline,
 } from "./context";
 
 /** Browsing Composio's directory and enabling an app out of it. */
@@ -25,6 +27,9 @@ export function mountComposioAppRoutes({
   store,
   requireUser,
   composio,
+  activeProvider,
+  activeVendor,
+  appOfUrl,
   actorEmail,
 }: PluginRouteContext) {
   /**
@@ -44,8 +49,9 @@ export function mountComposioAppRoutes({
    * {@link BrokerUnconfiguredError}'s own message is what is sent rather than a sentence written
    * here.
    *
-   * `enabled` comes off `toolkitOf(url)` and never off the row's id. The url is where the
-   * transport reads which app a call is against, so it is the only reading that decides anything;
+   * `enabled` comes off `appOfUrl(url)` — the active broker's own parser — and never off the
+   * row's id. The url is where the transport reads which app a call is against, so it is the only
+   * reading that decides anything;
    * the id names the row — `composio-linear` — and reading one as the other would quietly work
    * until somebody renamed a row. `serverUrls` hands over the urls and nothing else, which is that
    * property made structural: there is no id here to read by mistake.
@@ -61,18 +67,24 @@ export function mountComposioAppRoutes({
 
     if (!composio) {
       return context.json(
-        { error: new BrokerUnconfiguredError().message },
+        {
+          error: new BrokerUnconfiguredError(activeProvider, "operator")
+            .message,
+        },
         503,
       );
     }
 
     let directory: BrokerApp[];
     try {
-      directory = await composio.broker.listApps();
+      directory = await withVendorDeadline(() => composio.broker.listApps());
     } catch (error) {
       // The vendor's own sentence where there is one, because "invalid api key" is the diagnosis
       // and a 500 is not. See {@link brokerRefusal} for what is kept out of the answer.
-      const refusal = brokerRefusal(error, DIRECTORY_UNAVAILABLE);
+      const refusal = brokerRefusal(
+        error,
+        directoryUnavailable(activeProvider),
+      );
       return context.json({ error: refusal.error }, refusal.status);
     }
     /*
@@ -121,7 +133,7 @@ export function mountComposioAppRoutes({
 
     const enabled = new Set(
       urls
-        .map((url) => toolkitOf(url))
+        .map((url) => appOfUrl(url))
         .filter((toolkit): toolkit is string => toolkit !== null),
     );
     return context.json({
@@ -148,7 +160,10 @@ export function mountComposioAppRoutes({
 
     if (!composio) {
       return context.json(
-        { error: new BrokerUnconfiguredError().message },
+        {
+          error: new BrokerUnconfiguredError(activeProvider, "operator")
+            .message,
+        },
         503,
       );
     }
@@ -171,7 +186,7 @@ export function mountComposioAppRoutes({
     let directory: BrokerApp[] = [];
     if (slug) {
       try {
-        directory = await composio.broker.listApps();
+        directory = await withVendorDeadline(() => composio.broker.listApps());
       } catch (error) {
         /*
          * The same failure the directory route answers, in the same words, because it is the same
@@ -179,7 +194,10 @@ export function mountComposioAppRoutes({
          * deployment whose key is wrong was told nothing at all, on the one screen where the key
          * had just been set.
          */
-        const refusal = brokerRefusal(error, DIRECTORY_UNAVAILABLE);
+        const refusal = brokerRefusal(
+          error,
+          directoryUnavailable(activeProvider),
+        );
         return context.json({ error: refusal.error }, refusal.status);
       }
     }
@@ -188,7 +206,7 @@ export function mountComposioAppRoutes({
       return context.json(
         {
           error: slug
-            ? `${slug} is not an app Composio lists for this deployment.`
+            ? `${slug} is not an app ${BROKERED_PROFILE[activeProvider].vendor} lists for this deployment.`
             : "An app is required.",
         },
         400,
@@ -325,7 +343,7 @@ export function mountComposioAppRoutes({
           JSON.stringify({
             type: "composio-app-not-enabled",
             slug: app.slug,
-            note: "Enabling a brokered app failed for a reason neither this deployment nor Composio put a sentence to. The administrator was answered 502 with the generic sentence.",
+            note: `Enabling a brokered app failed for a reason neither this deployment nor ${activeVendor} put a sentence to. The administrator was answered 502 with the generic sentence.`,
             error: reasonWithoutStatement(error),
           }),
         );
@@ -333,7 +351,7 @@ export function mountComposioAppRoutes({
 
       const refusal = brokerRefusal(
         error,
-        `${app.name} could not be enabled, and Composio said nothing about why. Try again, and check this deployment's Composio key if it persists.`,
+        `${app.name} could not be enabled, and ${activeVendor} said nothing about why. Try again, and check this deployment's ${activeVendor} key if it persists.`,
       );
       return context.json({ error: refusal.error }, refusal.status);
     }

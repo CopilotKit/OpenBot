@@ -33,6 +33,7 @@ const serverId = "google-drive";
 const personId = `plugin_rotation_person_${suite}`;
 
 const store = createPluginStore({
+  brokerProvider: "composio",
   database,
   auditStore: createAuditStore(database),
   credentials: createCredentialStore(database),

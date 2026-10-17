@@ -400,6 +400,27 @@
       "when": 1791866936937,
       "tag": "0056_sign_in_code_step",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1792099944352,
+      "tag": "0057_arcade_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792099950842,
+      "tag": "0058_arcade_provider_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792251361575,
+      "tag": "0059_skipped_tools",
+      "breakpoints": true
     }
   ]
 }

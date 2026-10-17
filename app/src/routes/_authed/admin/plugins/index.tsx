@@ -28,7 +28,13 @@ import {
   type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
+import {
+  moreAppsRow,
+  moreAppsSectionDescription,
+  providerVocabulary,
+} from "@/lib/plugins/provider-vocabulary";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -96,6 +102,12 @@ function summaryFor(
 function RouteComponent() {
   const plugins = useQuery(pluginsPageQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
+  // A NAME for the "More apps" row, which cannot be read off a row that may not exist yet.
+  const provider = pluginsProvider(plugins.data);
+  const moreApps = moreAppsRow(
+    provider,
+    plugins.data?.composioConfigured ?? false,
+  );
 
   /*
    * PERSONAL ONLY: a Shared app's connection is the deployment's standing account, not something
@@ -241,7 +253,7 @@ function RouteComponent() {
           </PageSection>
 
           <PageSection
-            description="A directory this deployment has not reviewed, reached through Composio."
+            description={moreAppsSectionDescription(provider)}
             title="More apps"
           >
             <PageRows>
@@ -252,21 +264,25 @@ function RouteComponent() {
                * administrator with nothing to search for, and nothing to tell them the handful of
                * connectors above is not the whole story.
                */}
-              {plugins.data?.composioConfigured ? (
+              {moreApps.linked ? (
                 <Item
-                  data-testid="plugin-composio"
-                  render={<Link to="/admin/plugins/composio" />}
+                  data-testid="plugin-directory"
+                  /* The ACTIVE provider's own directory. Read from the vocabulary rather than
+                     written here: a hard-coded path is the lowercase spelling of a vendor name,
+                     which is how this row pointed every Arcade deployment at a screen that
+                     redirected it straight back. The field is a literal union over the generated
+                     route tree, so a path no route answers does not compile. */
+                  render={
+                    <Link to={providerVocabulary(provider).directoryPath} />
+                  }
                   size="sm"
                 >
                   <RowMark>
                     <IconPlug className="size-4" />
                   </RowMark>
                   <ItemContent>
-                    <ItemTitle>Browse Composio</ItemTitle>
-                    <ItemDescription>
-                      A few hundred apps, reached as whoever is asking. Each
-                      person connects their own account.
-                    </ItemDescription>
+                    <ItemTitle>{moreApps.title}</ItemTitle>
+                    <ItemDescription>{moreApps.description}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -275,16 +291,13 @@ function RouteComponent() {
               ) : (
                 /* No chevron and no link: the row goes nowhere, because there is nowhere to go
                    until the key is set. */
-                <Item data-testid="plugin-composio" size="sm">
+                <Item data-testid="plugin-directory" size="sm">
                   <RowMark>
                     <IconPlug className="size-4" />
                   </RowMark>
                   <ItemContent>
-                    <ItemTitle>Composio</ItemTitle>
-                    <ItemDescription>
-                      Add your Composio key to enable a catalogue of tools. Set
-                      COMPOSIO_API_KEY on this deployment.
-                    </ItemDescription>
+                    <ItemTitle>{moreApps.title}</ItemTitle>
+                    <ItemDescription>{moreApps.description}</ItemDescription>
                   </ItemContent>
                 </Item>
               )}

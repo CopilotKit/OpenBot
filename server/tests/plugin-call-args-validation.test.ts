@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
-import type { BotAccessCheck } from "../src/plugins/routes";
+import type { BotAccessCheck } from "../src/agents/profile-policy";
 import { createPluginRoutes } from "../src/plugins/routes";
 import type { PluginStore } from "../src/plugins/store";
 
@@ -27,6 +27,7 @@ const canUseBot: BotAccessCheck = async () => true;
 describe("POST /api/plugins/call args", () => {
   function appWith(calls: unknown[]) {
     const store = {
+      brokerProvider: "composio" as const,
       callTool: async (input: unknown) => {
         calls.push(input);
         return { ok: true };

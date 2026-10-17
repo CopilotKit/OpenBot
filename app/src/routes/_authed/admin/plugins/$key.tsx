@@ -18,6 +18,7 @@ import {
   BrokeredAccountRow,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -58,7 +59,15 @@ import {
   type PluginServer,
   personalConnections,
   pluginsPageQueryOptions,
+  pluginsProvider,
 } from "@/lib/plugins/queries";
+import {
+  brokeredConnectionDescription,
+  brokeredDisconnectNote,
+  brokeredPerActionTrip,
+  brokeredProvenance,
+  brokeredReach,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   botSharedAppsQueryOptions,
   describeApproval,
@@ -161,7 +170,7 @@ export function connectionKindFor(
   server: PluginServer | undefined,
   auth: CatalogueItem["auth"] | undefined,
 ): CatalogueItem["auth"] | "brokered" {
-  if (server?.provenance === "composio") return "brokered";
+  if (server && brokeredProvenance(server.provenance)) return "brokered";
   return auth ?? "deployment-bearer";
 }
 
@@ -202,6 +211,7 @@ function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
+  const provider = pluginsProvider(plugins.data);
   /*
    * The administrator's OWN connections, not the deployment's.
    *
@@ -379,8 +389,16 @@ function RouteComponent() {
    * `connectSelf` above stays: it is the `user-oauth` row's Connect, which is a different row with
    * no Disconnect beside it and nothing brokered to confirm.
    */
+  /*
+   * THE SAME CAPABILITY THE SETTINGS SCREEN READS, and read here for the same reason: this page
+   * draws the brokered row too, so under a per-action broker it offered the one Connect that can
+   * never succeed. Off the declared capability and never off `provider === "arcade"` — see
+   * {@link BrokeredAccount.authorizesPerAction}.
+   */
+  const perActionGrants = plugins.data?.authorizesPerAction ?? false;
   const brokeredAccount = useBrokeredAccount({
     authScheme: server?.authScheme ?? null,
+    authorizesPerAction: perActionGrants,
     brokered: auth === "brokered",
     configured: plugins.data?.composioConfigured ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
@@ -577,7 +595,8 @@ function RouteComponent() {
            * nothing to connect at all — see `brokeredAccountsListedOn` — so there is no personal/
            * shared choice to offer for it, and a row here could only open a dialog that refuses.
            */}
-          {server?.provenance === "composio" &&
+          {server &&
+          brokeredProvenance(server.provenance) &&
           server.authScheme !== "NO_AUTH" ? (
             <>
               <Separator />
@@ -630,7 +649,7 @@ function RouteComponent() {
                 ? "Built into this deployment. There is no vendor to reach and no credential to hold — a call runs as whoever asked."
                 : auth === "brokered"
                   ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an administrator has to do here — which is nothing. */
-                    "Reached through Composio, which holds each person's own account."
+                    brokeredConnectionDescription(provider)
                   : "What this deployment presents to the vendor. One credential, used for everybody."
           }
           title="Connection"
@@ -690,16 +709,12 @@ function RouteComponent() {
                 <ItemContent>
                   <ItemTitle>How this is reached</ItemTitle>
                   <ItemDescription>
-                    This app is reached through Composio, which holds the
-                    account. This deployment sends one key and the name of
-                    whoever is asking, so each person connects their own and a
-                    Bot sees only what that person can see. There is no token to
-                    paste.
+                    {brokeredReach(provider).description}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    Through Composio
+                    {brokeredReach(provider).badge}
                   </span>
                 </ItemActions>
               </Item>
@@ -809,9 +824,10 @@ function RouteComponent() {
                   <BrokeredAccountRow
                     account={brokeredAccount}
                     connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot granted these tools acts as this account.`}
-                    disconnectedDescription="No team account is connected, so Bots granted these tools are refused."
+                    disconnectedDescription={`No team account is connected, so Bots granted these tools are refused.${perActionGrants ? ` ${brokeredPerActionTrip(provider, "settings")}` : ""}`}
                     heading="Team account"
                     notice="Sign in as the team account, not your own."
+                    provider={provider}
                     title={title}
                   />
                 ) : (
@@ -820,14 +836,19 @@ function RouteComponent() {
                     /* Said beside the button rather than after it: disconnecting ends the account
                        at Composio, so what it undoes is not the row here but the grant on this
                        person's mailbox, and connecting again is a fresh consent. */
-                    connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. Disconnecting ends the account at Composio, not just here.`}
-                    disconnectedDescription={`Connect your own account to try this connector. ${reassurance}`}
+                    connectedDescription={`Connected, so a Bot granted these tools uses your ${title} as you. ${brokeredDisconnectNote(provider)}`}
+                    disconnectedDescription={
+                      perActionGrants
+                        ? `${brokeredPerActionTrip(provider, "settings")} ${reassurance}`
+                        : `Connect your own account to try this connector. ${reassurance}`
+                    }
                     /* The half of the line above that is true whichever way this app connects.
                        An app whose key somebody types gets a different first sentence from the
                        row — pressing Connect opens a form rather than leaving for a consent
                        screen — and an administrator still has to be told they are not the step
                        that finishes the connector. */
                     disconnectedReassurance={reassurance}
+                    provider={provider}
                     title={title}
                   />
                 )}
@@ -1014,6 +1035,7 @@ function RouteComponent() {
           description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
           title="Tools"
         >
+          <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
             <PageEmpty>
               {server.lastError ??

@@ -65,12 +65,17 @@ const SHARED_DRIVE_ITEMS = {
  *
  * A Doc has no bytes to download — `alt=media` refuses it — so it has to be exported. Anything not
  * in here is a real file and is fetched directly.
+ *
+ * A Map, because the type comes off a file somebody else uploaded and named. Asked of a plain
+ * object, `toString` is answered with `Object.prototype.toString`: truthy, so the file is taken for
+ * an editor format, the refusal below is skipped, and that function is sent to Google as the format
+ * to export to.
  */
-const EXPORTABLE: Record<string, string> = {
-  "application/vnd.google-apps.document": "text/plain",
-  "application/vnd.google-apps.spreadsheet": "text/csv",
-  "application/vnd.google-apps.presentation": "text/plain",
-};
+const EXPORTABLE: ReadonlyMap<string, string> = new Map([
+  ["application/vnd.google-apps.document", "text/plain"],
+  ["application/vnd.google-apps.spreadsheet", "text/csv"],
+  ["application/vnd.google-apps.presentation", "text/plain"],
+]);
 
 /**
  * What this adapter offers, as the same shape a server would have answered `tools/list` with.
@@ -478,7 +483,7 @@ export async function callTool(
       readId = targetId;
     }
 
-    const exportAs = file.mimeType ? EXPORTABLE[file.mimeType] : undefined;
+    const exportAs = file.mimeType ? EXPORTABLE.get(file.mimeType) : undefined;
 
     /*
      * A file whose bytes are not text is declined by name, not decoded and hoped for.
