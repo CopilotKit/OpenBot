@@ -549,7 +549,9 @@ export type ConnectedAppBroker = {
    * for. `null` is the honest answer, and its callers leave such an app out rather than guess.
    *
    * WHAT THIS MEMBER ANSWERS WITH IS THE PROVIDER TYPE, AND `provider_id` NAMES THREE DIFFERENT
-   * THINGS ON THREE ARCADE OBJECTS. Measured against the live API:
+   * THINGS ON THREE ARCADE OBJECTS. Measured once, in the 2026-10-13 run of
+   * `tests/arcade-live.test.ts` against a live Arcade project; nothing in CI re-checks it (see
+   * `docs/plugins/arcade.md`):
    *
    * - on a TOOL LISTING, `requirements.authorization.provider_id` is the provider TYPE (`google`) —
    *   this is the one this member reads, and the one it returns;

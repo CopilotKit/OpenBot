@@ -230,7 +230,9 @@ const CATALOGUE_MAX_PAGES = 1000;
 /**
  * Page size for the WHOLE-DIRECTORY listing `listApps` reads, which is the "Browse Arcade" screen.
  *
- * THE ARITHMETIC, MEASURED AGAINST THE LIVE API so the next person changing this does not re-probe:
+ * THE ARITHMETIC, MEASURED BY HAND ON 2026-10-14 against a live Arcade project, through this
+ * deployment's own directory screen, so the next person changing this does not re-probe. Nothing in
+ * CI re-checks it, and the directory's size will drift:
  * - Arcade's directory reported `total_count` **8,320** tools.
  * - `limit=1000` is accepted (1,000 items in ~1.77 s); `limit=5000` is REJECTED (empty answer in
  *   ~0.17 s), so **1000 is at or near the vendor's ceiling** — do not raise this past it.
@@ -849,7 +851,9 @@ async function authProviderInstances(
  * where that mapping lives.
  *
  * AND `authProviderOf`'S ANSWER IS ALSO THE WRONG SPELLING FOR A CONNECTION ROW, because
- * `provider_id` MEANS TWO DIFFERENT THINGS ON THE TWO OBJECTS. Measured against the live API:
+ * `provider_id` MEANS TWO DIFFERENT THINGS ON THE TWO OBJECTS. Measured once, in the 2026-10-13 run
+ * of `tests/arcade-live.test.ts` against a live Arcade project; nothing in CI re-checks it (see
+ * `docs/plugins/arcade.md`):
  *
  * - on a tool listing, `requirements.authorization.provider_id` — what `authProviderOf` reads — is
  *   the provider TYPE: `"google"`;
@@ -1077,8 +1081,9 @@ function connectionIsLive(row: ConnectionRow): boolean {
 /**
  * DELETE TAKES `connection_id` (`ac_...`), NOT `id` (`at_...`). A user-connection row carries both
  * and the listing prints `id` FIRST; the SDK declares `delete(id: string)` and does not say which.
- * Measured against the live API: `at_...` answers 500, `ac_...` answers 204. Reading the obvious
- * field fails only when somebody presses Disconnect, the worst time to find out.
+ * Measured by hand on 2026-10-12 against a live Arcade project, with a script that is not in this
+ * repository, and re-checked by nothing in CI: `at_...` answers 500, `ac_...` answers 204. Reading
+ * the obvious field fails only when somebody presses Disconnect, the worst time to find out.
  */
 async function deleteConnection(
   client: Arcade,
