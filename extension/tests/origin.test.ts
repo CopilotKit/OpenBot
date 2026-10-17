@@ -75,6 +75,13 @@ test("only http and https pages are recordable", () => {
   expect(isRecordablePage("http://x.test/a")).toBe(true);
   expect(isRecordablePage("chrome://newtab/")).toBe(false);
   expect(isRecordablePage("https://chromewebstore.google.com/")).toBe(false);
+  expect(
+    isRecordablePage("https://microsoftedge.microsoft.com/addons/detail/x"),
+  ).toBe(false);
+  expect(isRecordablePage("https://chrome.google.com/webstore/detail/x")).toBe(
+    false,
+  );
+  expect(isRecordablePage("https://chrome.google.com/search")).toBe(true);
   expect(isRecordablePage("chrome-extension://abc/popup.html")).toBe(false);
   expect(isRecordablePage(undefined)).toBe(false);
   expect(isRecordablePage("")).toBe(false);
