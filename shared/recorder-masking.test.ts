@@ -393,7 +393,10 @@ test("sha256HexSync matches the platform's SHA-256, and needs no crypto.subtle",
     expect(await sha256Hex("737")).toBe(sha256HexSync("737"));
   } finally {
     if (subtle) Object.defineProperty(globalThis.crypto, "subtle", subtle);
+    // subtle is a getter on Crypto's prototype; deleting the own override restores it
+    else delete (globalThis.crypto as { subtle?: unknown }).subtle;
   }
+  expect(typeof globalThis.crypto.subtle?.digest).toBe("function");
 });
 
 test("a hyphenated UUID is redacted by the long-token rule, by design (Decision 15)", () => {
