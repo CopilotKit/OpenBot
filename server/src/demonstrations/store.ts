@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { hasTarget } from "@openbot/shared/demonstration-schema";
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import type {
+  ExtensionDemonstration,
+  LearningSpaceState,
+} from "@openbot/shared/recorder-api";
+import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   demonstrationSteps,
   demonstrations,
+  demonstrationTrajectories,
 } from "../db/schema/demonstrations";
 import { draftDemonstration } from "./draft";
 import {
@@ -269,6 +274,181 @@ export function createDemonstrationStore(database: Database) {
           .where(eq(demonstrations.id, id));
         return total;
       });
+    },
+    /** Binds a trajectory to this person's extension recording; one trajectory belongs to one recording. */
+    async registerTrajectory(
+      ownerUserId: string,
+      id: string,
+      trajectoryId: string,
+    ) {
+      await database.transaction(async (transaction) => {
+        const [row] = await transaction
+          .select({
+            status: demonstrations.status,
+            source: demonstrations.source,
+          })
+          .from(demonstrations)
+          .where(
+            and(
+              eq(demonstrations.id, id),
+              eq(demonstrations.ownerUserId, ownerUserId),
+            ),
+          )
+          .for("update");
+        if (!row) throw new DemonstrationNotFoundError();
+        if (row.source !== "extension")
+          throw new DemonstrationRefusedError(
+            "This recording is not being made in a browser.",
+          );
+        if (row.status !== "recording") {
+          // A rollover the streamer began before Stop may still register while a trajectory is open.
+          const [unclosed] = await transaction
+            .select({ trajectoryId: demonstrationTrajectories.trajectoryId })
+            .from(demonstrationTrajectories)
+            .where(
+              and(
+                eq(demonstrationTrajectories.demonstrationId, id),
+                isNull(demonstrationTrajectories.closedAt),
+              ),
+            )
+            .limit(1);
+          if (row.status !== "stopped" || !unclosed)
+            throw new DemonstrationRefusedError(
+              "This recording has finished and takes no new trajectory.",
+            );
+        }
+        await transaction
+          .insert(demonstrationTrajectories)
+          .values({ trajectoryId, demonstrationId: id, ownerUserId })
+          .onConflictDoNothing();
+        const [stored] = await transaction
+          .select({
+            demonstrationId: demonstrationTrajectories.demonstrationId,
+          })
+          .from(demonstrationTrajectories)
+          .where(eq(demonstrationTrajectories.trajectoryId, trajectoryId));
+        if (stored?.demonstrationId !== id)
+          throw new DemonstrationRefusedError(
+            "This trajectory belongs to another recording.",
+          );
+      });
+    },
+    /** An extension recording as the recorder routes answer it: no actions, plus what the newest trajectory's last pass found. */
+    async presentExtension(
+      ownerUserId: string,
+      id: string,
+    ): Promise<ExtensionDemonstration> {
+      const row = await get(ownerUserId, id);
+      if (row.source !== "extension") throw new DemonstrationNotFoundError();
+      const [newest] = await database
+        .select({
+          state: demonstrationTrajectories.learningState,
+          containerId: demonstrationTrajectories.learningContainerId,
+        })
+        .from(demonstrationTrajectories)
+        .where(eq(demonstrationTrajectories.demonstrationId, id))
+        .orderBy(desc(demonstrationTrajectories.createdAt))
+        .limit(1);
+      return {
+        id: row.id,
+        botId: row.botId,
+        title: row.title,
+        source: "extension",
+        status: row.status,
+        actionCount: row.actionCount,
+        learning: newest?.state
+          ? { state: newest.state, containerId: newest.containerId }
+          : null,
+      };
+    },
+    async closeTrajectory(
+      ownerUserId: string,
+      id: string,
+      trajectoryId: string,
+    ) {
+      await database
+        .update(demonstrationTrajectories)
+        .set({
+          closedAt: sql`coalesce(${demonstrationTrajectories.closedAt}, now())`,
+        })
+        .where(
+          and(
+            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
+            eq(demonstrationTrajectories.demonstrationId, id),
+            eq(demonstrationTrajectories.ownerUserId, ownerUserId),
+          ),
+        );
+    },
+    async trajectoryOwner(ownerUserId: string, trajectoryId: string) {
+      const [row] = await database
+        .select({
+          demonstrationId: demonstrations.id,
+          botId: demonstrations.botId,
+          status: demonstrations.status,
+          source: demonstrations.source,
+          closedAt: demonstrationTrajectories.closedAt,
+        })
+        .from(demonstrationTrajectories)
+        .innerJoin(
+          demonstrations,
+          eq(demonstrations.id, demonstrationTrajectories.demonstrationId),
+        )
+        .where(
+          and(
+            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
+            eq(demonstrationTrajectories.ownerUserId, ownerUserId),
+          ),
+        );
+      return row ?? null;
+    },
+    /**
+     * Records what a pass found. An `assigned` trajectory is kept against a later `unjoined`,
+     * `unverified` or `learning-off` (the earlier join's membership persists); only `missing` replaces it.
+     */
+    async setTrajectoryLearning(
+      trajectoryId: string,
+      learning: LearningSpaceState,
+    ) {
+      await database
+        .update(demonstrationTrajectories)
+        .set({
+          learningState: learning.state,
+          learningContainerId: learning.containerId,
+        })
+        .where(
+          and(
+            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
+            // A null learning_state (no pass yet) makes the comparison null, so test for "not true", not NOT.
+            sql`(${demonstrationTrajectories.learningState} = 'assigned' AND ${learning.state} IN ('unjoined', 'unverified', 'learning-off')) IS NOT TRUE`,
+          ),
+        );
+    },
+    /** Deletes an extension recording; a cloud-browser recording is refused. */
+    async removeExtension(ownerUserId: string, id: string) {
+      const [row] = await database
+        .delete(demonstrations)
+        .where(
+          and(
+            eq(demonstrations.id, id),
+            eq(demonstrations.ownerUserId, ownerUserId),
+            eq(demonstrations.source, "extension"),
+          ),
+        )
+        .returning({ id: demonstrations.id });
+      if (row) return;
+      const [exists] = await database
+        .select({ id: demonstrations.id })
+        .from(demonstrations)
+        .where(
+          and(
+            eq(demonstrations.id, id),
+            eq(demonstrations.ownerUserId, ownerUserId),
+          ),
+        );
+      if (!exists) throw new DemonstrationNotFoundError();
+      throw new DemonstrationRefusedError(
+        "This recording was made in the Bot's computer, not in a browser.",
+      );
     },
     async stop(ownerUserId: string, id: string) {
       await get(ownerUserId, id);

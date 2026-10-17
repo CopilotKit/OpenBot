@@ -6,10 +6,14 @@ import { agents, users } from "../src/db/schema/core";
 import {
   demonstrationSteps,
   demonstrations,
+  demonstrationTrajectories,
 } from "../src/db/schema/demonstrations";
 import { createDemonstrationRecorder } from "../src/demonstrations/recording";
 import { createDemonstrationStore } from "../src/demonstrations/store";
-import { DemonstrationRefusedError } from "../src/demonstrations/types";
+import {
+  DemonstrationNotFoundError,
+  DemonstrationRefusedError,
+} from "../src/demonstrations/types";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
 
 const database = createDatabase(testDatabaseUrl(), TEST_POOL);
@@ -18,6 +22,7 @@ const owner = `${prefix}-owner`;
 const other = `${prefix}-other`;
 const bot = `${prefix}-bot`;
 const sharedBot = `${prefix}-shared`;
+const otherBot = `${prefix}-other-bot`;
 const store = createDemonstrationStore(database);
 const recorder = createDemonstrationRecorder({
   store,
@@ -41,7 +46,7 @@ beforeAll(async () => {
     { id: other, email: `${other}@example.test` },
   ]);
   await database.insert(agents).values(
-    [bot, sharedBot].map((id) => ({
+    [bot, sharedBot, otherBot].map((id) => ({
       id,
       name: id,
       type: "built_in" as const,
@@ -51,7 +56,9 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await database.delete(users).where(inArray(users.id, [owner, other]));
-  await database.delete(agents).where(inArray(agents.id, [bot, sharedBot]));
+  await database
+    .delete(agents)
+    .where(inArray(agents.id, [bot, sharedBot, otherBot]));
   await database.$client.close();
 });
 
@@ -208,4 +215,143 @@ test("with an extension and a cloud recording open for one person and Bot, the l
   ]);
   await recorder.stop(owner, cloud.id);
   await recorder.stop(owner, extension.id);
+});
+test("a rollover can register while the stopped recording still has an open trajectory, and not after", async () => {
+  const demo = await recorder.start(owner, bot, "Roll", "extension");
+  const first = randomUUID();
+  await store.registerTrajectory(owner, demo.id, first);
+  await recorder.stop(owner, demo.id);
+  const second = randomUUID();
+  await store.registerTrajectory(owner, demo.id, second);
+  await store.closeTrajectory(owner, demo.id, first);
+  await store.closeTrajectory(owner, demo.id, second);
+  await expect(
+    store.registerTrajectory(owner, demo.id, randomUUID()),
+  ).rejects.toThrow(DemonstrationRefusedError);
+});
+test("presentExtension carries the newest trajectory's learning state", async () => {
+  const demo = await recorder.start(owner, bot, "Learning", "extension");
+  expect((await store.presentExtension(owner, demo.id)).learning).toBeNull();
+  const t1 = randomUUID();
+  const t2 = randomUUID();
+  await store.registerTrajectory(owner, demo.id, t1);
+  await store.setTrajectoryLearning(t1, {
+    state: "assigned",
+    containerId: "openbot",
+  });
+  expect((await store.presentExtension(owner, demo.id)).learning).toEqual({
+    state: "assigned",
+    containerId: "openbot",
+  });
+  await store.registerTrajectory(owner, demo.id, t2);
+  await store.setTrajectoryLearning(t2, {
+    state: "unjoined",
+    containerId: "openbot",
+  });
+  const present = await store.presentExtension(owner, demo.id);
+  expect(present.learning).toEqual({
+    state: "unjoined",
+    containerId: "openbot",
+  });
+  expect("actions" in present).toBe(false);
+  await recorder.stop(owner, demo.id);
+});
+test("trajectories belong to one recording and one person, and close once", async () => {
+  const demo = await recorder.start(owner, bot, "T", "extension");
+  const trajectoryId = randomUUID();
+  await store.registerTrajectory(owner, demo.id, trajectoryId);
+  expect(await store.trajectoryOwner(owner, trajectoryId)).toMatchObject({
+    demonstrationId: demo.id,
+    botId: bot,
+    status: "recording",
+    source: "extension",
+    closedAt: null,
+  });
+  expect(await store.trajectoryOwner(other, trajectoryId)).toBeNull();
+  await expect(
+    store.registerTrajectory(other, demo.id, randomUUID()),
+  ).rejects.toThrow(DemonstrationNotFoundError);
+  await recorder.stop(owner, demo.id);
+  expect(
+    (await store.trajectoryOwner(owner, trajectoryId))?.closedAt,
+  ).toBeNull();
+  await store.closeTrajectory(owner, demo.id, trajectoryId);
+  const closed = (await store.trajectoryOwner(owner, trajectoryId))?.closedAt;
+  await store.closeTrajectory(owner, demo.id, trajectoryId);
+  expect(closed).toBeInstanceOf(Date);
+  expect((await store.trajectoryOwner(owner, trajectoryId))?.closedAt).toEqual(
+    closed ?? undefined,
+  );
+});
+test("a trajectory id already bound to another recording is refused", async () => {
+  const a = await recorder.start(owner, bot, "A", "extension");
+  const b = await recorder.start(owner, otherBot, "B", "extension");
+  const trajectoryId = randomUUID();
+  await store.registerTrajectory(owner, a.id, trajectoryId);
+  await expect(
+    store.registerTrajectory(owner, b.id, trajectoryId),
+  ).rejects.toThrow(DemonstrationRefusedError);
+  expect(
+    (await store.trajectoryOwner(owner, trajectoryId))?.demonstrationId,
+  ).toBe(a.id);
+  await recorder.stop(owner, a.id);
+  await recorder.stop(owner, b.id);
+});
+test("removeExtension deletes an extension recording and refuses a cloud-browser one", async () => {
+  const cloud = await recorder.start(owner, bot, "Cloud");
+  await expect(store.removeExtension(owner, cloud.id)).rejects.toThrow(
+    DemonstrationRefusedError,
+  );
+  expect((await store.get(owner, cloud.id)).id).toBe(cloud.id);
+  await recorder.stop(owner, cloud.id);
+  const extension = await recorder.start(owner, bot, "Chrome", "extension");
+  await store.removeExtension(owner, extension.id);
+  await expect(store.get(owner, extension.id)).rejects.toThrow(
+    DemonstrationNotFoundError,
+  );
+  await expect(store.removeExtension(owner, extension.id)).rejects.toThrow(
+    DemonstrationNotFoundError,
+  );
+});
+test("a later unjoined, unverified or learning-off pass never downgrades an assigned trajectory; missing does", async () => {
+  const demo = await recorder.start(owner, bot, "L", "extension");
+  const t = randomUUID();
+  await store.registerTrajectory(owner, demo.id, t);
+  await store.setTrajectoryLearning(t, {
+    state: "assigned",
+    containerId: "openbot",
+  });
+  for (const state of ["unjoined", "unverified", "learning-off"] as const) {
+    await store.setTrajectoryLearning(t, { state, containerId: "openbot" });
+    expect((await store.presentExtension(owner, demo.id)).learning).toEqual({
+      state: "assigned",
+      containerId: "openbot",
+    });
+  }
+  await store.setTrajectoryLearning(t, {
+    state: "missing",
+    containerId: "openbot",
+  });
+  expect((await store.presentExtension(owner, demo.id)).learning?.state).toBe(
+    "missing",
+  );
+  await recorder.stop(owner, demo.id);
+});
+test("a trajectory records the Learning space its last pass found", async () => {
+  const demo = await recorder.start(owner, bot, "Found", "extension");
+  const t = randomUUID();
+  await store.registerTrajectory(owner, demo.id, t);
+  await store.setTrajectoryLearning(t, {
+    state: "missing",
+    containerId: "gone",
+  });
+  const [row] = await database
+    .select()
+    .from(demonstrationTrajectories)
+    .where(eq(demonstrationTrajectories.trajectoryId, t));
+  expect([row?.learningState, row?.learningContainerId]).toEqual([
+    "missing",
+    "gone",
+  ]);
+  await recorder.stop(owner, demo.id);
 });
