@@ -4,10 +4,11 @@ import {
 } from "../desktop-connection-failure";
 import type { AuthenticatedActor, AuthService } from "./guards";
 
-const COOKIE = "openbot.organization-session";
+export const ORGANIZATION_SESSION_COOKIE = "openbot.organization-session";
+const COOKIE = ORGANIZATION_SESSION_COOKIE;
 const HANDOFF_PATH = "/api/auth/organization/session";
 const COOKIE_AGE = 7 * 24 * 60 * 60;
-class AuthorityUnavailable extends Error {}
+export class AuthorityUnavailable extends Error {}
 
 /** Explicit customer OpenBot authority, never inferred from an Intelligence endpoint. */
 export function organizationAuthority(value: string): string {
@@ -70,12 +71,23 @@ function sessionCookie(value: unknown): value is string {
 export function createOrganizationAuth(options: {
   authorityUrl: string;
   materializeUser: (user: AuthenticatedActor) => Promise<AuthenticatedActor>;
-}): AuthService {
+}): AuthService & {
+  verifySessionQuietly: (
+    cookieHeader: string,
+  ) => Promise<AuthenticatedActor | null>;
+} {
   const authority = organizationAuthority(options.authorityUrl);
   const tickets = new Map<string, { cookie: string; expires: number }>();
 
-  async function verify(cookie: string): Promise<AuthenticatedActor | null> {
-    if (!sessionCookie(cookie)) return null;
+  type Verdict =
+    | { kind: "actor"; actor: AuthenticatedActor }
+    | { kind: "refused"; authenticationFailed: boolean }
+    | { kind: "unexpected" };
+
+  /** Asks the organization about a cookie and reports what it said, with no side effects on Desktop's failure state. */
+  async function verifyAtAuthority(cookie: string): Promise<Verdict> {
+    if (!sessionCookie(cookie))
+      return { kind: "refused", authenticationFailed: false };
     let response: Response;
     try {
       response = await fetch(`${authority}/api/me`, {
@@ -92,17 +104,29 @@ export function createOrganizationAuth(options: {
       throw new AuthorityUnavailable(
         "The organization is temporarily unavailable. Try again.",
       );
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403)
+    if (!response.ok)
+      return {
+        kind: "refused",
+        authenticationFailed:
+          response.status === 401 || response.status === 403,
+      };
+    const user = actor(await response.json().catch(() => null));
+    if (!user) return { kind: "unexpected" };
+    return { kind: "actor", actor: user };
+  }
+
+  async function verify(cookie: string): Promise<AuthenticatedActor | null> {
+    const verdict = await verifyAtAuthority(cookie);
+    if (verdict.kind === "refused") {
+      if (verdict.authenticationFailed)
         recordDesktopConnectionFailure({
           connection: "organization",
           code: "organization_authentication_failed",
         });
       return null;
     }
-    const user = actor(await response.json().catch(() => null));
-    if (!user) return null;
-    const localUser = await options.materializeUser(user);
+    if (verdict.kind === "unexpected") return null;
+    const localUser = await options.materializeUser(verdict.actor);
     clearDesktopConnectionFailure("organization");
     return localUser;
   }
@@ -146,8 +170,23 @@ export function createOrganizationAuth(options: {
     return user ? { user } : null;
   };
 
+  /** Verifies a forwarded cookie header without touching Desktop's failure state; an odd answer is unavailable, never a sign-out. */
+  async function verifySessionQuietly(
+    cookieHeader: string,
+  ): Promise<AuthenticatedActor | null> {
+    const cookie = cookieFrom(new Headers({ cookie: cookieHeader }));
+    if (!cookie) return null;
+    const verdict = await verifyAtAuthority(cookie);
+    if (verdict.kind === "actor") return verdict.actor;
+    if (verdict.kind === "refused") return null;
+    throw new AuthorityUnavailable(
+      "The organization gave an answer OpenBot could not read. Try again.",
+    );
+  }
+
   return {
     api: { getSession },
+    verifySessionQuietly,
     async handler(request) {
       try {
         const url = new URL(request.url);
