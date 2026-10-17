@@ -89,15 +89,16 @@ export function tx<T>(
     let failure: unknown;
     const finish = () => {
       if (!completed || !outcome) return;
-      if (failed) reject(failure);
-      else if (outcome.ok) resolve(outcome.value);
+      if (outcome.ok) resolve(outcome.value);
       else reject(outcome.error);
     };
     t.oncomplete = () => {
       completed = true;
       finish();
     };
-    // t.error is still null while the error event fires, so the cause is read from the failing request
+    // A request error the caller handled still lets the transaction commit, so this only records the cause that
+    // `onabort` reports; `finish` settles from the work outcome alone. t.error is still null while the error event
+    // fires, so the cause is read from the failing request.
     t.onerror = (event) => {
       if (!failed) {
         failed = true;

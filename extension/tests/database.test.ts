@@ -158,6 +158,25 @@ describe("recorder database", () => {
     expect(left.every((r) => r.mediaId === "m2")).toBe(true);
     db.close();
   });
+
+  test("tx resolves when the caller handled a request error", async () => {
+    const db = await openRecorderDatabase(freshName());
+    await tx(db, ["steps"], "readwrite", (t) => {
+      t.objectStore("steps").add({ demonstrationId: "d", index: 0 });
+    });
+    await tx(db, ["steps"], "readwrite", (t) => {
+      const duplicate = t
+        .objectStore("steps")
+        .add({ demonstrationId: "d", index: 0 });
+      duplicate.onerror = (e) => e.preventDefault();
+      t.objectStore("steps").put({ demonstrationId: "d", index: 1 });
+    });
+    const count = await tx(db, ["steps"], "readonly", (t) =>
+      requestToPromise(t.objectStore("steps").count()),
+    );
+    expect(count).toBe(2);
+    db.close();
+  });
 });
 
 type StoreNameLike = (typeof STORES)[number];
