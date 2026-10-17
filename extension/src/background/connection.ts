@@ -194,6 +194,18 @@ async function tabIsOpen(tabId: number | undefined): Promise<boolean> {
   }
 }
 
+/** A connect page reads the pending origin once, on load, while its Connect button exchanges whatever is pending at
+ * the click. So the tab of a pending connect being replaced is closed first, or it would show one site and connect
+ * another. Best effort: a tab the person closed in the meantime leaves nothing to close. */
+async function closeConnectTab(tabId: number | undefined): Promise<void> {
+  if (tabId === undefined) return;
+  try {
+    await chrome.tabs.remove(tabId);
+  } catch {
+    // Closed already.
+  }
+}
+
 /** openbot.ping and openbot.connect from OpenBot's web page. The origin is only ever the one Chrome reports. */
 export async function handleExternalConnect(
   message: ExternalToBackground,
@@ -226,11 +238,9 @@ export async function handleExternalConnect(
   });
 
   const pending = await readSession("pendingConnect");
-  if (pending && now - pending.requestedAt < PENDING_MAX_AGE_MS) {
-    const open = await tabIsOpen(pending.tabId);
-    if (open && pending.origin !== checked.origin)
-      return { ok: false, error: "busy" };
-    if (open) {
+  if (pending && (await tabIsOpen(pending.tabId))) {
+    // Whatever the pending connect's age, so no page can open more than one connect tab however often it asks.
+    if (pending.origin === checked.origin) {
       await writeSession("pendingConnect", {
         ...pending,
         code: message.code,
@@ -239,6 +249,9 @@ export async function handleExternalConnect(
       await chrome.tabs.update(pending.tabId as number, { active: true });
       return connected(checked.origin);
     }
+    if (now - pending.requestedAt < PENDING_MAX_AGE_MS)
+      return { ok: false, error: "busy" };
+    await closeConnectTab(pending.tabId);
   }
   const next: PendingConnect = {
     origin: checked.origin,
@@ -302,6 +315,7 @@ export async function offerDesktopConnection(
   if (!checked.ok) return false;
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return false;
+  await closeConnectTab((await readSession("pendingConnect"))?.tabId);
   const pending: PendingConnect = {
     origin: checked.origin,
     code: handoff.code,
