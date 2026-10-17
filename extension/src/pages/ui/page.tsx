@@ -4,7 +4,11 @@ import { PageColumn, PageHeader } from "@/components/layout/page-parts";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-/** The `dark` class on the document follows the browser's colour scheme, as the app's does. */
+/**
+ * The `dark` class on the document follows the browser's colour scheme. The app
+ * follows the theme a person picks, but keeps it in its own localStorage, which
+ * an extension page cannot read, so the browser's setting is the only signal here.
+ */
 function useColourScheme() {
   useLayoutEffect(() => {
     const query = window.matchMedia(DARK_QUERY);
