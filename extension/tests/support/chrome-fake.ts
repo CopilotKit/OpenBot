@@ -180,6 +180,7 @@ type PortEnd = {
   onMessage: FakeEvent;
   onDisconnect: FakeEvent;
   disconnected: boolean;
+  disconnectFired: boolean;
   postMessage(message: unknown): void;
   disconnect(): void;
 };
@@ -195,6 +196,7 @@ function createPortPair(
     onMessage: createEvent(null, calls),
     onDisconnect: createEvent(null, calls),
     disconnected: false,
+    disconnectFired: false,
     postMessage() {},
     disconnect() {},
   });
@@ -217,6 +219,7 @@ function createPortPair(
       from.disconnected = true;
       queueMicrotask(() => {
         to.disconnected = true;
+        to.disconnectFired = true;
         to.onDisconnect.dispatch(to);
       });
     };
@@ -271,6 +274,7 @@ export function installChromeFake(
       queueMicrotask(() => {
         pair.near.disconnected = true;
         pair.far.disconnected = true;
+        pair.far.disconnectFired = true;
         pair.far.onDisconnect.dispatch(pair.far);
       });
       return pair;
@@ -314,7 +318,7 @@ export function installChromeFake(
         disconnect: far.disconnect,
         onDisconnect: {
           get called() {
-            return far.disconnected;
+            return far.disconnectFired;
           },
         },
       };
@@ -461,11 +465,12 @@ export function installChromeFake(
         calls.push(`storage.${areaName}.set`);
         const changes: Record<string, chrome.storage.StorageChange> = {};
         for (const [key, value] of Object.entries(items)) {
-          changes[key] = {
-            oldValue: map.get(key),
-            newValue: jsonCopy(value),
-          };
-          map.set(key, jsonCopy(value));
+          const next = jsonCopy(value);
+          if (map.has(key) && isDeepStrictEqual(map.get(key), next)) continue;
+          changes[key] = map.has(key)
+            ? { oldValue: map.get(key), newValue: next }
+            : { newValue: next };
+          map.set(key, next);
         }
         notify(changes);
       };

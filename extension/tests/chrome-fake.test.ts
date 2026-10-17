@@ -524,3 +524,31 @@ test("runtime.sendMessage ignores a sender-like second argument and keeps the ex
   await fake.sendFromPage({ type: "x" }, { tab: { id: 9 } as chrome.tabs.Tab });
   expect(seen?.tab?.id).toBe(9);
 });
+
+test("storage set reports a change only when the value differs and omits oldValue for a new key", async () => {
+  const seen: Record<string, chrome.storage.StorageChange>[] = [];
+  chrome.storage.onChanged.addListener((changes) => seen.push(changes));
+  await chrome.storage.local.set({ k: { a: 1 } });
+  await chrome.storage.local.set({ k: { a: 1 } });
+  expect(seen).toHaveLength(1);
+  expect("oldValue" in (seen[0]?.k ?? {})).toBe(false);
+  await chrome.storage.local.set({ k: { a: 2 } });
+  expect(seen).toHaveLength(2);
+  expect(seen[1]?.k?.oldValue).toEqual({ a: 1 });
+});
+
+test("onDisconnect.called is false on the end that disconnected and true once the other side does", async () => {
+  let swPort: chrome.runtime.Port | undefined;
+  chrome.runtime.onConnect.addListener((port) => {
+    swPort = port;
+  });
+  const far = fake.connectFrom("p", { id: "x" });
+  far.disconnect();
+  await Promise.resolve();
+  expect(far.onDisconnect.called).toBe(false);
+
+  const far2 = fake.connectFrom("p2", { id: "x" });
+  swPort?.disconnect();
+  await Promise.resolve();
+  expect(far2.onDisconnect.called).toBe(true);
+});
