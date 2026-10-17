@@ -5,6 +5,7 @@
       "**",
       "!**/dist",
       "!.",
+      "!.superpowers",
       "!app/src/lib/generated/application-config.ts",
       "!app/src/routeTree.gen.ts",
       "!desktop/src-tauri/gen",

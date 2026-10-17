@@ -142,22 +142,22 @@ describe("agent input parser", () => {
     [
       "roleDescription",
       undefined,
-      "Role description must be text between 1 and 1000 characters.",
+      "What it does must be text between 1 and 1000 characters.",
     ],
     [
       "roleDescription",
       {},
-      "Role description must be text between 1 and 1000 characters.",
+      "What it does must be text between 1 and 1000 characters.",
     ],
     [
       "roleDescription",
       "   ",
-      "Role description must be text between 1 and 1000 characters.",
+      "What it does must be text between 1 and 1000 characters.",
     ],
     [
       "roleDescription",
       "r".repeat(1001),
-      "Role description must be text between 1 and 1000 characters.",
+      "What it does must be text between 1 and 1000 characters.",
     ],
     ["visibility", undefined, "Visibility must be public or private."],
     ["visibility", 1, "Visibility must be public or private."],

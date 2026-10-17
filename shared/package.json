@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./harnesses.json": "./harnesses.json",
     "./model-providers.json": "./model-providers.json",
     "./*": "./*.ts"
   },

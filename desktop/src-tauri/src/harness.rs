@@ -148,168 +148,64 @@ fn byo_remote_ag_ui_url(value: &str) -> Result<String, String> {
 /// `registerCopilotKit` in the harness amounted to: that route serves the CopilotKit Runtime
 /// protocol, not AG-UI, and a run reached it and came back asking for a `method` field.
 pub fn catalogue() -> Vec<Harness> {
-    // Marks are vendored under the row's own id, so a row finds its own without a second mapping.
-    // The three with none are named here rather than discovered at draw time, because a missing
-    // file and a brand with no mark are different things and only one of them is a bug.
-    const UNMARKED: [&str; 3] = ["agno", "ag2", "langroid"];
     /*
-     * The directory is given, not derived from the id, and that is deliberate.
+     * Read from `shared/harnesses.json`, the one file every language reads, rather than written
+     * here. The web app's New Bot dialog names the same frameworks, and a second copy of this list
+     * would drift — which matters more than for most lists, because this one carries other
+     * companies' trade marks and the rules in `shared/marks/README.md` about what may be drawn for
+     * them.
      *
-     * A release publishes `openbot-<directory>`, taken from the Dockerfile paths in the tree, so
-     * the image name belongs to the directory and not to whatever this list calls the row. Derived
-     * from the id it was wrong for every row — `openbot-harness-crewai` against a published
-     * `openbot-agent-crewai` — and wrong twice for the four whose id does not match their folder.
-     * A picker that names an image nobody publishes fails at the pull, on a first run, with nothing
-     * on screen to say why. `every_image_is_one_a_release_publishes` holds it.
+     * Baked in with `include_str!` rather than read at runtime: the setup window draws before it
+     * has a working directory it can rely on, and a catalogue that can fail to load is a catalogue
+     * that can leave the picker empty on a first run with nothing on screen to say why.
      */
-    let ours = |id: &str,
-                directory: &str,
-                port: u16,
-                run_path: &str,
-                name: &str,
-                summary: &str,
-                maintainer: Maintainer| Harness {
-        id: id.into(),
-        name: name.into(),
-        summary: summary.into(),
-        // The manifest's own key, which is the directory the image is built from. `openbot-` is
-        // the published repository's prefix and belongs to the reference, not to this name.
-        image: Some(directory.to_string()),
-        port: Some(port),
-        health_path: Some("/health".into()),
-        run_path: run_path.into(),
-        credential: Credential::AnyProvider,
-        maintainer,
-        mark: (!UNMARKED.contains(&id)).then(|| id.to_string()),
-    };
+    #[derive(Deserialize)]
+    struct CatalogFile {
+        harnesses: Vec<CatalogRow>,
+    }
 
-    vec![
-        ours(
-            "crewai",
-            "agent-crewai",
-            4202,
-            "",
-            "CrewAI",
-            "Crews of agents with roles and tasks.",
-            Maintainer::Partnership,
-        ),
-        ours(
-            "llamaindex",
-            "agent-llamaindex",
-            4204,
-            "/run",
-            "LlamaIndex",
-            "Agents built around your own documents.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "agno",
-            "agent-agno",
-            4203,
-            "/agui",
-            "Agno",
-            "Fast, small, and multi-modal.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "langgraph",
-            "agent-langgraph-agui",
-            4206,
-            "",
-            "LangGraph",
-            "Graphs you can change, from LangChain.",
-            Maintainer::Partnership,
-        ),
-        ours(
-            "google-adk",
-            "agent-adk",
-            4208,
-            "",
-            "Google ADK",
-            "Google's agent kit. Gemini first, any model after.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "pydantic-ai",
-            "agent-pydantic-ai",
-            4205,
-            "",
-            "Pydantic AI",
-            "Typed agents, validated in and out.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "microsoft-agent-framework",
-            "agent-microsoft",
-            4211,
-            "",
-            "Microsoft Agent Framework",
-            "Microsoft's, model-agnostic by design.",
-            Maintainer::FirstParty,
-        ),
-        Harness {
-            id: "claude-agent-sdk".into(),
-            name: "Claude Agent SDK".into(),
-            summary: "Anthropic's own. The one that takes a Claude plan instead of a key.".into(),
-            image: Some("agent-claude-sdk".into()),
-            port: Some(4212),
-            health_path: Some("/health".into()),
-            run_path: String::new(),
-            credential: Credential::Anthropic,
-            maintainer: Maintainer::Community,
-            mark: Some("claude-agent-sdk".into()),
-        },
-        ours(
-            "strands",
-            "agent-strands",
-            4207,
-            "",
-            "AWS Strands",
-            "Amazon's. Bedrock first, any model after.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "ag2",
-            "agent-ag2",
-            4210,
-            "",
-            "AG2",
-            "The AutoGen line, continued.",
-            Maintainer::FirstParty,
-        ),
-        ours(
-            "langroid",
-            "agent-langroid",
-            4209,
-            "",
-            "Langroid",
-            "Multi-agent, deliberately small.",
-            Maintainer::Community,
-        ),
-        ours(
-            "mastra",
-            "agent-mastra",
-            4213,
-            "",
-            "Mastra",
-            "TypeScript agents, with their own server.",
-            Maintainer::Partnership,
-        ),
-        Harness {
-            id: "byo-url".into(),
-            name: "An agent you already run".into(),
-            summary: "Give its address. It is proved with a real AG-UI run before it is saved."
-                .into(),
-            image: None,
-            port: None,
-            health_path: None,
-            run_path: String::new(),
-            credential: Credential::TheirEndpoint,
-            maintainer: Maintainer::Community,
-            // Stands for whatever the person already runs, so no vendor's mark is honest here.
-            mark: None,
-        },
-    ]
+    /*
+     * Its own struct rather than deserializing `Harness` directly, because the two shapes differ on
+     * purpose. The file is camelCase, which is what the web app reads; `Harness` is snake_case,
+     * which is what the Tauri command has always sent `desktop/src/HarnessPicker.tsx`. Renaming
+     * `Harness` to match the file would change that wire format for a UI that declares
+     * `health_path`. Unknown keys — `_readme`, and the web-only `webSummary` and `webCreate` — are
+     * ignored by serde, which is what lets the web app add a field without touching this.
+     */
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CatalogRow {
+        id: String,
+        name: String,
+        summary: String,
+        image: Option<String>,
+        port: Option<u16>,
+        health_path: Option<String>,
+        run_path: String,
+        credential: Credential,
+        maintainer: Maintainer,
+        mark: Option<String>,
+    }
+
+    let file: CatalogFile =
+        serde_json::from_str(include_str!("../../../shared/harnesses.json"))
+            .expect("shared/harnesses.json is baked in at build time and must parse");
+
+    file.harnesses
+        .into_iter()
+        .map(|row| Harness {
+            id: row.id,
+            name: row.name,
+            summary: row.summary,
+            image: row.image,
+            health_path: row.health_path,
+            run_path: row.run_path,
+            port: row.port,
+            credential: row.credential,
+            maintainer: row.maintainer,
+            mark: row.mark,
+        })
+        .collect()
 }
 
 /**
@@ -879,7 +775,7 @@ mod tests {
         for harness in catalogue() {
             let Some(mark) = harness.mark else { continue };
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../src/marks")
+                .join("../../shared/marks")
                 .join(format!("{mark}.svg"));
             assert!(
                 path.exists(),

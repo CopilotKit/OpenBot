@@ -61,7 +61,9 @@ const TEXT_FIELDS: {
   { field: "title", label: "Title", icon: IconTag },
   {
     field: "roleDescription",
-    label: "Role",
+    // Not "Role": beside "Title" it read as a second job title, when it is the standing
+    // instruction the Bot carries into every channel. The create dialog says the same.
+    label: "What it does",
     icon: IconTextCaption,
     multiline: true,
   },

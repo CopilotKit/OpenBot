@@ -172,17 +172,18 @@ test("the new-coworker wizard does not move on from the Enter that confirms a co
   const name = await view.findByLabelText("Name");
   await type(name, "経費");
   await type(view.getByLabelText("Title"), "Finance Operations");
-  await type(view.getByLabelText("Role"), "Review receipts.");
+  await type(view.getByLabelText("What it does"), "Review receipts.");
 
   await confirmComposedCharacter(name);
   await settle();
-  expect(view.getByText("Step 1 of 3")).toBeTruthy();
+  // The wizard draws no counter, so the step's own heading is what says where we are.
+  expect(view.getByText("Who is this coworker?")).toBeTruthy();
 
   // An ordinary Enter still means Continue.
   await act(async () => {
     fireEvent.keyDown(name, { key: "Enter", keyCode: 13 });
   });
-  expect(await view.findByText("Step 2 of 3")).toBeTruthy();
+  expect(await view.findByText("Where does it run?")).toBeTruthy();
 });
 
 test("a boundary rule is not saved by the Enter that confirms a composed character", async () => {
