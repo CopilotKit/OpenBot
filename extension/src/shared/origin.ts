@@ -65,7 +65,7 @@ const NON_RECORDABLE_HOSTS = new Set([
 ]);
 
 /** http: or https: only (chrome://, the Web Store, PDF viewer: false). */
-export function isRecordablePage(url: string): boolean {
+export function isRecordablePage(url: string | undefined): boolean {
   if (typeof url !== "string") return false;
   const parsed = parse(url);
   if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:"))

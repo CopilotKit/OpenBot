@@ -76,6 +76,6 @@ test("only http and https pages are recordable", () => {
   expect(isRecordablePage("chrome://newtab/")).toBe(false);
   expect(isRecordablePage("https://chromewebstore.google.com/")).toBe(false);
   expect(isRecordablePage("chrome-extension://abc/popup.html")).toBe(false);
-  expect(isRecordablePage(undefined as unknown as string)).toBe(false);
+  expect(isRecordablePage(undefined)).toBe(false);
   expect(isRecordablePage("")).toBe(false);
 });
