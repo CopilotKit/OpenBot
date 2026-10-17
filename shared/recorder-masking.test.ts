@@ -414,3 +414,22 @@ test("sensitivity is read from autocomplete, name, aria-label, placeholder and l
   ).toBe(true);
   expect(isSensitiveTarget({ label: "Card number" })).toBe(true);
 });
+
+test("sanitiseForIntelligence replaces every NUL, not only the first", () => {
+  expect(
+    sanitiseForIntelligence({ "a\u0000b\u0000c": ["x\u0000y\u0000z"] }),
+  ).toEqual({ "a�b�c": ["x�y�z"] });
+});
+
+test("maskBody redacts a JSON integer too large to check after rounding", () => {
+  expect(
+    JSON.parse(
+      maskBody('{"pan":6250941006528599123,"n":42}', "application/json"),
+    ),
+  ).toEqual({ pan: REDACTED, n: 42 });
+});
+
+test("isCredentialKey decodes each escape on its own, like the collector", () => {
+  expect(isCredentialKey("client%5Fsecret%zz")).toBe(true);
+  expect(isCredentialKey("access%5Ftoken%")).toBe(true);
+});

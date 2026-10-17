@@ -79,6 +79,7 @@ const DIGIT_GROUPS = /\d+(?:[ -]\d+)+/g;
 const TOKEN_CHARS = /[^\s,;&=:"'{}[\]]+/g;
 /** Only digits, spaces and dashes: normalised to digits (plan Task 3 `normaliseSecret`). */
 const DIGITS_AND_SEPARATORS = /^[\d\s-]+$/;
+/** Form bodies are masked pair by pair (plan Task 3 maskBody). */
 const FORM_CONTENT_TYPE = /application\/x-www-form-urlencoded/i;
 /** Input event target fields that hold what the person typed or chose (plan Task 3 `maskCollectorEvent`). */
 const TARGET_VALUE_FIELDS = ["value", "text"] as const;
@@ -111,7 +112,10 @@ export function normaliseSecret(value: string): string {
 }
 
 export function isCredentialKey(key: string): boolean {
-  const words = ` ${decodeQuietly(key)
+  const words = ` ${key
+    .replace(/%([\da-f]{2})/gi, (_, hex: string) =>
+      String.fromCharCode(parseInt(hex, 16)),
+    )
     .replace(/([a-z\d])(?=[A-Z])/g, "$1 ")
     .toLowerCase()
     .split(/[^a-z\d]+/)
@@ -146,6 +150,7 @@ export function luhnValid(digits: string): boolean {
   return sum % 10 === 0;
 }
 
+/** SHA-256 round constants (FIPS 180-4 section 4.2.2). */
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
   0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -317,7 +322,13 @@ const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
     return matchesDigest(value, options) ? REDACTED : scrubText(value, options);
   if (typeof value === "number") {
     const digits = String(value);
-    return matchesDigest(digits, options) ||
+    // JSON.parse already rounded an integer past 2^53, so it can no longer be checked; redact it.
+    const unverifiable =
+      Number.isInteger(value) &&
+      !Number.isSafeInteger(value) &&
+      Math.abs(value) < 1e19;
+    return unverifiable ||
+      matchesDigest(digits, options) ||
       (/^\d{13,19}$/.test(digits) && luhnValid(digits))
       ? REDACTED
       : value;
@@ -382,7 +393,7 @@ export function isSensitiveTarget(target: {
 }
 
 export function sanitiseForIntelligence(value: JsonValue): JsonValue {
-  const clean = (text: string) => text.replace(NUL, "�").toWellFormed();
+  const clean = (text: string) => text.replaceAll(NUL, "\uFFFD").toWellFormed();
   if (typeof value === "string") return clean(value);
   if (Array.isArray(value)) return value.map(sanitiseForIntelligence);
   if (isObject(value)) {
