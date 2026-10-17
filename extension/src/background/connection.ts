@@ -58,8 +58,8 @@ const connectUrl = () => chrome.runtime.getURL("connect.html");
 /** A web connect, Desktop's handoff and a decision's clear (`clearPendingConnect`) each read, then write, the pending
  * connect (and a web connect the request count) across storage awaits, so they run one at a time: run side by side,
  * ten connects in one tick would each find the slot empty and open a tab, and the limit would count one of them. A
- * keep-alive's signed-out forget (`forgetIfStillStored`) and approve's store of the connection queue here too. A job
- * that throws rejects its own caller and the next job still runs. */
+ * forget told which token asked (`forgetConnection` with `askedWith`) and approve's store of the connection queue here
+ * too. A job that throws rejects its own caller and the next job still runs. */
 let queue: Promise<unknown> = Promise.resolve();
 function serially<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
@@ -101,35 +101,36 @@ async function keepAlive(): Promise<void> {
     await openbotJson<RecorderMe>(connection, recorderPaths.me);
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
-      await forgetIfStillStored(
-        connection.token,
-        error.body?.reason ?? "revoked",
-      );
+      await forgetConnection(error.body?.reason ?? "revoked", connection.token);
     return;
   }
   await writeLocal("lastKeepAliveAt", Date.now());
-}
-
-/** Reconnecting this copy revokes its old token, so a keep-alive that asked with the old token can be answered signed
- * out after approve stored the new connection: only the connection that asked is forgotten, notice and all. The check
- * and the forget are one queued job, and approve stores through the queue, so no new connection lands between them. */
-function forgetIfStillStored(
-  token: string,
-  reason: "revoked" | "removed" | "organization",
-): Promise<void> {
-  return serially(async () => {
-    if ((await currentConnection())?.token === token)
-      await forgetConnection(reason);
-  });
 }
 
 export async function currentConnection(): Promise<ConnectionRecord | null> {
   return (await readLocal("connection")) ?? null;
 }
 
-export async function forgetConnection(
-  reason: "revoked" | "removed" | "organization" | "disconnected",
+type ForgetReason = "revoked" | "removed" | "organization" | "disconnected";
+
+/** Forgets the stored connection, with a signed-out notice giving the reason unless the person disconnected.
+ *
+ * A caller handling a failed request (a signed-out answer, or a Disconnect's DELETE) must pass the token that request
+ * used as `askedWith`. Reconnecting this copy revokes its old token, so a request sent with the old token can finish
+ * after approve stored the new connection: with `askedWith`, only the connection that asked is forgotten, notice and
+ * all. The check and the forget are one queued job, and approve stores through the queue, so no new connection lands
+ * between them. Without `askedWith`, whatever connection is stored is forgotten at once. */
+export function forgetConnection(
+  reason: ForgetReason,
+  askedWith?: string,
 ): Promise<void> {
+  if (askedWith === undefined) return forget(reason);
+  return serially(async () => {
+    if ((await currentConnection())?.token === askedWith) await forget(reason);
+  });
+}
+
+async function forget(reason: ForgetReason): Promise<void> {
   await removeLocal("connection");
   if (reason !== "disconnected")
     await writeLocal("notice", { kind: "signed-out", at: Date.now(), reason });
@@ -165,8 +166,9 @@ export async function handleConnectionMessage(
         } catch {
           // Best effort: the token is forgotten here either way, and the person can revoke it in OpenBot.
         }
+        // A reconnect approved while OpenBot was being told is a newer connection, and stays.
+        await forgetConnection("disconnected", connection.token);
       }
-      await forgetConnection("disconnected");
       return { ok: true };
     }
     case "page.desktop.available":

@@ -79,8 +79,10 @@ beforeAll(() => {
       if (
         request.method === "DELETE" &&
         url.pathname === "/api/recorder/connections/current"
-      )
+      ) {
+        await holdIfAsked(url.pathname);
         return new Response(null, { status: 204 });
+      }
       if (url.pathname === "/api/recorder/me") {
         await holdIfAsked(url.pathname);
         return Response.json(meAnswer.body, { status: meAnswer.status });
@@ -324,6 +326,10 @@ test("an approve that cannot reach OpenBot shows a plain sentence, not the brows
     unreachable.mockRestore();
   }
   expect(await readLocal("connection")).toBeUndefined();
+  expect(await readSession("pendingConnect")).toMatchObject({
+    origin,
+    code: "obc_abc",
+  });
 });
 
 test("disconnect tells OpenBot and forgets the token without a notice", async () => {
@@ -341,6 +347,42 @@ test("disconnect tells OpenBot and forgets the token without a notice", async ()
   );
   expect(await currentConnection()).toBeNull();
   expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a disconnect still telling OpenBot when a reconnect lands forgets only the connection it disconnected", async () => {
+  await connected("obr_old");
+  const deleting = holdAnswer("/api/recorder/connections/current");
+  const disconnecting = handleConnectionMessage({ type: "page.disconnect" });
+  await deleting.arrived;
+  await connect("obc_abc");
+  expect(
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    }),
+  ).toEqual({ ok: true });
+  deleting.release();
+  expect(await disconnecting).toEqual({ ok: true });
+  expect(hits).toContain(
+    "DELETE /api/recorder/connections/current Bearer obr_old",
+  );
+  expect((await currentConnection())?.token).toBe("obr_fixture");
+  expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a forget told which token asked leaves a newer connection alone, and forgets the one that asked with a notice", async () => {
+  await connected("obr_new");
+  await forgetConnection("revoked", "obr_old");
+  expect((await currentConnection())?.token).toBe("obr_new");
+  expect(await readLocal("notice")).toBeUndefined();
+  await forgetConnection("revoked", "obr_new");
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toEqual({
+    kind: "signed-out",
+    at: clock,
+    reason: "revoked",
+  });
 });
 
 test("forgetting a revoked connection leaves a signed-out notice with its reason", async () => {
@@ -853,4 +895,68 @@ test("a signed-out answer to a held keep-alive still forgets the connection that
     at: clock,
     reason: "revoked",
   });
+});
+
+const signedOut = (reason: "revoked" | "removed" | "organization") => ({
+  status: 401,
+  body: { error: "Signed out.", code: "RECORDER_SIGNED_OUT", reason },
+});
+
+test("a reconnect approved while a signed-out forget is removing the old connection waits for it, and stands", async () => {
+  await connected("obr_old");
+  await writeLocal("lastKeepAliveAt", clock);
+  installConnection();
+  await settle();
+  await connect("obc_abc");
+  const local = chrome.storage.local;
+  const remove = local.remove;
+  const reached = Promise.withResolvers<void>();
+  const go = Promise.withResolvers<void>();
+  Object.assign(local, {
+    remove: async (keys: string | string[]) => {
+      if ([keys].flat().includes("connection")) {
+        reached.resolve();
+        await go.promise;
+      }
+      return Reflect.apply(remove, local, [keys]);
+    },
+  });
+  try {
+    meAnswer = signedOut("revoked");
+    fake.alarms.fire("recorder-session-keepalive");
+    await reached.promise;
+    // The forget has checked that the old connection is still stored and is removing it while the reconnect lands.
+    const approving = handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    });
+    await settle();
+    expect(exchanges.map((e) => e.code)).toEqual(["obc_abc"]);
+    go.resolve();
+    expect(await approving).toEqual({ ok: true });
+  } finally {
+    go.resolve();
+    Object.assign(local, { remove });
+  }
+  expect((await currentConnection())?.token).toBe("obr_fixture");
+  expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a stale signed-out keep-alive answer after a deliberate Disconnect leaves no signed-out notice", async () => {
+  await connected();
+  await writeLocal("lastKeepAliveAt", clock);
+  installConnection();
+  await settle();
+  const me = holdAnswer("/api/recorder/me");
+  fake.alarms.fire("recorder-session-keepalive");
+  await me.arrived;
+  expect(await handleConnectionMessage({ type: "page.disconnect" })).toEqual({
+    ok: true,
+  });
+  meAnswer = signedOut("revoked");
+  me.release();
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toBeUndefined();
 });
