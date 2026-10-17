@@ -227,6 +227,21 @@ test("RECORDER_E2E_FLOOD is unknown outside the e2e variant", async () => {
   expect(seen.page).toEqual([]);
 });
 
+test("RECORDER_E2E_FLOOD reaches the recording handler in the e2e variant", async () => {
+  const previous = process.env.RECORDER_VARIANT;
+  process.env.RECORDER_VARIANT = "e2e";
+  try {
+    installRouter(handlers);
+    expect(
+      await fake.sendFromPage({ type: "RECORDER_E2E_FLOOD", count: 3 }),
+    ).toEqual({ ok: true });
+    expect(seen.page).toEqual([{ type: "RECORDER_E2E_FLOOD", count: 3 }]);
+  } finally {
+    if (previous === undefined) delete process.env.RECORDER_VARIANT;
+    else process.env.RECORDER_VARIANT = previous;
+  }
+});
+
 test("a page message from a web origin or another extension is refused", async () => {
   installRouter(handlers);
   const web = {
