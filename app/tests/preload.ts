@@ -20,9 +20,22 @@
  * before, and each DOM test file still registers and unregisters its own happy-dom.
  */
 
+import { mock } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 GlobalRegistrator.register();
 /* `@base-ui/utils` is not a dependency of this package; the react package that owns it is. */
 await import("@base-ui/react/dialog");
 GlobalRegistrator.unregister();
+
+/**
+ * `markFor` globs the vendored brand marks, and `import.meta.glob` is Vite's — under `bun test` it
+ * is undefined and calling it throws. Anything that renders the New Bot dialog imports it
+ * transitively, so without this every such file would need its own stub, and two of them passed
+ * only because a stub in a *different* file leaked process-wide: exactly the walk-order dependency
+ * the note above exists to stop.
+ *
+ * Null for every brand, which is a real state — four rows have no mark. A file that needs a mark
+ * drawn calls `mock.module` itself and wins, because a later registration replaces this one.
+ */
+mock.module("../src/lib/marks", () => ({ markFor: () => null }));

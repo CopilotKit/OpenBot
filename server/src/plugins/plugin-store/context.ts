@@ -1,3 +1,4 @@
+import { connectAppRefusal } from "@openbot/shared/connect-prompt";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { recordAuditEvent } from "../../audit";
 import {
@@ -659,10 +660,19 @@ export function createStoreContext(options: PluginStoreOptions) {
         .where(accountRow(access.toolkit, resolved.ref))
         .limit(1);
       if (!connected) {
+        /*
+         * Only the personal half carries a connect prompt. A Shared app's account belongs to the
+         * deployment, so the person reading this cannot connect it however clearly they are asked —
+         * a card offering them the button would be an invitation to a refusal.
+         */
         throw new PluginRefusedError(
           resolved.ref.holder === "deployment"
             ? `${row.title} is shared across this deployment and no account is connected to it yet. Ask an administrator to connect it.`
-            : `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+            : connectAppRefusal({
+                serverId: row.id,
+                title: row.title,
+                message: `You have not connected your ${row.title} account. Connect it and ask again.`,
+              }),
           null,
         );
       }
@@ -735,7 +745,11 @@ export function createStoreContext(options: PluginStoreOptions) {
 
     if (!held) {
       throw new PluginRefusedError(
-        `You have not connected your ${entry.title} account. Connect it in Settings and ask again.`,
+        connectAppRefusal({
+          serverId: row.id,
+          title: entry.title,
+          message: `You have not connected your ${entry.title} account. Connect it and ask again.`,
+        }),
         null,
       );
     }
@@ -934,7 +948,11 @@ export function createStoreContext(options: PluginStoreOptions) {
           // and connecting again is the thing to do.
           if (!current) {
             throw new PluginRefusedError(
-              `You have not connected your ${title} account. Connect it in Settings and ask again.`,
+              connectAppRefusal({
+                serverId: row.id,
+                title,
+                message: `You have not connected your ${title} account. Connect it and ask again.`,
+              }),
               null,
             );
           }
@@ -954,7 +972,11 @@ export function createStoreContext(options: PluginStoreOptions) {
            */
           if (!locked || locked.revokedAt) {
             throw new PluginRefusedError(
-              `Your ${title} access was withdrawn. Connect it again in Settings.`,
+              connectAppRefusal({
+                serverId: row.id,
+                title,
+                message: `Your ${title} access was withdrawn. Connect it again.`,
+              }),
               null,
             );
           }

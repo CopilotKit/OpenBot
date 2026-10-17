@@ -1,7 +1,28 @@
 import { tryClient } from "@/lib/client";
-import { reportComputerActivity } from "@/lib/copilot/computer-activity";
+import {
+  reportComputerActivity,
+  withdrawComputerActivity,
+} from "@/lib/copilot/computer-activity";
 
 export type ToolOutcome = Record<string, unknown> & { ok: boolean };
+
+/**
+ * The calls that never reach the Bot's screen.
+ *
+ * Reading a file or running a command happens on the computer, not on the display, so announcing
+ * them opened the live screen on whatever still page was already there — a pane that arrived for an
+ * action nobody could see, which is indistinguishable from one that arrived for no reason.
+ *
+ * A LIST OF EXCEPTIONS, NOT A LIST OF PERMITS, and deliberately so: a browser path added later and
+ * never added here goes on announcing itself, which is what every browser path already does. The
+ * failure mode of forgetting this list is a pane that opens, not one that silently stops.
+ */
+const OFF_SCREEN_PATHS = new Set([
+  "/files/list",
+  "/files/read",
+  "/files/write",
+  "/exec",
+]);
 
 /**
  * Exported for the test that covers what a Bot is told when a call is refused.
@@ -21,7 +42,7 @@ export async function callComputer(
   signal?: AbortSignal,
 ): Promise<ToolOutcome> {
   // Announce before the call so the screen can open while the action is running.
-  reportComputerActivity(botId);
+  const run = OFF_SCREEN_PATHS.has(path) ? null : reportComputerActivity(botId);
   let response: Response;
   try {
     response = await tryClient(`/api/computers/${botId}${path}`, {
@@ -47,6 +68,14 @@ export async function callComputer(
   > | null;
 
   if (!response.ok) {
+    /*
+     * A REFUSAL IS AN INTENTION, NOT AN ACTION. 403 is a policy, a capability switch or a network
+     * rule saying no, and it says so before the browser is touched: there is nothing on the screen
+     * to see, because nothing was done to it. Every other failure reached the computer and may have
+     * moved it, so those keep the screen they opened.
+     */
+    if (response.status === 403 && run !== null)
+      withdrawComputerActivity(botId, run);
     return {
       ok: false,
       reason: (body?.error as string) ?? "That did not work.",

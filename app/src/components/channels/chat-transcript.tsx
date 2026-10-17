@@ -59,6 +59,7 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import {
@@ -72,6 +73,7 @@ import {
   toVisibleChatItems,
 } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
+import { ConnectAppCard } from "./connect-app-card";
 import { TeamBotConsentCard } from "./team-bot-consent";
 import { ToolRenderBoundary } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1371,6 +1373,9 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
+  // An app this person has not connected draws the connect button, not the name of a screen.
+  const connect = refused ? readConnectPrompt(body) : null;
+  if (connect) return <ConnectAppCard {...connect} />;
   return (
     <ToolLine
       {...(detail ? { detail } : {})}

@@ -15,6 +15,7 @@ import {
   toolResultFailed,
 } from "@/lib/plugins/tool-result";
 import { readTeamBotConsent } from "@/lib/team-bots";
+import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 import { researchRoleOfTool } from "@openbot/shared/research";
 import { browserStepDetails, isBrowserStep } from "./browser-activity";
 import type { VisibleChatItem } from "./chat-messages";
@@ -69,16 +70,22 @@ export function groupToolSteps(
 function foldable(item: ToolItem): boolean {
   if (isBrowserStep(item)) return true;
   if (!item.toolCall.function.name.startsWith("mcp__")) return false;
-  return !asksForConsent(item.result);
+  return !asksThePerson(item.result);
 }
 
-function asksForConsent(result: string | undefined): boolean {
+/**
+ * Whether this refusal is a question for the person rather than a line about what a Bot did.
+ *
+ * Both of these draw a card with something to press — a Team Bot asking to act as them, and an app
+ * they have not connected — and neither may sit behind a disclosure for the same reason: a question
+ * nobody can see is a conversation that has stopped without saying so.
+ */
+function asksThePerson(result: string | undefined): boolean {
   if (result === undefined) return false;
   const answer = asText(result);
   if (!answer.startsWith(REFUSAL_MARKER)) return false;
-  return (
-    readTeamBotConsent(answer.slice(REFUSAL_MARKER.length).trim()) !== null
-  );
+  const body = answer.slice(REFUSAL_MARKER.length).trim();
+  return readTeamBotConsent(body) !== null || readConnectPrompt(body) !== null;
 }
 
 type StepKind = "search" | "fetch" | "browser" | "connector";

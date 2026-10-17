@@ -81,6 +81,19 @@ test("a request to connect the person's own account is never folded away", () =>
   expect(grouped.map((item) => item.id)).toContain("consent");
 });
 
+test("a request to connect an app at all is never folded away either", () => {
+  const prompt = call(
+    "connect",
+    "mcp__notion__search",
+    {},
+    JSON.stringify(
+      'Refused. [connect-app]{"serverId":"srv_notion","title":"Notion"} You have not connected your Notion account. Connect it and ask again.',
+    ),
+  );
+  const grouped = groupToolSteps([search("a"), prompt, search("b")]);
+  expect(grouped.map((item) => item.id)).toContain("connect");
+});
+
 test("the summary says what was done, never which provider searched", () => {
   const steps = [
     search(),
