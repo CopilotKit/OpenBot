@@ -183,7 +183,8 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
               <p className="mt-2">
                 {plural(kept.events, "event", "events")} from{" "}
                 {plural(kept.recordings, "recording", "recordings")} still
-                waiting in this browser are discarded.
+                waiting in this browser {kept.events === 1 ? "is" : "are"}{" "}
+                discarded.
               </p>
             ) : null}
           </DialogBody>

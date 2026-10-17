@@ -118,6 +118,22 @@ test("the dialog names the kept events when some are waiting", async () => {
   ).toBeTruthy();
 });
 
+test("the dialog says is discarded when a single event is kept", async () => {
+  const { findByRole, getByText } = setup(
+    stateResponse({
+      state: {
+        kept: { recordings: 1, events: 1, reason: "r", parked: false },
+      },
+    }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Disconnect" }));
+  expect(
+    getByText(
+      "1 event from 1 recording still waiting in this browser is discarded.",
+    ),
+  ).toBeTruthy();
+});
+
 test("confirming sends page.disconnect and shows the not-connected copy", async () => {
   const { findAllByRole, findByText, sent } = setup(stateResponse());
   fireEvent.click((await findAllByRole("button", { name: "Disconnect" }))[0]);
