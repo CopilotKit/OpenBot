@@ -74,7 +74,6 @@ import { createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import { createOrganizationAuth } from "./auth/organization";
 import { organizationUserStore } from "./auth/organization-store";
-import type { OpenBotRole } from "./auth/roles";
 import {
   loadAttachmentForTurn,
   markAttachmentsSent,
@@ -116,8 +115,6 @@ import {
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import {
-  type IdentifyActor,
-  type IdentifyUser,
   mountCopilotRuntime,
   normalizeModelBaseUrls,
   runtimeModelForEnvironment,
@@ -159,6 +156,7 @@ import {
   createIntelligenceClient,
   observeIntelligenceAuthentication,
 } from "./intelligence-client";
+import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import {
   createLearningAutoAssign,
   probeLearningContainer,
@@ -177,8 +175,8 @@ import { createMemoryDefaults } from "./memory/defaults";
 import { createMemoryIngestion } from "./memory/ingestion";
 import { createIntelligenceMemory } from "./memory/intelligence";
 import { createMemoryStore } from "./memory/store";
-import { reportModelAvailability } from "./model-availability-check";
 import { memoryTools } from "./memory/tools";
+import { reportModelAvailability } from "./model-availability-check";
 import { createSignInNotifier, createSignInResumer } from "./passwords/resume";
 import { createSignInService } from "./passwords/service";
 import { createPasswordStore } from "./passwords/store";
@@ -214,6 +212,7 @@ import {
 } from "./proactive/restriction";
 import { createProactiveStore } from "./proactive/store";
 import { createProviderOAuthProxy } from "./provider-oauth";
+import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
   createEmailTriggerRoutes,
@@ -238,7 +237,6 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
-import { reportIntelligenceEntitlement } from "./intelligence-entitlement-check";
 import { createSelfHostBanner } from "./self-host-banner";
 import { createTeamBots } from "./team-bots/team-bots";
 import {
@@ -252,66 +250,6 @@ import { createVoiceSessionStore } from "./voice/sessions";
 import { createVoiceSummarizer } from "./voice/summary";
 import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue, type WorkOfferedListener } from "./work/queue";
-
-/**
- * Who is asking, for a CopilotKit request.
- *
- * One resolver, because a run has two questions to answer about the same person: whose threads and
- * memory these are, and which coworkers they may run. Answering them from different places is how
- * one person ends up running another's private coworker, or reading their thread.
- */
-async function resolveRequestActor(request: Request): Promise<{
-  id: string;
-  name: string;
-  role: OpenBotRole;
-}> {
-  if (config.singleUser) {
-    return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
-  }
-  const session = await auth?.api.getSession({ headers: request.headers });
-  const user = session?.user;
-  if (!user) {
-    throw new Error("A CopilotKit run requires a signed-in user.");
-  }
-  const roles = user.role
-    ? [user.role]
-    : await roleRepository.rolesForUser(user.id);
-  if (!roles.includes("admin") && !roles.includes("user")) {
-    throw new Error("A CopilotKit run requires an authorized user.");
-  }
-  return {
-    id: user.id,
-    name: user.name ?? user.email ?? user.id,
-    role: roles.includes("admin") ? "admin" : "user",
-  };
-}
-
-/** The Intelligence projection of {@link resolveRequestActor}: threads are scoped to this person. */
-const identifyUser: IdentifyUser = async (request) => {
-  const { id, name } = await resolveRequestActor(request);
-  return { id, name };
-};
-
-/**
- * The authorization projection of the same person: agent visibility is decided from this.
- *
- * An unauthenticated request resolves to a person who owns nothing rather than an error, so the
- * runtime can still describe itself, `/info` reports the licence and the public roster, which is
- * what a deployment check reads to tell "the licence is invalid" apart from "chat is silently
- * broken". It grants nothing: this actor matches no private profile and is not an administrator,
- * and a run still fails in `identifyUser`, which has no anonymous case because a thread must belong
- * to somebody.
- */
-const ANONYMOUS_ACTOR = { id: "", role: "user" } as const;
-
-const identifyActor: IdentifyActor = async (request) => {
-  try {
-    const { id, role } = await resolveRequestActor(request);
-    return { id, role };
-  } catch {
-    return ANONYMOUS_ACTOR;
-  }
-};
 
 const config = loadConfig();
 // The environment seeds local policy once. The SDK fallback must not reapply an old revision
@@ -498,6 +436,14 @@ const auth: AuthService | undefined = config.organizationAuthUrl
         signInAuditStore,
       )
     : undefined;
+const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
+  {
+    singleUser: config.singleUser,
+    getSession: async (headers) =>
+      (await auth?.api.getSession({ headers })) ?? null,
+    rolesForUser: (id) => roleRepository.rolesForUser(id),
+  },
+);
 // Each computer is pushed its network policy on the way to the action that woke it, because a
 // computer refuses every connection until one arrives (see `withPolicyPushOnWake`).
 const computerProvider = config.computer
