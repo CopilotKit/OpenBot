@@ -30,6 +30,18 @@ function elementOf(target: EventTarget | null): Element | null {
   return target instanceof Element ? target : null;
 }
 
+/** The element the event started on, seen through open shadow roots (a window listener sees only the host). */
+const origin = (event: Event) =>
+  elementOf(event.composedPath()[0] ?? event.target);
+
+/** The focused element, descending through open shadow roots. */
+function deepActiveElement(): Element | null {
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement)
+    active = active.shadowRoot.activeElement;
+  return active;
+}
+
 /**
  * Records what the person did as demonstration steps, in the frame they did it. Listeners are on
  * the capture phase so a page that stops propagation cannot hide a step. A field's value is never read.
@@ -51,7 +63,7 @@ export function startStepCapture(options: {
 
   const accepts = (event: Event) =>
     isTrusted(event) &&
-    !options.isIgnored(event.target, [
+    !options.isIgnored(origin(event), [
       ...event.composedPath(),
     ] as EventTarget[]);
   const url = () => safeDemonstrationUrl(location.href);
@@ -79,11 +91,11 @@ export function startStepCapture(options: {
     options.send({
       kind: "click",
       url: url(),
-      target: target(elementOf(event.target)),
+      target: target(origin(event)),
     });
   };
   const onInput = (event: Event) => {
-    const element = elementOf(event.target);
+    const element = origin(event);
     if (!isTextEntry(element) || !accepts(event)) return;
     if (typingField === element) return;
     flushScroll();
@@ -102,7 +114,7 @@ export function startStepCapture(options: {
       kind: "key",
       key: key as (typeof DEMONSTRATION_KEYS)[number],
       url: url(),
-      target: target(document.activeElement),
+      target: target(deepActiveElement()),
     });
   };
   const onWheel = (event: Event) => {
@@ -114,8 +126,7 @@ export function startStepCapture(options: {
     }
     scroll = {
       deltaY,
-      element:
-        document.elementFromPoint(clientX, clientY) ?? elementOf(event.target),
+      element: document.elementFromPoint(clientX, clientY) ?? origin(event),
       timer: setTimeout(flushScroll, scrollWindowMs),
     };
   };

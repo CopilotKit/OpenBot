@@ -177,3 +177,68 @@ test("stop removes the listeners and drops a pending scroll", async () => {
   await wait(60);
   expect(sent).toEqual([]);
 });
+
+function shadowFixture() {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML = `<input aria-label="Inner field"><button>Inner save</button>`;
+  const input = root.querySelector("input")!;
+  const button = root.querySelector("button")!;
+  const retargeted = (event: Event, inner: Element) => {
+    Object.defineProperty(event, "composedPath", {
+      value: () => [
+        inner,
+        root,
+        host,
+        document.body,
+        document.documentElement,
+        document,
+        window,
+      ],
+    });
+    return event;
+  };
+  return { host, root, input, button, retargeted };
+}
+
+test("typing into an input inside a shadow root names the inner input", () => {
+  const { host, input, retargeted } = shadowFixture();
+  start();
+  host.dispatchEvent(retargeted(new Event("input", { bubbles: true }), input));
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    kind: "type",
+    target: { role: "textbox", name: "Inner field" },
+  });
+});
+
+test("a click on a button inside a shadow root names the button, not its host", () => {
+  const { host, button, retargeted } = shadowFixture();
+  start();
+  host.dispatchEvent(
+    retargeted(new MouseEvent("click", { bubbles: true, button: 0 }), button),
+  );
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    kind: "click",
+    target: { role: "button", name: "Inner save" },
+  });
+});
+
+test("Enter while focus is inside a shadow root names the inner focused control", () => {
+  const { host, root, input } = shadowFixture();
+  host.tabIndex = 0;
+  host.focus();
+  Object.defineProperty(root, "activeElement", { value: input });
+  start();
+  host.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({
+    kind: "key",
+    key: "Enter",
+    target: { role: "textbox", name: "Inner field" },
+  });
+});
