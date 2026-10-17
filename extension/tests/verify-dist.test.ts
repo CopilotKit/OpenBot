@@ -89,6 +89,14 @@ describe("verifyDist", () => {
     expect(verifyDist(dir, release)).toEqual(["popup.html loads remote code"]);
   });
 
+  test("a remote src after a data-src attribute reports remote code", () => {
+    const dir = fixture({
+      "popup.html":
+        '<script data-src="./x.js" src="https://cdn.example/x.js"></script>',
+    });
+    expect(verifyDist(dir, release)).toEqual(["popup.html loads remote code"]);
+  });
+
   test("a protocol-relative stylesheet reports remote code", () => {
     const dir = fixture({
       "options.html": '<link rel="stylesheet" href="//cdn.example/x.css">',
