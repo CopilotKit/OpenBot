@@ -55,6 +55,17 @@ const withDefaults = (deps?: Partial<ConnectionDeps>): ConnectionDeps => ({
 
 const connectUrl = () => chrome.runtime.getURL("connect.html");
 
+/** A web connect and Desktop's handoff each read, then write, the pending connect (and a web connect the request
+ * count) across storage awaits, so they run one at a time: run side by side, ten connects in one tick would each find
+ * the slot empty and open a tab, and the limit would count one of them. A job that throws rejects its own caller and
+ * the next job still runs. */
+let queue: Promise<unknown> = Promise.resolve();
+function serially<T>(work: () => Promise<T>): Promise<T> {
+  const run = queue.then(work, work);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 export function installConnection(deps?: Partial<ConnectionDeps>): void {
   const resolved = withDefaults(deps);
   chrome.runtime.onInstalled.addListener(async (details) => {
@@ -226,47 +237,58 @@ export async function handleExternalConnect(
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return { ok: false, error: "pinned-elsewhere" };
 
+  return serially(() => webConnect(checked.origin, message.code, resolved));
+}
+
+/** Everything from the request count through the connect tab, in one queued job (see `serially`). */
+async function webConnect(
+  origin: string,
+  code: string,
+  deps: ConnectionDeps,
+): Promise<ExternalResponse> {
   const now = Date.now();
   const requests = await readSession("connectRequests");
-  const recent = (requests?.[checked.origin] ?? []).filter(
+  const recent = (requests?.[origin] ?? []).filter(
     (at) => now - at < CONNECT_WINDOW_MS,
   );
   if (recent.length >= CONNECT_LIMIT) return { ok: false, error: "busy" };
   await writeSession("connectRequests", {
     ...requests,
-    [checked.origin]: [...recent, now],
+    [origin]: [...recent, now],
   });
 
   const pending = await readSession("pendingConnect");
   if (pending && (await tabIsOpen(pending.tabId))) {
     // Whatever the pending connect's age, so no page can open more than one connect tab however often it asks.
-    if (pending.origin === checked.origin) {
+    if (pending.origin === origin) {
       await writeSession("pendingConnect", {
         ...pending,
-        code: message.code,
+        code,
         requestedAt: now,
       });
       await chrome.tabs.update(pending.tabId as number, { active: true });
-      return connected(checked.origin);
+      return awaitingConfirmationAnswer(origin);
     }
     if (now - pending.requestedAt < PENDING_MAX_AGE_MS)
       return { ok: false, error: "busy" };
     await closeConnectTab(pending.tabId);
   }
   const next: PendingConnect = {
-    origin: checked.origin,
-    code: message.code,
+    origin,
+    code,
     via: "web",
     requestedAt: now,
   };
   await writeSession("pendingConnect", next);
-  const tabId = await resolved.openTab(connectUrl());
+  const tabId = await deps.openTab(connectUrl());
   if (tabId !== undefined)
     await writeSession("pendingConnect", { ...next, tabId });
-  return connected(checked.origin);
+  return awaitingConfirmationAnswer(origin);
 }
 
-async function connected(origin: string): Promise<ExternalResponse> {
+async function awaitingConfirmationAnswer(
+  origin: string,
+): Promise<ExternalResponse> {
   return {
     ok: true,
     version: chrome.runtime.getManifest().version,
@@ -302,14 +324,18 @@ export async function reconcilePolicy(): Promise<void> {}
 
 /** A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always
  * a loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked. */
-export async function offerDesktopConnection(
+export function offerDesktopConnection(
   deps?: Partial<ConnectionDeps>,
 ): Promise<boolean> {
   const resolved = withDefaults(deps);
-  const policy = await resolved.readPolicy();
+  return serially(() => desktopConnect(resolved));
+}
+
+async function desktopConnect(deps: ConnectionDeps): Promise<boolean> {
+  const policy = await deps.readPolicy();
   if (policy.openbotUrlInvalid) return false;
   if (policy.openbotUrl && !policy.openbotUrl.startsWith("http:")) return false;
-  const handoff = await resolved.askDesktop();
+  const handoff = await deps.askDesktop();
   if (!handoff) return false;
   const checked = normaliseOpenBotOrigin(handoff.openbotUrl);
   if (!checked.ok) return false;
@@ -323,7 +349,7 @@ export async function offerDesktopConnection(
     requestedAt: Date.now(),
   };
   await writeSession("pendingConnect", pending);
-  const tabId = await resolved.openTab(connectUrl());
+  const tabId = await deps.openTab(connectUrl());
   if (tabId !== undefined)
     await writeSession("pendingConnect", { ...pending, tabId });
   return true;

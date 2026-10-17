@@ -483,6 +483,88 @@ test("an origin that asks to connect over and over is told busy and opens nothin
   expect((await connect("obc_5")).ok).toBe(true);
 });
 
+test("ten connects in one tick from one origin open one tab, and the limit answers the other seven busy", async () => {
+  const site = "https://a.example.test";
+  const answers = await Promise.all(
+    Array.from({ length: 10 }, (_, i) => connect(`obc_${i}`, site)),
+  );
+  const accepted = answers.flatMap((answer, i) =>
+    answer.ok ? [`obc_${i}`] : [],
+  );
+  expect(accepted).toHaveLength(3);
+  expect(answers.filter((answer) => !answer.ok)).toEqual(
+    Array(7).fill({ ok: false, error: "busy" }),
+  );
+  expect(opened).toHaveLength(1);
+  expect((await readSession("pendingConnect"))?.code).toBe(accepted[2]);
+  expect((await readSession("connectRequests"))?.[site]).toHaveLength(3);
+});
+
+test("connects from two origins in one tick open one tab and answer the second busy", async () => {
+  const sites = ["https://a.example.test", "https://b.example.test"];
+  const answers = await Promise.all([
+    connect("obc_a", sites[0]),
+    connect("obc_b", sites[1]),
+  ]);
+  expect(answers.filter((answer) => answer.ok)).toHaveLength(1);
+  expect(answers.filter((answer) => !answer.ok)).toEqual([
+    { ok: false, error: "busy" },
+  ]);
+  expect(opened).toHaveLength(1);
+  expect(await readSession("pendingConnect")).toMatchObject({
+    origin: answers[0].ok ? sites[0] : sites[1],
+    tabId: 41,
+  });
+});
+
+test("a web connect and Desktop's handoff at once leave one pending connect, shown in the only open connect tab", async () => {
+  await Promise.all([
+    connect("obc_w", "https://a.example.test"),
+    offerDesktopConnection({
+      askDesktop: async () => ({
+        openbotUrl: "http://127.0.0.1:7470",
+        code: "obc_d",
+      }),
+      openTab,
+      readPolicy: async () => policy,
+    }),
+  ]);
+  const pending = await readSession("pendingConnect");
+  expect(pending).toMatchObject(
+    pending?.via === "desktop"
+      ? { origin: "http://127.0.0.1:7470", code: "obc_d" }
+      : { origin: "https://a.example.test", code: "obc_w" },
+  );
+  const openConnectTabs = [...fake.tabs.values()]
+    .filter((tab) => tab.url?.endsWith("/connect.html"))
+    .map((tab) => tab.id);
+  expect(openConnectTabs).toEqual([pending?.tabId]);
+  // Any connect tab opened and then replaced was closed.
+  expect(opened.length - removed.length).toBe(1);
+});
+
+test("a connect whose storage read fails rejects its caller, and the connect queued behind it still runs", async () => {
+  const session = chrome.storage.session;
+  const get = session.get;
+  let failures = 1;
+  Object.assign(session, {
+    get: (...args: unknown[]) =>
+      failures-- > 0
+        ? Promise.reject(new Error("Storage is unavailable."))
+        : Reflect.apply(get, session, args),
+  });
+  try {
+    const failing = connect("obc_x");
+    const next = connect("obc_y");
+    await expect(failing).rejects.toThrow("Storage is unavailable.");
+    expect((await next).ok).toBe(true);
+  } finally {
+    Object.assign(session, { get });
+  }
+  expect(opened).toHaveLength(1);
+  expect((await readSession("pendingConnect"))?.code).toBe("obc_y");
+});
+
 test("the Desktop handoff respects a policy pinned elsewhere", async () => {
   const asking = {
     askDesktop: async () => {
