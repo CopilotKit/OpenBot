@@ -61,6 +61,26 @@ test("storage get and set round-trip, copy their values and notify onChanged", a
   ).toEqual({ openbotOrigin: "https://openbot.example.test" });
 });
 
+test("setManaged fires storage.onChanged and storage.managed.onChanged with the managed area name", () => {
+  fake.storage.setManaged({ keep: "a", drop: "b", change: 1 });
+  const global: unknown[] = [];
+  const area: unknown[] = [];
+  chrome.storage.onChanged.addListener((changes, areaName) =>
+    global.push([changes, areaName]),
+  );
+  chrome.storage.managed.onChanged.addListener((changes) => area.push(changes));
+  fake.storage.setManaged({ keep: "a", change: 2, added: true });
+  const expected = {
+    change: { oldValue: 1, newValue: 2 },
+    added: { newValue: true },
+    drop: { oldValue: "b" },
+  };
+  expect(global).toEqual([[expected, "managed"]]);
+  expect(area).toEqual([expected]);
+  fake.storage.setManaged({ keep: "a", change: 2, added: true });
+  expect(global.length).toBe(1);
+});
+
 test("setAccessLevel is recorded for local and session", async () => {
   await chrome.storage.local.setAccessLevel({
     accessLevel: "TRUSTED_CONTEXTS",
@@ -163,6 +183,10 @@ test("calls lists tabCapture.getMediaStreamId before a later port message in the
   expect(capture).toBeGreaterThanOrEqual(0);
   expect(message).toBeGreaterThan(capture);
   expect(fake.tabCapture.calls).toEqual([{ targetTabId: 3 }]);
+  chrome.runtime.getURL("a.html");
+  chrome.runtime.getManifest();
+  expect(fake.calls).toContain("runtime.getURL");
+  expect(fake.calls).toContain("runtime.getManifest");
 });
 
 test("addListener is recorded as <namespace>.<event>.addListener", () => {

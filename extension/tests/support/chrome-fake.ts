@@ -4,6 +4,8 @@
  * IndexedDB is not part of it: tests import `fake-indexeddb/auto`.
  */
 
+import { isDeepStrictEqual } from "node:util";
+
 type Listener = (...args: unknown[]) => unknown;
 type Json = Record<string, unknown>;
 
@@ -229,6 +231,12 @@ export function installChromeFake(
     onStartup: event("runtime.onStartup"),
   };
   const serviceWorkerPorts: PortEnd[] = [];
+  const notifyStorage: Partial<
+    Record<
+      "local" | "session" | "managed",
+      (changes: Record<string, chrome.storage.StorageChange>) => void
+    >
+  > = {};
 
   const openPort = (name: string, sender: chrome.runtime.MessageSender) => {
     const pair = createPortPair(name, sender, calls);
@@ -249,9 +257,18 @@ export function installChromeFake(
       accessLevel: null,
       sessionAccessLevel: null,
       setManaged(values) {
-        fake.storage.managed.clear();
+        const managed = fake.storage.managed;
+        const before = new Map(managed);
+        managed.clear();
         for (const [key, value] of Object.entries(values))
-          fake.storage.managed.set(key, structuredClone(value));
+          managed.set(key, structuredClone(value));
+        const changes: Record<string, chrome.storage.StorageChange> = {};
+        for (const [key, value] of managed)
+          if (!before.has(key) || !isDeepStrictEqual(before.get(key), value))
+            changes[key] = { oldValue: before.get(key), newValue: value };
+        for (const [key, oldValue] of before)
+          if (!managed.has(key)) changes[key] = { oldValue };
+        notifyStorage.managed?.(changes);
       },
     },
     connectFrom(name, sender) {
@@ -380,6 +397,12 @@ export function installChromeFake(
   const storageArea = (areaName: "local" | "session" | "managed") => {
     const map = fake.storage[areaName];
     const changed = event(`storage.${areaName}.onChanged`);
+    const notify = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (Object.keys(changes).length === 0) return;
+      changed.dispatch(changes);
+      storageChanged.dispatch(changes, areaName);
+    };
+    notifyStorage[areaName] = notify;
     const area: Record<string, unknown> = {
       async get(keys?: string | string[] | Json | null) {
         calls.push(`storage.${areaName}.get`);
@@ -400,13 +423,6 @@ export function installChromeFake(
       onChanged: changed,
     };
     if (areaName !== "managed") {
-      const notify = (
-        changes: Record<string, chrome.storage.StorageChange>,
-      ) => {
-        if (Object.keys(changes).length === 0) return;
-        changed.dispatch(changes);
-        storageChanged.dispatch(changes, areaName);
-      };
       area.set = async (items: Json) => {
         calls.push(`storage.${areaName}.set`);
         const changes: Record<string, chrome.storage.StorageChange> = {};
@@ -447,13 +463,18 @@ export function installChromeFake(
   const chromeApi = {
     runtime: {
       id: extensionId,
-      getURL: (path: string) =>
-        `chrome-extension://${extensionId}/${path.replace(/^\//, "")}`,
-      getManifest: () => ({
-        manifest_version: 3,
-        name: "OpenBot Recorder",
-        version: manifestVersion,
-      }),
+      getURL: (path: string) => {
+        calls.push("runtime.getURL");
+        return `chrome-extension://${extensionId}/${path.replace(/^\//, "")}`;
+      },
+      getManifest: () => {
+        calls.push("runtime.getManifest");
+        return {
+          manifest_version: 3,
+          name: "OpenBot Recorder",
+          version: manifestVersion,
+        };
+      },
       async getContexts(filter: { contextTypes?: string[] } = {}) {
         calls.push("runtime.getContexts");
         const open =
