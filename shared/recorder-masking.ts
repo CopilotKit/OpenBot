@@ -63,20 +63,38 @@ const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   "private-token",
   "x-token",
 ]);
-/** JSON web tokens, three dot-separated base64url parts (plan Task 3 `scrubText`). */
-const JWT = /eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+/** JSON web tokens, three dot-separated base64url parts (plan Task 3 `scrubText`): the same matches as
+ * `/eyJ[\w-]+\.[\w-]+\.[\w-]*\/g`, tried once per run of `[\w-]` so a long dotless run full of `eyJ` stays linear. Group 1 is
+ * what precedes the run's first `eyJ` and is put back; each lookahead and backreference pair is atomic, so no part is re-scanned. */
+const JWT =
+  /(?<![\w-])((?:(?!eyJ)[\w-])*)eyJ(?=([\w-]+))\2\.(?=([\w-]+))\3\.[\w-]*/g;
 /** The value after an auth scheme word (plan Task 3 `scrubText`). */
 const AUTH_SCHEME = /\b(bearer|basic|token)(\s+)([^\s"',;]+)/gi;
 /** Long unbroken runs; no `/` in the class so a readable path or slug survives (plan Task 3 `scrubText`). */
 const LONG_RUN = /[A-Za-z0-9_+=-]{32,}/g;
-/** Email addresses (plan Task 3 `scrubText`). */
-const EMAIL = /[^\s@"'<>]+@[^\s@"'<>]+\.[A-Za-z]{2,}/g;
-/** 13 to 19 digits, optionally separated by single spaces or dashes: a card number candidate (plan Task 3 `scrubText`). */
-const CARD_RUN = /\b\d(?:[ -]?\d){12,18}\b/g;
-/** A run of digit groups separated by single spaces or dashes, re-joined before hashing (plan Task 3 `scrubText`). */
-const DIGIT_GROUPS = /\d+(?:[ -]\d+)+/g;
+/** Email addresses, bounded by RFC 5321's 64-octet local part and 255-octet domain so a long run without whitespace is
+ * scanned in linear time (plan Task 3 `scrubText`). */
+const EMAIL = /[^\s@"'<>]{1,64}@[^\s@"'<>]{1,255}\.[A-Za-z]{2,}/g;
+/** A whole run of digit groups separated by single spaces or dashes, touching no word character: card number candidates
+ * (plan Task 3 `scrubText`). */
+const CARD_GROUPS = /(?<!\w)\d+(?:[ -]\d+)*(?!\w)/g;
+/** A card number is 13 to 19 digits (ISO/IEC 7812-1, the range plan Task 3 `scrubText` checks). */
+const CARD_MIN_DIGITS = 13;
+const CARD_MAX_DIGITS = 19;
+/** The shortest group in a written card number (4-4-4-4, 4-6-5, 4-6-4, 4-4-4-4-3), so a row of page numbers is never one. */
+const CARD_MIN_GROUP_DIGITS = 3;
+/** A run of digit groups separated by single spaces or dashes, re-joined before hashing (plan Task 3 `scrubText`); anchored at
+ * the start of a digit run so a long run of digits is scanned once, not once per digit. */
+const DIGIT_GROUPS = /(?<!\d)\d+(?:[ -]\d+)+/g;
+/** The most consecutive digit groups hashed as one digest candidate (a card written 4-4-4-4-3 is five). */
+const MAX_DIGEST_GROUPS = 6;
+/** The most digest answers one `scrubText` call remembers (see `digestMatcher`). */
+const DIGEST_MEMO_LIMIT = 4096;
 /** Where one token ends when hashing digest candidates (plan Task 3 `scrubText`). */
 const TOKEN_CHARS = /[^\s,;&=:"'{}[\]]+/g;
+/** A second, finer split for digest candidates, so a secret beside a full stop, a bracket or markup is found too ("737.",
+ * "<td>737</td>"); the first split still finds a secret that contains these characters ("p.ss"). */
+const TOKEN_CHARS_FINE = /[^\s,;&=:"'{}[\]().<>/\\?!|*`]+/g;
 /** Only digits, spaces and dashes: normalised to digits (plan Task 3 `normaliseSecret`). */
 const DIGITS_AND_SEPARATORS = /^[\d\s-]+$/;
 /** Form bodies are masked pair by pair (plan Task 3 maskBody). */
@@ -237,25 +255,120 @@ const matchesDigest = (value: string, options?: MaskOptions): boolean => {
   );
 };
 
+/** One group of a digit run and where it sits in the run, as character offsets. */
+type DigitGroup = { digits: string; start: number; end: number };
+
+/** Splits a run matched by `CARD_GROUPS` or `DIGIT_GROUPS`, whose groups are always one separator apart. */
+const digitGroupsOf = (run: string): DigitGroup[] => {
+  const groups: DigitGroup[] = [];
+  let start = 0;
+  for (const digits of run.split(/[ -]/)) {
+    groups.push({ digits, start, end: start + digits.length });
+    start += digits.length + 1;
+  }
+  return groups;
+};
+
+/** Replaces each `[start, end)` span of `text` with REDACTED; overlapping spans become one marker, disjoint ones stay apart. */
+const redactSpans = (text: string, spans: Array<[number, number]>): string => {
+  if (spans.length === 0) return text;
+  spans.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    if (start < cursor) {
+      // Overlaps the span just redacted: widen that marker instead of adding another.
+      cursor = Math.max(cursor, end);
+      continue;
+    }
+    out += text.slice(cursor, start) + REDACTED;
+    cursor = end;
+  }
+  return out + text.slice(cursor);
+};
+
+const isCardNumber = (digits: string): boolean =>
+  digits.length >= CARD_MIN_DIGITS &&
+  digits.length <= CARD_MAX_DIGITS &&
+  luhnValid(digits);
+
+/** A whole run that is a card number goes; otherwise every stretch of consecutive groups that could be a written card number
+ * (each group at least 3 digits, 13 to 19 digits in all) is tested on its own, so a card beside an expiry, a security code or
+ * a quantity is still found. A run of one group is a card number or nothing, as before. */
+const scrubCardRun = (run: string): string => {
+  if (isCardNumber(run.replace(/[ -]/g, ""))) return REDACTED;
+  const groups = digitGroupsOf(run);
+  if (groups.length === 1) return run;
+  const spans: Array<[number, number]> = [];
+  for (let first = 0; first < groups.length; first++) {
+    const head = groups[first];
+    if (!head) continue;
+    let digits = "";
+    for (let last = first; last < groups.length; last++) {
+      const group = groups[last];
+      if (!group || group.digits.length < CARD_MIN_GROUP_DIGITS) break;
+      digits += group.digits;
+      if (digits.length > CARD_MAX_DIGITS) break;
+      if (isCardNumber(digits)) spans.push([head.start, group.end]);
+    }
+  }
+  return redactSpans(run, spans);
+};
+
+/** `matchesDigest` for one `scrubText` call, hashing each distinct candidate once, so repeated words and numbers cost one hash.
+ * The digests cannot change during a synchronous call, so a remembered answer is never stale; at most `DIGEST_MEMO_LIMIT`
+ * answers are kept, so a body of distinct tokens cannot grow it without bound. */
+const digestMatcher = (options: MaskOptions): ((value: string) => boolean) => {
+  const known = new Map<string, boolean>();
+  return (value) => {
+    const remembered = known.get(value);
+    if (remembered !== undefined) return remembered;
+    const hit = matchesDigest(value, options);
+    if (known.size < DIGEST_MEMO_LIMIT) known.set(value, hit);
+    return hit;
+  };
+};
+
+/** A whole run whose digits match a digest goes; otherwise every stretch of up to `MAX_DIGEST_GROUPS` consecutive groups is
+ * hashed on its own, so a typed number is found beside other numbers ("4111 1111 1111 1112 12/28"). */
+const scrubDigestRun = (
+  run: string,
+  matches: (value: string) => boolean,
+): string => {
+  if (matches(run.replace(/[ -]/g, ""))) return REDACTED;
+  const groups = digitGroupsOf(run);
+  const spans: Array<[number, number]> = [];
+  for (let first = 0; first < groups.length; first++) {
+    const head = groups[first];
+    if (!head) continue;
+    let digits = "";
+    const stop = Math.min(groups.length, first + MAX_DIGEST_GROUPS);
+    for (let last = first; last < stop; last++) {
+      const group = groups[last];
+      if (!group) break;
+      digits += group.digits;
+      if (matches(digits)) spans.push([head.start, group.end]);
+    }
+  }
+  return redactSpans(run, spans);
+};
+
 export function scrubText(text: string, options?: MaskOptions): string {
   let out = text
-    .replace(JWT, REDACTED)
+    .replace(JWT, `$1${REDACTED}`)
     .replace(AUTH_SCHEME, `$1$2${REDACTED}`)
     .replace(LONG_RUN, (run) =>
       /[A-Za-z]/.test(run) && /\d/.test(run) ? REDACTED : run,
     )
     .replace(EMAIL, REDACTED)
-    .replace(CARD_RUN, (run) =>
-      luhnValid(run.replace(/[ -]/g, "")) ? REDACTED : run,
-    );
+    .replace(CARD_GROUPS, (run) => scrubCardRun(run));
   if (options?.digests && options.digests.size > 0) {
+    const matches = digestMatcher(options);
+    const redactToken = (token: string) => (matches(token) ? REDACTED : token);
     out = out
-      .replace(DIGIT_GROUPS, (run) =>
-        matchesDigest(run, options) ? REDACTED : run,
-      )
-      .replace(TOKEN_CHARS, (token) =>
-        matchesDigest(token, options) ? REDACTED : token,
-      );
+      .replace(DIGIT_GROUPS, (run) => scrubDigestRun(run, matches))
+      .replace(TOKEN_CHARS, redactToken)
+      .replace(TOKEN_CHARS_FINE, redactToken);
   }
   return out;
 }
@@ -265,8 +378,11 @@ export function maskHeaders(
   options?: MaskOptions,
 ): Record<string, string> {
   const out: Record<string, string> = {};
+  // A header value read from captured JSON is not always a string (a numeric content-length), so it is scrubbed as one.
   for (const [name, value] of Object.entries(headers))
-    out[name] = isCredentialHeader(name) ? REDACTED : scrubText(value, options);
+    out[name] = isCredentialHeader(name)
+      ? REDACTED
+      : scrubText(String(value), options);
   return out;
 }
 

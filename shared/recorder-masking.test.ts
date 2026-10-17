@@ -433,3 +433,143 @@ test("isCredentialKey decodes each escape on its own, like the collector", () =>
   expect(isCredentialKey("client%5Fsecret%zz")).toBe(true);
   expect(isCredentialKey("access%5Ftoken%")).toBe(true);
 });
+
+/** Milliseconds a synchronous call takes. */
+const elapsedMs = (run: () => unknown): number => {
+  const start = performance.now();
+  run();
+  return performance.now() - start;
+};
+
+/** Deterministic pseudo-random bytes, so a timing test masks realistic base64 rather than one repeated letter. */
+const noise = (length: number): Uint8Array => {
+  const bytes = new Uint8Array(length);
+  let seed = 1;
+  for (let i = 0; i < length; i++) {
+    seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+    bytes[i] = seed >>> 24;
+  }
+  return bytes;
+};
+
+test("a 2 MB run without whitespace is scrubbed in linear time", () => {
+  const text = "x".repeat(2_000_000);
+  let out = "";
+  expect(elapsedMs(() => (out = scrubText(text)))).toBeLessThan(5000);
+  expect(out === text).toBe(true);
+});
+
+test("a JSON body holding a 2 MiB data URI is masked in linear time", () => {
+  // 1.5 MiB of bytes is exactly 2 MiB of base64.
+  const image = `data:image/png;base64,${Buffer.from(noise(1_572_864)).toString("base64")}`;
+  const body = JSON.stringify({ name: "photo.png", image });
+  let out = "";
+  expect(
+    elapsedMs(() => (out = maskBody(body, "application/json"))),
+  ).toBeLessThan(5000);
+  expect(JSON.parse(out).name).toBe("photo.png");
+});
+
+test("a 200,000-digit run is scrubbed in linear time when digests are present", async () => {
+  const digests = await digestsOf("737");
+  const text = "1".repeat(200_000);
+  let out = "";
+  expect(elapsedMs(() => (out = scrubText(text, { digests })))).toBeLessThan(
+    5000,
+  );
+  expect(out === text).toBe(true);
+});
+
+test("a 2 MB run of one-digit groups is scrubbed in linear time when digests are present", async () => {
+  const digests = await digestsOf("737");
+  const text = "1 ".repeat(1_000_000);
+  let out = "";
+  expect(elapsedMs(() => (out = scrubText(text, { digests })))).toBeLessThan(
+    5000,
+  );
+  expect(out === text).toBe(true);
+});
+
+test("a long dotless run full of eyJ is scrubbed in linear time, and a JWT after other letters is still found", () => {
+  expect(elapsedMs(() => scrubText("eyJ".repeat(700_000)))).toBeLessThan(5000);
+  expect(scrubText("xeyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjF9.c2ln end")).toBe(
+    `x${REDACTED} end`,
+  );
+});
+
+test("a card number beside an expiry, a security code or a quantity is still redacted", () => {
+  expect(scrubText("Card 4111 1111 1111 1111 12/28")).toBe(
+    `Card ${REDACTED} 12/28`,
+  );
+  expect(scrubText("4111111111111111 737")).toBe(`${REDACTED} 737`);
+  expect(scrubText("qty 2 4111 1111 1111 1111")).toBe(`qty 2 ${REDACTED}`);
+  expect(scrubText("3782 822463 10005 737")).toBe(`${REDACTED} 737`);
+  expect(scrubText("4111111111111111 5555555555554444")).toBe(
+    `${REDACTED} ${REDACTED}`,
+  );
+});
+
+test("a card number beside an expiry is redacted when its digest is known too", async () => {
+  const digests = await digestsOf("4111 1111 1111 1111");
+  expect(scrubText("Card 4111 1111 1111 1111 12/28", { digests })).toBe(
+    `Card ${REDACTED} 12/28`,
+  );
+});
+
+test("a typed number that fails Luhn is found by its digest inside a longer run of digit groups", async () => {
+  const digests = await digestsOf("4111 1111 1111 1112", "123456");
+  expect(scrubText("Card 4111 1111 1111 1112 12/28", { digests })).toBe(
+    `Card ${REDACTED} 12/28`,
+  );
+  expect(scrubText("ref 9 123 456 7", { digests })).toBe(`ref 9 ${REDACTED} 7`);
+});
+
+test("short numbers in a row are not mistaken for a card number", () => {
+  expect(scrubText("Page 1 2 3 4 5 6 7 8 9 10 11 12")).toBe(
+    "Page 1 2 3 4 5 6 7 8 9 10 11 12",
+  );
+});
+
+test("a secret beside punctuation or inside markup is still found by its digest", async () => {
+  const digests = await digestsOf("737", "hunter22");
+  expect(scrubText("Invalid code: 737.", { digests })).toBe(
+    `Invalid code: ${REDACTED}.`,
+  );
+  expect(scrubText("<td>737</td>", { digests })).toBe(`<td>${REDACTED}</td>`);
+  expect(scrubText("(737)", { digests })).toBe(`(${REDACTED})`);
+  expect(scrubText("<b>hunter22</b>", { digests })).toBe(`<b>${REDACTED}</b>`);
+  expect(
+    JSON.parse(
+      maskBody('{"error":"Invalid code: 737."}', "application/json", {
+        digests,
+      }),
+    ),
+  ).toEqual({ error: `Invalid code: ${REDACTED}.` });
+});
+
+test("a secret that contains a period still matches its digest", async () => {
+  const digests = await digestsOf("p.ss");
+  expect(scrubText("password p.ss was rejected", { digests })).toBe(
+    `password ${REDACTED} was rejected`,
+  );
+});
+
+test("a header value that is not a string is scrubbed as its string form", () => {
+  const event = {
+    type: "CUSTOM" as const,
+    name: "network",
+    timestamp: 1,
+    value: {
+      method: "GET",
+      url: "https://x.test/a",
+      request: { headers: { "content-length": 12 } },
+      response: { headers: { "content-length": 2 } },
+    },
+  };
+  let masked: ReturnType<typeof maskNetworkEvent> | undefined;
+  expect(() => {
+    masked = maskNetworkEvent(event);
+  }).not.toThrow();
+  expect(at(masked, "request", "headers", "content-length")).toBe("12");
+  expect(at(masked, "response", "headers", "content-length")).toBe("2");
+});
