@@ -21,6 +21,7 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 COPY shared/package.json shared/package.json
 COPY toolkit/package.json toolkit/package.json
+COPY extension/package.json extension/package.json
 RUN bun install --frozen-lockfile
 
 
@@ -53,6 +54,8 @@ COPY --from=deps /app/package.json package.json
 COPY --from=deps /app/bun.lock bun.lock
 COPY --from=deps /app/server/node_modules server/node_modules
 COPY --from=deps /app/toolkit/node_modules toolkit/node_modules
+# shared files import zod at runtime, and the isolated install resolves it from shared/node_modules
+COPY --from=deps /app/shared/node_modules shared/node_modules
 
 COPY server server
 COPY shared shared

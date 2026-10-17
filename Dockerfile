@@ -57,6 +57,7 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 COPY shared/package.json shared/package.json
 COPY toolkit/package.json toolkit/package.json
+COPY extension/package.json extension/package.json
 RUN bun install --frozen-lockfile
 
 # The lockfile travels with the manifest, because `--frozen-lockfile` with no lockfile in the context
@@ -70,12 +71,13 @@ RUN cd agent-computer && bun install --frozen-lockfile
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
 RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
-  && cd /prod && mkdir -p app server worker shared toolkit \
+  && cd /prod && mkdir -p app server worker shared toolkit extension \
   && cp /src/app/package.json app/package.json \
   && cp /src/server/package.json server/package.json \
   && cp /src/worker/package.json worker/package.json \
   && cp /src/shared/package.json shared/package.json \
   && cp /src/toolkit/package.json toolkit/package.json \
+  && cp /src/extension/package.json extension/package.json \
   && bun install --frozen-lockfile --production
 
 
@@ -127,6 +129,8 @@ WORKDIR /app
 COPY --from=deps /prod/node_modules node_modules
 COPY --from=deps /prod/server/node_modules server/node_modules
 COPY --from=deps /prod/toolkit/node_modules toolkit/node_modules
+# shared files import zod at runtime, and the isolated install resolves it from shared/node_modules
+COPY --from=deps /prod/shared/node_modules shared/node_modules
 COPY --from=deps /src/package.json package.json
 COPY --from=deps /src/bun.lock bun.lock
 # The browser's tree is a separate install root with its own lockfile rather than a workspace of the
