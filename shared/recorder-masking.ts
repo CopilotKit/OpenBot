@@ -1,0 +1,575 @@
+// Masking for everything the Recorder captures, applied in the browser before anything leaves it. Intelligence does no
+// server-side redaction, so these functions are the only defence for what reaches it. DOM-free and import-free: the same
+// file runs in the service worker, content scripts, the MAIN-world bundle, the offscreen document and Bun.
+
+/** The collector's own marker (`@copilotkit/learning` 0.0.1 `src/types.ts` REDACTED), so the two agree. */
+export const REDACTED = "[redacted]";
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+export type CapturedEvent = {
+  type: "CUSTOM";
+  name: string;
+  timestamp: number;
+  value: JsonValue;
+};
+export type MaskOptions = { digests?: ReadonlySet<string> };
+type Obj = { [key: string]: JsonValue };
+
+/** A 3-digit security code is a secret too, so digests of values this short still match. */
+export const MIN_DIGEST_LENGTH = 3;
+/** Intelligence's per-event limit (batch.ex `@max_event_bytes`). */
+export const MAX_EVENT_BYTES = 16 * 1024;
+/** Intelligence refuses timestamps at or above 253,402,300,800,000 (batch.ex `@max_timestamp_ms` and `prepare_event/1`). */
+export const MAX_TIMESTAMP_MS = 253_402_300_800_000 - 1;
+/** Leaves room for the seq and envelope the streamer adds to each event. */
+export const EVENT_BUDGET_BYTES = 15 * 1024;
+
+/** Copy of `shared/demonstration-rules.ts` SENSITIVE_FIELD (this file has no imports); `shared/sensitive-rule.test.ts` keeps the two equal. */
+export const SENSITIVE_FIELD =
+  /password|secret|token|one.time|verification|credit.card|security.code|passcode|card.?(?:number|num|no)(?![a-z])|cardholder|card.?verification|(?:^|[^a-z])(?:cc-|(?:cvc|cvv|csc|pin|otp)(?![a-z]))/i;
+
+// The next three are copied exactly from `@copilotkit/learning` 0.0.1 `src/redact.ts` (`CREDENTIAL`, `CREDENTIAL_WORD`, `METADATA`).
+/** Matches anywhere in a key's joined lowercase words (collector `CREDENTIAL`). */
+const CREDENTIAL =
+  /password|passwd|passphrase|passcode|credential|api(key|token)|privatekey|subscriptionkey|(access|refresh|auth|session)token|clientsecret/;
+/** Matches only as whole words, as the last word, or as the entire key (collector `CREDENTIAL_WORD`). */
+const CREDENTIAL_WORD =
+  / (secret|id ?token)s? | (authorization|cookies?|jwt|bearer ?token|[cx]srf ?token) $|^ (pwd|pass|token|otp) $/;
+/** Metadata about a credential is not the credential (collector `METADATA`), checked first. */
+const METADATA =
+  / (ids?|at|in|expires?|expiry|length|count|enabled|required|policy|hint|type) $/;
+/** OpenBot's addition: payment-card keys that are the entire key (plan Task 3, Decision 15). */
+const CARD_KEY = /^ (pin|cvv|cvc|csc) $/;
+/** OpenBot's addition: payment-card keys matched on the joined words (plan Task 3, Decision 15). */
+const CARD_WORDS = /cardnumber|ccnumber|cardverification/;
+/** Headers whose values are credentials whatever their name looks like (plan Task 3 `CREDENTIAL_HEADERS`). */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "api-key",
+  "apikey",
+  "x-auth-token",
+  "x-csrf-token",
+  "x-xsrf-token",
+  "x-amz-security-token",
+  "private-token",
+  "x-token",
+]);
+/** JSON web tokens, three dot-separated base64url parts (plan Task 3 `scrubText`). */
+const JWT = /eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+/** The value after an auth scheme word (plan Task 3 `scrubText`). */
+const AUTH_SCHEME = /\b(bearer|basic|token)(\s+)([^\s"',;]+)/gi;
+/** Long unbroken runs; no `/` in the class so a readable path or slug survives (plan Task 3 `scrubText`). */
+const LONG_RUN = /[A-Za-z0-9_+=-]{32,}/g;
+/** Email addresses (plan Task 3 `scrubText`). */
+const EMAIL = /[^\s@"'<>]+@[^\s@"'<>]+\.[A-Za-z]{2,}/g;
+/** 13 to 19 digits, optionally separated by single spaces or dashes: a card number candidate (plan Task 3 `scrubText`). */
+const CARD_RUN = /\b\d(?:[ -]?\d){12,18}\b/g;
+/** A run of digit groups separated by single spaces or dashes, re-joined before hashing (plan Task 3 `scrubText`). */
+const DIGIT_GROUPS = /\d+(?:[ -]\d+)+/g;
+/** Where one token ends when hashing digest candidates (plan Task 3 `scrubText`). */
+const TOKEN_CHARS = /[^\s,;&=:"'{}[\]]+/g;
+/** Only digits, spaces and dashes: normalised to digits (plan Task 3 `normaliseSecret`). */
+const DIGITS_AND_SEPARATORS = /^[\d\s-]+$/;
+const FORM_CONTENT_TYPE = /application\/x-www-form-urlencoded/i;
+/** Input event target fields that hold what the person typed or chose (plan Task 3 `maskCollectorEvent`). */
+const TARGET_VALUE_FIELDS = ["value", "text"] as const;
+const TARGET_ATTRIBUTE_VALUES = [
+  "value",
+  "aria-valuetext",
+  "data-value",
+] as const;
+/** Intelligence rejects a NUL at any depth (batch.ex `prepare_event/1` with `contains_nul?/1`). */
+const NUL = "\u0000";
+/** Longest `target.value` and `target.text` kept when trimming (plan Task 3 `trimEvent`). */
+const TRIMMED_TARGET_TEXT = 200;
+
+const isObject = (value: unknown): value is Obj =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const decodeQuietly = (text: string): string => {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+};
+
+export function normaliseSecret(value: string): string {
+  const trimmed = value.trim();
+  return DIGITS_AND_SEPARATORS.test(trimmed)
+    ? trimmed.replace(/[\s-]/g, "")
+    : trimmed;
+}
+
+export function isCredentialKey(key: string): boolean {
+  const words = ` ${decodeQuietly(key)
+    .replace(/([a-z\d])(?=[A-Z])/g, "$1 ")
+    .toLowerCase()
+    .split(/[^a-z\d]+/)
+    .filter(Boolean)
+    .join(" ")} `;
+  if (METADATA.test(words)) return false;
+  return (
+    CREDENTIAL.test(words.replace(/ /g, "")) ||
+    CREDENTIAL_WORD.test(words) ||
+    CARD_KEY.test(words) ||
+    CARD_WORDS.test(words.replace(/ /g, ""))
+  );
+}
+
+export function isCredentialHeader(name: string): boolean {
+  return isCredentialKey(name) || CREDENTIAL_HEADERS.has(name.toLowerCase());
+}
+
+export function luhnValid(digits: string): boolean {
+  if (!/^\d+$/.test(digits)) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let digit = digits.charCodeAt(i) - 48;
+    if (double) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
+const K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+  0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+  0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+/** SHA-256 (FIPS 180-4) in plain JavaScript: synchronous and identical in every context, including insecure http pages
+ * where `crypto.subtle` does not exist. */
+export function sha256HexSync(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const padded = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(
+    padded.length - 8,
+    Math.floor((bytes.length * 8) / 0x100000000),
+  );
+  view.setUint32(padded.length - 4, (bytes.length * 8) >>> 0);
+  const h = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+    0x1f83d9ab, 0x5be0cd19,
+  ]);
+  const w = new Uint32Array(64);
+  const word = (list: ArrayLike<number>, i: number) => list[i] ?? 0;
+  const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
+  for (let offset = 0; offset < padded.length; offset += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const w15 = word(w, i - 15);
+      const w2 = word(w, i - 2);
+      const s0 = rotr(w15, 7) ^ rotr(w15, 18) ^ (w15 >>> 3);
+      const s1 = rotr(w2, 17) ^ rotr(w2, 19) ^ (w2 >>> 10);
+      w[i] = (word(w, i - 16) + s0 + word(w, i - 7) + s1) >>> 0;
+    }
+    const state = Array.from(h);
+    let [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, hh = 0] = state;
+    for (let i = 0; i < 64; i++) {
+      const t1 =
+        (hh +
+          (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) +
+          ((e & f) ^ (~e & g)) +
+          word(K, i) +
+          word(w, i)) >>>
+        0;
+      const t2 =
+        ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) +
+          ((a & b) ^ (a & c) ^ (b & c))) >>>
+        0;
+      hh = g;
+      g = f;
+      f = e;
+      e = (d + t1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) >>> 0;
+    }
+    const next = [a, b, c, d, e, f, g, hh];
+    for (let i = 0; i < 8; i++) h[i] = (word(h, i) + word(next, i)) >>> 0;
+  }
+  return Array.from(h, (part) => part.toString(16).padStart(8, "0")).join("");
+}
+
+export async function sha256Hex(value: string): Promise<string> {
+  return sha256HexSync(value);
+}
+
+const matchesDigest = (value: string, options?: MaskOptions): boolean => {
+  const digests = options?.digests;
+  if (!digests || digests.size === 0) return false;
+  const normalised = normaliseSecret(value);
+  return (
+    normalised.length >= MIN_DIGEST_LENGTH &&
+    digests.has(sha256HexSync(normalised))
+  );
+};
+
+export function scrubText(text: string, options?: MaskOptions): string {
+  let out = text
+    .replace(JWT, REDACTED)
+    .replace(AUTH_SCHEME, `$1$2${REDACTED}`)
+    .replace(LONG_RUN, (run) =>
+      /[A-Za-z]/.test(run) && /\d/.test(run) ? REDACTED : run,
+    )
+    .replace(EMAIL, REDACTED)
+    .replace(CARD_RUN, (run) =>
+      luhnValid(run.replace(/[ -]/g, "")) ? REDACTED : run,
+    );
+  if (options?.digests && options.digests.size > 0) {
+    out = out
+      .replace(DIGIT_GROUPS, (run) =>
+        matchesDigest(run, options) ? REDACTED : run,
+      )
+      .replace(TOKEN_CHARS, (token) =>
+        matchesDigest(token, options) ? REDACTED : token,
+      );
+  }
+  return out;
+}
+
+export function maskHeaders(
+  headers: Record<string, string>,
+  options?: MaskOptions,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers))
+    out[name] = isCredentialHeader(name) ? REDACTED : scrubText(value, options);
+  return out;
+}
+
+const scrubSegment = (segment: string, options?: MaskOptions): string => {
+  const decoded = decodeQuietly(segment);
+  const scrubbed = scrubText(decoded, options);
+  if (scrubbed === decoded) return segment;
+  return scrubbed.split(REDACTED).map(encodeURIComponent).join(REDACTED);
+};
+
+const scrubQueryPair = (pair: string, options?: MaskOptions): string => {
+  const at = pair.indexOf("=");
+  if (at === -1) {
+    const decoded = decodeQuietly(pair);
+    return scrubText(decoded, options) === decoded &&
+      !matchesDigest(decoded, options)
+      ? pair
+      : REDACTED;
+  }
+  const key = pair.slice(0, at);
+  const value = decodeQuietly(pair.slice(at + 1).replace(/\+/g, " "));
+  const redact =
+    isCredentialKey(decodeQuietly(key)) ||
+    scrubText(value, options) !== value ||
+    matchesDigest(value, options);
+  return redact ? `${key}=${REDACTED}` : pair;
+};
+
+export function scrubUrl(url: string, options?: MaskOptions): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return scrubText(url, options);
+  }
+  if (!parsed.host) return scrubText(url.replace(/#.*$/, ""), options);
+  const path = parsed.pathname
+    .split("/")
+    .map((segment) => scrubSegment(segment, options))
+    .join("/");
+  const query = parsed.search.slice(1);
+  const scrubbedQuery = query
+    ? `?${query
+        .split("&")
+        .map((pair) => scrubQueryPair(pair, options))
+        .join("&")}`
+    : "";
+  return `${parsed.protocol}//${parsed.host}${path}${scrubbedQuery}`;
+}
+
+const maskJson = (value: JsonValue, options?: MaskOptions): JsonValue => {
+  if (typeof value === "string")
+    return matchesDigest(value, options) ? REDACTED : scrubText(value, options);
+  if (typeof value === "number") {
+    const digits = String(value);
+    return matchesDigest(digits, options) ||
+      (/^\d{13,19}$/.test(digits) && luhnValid(digits))
+      ? REDACTED
+      : value;
+  }
+  if (Array.isArray(value)) return value.map((item) => maskJson(item, options));
+  if (isObject(value)) {
+    const out: Obj = {};
+    for (const [key, item] of Object.entries(value))
+      out[key] = isCredentialKey(key) ? REDACTED : maskJson(item, options);
+    return out;
+  }
+  return value;
+};
+
+const maskForm = (text: string, options?: MaskOptions): string =>
+  text
+    .split("&")
+    .map((pair) => scrubQueryPair(pair, options))
+    .join("&");
+
+export function maskBody(
+  text: string,
+  contentType: string | undefined,
+  options?: MaskOptions,
+): string {
+  try {
+    let parsed: JsonValue | undefined;
+    try {
+      parsed = JSON.parse(text) as JsonValue;
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed !== undefined && typeof parsed === "object")
+      return JSON.stringify(maskJson(parsed, options));
+    if (contentType && FORM_CONTENT_TYPE.test(contentType))
+      return maskForm(text, options);
+    return scrubText(text, options);
+  } catch {
+    return REDACTED;
+  }
+}
+
+export function isSensitiveTarget(target: {
+  attributes?: Record<string, string>;
+  label?: string;
+  text?: string;
+}): boolean {
+  const attributes = target.attributes ?? {};
+  if (attributes.type === "password") return true;
+  const words = [
+    target.label,
+    attributes["aria-label"],
+    attributes.placeholder,
+    attributes.title,
+    attributes.name,
+    attributes.id,
+    attributes.autocomplete,
+  ]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ");
+  return SENSITIVE_FIELD.test(words);
+}
+
+export function sanitiseForIntelligence(value: JsonValue): JsonValue {
+  const clean = (text: string) => text.replace(NUL, "�").toWellFormed();
+  if (typeof value === "string") return clean(value);
+  if (Array.isArray(value)) return value.map(sanitiseForIntelligence);
+  if (isObject(value)) {
+    const out: Obj = {};
+    for (const [key, item] of Object.entries(value))
+      out[clean(key)] = sanitiseForIntelligence(item);
+    return out;
+  }
+  return value;
+}
+
+const scrubStrings = (
+  value: JsonValue,
+  options: MaskOptions | undefined,
+  key?: string,
+): JsonValue => {
+  if (typeof value === "string") {
+    if (value === REDACTED) return value;
+    return key === "url" || key === "referrer"
+      ? scrubUrl(value, options)
+      : scrubText(value, options);
+  }
+  if (Array.isArray(value))
+    return value.map((item) => scrubStrings(item, options, key));
+  if (isObject(value)) {
+    const out: Obj = {};
+    for (const [name, item] of Object.entries(value)) {
+      out[name] =
+        key === "attributes" && isCredentialKey(name.replace(/^data-/i, ""))
+          ? REDACTED
+          : scrubStrings(item, options, name);
+    }
+    return out;
+  }
+  return value;
+};
+
+export function maskCollectorEvent(
+  event: CapturedEvent,
+  context: { sensitive: boolean },
+  options?: MaskOptions,
+): CapturedEvent | null {
+  if (typeof event !== "object" || event === null) return null;
+  const clone = sanitiseForIntelligence(
+    event as unknown as JsonValue,
+  ) as unknown as CapturedEvent;
+  const value = clone.value;
+  if (isObject(value) && isObject(value.target)) {
+    const target = value.target;
+    const attributes = isObject(target.attributes)
+      ? (target.attributes as Record<string, string>)
+      : undefined;
+    const label = typeof target.label === "string" ? target.label : undefined;
+    if (context.sensitive || isSensitiveTarget({ attributes, label })) {
+      for (const field of TARGET_VALUE_FIELDS)
+        if (field in target) target[field] = REDACTED;
+      if (attributes)
+        for (const field of TARGET_ATTRIBUTE_VALUES)
+          if (field in attributes) attributes[field] = REDACTED;
+      delete target.selectedValues;
+    }
+    if (Array.isArray(target.files)) {
+      target.files = target.files.map((file) =>
+        isObject(file) && typeof file.name === "string"
+          ? { ...file, name: scrubText(file.name, options) }
+          : file,
+      );
+    }
+  }
+  return { ...clone, value: scrubStrings(value, options) };
+}
+
+const headerValue = (
+  headers: JsonValue | undefined,
+  name: string,
+): string | undefined => {
+  if (!isObject(headers)) return undefined;
+  for (const [key, item] of Object.entries(headers))
+    if (key.toLowerCase() === name && typeof item === "string") return item;
+  return undefined;
+};
+
+const maskExchange = (
+  part: JsonValue | undefined,
+  options?: MaskOptions,
+): JsonValue | undefined => {
+  if (!isObject(part)) return part;
+  const out: Obj = { ...part };
+  if (typeof out.url === "string") out.url = scrubUrl(out.url, options);
+  if (isObject(out.headers))
+    out.headers = maskHeaders(out.headers as Record<string, string>, options);
+  if (isObject(out.body) && typeof out.body.text === "string") {
+    out.body = {
+      ...out.body,
+      text: maskBody(
+        out.body.text,
+        headerValue(part.headers, "content-type"),
+        options,
+      ),
+    };
+  }
+  return out;
+};
+
+export function maskNetworkEvent(
+  event: CapturedEvent,
+  options?: MaskOptions,
+): CapturedEvent {
+  const clone = sanitiseForIntelligence(
+    event as unknown as JsonValue,
+  ) as unknown as CapturedEvent;
+  if (!isObject(clone.value)) return clone;
+  const value: Obj = { ...clone.value };
+  if (typeof value.url === "string") value.url = scrubUrl(value.url, options);
+  if (typeof value.route === "string")
+    value.route = scrubText(value.route, options);
+  if (value.request !== undefined)
+    value.request = maskExchange(value.request, options) ?? null;
+  if (value.response !== undefined)
+    value.response = maskExchange(value.response, options) ?? null;
+  return { ...clone, value };
+}
+
+const byteLength = (event: CapturedEvent) =>
+  new TextEncoder().encode(JSON.stringify(event)).byteLength;
+
+/** Cuts at a code unit count without leaving the first half of a surrogate pair at the end. */
+const cut = (text: string, length: number): string => {
+  const end =
+    length > 0 &&
+    text.charCodeAt(length - 1) >= 0xd800 &&
+    text.charCodeAt(length - 1) <= 0xdbff
+      ? length - 1
+      : length;
+  return text.slice(0, end);
+};
+
+const truncateBody = (
+  event: CapturedEvent,
+  side: "request" | "response",
+  maxBytes: number,
+): void => {
+  const value = event.value;
+  if (!isObject(value) || !isObject(value[side])) return;
+  const body = (value[side] as Obj).body;
+  if (!isObject(body) || typeof body.text !== "string") return;
+  let length = body.text.length;
+  while (length > 0 && byteLength(event) > maxBytes) {
+    length = Math.floor(length / 2);
+    body.text = cut(body.text, length);
+    body.status = "truncated";
+    body.truncated = true;
+  }
+};
+
+export function trimEvent(
+  event: CapturedEvent,
+  maxBytes: number,
+): { event: CapturedEvent; trimmed: boolean } {
+  const work = sanitiseForIntelligence(
+    event as unknown as JsonValue,
+  ) as unknown as CapturedEvent;
+  if (byteLength(work) <= maxBytes) return { event: work, trimmed: false };
+  truncateBody(work, "response", maxBytes);
+  if (byteLength(work) > maxBytes) truncateBody(work, "request", maxBytes);
+  if (
+    byteLength(work) > maxBytes &&
+    isObject(work.value) &&
+    isObject(work.value.target)
+  ) {
+    const target = work.value.target;
+    for (const field of TARGET_VALUE_FIELDS) {
+      if (typeof target[field] === "string")
+        target[field] = cut(target[field] as string, TRIMMED_TARGET_TEXT);
+    }
+    work.value.truncated = true;
+  }
+  if (byteLength(work) > maxBytes) {
+    const minimal: Obj = { trimmed: true };
+    if (isObject(work.value) && typeof work.value.url === "string")
+      minimal.url = scrubUrl(work.value.url);
+    return { event: { ...work, value: minimal }, trimmed: true };
+  }
+  return {
+    event: sanitiseForIntelligence(
+      work as unknown as JsonValue,
+    ) as unknown as CapturedEvent,
+    trimmed: true,
+  };
+}
