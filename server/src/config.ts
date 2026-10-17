@@ -170,6 +170,11 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /**
+   * Browser extension ids OpenBot trusts as the Recorder besides its own fixed id, for a fork or a
+   * build signed with another key. From OPENBOT_RECORDER_EXTRA_EXTENSION_IDS, never from NODE_ENV.
+   */
+  recorder: { extraExtensionIds: string[] };
   /** Optional environment default. A saved Admin setting takes precedence. */
   learning?: LearningTarget;
   /**
@@ -1363,6 +1368,7 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    recorder: { extraExtensionIds: recorderExtraExtensionIds(environment) },
     learning: learningDefault(environment),
     learningAutoAssign: learningAutoAssignEnabled(environment),
     ...learningSetupCredential(environment),
@@ -1407,6 +1413,20 @@ function learningAutoAssignEnabled(environment: Environment): boolean {
     return false;
   const value = optional(environment, "OPENBOT_LEARNING_AUTO_ASSIGN");
   return value !== "false" && value !== "0";
+}
+
+/** Comma separated, each trimmed, each a Chrome extension id (32 letters a to p). */
+function recorderExtraExtensionIds(environment: Environment): string[] {
+  const value = optional(environment, "OPENBOT_RECORDER_EXTRA_EXTENSION_IDS");
+  if (!value) return [];
+  const ids = value.split(",").map((id) => id.trim());
+  for (const id of ids) {
+    if (!/^[a-p]{32}$/.test(id))
+      throw new Error(
+        `OPENBOT_RECORDER_EXTRA_EXTENSION_IDS lists "${id}", which is not an extension id. An id is 32 letters from a to p; separate several with commas.`,
+      );
+  }
+  return ids;
 }
 
 /** On unless the variable is "false" or "0", the rule every default-on switch here follows. */
