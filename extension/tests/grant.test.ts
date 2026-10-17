@@ -386,8 +386,11 @@ describe("fetchGrant", () => {
   test("a 200 that is not a grant is held (row 23a)", async () => {
     respond = () => Response.json({ ok: true });
     expect((await failure()).kind).toBe("hold");
+  });
+
+  test("a 200 whose body is not JSON retries (row 21)", async () => {
     respond = () => new Response("<html>", { status: 200 });
-    expect((await failure()).kind).toBe("hold");
+    expect(await failure()).toEqual({ kind: "retry", reason: BUSY });
   });
 
   test("a body that is not JSON on a 5xx retries (row 21)", async () => {

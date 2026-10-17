@@ -212,10 +212,17 @@ export async function fetchGrant(
     throw new GrantError(classifyGrantError(null, null));
   }
   let parsed: unknown = null;
+  let unparsable = false;
   try {
     parsed = await response.json();
   } catch {
     // A body that is not JSON carries no code.
+    unparsable = true;
+  }
+  // Row 21: a page that is not JSON on a 2xx is OpenBot or the network
+  // misbehaving, not an answer the Recorder does not know (row 23a).
+  if (response.ok && unparsable) {
+    throw new GrantError(classifyGrantError(null, null));
   }
   if (response.ok && isGrant(parsed)) return parsed;
   const body =
