@@ -1,6 +1,6 @@
 export type BuildVariant = "release" | "e2e";
 // The highest floor of the APIs the Recorder uses: debugger flattened child sessions (sessionId) need 125.
-// The others sit lower: offscreen 109, tabCapture stream id from a service worker into an offscreen document 116,
+// The others sit lower: offscreen 109, externally_connectable 107, chrome.alarms (below the floor), tabCapture stream id from a service worker into an offscreen document 116,
 // service-worker keep-alive by WebSocket 116 and by debugger 118, scripting world MAIN 95 and injectImmediately 102,
 // storage setAccessLevel 102, String.isWellFormed 111.
 // https://developer.chrome.com/docs/extensions/reference/api/debugger
@@ -8,26 +8,47 @@ export type BuildVariant = "release" | "e2e";
 // https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle
 // https://developer.chrome.com/docs/extensions/reference/api/scripting
 // https://developer.chrome.com/docs/extensions/reference/api/storage
+// https://developer.chrome.com/docs/extensions/reference/api/offscreen
+// https://developer.chrome.com/docs/extensions/reference/manifest/externally-connectable
+// https://developer.chrome.com/docs/extensions/reference/api/alarms
 export const MINIMUM_CHROME_VERSION = "125";
 export const PERMISSIONS = [
-  "storage", "unlimitedStorage", "alarms", "offscreen", "tabCapture", "debugger", "scripting", "webNavigation", "nativeMessaging",
-] as const;   // alarms: the organization sign-in keep-alive (Decision 2); unlimitedStorage: Decision 7
+  "storage",
+  "unlimitedStorage",
+  "alarms",
+  "offscreen",
+  "tabCapture",
+  "debugger",
+  "scripting",
+  "webNavigation",
+  "nativeMessaging",
+] as const; // alarms: the organization sign-in keep-alive (Decision 2); unlimitedStorage: Decision 7
 
 export function buildManifest(input: {
   variant: BuildVariant;
   version: string;
   publicKey: string;
 }): chrome.runtime.ManifestV3 {
-  const icons = { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" };
+  const icons = {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png",
+  };
   return {
     manifest_version: 3,
     name: "OpenBot Recorder",
     version: input.version,
-    description: "Record a task in your browser so an OpenBot Bot can learn to do it.",
+    description:
+      "Record a task in your browser so an OpenBot Bot can learn to do it.",
     minimum_chrome_version: MINIMUM_CHROME_VERSION,
     incognito: "not_allowed",
     icons,
-    action: { default_title: "OpenBot Recorder", default_popup: "popup.html", default_icon: icons },
+    action: {
+      default_title: "OpenBot Recorder",
+      default_popup: "popup.html",
+      default_icon: icons,
+    },
     background: { service_worker: "service-worker.js", type: "module" },
     options_page: "options.html",
     permissions: [...PERMISSIONS],

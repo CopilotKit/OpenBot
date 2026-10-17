@@ -3,11 +3,20 @@ import { buildManifest, MINIMUM_CHROME_VERSION } from "../src/manifest";
 
 const base = { version: "0.2.0", publicKey: "MIIBIjANBgkqh" };
 const PERMISSIONS: chrome.runtime.ManifestPermission[] = [
-  "storage", "unlimitedStorage", "alarms", "offscreen", "tabCapture", "debugger", "scripting", "webNavigation", "nativeMessaging",
+  "storage",
+  "unlimitedStorage",
+  "alarms",
+  "offscreen",
+  "tabCapture",
+  "debugger",
+  "scripting",
+  "webNavigation",
+  "nativeMessaging",
 ];
 
 test("every build carries the committed public key, so Chrome and Edge give it one fixed id", () => {
-  for (const variant of ["release", "e2e"] as const) expect(buildManifest({ ...base, variant }).key).toBe(base.publicKey);
+  for (const variant of ["release", "e2e"] as const)
+    expect(buildManifest({ ...base, variant }).key).toBe(base.publicKey);
 });
 
 test("every build ships the debugger permission and the fixed permission set", () => {
@@ -17,13 +26,19 @@ test("every build ships the debugger permission and the fixed permission set", (
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.minimum_chrome_version).toBe(MINIMUM_CHROME_VERSION);
     expect(manifest.incognito).toBe("not_allowed");
-    expect(manifest.externally_connectable).toEqual({ matches: ["<all_urls>"] });
+    expect(manifest.externally_connectable).toEqual({
+      matches: ["<all_urls>"],
+    });
     expect(manifest.storage).toEqual({ managed_schema: "managed_schema.json" });
-    expect(manifest.background).toEqual({ service_worker: "service-worker.js", type: "module" });
+    expect(manifest.background).toEqual({
+      service_worker: "service-worker.js",
+      type: "module",
+    });
     expect("content_scripts" in manifest).toBe(false);
     expect("update_url" in manifest).toBe(false); // no store; a company install names its update URL in policy (Task 22)
     expect(manifest.content_security_policy).toEqual({
-      extension_pages: "script-src 'self'; object-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      extension_pages:
+        "script-src 'self'; object-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     });
   }
 });
