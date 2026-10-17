@@ -1,54 +1,10 @@
-import { z } from "zod";
+import {
+  type DemonstrationAction,
+  demonstrationActionSchema,
+} from "@openbot/shared/demonstration-schema";
 
-const target = z
-  .object({
-    role: z.string().min(1).max(40),
-    name: z.string().min(1).max(120),
-    sensitive: z.boolean(),
-  })
-  .strict();
-export const demonstrationActionSchema = z
-  .object({
-    kind: z.enum(["click", "type", "key", "scroll"]),
-    url: z
-      .string()
-      .max(2000)
-      .refine((value) => {
-        try {
-          const url = new URL(value);
-          return (
-            ["http:", "https:", "about:"].includes(url.protocol) &&
-            !url.username &&
-            !url.password &&
-            !url.search &&
-            !url.hash
-          );
-        } catch {
-          return false;
-        }
-      }),
-    target,
-    key: z
-      .enum([
-        "Enter",
-        "Tab",
-        "Escape",
-        "Backspace",
-        "Delete",
-        "ArrowDown",
-        "ArrowUp",
-        "ArrowLeft",
-        "ArrowRight",
-        "Home",
-        "End",
-        "PageDown",
-        "PageUp",
-      ])
-      .optional(),
-    deltaY: z.number().min(-2000).max(2000).optional(),
-  })
-  .strict();
-export type DemonstrationAction = z.infer<typeof demonstrationActionSchema>;
+export type { DemonstrationAction };
+export { demonstrationActionSchema };
 /** A demonstration records at most ten minutes; the server stops it at this bound. */
 export const DEMONSTRATION_MAX_DURATION_MS = 10 * 60 * 1000;
 /** When a recording started at `createdAt` is stopped by the server. */

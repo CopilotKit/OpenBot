@@ -1,3 +1,4 @@
+import { hasTarget } from "@openbot/shared/demonstration-schema";
 import {
   type DemonstrationAction,
   type DemonstrationDraft,
@@ -17,6 +18,7 @@ export function draftDemonstration(recording: {
   let url = "";
   const steps: string[] = [];
   for (const action of recording.actions) {
+    if (!hasTarget(action)) continue;
     if (action.url !== url && action.url !== "about:blank") {
       url = action.url;
       required.add("computer_navigate");

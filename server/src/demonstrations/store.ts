@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasTarget } from "@openbot/shared/demonstration-schema";
 import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { demonstrations } from "../db/schema/demonstrations";
@@ -141,6 +142,7 @@ export function createDemonstrationStore(database: Database) {
         if (
           action.kind === "type" &&
           last?.kind === "type" &&
+          hasTarget(last) &&
           last.url === action.url &&
           // Field by field: jsonb reorders object keys, so a stringified comparison never matched.
           last.target.role === action.target.role &&
