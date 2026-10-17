@@ -190,16 +190,103 @@ describe("step uploader", () => {
     );
   });
 
-  test("a 409 drops the steps OpenBot already has and resends from its count", async () => {
-    const { steps } = uploader();
+  test("a 409 gap renumbers the queue and resends the same steps from OpenBot's count", async () => {
+    const { steps, calls } = uploader();
     for (let i = 0; i < 5; i++) steps.add(click(i));
+    await steps.flush();
+    steps.add(click(5));
+    steps.add(click(6));
     answers.push(() =>
-      Response.json({ error: "Out of order.", count: 3 }, { status: 409 }),
+      Response.json({ error: "Steps are missing.", count: 3 }, { status: 409 }),
     );
     await steps.flush();
-    expect(received).toHaveLength(2);
-    expect(received[1]?.fromIndex).toBe(3);
-    expect(received[1]?.actions).toHaveLength(2);
+    expect(received.slice(1).map((b) => b.fromIndex)).toEqual([5, 3]);
+    expect(received[2]?.actions).toEqual([click(5), click(6)]);
+    expect(await storedIndexes()).toEqual([]);
+    expect(calls.refused).toEqual([]);
+    expect(steps.count()).toBe(5);
+  });
+
+  test("a step added while the gap renumber is pending takes the next index in the new numbering", async () => {
+    let gate: Promise<void> | null = null;
+    let open = () => {};
+    const { steps, calls } = uploader({
+      db: async () => {
+        if (gate) await gate;
+        return db;
+      },
+    });
+    for (let i = 0; i < 5; i++) steps.add(click(i));
+    await steps.flush();
+    steps.add(click(5));
+    steps.add(click(6));
+    answers.push(() => {
+      // Hold the write queue, with a step queued in the old numbering ahead of the renumber.
+      gate = new Promise((resolve) => {
+        open = resolve;
+      });
+      steps.add(click(7));
+      return Response.json(
+        { error: "Steps are missing.", count: 3 },
+        { status: 409 },
+      );
+    });
+    const flushed = steps.flush();
+    await settle();
+    expect(steps.count()).toBe(6);
+    steps.add(click(8));
+    gate = null;
+    open();
+    await flushed;
+    await steps.flush();
+    const resent = received.slice(2);
+    expect(
+      resent.flatMap((b) => b.actions.map((_, i) => b.fromIndex + i)),
+    ).toEqual([3, 4, 5, 6]);
+    expect(resent.flatMap((b) => b.actions)).toEqual([
+      click(5),
+      click(6),
+      click(7),
+      click(8),
+    ]);
+    expect(await storedIndexes()).toEqual([]);
+    expect(calls.refused).toEqual([]);
+    expect(steps.count()).toBe(7);
+  });
+
+  test("after a restart, a renumbered queue and its next index load consistently", async () => {
+    const first = uploader();
+    for (let i = 0; i < 5; i++) first.steps.add(click(i));
+    await first.steps.flush();
+    first.steps.add(click(5));
+    first.steps.add(click(6));
+    answers.push(
+      () =>
+        Response.json(
+          { error: "Steps are missing.", count: 3 },
+          { status: 409 },
+        ),
+      () => Response.json({ error: "down" }, { status: 503 }),
+    );
+    await expect(first.steps.flush()).rejects.toThrow("down");
+    expect(first.calls.refused).toEqual([]);
+    expect(await storedIndexes()).toEqual([3, 4]);
+    const storedNext = await requestToPromise(
+      db
+        .transaction("meta", "readonly")
+        .objectStore("meta")
+        .get(`steps-next:${target.demonstrationId}`),
+    );
+    expect(storedNext).toBe(5);
+    timers = [];
+
+    const second = uploader();
+    await second.steps.load();
+    expect(second.steps.count()).toBe(5);
+    second.steps.add(click(7));
+    await second.steps.flush();
+    expect(received.at(-1)?.fromIndex).toBe(3);
+    expect(received.at(-1)?.actions).toEqual([click(5), click(6), click(7)]);
     expect(await storedIndexes()).toEqual([]);
   });
 
@@ -402,6 +489,37 @@ describe("step uploader", () => {
     expect(received).toHaveLength(1);
     expect(received[0]?.actions).toHaveLength(3);
     expect(await storedIndexes(orphan.demonstrationId)).toEqual([]);
+  });
+
+  test("a drain of another recording keeps the live recording's pending retry", async () => {
+    const { steps } = uploader();
+    steps.add(click(0));
+    answers.push(() => Response.json({ error: "down" }, { status: 503 }));
+    await expect(steps.flush()).rejects.toThrow("down");
+    expect(timers.map((t) => t.ms)).toEqual([1000]);
+
+    const orphan: StepTarget = {
+      ...target,
+      demonstrationId: crypto.randomUUID(),
+    };
+    await requestToPromise(
+      db
+        .transaction("steps", "readwrite")
+        .objectStore("steps")
+        .put({
+          demonstrationId: orphan.demonstrationId,
+          index: 0,
+          action: click(9),
+        }),
+    );
+    await steps.drain(orphan);
+    expect(await storedIndexes(orphan.demonstrationId)).toEqual([]);
+    expect(timers.map((t) => t.ms)).toEqual([1000]);
+
+    fire(1000);
+    await settle();
+    expect(received.at(-1)).toEqual({ fromIndex: 0, actions: [click(0)] });
+    expect(await storedIndexes()).toEqual([]);
   });
 
   test("drain rejects on a 404 and leaves the steps", async () => {

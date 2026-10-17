@@ -29,6 +29,16 @@ const pairRange = (id: string, from = -Infinity, to = Infinity) =>
   IDBKeyRange.bound([id, from], [id, to]);
 const nextKey = (id: string) => `steps-next:${id}`;
 
+/** How many steps OpenBot holds, from a 409 that names it; undefined for any other answer. */
+const heldCount = (error: unknown): number | undefined => {
+  if (!(error instanceof OpenBotError) || error.status !== 409)
+    return undefined;
+  const count = error.body?.count;
+  return typeof count === "number" && Number.isInteger(count) && count >= 0
+    ? count
+    : undefined;
+};
+
 /**
  * Pending steps live in IndexedDB (store "steps", key [demonstrationId, index]), because storage.session is cleared by
  * a browser restart and holds only 10 MB. `add` gives a step its index at once and writes it before anything is
@@ -116,6 +126,47 @@ export function createStepUploader(deps: {
     );
   }
 
+  /**
+   * Moves every queued step of the demonstration `shift` indexes down, with its stored next index, in one transaction
+   * queued behind the pending writes. The in-memory next index moves at once, so a step added meanwhile is numbered
+   * after the renumbered ones and written after them.
+   */
+  function renumber(
+    db: IDBDatabase,
+    demonstrationId: string,
+    shift: number,
+  ): Promise<void> {
+    const current = next.get(demonstrationId);
+    if (current !== undefined) next.set(demonstrationId, current - shift);
+    const done = writes.then(() =>
+      tx(db, ["steps", "meta"], "readwrite", async (t) => {
+        const steps = t.objectStore("steps");
+        const meta = t.objectStore("meta");
+        const [rows, stored] = await Promise.all([
+          requestToPromise<StepRecord[]>(
+            steps.getAll(pairRange(demonstrationId)),
+          ),
+          requestToPromise<unknown>(meta.get(nextKey(demonstrationId))),
+        ]);
+        const lastIndex = rows[rows.length - 1]?.index;
+        if (lastIndex === undefined) return;
+        steps.delete(pairRange(demonstrationId));
+        for (const row of rows) steps.put({ ...row, index: row.index - shift });
+        const storedNext = typeof stored === "number" ? stored : 0;
+        meta.put(
+          Math.max(storedNext, lastIndex + 1) - shift,
+          nextKey(demonstrationId),
+        );
+      }),
+    );
+    // The caller sees a failure through `done`; later writes still run.
+    writes = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    return done;
+  }
+
   /** Sends batches until the demonstration has none queued. Throws what the last request threw. */
   async function upload(target: StepTarget): Promise<void> {
     const db = await deps.db();
@@ -139,13 +190,15 @@ export function createStepUploader(deps: {
           },
         );
       } catch (error) {
-        const count =
-          error instanceof OpenBotError && error.status === 409
-            ? error.body?.count
-            : undefined;
-        if (typeof count === "number" && count > first.index) {
+        const count = heldCount(error);
+        if (count !== undefined && count > first.index) {
           // OpenBot already holds the steps below `count`: drop them and resend from it.
           await removeSteps(db, target.demonstrationId, first.index, count - 1);
+          continue;
+        }
+        if (count !== undefined && count < first.index) {
+          // A gap: OpenBot holds only `count` steps, so the queue is renumbered to resend from there.
+          await renumber(db, target.demonstrationId, first.index - count);
           continue;
         }
         throw error;
@@ -166,12 +219,14 @@ export function createStepUploader(deps: {
         await deps.onSignedOut(error.body?.reason ?? "revoked");
         return;
       }
+      // A 409 naming a count is OpenBot's pacing, not a refusal; one without a count is.
       const refusal =
-        error.status === 409 ||
+        (error.status === 409 && heldCount(error) === undefined) ||
         (error.status >= 400 &&
           error.status < 500 &&
           error.status !== 401 &&
           error.status !== 408 &&
+          error.status !== 409 &&
           error.status !== 429);
       if (refusal) {
         if (live) {
@@ -199,9 +254,12 @@ export function createStepUploader(deps: {
   async function attemptUpload(target: StepTarget, live: boolean) {
     try {
       await upload(target);
-      attempt = 0;
-      clearTimer(retryTimer);
-      retryTimer = null;
+      // Only the live recording's success ends its backoff: a drain of another one leaves its retry pending.
+      if (live) {
+        attempt = 0;
+        clearTimer(retryTimer);
+        retryTimer = null;
+      }
     } catch (error) {
       await classify(error, target, live);
       throw error;
