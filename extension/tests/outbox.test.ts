@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
-import { type OutboxEvent, openOutbox } from "../src/offscreen/outbox";
+import {
+  type OutboxEvent,
+  openOutbox,
+  type TrajectoryMeta,
+  trajectoryMetaKey,
+} from "../src/offscreen/outbox";
 
 type IndexedDbGlobals = {
   indexedDB?: IDBFactory;
@@ -74,6 +79,35 @@ describe("outbox", () => {
     await outbox.clear("t1");
     expect(await outbox.count("t1")).toBe(0);
     expect(await outbox.count("t2")).toBe(1);
+  });
+
+  test("clear forgets the trajectory's events and meta and leaves the others", async () => {
+    const outbox = await openOutbox(freshName());
+    const meta = (demonstrationId: string): TrajectoryMeta => ({
+      demonstrationId,
+      title: "t",
+      pushed: 0,
+      outcomeQueued: false,
+      droppedPending: 0,
+      stopped: false,
+    });
+    expect(trajectoryMetaKey("a")).toBe("trajectory:a");
+    await outbox.put(item("a", 1));
+    await outbox.put(item("b", 1));
+    await outbox.setMeta(trajectoryMetaKey("a"), meta("a"));
+    await outbox.setMeta(trajectoryMetaKey("b"), meta("b"));
+    await outbox.setMeta("seq", 5);
+    await outbox.clear("a");
+    expect((await outbox.trajectories()).sort()).toEqual(["b"]);
+    expect(await outbox.count("a")).toBe(0);
+    expect(
+      await outbox.getMeta<TrajectoryMeta>(trajectoryMetaKey("a")),
+    ).toBeUndefined();
+    expect(await outbox.count("b")).toBe(1);
+    expect(
+      await outbox.getMeta<TrajectoryMeta>(trajectoryMetaKey("b")),
+    ).toEqual(meta("b"));
+    expect(await outbox.getMeta<number>("seq")).toBe(5);
   });
 
   test("trajectories lists every trajectory with events or meta, once", async () => {

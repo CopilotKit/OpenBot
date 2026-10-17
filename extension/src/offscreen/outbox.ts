@@ -11,8 +11,24 @@ export type OutboxEvent = {
   bytes: number;
 };
 
-/** The meta key a trajectory's own record lives under; `trajectories()` counts these as well as stored events. */
-const TRAJECTORY_META_PREFIX = "trajectory:";
+/** One trajectory's own record in the meta store. */
+export type TrajectoryMeta = {
+  demonstrationId: string;
+  title: string;
+  pushed: number;
+  outcomeQueued: boolean;
+  droppedPending: number;
+  stopped: boolean;
+  /** Rollover: the next trajectory, and whether OpenBot has registered it yet (a restarted document resumes the registration). */
+  next?: string;
+  registered?: boolean;
+};
+
+/** The meta key prefix a trajectory's own record lives under; `trajectories()` counts these as well as stored events. */
+export const TRAJECTORY_META_PREFIX = "trajectory:";
+
+export const trajectoryMetaKey = (trajectoryId: string) =>
+  `${TRAJECTORY_META_PREFIX}${trajectoryId}`;
 
 export type Outbox = {
   put(item: OutboxEvent): Promise<void>;
@@ -91,8 +107,9 @@ export async function openOutbox(databaseName?: string): Promise<Outbox> {
       ),
 
     clear: (trajectoryId) =>
-      tx(db, ["events"], "readwrite", (t) => {
+      tx(db, ["events", "meta"], "readwrite", (t) => {
         t.objectStore("events").delete(trajectoryRange(trajectoryId));
+        t.objectStore("meta").delete(trajectoryMetaKey(trajectoryId));
       }),
 
     trajectories: () =>
@@ -108,7 +125,7 @@ export async function openOutbox(databaseName?: string): Promise<Outbox> {
             .getAllKeys(
               IDBKeyRange.bound(
                 TRAJECTORY_META_PREFIX,
-                `${TRAJECTORY_META_PREFIX}￿`,
+                `${TRAJECTORY_META_PREFIX}\uffff`,
               ),
             ),
         );
