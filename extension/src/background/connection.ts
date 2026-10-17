@@ -58,7 +58,8 @@ const connectUrl = () => chrome.runtime.getURL("connect.html");
 /** A web connect, Desktop's handoff and a decision's clear (`clearPendingConnect`) each read, then write, the pending
  * connect (and a web connect the request count) across storage awaits, so they run one at a time: run side by side,
  * ten connects in one tick would each find the slot empty and open a tab, and the limit would count one of them. A
- * job that throws rejects its own caller and the next job still runs. */
+ * keep-alive's signed-out forget (`forgetIfStillStored`) and approve's store of the connection queue here too. A job
+ * that throws rejects its own caller and the next job still runs. */
 let queue: Promise<unknown> = Promise.resolve();
 function serially<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work, work);
@@ -100,10 +101,26 @@ async function keepAlive(): Promise<void> {
     await openbotJson<RecorderMe>(connection, recorderPaths.me);
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
-      await forgetConnection(error.body?.reason ?? "revoked");
+      await forgetIfStillStored(
+        connection.token,
+        error.body?.reason ?? "revoked",
+      );
     return;
   }
   await writeLocal("lastKeepAliveAt", Date.now());
+}
+
+/** Reconnecting this copy revokes its old token, so a keep-alive that asked with the old token can be answered signed
+ * out after approve stored the new connection: only the connection that asked is forgotten, notice and all. The check
+ * and the forget are one queued job, and approve stores through the queue, so no new connection lands between them. */
+function forgetIfStillStored(
+  token: string,
+  reason: "revoked" | "removed" | "organization",
+): Promise<void> {
+  return serially(async () => {
+    if ((await currentConnection())?.token === token)
+      await forgetConnection(reason);
+  });
 }
 
 export async function currentConnection(): Promise<ConnectionRecord | null> {
@@ -178,19 +195,25 @@ async function approve(label: string): Promise<PageResponse> {
       },
     );
   } catch (error) {
+    // The server's own sentence, or a plain one: a network failure's message ("Failed to fetch") means nothing here.
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "OpenBot did not answer.",
+      error:
+        error instanceof OpenBotError
+          ? error.message
+          : "OpenBot did not answer. Try again.",
     };
   }
-  await writeLocal("connection", {
-    openbotUrl: pending.origin,
-    token: exchanged.token,
-    connectionId: exchanged.connection.id,
-    user: exchanged.user,
-    via: pending.via,
-    connectedAt: Date.now(),
-  });
+  await serially(() =>
+    writeLocal("connection", {
+      openbotUrl: pending.origin,
+      token: exchanged.token,
+      connectionId: exchanged.connection.id,
+      user: exchanged.user,
+      via: pending.via,
+      connectedAt: Date.now(),
+    }),
+  );
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");

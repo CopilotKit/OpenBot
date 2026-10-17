@@ -4,6 +4,7 @@ import {
   beforeAll,
   beforeEach,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import {
@@ -30,10 +31,19 @@ let server: ReturnType<typeof Bun.serve>;
 let origin = "";
 const exchanges: Exchange[] = [];
 const hits: string[] = [];
-/** While set, OpenBot records an exchange, calls `arrived`, and holds its answer until `released` resolves. */
-let heldExchange: { arrived: () => void; released: Promise<void> } | null =
-  null;
-let releaseHeldExchange = () => {};
+/** While set, a request to `path` reaches OpenBot (an exchange is recorded first), calls `arrived`, and has its answer
+ * held until `released` resolves. */
+let held: {
+  path: string;
+  arrived: () => void;
+  released: Promise<void>;
+} | null = null;
+let releaseHeld = () => {};
+async function holdIfAsked(path: string): Promise<void> {
+  if (held?.path !== path) return;
+  held.arrived();
+  await held.released;
+}
 let meAnswer: { status: number; body: object } = {
   status: 200,
   body: { user, connectionId: "c1", capabilities: { transcription: true } },
@@ -54,10 +64,7 @@ beforeAll(() => {
       ) {
         const body = (await request.json()) as Exchange;
         exchanges.push(body);
-        if (heldExchange) {
-          heldExchange.arrived();
-          await heldExchange.released;
-        }
+        await holdIfAsked(url.pathname);
         if (body.code === "obc_expired")
           return Response.json(
             { error: "That code has expired. Connect again from OpenBot." },
@@ -74,8 +81,10 @@ beforeAll(() => {
         url.pathname === "/api/recorder/connections/current"
       )
         return new Response(null, { status: 204 });
-      if (url.pathname === "/api/recorder/me")
+      if (url.pathname === "/api/recorder/me") {
+        await holdIfAsked(url.pathname);
         return Response.json(meAnswer.body, { status: meAnswer.status });
+      }
       return new Response("nope", { status: 404 });
     },
   });
@@ -137,8 +146,8 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
-  releaseHeldExchange();
-  heldExchange = null;
+  releaseHeld();
+  held = null;
   Date.now = realNow;
   Reflect.deleteProperty(chrome.tabs, "remove");
   fake.uninstall();
@@ -151,12 +160,15 @@ const connect = (code: string, from = origin) =>
     deps(),
   );
 
-/** Holds OpenBot's exchange answers until `release`; `arrived` resolves once a code has reached OpenBot. */
-function holdExchange(): { arrived: Promise<void>; release: () => void } {
+/** Holds OpenBot's answers to `path` until `release`; `arrived` resolves once a request to it has reached OpenBot. */
+function holdAnswer(path: string): {
+  arrived: Promise<void>;
+  release: () => void;
+} {
   const arrived = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
-  heldExchange = { arrived: arrived.resolve, released: released.promise };
-  releaseHeldExchange = released.resolve;
+  held = { path, arrived: arrived.resolve, released: released.promise };
+  releaseHeld = released.resolve;
   return { arrived: arrived.promise, release: released.resolve };
 }
 
@@ -293,6 +305,27 @@ test("an expired code shows the server's sentence and stores nothing", async () 
   expect(await readLocal("connection")).toBeUndefined();
 });
 
+test("an approve that cannot reach OpenBot shows a plain sentence, not the browser's error, and stores nothing", async () => {
+  await connect("obc_abc");
+  const unreachable = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(() => Promise.reject(new TypeError("Failed to fetch")), {
+      preconnect: globalThis.fetch.preconnect,
+    }),
+  );
+  try {
+    expect(
+      await handleConnectionMessage({
+        type: "page.connect.decide",
+        approve: true,
+        label: "x",
+      }),
+    ).toEqual({ ok: false, error: "OpenBot did not answer. Try again." });
+  } finally {
+    unreachable.mockRestore();
+  }
+  expect(await readLocal("connection")).toBeUndefined();
+});
+
 test("disconnect tells OpenBot and forgets the token without a notice", async () => {
   await connect("obc_abc");
   await handleConnectionMessage({
@@ -353,7 +386,7 @@ test("rejecting clears the pending connect and exchanges nothing", async () => {
 test("an approve still exchanging when another origin replaces the stale pending connect leaves the new one in place", async () => {
   const other = "https://b.example.test";
   await connect("obc_a");
-  const exchange = holdExchange();
+  const exchange = holdAnswer("/api/recorder/connections");
   const approving = handleConnectionMessage({
     type: "page.connect.decide",
     approve: true,
@@ -699,10 +732,10 @@ test("Desktop's IPv6 loopback address is accepted", async () => {
   });
 });
 
-async function connected() {
+async function connected(token = "obr_fixture") {
   await writeLocal("connection", {
     openbotUrl: origin,
-    token: "obr_fixture",
+    token,
     connectionId: "c1",
     user,
     via: "web",
@@ -761,4 +794,63 @@ test("a service-worker start checks at once when the last check is over twelve h
   await settle();
   expect(hits.filter((hit) => hit.includes("/me"))).toHaveLength(1);
   expect(await readLocal("lastKeepAliveAt")).toBe(clock);
+});
+
+test("a signed-out answer to a keep-alive sent with the old token leaves a reconnect's new connection alone", async () => {
+  await connected("obr_old");
+  await writeLocal("lastKeepAliveAt", clock);
+  installConnection();
+  await settle();
+  const me = holdAnswer("/api/recorder/me");
+  fake.alarms.fire("recorder-session-keepalive");
+  await me.arrived;
+  // Reconnecting this copy stores the new token and revokes the old one on OpenBot...
+  await connect("obc_abc");
+  expect(
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    }),
+  ).toEqual({ ok: true });
+  // ...so the keep-alive still in flight with the old token comes back revoked.
+  meAnswer = {
+    status: 401,
+    body: {
+      error: "Signed out.",
+      code: "RECORDER_SIGNED_OUT",
+      reason: "revoked",
+    },
+  };
+  me.release();
+  await settle();
+  expect(hits).toContain("GET /api/recorder/me Bearer obr_old");
+  expect((await currentConnection())?.token).toBe("obr_fixture");
+  expect(await readLocal("notice")).toBeUndefined();
+});
+
+test("a signed-out answer to a held keep-alive still forgets the connection that asked, with a notice", async () => {
+  await connected();
+  await writeLocal("lastKeepAliveAt", clock);
+  installConnection();
+  await settle();
+  const me = holdAnswer("/api/recorder/me");
+  fake.alarms.fire("recorder-session-keepalive");
+  await me.arrived;
+  meAnswer = {
+    status: 401,
+    body: {
+      error: "Signed out.",
+      code: "RECORDER_SIGNED_OUT",
+      reason: "revoked",
+    },
+  };
+  me.release();
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toEqual({
+    kind: "signed-out",
+    at: clock,
+    reason: "revoked",
+  });
 });
