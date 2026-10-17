@@ -259,3 +259,40 @@ describe("the brokered-credential invariant names the active vendor", () => {
     await database.delete(agents).where(inArray(agents.id, [botId]));
   });
 });
+
+/**
+ * A TOOL ROW AN OLD REPLICA WROTE. During a rolling deploy a replica built before 0057 still lists
+ * tools, and it inserts `mcp_tools` rows with no `vendor_name` at all; 0058's backfill has already
+ * run by then and will not run again. Every reader takes the vendor's spelling through
+ * `vendorNameOf` (`coalesce(vendor_name, name)`), so such a row still answers to its own name. A
+ * raw `vendorName` read would answer null here, and this is the case that says so.
+ */
+describe("a tool row with no vendor_name still answers to its name", () => {
+  async function writtenByAnOldReplica() {
+    const toolkit = `Notion${suite}`;
+    const id = await brokeredApp("arcade", toolkit);
+    const name = `${toolkit}.WhoAmI`;
+    // Exactly what a pre-0057 replica inserts: the column is not named, so it is null.
+    await database.insert(mcpTools).values({
+      serverId: id,
+      name,
+      description: "Says who the key belongs to.",
+      effect: "read",
+      version: "1.0",
+    });
+    return { id, name };
+  }
+
+  test("the per-action gate finds the action", async () => {
+    const { id, name } = await writtenByAnOldReplica();
+    expect(await STORE.arcade.serverPublishesAction(id, name)).toBe(true);
+  });
+
+  test("the re-check probe is offered it, under that name", async () => {
+    const { id, name } = await writtenByAnOldReplica();
+    expect(await STORE.arcade.probeActionFor(id)).toEqual({
+      name,
+      version: "1.0",
+    });
+  });
+});
