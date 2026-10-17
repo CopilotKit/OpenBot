@@ -9,7 +9,7 @@ afterEach(() => {
   fake.uninstall();
 });
 
-test("a port opened with connectFrom delivers to onConnect listeners and carries messages both ways", () => {
+test("a port opened with connectFrom delivers to onConnect listeners and carries messages both ways", async () => {
   const received: unknown[] = [];
   let swPort: chrome.runtime.Port | undefined;
   chrome.runtime.onConnect.addListener((port) => {
@@ -24,12 +24,65 @@ test("a port opened with connectFrom delivers to onConnect listeners and carries
   expect(swPort?.sender?.url).toBe("chrome-extension://x/offscreen.html");
   far.postMessage({ type: "offscreen.ready" });
   swPort?.postMessage({ type: "offscreen.start" });
+  await Promise.resolve();
   expect(received).toEqual([{ type: "offscreen.ready" }]);
   expect(far.messages).toEqual([{ type: "offscreen.start" }]);
   expect(fake.calls).toContain("port:recorder:offscreen offscreen.ready");
   expect(fake.calls).toContain("port:recorder:offscreen offscreen.start");
   swPort?.disconnect();
+  await Promise.resolve();
   expect(far.onDisconnect.called).toBe(true);
+});
+
+test("an onMessage listener reached through sendFromPage sees an extension page sender", async () => {
+  let seen: chrome.runtime.MessageSender | undefined;
+  chrome.runtime.onMessage.addListener((_message, sender) => {
+    seen = sender;
+  });
+  await fake.sendFromPage({ type: "x" });
+  expect(seen?.id).toBe(chrome.runtime.id);
+  expect(seen?.url?.startsWith(chrome.runtime.getURL(""))).toBe(true);
+  expect(seen?.origin).toBe(`chrome-extension://${chrome.runtime.id}`);
+});
+
+test("sendFromPage merges a sender override over the extension page default", async () => {
+  let seen: chrome.runtime.MessageSender | undefined;
+  chrome.runtime.onMessage.addListener((_message, sender) => {
+    seen = sender;
+  });
+  await fake.sendFromPage(
+    { type: "x" },
+    { url: "https://evil.test/", origin: "https://evil.test" },
+  );
+  expect(seen?.url).toBe("https://evil.test/");
+  expect(seen?.origin).toBe("https://evil.test");
+  expect(seen?.id).toBe(chrome.runtime.id);
+});
+
+test("a message the worker posts inside onConnect reaches a listener added right after connect returns", async () => {
+  chrome.runtime.onConnect.addListener((port) => {
+    port.postMessage({ type: "sw.hello" });
+  });
+  const port = chrome.runtime.connect({ name: "recorder:popup" });
+  const received: unknown[] = [];
+  port.onMessage.addListener((message) => received.push(message));
+  expect(received).toEqual([]);
+  await Promise.resolve();
+  expect(received).toEqual([{ type: "sw.hello" }]);
+});
+
+test("port messages arrive in order and before a later disconnect", async () => {
+  const order: string[] = [];
+  chrome.runtime.onConnect.addListener((port) => {
+    port.postMessage("a");
+    port.postMessage("b");
+    port.disconnect();
+  });
+  const port = chrome.runtime.connect({ name: "p" });
+  port.onMessage.addListener((m) => order.push(String(m)));
+  port.onDisconnect.addListener(() => order.push("disconnect"));
+  await Promise.resolve();
+  expect(order).toEqual(["a", "b", "disconnect"]);
 });
 
 test("storage get and set round-trip, copy their values and notify onChanged", async () => {

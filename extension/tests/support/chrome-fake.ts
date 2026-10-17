@@ -37,7 +37,10 @@ export type ChromeFake = {
     message: unknown,
     sender: chrome.runtime.MessageSender,
   ): Promise<unknown>;
-  sendFromPage(message: unknown): Promise<unknown>;
+  sendFromPage(
+    message: unknown,
+    sender?: Partial<chrome.runtime.MessageSender>,
+  ): Promise<unknown>;
   permissions: {
     granted: Set<string>;
     requests: chrome.permissions.Permissions[];
@@ -191,14 +194,18 @@ function createPortPair(
       if (from.disconnected)
         throw new Error("Attempting to use a disconnected port object");
       calls.push(`port:${name} ${messageType(message)}`);
-      to.messages.push(message);
-      to.onMessage.dispatch(message, to);
+      queueMicrotask(() => {
+        to.messages.push(message);
+        to.onMessage.dispatch(message, to);
+      });
     };
     from.disconnect = () => {
       if (from.disconnected) return;
       from.disconnected = true;
-      to.disconnected = true;
-      to.onDisconnect.dispatch(to);
+      queueMicrotask(() => {
+        to.disconnected = true;
+        to.onDisconnect.dispatch(to);
+      });
     };
   };
   wire(near, far);
@@ -237,6 +244,12 @@ export function installChromeFake(
       (changes: Record<string, chrome.storage.StorageChange>) => void
     >
   > = {};
+
+  const extensionPageSender = (): chrome.runtime.MessageSender => ({
+    id: extensionId,
+    url: `chrome-extension://${extensionId}/popup.html`,
+    origin: `chrome-extension://${extensionId}`,
+  });
 
   const openPort = (name: string, sender: chrome.runtime.MessageSender) => {
     const pair = createPortPair(name, sender, calls);
@@ -286,8 +299,8 @@ export function installChromeFake(
     },
     sendExternal: (message, sender) =>
       deliver(runtimeEvents.onMessageExternal, message, sender),
-    sendFromPage: (message) =>
-      chromeApi.runtime.sendMessage(message) as Promise<unknown>,
+    sendFromPage: (message, sender) =>
+      chromeApi.runtime.sendMessage(message, sender) as Promise<unknown>,
     permissions: { granted: new Set(), requests: [], answer: true },
     scripting: { registered: [], executed: [] },
     offscreen: { open: false, created: [] },
@@ -494,13 +507,19 @@ export function installChromeFake(
             ]
           : [];
       },
-      async sendMessage(message: unknown) {
+      async sendMessage(
+        message: unknown,
+        senderOverride?: Partial<chrome.runtime.MessageSender>,
+      ) {
         calls.push("runtime.sendMessage");
         if (!runtimeEvents.onMessage.hasListeners())
           throw new Error(
             "Could not establish connection. Receiving end does not exist.",
           );
-        return deliver(runtimeEvents.onMessage, message, { id: extensionId });
+        return deliver(runtimeEvents.onMessage, message, {
+          ...extensionPageSender(),
+          ...senderOverride,
+        });
       },
       async sendNativeMessage(_host: string, message: object) {
         calls.push("runtime.sendNativeMessage");
@@ -511,7 +530,7 @@ export function installChromeFake(
       },
       connect(info: { name?: string } = {}) {
         calls.push("runtime.connect");
-        return openPort(info.name ?? "", { id: extensionId }).far;
+        return openPort(info.name ?? "", extensionPageSender()).far;
       },
       ...runtimeEvents,
     },
