@@ -1,0 +1,306 @@
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import * as connection from "../src/background/connection";
+import { installRouter, type RouterHandlers } from "../src/background/router";
+import type {
+  ExternalToBackground,
+  PageToBackground,
+} from "../src/protocol/messages";
+import { PORT_CONTENT, PORT_OFFSCREEN } from "../src/protocol/messages";
+import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
+
+let fake: ChromeFake;
+let seen: {
+  page: PageToBackground[];
+  external: ExternalToBackground[];
+  content: chrome.runtime.Port[];
+  offscreen: chrome.runtime.Port[];
+  order: string[];
+};
+let handlers: RouterHandlers & {
+  connected(): Promise<void>;
+  disconnected(): Promise<void>;
+};
+let id: string;
+let restore: (() => void)[];
+
+beforeEach(() => {
+  fake = installChromeFake();
+  id = chrome.runtime.id;
+  restore = [];
+  seen = { page: [], external: [], content: [], offscreen: [], order: [] };
+  handlers = {
+    page: async (message) => {
+      seen.page.push(message);
+      return { ok: true };
+    },
+    external: async (message) => {
+      seen.external.push(message);
+      return { ok: true };
+    },
+    contentPort: (port) => seen.content.push(port),
+    offscreenPort: (port) => seen.offscreen.push(port),
+    connected: async () => {
+      seen.order.push("connected");
+    },
+    disconnected: async () => {
+      seen.order.push("disconnected");
+    },
+  };
+});
+
+afterEach(() => {
+  for (const undo of restore) undo();
+  fake.uninstall();
+});
+
+function stubConnection(
+  answer: Awaited<ReturnType<typeof connection.handleConnectionMessage>>,
+) {
+  const spy = spyOn(connection, "handleConnectionMessage").mockImplementation(
+    async () => {
+      seen.order.push("connection");
+      return answer;
+    },
+  );
+  restore.push(() => spy.mockRestore());
+}
+
+test("registers exactly one onMessage, onMessageExternal and onConnect listener", () => {
+  installRouter(handlers);
+  for (const name of [
+    "runtime.onMessage.addListener",
+    "runtime.onMessageExternal.addListener",
+    "runtime.onConnect.addListener",
+  ])
+    expect(fake.calls.filter((call) => call === name)).toHaveLength(1);
+});
+
+test("recording messages from the extension's own pages go to the recording handler", async () => {
+  installRouter(handlers);
+  const messages: PageToBackground[] = [
+    { type: "page.state" },
+    { type: "page.bots" },
+    {
+      type: "page.record",
+      botId: "b",
+      title: "t",
+      tabId: 1,
+      microphone: false,
+    },
+    { type: "page.stop" },
+    { type: "page.restart" },
+    { type: "page.notice", choice: "stop" },
+    { type: "page.notice.dismiss" },
+    { type: "page.screen" },
+    { type: "page.kept.discard" },
+  ];
+  for (const message of messages)
+    expect(await fake.sendFromPage(message)).toEqual({ ok: true });
+  expect(seen.page).toEqual(messages);
+});
+
+test("connection messages go to the connection handler, not recording", async () => {
+  installRouter(handlers);
+  expect(await fake.sendFromPage({ type: "page.connect.pending" })).toEqual({
+    ok: true,
+    pending: null,
+  });
+  expect(await fake.sendFromPage({ type: "page.desktop.available" })).toEqual({
+    ok: true,
+    available: false,
+  });
+  expect(seen.page).toEqual([]);
+});
+
+test("an ok page.connect.decide calls connected() after the connection answered", async () => {
+  stubConnection({ ok: true });
+  installRouter(handlers);
+  await fake.sendFromPage({
+    type: "page.connect.decide",
+    approve: true,
+    label: "x",
+  });
+  expect(seen.order).toEqual(["connection", "connected"]);
+});
+
+test("a refused page.connect.decide does not call connected()", async () => {
+  stubConnection({ ok: false, error: "no" });
+  installRouter(handlers);
+  expect(
+    await fake.sendFromPage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    }),
+  ).toEqual({ ok: false, error: "no" });
+  expect(seen.order).toEqual(["connection"]);
+});
+
+test("page.disconnect calls disconnected() after the connection answered", async () => {
+  stubConnection({ ok: true });
+  installRouter(handlers);
+  await fake.sendFromPage({ type: "page.disconnect" });
+  expect(seen.order).toEqual(["connection", "disconnected"]);
+});
+
+test("an unknown page message gets an Unknown request answer", async () => {
+  installRouter(handlers);
+  expect(await fake.sendFromPage({ type: "page.nope" })).toEqual({
+    ok: false,
+    error: "Unknown request.",
+  });
+  expect(await fake.sendFromPage("garbage")).toEqual({
+    ok: false,
+    error: "Unknown request.",
+  });
+  expect(seen.page).toEqual([]);
+});
+
+test("RECORDER_E2E_FLOOD is unknown outside the e2e variant", async () => {
+  installRouter(handlers);
+  expect(
+    await fake.sendFromPage({ type: "RECORDER_E2E_FLOOD", count: 3 }),
+  ).toEqual({ ok: false, error: "Unknown request." });
+  expect(seen.page).toEqual([]);
+});
+
+test("a page message from a web origin or another extension is refused", async () => {
+  installRouter(handlers);
+  const web = {
+    id,
+    url: "https://evil.example.test/",
+    origin: "https://evil.example.test",
+  };
+  const other = {
+    id: "otherextension",
+    url: `chrome-extension://${id}/popup.html`,
+  };
+  const noUrl = { id, url: undefined };
+  for (const sender of [web, other, noUrl]) {
+    const answer = (await fake.sendFromPage(
+      { type: "page.state" },
+      sender,
+    )) as {
+      ok: boolean;
+    };
+    expect(answer.ok).toBe(false);
+  }
+  expect(seen.page).toEqual([]);
+});
+
+test("a handler that throws answers with an error instead of hanging", async () => {
+  handlers.page = async () => {
+    throw new Error("boom");
+  };
+  installRouter(handlers);
+  const answer = (await fake.sendFromPage({ type: "page.state" })) as {
+    ok: boolean;
+  };
+  expect(answer.ok).toBe(false);
+});
+
+test("openbot.ping and openbot.connect from a web page go to the external connect handler", async () => {
+  const spy = spyOn(connection, "handleExternalConnect").mockImplementation(
+    async (message) => {
+      seen.external.push(message);
+      return { ok: true };
+    },
+  );
+  restore.push(() => spy.mockRestore());
+  installRouter(handlers);
+  const sender = {
+    url: "https://openbot.example.test/x",
+    origin: "https://openbot.example.test",
+  };
+  await fake.sendExternal({ type: "openbot.ping" }, sender);
+  await fake.sendExternal({ type: "openbot.connect", code: "obc_abc" }, sender);
+  expect(seen.external).toEqual([
+    { type: "openbot.ping" },
+    { type: "openbot.connect", code: "obc_abc" },
+  ]);
+});
+
+test("recorder.page-network goes to the recording handler's external entry", async () => {
+  installRouter(handlers);
+  const event = {
+    type: "CUSTOM" as const,
+    name: "network",
+    timestamp: 1,
+    value: { a: 1 },
+  };
+  const answer = await fake.sendExternal(
+    { type: "recorder.page-network", event },
+    { tab: { id: 7 } as chrome.tabs.Tab, url: "https://site.example.test/" },
+  );
+  expect(answer).toEqual({ ok: true });
+  expect(seen.external).toEqual([{ type: "recorder.page-network", event }]);
+});
+
+test("a malformed external message is answered invalid without reaching a handler", async () => {
+  installRouter(handlers);
+  expect(
+    await fake.sendExternal(
+      { type: "openbot.connect", code: "not-a-code" },
+      { origin: "https://openbot.example.test" },
+    ),
+  ).toEqual({ ok: false, error: "invalid" });
+  expect(await fake.sendExternal({ nope: 1 }, {})).toEqual({
+    ok: false,
+    error: "invalid",
+  });
+  expect(seen.external).toEqual([]);
+});
+
+test("a content port reaches the content handler and malformed messages are dropped without throwing", async () => {
+  const received: unknown[] = [];
+  handlers.contentPort = (port) => {
+    seen.content.push(port);
+    port.onMessage.addListener((message) => received.push(message));
+  };
+  installRouter(handlers);
+  const far = fake.connectFrom(PORT_CONTENT, {
+    id,
+    tab: { id: 3 } as chrome.tabs.Tab,
+  });
+  far.postMessage({ type: "content.hello", top: true, url: "https://a.test/" });
+  far.postMessage({ type: "content.nope" });
+  far.postMessage("garbage");
+  far.postMessage({ type: "content.notice", choice: "stop", extra: 1 });
+  far.postMessage({ type: "content.notice", choice: "continue" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(seen.content).toHaveLength(1);
+  expect(received).toEqual([
+    { type: "content.hello", top: true, url: "https://a.test/" },
+    { type: "content.notice", choice: "continue" },
+  ]);
+});
+
+test("the offscreen port is accepted only from offscreen.html", async () => {
+  installRouter(handlers);
+  const good = fake.connectFrom(PORT_OFFSCREEN, {
+    id,
+    url: `chrome-extension://${id}/offscreen.html`,
+  });
+  const wrongPage = fake.connectFrom(PORT_OFFSCREEN, {
+    id,
+    url: `chrome-extension://${id}/popup.html`,
+  });
+  const wrongId = fake.connectFrom(PORT_OFFSCREEN, {
+    id: "other",
+    url: `chrome-extension://other/offscreen.html`,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(seen.offscreen).toHaveLength(1);
+  expect(good.onDisconnect.called).toBe(false);
+  expect(wrongPage.onDisconnect.called).toBe(true);
+  expect(wrongId.onDisconnect.called).toBe(true);
+});
+
+test("a port with an unknown name is disconnected", async () => {
+  installRouter(handlers);
+  const far = fake.connectFrom("recorder:other", { id });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(far.onDisconnect.called).toBe(true);
+  expect(seen.content).toEqual([]);
+  expect(seen.offscreen).toEqual([]);
+});

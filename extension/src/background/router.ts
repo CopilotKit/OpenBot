@@ -1,0 +1,171 @@
+// The ONLY listeners of runtime.onMessage, onMessageExternal and onConnect in the whole extension (MV3 needs them
+// registered synchronously at top level, and one place keeps the trust checks in one place).
+import {
+  type ExternalResponse,
+  type ExternalToBackground,
+  type PageResponse,
+  type PageToBackground,
+  PORT_CONTENT,
+  PORT_OFFSCREEN,
+  parseContentMessage,
+  parseExternalMessage,
+} from "../protocol/messages";
+import { handleConnectionMessage, handleExternalConnect } from "./connection";
+
+export type RouterHandlers = {
+  page(
+    message: PageToBackground,
+    sender: chrome.runtime.MessageSender,
+  ): Promise<PageResponse>;
+  external(
+    message: ExternalToBackground,
+    sender: chrome.runtime.MessageSender,
+  ): Promise<ExternalResponse>;
+  contentPort(port: chrome.runtime.Port): void;
+  offscreenPort(port: chrome.runtime.Port): void;
+};
+
+type RouterDeps = RouterHandlers & {
+  connected(): Promise<void>;
+  disconnected(): Promise<void>;
+};
+
+const CONNECTION_TYPES = new Set<string>([
+  "page.connect.pending",
+  "page.connect.decide",
+  "page.disconnect",
+  "page.desktop.available",
+  "page.connect.desktop",
+]);
+const RECORDING_TYPES = new Set<string>([
+  "page.state",
+  "page.bots",
+  "page.record",
+  "page.stop",
+  "page.restart",
+  "page.notice",
+  "page.notice.dismiss",
+  "page.screen",
+  "page.kept.discard",
+]);
+
+const UNKNOWN: PageResponse = { ok: false, error: "Unknown request." };
+const FAILED: PageResponse = {
+  ok: false,
+  error: "The Recorder could not do that. Try again.",
+};
+
+function isOwnPage(sender: chrome.runtime.MessageSender): boolean {
+  return (
+    sender.id === chrome.runtime.id &&
+    typeof sender.url === "string" &&
+    sender.url.startsWith(chrome.runtime.getURL(""))
+  );
+}
+
+function messageType(raw: unknown): string | null {
+  const type = (raw as { type?: unknown } | null)?.type;
+  return typeof type === "string" ? type : null;
+}
+
+async function routePage(
+  raw: unknown,
+  sender: chrome.runtime.MessageSender,
+  deps: RouterDeps,
+): Promise<PageResponse> {
+  if (!isOwnPage(sender)) return { ok: false, error: "Not allowed." };
+  const type = messageType(raw);
+  if (type === null) return UNKNOWN;
+  const message = raw as PageToBackground;
+  if (CONNECTION_TYPES.has(type)) {
+    const answer = await handleConnectionMessage(message);
+    if (answer === undefined) return UNKNOWN;
+    if (answer.ok && type === "page.connect.decide") await deps.connected();
+    if (answer.ok && type === "page.disconnect") await deps.disconnected();
+    return answer;
+  }
+  if (
+    RECORDING_TYPES.has(type) ||
+    (import.meta.env.RECORDER_VARIANT === "e2e" &&
+      type === "RECORDER_E2E_FLOOD")
+  )
+    return deps.page(message, sender);
+  return UNKNOWN;
+}
+
+/** A port whose onMessage listeners only ever see messages that passed parseContentMessage. */
+function filteredContentPort(port: chrome.runtime.Port): chrome.runtime.Port {
+  const wrapped = new Map<unknown, (message: unknown) => void>();
+  const onMessage = {
+    addListener(
+      listener: (message: unknown, port: chrome.runtime.Port) => void,
+    ) {
+      const guarded = (raw: unknown) => {
+        const message = parseContentMessage(raw);
+        if (message === null) return;
+        listener(message, filtered);
+      };
+      wrapped.set(listener, guarded);
+      port.onMessage.addListener(guarded);
+    },
+    removeListener(listener: unknown) {
+      const guarded = wrapped.get(listener);
+      if (!guarded) return;
+      wrapped.delete(listener);
+      port.onMessage.removeListener(guarded);
+    },
+    hasListener: (listener: unknown) => wrapped.has(listener),
+  };
+  const filtered = {
+    name: port.name,
+    sender: port.sender,
+    onMessage,
+    onDisconnect: port.onDisconnect,
+    postMessage: (message: unknown) => port.postMessage(message),
+    disconnect: () => port.disconnect(),
+  } as unknown as chrome.runtime.Port;
+  return filtered;
+}
+
+export function installRouter(deps: RouterDeps): void {
+  chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
+    routePage(raw, sender, deps).then(
+      (answer) => sendResponse(answer),
+      () => sendResponse(FAILED),
+    );
+    return true;
+  });
+
+  chrome.runtime.onMessageExternal.addListener((raw, sender, sendResponse) => {
+    const message = parseExternalMessage(raw);
+    if (message === null) {
+      sendResponse({ ok: false, error: "invalid" } satisfies ExternalResponse);
+      return false;
+    }
+    const answer =
+      message.type === "recorder.page-network"
+        ? deps.external(message, sender)
+        : handleExternalConnect(message, sender);
+    answer.then(
+      (response) => sendResponse(response),
+      () => sendResponse({ ok: false, error: "invalid" }),
+    );
+    return true;
+  });
+
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === PORT_CONTENT) {
+      deps.contentPort(filteredContentPort(port));
+      return;
+    }
+    if (
+      port.name === PORT_OFFSCREEN &&
+      port.sender?.id === chrome.runtime.id &&
+      port.sender.url === chrome.runtime.getURL("offscreen.html")
+    ) {
+      deps.offscreenPort(port);
+      return;
+    }
+    port.disconnect();
+  });
+}
