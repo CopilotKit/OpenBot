@@ -465,3 +465,62 @@ test("sendMessage, sendFromPage and sendExternal deliver to listeners asynchrono
     "external",
   ]);
 });
+
+test("storage keeps only JSON values: a Set becomes {} and a Date becomes a string", async () => {
+  const when = new Date("2026-01-02T03:04:05.000Z");
+  const read = (area: unknown, keys: string[]) =>
+    (area as { get(keys: string[]): Promise<unknown> }).get(keys);
+  await chrome.storage.local.set({ s: new Set(["a"]), d: when });
+  expect(await read(chrome.storage.local, ["s", "d"])).toEqual({
+    s: {},
+    d: when.toISOString(),
+  });
+  fake.storage.setManaged({ m: new Map([["k", 1]]) });
+  expect(await read(chrome.storage.managed, ["m"])).toEqual({ m: {} });
+});
+
+test("runtime.sendMessage supports Chrome's callback form and answers the callback with the response", async () => {
+  chrome.runtime.onMessage.addListener((_message, _sender, sendResponse) => {
+    sendResponse({ ok: true });
+    return true;
+  });
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "x" }, resolve);
+  });
+  expect(response).toEqual({ ok: true });
+  const viaOptions = await new Promise((resolve) => {
+    (chrome.runtime.sendMessage as (...args: unknown[]) => void)(
+      { type: "x" },
+      {},
+      resolve,
+    );
+  });
+  expect(viaOptions).toEqual({ ok: true });
+});
+
+test("runtime.sendMessage with a callback and no listener sets lastError for the callback only", async () => {
+  let seen: unknown = "unset";
+  await new Promise<void>((resolve) => {
+    chrome.runtime.sendMessage({ type: "x" }, () => {
+      seen = chrome.runtime.lastError;
+      resolve();
+    });
+  });
+  expect(seen).toEqual({
+    message: "Could not establish connection. Receiving end does not exist.",
+  });
+  expect(chrome.runtime.lastError).toBeUndefined();
+});
+
+test("runtime.sendMessage ignores a sender-like second argument and keeps the extension page sender", async () => {
+  let seen: chrome.runtime.MessageSender | undefined;
+  chrome.runtime.onMessage.addListener((_message, sender) => {
+    seen = sender;
+  });
+  await (
+    chrome.runtime.sendMessage as (...args: unknown[]) => Promise<unknown>
+  )({ type: "x" }, { tab: { id: 9 } });
+  expect(seen?.tab).toBeUndefined();
+  await fake.sendFromPage({ type: "x" }, { tab: { id: 9 } as chrome.tabs.Tab });
+  expect(seen?.tab?.id).toBe(9);
+});

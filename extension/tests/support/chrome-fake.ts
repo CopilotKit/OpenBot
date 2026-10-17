@@ -296,7 +296,7 @@ export function installChromeFake(
         const before = new Map(managed);
         managed.clear();
         for (const [key, value] of Object.entries(values))
-          managed.set(key, structuredClone(value));
+          managed.set(key, jsonCopy(value));
         const changes: Record<string, chrome.storage.StorageChange> = {};
         for (const [key, value] of managed)
           if (!before.has(key) || !isDeepStrictEqual(before.get(key), value))
@@ -321,8 +321,7 @@ export function installChromeFake(
     },
     sendExternal: (message, sender) =>
       deliver(runtimeEvents.onMessageExternal, message, sender),
-    sendFromPage: (message, sender) =>
-      chromeApi.runtime.sendMessage(message, sender) as Promise<unknown>,
+    sendFromPage: (message, sender) => sendMessageFrom(message, sender),
     permissions: { granted: new Set(), requests: [], answer: true },
     scripting: { registered: [], executed: [] },
     offscreen: { open: false, created: [] },
@@ -464,9 +463,9 @@ export function installChromeFake(
         for (const [key, value] of Object.entries(items)) {
           changes[key] = {
             oldValue: map.get(key),
-            newValue: structuredClone(value),
+            newValue: jsonCopy(value),
           };
-          map.set(key, structuredClone(value));
+          map.set(key, jsonCopy(value));
         }
         notify(changes);
       };
@@ -495,8 +494,25 @@ export function installChromeFake(
     fake.permissions.granted.has(origin) ||
     fake.permissions.granted.has("<all_urls>");
 
+  /** Test-only path: delivers as an extension page unless the sender is overridden. Never part of chrome.runtime. */
+  const sendMessageFrom = async (
+    message: unknown,
+    senderOverride?: Partial<chrome.runtime.MessageSender>,
+  ): Promise<unknown> => {
+    calls.push("runtime.sendMessage");
+    if (!runtimeEvents.onMessage.hasListeners())
+      throw new Error(
+        "Could not establish connection. Receiving end does not exist.",
+      );
+    return deliver(runtimeEvents.onMessage, message, {
+      ...extensionPageSender(),
+      ...senderOverride,
+    });
+  };
+
   const chromeApi = {
     runtime: {
+      lastError: undefined as { message: string } | undefined,
       id: extensionId,
       getURL: (path: string) => {
         calls.push("runtime.getURL");
@@ -529,19 +545,28 @@ export function installChromeFake(
             ]
           : [];
       },
-      async sendMessage(
+      sendMessage(
         message: unknown,
-        senderOverride?: Partial<chrome.runtime.MessageSender>,
+        optionsOrCallback?: unknown,
+        maybeCallback?: unknown,
       ) {
-        calls.push("runtime.sendMessage");
-        if (!runtimeEvents.onMessage.hasListeners())
-          throw new Error(
-            "Could not establish connection. Receiving end does not exist.",
-          );
-        return deliver(runtimeEvents.onMessage, message, {
-          ...extensionPageSender(),
-          ...senderOverride,
-        });
+        const callback = [optionsOrCallback, maybeCallback].find(
+          (arg): arg is (response?: unknown) => void =>
+            typeof arg === "function",
+        );
+        const result = sendMessageFrom(message);
+        if (!callback) return result;
+        result.then(
+          (response) => callback(response),
+          (error: Error) => {
+            chromeApi.runtime.lastError = { message: error.message };
+            try {
+              callback();
+            } finally {
+              chromeApi.runtime.lastError = undefined;
+            }
+          },
+        );
       },
       async sendNativeMessage(_host: string, message: object) {
         calls.push("runtime.sendNativeMessage");
