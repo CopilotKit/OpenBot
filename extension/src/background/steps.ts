@@ -70,8 +70,10 @@ export function createStepUploader(deps: {
   let flushTimer: unknown = null;
   let retryTimer: unknown = null;
   let attempt = 0;
-  // The token a sign-out or refusal was reported for: nothing more is uploaded with it.
+  // The token a sign-out was reported for: nothing more is uploaded with it.
   let haltedToken: string | null = null;
+  // Recordings OpenBot refused: no more live upload for them, but the next recording is unaffected.
+  const refused = new Set<string>();
   let running: Promise<void> = Promise.resolve();
 
   const clearTimer = (handle: unknown) => {
@@ -161,19 +163,19 @@ export function createStepUploader(deps: {
     if (error instanceof OpenBotError) {
       if (error.signedOut) {
         haltedToken = target.token;
-        await deps.onSignedOut(error.body?.reason ?? "removed");
+        await deps.onSignedOut(error.body?.reason ?? "revoked");
         return;
       }
-      const refused =
+      const refusal =
         error.status === 409 ||
         (error.status >= 400 &&
           error.status < 500 &&
           error.status !== 401 &&
           error.status !== 408 &&
           error.status !== 429);
-      if (refused) {
+      if (refusal) {
         if (live) {
-          haltedToken = target.token;
+          refused.add(target.demonstrationId);
           await deps.onRefused(error.message);
         }
         return;
@@ -226,7 +228,12 @@ export function createStepUploader(deps: {
     }
     return serial(async () => {
       const target = deps.target();
-      if (!target || target.token === haltedToken) return;
+      if (
+        !target ||
+        target.token === haltedToken ||
+        refused.has(target.demonstrationId)
+      )
+        return;
       await attemptUpload(target, true);
     });
   }
@@ -315,6 +322,7 @@ export function createStepUploader(deps: {
       });
       next.delete(demonstrationId);
       pending.delete(demonstrationId);
+      refused.delete(demonstrationId);
     },
 
     count() {

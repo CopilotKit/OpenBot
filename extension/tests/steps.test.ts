@@ -291,6 +291,53 @@ describe("step uploader", () => {
     expect(await storedIndexes()).toEqual([0, 1]);
   });
 
+  test("a refusal stops live upload for that recording only, not the next one with the same token", async () => {
+    const { steps, calls } = uploader();
+    steps.add(click(0));
+    answers.push(() =>
+      Response.json({ error: "Not accepted." }, { status: 400 }),
+    );
+    await expect(steps.flush()).rejects.toThrow("Not accepted.");
+    const refusedId = target.demonstrationId;
+    target = { ...target, demonstrationId: crypto.randomUUID() };
+    steps.add(click(1));
+    await steps.flush();
+    expect(calls.refused).toEqual(["Not accepted."]);
+    expect(received).toHaveLength(2);
+    expect(await storedIndexes()).toEqual([]);
+    expect(await storedIndexes(refusedId)).toEqual([0]);
+  });
+
+  test("a sign-out stops live upload with that token for every recording", async () => {
+    const { steps } = uploader();
+    steps.add(click(0));
+    answers.push(() =>
+      Response.json(
+        { error: "Gone.", code: "RECORDER_SIGNED_OUT", reason: "revoked" },
+        { status: 401 },
+      ),
+    );
+    await expect(steps.flush()).rejects.toThrow("Gone.");
+    target = { ...target, demonstrationId: crypto.randomUUID() };
+    steps.add(click(1));
+    await steps.flush();
+    expect(received).toHaveLength(1);
+    expect(await storedIndexes()).toEqual([0]);
+  });
+
+  test("a sign-out with no reason is reported as revoked", async () => {
+    const { steps, calls } = uploader();
+    steps.add(click(0));
+    answers.push(() =>
+      Response.json(
+        { error: "Gone.", code: "RECORDER_SIGNED_OUT" },
+        { status: 401 },
+      ),
+    );
+    await expect(steps.flush()).rejects.toThrow("Gone.");
+    expect(calls.signedOut).toEqual(["revoked"]);
+  });
+
   test("after a restart, load resends unacknowledged steps with their original indexes and keeps counting", async () => {
     const first = uploader();
     for (let i = 0; i < 3; i++) first.steps.add(click(i));
