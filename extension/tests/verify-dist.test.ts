@@ -82,6 +82,13 @@ describe("verifyDist", () => {
     expect(verifyDist(dir, release)).toEqual(["popup.html loads remote code"]);
   });
 
+  test("an unquoted remote script src reports remote code", () => {
+    const dir = fixture({
+      "popup.html": "<script src=https://cdn.example/x.js></script>",
+    });
+    expect(verifyDist(dir, release)).toEqual(["popup.html loads remote code"]);
+  });
+
   test("a protocol-relative stylesheet reports remote code", () => {
     const dir = fixture({
       "options.html": '<link rel="stylesheet" href="//cdn.example/x.css">',

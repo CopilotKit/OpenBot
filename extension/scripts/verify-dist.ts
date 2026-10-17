@@ -22,10 +22,10 @@ function listFiles(dir: string): string[] {
 
 function attribute(tag: string, name: string): string | undefined {
   const match = new RegExp(
-    `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`,
     "i",
   ).exec(tag);
-  return match ? (match[1] ?? match[2]) : undefined;
+  return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
 }
 
 function loadsRemoteCode(html: string): boolean {
