@@ -104,8 +104,9 @@ export function classifyGrantError(
   }
   // Row 2.
   if (status === 401 && code === RECORDER_SIGNED_OUT) {
-    const reason = SIGNED_OUT_REASONS.find((r) => r === body?.reason);
-    if (reason) return { kind: "signed-out", reason };
+    const reason =
+      SIGNED_OUT_REASONS.find((r) => r === body?.reason) ?? "revoked";
+    return { kind: "signed-out", reason };
   }
   // Row 3.
   if (status === 403 && code === "FORBIDDEN") return stop("park", "FORBIDDEN");

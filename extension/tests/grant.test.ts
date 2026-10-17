@@ -243,9 +243,19 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     expect(hold(classifyGrantError(401, null)).hint).toBe(
       "Learning capture is paused: OpenBot refused the capture pass.",
     );
+  });
+
+  test("row 2: a 401 RECORDER_SIGNED_OUT with no reason, or an unrecognised one, is a revoked sign-out", () => {
+    expect(classifyGrantError(401, { code: RECORDER_SIGNED_OUT })).toEqual({
+      kind: "signed-out",
+      reason: "revoked",
+    });
     expect(
-      hold(classifyGrantError(401, { code: RECORDER_SIGNED_OUT })).hint,
-    ).toBe(PASS_HINTS.UNAUTHORIZED);
+      classifyGrantError(401, {
+        code: RECORDER_SIGNED_OUT,
+        reason: "no-such-reason",
+      } as never),
+    ).toEqual({ kind: "signed-out", reason: "revoked" });
   });
 
   test("row 23: the gateway-policy sentence is fixed for the streamer's check", () => {
