@@ -1,5 +1,5 @@
-import "fake-indexeddb/auto";
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import {
   deleteDemonstrationData,
   openRecorderDatabase,
@@ -9,6 +9,28 @@ import {
   STORES,
   tx,
 } from "../src/shared/database";
+
+// Installed per test rather than by "fake-indexeddb/auto": that import sets the globals once at module
+// load, and another file's teardown in the same `bun test` process can delete them afterwards.
+type IndexedDbGlobals = {
+  indexedDB?: IDBFactory;
+  IDBKeyRange?: typeof FakeIDBKeyRange;
+};
+const globals = globalThis as unknown as IndexedDbGlobals;
+let saved: IndexedDbGlobals = {};
+
+beforeEach(() => {
+  saved = { indexedDB: globals.indexedDB, IDBKeyRange: globals.IDBKeyRange };
+  globals.indexedDB = new IDBFactory();
+  globals.IDBKeyRange = FakeIDBKeyRange;
+});
+
+afterEach(() => {
+  for (const key of ["indexedDB", "IDBKeyRange"] as const) {
+    if (saved[key] === undefined) Reflect.deleteProperty(globals, key);
+    else Object.assign(globals, { [key]: saved[key] });
+  }
+});
 
 let counter = 0;
 const freshName = () => `recorder-test-${Date.now()}-${counter++}`;
