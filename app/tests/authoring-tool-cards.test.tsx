@@ -120,21 +120,34 @@ function serving(grant: string) {
 type Renderer = ComponentType<Record<string, unknown>>;
 type Handler = (args: unknown, context: unknown) => Promise<unknown>;
 type Kept = {
+  core?: ReturnType<typeof useCopilotKit>["copilotkit"];
   renderers: Map<string, Renderer>;
   handlers: Map<string, Handler>;
 };
 
-function Capture({ kept, names }: { kept: Kept; names: string[] }) {
-  const { copilotkit } = useCopilotKit();
+/**
+ * Hands the test the provider's core, and nothing else.
+ *
+ * What the SDK kept is read from the core when the test asks (`keep`), never during this render.
+ * Registering a tool re-renders nothing that only calls `useCopilotKit`: before runtime 1.79 the
+ * provider's config effect fired `onHeadersChanged` each time it re-ran, which redrew every caller
+ * as a side effect, and 1.79 made an unchanged header record a no-op. A read here would hold
+ * whatever was registered when this last drew, which is nothing.
+ */
+function Capture({ kept }: { kept: Kept }) {
+  kept.core = useCopilotKit().copilotkit;
+  return null;
+}
+
+function keep(kept: Kept, names: string[]) {
   for (const name of names) {
-    const entry = copilotkit.renderToolCalls.find(
+    const entry = kept.core?.renderToolCalls.find(
       (candidate) => candidate.name === name,
     );
     if (entry) kept.renderers.set(name, entry.render as Renderer);
-    const tool = copilotkit.getTool({ toolName: name });
+    const tool = kept.core?.getTool({ toolName: name });
     if (tool?.handler) kept.handlers.set(name, tool.handler as Handler);
   }
-  return null;
 }
 
 function Declare() {
@@ -161,10 +174,13 @@ test("a proposed coworker named like an existing one says so", async () => {
   const tree = render(
     <Providers>
       <BotTools />
-      <Capture kept={kept} names={["save_bot"]} />
+      <Capture kept={kept} />
     </Providers>,
   );
-  await waitFor(() => expect(kept.renderers.get("save_bot")).toBeDefined());
+  await waitFor(() => {
+    keep(kept, ["save_bot"]);
+    expect(kept.renderers.get("save_bot")).toBeDefined();
+  });
 
   // The roster arrives after the grant turned the tool on.
   release();
@@ -172,7 +188,7 @@ test("a proposed coworker named like an existing one says so", async () => {
   tree.rerender(
     <Providers>
       <BotTools />
-      <Capture kept={kept} names={["save_bot"]} />
+      <Capture kept={kept} />
       <Kept
         name="save_bot"
         args={{ name: "Researcher" }}
@@ -199,12 +215,13 @@ async function skillToolsLoaded() {
   const drawn = (card?: ReactNode) => (
     <Providers>
       <SkillTools />
-      <Capture kept={kept} names={names} />
+      <Capture kept={kept} />
       {card}
     </Providers>
   );
   const tree = render(drawn());
   await waitFor(() => {
+    keep(kept, names);
     expect(kept.renderers.get("save_skill")).toBeDefined();
     expect(kept.handlers.get("list_skills")).toBeDefined();
   });
