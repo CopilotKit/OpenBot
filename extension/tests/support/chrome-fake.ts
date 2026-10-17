@@ -137,21 +137,33 @@ function createEvent(name: string | null, calls: string[]): FakeEvent {
   };
 }
 
-/** Runs onMessage-style listeners and resolves with the first response, or undefined when none answers. */
+/** Chrome's message passing serializes as JSON: Sets, Maps and functions do not survive, and the sender cannot mutate the copy. */
+function jsonCopy(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  const text = JSON.stringify(value);
+  return text === undefined ? undefined : JSON.parse(text);
+}
+
+/**
+ * Runs onMessage-style listeners in a microtask, as Chrome does, handing them a JSON copy of the message, and
+ * resolves with the first response (also a JSON copy), or undefined when none answers.
+ */
 function deliver(
   event: FakeEvent,
   message: unknown,
   sender: chrome.runtime.MessageSender,
 ): Promise<unknown> {
   return new Promise((resolve) => {
-    let answered = false;
-    const sendResponse = (response: unknown) => {
-      if (answered) return;
-      answered = true;
-      resolve(response);
-    };
-    const results = event.dispatch(message, sender, sendResponse);
-    if (!answered && !results.includes(true)) resolve(undefined);
+    queueMicrotask(() => {
+      let answered = false;
+      const sendResponse = (response: unknown) => {
+        if (answered) return;
+        answered = true;
+        resolve(jsonCopy(response));
+      };
+      const results = event.dispatch(jsonCopy(message), sender, sendResponse);
+      if (!answered && !results.includes(true)) resolve(undefined);
+    });
   });
 }
 
@@ -194,9 +206,10 @@ function createPortPair(
       if (from.disconnected)
         throw new Error("Attempting to use a disconnected port object");
       calls.push(`port:${name} ${messageType(message)}`);
+      const copy = jsonCopy(message);
       queueMicrotask(() => {
-        to.messages.push(message);
-        to.onMessage.dispatch(message, to);
+        to.messages.push(copy);
+        to.onMessage.dispatch(copy, to);
       });
     };
     from.disconnect = () => {
@@ -253,6 +266,15 @@ export function installChromeFake(
 
   const openPort = (name: string, sender: chrome.runtime.MessageSender) => {
     const pair = createPortPair(name, sender, calls);
+    if (!runtimeEvents.onConnect.hasListeners()) {
+      // Nobody is listening for connections: Chrome disconnects the connecting end.
+      queueMicrotask(() => {
+        pair.near.disconnected = true;
+        pair.far.disconnected = true;
+        pair.far.onDisconnect.dispatch(pair.far);
+      });
+      return pair;
+    }
     serviceWorkerPorts.push(pair.near);
     runtimeEvents.onConnect.dispatch(pair.near);
     return pair;

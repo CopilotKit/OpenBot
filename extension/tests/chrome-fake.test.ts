@@ -228,6 +228,7 @@ test("uninstall removes globalThis.chrome", () => {
 });
 
 test("calls lists tabCapture.getMediaStreamId before a later port message in the order they happened", async () => {
+  chrome.runtime.onConnect.addListener(() => undefined);
   const far = fake.connectFrom("recorder:offscreen", { id: "x" });
   await chrome.tabCapture.getMediaStreamId({ targetTabId: 3 });
   far.postMessage({ type: "offscreen.ready" });
@@ -366,4 +367,101 @@ test("offscreen, native, badge, tabs and webNavigation behave as the plan's APIs
     frameId: 0,
     url: "https://x.example.test/a",
   });
+});
+
+test("runtime.connect with no onConnect listener fires its onDisconnect", async () => {
+  const port = chrome.runtime.connect({ name: "p" });
+  let disconnected = false;
+  port.onDisconnect.addListener(() => {
+    disconnected = true;
+  });
+  expect(disconnected).toBe(false);
+  await Promise.resolve();
+  expect(disconnected).toBe(true);
+});
+
+test("connectFrom with no onConnect listener reports onDisconnect.called after a microtask", async () => {
+  const far = fake.connectFrom("recorder:offscreen", { id: "x" });
+  await Promise.resolve();
+  expect(far.onDisconnect.called).toBe(true);
+});
+
+test("a port message is copied as JSON: a Set arrives as an empty object", async () => {
+  let swPort: chrome.runtime.Port | undefined;
+  const received: unknown[] = [];
+  chrome.runtime.onConnect.addListener((port) => {
+    swPort = port;
+    port.onMessage.addListener((message) => received.push(message));
+  });
+  const far = fake.connectFrom("p", { id: "x" });
+  far.postMessage({ s: new Set(["a"]) });
+  swPort?.postMessage({ s: new Set(["a"]) });
+  await Promise.resolve();
+  expect(received).toEqual([{ s: {} }]);
+  expect(far.messages).toEqual([{ s: {} }]);
+});
+
+test("mutating a posted message after postMessage leaves the delivered copy unchanged", async () => {
+  let swPort: chrome.runtime.Port | undefined;
+  chrome.runtime.onConnect.addListener((port) => {
+    swPort = port;
+  });
+  const far = fake.connectFrom("p", { id: "x" });
+  const sent = { list: [1] };
+  swPort?.postMessage(sent);
+  sent.list.push(2);
+  await Promise.resolve();
+  expect(far.messages).toEqual([{ list: [1] }]);
+});
+
+test("sendMessage and sendExternal hand listeners a JSON copy and copy the response", async () => {
+  const seen: unknown[] = [];
+  const reply = { nested: [1] };
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    seen.push(message);
+    sendResponse(reply);
+  });
+  chrome.runtime.onMessageExternal.addListener(
+    (message, _sender, sendResponse) => {
+      seen.push(message);
+      sendResponse({ s: new Set(["a"]) });
+    },
+  );
+  const sent = { s: new Set(["a"]), n: 1 };
+  const answer = (await fake.sendFromPage(sent)) as typeof reply;
+  expect(seen[0]).toEqual({ s: {}, n: 1 });
+  expect(seen[0]).not.toBe(sent);
+  expect(answer).toEqual({ nested: [1] });
+  expect(answer).not.toBe(reply);
+  expect(await fake.sendExternal({ s: new Set(["a"]) }, { id: "x" })).toEqual({
+    s: {},
+  });
+  expect(seen[1]).toEqual({ s: {} });
+});
+
+test("sendMessage, sendFromPage and sendExternal deliver to listeners asynchronously", async () => {
+  const order: string[] = [];
+  chrome.runtime.onMessage.addListener(() => {
+    order.push("listener");
+  });
+  chrome.runtime.onMessageExternal.addListener(() => {
+    order.push("external");
+  });
+  const viaSend = chrome.runtime.sendMessage({ type: "a" });
+  order.push("after sendMessage");
+  await viaSend;
+  const viaPage = fake.sendFromPage({ type: "b" });
+  order.push("after sendFromPage");
+  await viaPage;
+  const viaExternal = fake.sendExternal({ type: "c" }, { id: "x" });
+  order.push("after sendExternal");
+  await viaExternal;
+  expect(order).toEqual([
+    "after sendMessage",
+    "listener",
+    "after sendFromPage",
+    "listener",
+    "after sendExternal",
+    "external",
+  ]);
 });
