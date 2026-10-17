@@ -286,8 +286,12 @@ const disagreements = (sql: string, before: Snapshot, after: Snapshot) => {
       problems.push(
         `the migration creates index "${index}", the snapshot lacks it`,
       );
+  /*
+   * A drop that the same migration follows with a create of that name is a change, not a removal:
+   * the index is meant to still be in the snapshot, and the create above already asked for it.
+   */
   for (const index of indexesDropped)
-    if (indexes.has(index))
+    if (indexes.has(index) && !indexesCreated.includes(index))
       problems.push(
         `the migration drops index "${index}", the snapshot still has it`,
       );
@@ -435,5 +439,32 @@ describe("the migration journal", () => {
     }
 
     expect(wrong).toEqual([]);
+  });
+});
+
+describe("the snapshot check on indexes", () => {
+  const withIndex: Snapshot = {
+    tables: { t: { name: "t", columns: {}, indexes: { i: {} } } },
+  };
+  const withoutIndex: Snapshot = {
+    tables: { t: { name: "t", columns: {}, indexes: {} } },
+  };
+
+  test("accepts an index that one migration drops and recreates", () => {
+    const sql = `DROP INDEX "i";--> statement-breakpoint\nCREATE INDEX "i" ON "t" ("a");`;
+    expect(disagreements(sql, withIndex, withIndex)).toEqual([]);
+  });
+
+  test("still reports an index that is dropped but left in the snapshot", () => {
+    const sql = `DROP INDEX "i";`;
+    expect(disagreements(sql, withIndex, withIndex)).toEqual([
+      `the migration drops index "i", the snapshot still has it`,
+    ]);
+  });
+
+  test("still accepts an index that is dropped and gone from the snapshot", () => {
+    expect(disagreements(`DROP INDEX "i";`, withIndex, withoutIndex)).toEqual(
+      [],
+    );
   });
 });
