@@ -40,19 +40,9 @@ function lockfileWorkspaceKeys(): string[] {
 
 function tracked(path: string): boolean {
   return (
-    execFileSync(
-      "git",
-      [
-        "ls-files",
-        "--cached",
-        "--others",
-        "--exclude-standard",
-        "-z",
-        "--",
-        path,
-      ],
-      { cwd: repositoryRoot },
-    ).length > 0
+    execFileSync("git", ["ls-files", "--cached", "-z", "--", path], {
+      cwd: repositoryRoot,
+    }).length > 0
   );
 }
 
