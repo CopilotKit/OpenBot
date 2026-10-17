@@ -80,8 +80,19 @@ async function routePage(
   if (CONNECTION_TYPES.has(type)) {
     const answer = await handleConnectionMessage(message);
     if (answer === undefined) return UNKNOWN;
-    if (answer.ok && type === "page.connect.decide") await deps.connected();
-    if (answer.ok && type === "page.disconnect") await deps.disconnected();
+    // The follow-up runs after the connection changed: never fail the page on it.
+    if (answer.ok && message.type === "page.connect.decide" && message.approve)
+      await deps
+        .connected()
+        .catch((error) =>
+          console.error("Recorder: reconnect follow-up failed", error),
+        );
+    if (answer.ok && message.type === "page.disconnect")
+      await deps
+        .disconnected()
+        .catch((error) =>
+          console.error("Recorder: disconnect follow-up failed", error),
+        );
     return answer;
   }
   if (
@@ -116,11 +127,26 @@ function filteredContentPort(port: chrome.runtime.Port): chrome.runtime.Port {
     },
     hasListener: (listener: unknown) => wrapped.has(listener),
   };
+  const disconnectWrapped = new Map<unknown, () => void>();
+  const onDisconnect = {
+    addListener(listener: (port: chrome.runtime.Port) => void) {
+      const guarded = () => listener(filtered);
+      disconnectWrapped.set(listener, guarded);
+      port.onDisconnect.addListener(guarded);
+    },
+    removeListener(listener: unknown) {
+      const guarded = disconnectWrapped.get(listener);
+      if (!guarded) return;
+      disconnectWrapped.delete(listener);
+      port.onDisconnect.removeListener(guarded);
+    },
+    hasListener: (listener: unknown) => disconnectWrapped.has(listener),
+  };
   const filtered = {
     name: port.name,
     sender: port.sender,
     onMessage,
-    onDisconnect: port.onDisconnect,
+    onDisconnect,
     postMessage: (message: unknown) => port.postMessage(message),
     disconnect: () => port.disconnect(),
   } as unknown as chrome.runtime.Port;

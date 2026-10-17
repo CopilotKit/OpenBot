@@ -136,6 +136,69 @@ test("a refused page.connect.decide does not call connected()", async () => {
   expect(seen.order).toEqual(["connection"]);
 });
 
+test("a rejected page.connect.decide (Cancel) answers ok but does not call connected()", async () => {
+  stubConnection({ ok: true });
+  installRouter(handlers);
+  expect(
+    await fake.sendFromPage({
+      type: "page.connect.decide",
+      approve: false,
+      label: "x",
+    }),
+  ).toEqual({ ok: true });
+  expect(seen.order).toEqual(["connection"]);
+});
+
+test("a connected() that throws does not fail the page", async () => {
+  const error = spyOn(console, "error").mockImplementation(() => {});
+  restore.push(() => error.mockRestore());
+  stubConnection({ ok: true });
+  handlers.connected = async () => {
+    throw new Error("boom");
+  };
+  installRouter(handlers);
+  expect(
+    await fake.sendFromPage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    }),
+  ).toEqual({ ok: true });
+  expect(error).toHaveBeenCalled();
+});
+
+test("a disconnected() that throws does not fail the page", async () => {
+  const error = spyOn(console, "error").mockImplementation(() => {});
+  restore.push(() => error.mockRestore());
+  stubConnection({ ok: true });
+  handlers.disconnected = async () => {
+    throw new Error("boom");
+  };
+  installRouter(handlers);
+  expect(await fake.sendFromPage({ type: "page.disconnect" })).toEqual({
+    ok: true,
+  });
+  expect(error).toHaveBeenCalled();
+});
+
+test("a content port's disconnect listeners receive the wrapped port", async () => {
+  let given: chrome.runtime.Port | undefined;
+  const got: chrome.runtime.Port[] = [];
+  handlers.contentPort = (port) => {
+    given = port;
+    port.onDisconnect.addListener((p) => got.push(p));
+  };
+  installRouter(handlers);
+  const far = fake.connectFrom(PORT_CONTENT, {
+    id,
+    tab: { id: 3 } as chrome.tabs.Tab,
+  });
+  far.disconnect();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(got).toHaveLength(1);
+  expect(got[0]).toBe(given as chrome.runtime.Port);
+});
+
 test("page.disconnect calls disconnected() after the connection answered", async () => {
   stubConnection({ ok: true });
   installRouter(handlers);
