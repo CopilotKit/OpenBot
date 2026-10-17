@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
-import { Page } from "../ui/page";
 import "../ui/styles.css";
+import { Popup } from "./popup";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root");
-createRoot(root).render(<Page title="OpenBot Recorder" width="popup" />);
+createRoot(root).render(<Popup />);
