@@ -30,6 +30,7 @@ type Pending = { origin: string; via: "web" | "desktop" };
 type Phase =
   | { kind: "loading" }
   | { kind: "none" }
+  | { kind: "error"; message: string }
   | { kind: "ready"; pending: Pending }
   | { kind: "connected"; name: string }
   | { kind: "cancelled" };
@@ -69,7 +70,9 @@ export function ConnectPage() {
     let live = true;
     ask({ type: "page.connect.pending" }).then((answer) => {
       if (!live) return;
-      if (answer.ok && "pending" in answer && answer.pending) {
+      if (!answer.ok) {
+        setPhase({ kind: "error", message: answer.error });
+      } else if ("pending" in answer && answer.pending) {
         setPhase({ kind: "ready", pending: answer.pending });
       } else {
         setPhase({ kind: "none" });
@@ -191,6 +194,7 @@ export function ConnectPage() {
                   <Input
                     id="browser-name"
                     value={draft}
+                    maxLength={80}
                     onChange={(event) => setDraft(event.target.value)}
                   />
                 </Field>
@@ -217,6 +221,10 @@ export function ConnectPage() {
       ) : phase.kind === "cancelled" ? (
         <p className="mt-8 text-muted-foreground text-sm" role="status">
           Nothing was connected. You can close this tab.
+        </p>
+      ) : phase.kind === "error" ? (
+        <p className="mt-8 text-destructive text-sm" role="alert">
+          {phase.message}
         </p>
       ) : phase.kind === "none" ? (
         <p className="mt-8 text-muted-foreground text-sm" role="status">

@@ -20,12 +20,14 @@ const ORIGIN = "https://openbot.example.test";
 let fake: ChromeFake;
 let received: { type: string; approve?: boolean; label?: string }[];
 let decideAnswer: unknown;
+let pendingAnswer: unknown;
 let originalMatchMedia: typeof window.matchMedia;
 
 beforeEach(() => {
   fake = installChromeFake();
   received = [];
   decideAnswer = { ok: true };
+  pendingAnswer = { ok: true, pending: { origin: ORIGIN, via: "web" } };
   originalMatchMedia = window.matchMedia;
   window.matchMedia = (() => ({
     matches: false,
@@ -42,7 +44,7 @@ beforeEach(() => {
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     received.push(message);
     if (message.type === "page.connect.pending") {
-      reply({ ok: true, pending: { origin: ORIGIN, via: "web" } });
+      reply(pendingAnswer);
     } else {
       reply(decideAnswer);
     }
@@ -114,4 +116,27 @@ test("Cancel sends approve false", async () => {
   fireEvent.click(await findByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(received.at(-1)?.approve).toBe(false));
   expect(received.at(-1)?.type).toBe("page.connect.decide");
+});
+
+test("a failed pending lookup shows the real error, not the no-connection sentence", async () => {
+  pendingAnswer = { ok: false, error: "x" };
+  const { findByRole, queryByText } = render(<ConnectPage />);
+  expect((await findByRole("alert")).textContent).toBe("x");
+  expect(queryByText(/No connection is waiting/)).toBeNull();
+});
+
+test("no pending connection still shows the no-connection sentence", async () => {
+  pendingAnswer = { ok: true, pending: null };
+  const { findByText } = render(<ConnectPage />);
+  await findByText(/No connection is waiting/);
+});
+
+test("the browser name input is capped at 80 characters", async () => {
+  const { findByText, findByLabelText } = render(<ConnectPage />);
+  const user = userEvent.setup({ document });
+  await user.click((await findByText("Name")).closest("button") as HTMLElement);
+  const input = (await findByLabelText(
+    "Name this browser",
+  )) as HTMLInputElement;
+  expect(input.maxLength).toBe(80);
 });
