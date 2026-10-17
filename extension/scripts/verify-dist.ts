@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import type { BuildVariant } from "../src/manifest";
 
-type VerifyOptions = { variant: "release" | "e2e"; rootVersion: string };
+type VerifyOptions = { variant: BuildVariant; rootVersion: string };
 
 const MODULE_SYNTAX = /^\s*(import|export)\s/m;
 const REMOTE_URL = /^(https?:|\/\/)/i;
