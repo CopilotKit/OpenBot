@@ -5,7 +5,11 @@ import {
   IconUser,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { PageRows, PageSection } from "@/components/layout/page-parts";
+import {
+  PageEmpty,
+  PageRows,
+  PageSection,
+} from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -135,10 +139,10 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
             </Item>
           </PageRows>
         ) : (
-          <p className="mt-4 text-muted-foreground text-sm">
+          <PageEmpty>
             This browser is not connected to OpenBot. Open OpenBot, go to
             Settings, Browsers, and choose Connect this browser.
-          </p>
+          </PageEmpty>
         )}
         {error ? (
           <p className="mt-2 text-destructive text-sm" role="alert">
