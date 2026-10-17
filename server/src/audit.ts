@@ -553,6 +553,13 @@ export const auditEventTypes = [
   "routine.enabled_changed",
   /* A run refused because its model is not on the team model allowlist. */
   "model.refused",
+  /*
+   * A Recorder extension's bearer turned away: malformed, unknown or revoked, the person removed,
+   * their organization sign-in ended, or no role. Target the first 16 hex digits of the token's
+   * SHA-256, never the token; payload `reason` and `path`. At most one row per digest and reason a
+   * minute per replica, because a browser retrying a dead token would otherwise flood the trail.
+   */
+  "recorder.bearer_refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
