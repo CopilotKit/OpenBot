@@ -39,29 +39,134 @@ function type(element: HTMLInputElement | HTMLElement, value: string) {
   element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
 }
 
-describe("sensitivity tracker", () => {
-  test("a field labelled only by a separate label element is redacted in value, attributes and text", () => {
-    // React and server markup mirror the value into the attribute; the collector copies every attribute and the text.
-    document.body.innerHTML = `<label for="c">Card number</label><input id="c" name="f7" value="4111111111111111">`;
-    const tracker = track();
-    const input = document.querySelector("input") as HTMLInputElement;
-    focus(input);
-    const beforeSend = collectorBeforeSend(tracker, () => {});
+function press(element: Element, name: "pointerdown" | "click") {
+  // A plain Event, so happy-dom does not forward a label's click to its control by itself: each test dispatches Chrome's
+  // forwarded click explicitly.
+  element.dispatchEvent(new Event(name, { bubbles: true, composed: true }));
+}
+
+type Target = {
+  tag: string;
+  value?: string;
+  text: string;
+  attributes: Record<string, string>;
+};
+
+/** Stands in for the collector's click listener: registered on window after the tracker, as index.ts orders them, it
+ * describes the clicked element like `describeTarget` in @copilotkit/learning (its value, its text and every attribute)
+ * and passes the click through collectorBeforeSend. */
+function collectClicks(tracker: ReturnType<typeof createSensitivityTracker>) {
+  const beforeSend = collectorBeforeSend(tracker, () => {});
+  const sent: Target[] = [];
+  const onClick = (event: Event) => {
+    const element = event.composedPath()[0];
+    if (!(element instanceof Element)) return;
     const masked = beforeSend({
       type: "CUSTOM",
       name: "click",
       timestamp: 1,
       value: {
         target: {
-          tag: "input",
-          value: "4111111111111111",
-          text: "4111111111111111",
-          attributes: { id: "c", name: "f7", value: "4111111111111111" },
+          tag: element.localName,
+          text: element.textContent ?? "",
+          attributes: Object.fromEntries(
+            Array.from(element.attributes, ({ name, value }) => [name, value]),
+          ),
+          ...(element instanceof HTMLInputElement
+            ? { value: element.value }
+            : {}),
         },
       },
+    } as never) as unknown as { value: { target: Target } };
+    sent.push(masked.value.target);
+  };
+  window.addEventListener("click", onClick, { capture: true });
+  cleanups.push(() =>
+    window.removeEventListener("click", onClick, { capture: true }),
+  );
+  return sent;
+}
+
+describe("sensitivity tracker", () => {
+  test("a field labelled only by a separate label element is redacted in value, attributes and text", () => {
+    // React and server markup mirror the value into the attribute; the collector copies every attribute and the text.
+    // A 3-digit code fails the Luhn check, so only the tracker's judgement of the field can redact it.
+    document.body.innerHTML = `<label for="c">Card security code</label><input id="c" name="f7" value="737">`;
+    const tracker = track();
+    const sent = collectClicks(tracker);
+    const input = document.querySelector("input") as HTMLInputElement;
+    press(input, "pointerdown");
+    press(input, "click");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.value).toBe("[redacted]");
+    expect(sent[0]?.text).toBe("[redacted]");
+    expect(sent[0]?.attributes.value).toBe("[redacted]");
+    expect(JSON.stringify(sent)).not.toContain("737");
+  });
+
+  test.each([
+    [
+      "a separate label",
+      `<label for="c">Card security code</label><input id="c" name="f7" value="737">`,
+    ],
+    [
+      "a wrapping label",
+      `<label><span>Card security code</span><input name="f7" value="737"></label>`,
+    ],
+  ])(
+    "a click on %s is redacted in the click Chrome forwards to the field",
+    (_, markup) => {
+      document.body.innerHTML = markup;
+      const tracker = track();
+      const sent = collectClicks(tracker);
+      const label = document.querySelector("label") as HTMLLabelElement;
+      const input = document.querySelector("input") as HTMLInputElement;
+      // What Chrome fires for a click on a label: pointerdown and click on the label, focus and a second click on the field.
+      press(label, "pointerdown");
+      focus(input);
+      press(label, "click");
+      press(input, "click");
+      expect(sent.map((target) => target.tag)).toEqual(["label", "input"]);
+      expect(sent[1]?.value).toBe("[redacted]");
+      expect(sent[1]?.text).toBe("[redacted]");
+      expect(sent[1]?.attributes.value).toBe("[redacted]");
+      expect(JSON.stringify(sent)).not.toContain("737");
+    },
+  );
+
+  test("an input event from a field inside a shadow root is judged by that field, not the focused host", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = host.attachShadow({ mode: "open" });
+    root.innerHTML = `<label for="s">Card security code</label><input id="s" name="f7">`;
+    const inner = root.querySelector("input") as HTMLInputElement;
+    const tracker = track();
+    inner.focus();
+    expect(document.activeElement).toBe(host);
+    // Below MIN_DIGEST_LENGTH, so no digest can redact it: only the tracker's judgement of the field can.
+    inner.value = "73";
+    const event = new Event("input", { bubbles: true, composed: true });
+    // Listeners on window see a shadow-DOM event retargeted to the host; composedPath()[0] is still the inner input.
+    Object.defineProperty(event, "composedPath", {
+      value: () => [
+        inner,
+        root,
+        host,
+        document.body,
+        document.documentElement,
+        document,
+        window,
+      ],
+    });
+    host.dispatchEvent(event);
+    expect(tracker.sensitiveForEvent("input")).toBe(true);
+    const masked = collectorBeforeSend(tracker, () => {})({
+      type: "CUSTOM",
+      name: "input",
+      timestamp: 1,
+      value: { target: { tag: "input", value: "73", attributes: {} } },
     } as never);
-    expect(masked).not.toBeNull();
-    expect(JSON.stringify(masked)).not.toContain("4111111111111111");
+    expect(JSON.stringify(masked)).toContain('"value":"[redacted]"');
   });
 
   test("an input event is masked from the focused sensitive field and a plain field is kept", () => {
@@ -93,6 +198,22 @@ describe("sensitivity tracker", () => {
       new Event("pointerdown", { bubbles: true }),
     );
     expect(tracker.sensitiveForEvent("click")).toBe(false);
+  });
+
+  test("a keyboard-activated button is judged by itself, not by an earlier pointer target", () => {
+    document.body.innerHTML = `<label for="p">Password</label><input id="p" type="password"><button id="b">Save</button>`;
+    const tracker = track();
+    press(document.getElementById("p") as HTMLElement, "pointerdown");
+    press(document.getElementById("b") as HTMLElement, "click");
+    expect(tracker.sensitiveForEvent("click")).toBe(false);
+  });
+
+  test("a click a re-render moved to the body keeps its pointerdown field, which the collector describes it by", () => {
+    document.body.innerHTML = `<label for="c">Card security code</label><input id="c" name="f7" value="737">`;
+    const tracker = track();
+    press(document.querySelector("input") as HTMLElement, "pointerdown");
+    press(document.body, "click");
+    expect(tracker.sensitiveForEvent("click")).toBe(true);
   });
 
   test("a field that was a password field stays sensitive after its type changes", () => {

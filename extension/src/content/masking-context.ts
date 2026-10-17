@@ -8,10 +8,11 @@ import {
 const FIELD = "input, textarea, select, [contenteditable]";
 
 export type SensitivityTracker = {
-  /** Capture-phase pointerdown, focusin, input and change on window; install it BEFORE the collector so a digest exists
-   * before the collector's own listener builds the event it masks. */
+  /** Capture-phase pointerdown, focusin, click, input and change on window; install it BEFORE the collector so a digest
+   * exists, and a click's field is known, before the collector's own listener builds the event it masks. */
   install(): () => void;
-  /** input and change are judged by the focused field, a click by the last pointer target. */
+  /** input and change are judged by the field the event came from (else the focused field), a click by the field it
+   * landed on: the field a label forwards its click to, never an earlier pointer target. */
   sensitiveForEvent(name: string): boolean;
   /** Values of at least MIN_DIGEST_LENGTH characters typed into sensitive fields, normalised then hashed, once per value. */
   onSensitiveValue(listener: (digest: string) => void): void;
@@ -21,6 +22,14 @@ export type SensitivityTracker = {
 
 const fieldOf = (target: EventTarget | null): Element | null =>
   target instanceof Element ? target.closest(FIELD) : null;
+
+// The collector describes a click that a re-render moved to <body> or <html>, or off a detached node, by its pointerdown
+// target (`clicks.ts` `installClickCapture` > `onClick`), so such a click keeps the pointerdown field.
+const describedByPointerdown = (target: EventTarget | null): boolean =>
+  !(target instanceof Element) ||
+  target.localName === "body" ||
+  target.localName === "html" ||
+  !target.isConnected;
 
 const fieldValue = (field: Element): string =>
   field instanceof HTMLInputElement ||
@@ -37,6 +46,7 @@ export function createSensitivityTracker(options?: {
   const digests = new Set<string>();
   const listeners: Array<(digest: string) => void> = [];
   let pointerField: Element | null = null;
+  let valueField: Element | null = null;
 
   const classify = (field: Element): boolean => {
     const sensitive =
@@ -55,6 +65,14 @@ export function createSensitivityTracker(options?: {
     pointerField = fieldOf(event.composedPath()[0] ?? null);
     if (pointerField) classify(pointerField);
   };
+  const onClick = (event: Event) => {
+    if (!isTrusted(event)) return;
+    // A click on a label reaches its field as a second click, after a pointerdown on the label itself.
+    const target = event.composedPath()[0] ?? null;
+    if (describedByPointerdown(target)) return;
+    pointerField = fieldOf(target);
+    if (pointerField) classify(pointerField);
+  };
   const onFocus = (event: Event) => {
     if (!isTrusted(event)) return;
     const field = fieldOf(event.composedPath()[0] ?? null);
@@ -62,9 +80,9 @@ export function createSensitivityTracker(options?: {
   };
   const onValue = (event: Event) => {
     if (!isTrusted(event)) return;
-    const field =
-      fieldOf(event.composedPath()[0] ?? null) ??
-      fieldOf(document.activeElement);
+    // A field inside a shadow root: document.activeElement is its host, composedPath()[0] the field itself.
+    valueField = fieldOf(event.composedPath()[0] ?? null);
+    const field = valueField ?? fieldOf(document.activeElement);
     if (!field || !classify(field)) return;
     const normalised = normaliseSecret(fieldValue(field));
     if (normalised.length < MIN_DIGEST_LENGTH) return;
@@ -79,18 +97,20 @@ export function createSensitivityTracker(options?: {
       const capture = { capture: true, passive: true } as const;
       window.addEventListener("pointerdown", onPointer, capture);
       window.addEventListener("focusin", onFocus, capture);
+      window.addEventListener("click", onClick, capture);
       window.addEventListener("input", onValue, capture);
       window.addEventListener("change", onValue, capture);
       return () => {
         window.removeEventListener("pointerdown", onPointer, capture);
         window.removeEventListener("focusin", onFocus, capture);
+        window.removeEventListener("click", onClick, capture);
         window.removeEventListener("input", onValue, capture);
         window.removeEventListener("change", onValue, capture);
       };
     },
     sensitiveForEvent(name) {
       if (name === "input" || name === "change")
-        return cached(fieldOf(document.activeElement));
+        return cached(valueField ?? fieldOf(document.activeElement));
       if (name === "click") return cached(pointerField);
       return false;
     },
