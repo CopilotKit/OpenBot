@@ -51,6 +51,20 @@ describe("storage helpers", () => {
     expect(await installIdFor("https://a.example.test")).not.toBe(a);
   });
 
+  test("concurrent first calls agree on one secret and one install id", async () => {
+    const [a, b] = await Promise.all([installSecret(), installSecret()]);
+    expect(a).toBe(b);
+    expect(await readLocal("installSecret")).toBe(a);
+
+    await removeLocal("installSecret");
+    const origin = "https://a.example.test";
+    const [x, y] = await Promise.all([
+      installIdFor(origin),
+      installIdFor(origin),
+    ]);
+    expect(x).toBe(y);
+  });
+
   test("restrictStorageToTrustedContexts records TRUSTED_CONTEXTS for local", async () => {
     await restrictStorageToTrustedContexts();
     expect(fake.storage.accessLevel).toBe("TRUSTED_CONTEXTS");

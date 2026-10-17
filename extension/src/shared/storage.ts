@@ -116,12 +116,20 @@ export async function restrictStorageToTrustedContexts(): Promise<void> {
   });
 }
 /** Reads `installSecret`, creating it with crypto.randomUUID() when absent. */
-export async function installSecret(): Promise<string> {
-  const existing = await readLocal("installSecret");
-  if (existing) return existing;
-  const created = crypto.randomUUID();
-  await writeLocal("installSecret", created);
-  return created;
+let pendingSecret: Promise<string> | null = null;
+/** Concurrent callers share one in-flight read-or-create, so two first calls never mint two secrets;
+ * the share clears on settle, so later calls read storage again and a failed write can retry. */
+export function installSecret(): Promise<string> {
+  pendingSecret ??= (async () => {
+    const existing = await readLocal("installSecret");
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    await writeLocal("installSecret", created);
+    return created;
+  })().finally(() => {
+    pendingSecret = null;
+  });
+  return pendingSecret;
 }
 /** This copy's install id for one OpenBot origin: the first 32 hex digits of SHA-256(installSecret + "\n" + origin),
  * so it is stable per (copy, origin) and links nothing across sites (Decision 18). */
