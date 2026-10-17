@@ -18,7 +18,12 @@ afterAll(() => GlobalRegistrator.unregister());
 
 const ORIGIN = "https://openbot.example.test";
 let fake: ChromeFake;
-let received: { type: string; approve?: boolean; label?: string }[];
+let received: {
+  type: string;
+  approve?: boolean;
+  label?: string;
+  origin?: string;
+}[];
 let decideAnswer: unknown;
 let pendingAnswer: unknown;
 let originalMatchMedia: typeof window.matchMedia;
@@ -89,6 +94,7 @@ test("the Name row opens a dialog whose Save changes the name and the label late
     type: "page.connect.decide",
     approve: true,
     label: "Work laptop",
+    origin: ORIGIN,
   });
   expect(fake.permissions.requests).toEqual([{ origins: [`${ORIGIN}/*`] }]);
 });
@@ -111,11 +117,39 @@ test("a refusal from OpenBot shows its sentence", async () => {
   await findByText("That code has expired.");
 });
 
-test("Cancel sends approve false", async () => {
-  const { findByRole } = render(<ConnectPage />);
+test("Cancel sends approve false with the origin the page shows", async () => {
+  const shown = "http://127.0.0.1:7470";
+  pendingAnswer = { ok: true, pending: { origin: shown, via: "desktop" } };
+  const { findByRole, getByText } = render(<ConnectPage />);
   fireEvent.click(await findByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(received.at(-1)?.approve).toBe(false));
-  expect(received.at(-1)?.type).toBe("page.connect.decide");
+  expect(received.at(-1)).toEqual({
+    type: "page.connect.decide",
+    approve: false,
+    label: "Google Chrome on macOS",
+    origin: shown,
+  });
+  expect(
+    getByText("Nothing was connected. You can close this tab."),
+  ).toBeTruthy();
+});
+
+test("Connect sends the origin the page shows", async () => {
+  const shown = "http://[::1]:7470";
+  pendingAnswer = { ok: true, pending: { origin: shown, via: "desktop" } };
+  fake.permissions.answer = true;
+  const { findByRole, findByText } = render(<ConnectPage />);
+  await findByText(shown);
+  fireEvent.click(await findByRole("button", { name: "Connect" }));
+  await findByText(
+    "Connected as Google Chrome on macOS. You can close this tab.",
+  );
+  expect(received.at(-1)).toEqual({
+    type: "page.connect.decide",
+    approve: true,
+    label: "Google Chrome on macOS",
+    origin: shown,
+  });
 });
 
 test("a failed pending lookup shows the real error, not the no-connection sentence", async () => {

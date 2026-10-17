@@ -4,6 +4,7 @@ import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import {
   parseContentMessage,
   parseExternalMessage,
+  parsePageConnectDecide,
 } from "../src/protocol/messages";
 
 const click = {
@@ -111,5 +112,37 @@ describe("parseExternalMessage", () => {
       }),
     };
     expect(parseExternalMessage(tooBig)).toBeNull();
+  });
+});
+
+describe("parsePageConnectDecide", () => {
+  const decide = {
+    type: "page.connect.decide",
+    approve: true,
+    label: "Chrome on macOS",
+    origin: "https://openbot.example.test",
+  };
+
+  test("returns a decide naming the origin its connect tab shows", () => {
+    expect(parsePageConnectDecide(decide)).toEqual(decide as never);
+    const desktop = { ...decide, approve: false, origin: "http://[::1]:7470" };
+    expect(parsePageConnectDecide(desktop)).toEqual(desktop as never);
+  });
+
+  test("returns null for a decide without an origin", () => {
+    const { origin: _, ...withoutOrigin } = decide;
+    expect(parsePageConnectDecide(withoutOrigin)).toBeNull();
+  });
+
+  test("returns null for an origin not in the form a pending connect stores", () => {
+    for (const origin of [
+      "",
+      "https://openbot.example.test/",
+      "https://openbot.example.test/path",
+      "http://openbot.example.test",
+      "HTTPS://OpenBot.example.test",
+      "not an address",
+    ])
+      expect(parsePageConnectDecide({ ...decide, origin })).toBeNull();
   });
 });

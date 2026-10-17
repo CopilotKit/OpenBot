@@ -106,15 +106,21 @@ export function ConnectPage() {
       type: "page.connect.decide",
       approve: true,
       label: name,
+      origin: pending.origin,
     });
     setBusy(false);
     if (answer.ok) setPhase({ kind: "connected", name });
     else setMessage(answer.error);
   };
 
-  const cancel = async () => {
+  const cancel = async (pending: Pending) => {
     setBusy(true);
-    await ask({ type: "page.connect.decide", approve: false, label: name });
+    await ask({
+      type: "page.connect.decide",
+      approve: false,
+      label: name,
+      origin: pending.origin,
+    });
     setBusy(false);
     setPhase({ kind: "cancelled" });
   };
@@ -174,7 +180,12 @@ export function ConnectPage() {
             >
               Connect
             </Button>
-            <Button size="lg" variant="ghost" disabled={busy} onClick={cancel}>
+            <Button
+              size="lg"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => cancel(phase.pending)}
+            >
               Cancel
             </Button>
           </div>

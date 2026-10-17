@@ -119,6 +119,7 @@ test("an ok page.connect.decide calls connected() after the connection answered"
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin: "https://openbot.example.test",
   });
   expect(seen.order).toEqual(["connection", "connected"]);
 });
@@ -131,6 +132,7 @@ test("a refused page.connect.decide does not call connected()", async () => {
       type: "page.connect.decide",
       approve: true,
       label: "x",
+      origin: "https://openbot.example.test",
     }),
   ).toEqual({ ok: false, error: "no" });
   expect(seen.order).toEqual(["connection"]);
@@ -144,9 +146,23 @@ test("a rejected page.connect.decide (Cancel) answers ok but does not call conne
       type: "page.connect.decide",
       approve: false,
       label: "x",
+      origin: "https://openbot.example.test",
     }),
   ).toEqual({ ok: true });
   expect(seen.order).toEqual(["connection"]);
+});
+
+test("a page.connect.decide without the origin its tab shows is unknown and never reaches the connection handler", async () => {
+  stubConnection({ ok: true });
+  installRouter(handlers);
+  expect(
+    await fake.sendFromPage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+    }),
+  ).toEqual({ ok: false, error: "Unknown request." });
+  expect(seen.order).toEqual([]);
 });
 
 test("a connected() that throws does not fail the page", async () => {
@@ -162,6 +178,7 @@ test("a connected() that throws does not fail the page", async () => {
       type: "page.connect.decide",
       approve: true,
       label: "x",
+      origin: "https://openbot.example.test",
     }),
   ).toEqual({ ok: true });
   expect(error).toHaveBeenCalled();

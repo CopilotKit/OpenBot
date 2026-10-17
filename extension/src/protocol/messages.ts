@@ -9,6 +9,7 @@ import { RECORDER_PAGE_NETWORK_MESSAGE_BYTES } from "@openbot/shared/recorder-ap
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { MAX_TIMESTAMP_MS } from "@openbot/shared/recorder-masking";
 import { z } from "zod";
+import { normaliseOpenBotOrigin } from "../shared/origin";
 import type { DrainRecord, RecorderNotice } from "../shared/storage";
 
 export const PORT_CONTENT = "recorder:content";
@@ -179,6 +180,22 @@ export type OffscreenToBackground =
       reason: "revoked" | "removed" | "organization";
     }; // a pass came back RECORDER_SIGNED_OUT, with the guard's reason; its events stay kept (Decision 19)
 
+/** The connect page's Connect or Cancel. `origin` is the one the page showed (its page.connect.pending answer), in the
+ * form a pending connect stores (normaliseOpenBotOrigin's): the service worker refuses a decide whose origin is not the
+ * pending connect's, so a connect tab only ever confirms the site it shows. */
+export const pageConnectDecideSchema = z
+  .object({
+    type: z.literal("page.connect.decide"),
+    approve: z.boolean(),
+    label: z.string(),
+    origin: z.string().refine((value) => {
+      const checked = normaliseOpenBotOrigin(value);
+      return checked.ok && checked.origin === value;
+    }),
+  })
+  .strict();
+export type PageConnectDecide = z.infer<typeof pageConnectDecideSchema>;
+
 export type PageToBackground =
   | { type: "page.state" }
   | { type: "page.bots" }
@@ -196,7 +213,7 @@ export type PageToBackground =
   | { type: "page.notice.dismiss" }
   | { type: "page.screen" }
   | { type: "page.connect.pending" }
-  | { type: "page.connect.decide"; approve: boolean; label: string }
+  | PageConnectDecide
   | { type: "page.disconnect" }
   | { type: "page.desktop.available" }
   | { type: "page.connect.desktop" }
@@ -286,6 +303,11 @@ export function parseExternalMessage(
       : MAX_MESSAGE_BYTES;
   if (bytes > cap) return null;
   const parsed = externalToBackgroundSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+/** The one page message the router parses, as it carries the origin the decide handler checks. */
+export function parsePageConnectDecide(raw: unknown): PageConnectDecide | null {
+  const parsed = pageConnectDecideSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
 export type { DemonstrationAction };

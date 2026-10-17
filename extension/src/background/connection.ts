@@ -35,6 +35,8 @@ export type ConnectionDeps = {
 };
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
+const OUT_OF_DATE =
+  "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
 const CONNECT_WINDOW_MS = 10 * 60 * 1000;
 const CONNECT_LIMIT = 3;
 const KEEP_ALIVE_ALARM = "recorder-session-keepalive";
@@ -151,8 +153,13 @@ export async function handleConnectionMessage(
       };
     }
     case "page.connect.decide": {
-      if (message.approve) return approve(message.label);
       const pending = await readSession("pendingConnect");
+      // A connect page reads the pending origin once, on load: a tab Chrome did not close when another origin
+      // replaced its pending connect (closeConnectTab) still shows the old one, and neither connects nor cancels the
+      // site it does not show.
+      if (pending && message.origin !== pending.origin)
+        return { ok: false, error: OUT_OF_DATE };
+      if (message.approve) return approve(pending, message.label);
       if (pending) await clearPendingConnect(pending);
       return { ok: true };
     }
@@ -180,8 +187,10 @@ export async function handleConnectionMessage(
   }
 }
 
-async function approve(label: string): Promise<PageResponse> {
-  const pending = await readSession("pendingConnect");
+async function approve(
+  pending: PendingConnect | undefined,
+  label: string,
+): Promise<PageResponse> {
   if (!pending) return { ok: false, error: "There is nothing to connect." };
   let exchanged: ExchangeResponse;
   try {
@@ -244,9 +253,9 @@ async function tabIsOpen(tabId: number | undefined): Promise<boolean> {
   }
 }
 
-/** A connect page reads the pending origin once, on load, while its Connect button exchanges whatever is pending at
- * the click. So the tab of a pending connect being replaced is closed first, or it would show one site and connect
- * another. Best effort: a tab the person closed in the meantime leaves nothing to close. */
+/** A connect page reads the pending origin once, on load. So the tab of a pending connect being replaced is closed
+ * first, or it would go on showing a site that is no longer pending (its decide names that site, and is refused).
+ * Best effort: a tab the person closed in the meantime leaves nothing to close. */
 async function closeConnectTab(tabId: number | undefined): Promise<void> {
   if (tabId === undefined) return;
   try {

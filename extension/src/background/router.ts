@@ -9,6 +9,7 @@ import {
   PORT_OFFSCREEN,
   parseContentMessage,
   parseExternalMessage,
+  parsePageConnectDecide,
 } from "../protocol/messages";
 import { handleConnectionMessage, handleExternalConnect } from "./connection";
 
@@ -76,7 +77,11 @@ async function routePage(
   if (!isOwnPage(sender)) return { ok: false, error: "Not allowed." };
   const type = messageType(raw);
   if (type === null) return UNKNOWN;
-  const message = raw as PageToBackground;
+  const message =
+    type === "page.connect.decide"
+      ? parsePageConnectDecide(raw)
+      : (raw as PageToBackground);
+  if (message === null) return UNKNOWN;
   if (CONNECTION_TYPES.has(type)) {
     const answer = await handleConnectionMessage(message);
     if (answer === undefined) return UNKNOWN;

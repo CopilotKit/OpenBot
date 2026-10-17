@@ -186,6 +186,7 @@ test("a web connect is confirmed on the extension's own page and exchanged at th
     type: "page.connect.decide",
     approve: true,
     label: "Chrome on macOS",
+    origin,
   });
   expect(exchanges).toEqual([
     {
@@ -248,6 +249,7 @@ test("the same origin asking again reuses the open connect tab instead of openin
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   expect(exchanges.map((e) => e.code)).toEqual(["obc_4"]);
 });
@@ -291,6 +293,7 @@ test("an expired code shows the server's sentence and stores nothing", async () 
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   expect(answer).toEqual({
     ok: false,
@@ -312,6 +315,7 @@ test("an approve that cannot reach OpenBot shows a plain sentence, not the brows
         type: "page.connect.decide",
         approve: true,
         label: "x",
+        origin,
       }),
     ).toEqual({ ok: false, error: "OpenBot did not answer. Try again." });
   } finally {
@@ -330,6 +334,7 @@ test("disconnect tells OpenBot and forgets the token without a notice", async ()
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   expect(await handleConnectionMessage({ type: "page.disconnect" })).toEqual({
     ok: true,
@@ -352,6 +357,7 @@ test("a disconnect still telling OpenBot when a reconnect lands forgets only the
       type: "page.connect.decide",
       approve: true,
       label: "x",
+      origin,
     }),
   ).toEqual({ ok: true });
   deleting.release();
@@ -383,6 +389,7 @@ test("forgetting a revoked connection leaves a signed-out notice with its reason
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   await forgetConnection("organization");
   expect(await currentConnection()).toBeNull();
@@ -400,6 +407,7 @@ test("a new connection clears the signed-out notice", async () => {
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   expect(await readLocal("notice")).toBeUndefined();
 });
@@ -410,11 +418,79 @@ test("rejecting clears the pending connect and exchanges nothing", async () => {
     type: "page.connect.decide",
     approve: false,
     label: "x",
+    origin,
   });
   expect(
     await handleConnectionMessage({ type: "page.connect.pending" }),
   ).toEqual({ ok: true, pending: null });
   expect(exchanges).toEqual([]);
+});
+
+const OUT_OF_DATE =
+  "This page is out of date. Close it and choose Connect this browser in OpenBot again.";
+
+test("a decide naming a site other than the pending one is refused, stores nothing, and keeps the pending connect", async () => {
+  await connect("obc_abc");
+  for (const approve of [true, false])
+    expect(
+      await handleConnectionMessage({
+        type: "page.connect.decide",
+        approve,
+        label: "x",
+        origin: "https://other.example.test",
+      }),
+    ).toEqual({ ok: false, error: OUT_OF_DATE });
+  expect(exchanges).toEqual([]);
+  expect(await readLocal("connection")).toBeUndefined();
+  expect(await readSession("pendingConnect")).toMatchObject({
+    origin,
+    code: "obc_abc",
+  });
+  // The tab that shows the pending site still connects it.
+  expect(
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+      origin,
+    }),
+  ).toEqual({ ok: true });
+  expect(exchanges.map((e) => e.code)).toEqual(["obc_abc"]);
+  expect((await readLocal("connection"))?.openbotUrl).toBe(origin);
+});
+
+test("a connect tab Chrome failed to close cannot connect the site that replaced its pending connect", async () => {
+  expect((await connect("obc_a", "https://a.example.test")).ok).toBe(true);
+  const remove = spyOn(chrome.tabs, "remove").mockImplementation(() =>
+    Promise.reject(
+      new Error(
+        "Tabs cannot be edited right now (user may be dragging a tab).",
+      ),
+    ),
+  );
+  try {
+    clock += 6 * 60 * 1000;
+    expect((await connect("obc_b")).ok).toBe(true);
+  } finally {
+    remove.mockRestore();
+  }
+  // A's tab is still open, showing A, while B is pending.
+  expect(fake.tabs.has(41)).toBe(true);
+  expect(
+    await handleConnectionMessage({
+      type: "page.connect.decide",
+      approve: true,
+      label: "x",
+      origin: "https://a.example.test",
+    }),
+  ).toEqual({ ok: false, error: OUT_OF_DATE });
+  expect(exchanges).toEqual([]);
+  expect(await readLocal("connection")).toBeUndefined();
+  expect(await readSession("pendingConnect")).toMatchObject({
+    origin,
+    code: "obc_b",
+    tabId: 42,
+  });
 });
 
 test("an approve still exchanging when another origin replaces the stale pending connect leaves the new one in place", async () => {
@@ -425,6 +501,7 @@ test("an approve still exchanging when another origin replaces the stale pending
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   await exchange.arrived;
   clock += 6 * 60 * 1000;
@@ -460,6 +537,7 @@ test("a cancel that arrives while Desktop's handoff is being asked never clears 
     type: "page.connect.decide",
     approve: false,
     label: "x",
+    origin: "https://a.example.test",
   });
   await settle();
   handoff.resolve({ openbotUrl: "http://127.0.0.1:7470", code: "obc_d" });
@@ -573,6 +651,7 @@ test("the connect answer, the connected origin's ping and the exchange carry thi
     type: "page.connect.decide",
     approve: true,
     label: "x",
+    origin,
   });
   expect(exchanges.at(-1)).toMatchObject({
     installId: await installIdFor(origin),
@@ -847,6 +926,7 @@ test("a signed-out answer to a keep-alive sent with the old token leaves a recon
       type: "page.connect.decide",
       approve: true,
       label: "x",
+      origin,
     }),
   ).toEqual({ ok: true });
   // ...so the keep-alive still in flight with the old token comes back revoked.
@@ -924,6 +1004,7 @@ test("a reconnect approved while a signed-out forget is removing the old connect
       type: "page.connect.decide",
       approve: true,
       label: "x",
+      origin,
     });
     await settle();
     expect(exchanges.map((e) => e.code)).toEqual(["obc_abc"]);
