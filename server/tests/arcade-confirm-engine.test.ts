@@ -38,7 +38,12 @@ function startEngine(body: unknown): Engine {
       return new Response("not found", { status: 404 });
     },
   });
-  return { port: server.port, requests, stop: () => server.stop(true) };
+  // `Bun.serve().port` is `number | undefined`; refuse loudly rather than coerce, as
+  // `arcade-revoke-invariant.test.ts` does.
+  const { port } = server;
+  if (port === undefined)
+    throw new Error("the stub vendor did not bind a port");
+  return { port, requests, stop: () => server.stop(true) };
 }
 
 let running: Engine | null = null;

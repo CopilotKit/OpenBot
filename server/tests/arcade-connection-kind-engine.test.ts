@@ -82,9 +82,15 @@ function engine(tools: unknown[]): Engine {
       });
     },
   });
-  running = { port: server.port, stop: () => server.stop(true) };
-  process.env.ARCADE_BASE_URL = `http://localhost:${server.port}`;
-  return running;
+  // `Bun.serve().port` is `number | undefined`; refuse loudly rather than coerce, as
+  // `arcade-revoke-invariant.test.ts` does.
+  const { port } = server;
+  if (port === undefined)
+    throw new Error("the stub vendor did not bind a port");
+  const started = { port, stop: () => server.stop(true) };
+  running = started;
+  process.env.ARCADE_BASE_URL = `http://localhost:${port}`;
+  return started;
 }
 
 afterEach(() => {

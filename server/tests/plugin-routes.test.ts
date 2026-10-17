@@ -115,7 +115,7 @@ type BrokeredConnection = Awaited<
 /**
  * A server row as the store really answers one, from the two columns a test cares about.
  *
- * FIFTEEN FIELDS BECAUSE THE STORE ANSWERS FIFTEEN. The stubs here used to hand back `{ id, url }`,
+ * EVERY FIELD BECAUSE THE STORE ANSWERS EVERY FIELD. The stubs here used to hand back `{ id, url }`,
  * which is not a row any deployment can produce — and a route reaching for `authScheme` or `tools`
  * on it would find `undefined` and behave in a way no real store could reproduce. The values are
  * the empty ones on purpose: nothing on these routes reads them, and a fixture that invented
@@ -125,6 +125,7 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
   return {
     id: row.id,
     title: row.id,
+    logo: null,
     vendor: "composio",
     url: row.url,
     summary: "",
@@ -135,7 +136,10 @@ function serverRecord(row: { id: string; url: string }): ServerRecord {
     lastError: null,
     addedBy: null,
     dynamicClient: false,
+    skippedTools: [],
     authScheme: null,
+    accountMode: null,
+    sharedVendorConnected: false,
     tools: [],
     withdrawn: [],
   };

@@ -193,7 +193,8 @@ function deployment(provider: BrokerProvider, wiring: Wiring = {}) {
     ),
   );
 
-  const post = (path: string, body: unknown = {}) =>
+  // Async so each is a `Promise<Response>`: `app.request` answers `Response | Promise<Response>`.
+  const post = async (path: string, body: unknown = {}) =>
     app.request(`http://openbot.test${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -202,7 +203,7 @@ function deployment(provider: BrokerProvider, wiring: Wiring = {}) {
 
   return {
     toolkit: row.toolkit,
-    remove: () =>
+    remove: async () =>
       app.request(`http://openbot.test/api/plugins/servers/${SERVER_ID}`, {
         method: "DELETE",
       }),
@@ -211,7 +212,7 @@ function deployment(provider: BrokerProvider, wiring: Wiring = {}) {
       post(`/api/plugins/servers/${SERVER_ID}/connect`, body ?? {}),
     confirm: () => post(`/api/plugins/servers/${SERVER_ID}/connection/confirm`),
     recheck: () => post(`/api/plugins/servers/${SERVER_ID}/connection/recheck`),
-    disconnect: () =>
+    disconnect: async () =>
       app.request(
         `http://openbot.test/api/plugins/servers/${SERVER_ID}/connection`,
         { method: "DELETE" },

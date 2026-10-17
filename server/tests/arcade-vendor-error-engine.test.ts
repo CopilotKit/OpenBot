@@ -70,7 +70,12 @@ function startEngine(): Engine {
       return refusal();
     },
   });
-  return { port: server.port, requests, stop: () => server.stop(true) };
+  // `Bun.serve().port` is `number | undefined`; refuse loudly rather than coerce, as
+  // `arcade-revoke-invariant.test.ts` does.
+  const { port } = server;
+  if (port === undefined)
+    throw new Error("the stub vendor did not bind a port");
+  return { port, requests, stop: () => server.stop(true) };
 }
 
 let running: Engine | null = null;
@@ -124,7 +129,13 @@ describe("a refusal from Arcade is an Error this deployment wrote", () => {
     ["listApps", ({ broker }) => broker.listApps()],
     [
       "authorize",
-      ({ broker }) => broker.authorize({ account, action: "Gmail.SendEmail" }),
+      ({ broker }) =>
+        broker.authorize({
+          account,
+          toolkit: "Gmail",
+          returnUrl: "https://openbot.test/return",
+          action: "Gmail.SendEmail",
+        }),
     ],
     [
       "isConnected",

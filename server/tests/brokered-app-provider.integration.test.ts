@@ -97,6 +97,15 @@ function storeFor(
       updateSecret: async () => {
         throw new Error("vault");
       },
+      rotate: async () => {
+        throw new Error("vault");
+      },
+      isLive: async () => {
+        throw new Error("vault");
+      },
+      findLiveByKey: async () => {
+        throw new Error("vault");
+      },
       revoke: async () => {
         throw new Error("vault");
       },

@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import { createDatabase } from "../src/db/client";
 import { auditEvents, brokeredConnections, mcpServers } from "../src/db/schema";
+import type { BrokerProvider } from "../src/plugins/access";
 import type { ConnectedAppBroker } from "../src/plugins/broker";
 import { createPluginStore } from "../src/plugins/store";
 import { TEST_POOL, testDatabaseUrl } from "./support/database";
@@ -106,7 +107,7 @@ async function server(id: string, provenance: string, url: string) {
   });
 }
 
-async function hold(provider: string, app: string, userId: string) {
+async function hold(provider: BrokerProvider, app: string, userId: string) {
   apps.push(app);
   await database.insert(brokeredConnections).values({
     provider,
