@@ -1,6 +1,6 @@
 import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
 import { recorderPaths } from "@openbot/shared/recorder-api";
-import { requestToPromise, tx } from "../shared/database";
+import { requestToPromise, stepsNextKey, tx } from "../shared/database";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 
 export type StepTarget = {
@@ -27,7 +27,6 @@ type StepRecord = {
 
 const pairRange = (id: string, from = -Infinity, to = Infinity) =>
   IDBKeyRange.bound([id, from], [id, to]);
-const nextKey = (id: string) => `steps-next:${id}`;
 
 /** How many steps OpenBot holds, from a 409 that names it; undefined for any other answer. */
 const heldCount = (error: unknown): number | undefined => {
@@ -146,7 +145,7 @@ export function createStepUploader(deps: {
           requestToPromise<StepRecord[]>(
             steps.getAll(pairRange(demonstrationId)),
           ),
-          requestToPromise<unknown>(meta.get(nextKey(demonstrationId))),
+          requestToPromise<unknown>(meta.get(stepsNextKey(demonstrationId))),
         ]);
         const lastIndex = rows[rows.length - 1]?.index;
         if (lastIndex === undefined) return;
@@ -155,7 +154,7 @@ export function createStepUploader(deps: {
         const storedNext = typeof stored === "number" ? stored : 0;
         meta.put(
           Math.max(storedNext, lastIndex + 1) - shift,
-          nextKey(demonstrationId),
+          stepsNextKey(demonstrationId),
         );
       }),
     );
@@ -322,7 +321,9 @@ export function createStepUploader(deps: {
       const db = await deps.db();
       const [stored, rows] = await tx(db, ["meta", "steps"], "readonly", (t) =>
         Promise.all([
-          requestToPromise<unknown>(t.objectStore("meta").get(nextKey(id))),
+          requestToPromise<unknown>(
+            t.objectStore("meta").get(stepsNextKey(id)),
+          ),
           requestToPromise<StepRecord[]>(
             t.objectStore("steps").getAll(pairRange(id)),
           ),
@@ -349,7 +350,7 @@ export function createStepUploader(deps: {
           const db = await deps.db();
           await tx(db, ["steps", "meta"], "readwrite", (t) => {
             t.objectStore("steps").put(record);
-            t.objectStore("meta").put(index + 1, nextKey(id));
+            t.objectStore("meta").put(index + 1, stepsNextKey(id));
           });
           pending.set(id, (pending.get(id) ?? 0) + 1);
           schedule(id);
@@ -376,7 +377,7 @@ export function createStepUploader(deps: {
       const db = await deps.db();
       await tx(db, ["steps", "meta"], "readwrite", (t) => {
         t.objectStore("steps").delete(pairRange(demonstrationId));
-        t.objectStore("meta").delete(nextKey(demonstrationId));
+        t.objectStore("meta").delete(stepsNextKey(demonstrationId));
       });
       next.delete(demonstrationId);
       pending.delete(demonstrationId);

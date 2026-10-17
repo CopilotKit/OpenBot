@@ -10,6 +10,8 @@ export const RECORDER_DATABASE_VERSION = 1;
  *  steps   keyPath ["demonstrationId", "index"]    steps not yet acknowledged by OpenBot
  *  bodies  keyPath ["mediaId", "line"]             network body lines not yet uploaded, value { mediaId, line, text };
  *          meta "media:<demonstrationId>:network" -> mediaId and "bodies-next:<mediaId>" -> the next line number
+ * The step uploader also keeps meta "steps-next:<demonstrationId>" -> the next step index for that recording
+ * (see stepsNextKey); deleteDemonstrationData removes it with the rest of the demonstration.
  */
 export const STORES = [
   "events",
@@ -138,6 +140,10 @@ export function tx<T>(
 
 const prefixRange = (prefix: string) =>
   IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+/** The meta key holding a demonstration's next step index; the step uploader and the delete share it. */
+export const stepsNextKey = (demonstrationId: string) =>
+  `steps-next:${demonstrationId}`;
+
 const pairRange = (first: string) =>
   IDBKeyRange.bound([first, -Infinity], [first, Infinity]);
 
@@ -169,6 +175,7 @@ export async function deleteDemonstrationData(
         meta.delete(`bodies-next:${mediaId}`);
       }
       meta.delete(linkRange);
+      meta.delete(stepsNextKey(demonstrationId));
     },
   );
 }

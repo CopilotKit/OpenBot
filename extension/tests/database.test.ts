@@ -181,6 +181,22 @@ describe("recorder database", () => {
     db.close();
   });
 
+  test("deleteDemonstrationData forgets the demonstration's next step index only", async () => {
+    const db = await openRecorderDatabase(freshName());
+    await tx(db, ["meta"], "readwrite", (t) => {
+      t.objectStore("meta").put(3, "steps-next:demo-1");
+      t.objectStore("meta").put(5, "steps-next:demo-2");
+    });
+
+    await deleteDemonstrationData(db, "demo-1");
+
+    const keys = await tx(db, ["meta"], "readonly", (t) =>
+      requestToPromise(t.objectStore("meta").getAllKeys()),
+    );
+    expect(keys).toEqual(["steps-next:demo-2"]);
+    db.close();
+  });
+
   test("tx resolves when the caller handled a request error", async () => {
     const db = await openRecorderDatabase(freshName());
     await tx(db, ["steps"], "readwrite", (t) => {
