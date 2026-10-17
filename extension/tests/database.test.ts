@@ -66,6 +66,31 @@ describe("recorder database", () => {
     db.close();
   });
 
+  test("tx waits for work that awaits something other than IndexedDB", async () => {
+    const db = await openRecorderDatabase(freshName());
+    const value = await tx(db, ["meta"], "readwrite", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return "v";
+    });
+    expect(value).toBe("v");
+    db.close();
+  });
+
+  test("tx rejects when work touches the transaction after it has finished", async () => {
+    const db = await openRecorderDatabase(freshName());
+    await expect(
+      tx(db, ["meta"], "readwrite", async (t) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        t.objectStore("meta").put("late", "k");
+      }),
+    ).rejects.toThrow();
+    const stored = await tx(db, ["meta"], "readonly", (t) =>
+      requestToPromise(t.objectStore("meta").get("k")),
+    );
+    expect(stored).toBeUndefined();
+    db.close();
+  });
+
   test("deleteDemonstrationData removes one demonstration and leaves another", async () => {
     const db = await openRecorderDatabase(freshName());
     const seed = (id: string, mediaId: string, bodiesId: string) =>

@@ -79,10 +79,24 @@ export function tx<T>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = db.transaction(stores, mode);
-    let result: T;
-    let failure: unknown;
+    // `work` outcome: undefined until it settles
+    let outcome:
+      | { ok: true; value: T }
+      | { ok: false; error: unknown }
+      | undefined;
+    let completed = false;
     let failed = false;
-    t.oncomplete = () => (failed ? reject(failure) : resolve(result));
+    let failure: unknown;
+    const finish = () => {
+      if (!completed || !outcome) return;
+      if (failed) reject(failure);
+      else if (outcome.ok) resolve(outcome.value);
+      else reject(outcome.error);
+    };
+    t.oncomplete = () => {
+      completed = true;
+      finish();
+    };
     t.onerror = () => {
       if (!failed) {
         failed = true;
@@ -96,6 +110,7 @@ export function tx<T>(
           : (t.error ?? new Error("An IndexedDB transaction was aborted.")),
       );
     const fail = (error: unknown) => {
+      outcome = { ok: false, error };
       failed = true;
       failure = error;
       try {
@@ -103,10 +118,12 @@ export function tx<T>(
       } catch {
         // already finished; the abort handler or completion reports the failure
       }
+      finish();
     };
     try {
       Promise.resolve(work(t)).then((value) => {
-        result = value;
+        outcome = { ok: true, value };
+        finish();
       }, fail);
     } catch (error) {
       fail(error);
@@ -114,7 +131,8 @@ export function tx<T>(
   });
 }
 
-const prefixRange = (prefix: string) => IDBKeyRange.bound(prefix, `${prefix}￿`);
+const prefixRange = (prefix: string) =>
+  IDBKeyRange.bound(prefix, `${prefix}\uffff`);
 const pairRange = (first: string) =>
   IDBKeyRange.bound([first, -Infinity], [first, Infinity]);
 
