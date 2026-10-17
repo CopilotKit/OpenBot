@@ -146,6 +146,19 @@ describe("classifyGrantError, one assertion per pass row of the table", () => {
     );
   });
 
+  test("row 10: a message that is not text classifies like an unrecognised message and never throws", () => {
+    for (const message of [42, {}, null]) {
+      const body = { code: "CONNECTION_FAILED", message } as unknown as {
+        code: string;
+      };
+      expect(retry(classifyGrantError(503, body)).reason).toBe(BUSY);
+      const v = hold(classifyGrantError(409, body));
+      expect(v.hint).toBe(
+        "Learning capture is paused: Intelligence refused the capture pass (409).",
+      );
+    }
+  });
+
   test("row 11: TRAJECTORIES_UNAVAILABLE is parked", () => {
     const v = park(
       classifyGrantError(404, { code: "TRAJECTORIES_UNAVAILABLE" }),

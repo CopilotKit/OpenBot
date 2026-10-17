@@ -79,7 +79,8 @@ export function classifyGrantError(
   headers?: { retryAfter?: string | null },
 ): GrantVerdict {
   const code = body?.code;
-  const message = body?.message ?? "";
+  // A body from the wire may carry a non-text message; treat it as no message.
+  const message = typeof body?.message === "string" ? body.message : "";
   const retry = (reason: string): GrantVerdict => {
     const after = retryAfterMs(headers?.retryAfter);
     return after === undefined
