@@ -242,3 +242,172 @@ test("Enter while focus is inside a shadow root names the inner focused control"
     target: { role: "textbox", name: "Inner field" },
   });
 });
+
+const keyboard = (type: "keydown" | "keyup", init: KeyboardEventInit) =>
+  new KeyboardEvent(type, { bubbles: true, ...init });
+const activation = (detail: number) =>
+  new MouseEvent("click", { bubbles: true, button: 0, detail });
+
+test("Enter in a form field that submits the form is one key step, not a key step and a click", () => {
+  document.body.innerHTML = `<form><input aria-label="Search"><button>Save</button></form>`;
+  document
+    .querySelector("form")!
+    .addEventListener("submit", (event) => event.preventDefault());
+  start();
+  const input = document.querySelector("input")!;
+  input.focus();
+  input.dispatchEvent(keyboard("keydown", { key: "Enter" }));
+  // Implicit submission: Chrome clicks the default button with detail 0 before the keyup.
+  document.querySelector("button")!.dispatchEvent(activation(0));
+  input.dispatchEvent(keyboard("keyup", { key: "Enter" }));
+  expect(sent).toEqual([
+    {
+      kind: "key",
+      key: "Enter",
+      url: "https://app.example.test/page",
+      target: { role: "textbox", name: "Search", sensitive: false },
+    },
+  ]);
+});
+
+test("a pointer click after Enter is still a click step", () => {
+  document.body.innerHTML = `<input aria-label="Search"><button>Save</button>`;
+  start();
+  const input = document.querySelector("input")!;
+  input.focus();
+  input.dispatchEvent(keyboard("keydown", { key: "Enter" }));
+  document.querySelector("button")!.dispatchEvent(activation(1));
+  expect(sent.map((step) => step.kind)).toEqual(["key", "click"]);
+});
+
+test("a click with detail 0 and no Enter before it (Space on a checkbox) is a click step", () => {
+  document.body.innerHTML = `<input type="checkbox" aria-label="Agree">`;
+  start();
+  const box = document.querySelector("input")!;
+  box.focus();
+  box.dispatchEvent(keyboard("keydown", { key: " " }));
+  box.dispatchEvent(activation(0));
+  expect(sent).toEqual([
+    {
+      kind: "click",
+      url: "https://app.example.test/page",
+      target: { role: "checkbox", name: "Agree", sensitive: false },
+    },
+  ]);
+});
+
+test("a click with detail 0 after the Enter key is released is a click step", () => {
+  document.body.innerHTML = `<input aria-label="Search"><button>Save</button>`;
+  start();
+  const input = document.querySelector("input")!;
+  input.focus();
+  input.dispatchEvent(keyboard("keydown", { key: "Enter" }));
+  input.dispatchEvent(keyboard("keyup", { key: "Enter" }));
+  document.querySelector("button")!.dispatchEvent(activation(0));
+  expect(sent.map((step) => step.kind)).toEqual(["key", "click"]);
+});
+
+test("a key pressed after an Enter whose keyup never arrived (focus moved to another frame) lets a detail 0 click through", () => {
+  document.body.innerHTML = `<input aria-label="Search"><input type="checkbox" aria-label="Agree">`;
+  start();
+  const input = document.querySelector("input")!;
+  input.focus();
+  input.dispatchEvent(keyboard("keydown", { key: "Enter" }));
+  const box = document.querySelector<HTMLInputElement>("[type=checkbox]")!;
+  box.focus();
+  box.dispatchEvent(keyboard("keydown", { key: " " }));
+  box.dispatchEvent(activation(0));
+  expect(sent.map((step) => step.kind)).toEqual(["key", "click"]);
+});
+
+/** Counts every click that reaches the window, so a test can show the browser really sent two. */
+function countClicks() {
+  const counter = { clicks: 0 };
+  const listener = () => {
+    counter.clicks += 1;
+  };
+  window.addEventListener("click", listener, true);
+  return {
+    counter,
+    off: () => window.removeEventListener("click", listener, true),
+  };
+}
+
+test("a click on a label for a checkbox is one click step, not one for the label and one for the checkbox", async () => {
+  document.body.innerHTML = `<label for="r">Remember me</label><input type="checkbox" id="r">`;
+  start();
+  const { counter, off } = countClicks();
+  document.querySelector("label")!.dispatchEvent(activation(1));
+  // happy-dom, like Chrome, forwards the label's click to its control in the same task.
+  off();
+  expect(counter.clicks).toBe(2);
+  expect(sent).toEqual([
+    {
+      kind: "click",
+      url: "https://app.example.test/page",
+      target: { role: "checkbox", name: "Remember me", sensitive: false },
+    },
+  ]);
+  await wait(0);
+  document.querySelector("input")!.dispatchEvent(activation(1));
+  expect(sent.map((step) => step.kind)).toEqual(["click", "click"]);
+});
+
+test("a click on the text of a label wrapping its checkbox is one click step", async () => {
+  document.body.innerHTML = `<label><input type="checkbox"> <span>Remember me</span></label>`;
+  start();
+  const { counter, off } = countClicks();
+  document.querySelector("span")!.dispatchEvent(activation(1));
+  off();
+  expect(counter.clicks).toBe(2);
+  expect(sent).toEqual([
+    {
+      kind: "click",
+      url: "https://app.example.test/page",
+      target: { role: "checkbox", name: "Remember me", sensitive: false },
+    },
+  ]);
+  await wait(0);
+  document.querySelector("input")!.dispatchEvent(activation(1));
+  expect(sent.map((step) => step.kind)).toEqual(["click", "click"]);
+});
+
+test("a click on the checkbox inside its label is one click step", () => {
+  document.body.innerHTML = `<label><input type="checkbox"> <span>Remember me</span></label>`;
+  start();
+  document.querySelector("input")!.dispatchEvent(activation(1));
+  expect(sent.map((step) => step.kind)).toEqual(["click"]);
+});
+
+test("Enter that confirms an input method's composition is not a step", () => {
+  document.body.innerHTML = `<input aria-label="Search">`;
+  start();
+  const input = document.querySelector("input")!;
+  input.focus();
+  input.dispatchEvent(keyboard("keydown", { key: "Enter", isComposing: true }));
+  const webkitConfirm = keyboard("keydown", { key: "Enter" });
+  Object.defineProperty(webkitConfirm, "keyCode", { value: 229 });
+  input.dispatchEvent(webkitConfirm);
+  expect(sent).toEqual([]);
+});
+
+test("a click inside the field being typed in keeps one type step for the visit", () => {
+  document.body.innerHTML = `<label for="n">Name</label><input id="n">`;
+  start();
+  const input = document.querySelector("input")!;
+  const type = () => input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  type();
+  input.dispatchEvent(activation(1));
+  type();
+  type();
+  input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  expect(sent.filter((step) => step.kind === "type")).toEqual([
+    {
+      kind: "type",
+      url: "https://app.example.test/page",
+      target: { role: "textbox", name: "Name", sensitive: false },
+    },
+  ]);
+  expect(sent.map((step) => step.kind)).toEqual(["type", "click"]);
+});

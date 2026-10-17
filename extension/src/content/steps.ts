@@ -55,6 +55,14 @@ export function startStepCapture(options: {
   const isTrusted = options.isTrusted ?? ((event: Event) => event.isTrusted);
   const scrollWindowMs = options.scrollWindowMs ?? SCROLL_WINDOW_MS;
   let typingField: Element | null = null;
+  // Enter on a field, button or link makes Chrome fire a click with detail 0 before the keyup;
+  // the Enter key step already stands for that action.
+  let enterDown = false;
+  // A click on a label is forwarded to its control in the same task; the label's step stands for both.
+  let forwarded: {
+    control: Element;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
   let scroll: {
     deltaY: number;
     element: Element | null;
@@ -83,16 +91,26 @@ export function startStepCapture(options: {
     });
   }
 
+  function clearForwarded() {
+    if (forwarded) clearTimeout(forwarded.timer);
+    forwarded = null;
+  }
+
   const onClick = (event: Event) => {
-    const { button } = event as MouseEvent;
+    const { button, detail } = event as MouseEvent;
     if ((button !== 0 && button !== 1) || !accepts(event)) return;
+    if (enterDown && detail === 0) return;
+    const element = origin(event);
+    if (forwarded && element === forwarded.control) return;
     flushScroll();
-    typingField = null;
-    options.send({
-      kind: "click",
-      url: url(),
-      target: target(origin(event)),
-    });
+    // Clicking inside the field being typed in (to move the caret) is still the same visit.
+    if (element !== typingField) typingField = null;
+    options.send({ kind: "click", url: url(), target: target(element) });
+    const control = element?.closest("label")?.control;
+    if (control && !control.contains(element)) {
+      clearForwarded();
+      forwarded = { control, timer: setTimeout(clearForwarded, 0) };
+    }
   };
   const onInput = (event: Event) => {
     const element = origin(event);
@@ -106,7 +124,12 @@ export function startStepCapture(options: {
     typingField = null;
   };
   const onKeyDown = (event: Event) => {
-    const { key } = event as KeyboardEvent;
+    const { key, isComposing, keyCode } = event as KeyboardEvent;
+    // Another key means the Enter is over, even when its keyup went to a frame focus moved into.
+    if (key !== "Enter") enterDown = false;
+    // An input method (Japanese, Chinese, Korean) confirms with Enter: Chromium marks it isComposing,
+    // WebKit sends key code 229. Recording it would replay a submit the person never made.
+    if (isComposing || keyCode === 229) return;
     if (!(DEMONSTRATION_KEYS as readonly string[]).includes(key)) return;
     if (!accepts(event)) return;
     flushScroll();
@@ -116,6 +139,10 @@ export function startStepCapture(options: {
       url: url(),
       target: target(deepActiveElement()),
     });
+    if (key === "Enter") enterDown = true;
+  };
+  const onKeyUp = (event: Event) => {
+    if ((event as KeyboardEvent).key === "Enter") enterDown = false;
   };
   const onWheel = (event: Event) => {
     if (!accepts(event)) return;
@@ -138,6 +165,7 @@ export function startStepCapture(options: {
     ["focusin", resetStreak],
     ["focusout", resetStreak],
     ["keydown", onKeyDown],
+    ["keyup", onKeyUp],
     ["wheel", onWheel],
   ];
   for (const [name, listener] of listeners)
@@ -150,6 +178,8 @@ export function startStepCapture(options: {
       if (scroll) clearTimeout(scroll.timer);
       scroll = null;
       typingField = null;
+      enterDown = false;
+      clearForwarded();
     },
   };
 }
