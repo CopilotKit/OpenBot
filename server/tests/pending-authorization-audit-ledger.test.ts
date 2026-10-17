@@ -316,7 +316,7 @@ const NON_WRITES: Record<
     anchor: 'return refusedWith("cancelled")',
     name: "completion claimed nothing because the attempt was cancelled during the return leg",
     waived:
-      "This branch ends no attempt: the cancel's deletion already ended it and filed `mcp.authorization_cancelled`, so a second row would record the same withdrawal twice. What the branch adds is a vendor-side withdrawal of the grant the return carried, or an `arcade-cancelled-grant-left-live` line where that would end more than the cancelled consent.",
+      "This branch ends no attempt: the cancel's deletion already ended it and filed `mcp.authorization_cancelled`, so a second row would record the same withdrawal twice. What the branch adds is a vendor-side withdrawal of the grant the return carried, or, where that would end more than the cancelled consent, an `arcade-cancelled-grant-left-live` line and an `mcp.cancelled_grant_left_live` row — which records the grant left live, not the attempt's ending.",
   },
   "mint that found its attempt already cancelled": {
     file: "server/src/plugins/route-groups/connections.ts",

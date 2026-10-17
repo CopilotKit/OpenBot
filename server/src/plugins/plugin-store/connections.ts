@@ -1508,6 +1508,33 @@ export function connectionMethods(context: StoreContext) {
     },
 
     /**
+     * A cancelled consent whose grant was left live at the vendor. See `mcp.cancelled_grant_left_live`.
+     * Filed under the app's slug, beside the `mcp.authorization_cancelled` row the cancel filed.
+     */
+    async recordCancelledGrantLeftLive(input: {
+      actorId: string;
+      attempt: PendingAuthorization;
+      toolkit: string;
+      why: string;
+      siblings: readonly string[];
+    }): Promise<void> {
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.cancelled_grant_left_live",
+        targetType: "mcp_server",
+        targetId: input.toolkit,
+        payload: {
+          actor: input.actorId,
+          server: input.toolkit,
+          serverId: input.attempt.serverId,
+          action: input.attempt.action,
+          holder: input.attempt.holder,
+          why: input.why,
+          siblings: [...input.siblings],
+        },
+      });
+    },
+
+    /**
      * Spend one call on this person's key, and say what the vendor made of it.
      *
      * ONE PROBE, TWO CALLERS, AND THE ANSWER TO "WHAT DOES A FAILED PROBE MEAN" LIVES HERE ONCE.

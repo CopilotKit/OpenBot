@@ -153,7 +153,11 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
   [
     "cancelled",
-    "That authorization was cancelled while it was being finished, so it was not recorded. If the app still shows as connected and you did not mean it to be, disconnect it from the app's page.",
+    "That authorization was cancelled while it was being finished, so it was not recorded, and what it granted at the app's vendor was withdrawn.",
+  ],
+  [
+    "cancelled-left-live",
+    "That authorization was cancelled while it was being finished, so it was not recorded — but what it granted could not be withdrawn at the app's vendor, so the vendor may still allow the action you cancelled. To remove it, disconnect the app from its page, which ends its whole connection there, then connect again and authorize only what you want.",
   ],
   [
     "not-recorded",

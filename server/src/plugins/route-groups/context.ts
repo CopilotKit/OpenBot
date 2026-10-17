@@ -180,6 +180,10 @@ export const AUTHORIZATION_REFUSALS = [
   "not-permitted",
   // The attempt was cancelled, or otherwise ended, while its return leg was being finished.
   "cancelled",
+  // The same, except the grant the return carried was not withdrawn — doing so would have ended a
+  // connection nobody asked to end, or the withdrawal was not confirmed — so the vendor may still
+  // allow the cancelled action.
+  "cancelled-left-live",
   // This deployment could not write what it had, so it wrote none of it.
   "not-recorded",
 ] as const;

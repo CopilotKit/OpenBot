@@ -38,6 +38,7 @@ test("every reason the verifier can send has a sentence here, and no others", ()
     "context-changed",
     "not-permitted",
     "cancelled",
+    "cancelled-left-live",
     "not-recorded",
   ]);
 });

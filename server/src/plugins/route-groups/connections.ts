@@ -2504,10 +2504,35 @@ export function mountConnectionRoutes({
        * reading the `catch` above gives an unreachable probe, for the same reason.
        */
       if (!claimed) {
+        let probeFailure: unknown = null;
         const completedElsewhere = await store
           .authorizationAttemptCompleted({ actorId, authId })
-          .catch(() => null);
-        if (completedElsewhere === null) return refusedWith("not-recorded");
+          .catch((error: unknown) => {
+            probeFailure = error;
+            return null;
+          });
+        /*
+         * A PROBE THAT COULD NOT BE READ WITHDRAWS NOTHING, AND SAYS SO. Whether the attempt was
+         * cancelled or completed by a rival is unknown, so the grant this return carried is left
+         * where it is — which may be live at the vendor with nothing here recording it. That is
+         * the same disagreement the line below reports, and it was the one branch that left none.
+         */
+        if (completedElsewhere === null) {
+          console.error(
+            JSON.stringify({
+              type: "arcade-cancelled-grant-left-live",
+              server: attempt.serverId,
+              app: fresh.toolkit,
+              action: attempt.action,
+              authorizationId: authId,
+              why: "whether the attempt was cancelled could not be read, so nothing was withdrawn",
+              siblings: [],
+              note: "A consent completed at the vendor and its attempt had already ended here, and reading how it ended raised. Nothing was recorded and nothing was withdrawn, so the grant may be live at the vendor. Disconnect the app here to end it if it should not stand.",
+              error: reasonWithoutStatement(probeFailure),
+            }),
+          );
+          return refusedWith("not-recorded");
+        }
         if (!completedElsewhere) {
           const account = fresh.account;
           const app = fresh.toolkit;
@@ -2564,6 +2589,32 @@ export function mountConnectionRoutes({
                 ...(failure ? { error: reasonWithoutStatement(failure) } : {}),
               }),
             );
+            /*
+             * AND THE TRAIL SAYS IT TOO, not only an operator's log. `mcp.authorization_cancelled`
+             * on its own reads as "the person withdrew this", and here the vendor may still allow
+             * the very action they cancelled — for a Shared app, as the team. A failure to file it
+             * costs the person nothing more than the line above already says.
+             */
+            await store
+              .recordCancelledGrantLeftLive({
+                actorId,
+                attempt,
+                toolkit: app,
+                why: leftLive,
+                siblings: collateral?.siblings ?? [],
+              })
+              .catch((error: unknown) =>
+                console.error(
+                  JSON.stringify({
+                    type: "arcade-cancelled-grant-left-live-not-filed",
+                    server: attempt.serverId,
+                    authorizationId: authId,
+                    error: reasonWithoutStatement(error),
+                  }),
+                ),
+              );
+            // Its own code, so the person is told the action may still be allowed and how to end it.
+            return refusedWith("cancelled-left-live");
           }
           return refusedWith("cancelled");
         }

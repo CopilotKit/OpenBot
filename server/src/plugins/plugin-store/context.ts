@@ -341,7 +341,17 @@ export function createStoreContext(options: PluginStoreOptions) {
     };
   }
 
-  /** The WHERE clause for one account's row, by holder. */
+  /**
+   * The WHERE clause for one account's row, by holder.
+   *
+   * THE DEPLOYMENT HALF MATCHES THE IDENTITY TOO. There is one deployment row per app, but not one
+   * deployment identity per app over time: every switch to Shared mints a new one. Matched on the
+   * holder alone, an act aimed at a RETIRED identity landed on the CURRENT one's row — a consent
+   * begun under Shared identity A, the app flipped Shared → Personal → Shared (minting B) and B
+   * connected, and the admin's return then withdrew A at the vendor, correctly, and deleted B's row
+   * here, so the app read as disconnected while B stood live at Arcade. A person's row needs no
+   * such clause: their vendor id is their user id ({@link personAccount}).
+   */
   const accountRow = (toolkit: string, account: AccountRef) =>
     account.holder === "person"
       ? and(
@@ -354,6 +364,7 @@ export function createStoreContext(options: PluginStoreOptions) {
           eq(brokeredConnections.provider, brokerProvider),
           eq(brokeredConnections.app, toolkit),
           eq(brokeredConnections.holder, "deployment"),
+          eq(brokeredConnections.vendorUserId, account.vendorUserId),
         );
 
   /**

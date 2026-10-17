@@ -195,6 +195,8 @@ function build(
      * breaks the transaction rolls it back, which is the first.
      */
     completion?: "rolls-back" | "commits-then-throws";
+    /** Makes the read of how an attempt ended throw, which a completion that claimed nothing asks. */
+    completedProbeThrows?: boolean;
   } = {},
 ) {
   const handle = options.database ?? database;
@@ -246,21 +248,28 @@ function build(
               : ({ ...row, ...options.attemptAs } as typeof row);
           },
         }
-      : options.completion
+      : options.completedProbeThrows
         ? {
             ...pluginStore,
-            completeAuthorizationAttempt: async (
-              input: Parameters<
-                typeof pluginStore.completeAuthorizationAttempt
-              >[0],
-            ) => {
-              if (options.completion === "commits-then-throws") {
-                await pluginStore.completeAuthorizationAttempt(input);
-              }
-              throw completionFailure();
+            authorizationAttemptCompleted: async () => {
+              throw new Error("injected probe failure");
             },
           }
-        : pluginStore;
+        : options.completion
+          ? {
+              ...pluginStore,
+              completeAuthorizationAttempt: async (
+                input: Parameters<
+                  typeof pluginStore.completeAuthorizationAttempt
+                >[0],
+              ) => {
+                if (options.completion === "commits-then-throws") {
+                  await pluginStore.completeAuthorizationAttempt(input);
+                }
+                throw completionFailure();
+              },
+            }
+          : pluginStore;
   args[29] =
     "brokerBag" in options ? options.brokerBag : { broker, provider: "arcade" };
   return createApp(...args);
@@ -498,6 +507,7 @@ test("the reasons the verifier can refuse with are a closed set", () => {
     "context-changed",
     "not-permitted",
     "cancelled",
+    "cancelled-left-live",
     "not-recorded",
   ]);
 });
@@ -1048,6 +1058,51 @@ describe("a consent whose account context has moved on", () => {
     expect(row?.outcome).toBe("withdrawn");
     expect(row?.completedAt).not.toBeNull();
     expect(row?.authId).toBe(MINTED);
+  });
+
+  /**
+   * A RETIRED SHARED IDENTITY IS NOT THE APP'S DEPLOYMENT ROW. An administrator starts a consent
+   * on Shared identity A; the app goes Shared → Personal → Shared, which mints B, and B connects;
+   * then the administrator comes back. The withdrawal is A's, and the row it clears must be A's:
+   * matched on the holder alone, it was B's, and the app read as disconnected while B stood live.
+   */
+  test("a retired SHARED identity's withdrawal leaves the current Shared identity's row alone", async () => {
+    const retired = `retired-${suite}`;
+    await database.insert(pendingAuthorizations).values({
+      actorId: ACTOR,
+      serverId: APP,
+      action: ACTION,
+      holder: "deployment",
+      userId: null,
+      vendorUserId: retired,
+      authId: MINTED,
+      createdAt: new Date(Math.floor(Date.now() / 1000) * 1000),
+    });
+    await switchToShared();
+    await giveCurrentAccountAConnection();
+    statusAnswer = async () => ({
+      status: "completed",
+      userId: retired,
+      scopes: ["gmail.read"],
+    });
+
+    await expectRefusal(
+      await verify(ACTOR, "?flow_id=flow-abc", { roles: ["admin"] }),
+      "context-changed",
+    );
+
+    expect(revokeCalls).toEqual([
+      {
+        account: { holder: "deployment", vendorUserId: retired },
+        toolkit: TOOLKIT,
+      },
+    ]);
+    const { connections } = await written();
+    expect(connections.map((row) => [row.holder, row.vendorUserId])).toEqual([
+      ["deployment", SHARED_IDENTITY],
+    ]);
+    expect(await disconnectsFor([TOOLKIT])).toEqual([]);
+    expect((await attemptRow())?.outcome).toBe("withdrawn");
   });
 
   test("a revoke that answers false, which an unresolved auth provider does, is not a withdrawal", async () => {
@@ -1796,6 +1851,19 @@ const lines = (said: unknown[][]): string[] =>
  * completion: the DELETE below is the one `discardAuthorizationAttempt` issues.
  */
 describe("a cancel that lands between the confirmation and the completion", () => {
+  const leftLiveEvents = async () =>
+    (
+      await database
+        .select({ payload: sql<Record<string, unknown>>`payload` })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.targetId, TOOLKIT),
+            eq(auditEvents.eventType, "mcp.cancelled_grant_left_live"),
+          ),
+        )
+    ).map((row) => row.payload);
+
   function cancelDuringTheReturnLeg() {
     statusAnswer = async () => {
       await database
@@ -1824,6 +1892,7 @@ describe("a cancel that lands between the confirmation and the completion", () =
       },
     ]);
     await expectNothingWritten();
+    expect(await leftLiveEvents()).toEqual([]);
     // The cancel's deletion stands: nothing here re-created or re-settled the attempt.
     expect(await attemptRow()).toBeNull();
   });
@@ -1845,12 +1914,17 @@ describe("a cancel that lands between the confirmation and the completion", () =
       verified: true,
     });
     cancelDuringTheReturnLeg();
+    // A provider of its own, so THIS guard is the only one that can stop the revoke: on the
+    // default provider, rows earlier cases left on this identity are siblings, and the sibling
+    // guard would stop it first and pass this case with the already-held check removed.
+    authProviderAnswer = async (toolkit) =>
+      toolkit === TOOLKIT ? `alone-${TOOLKIT}` : "google";
 
     const [response, said] = await heard(() =>
       verify(ACTOR, "?flow_id=flow-abc"),
     );
 
-    await expectRefusal(response, "cancelled");
+    await expectRefusal(response, "cancelled-left-live");
     expect(revokeCalls).toEqual([]);
     const { connections, events } = await written();
     expect(connections.length).toBe(1);
@@ -1860,6 +1934,76 @@ describe("a cancel that lands between the confirmation and the completion", () =
     );
     expect(line).toBeDefined();
     expect(line).toContain(`"authorizationId":"${MINTED}"`);
+    expect(line).toContain("already held this app");
+    // AND THE TRAIL: the cancel's own row would otherwise read as a clean withdrawal.
+    expect(await leftLiveEvents()).toEqual([
+      expect.objectContaining({ action: ACTION, actor: ACTOR }),
+    ]);
+  });
+
+  /**
+   * THE SIBLING GUARD, ON ITS OWN. The account does not hold this app, so the already-held check
+   * passes; it holds another app on the SAME auth provider, which a revoke would end with it. For a
+   * Shared app that is the team's connection.
+   */
+  test("leaves a connection a sibling app shares alone, and says so", async () => {
+    await giveAttempt({ authId: MINTED, ageMinutes: 1 });
+    const sibling = `${TOOLKIT}+calendar`;
+    await database.insert(brokeredConnections).values({
+      provider: "arcade",
+      app: sibling,
+      holder: "person",
+      userId: ACTOR,
+      vendorUserId: ACTOR,
+      verified: true,
+    });
+    cancelDuringTheReturnLeg();
+    authProviderAnswer = async (toolkit) =>
+      toolkit === TOOLKIT || toolkit === sibling
+        ? `alone-${TOOLKIT}`
+        : "google";
+
+    const [response, said] = await heard(() =>
+      verify(ACTOR, "?flow_id=flow-abc"),
+    );
+
+    await expectRefusal(response, "cancelled-left-live");
+    expect(revokeCalls).toEqual([]);
+    await expectNothingWritten();
+    const line = lines(said).find((text) =>
+      text.includes("arcade-cancelled-grant-left-live"),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain("other apps share this connection");
+    // AND THE TRAIL: the cancel's own row would otherwise read as a clean withdrawal.
+    expect(await leftLiveEvents()).toEqual([
+      expect.objectContaining({ action: ACTION, actor: ACTOR }),
+    ]);
+  });
+});
+
+describe("a cancel whose ending could not be read", () => {
+  test("withdraws nothing, refuses as not-recorded, and leaves an operator a line", async () => {
+    await giveAttempt({ authId: MINTED, ageMinutes: 1 });
+    statusAnswer = async () => {
+      await database
+        .delete(pendingAuthorizations)
+        .where(eq(pendingAuthorizations.actorId, ACTOR));
+      return { status: "completed", userId: ACTOR, scopes: ["gmail.read"] };
+    };
+
+    const [response, said] = await heard(() =>
+      verify(ACTOR, "?flow_id=flow-abc", { completedProbeThrows: true }),
+    );
+
+    await expectRefusal(response, "not-recorded");
+    expect(revokeCalls).toEqual([]);
+    const line = lines(said).find((text) =>
+      text.includes("arcade-cancelled-grant-left-live"),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain(`"authorizationId":"${MINTED}"`);
+    expect(line).toContain("injected probe failure");
   });
 });
 
