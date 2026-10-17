@@ -4,6 +4,7 @@ import type {
   BackgroundToContent,
   ContentToBackground,
 } from "../src/protocol/messages";
+import { parseContentMessage } from "../src/protocol/messages";
 
 type TestPort = {
   port: chrome.runtime.Port;
@@ -273,5 +274,21 @@ describe("createContentPort", () => {
     second.content.dispose();
     expect(second.timeouts.every((t) => t.cleared)).toBe(true);
     expect(timeouts).toHaveLength(0);
+  });
+
+  test("clips a very long page address so the hello sent after a reconnect still parses", () => {
+    globals.location = {
+      href: `https://example.test/saml?SAMLRequest=${"a".repeat(5000)}`,
+    };
+    const { ports, fire } = harness();
+
+    ports[0].disconnect();
+    fire();
+
+    const hello = ports[1].sent[0];
+    expect(hello.type).toBe("content.hello");
+    const parsed = parseContentMessage(hello);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type === "content.hello" && parsed.url.length).toBe(4096);
   });
 });

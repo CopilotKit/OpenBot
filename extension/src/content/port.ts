@@ -17,6 +17,17 @@ const defaultTimers: Timers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
+const MAX_HELLO_URL = 4096;
+
+/** The hello, with the address clipped to the protocol's cap so a long URL (a SAML redirect) still parses. */
+export function contentHello(): ContentToBackground {
+  return {
+    type: "content.hello",
+    top: window === window.top,
+    url: location.href.slice(0, MAX_HELLO_URL),
+  };
+}
+
 /**
  * The content script's line to the service worker. When the worker restarts the port disconnects: reconnect after
  * 0.5, 1, 2 and 4 s (then every 4 s) and keep what was posted meanwhile, in order. Steps, digests, hellos and notice
@@ -48,12 +59,6 @@ export function createContentPort(
   let timer: unknown = null;
   let disposed = false;
 
-  const hello = (): ContentToBackground => ({
-    type: "content.hello",
-    top: window === window.top,
-    url: location.href,
-  });
-
   const scheduleReconnect = () => {
     if (disposed || timer !== null) return;
     const delay =
@@ -66,7 +71,7 @@ export function createContentPort(
   };
 
   const flush = (target: chrome.runtime.Port) => {
-    target.postMessage(hello());
+    target.postMessage(contentHello());
     if (dropped > 0) {
       target.postMessage({
         type: "content.event",
