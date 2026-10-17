@@ -117,6 +117,27 @@ describe("deployment configuration", () => {
     );
   });
 
+  test("reads the CLI-written CPK_INTELLIGENCE_API_KEY when INTELLIGENCE_API_KEY is unset", () => {
+    const environment: Record<string, string | undefined> = {
+      ...baseEnvironment,
+    };
+    delete environment.INTELLIGENCE_API_KEY;
+    environment.CPK_INTELLIGENCE_API_KEY = "cpk-cli-written";
+
+    const config = loadConfig(environment);
+
+    expect(config.runtime.intelligence.apiKey).toBe("cpk-cli-written");
+  });
+
+  test("prefers INTELLIGENCE_API_KEY over CPK_INTELLIGENCE_API_KEY when both are set", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      CPK_INTELLIGENCE_API_KEY: "cpk-cli-written",
+    });
+
+    expect(config.runtime.intelligence.apiKey).toBe("tenant-api-key");
+  });
+
   test("starts without COPILOTKIT_LICENSE_TOKEN, because managed Intelligence no longer issues one", () => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
