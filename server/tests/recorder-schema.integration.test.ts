@@ -290,7 +290,13 @@ test("the trajectory foreign key keeps its short name", async () => {
   expect(list).toContain(
     "demonstration_trajectories_owner_user_id_users_id_fk",
   );
-  for (const name of list) expect(name.length).toBeLessThanOrEqual(63);
+  const migration = await Bun.file(
+    new URL("../drizzle/0057_recorder_extension.sql", import.meta.url),
+  ).text();
+  const quoted = [...migration.matchAll(/"([a-z0-9_]+)"/g)].map(
+    (match) => match[1] as string,
+  );
+  for (const name of quoted) expect(name.length).toBeLessThanOrEqual(63);
 });
 
 test("a connection token hash is unique", async () => {
