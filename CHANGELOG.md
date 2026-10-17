@@ -32,6 +32,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `code_required` (below). A server and a computer must be upgraded together: an older computer has
   no `/sign-in/code`.
 
+### A repeated minute in a routine's schedule is described once
+
+A schedule like `0,30,0 9 * * *` fires at 09:00 and 09:30, but the routines page and the model were
+told "Every day at 09:00, 09:00 and 09:30". Repeated minutes are now said once, as repeated weekdays
+already were.
+
 ### The Bot's screen opens only when there is something to watch
 
 Asking a Bot a question it answered in words could still open its computer beside the conversation,
