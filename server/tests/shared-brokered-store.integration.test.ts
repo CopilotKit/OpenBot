@@ -299,9 +299,12 @@ describe("a shared app", () => {
 
   /*
    * AND A RE-CHECK NEVER RE-POINTS IT. The `only` branch records a check of a connection that
-   * exists; it is not evidence of a grant under any identity, so it may not move the row's.
+   * exists; it is not evidence of a grant under any identity, so it may not move the row's. Nor
+   * may it stamp its verdict on the row: a probe of ANOTHER identity says nothing about the account
+   * this row holds, so it finds no row of its own and writes nothing — `accountRow` matches the
+   * deployment's identity as well as its holder.
    */
-  test("a re-check write under another identity leaves the row's identity alone", async () => {
+  test("a re-check write under another identity leaves the row alone", async () => {
     const store = freshStore();
     await store.recordBrokeredConnection({
       toolkit: app,
@@ -317,12 +320,15 @@ describe("a shared app", () => {
       probeAction: "GITHUB_LIST_ISSUES",
       only: "a row that is still there",
     });
-    expect(wrote).toBe(true);
+    expect(wrote).toBe(false);
     const rows = await database
-      .select({ vendorUserId: brokeredConnections.vendorUserId })
+      .select({
+        vendorUserId: brokeredConnections.vendorUserId,
+        verified: brokeredConnections.verified,
+      })
       .from(brokeredConnections)
       .where(eq(brokeredConnections.app, app));
-    expect(rows).toEqual([{ vendorUserId: VENDOR_ID }]);
+    expect(rows).toEqual([{ vendorUserId: VENDOR_ID, verified: true }]);
   });
 
   test("removing the app revokes the deployment account too", async () => {

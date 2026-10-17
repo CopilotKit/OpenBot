@@ -145,7 +145,7 @@ describe("a brokered row minted at the other broker", () => {
         actorId: asker,
       }),
     ).rejects.toThrow(
-      "You have not connected your Left-over GitHub account. Connect it in Settings and ask again.",
+      "You have not connected your Left-over GitHub account. Connect it and ask again.",
     );
     expect(sentAs).toEqual([]);
   });

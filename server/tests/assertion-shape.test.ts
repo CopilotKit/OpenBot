@@ -877,7 +877,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "app/tests/connected-accounts-authorized-notice.test.tsx",
-    line: 103,
+    line: 104,
     shape: "d",
     finding: "round 2 — connected-accounts-authorized-notice.test.tsx:103-115",
     why: 'test.each([ "no-attempt", "toString", "constructor", "__proto__",',
@@ -928,7 +928,7 @@ const ALLOW: Allowed[] = [
   },
   {
     file: "server/tests/arcade-vendor-error-engine.test.ts",
-    line: 175,
+    line: 186,
     shape: "f",
     finding: "round 2 — arcade-vendor-error-engine.test.ts:174",
     why: 'expect( JSON.stringify(thrown, Object.keys(thrown as object)), ).not.toContain("SECRET-BEARER");',
