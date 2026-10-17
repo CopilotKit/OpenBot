@@ -14,6 +14,15 @@ import { verifyDist } from "./verify-dist";
 
 const PAGES = ["popup", "connect", "access", "microphone", "options"] as const;
 
+export function parseBuildVariant(
+  value: string | undefined,
+): BuildVariant | null {
+  if (value === undefined || value === "" || value === "release")
+    return "release";
+  if (value === "e2e") return "e2e";
+  return null;
+}
+
 export function viteConfigs(input: {
   variant: BuildVariant;
   root: string;
@@ -32,6 +41,10 @@ export function viteConfigs(input: {
   } satisfies InlineConfig;
   const script = (entry: string, name: string, file: string): InlineConfig => ({
     ...shared,
+    define: {
+      ...shared.define,
+      "process.env.NODE_ENV": JSON.stringify("production"),
+    },
     build: {
       outDir,
       emptyOutDir: false,
@@ -98,8 +111,14 @@ async function main() {
   const root = path.resolve(import.meta.dir, "..", "..");
   const extension = path.join(root, "extension");
   const dist = path.join(extension, "dist");
-  const variant: BuildVariant =
-    process.env.RECORDER_BUILD_VARIANT === "e2e" ? "e2e" : "release";
+  const requested = process.env.RECORDER_BUILD_VARIANT;
+  const variant = parseBuildVariant(requested);
+  if (variant === null) {
+    console.error(
+      `RECORDER_BUILD_VARIANT must be "release" or "e2e", got "${requested}"`,
+    );
+    process.exit(1);
+  }
 
   for (const config of viteConfigs({ variant, root })) await build(config);
 
