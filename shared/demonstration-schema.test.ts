@@ -103,4 +103,23 @@ test("hasTarget is true for every gesture kind and false for navigate and networ
       ),
     ).toBe(true);
   }
+  expect(
+    hasTarget(
+      demonstrationActionSchema.parse({
+        kind: "navigate",
+        url: "https://example.test/",
+        transition: "link",
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    hasTarget(
+      demonstrationActionSchema.parse({
+        kind: "network",
+        url: "https://example.test/",
+        method: "POST",
+        status: 201,
+      }),
+    ),
+  ).toBe(false);
 });
