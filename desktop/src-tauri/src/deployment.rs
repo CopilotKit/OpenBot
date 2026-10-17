@@ -175,11 +175,14 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 8] = [
+pub const ALSO_COPIED: [&str; 9] = [
     "shared",
     // A root workspace the server imports as `@openbot/toolkit`. Without it, `bun install
     // --frozen-lockfile` stops with `Workspace not found "toolkit"`.
     "toolkit",
+    // The Recorder extension's root workspace. Desktop does not build or run it, but `bun install
+    // --frozen-lockfile` stops with `Workspace not found "extension"` without its manifest.
+    "extension",
     "examples",
     "package.json",
     "bun.lock",
@@ -590,5 +593,18 @@ mod tests {
             "a deployment is not a place to develop"
         );
         assert!(!REQUIRED.contains(&"docs"));
+    }
+
+    #[test]
+    fn every_root_workspace_is_copied() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        for workspace in manifest["workspaces"].as_array().unwrap() {
+            let workspace = workspace.as_str().unwrap();
+            assert!(
+                REQUIRED.contains(&workspace) || ALSO_COPIED.contains(&workspace),
+                "{workspace} is a root workspace that a frozen install needs, but is not copied"
+            );
+        }
     }
 }

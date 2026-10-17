@@ -11,7 +11,15 @@ pub const REQUIRED: &str = "Finish installing OpenBot's local software before si
 pub const FILE: &str = ".openbot-prepared.json";
 const DEPENDENCIES: &str = ".openbot-dependencies.json";
 const LAUNCH: &str = ".openbot-launched.json";
-const PACKAGES: [&str; 6] = ["", "server", "app", "worker", "shared", "toolkit"];
+const PACKAGES: [&str; 7] = [
+    "",
+    "server",
+    "app",
+    "worker",
+    "shared",
+    "toolkit",
+    "extension",
+];
 
 #[derive(Serialize, Deserialize)]
 struct Dependencies {
@@ -528,5 +536,18 @@ fn main() {
             Some(f.root.clone()),
             "repair must not forget the last successful folder"
         );
+    }
+
+    #[test]
+    fn every_root_workspace_is_fingerprinted() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../package.json")).unwrap();
+        for workspace in manifest["workspaces"].as_array().unwrap() {
+            let workspace = workspace.as_str().unwrap();
+            assert!(
+                PACKAGES.contains(&workspace),
+                "{workspace} is a root workspace whose dependencies are not fingerprinted"
+            );
+        }
     }
 }
