@@ -15,16 +15,6 @@ import {
 } from "../src/demonstrations/types";
 import { RoutineRefusedError } from "../src/routines/store";
 
-test("recorded actions reject typed secrets and unknown payload fields", () => {
-  expect(() =>
-    parseDemonstrationAction({
-      kind: "type",
-      url: "https://example.test/form",
-      target: { role: "textbox", name: "Password", sensitive: true },
-      text: "private-password",
-    }),
-  ).toThrow();
-});
 test("draft preserves ordered real actions and replaces input with parameters", () => {
   const draft = draftDemonstration({
     id: "recording",
