@@ -18,6 +18,7 @@ import {
   BrokeredAccountRow,
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
+import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1034,6 +1035,7 @@ function RouteComponent() {
           description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
           title="Tools"
         >
+          <SkippedToolsNotice names={server.skippedTools ?? []} />
           {server.tools.length === 0 ? (
             <PageEmpty>
               {server.lastError ??

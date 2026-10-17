@@ -1700,18 +1700,20 @@ export function serverMethods(context: StoreContext) {
       /*
        * ACTIONS LEFT OUT FOR THEIR NAMES, said where the person who pressed Refresh will read it.
        *
-       * CRITERION. A name {@link storableTools} skipped is named in `lastError` — the column the
-       * Plugins page draws and the refresh route hands back — and in a warning with the server id,
-       * and costs only itself: every other action in the listing is still recorded.
+       * CRITERION. A name {@link storableTools} skipped is recorded in `skippedTools`, which the
+       * app's page draws as a warning, and in a log line with the server id, and costs only
+       * itself: every other action in the listing is still recorded.
        *
        * REASON. The guard used to refuse the whole listing over one name, and the MCP spec allows a
        * dot in a tool name, so a custom server with one dotted action stored nothing on its add and
        * froze on every refresh after. Skipped silently instead, the action would simply be missing
-       * with nobody told why. `lastError` rather than a column of its own, because it is already
-       * the one sentence an administrator reads about the last refresh, and this is that sentence.
+       * with nobody told why.
        *
-       * Capped at 400 like every other sentence in the column; the warning carries every name
-       * whatever the cap keeps.
+       * NOT `lastError`, which is where this used to go. That column is a failure, and the Plugins
+       * list turns a row red for it; a refresh that stored every other action did not fail, and a
+       * server that keeps listing a dotted name would have read as broken on every refresh, for
+       * good. The sentence is still built, for the one case below where nothing was stored at all —
+       * that refresh did learn nothing, and says so as a failure.
        */
       const skippedSentence =
         skipped.length > 0
@@ -1749,6 +1751,7 @@ export function serverMethods(context: StoreContext) {
                   0,
                   400,
                 ),
+              skippedTools: skipped,
               updatedAt: new Date(),
             })
             .where(eq(mcpServers.id, serverId));
@@ -1814,8 +1817,9 @@ export function serverMethods(context: StoreContext) {
         .update(mcpServers)
         .set({
           toolsRefreshedAt: new Date(),
-          // Cleared on a clean listing; on one with names left out, those names — see above.
-          lastError: skippedSentence?.slice(0, 400) ?? null,
+          // Cleared: the listing was stored. The names it left out are a warning — see above.
+          lastError: null,
+          skippedTools: skipped.length > 0 ? skipped : null,
           updatedAt: new Date(),
         })
         .where(eq(mcpServers.id, serverId));
@@ -1978,6 +1982,7 @@ export function serverMethods(context: StoreContext) {
           hasCredential: row.credentialId !== null,
           toolsRefreshedAt: iso(row.toolsRefreshedAt),
           lastError: row.lastError,
+          skippedTools: row.skippedTools ?? [],
           addedBy: row.addedBy,
           dynamicClient:
             entry?.auth.kind === "user-oauth" &&

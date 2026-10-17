@@ -123,6 +123,8 @@ export type ServerRecord = {
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;
+  /** What the last stored listing left out for its names; a warning, never a failure. */
+  skippedTools: string[];
   addedBy: string | null;
   /**
    * Whether the catalogue entry registers its own OAuth client (RFC 7591) rather than waiting on

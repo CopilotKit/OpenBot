@@ -73,6 +73,11 @@ export type PluginServer = {
   hasCredential: boolean;
   toolsRefreshedAt: string | null;
   lastError: string | null;
+  /**
+   * What the last refresh left out for its names. A warning: the rest were stored. Optional because
+   * a server replica older than this field does not send it, mid-rollout.
+   */
+  skippedTools?: string[];
   addedBy: string | null;
   /**
    * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an

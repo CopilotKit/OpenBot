@@ -12,6 +12,7 @@ import {
   SharedApprovalFields,
   sharedSectionSentence,
 } from "@/components/plugins/shared-approval-fields";
+import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -416,6 +417,8 @@ function RouteComponent() {
           {error}
         </p>
       ) : null}
+
+      <SkippedToolsNotice names={server.skippedTools ?? []} />
 
       {server.tools.length === 0 ? (
         <PageEmpty>

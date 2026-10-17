@@ -137,6 +137,14 @@ export const mcpServers = pgTable(
     toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
     /** The last failure, kept so the Plugins page can say why a server has no tools. */
     lastError: text("last_error"),
+    /**
+     * The names the last stored listing left out because no model could be offered them, as the
+     * vendor spelled them. A warning about a refresh that succeeded, not a failure, which is why it
+     * is not `lastError`: a server that keeps listing a dotted name would otherwise read as broken
+     * on the Plugins list forever. Null and empty both mean none; a replica that predates the column
+     * writes nothing here.
+     */
+    skippedTools: text("skipped_tools").array(),
     addedBy: text("added_by"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

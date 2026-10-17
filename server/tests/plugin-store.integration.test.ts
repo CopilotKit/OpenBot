@@ -3323,7 +3323,9 @@ describe("a dynamic client the vendor has evicted", () => {
    * A name the model API would refuse costs that one action, not the whole listing.
    *
    * CRITERION. A listing with one dotted name among valid ones stores the valid ones, stamps the
-   * refresh, and names the dotted one in `lastError`, which is what the Plugins page draws.
+   * refresh, and names the dotted one in `skippedTools`, which the app's page draws as a warning —
+   * and NOT in `lastError`, which the Plugins list draws as a failure that, for a server that keeps
+   * listing the name, would never clear.
    *
    * REASON. The MCP spec allows a dot in a tool name, and `storableTools` used to refuse the whole
    * listing over one. A custom server with a single such action then stored nothing on its add and
@@ -3372,15 +3374,22 @@ describe("a dynamic client the vendor has evicted", () => {
         const [server] = await database
           .select({
             lastError: mcpServers.lastError,
+            skippedTools: mcpServers.skippedTools,
             toolsRefreshedAt: mcpServers.toolsRefreshedAt,
           })
           .from(mcpServers)
           .where(eq(mcpServers.id, dynamicServerId));
-        // Something was learned, so the refresh is stamped — and the one thing not learned is
-        // said where the administrator who pressed Refresh will read it.
+        // Something was learned, so the refresh is stamped and is no failure — and the one thing
+        // not learned is said where the administrator who pressed Refresh will read it.
         expect(server?.toolsRefreshedAt).not.toBeNull();
-        expect(server?.lastError).toContain('"notion.export"');
-        expect(server?.lastError).not.toContain("notion-fetch");
+        expect(server?.lastError).toBeNull();
+        expect(server?.skippedTools).toEqual(["notion.export"]);
+
+        // And the page's read hands it on.
+        const listed = (await dynamicStore.listServers()).find(
+          (entry) => entry.id === dynamicServerId,
+        );
+        expect(listed?.skippedTools).toEqual(["notion.export"]);
       },
     );
   });
