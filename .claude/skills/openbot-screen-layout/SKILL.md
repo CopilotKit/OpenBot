@@ -143,7 +143,7 @@ itself when the dialog changes something.
 
 ## The rem Trap
 
-`app/src/styles.css` sets `html { font-size: 15px }`. Every rem-based Tailwind token is therefore
+`app/src/theme.css` sets `html { font-size: 15px }`. Every rem-based Tailwind token is therefore
 **0.9375×** its documented pixel value:
 
 | Token | Documented | Actual here |

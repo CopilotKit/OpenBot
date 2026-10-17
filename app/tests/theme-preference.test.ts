@@ -57,7 +57,7 @@ describe("pre-paint theme boot", () => {
 
 describe("color scheme", () => {
   const styles = readFileSync(
-    new URL("../src/styles.css", import.meta.url),
+    new URL("../src/theme.css", import.meta.url),
     "utf8",
   );
 
