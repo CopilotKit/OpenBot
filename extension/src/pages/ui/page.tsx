@@ -1,12 +1,12 @@
 import type * as React from "react";
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { PageColumn, PageHeader } from "@/components/layout/page-parts";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 /** The `dark` class on the document follows the browser's colour scheme, as the app's does. */
 function useColourScheme() {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const query = window.matchMedia(DARK_QUERY);
     const apply = () =>
       document.documentElement.classList.toggle("dark", query.matches);
