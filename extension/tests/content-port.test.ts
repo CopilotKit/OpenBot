@@ -334,4 +334,60 @@ describe("the content script entry", () => {
     });
     expect(globals.__openbotRecorderContent).toBe(true);
   });
+
+  function trustedClick(el: Element | null | undefined) {
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      composed: true,
+      button: 0,
+    });
+    Object.defineProperty(click, "isTrusted", { value: true });
+    el?.dispatchEvent(click);
+  }
+
+  test("capture stopping takes the 50-step notice down", async () => {
+    const fake = installChromeFake();
+    uninstall = () => fake.uninstall();
+    const ports: chrome.runtime.Port[] = [];
+    const received: ContentToBackground[] = [];
+    chrome.runtime.onConnect.addListener((port) => {
+      ports.push(port);
+      port.onMessage.addListener((m: ContentToBackground) => received.push(m));
+    });
+    await import(`../src/content/index?fresh=${Date.now()}0`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const port = ports[0];
+    port.postMessage({ type: "background.notice", show: true, steps: 50 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const oldNotice = document.querySelector("openbot-recorder-notice");
+    expect(oldNotice).not.toBeNull();
+
+    port.postMessage({ type: "background.capture", active: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(document.querySelector("openbot-recorder-notice")).toBeNull();
+    expect(oldNotice?.isConnected).toBe(false);
+  });
+
+  test("a click inside a part of the page marked to be ignored is not a step", async () => {
+    const fake = installChromeFake();
+    uninstall = () => fake.uninstall();
+    const received: ContentToBackground[] = [];
+    chrome.runtime.onConnect.addListener((port) => {
+      port.onMessage.addListener((m: ContentToBackground) => received.push(m));
+    });
+    globals.__openbotRecorderActive = "d1";
+    document.body.innerHTML = `<div data-copilotkit-ignore><button id="skip">Skip</button></div><button id="keep">Keep</button>`;
+    await import(`../src/content/index?fresh=${Date.now()}1`);
+
+    trustedClick(document.getElementById("skip"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(received.filter((m) => m.type === "content.step")).toEqual([]);
+
+    trustedClick(document.getElementById("keep"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(received.filter((m) => m.type === "content.step")).toMatchObject([
+      { action: { target: { name: "Keep" } } },
+    ]);
+  });
 });

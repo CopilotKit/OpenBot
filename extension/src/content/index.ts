@@ -38,7 +38,13 @@ function startContentScript() {
     });
     const steps = startStepCapture({
       send: (action) => port.post({ type: "content.step", action }),
-      isIgnored: isNoticeEvent,
+      isIgnored: (target, path) =>
+        isNoticeEvent(target, path) ||
+        path.some(
+          (node) =>
+            node instanceof Element &&
+            node.hasAttribute("data-copilotkit-ignore"),
+        ),
     });
     capture = {
       stop() {
@@ -48,12 +54,15 @@ function startContentScript() {
       },
     };
   };
+  let notice: { remove(): void } | null = null;
   const stopCapture = () => {
     capture?.stop();
     capture = null;
+    // Capture stopping for any reason ends the 50-step notice: its buttons would otherwise act on a later recording.
+    notice?.remove();
+    notice = null;
   };
 
-  let notice: { remove(): void } | null = null;
   const onNotice = (
     message: Extract<BackgroundToContent, { type: "background.notice" }>,
   ) => {
