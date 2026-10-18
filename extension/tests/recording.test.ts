@@ -940,6 +940,38 @@ test("Record screen in the popup takes a fresh stream id", async () => {
   });
 });
 
+test("Stop while Record screen takes its stream id leaves the screen off: the document hears no screen after its stop", async () => {
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const port = doc;
+  const tabCapture = chrome.tabCapture as unknown as {
+    getMediaStreamId: (options: unknown) => Promise<string>;
+  };
+  const getMediaStreamId = tabCapture.getMediaStreamId;
+  const streamId = gate();
+  let held = false;
+  tabCapture.getMediaStreamId = async (options) => {
+    held = true;
+    await streamId.promise;
+    return getMediaStreamId.call(tabCapture, options);
+  };
+  try {
+    const screen = page({ type: "page.screen" });
+    await until(() => held, "the stream id is held");
+    expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+    expect(sentToDocument("offscreen.stop", port)).toHaveLength(1);
+    streamId.open();
+    expect(await screen).toEqual({
+      ok: false,
+      error: "Nothing is being recorded.",
+    });
+    await settle();
+    expect(sentToDocument("offscreen.screen", port)).toEqual([]);
+    expect((await state()).phase).toBe("idle");
+  } finally {
+    tabCapture.getMediaStreamId = getMediaStreamId;
+  }
+});
+
 // ---- Stop and the document --------------------------------------------------------------------
 
 test("Stop drains media and voice, then sends every step, then tells OpenBot", async () => {
@@ -1054,6 +1086,47 @@ test("Stop with no document finishes at once: there is nothing to wait for", asy
   await until(() => answered, "Stop finishes without a timer");
   expect(requests().at(-1)).toBe(`POST ${demoPath(demoId, "/stop")}`);
   expect((await state()).phase).toBe("idle");
+});
+
+test("Stop while Record still injects the content script waits for Record to finish, then stops the network capture and switches the tab off", async () => {
+  fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
+  const content = contentPort(7);
+  const injection = gate();
+  const scripting = chrome.scripting as unknown as {
+    executeScript: (details: unknown) => Promise<unknown>;
+  };
+  const executeScript = scripting.executeScript;
+  let held = false;
+  scripting.executeScript = async (details) => {
+    if (!held) {
+      held = true;
+      await injection.promise;
+    }
+    return executeScript.call(scripting, details);
+  };
+  try {
+    const recording = page({
+      type: "page.record",
+      botId: "bot-1",
+      title: "T",
+      tabId: 7,
+      microphone: false,
+    });
+    await until(() => held, "the first injection is held");
+    const stopping = page({ type: "page.stop" });
+    await settle();
+    injection.open();
+    expect(await recording).toEqual({ ok: true });
+    expect(await stopping).toEqual({ ok: true });
+    expect(network.calls).toEqual([`start 7 ${DEAL}`, "stop"]);
+    expect(content.messages.at(-1)).toEqual({
+      type: "background.capture",
+      active: false,
+    });
+    expect((await state()).phase).toBe("idle");
+  } finally {
+    scripting.executeScript = executeScript;
+  }
 });
 
 test("the document closes only when every drain is done", async () => {
@@ -1467,6 +1540,38 @@ test("Disconnect discards the kept recordings, and nothing else does", async () 
   expect(drains()).toEqual([]);
   expect(fake.storage.local.get("connection")).toBeUndefined();
   expect((await state()).phase).toBe("idle");
+});
+
+test("Disconnect while a Stop drains discards that recording too, and sends nothing with the forgotten token", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await sendSteps(contentPort(7), [click("One"), click("Two")], 2);
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(async () => (await state()).phase === "stopping", "stopping");
+  const disconnecting = page({ type: "page.disconnect" });
+  await until(
+    () => fake.storage.local.get("connection") === undefined,
+    "the connection is forgotten",
+  );
+  await settle();
+  doc?.postMessage({
+    type: "offscreen.stopped",
+    demonstrationId: id,
+    trajectoryIds: [],
+  });
+  expect(await stopping).toEqual({ ok: true });
+  expect(await disconnecting).toEqual({ ok: true });
+  expect(drains()).toEqual([]);
+  expect(sentToDocument("offscreen.discard")).toEqual([
+    { type: "offscreen.discard", demonstrationIds: [id] },
+  ]);
+  expect(await storedSteps(id)).toEqual([]);
+  expect(requests()).not.toContain(`POST ${demoPath(id, "/actions")}`);
+  expect(requests()).not.toContain(`POST ${demoPath(id, "/stop")}`);
+  expect(fake.storage.local.get("activeRecording")).toBeUndefined();
+  expect(await state()).toMatchObject({ phase: "idle", draining: 0 });
+  expect((await state()).error).toBeUndefined();
 });
 
 test("Stop sends every queued step before telling OpenBot, and waits for OpenBot when it is away", async () => {

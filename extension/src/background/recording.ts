@@ -410,6 +410,12 @@ export function installRecording(
   /** Set while Start over saves and makes the switch to the new recording (nothing in it waits on OpenBot): a stop waits
    * for it, so the document and the tabs always hear of the switch before they hear of the stop. */
   let switching: Promise<void> | null = null;
+  /** Set from the moment Record makes the recording live until it finished starting (or rolled back): a stop waits for
+   * it, so the network capture and the tab's script Record starts are there for the stop to end. */
+  let starting: Promise<void> | null = null;
+  /** The stop under way, from the moment it takes the live recording until it finished: Disconnect waits for it, so the
+   * recording it moves into the drains is discarded with the rest. */
+  let stopInFlight: Promise<void> | null = null;
   /** The recording whose capture the popup shows and the trajectories it streams to: a status about any other
    * trajectory (a recording Start over discarded, still draining) leaves that capture alone. */
   let shown: { demonstrationId: string; trajectoryIds: Set<string> } | null =
@@ -1011,6 +1017,7 @@ export function installRecording(
     let documentStarted = false;
     let injected = false;
     let capture: NetworkCapture | null = null;
+    let finishStarting = () => {};
     try {
       let created: { demonstration: ExtensionDemonstration };
       try {
@@ -1095,6 +1102,10 @@ export function installRecording(
         userId: connection.user.id,
       };
       lastPollAt = undefined;
+      // A stop that comes from here on (Stop, Disconnect, a sign-out) waits until Record finished or rolled back.
+      starting = new Promise<void>((resolve) => {
+        finishStarting = resolve;
+      });
       // Recording from here on, before the script is injected: a content script that says hello is told to capture.
       dispatch({
         type: "started",
@@ -1160,6 +1171,9 @@ export function installRecording(
       const reason = signedOutReason(error);
       if (reason) await forgetConnection(reason, connection.token);
       return refuse(sentenceFor(error, SENTENCES.startFailed));
+    } finally {
+      starting = null;
+      finishStarting();
     }
   }
 
@@ -1223,12 +1237,25 @@ export function installRecording(
   }
 
   async function stopRecording(mode: StopMode): Promise<void> {
-    // A stop that comes while Start over makes its switch waits for it, then stops the recording that is live. A Start
-    // over still waiting on OpenBot is not waited for: the stop wins, and that Start over finds the recording ended.
+    // A stop that comes while Record finishes starting, or while Start over makes its switch, waits for it, then stops
+    // the recording that is live. A Start over still waiting on OpenBot is not waited for: the stop wins, and that
+    // Start over finds the recording ended.
+    if (starting) await starting;
     if (switching) await switching;
     if (state.phase !== "recording" || !live) return;
     const current = live;
     live = null;
+    const run = endRecording(current, mode);
+    stopInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (stopInFlight === run) stopInFlight = null;
+    }
+  }
+
+  /** The stop of the recording `stopRecording` took from `live`. */
+  async function endRecording(current: Live, mode: StopMode): Promise<void> {
     const since = deps.now();
     const stoppedFrom =
       mode.kind === "openbot" ? ("openbot" as const) : undefined;
@@ -1266,7 +1293,12 @@ export function installRecording(
     let signedOut: SignedOutReason | null = null;
     if (mode.kind === "person") {
       const record = await readLocal("activeRecording");
-      if (record) {
+      if (record && (await currentConnection())?.token !== current.token) {
+        // The connection was forgotten while the stop drained (Disconnect, or a sign-out): nothing goes out with its
+        // token. The recording waits in the drains with its stop still owed, for Disconnect to discard it or for its
+        // person to send it when they connect again.
+        stopPending = true;
+      } else if (record) {
         try {
           learning = await tellOpenBot(record, current.token);
         } catch (failure) {
@@ -1646,6 +1678,8 @@ export function installRecording(
 
   async function startScreen(tabId: number): Promise<boolean> {
     const tabStreamId = await takeStreamId(tabId);
+    // A stop that came while the stream id was taken already told the document to stop: no screen starts after it.
+    if (state.phase !== "recording") return false;
     if (
       tabStreamId &&
       postOffscreen({ type: "offscreen.screen", tabStreamId })
@@ -1667,9 +1701,14 @@ export function installRecording(
     const tabId = state.tabIds[0];
     if (state.phase !== "recording" || tabId === undefined)
       return { ok: false, error: SENTENCES.notRecording };
-    return (await startScreen(tabId))
-      ? { ok: true }
-      : { ok: false, error: SENTENCES.screenFromPopup };
+    if (await startScreen(tabId)) return { ok: true };
+    return {
+      ok: false,
+      error:
+        state.phase === "recording"
+          ? SENTENCES.screenFromPopup
+          : SENTENCES.notRecording,
+    };
   }
 
   // ---- Kept events, Disconnect and reconnecting ----------------------------------------------
@@ -2090,6 +2129,9 @@ export function installRecording(
       await ready;
       if (state.phase === "recording")
         await stopRecording({ kind: "disconnect" });
+      // A stop still under way (a Stop draining, within its 120-second watchdog) finishes first, so the recording it
+      // moves into the drains is discarded with the rest.
+      if (stopInFlight) await stopInFlight;
       const drains = (await readLocal("drains")) ?? [];
       await discardDrains(drains.map((drain) => drain.demonstrationId));
     },
