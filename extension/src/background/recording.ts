@@ -109,6 +109,35 @@ export type ConnectionEvents = {
   disconnected(): Promise<void>;
 };
 
+/** What recovery.ts drives after a browser or service-worker restart (Task 9's Recovery), on the controller installed last. */
+export type RecordingRecovery = {
+  /** The phase this service worker found in storage.session when it started: idle after a browser restart. */
+  loadedPhase(): Promise<RecorderState["phase"]>;
+  /** A browser restart mid-recording: the recording moves into the drains with its stop still owed to OpenBot, and the
+   * popup says it was interrupted. */
+  interrupt(): Promise<void>;
+  /** A Record a service-worker restart cut short rolls back, as a Record that fails does. */
+  abandonStart(): Promise<void>;
+  /** Finishes a Stop a service-worker restart cut short, through the one stop path; resolves with the recording it
+   * stopped. */
+  resumeStop(): Promise<string | null>;
+  /** The live recording after a service-worker restart: network capture again and, when it is gone, the document. */
+  resumeRecording(): Promise<void>;
+  /** For every drain of the connected person: its queued steps, its owed stop and its network bodies, then
+   * offscreen.recover. Drains of anyone else wait for their person to connect again. */
+  sendDrains(): Promise<void>;
+  /** Asks the open document to report on one drain again: answers it sent before that recording reached the drains were
+   * held in the memory of the service worker that stopped. */
+  recoverDrain(demonstrationId: string): Promise<void>;
+};
+
+let installedRecovery: RecordingRecovery | null = null;
+
+/** The controller a restarted service worker installed, for recovery.ts. */
+export function recordingRecovery(): RecordingRecovery | null {
+  return installedRecovery;
+}
+
 const READY_TIMEOUT_MS = 5_000;
 const STOP_WATCHDOG_MS = 120_000;
 const POLL_EVERY_MS = 25_000;
@@ -137,6 +166,8 @@ const SENTENCES = {
     "Stopping: OpenBot did not answer yet. Your steps are kept in this browser and sent when it does.",
   stoppedInOpenBot:
     "This recording was stopped in OpenBot. Everything until then was saved.",
+  screenRestarted:
+    "The screen recording stopped when Chrome restarted the Recorder in the background.",
   signedOut:
     "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
   organizationSignedOut:
@@ -565,9 +596,12 @@ export function installRecording(
     if (first) addStep(first);
   }
 
+  /** What a previous service worker left in storage.session: recovery finishes it (recovery.ts). */
+  let loadedPhase: RecorderState["phase"] = "idle";
   const ready = (async () => {
     const stored = await readSession("recorder");
     if (stored) state = stored;
+    loadedPhase = state.phase;
     for (const digest of (await readSession("digests")) ?? [])
       digests.add(digest);
     if (state.phase === "idle") return;
@@ -770,6 +804,23 @@ export function installRecording(
   /** Posts a message the document must get, waiting up to the ready timeout for its port while it reconnects. */
   async function sendToDocument(message: BackgroundToOffscreen): Promise<void> {
     if (await documentPort(READY_TIMEOUT_MS)) postOffscreen(message);
+  }
+
+  /** Opens a document that went away with a previous service worker on the stored session: the same outbox, and no tab
+   * stream (a stream id works once). False when no session is stored. */
+  async function resumeDocument(): Promise<boolean> {
+    const stream = await readSession("stream");
+    if (!stream) return false;
+    const port = await openDocument();
+    try {
+      port.postMessage({
+        type: "offscreen.resume",
+        session: { ...stream, media: { ...stream.media, tabStreamId: null } },
+      } satisfies BackgroundToOffscreen);
+    } finally {
+      releaseEvents();
+    }
+    return true;
   }
 
   function onOffscreenMessage(
@@ -1310,7 +1361,11 @@ export function installRecording(
     if (state.phase !== "recording" || !live) return;
     const current = live;
     live = null;
-    const run = endRecording(current, mode);
+    await trackStop(endRecording(current, mode));
+  }
+
+  /** Disconnect waits for the stop under way, a resumed one included. */
+  async function trackStop(run: Promise<void>): Promise<void> {
     stopInFlight = run;
     try {
       await run;
@@ -1319,16 +1374,23 @@ export function installRecording(
     }
   }
 
-  /** The stop of the recording `stopRecording` took from `live`. */
-  async function endRecording(current: Live, mode: StopMode): Promise<void> {
-    const since = deps.now();
+  /** The stop of the recording `stopRecording` took from `live`, or, with `resumed`, the rest of a stop a previous service
+   * worker persisted before it went away. */
+  async function endRecording(
+    current: Live,
+    mode: StopMode,
+    resumed?: NonNullable<RecorderState["stopping"]>,
+  ): Promise<void> {
+    const since = resumed?.since ?? deps.now();
     const stoppedFrom =
       mode.kind === "openbot" ? ("openbot" as const) : undefined;
     const tabIds = state.tabIds;
     const { demonstrationId } = current;
-    // Persisted before anything else: awaiting does not keep a service worker alive, and a restarted one finishes the stop.
-    dispatch({ type: "stop", since, stoppedFrom });
-    await persisted;
+    if (!resumed) {
+      // Persisted before anything else: awaiting does not keep a service worker alive, and a restarted one finishes the stop.
+      dispatch({ type: "stop", since, stoppedFrom });
+      await persisted;
+    }
     await stopRecordingScripts(tabIds);
     digests.clear();
     frameUrls.clear();
@@ -1346,13 +1408,25 @@ export function installRecording(
       stoppedFrom,
     });
     // Media and voice drain and the final outcome is queued before OpenBot hears of the stop. A recording kept for
-    // its person, or discarded (a Disconnect is under way), waits only for a reconnecting document to hear of it.
-    if (
-      (mode.kind === "person" || mode.kind === "openbot") &&
-      disconnecting === 0
-    )
-      await awaitStopped(demonstrationId, since, message);
-    else await sendToDocument(message);
+    // its person, or discarded (a Disconnect is under way), waits only for a reconnecting document to hear of it. A
+    // resumed stop past the document's part (telling-openbot) tells it nothing again.
+    if (resumed?.stage !== "telling-openbot") {
+      if (since + STOP_WATCHDOG_MS <= deps.now()) {
+        // The watchdog has run out (it counts from the persisted start): a connected document is still told, nothing
+        // is waited for, and the drain holds whatever it has not sent.
+        postOffscreen(message);
+      } else {
+        // The document went away with the service worker: it is reopened on the stored session to finish the stop.
+        if (resumed && !(await hasOffscreenDocument()))
+          await resumeDocument().catch(report("reopening the document"));
+        if (
+          (mode.kind === "person" || mode.kind === "openbot") &&
+          disconnecting === 0
+        )
+          await awaitStopped(demonstrationId, since, message);
+        else await sendToDocument(message);
+      }
+    }
     dispatch({ type: "stopped" });
 
     let learning: LearningSpaceState | undefined;
@@ -1429,6 +1503,15 @@ export function installRecording(
     if (disconnecting > 0) return null;
     const notice = await readLocal("notice");
     return notice?.kind === "signed-out" ? (notice.reason ?? "revoked") : null;
+  }
+
+  /** Why a recording waits for its person when no answer said so (found after a restart): the sign-out notice's reason,
+   * else a plain disconnect. */
+  async function waitingReason(): Promise<SignedOutReason> {
+    const notice = await readLocal("notice");
+    return notice?.kind === "signed-out"
+      ? (notice.reason ?? "revoked")
+      : "revoked";
   }
 
   let stopRetryHandle: unknown = null;
@@ -1863,10 +1946,19 @@ export function installRecording(
     return { ok: true };
   }
 
-  /** The person who recorded kept drains is connected again: send everything kept while signed out. Drains of another
-   * person, or of another OpenBot, keep waiting: they are never sent under someone else's connection. */
-  async function sendKept(): Promise<void> {
+  /** The person who recorded kept drains is connected again (or, `recovering`, the browser started): send everything
+   * their drains still owe. Drains of another person, or of another OpenBot, keep waiting: they are never sent under
+   * someone else's connection, and recovery marks them waiting for their person. Recovery also uploads each drain's
+   * network bodies still in IndexedDB. */
+  async function sendDrains(options: { recovering: boolean }): Promise<void> {
     const connection = await currentConnection();
+    if (options.recovering)
+      await markWaiting(
+        (drain) =>
+          !(connection && ownedBy(drain, connection)) &&
+          !drain.kept?.waitingForReconnect,
+        await waitingReason(),
+      );
     if (!connection) return;
     const drains = await updateDrains((all) =>
       all.map((drain) => {
@@ -1879,14 +1971,15 @@ export function installRecording(
     const own = drains.filter((drain) => ownedBy(drain, connection));
     if (own.length === 0) return;
     for (const drain of own) {
+      const target = { openbotUrl: drain.openbotUrl, token: connection.token };
       try {
         if (drain.stopPending) await finishPendingStop(drain, connection);
         else
           await steps.drain({
-            openbotUrl: drain.openbotUrl,
-            token: connection.token,
+            ...target,
             demonstrationId: drain.demonstrationId,
           });
+        if (options.recovering) await deps.recoverNetworkBodies(drain, target);
       } catch (error) {
         const reason = signedOutReason(error);
         if (reason) {
@@ -1917,6 +2010,178 @@ export function installRecording(
       releaseEvents();
     }
   }
+
+  // ---- After a restart (recovery.ts) ---------------------------------------------------------
+
+  const liveFrom = (record: DrainRecord, token: string): Live => ({
+    demonstrationId: record.demonstrationId,
+    botId: record.botId,
+    openbotUrl: record.openbotUrl,
+    token,
+    userId: record.userId,
+  });
+
+  async function interrupt(): Promise<void> {
+    // Only what the browser restart left: a Record this service worker started since is not touched.
+    if (loadedPhase !== "idle" || state.phase !== "idle" || starting) return;
+    const record = await readLocal("activeRecording");
+    if (!record) return;
+    await moveIntoDrains(record.demonstrationId, {
+      stopPending: true,
+      discard: record.discard,
+    });
+    await writeLocal("notice", { kind: "interrupted", at: deps.now() });
+  }
+
+  async function abandonStart(): Promise<void> {
+    if (loadedPhase !== "starting" || state.phase !== "starting" || starting)
+      return;
+    const record = await readLocal("activeRecording");
+    if (record) {
+      // The document may have been told to start it: it closes the trajectory as failed, as Record's rollback has it.
+      await sendToDocument({ type: "offscreen.stop", outcome: "failed" });
+      const connection = await currentConnection();
+      if (connection && ownedBy(record, connection))
+        await openbotJson(
+          connection,
+          recorderPaths.demonstration(record.demonstrationId),
+          { method: "DELETE" },
+        ).catch(report("deleting the recording that could not start"));
+      await steps.reset(record.demonstrationId);
+      await serially(() => removeLocal("activeRecording"));
+    }
+    await removeSession("stream");
+    dispatch({ type: "error", error: SENTENCES.startFailed });
+    await maybeCloseDocument();
+  }
+
+  async function resumeStop(): Promise<string | null> {
+    const stopping = state.stopping;
+    if (
+      loadedPhase !== "stopping" ||
+      state.phase !== "stopping" ||
+      !stopping ||
+      stopInFlight
+    )
+      return null;
+    // The stop may have moved the recording into the drains just before the service worker went away.
+    const record =
+      (await readLocal("activeRecording")) ??
+      ((await readLocal("drains")) ?? []).find(
+        (drain) => drain.demonstrationId === state.demonstrationId,
+      );
+    if (!record) {
+      dispatch({ type: "cancelled" });
+      return null;
+    }
+    const connection = await currentConnection();
+    const token =
+      connection && ownedBy(record, connection) ? connection.token : "";
+    await trackStop(
+      endRecording(
+        liveFrom(record, token),
+        stopping.stoppedFrom === "openbot"
+          ? { kind: "openbot" }
+          : { kind: "person" },
+        stopping,
+      ),
+    );
+    return record.demonstrationId;
+  }
+
+  async function resumeRecording(): Promise<void> {
+    if (
+      loadedPhase !== "recording" ||
+      state.phase !== "recording" ||
+      network ||
+      stopInFlight
+    )
+      return;
+    if (!live) {
+      await stopWithoutConnection();
+      return;
+    }
+    const capture = deps.createNetworkCapture(networkDeps, {
+      fallback: deps.createPageFallback(),
+    });
+    network = capture;
+    const mode = await capture.resume(
+      state.tabIds.map((tabId) => ({
+        tabId,
+        url: state.topUrls[tabId] ?? "",
+      })),
+    );
+    // A stop that came meanwhile has stopped this capture already.
+    if (network !== capture) return;
+    networkMode = mode;
+    dispatch({ type: "capture", capture: { network: mode } });
+    // A live document reconnects its port and re-sends its status itself.
+    if ((await hasOffscreenDocument()) || state.phase !== "recording") return;
+    if (!(await resumeDocument())) return;
+    // The stream went with the old document. A screen that was off for a stated reason was not recording.
+    const { screen, screenReason } = state.capture;
+    if (
+      state.phase === "recording" &&
+      (screen === "recording" || (screen === "off" && !screenReason))
+    )
+      dispatch({
+        type: "capture",
+        capture: { screen: "failed", screenReason: SENTENCES.screenRestarted },
+      });
+  }
+
+  /** A live recording whose connection went while the service worker was away (a sign-out the popup or the keep-alive
+   * noticed): it stops here and is kept for its person, as a signed-out stop is. */
+  async function stopWithoutConnection(): Promise<void> {
+    const record = await readLocal("activeRecording");
+    if (!record) {
+      dispatch({ type: "cancelled" });
+      return;
+    }
+    await trackStop(
+      endRecording(liveFrom(record, ""), {
+        kind: "signed-out",
+        reason: await waitingReason(),
+        forgot: true,
+      }),
+    );
+  }
+
+  async function recoverDrain(demonstrationId: string): Promise<void> {
+    const connection = await currentConnection();
+    const drain = ((await readLocal("drains")) ?? []).find(
+      (entry) => entry.demonstrationId === demonstrationId,
+    );
+    if (
+      !connection ||
+      !drain ||
+      !ownedBy(drain, connection) ||
+      drain.kept?.waitingForReconnect
+    )
+      return;
+    await sendToDocument({
+      type: "offscreen.recover",
+      openbotUrl: connection.openbotUrl,
+      token: connection.token,
+      drains: [drain],
+    });
+  }
+
+  const afterReady =
+    <A extends unknown[], R>(work: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      await ready;
+      return work(...args);
+    };
+  installedRecovery = {
+    loadedPhase: afterReady(async () => loadedPhase),
+    interrupt: afterReady(interrupt),
+    abandonStart: afterReady(abandonStart),
+    resumeStop: afterReady(resumeStop),
+    resumeRecording: afterReady(resumeRecording),
+    sendDrains: afterReady(() => sendDrains({ recovering: true })),
+    recoverDrain: afterReady(recoverDrain),
+  };
 
   // ---- The popup's answers -------------------------------------------------------------------
 
@@ -2245,7 +2510,9 @@ export function installRecording(
     async connected() {
       await ready;
       // The connect page waits on this answer: the sending runs on its own.
-      void sendKept().catch(report("sending kept recordings"));
+      void sendDrains({ recovering: false }).catch(
+        report("sending kept recordings"),
+      );
     },
 
     async disconnected() {

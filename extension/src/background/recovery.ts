@@ -1,0 +1,53 @@
+// Finishes what a browser restart or a service-worker restart cut short (Task 9's Recovery, Review Focus 3): a recording
+// the browser closed on is stopped and sent, a Stop is finished, a live recording picks up again, and every drain of the
+// connected person is sent; drains of anyone else wait for their person (Decision 19).
+import { readLocal } from "../shared/storage";
+import { hasOffscreenDocument } from "./offscreen-document";
+import { type RecordingRecovery, recordingRecovery } from "./recording";
+
+let running: { recording: RecordingRecovery; done: Promise<void> } | null =
+  null;
+
+/** Single-flight: a call made while one is running returns the running one's promise (index.ts top level and
+ * runtime.onStartup both call it at a browser start). A controller installed since (a restarted service worker) starts
+ * its own. Never rejects: a failure is logged. */
+export function recoverInterruptedRecording(): Promise<void> {
+  const recording = recordingRecovery();
+  if (!recording) return Promise.resolve();
+  if (running?.recording === recording) return running.done;
+  const done = recover(recording)
+    .catch((error) =>
+      console.error("Recorder: recovering after a restart failed", error),
+    )
+    .finally(() => {
+      if (running?.done === done) running = null;
+    });
+  running = { recording, done };
+  return done;
+}
+
+async function recover(recording: RecordingRecovery): Promise<void> {
+  const phase = await recording.loadedPhase();
+  // A browser restart closes the document; a service-worker restart leaves it running, still sending what it holds.
+  const hadDocument = await hasOffscreenDocument();
+  switch (phase) {
+    case "idle":
+      // storage.session is empty after a browser restart: a recording left in storage.local was interrupted.
+      await recording.interrupt();
+      break;
+    case "starting":
+      await recording.abandonStart();
+      break;
+    case "stopping": {
+      const stopped = await recording.resumeStop();
+      if (stopped && hadDocument) await recording.recoverDrain(stopped);
+      break;
+    }
+    case "recording":
+      await recording.resumeRecording();
+      break;
+  }
+  // The document that held the drains is gone: their steps, stops and bodies go now, then a document recovers them.
+  if (!hadDocument && ((await readLocal("drains")) ?? []).length > 0)
+    await recording.sendDrains();
+}
