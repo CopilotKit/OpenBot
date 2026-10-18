@@ -4,6 +4,7 @@ import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { LearningSettings } from "@openbot/shared/learning";
 import {
   type ExchangeResponse,
+  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   recorderPaths,
 } from "@openbot/shared/recorder-api";
@@ -19,7 +20,6 @@ import { createDatabase } from "../src/db/client";
 import { users } from "../src/db/schema/core";
 import { recorderTrajectoryBindings } from "../src/db/schema/recorder";
 import { createLearningSettingsStore } from "../src/learning/settings";
-import { RECORDER_BOT_HEADER } from "../src/recorder/trajectory-gate";
 import { createRecorderExtension } from "../src/recorder/wiring";
 import { createRequestActor } from "../src/request-actor";
 import { skillSnapshot } from "./fixtures/learned-skills";

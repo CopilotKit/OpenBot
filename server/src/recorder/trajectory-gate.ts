@@ -4,6 +4,7 @@ import type {
 } from "@copilotkit/runtime/v2";
 import {
   type LearningSpaceState,
+  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
@@ -14,9 +15,6 @@ import {
 } from "../audit";
 import type { RecorderRefusal, RecorderResolver } from "./guard";
 import type { LearningSpaceCheck } from "./learning-space";
-
-/** The header the Recorder names its picked Bot in, beside its bearer, on the capture pass. */
-export const RECORDER_BOT_HEADER = "x-openbot-recorder-bot";
 
 export type TrajectoryRefusal = {
   reason:

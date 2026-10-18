@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   TRAJECTORY_GATE_REFUSALS,
 } from "@openbot/shared/recorder-api";
@@ -13,7 +14,6 @@ import {
   createTrajectoryConnectHook,
   createTrajectoryRefusalAudit,
   isTrajectoryConnectPath,
-  RECORDER_BOT_HEADER,
 } from "../src/recorder/trajectory-gate";
 
 const TRAJECTORY = "0b6c1c0e-6f0a-4f6e-9a55-1d1c2f3f4a5b";

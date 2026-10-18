@@ -1,5 +1,6 @@
 import {
   RECORDER_AUTHORITY_UNAVAILABLE,
+  RECORDER_BOT_HEADER,
   RECORDER_SIGNED_OUT,
   recorderPaths,
   type TrajectoryGrant,
@@ -188,10 +189,6 @@ function isGrant(value: unknown): value is TrajectoryGrant {
     typeof realtime.topic === "string"
   );
 }
-
-/** The header that names the Bot the person picked in the popup on every capture pass request: OpenBot puts the
- * trajectory into that Bot's Learning space. */
-export const RECORDER_BOT_HEADER = "x-openbot-recorder-bot";
 
 /** Where a pass is asked for: the connected OpenBot, the recorder bearer, and the recording's Bot. */
 export type GrantTarget = { openbotUrl: string; token: string; botId: string };

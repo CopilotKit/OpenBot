@@ -11,6 +11,9 @@ export const RECORDER_SIGNED_OUT = "RECORDER_SIGNED_OUT";
 /** The `code` on the 503 the recorder guard and the trajectory gate answer when the organization's sign-in server could not
  * answer for now (Decision 19): transient, never a sign-out; the caller retries. */
 export const RECORDER_AUTHORITY_UNAVAILABLE = "RECORDER_AUTHORITY_UNAVAILABLE";
+/** The header the Recorder names the Bot the person picked in on every capture pass request, beside its bearer: OpenBot
+ * binds the trajectory to that Bot and puts it into that Bot's Learning space. */
+export const RECORDER_BOT_HEADER = "x-openbot-recorder-bot";
 /** The refusals OpenBot's trajectory gate shares with the Recorder's pass table (rows 1, 3 and 4a). */
 export const TRAJECTORY_GATE_REFUSALS = {
   invalidId: {

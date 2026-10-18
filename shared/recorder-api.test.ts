@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   connectCodeRequestSchema,
   exchangeRequestSchema,
+  RECORDER_BOT_HEADER,
   recorderPaths,
   TRAJECTORY_GATE_REFUSALS,
 } from "./recorder-api";
@@ -66,6 +67,13 @@ describe("recorder constants and paths", () => {
         name !== "trajectoryConnect",
       );
     }
+  });
+
+  test("the extension and the gate name the Bot in one lowercase header", () => {
+    expect(RECORDER_BOT_HEADER).toBe("x-openbot-recorder-bot");
+    expect(
+      new Headers({ [RECORDER_BOT_HEADER]: "b" }).get("X-OpenBot-Recorder-Bot"),
+    ).toBe("b");
   });
 
   test("the gate refusals carry the documented statuses", () => {
