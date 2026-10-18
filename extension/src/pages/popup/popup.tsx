@@ -2,7 +2,11 @@ import type { RecorderBot } from "@openbot/shared/recorder-api";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { PageResponse, PageStateResponse } from "../../protocol/messages";
+import type {
+  PageResponse,
+  PageStateResponse,
+  PageToBackground,
+} from "../../protocol/messages";
 import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
@@ -10,6 +14,7 @@ import { microphoneState as defaultMicrophoneState } from "./media";
 import { Notices } from "./notices";
 import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
+import { AfterStop, isStopPending, RecordingView } from "./recording-view";
 
 export type PopupDeps = {
   prepare: typeof prepareRecording;
@@ -79,6 +84,22 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // While a recording runs or the last of one is still sending, the state keeps changing under the popup.
+  const live =
+    view !== null && (view.state.phase !== "idle" || view.state.draining > 0);
+  useEffect(() => {
+    if (!live) return;
+    let alive = true;
+    const timer = setInterval(async () => {
+      const answer = await ask<PageResponse>({ type: "page.state" });
+      if (alive && answer.ok && "state" in answer) setView(answer);
+    }, 1000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [live, ask]);
 
   useEffect(() => {
     let live = true;
@@ -193,6 +214,21 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
 
+  const act = async (message: PageToBackground) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const answer = await ask(message);
+      if (!answer.ok) setError(answer.error);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const stopPending = isStopPending(state.error);
+
   const refusedBotId = state.openRecording
     ? (state.botId ?? lastBotId ?? undefined)
     : undefined;
@@ -212,6 +248,25 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     >
       <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
       {state.phase === "idle" ? (
+        <AfterStop
+          state={state}
+          openbotUrl={connection.openbotUrl}
+          onDiscard={() => act({ type: "page.kept.discard" })}
+          openTab={openTab}
+        />
+      ) : (
+        <RecordingView
+          state={state}
+          busy={busy}
+          actions={{
+            onStop: () => act({ type: "page.stop" }),
+            onRestart: () => act({ type: "page.restart" }),
+            onNotice: (choice) => act({ type: "page.notice", choice }),
+            onRecordScreen: () => act({ type: "page.screen" }),
+          }}
+        />
+      )}
+      {state.phase === "idle" && !stopPending ? (
         <RecordForm
           bots={bots}
           initialBotId={

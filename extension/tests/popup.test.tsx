@@ -496,3 +496,262 @@ test("Stop the open recording and the refusal belong to the Bot whose Record was
   await findByText(OPEN_ERROR);
   getByRole("button", { name: "Stop the open recording" });
 });
+
+const CAPTURE = {
+  intelligence: "streaming",
+  network: "debugger",
+  screen: "recording",
+  voice: "recording",
+} as const;
+const recording = (
+  state: Partial<RecorderState> = {},
+  over: Omit<Partial<PageStateResponse>, "state"> = {},
+) =>
+  stateResponse({
+    ...over,
+    state: {
+      phase: "recording",
+      botId: "b1",
+      title: "Refund an order",
+      startedAt: Date.now() - 65_000,
+      steps: 12,
+      capture: { ...CAPTURE },
+      ...state,
+    },
+  });
+
+test("the recording view shows the time, the step count and the four capture rows", async () => {
+  const { findByText, getByText, queryByRole } = setup(recording());
+  await findByText("1:05 · 12 steps");
+  for (const title of ["Learning capture", "Network", "Screen", "Voice"]) {
+    expect(getByText(title)).toBeTruthy();
+  }
+  expect(getByText("Streaming to Intelligence")).toBeTruthy();
+  expect(queryByRole("button", { name: "Record" })).toBeNull();
+  expect(queryByRole("button", { name: "Record screen" })).toBeNull();
+});
+
+test("Stop and Start over send page.stop and page.restart", async () => {
+  const { findByRole, getByRole, sent } = setup(recording());
+  fireEvent.click(await findByRole("button", { name: "Stop" }));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.stop")).toBe(true),
+  );
+  fireEvent.click(getByRole("button", { name: "Start over" }));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.restart")).toBe(true),
+  );
+});
+
+test("at 50 steps with the notice shown the popup repeats its three choices", async () => {
+  const { findByText, getByRole, sent } = setup(
+    recording({ steps: 50, noticeShown: true }),
+  );
+  await findByText("You have recorded 50 steps");
+  fireEvent.click(getByRole("button", { name: "Keep going" }));
+  await waitFor(() =>
+    expect(sent.filter((m) => m.type === "page.notice").at(-1)).toMatchObject({
+      choice: "continue",
+    }),
+  );
+});
+
+test("Record screen shows when the screen is off with a reason and sends page.screen", async () => {
+  const { findByRole, sent } = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        screen: "off",
+        screenReason: "Chrome would not share this tab.",
+      },
+    }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Record screen" }));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.screen")).toBe(true),
+  );
+});
+
+test("held and parked capture say so, with the reason and the kept-events line", async () => {
+  const held = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "held",
+        intelligenceReason:
+          "Learning capture is paused: Intelligence refused the capture pass (503).",
+      },
+    }),
+  );
+  await held.findByText("Learning capture is paused");
+  expect(
+    held.getByText("Intelligence refused the capture pass (503)."),
+  ).toBeTruthy();
+  expect(
+    held.getByText(
+      "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.",
+    ),
+  ).toBeTruthy();
+  cleanup();
+  const parked = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "parked",
+        intelligenceReason:
+          "Learning capture is off: Intelligence refused the capture pass.",
+      },
+    }),
+  );
+  await parked.findByText("Learning capture is off");
+  expect(
+    parked.getByText(
+      "Your events are kept in this browser. The Recorder tries again when the browser next starts.",
+    ),
+  ).toBeTruthy();
+});
+
+test("a recording outside a Learning space says Not into a Learning space with the sentence", async () => {
+  const { findByText, getByText } = setup(
+    recording({ learning: { state: "missing", containerId: "c9" } }),
+  );
+  await findByText("Not into a Learning space");
+  expect(
+    getByText(/this Bot's Learning space does not exist in Intelligence/),
+  ).toBeTruthy();
+});
+
+test("unjoined, learning-off and unverified each show their sentence while streaming", async () => {
+  const unjoined = setup(
+    recording({ learning: { state: "unjoined", containerId: null } }),
+  );
+  await unjoined.findByText(
+    "Learning did not see this recording: OpenBot could not choose its Learning space in time. It still saves to OpenBot.",
+  );
+  cleanup();
+  const off = setup(
+    recording({ learning: { state: "learning-off", containerId: null } }),
+  );
+  await off.findByText(
+    /Intelligence's Learning delivery is off or unavailable/,
+  );
+  expect(off.getByText("Streaming to Intelligence")).toBeTruthy();
+  cleanup();
+  const unverified = setup(
+    recording({ learning: { state: "unverified", containerId: null } }),
+  );
+  await unverified.findByText(
+    /could not check this Bot's Learning space with Intelligence just now/,
+  );
+});
+
+test("refused and dropped events are counted in the Learning capture row", async () => {
+  const { findByText, getByText } = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        events: { sent: 10, pending: 0, rejected: 3, dropped: 1 },
+      },
+    }),
+  );
+  await findByText("3 events were refused by Intelligence");
+  expect(getByText("1 event could not be sent")).toBeTruthy();
+});
+
+const STOPPED = {
+  lastStopped: {
+    demonstrationId: "d1",
+    botId: "b1",
+    openbotUrl: "https://openbot.example.test",
+  },
+};
+
+test("after stop the saved line links to the Bot's Demonstrations page", async () => {
+  const { findByRole, findByText } = setup(stateResponse({ state: STOPPED }));
+  await findByText("Saved. Review it in OpenBot to draft the Skill.");
+  const link = await findByRole("link");
+  expect(link.getAttribute("href")).toBe(
+    "https://openbot.example.test/bots/b1/demonstrations",
+  );
+  fireEvent.click(link);
+  await waitFor(() =>
+    expect(fake.opened).toContain(
+      "https://openbot.example.test/bots/b1/demonstrations",
+    ),
+  );
+});
+
+test("after stop, draining shows the sending sentence and what is still sending", async () => {
+  const { findByText, getByText } = setup(
+    stateResponse({
+      state: {
+        ...STOPPED,
+        draining: 1,
+        capture: {
+          ...CAPTURE,
+          intelligence: "parked",
+          intelligenceReason:
+            "Learning capture is off: Intelligence refused the capture pass.",
+        },
+        learning: { state: "unassigned", containerId: null },
+      },
+    }),
+  );
+  await findByText(
+    "Sending the last of the recording to Intelligence and OpenBot. You can keep browsing.",
+  );
+  expect(getByText("Learning capture is off")).toBeTruthy();
+  expect(getByText(/when the browser next starts/)).toBeTruthy();
+  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+});
+
+const KEPT = {
+  recordings: 2,
+  events: 40,
+  reason: "Intelligence is not accepting events.",
+  parked: false,
+};
+
+test("kept events are discarded only after the dialog confirms, and Cancel sends nothing", async () => {
+  const { findByText, getByRole, queryByText, sent } = setup(
+    stateResponse({ state: { ...STOPPED, kept: KEPT } }),
+  );
+  await findByText(
+    "40 events from 2 recordings are kept in this browser: Intelligence is not accepting events.",
+  );
+  fireEvent.click(getByRole("button", { name: "Discard kept events" }));
+  await findByText(
+    /Discard them\? Intelligence will never receive them\. Your recordings in OpenBot stay as they are\./,
+  );
+  fireEvent.click(getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(queryByText(/Discard them\?/)).toBeNull());
+  expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
+  fireEvent.click(getByRole("button", { name: "Discard kept events" }));
+  fireEvent.click(await findByText("Discard"));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.kept.discard")).toBe(true),
+  );
+});
+
+test("kept events waiting on a sign-out name the person and how to send them", async () => {
+  const { findByText } = setup(
+    stateResponse({
+      state: {
+        kept: { ...KEPT, waitingFor: { name: "Ada Lovelace", recordings: 2 } },
+      },
+    }),
+  );
+  await findByText(
+    "40 events from 2 recordings by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+  );
+});
+
+test("a pending stop shows its sentence and no Record button", async () => {
+  const sentence =
+    "Stopping: OpenBot did not answer yet. Your steps are kept in this browser and sent when it does.";
+  const { findByText, queryByRole } = setup(
+    stateResponse({ state: { ...STOPPED, botId: "b1", error: sentence } }),
+  );
+  await findByText(sentence);
+  expect(queryByRole("button", { name: "Record" })).toBeNull();
+});
