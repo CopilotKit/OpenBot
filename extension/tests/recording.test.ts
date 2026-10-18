@@ -722,25 +722,15 @@ beforeEach(() => {
     extensionId: EXTENSION_ID,
     manifestVersion: "0.3.0",
   });
-  const offscreen = chrome.offscreen as unknown as {
-    createDocument(
-      parameters: chrome.offscreen.CreateParameters,
-    ): Promise<void>;
-    closeDocument(): Promise<void>;
-  };
-  const create = offscreen.createDocument;
-  const close = offscreen.closeDocument;
-  offscreen.createDocument = async (parameters) => {
-    await create(parameters);
+  fake.offscreen.onDocumentCreated.addListener(() => {
     setTimeout(() => {
       void pass("document").then(openDocument);
     }, 0);
-  };
-  offscreen.closeDocument = async () => {
-    await close();
+  });
+  fake.offscreen.onDocumentClosed.addListener(() => {
     doc?.disconnect();
     doc = null;
-  };
+  });
   doc = null;
   docPorts = [];
   docDemo = "";

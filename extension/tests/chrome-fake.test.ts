@@ -586,3 +586,99 @@ test("tabs.remove closes tabs in order, fires onRemoved, and stops at the first 
   ]);
   expect(fake.calls.filter((call) => call === "tabs.remove")).toHaveLength(3);
 });
+
+const OFFSCREEN_PARAMETERS = {
+  url: "offscreen.html",
+  reasons: ["USER_MEDIA" as chrome.offscreen.Reason],
+  justification: "x",
+};
+
+test("offscreen.hasDocument and runtime.getContexts report the document from createDocument until closeDocument", async () => {
+  expect(await chrome.offscreen.hasDocument()).toBe(false);
+  expect(
+    await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] }),
+  ).toEqual([]);
+  await chrome.offscreen.createDocument(OFFSCREEN_PARAMETERS);
+  expect(await chrome.offscreen.hasDocument()).toBe(true);
+  expect(
+    await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] }),
+  ).toMatchObject([{ contextType: "OFFSCREEN_DOCUMENT" }]);
+  await chrome.offscreen.closeDocument();
+  expect(await chrome.offscreen.hasDocument()).toBe(false);
+  expect(fake.calls.filter((call) => call.startsWith("offscreen."))).toEqual([
+    "offscreen.hasDocument",
+    "offscreen.createDocument",
+    "offscreen.hasDocument",
+    "offscreen.closeDocument",
+    "offscreen.hasDocument",
+  ]);
+});
+
+test("a second createDocument and a closeDocument with no document reject with Chrome's exact errors and change nothing", async () => {
+  const created: string[] = [];
+  let closed = 0;
+  fake.offscreen.onDocumentCreated.addListener((parameters) =>
+    created.push(parameters.url),
+  );
+  fake.offscreen.onDocumentClosed.addListener(() => {
+    closed++;
+  });
+  await expect(chrome.offscreen.closeDocument()).rejects.toThrow(
+    /^No current offscreen document\.$/,
+  );
+  expect(closed).toBe(0);
+  await chrome.offscreen.createDocument(OFFSCREEN_PARAMETERS);
+  await expect(
+    chrome.offscreen.createDocument({
+      ...OFFSCREEN_PARAMETERS,
+      url: "other.html",
+    }),
+  ).rejects.toThrow(/^Only a single offscreen document may be created\.$/);
+  expect(created).toEqual(["offscreen.html"]);
+  expect(fake.offscreen.created).toEqual([OFFSCREEN_PARAMETERS]);
+  expect(fake.offscreen.open).toBe(true);
+  await chrome.offscreen.closeDocument();
+  await expect(chrome.offscreen.closeDocument()).rejects.toThrow(
+    /^No current offscreen document\.$/,
+  );
+  expect(closed).toBe(1);
+  expect(fake.offscreen.open).toBe(false);
+});
+
+test("onDocumentCreated and onDocumentClosed run once per document, with the new state in place, before the call resolves", async () => {
+  const seen: string[] = [];
+  fake.offscreen.onDocumentCreated.addListener((parameters) =>
+    seen.push(`created ${parameters.url} open=${fake.offscreen.open}`),
+  );
+  fake.offscreen.onDocumentClosed.addListener(() =>
+    seen.push(`closed open=${fake.offscreen.open}`),
+  );
+  await chrome.offscreen.createDocument(OFFSCREEN_PARAMETERS);
+  seen.push("createDocument resolved");
+  await chrome.offscreen.closeDocument();
+  seen.push("closeDocument resolved");
+  expect(seen).toEqual([
+    "created offscreen.html open=true",
+    "createDocument resolved",
+    "closed open=false",
+    "closeDocument resolved",
+  ]);
+});
+
+test("the document hooks survive restartServiceWorker, as the document does, and removeListener stops one", async () => {
+  const created: string[] = [];
+  const closed: string[] = [];
+  const onCreated = (parameters: chrome.offscreen.CreateParameters) =>
+    created.push(parameters.url);
+  fake.offscreen.onDocumentCreated.addListener(onCreated);
+  fake.offscreen.onDocumentClosed.addListener(() => closed.push("closed"));
+  await chrome.offscreen.createDocument(OFFSCREEN_PARAMETERS);
+  fake.restartServiceWorker();
+  expect(await chrome.offscreen.hasDocument()).toBe(true);
+  await chrome.offscreen.closeDocument();
+  expect(closed).toEqual(["closed"]);
+  fake.offscreen.onDocumentCreated.removeListener(onCreated);
+  await chrome.offscreen.createDocument(OFFSCREEN_PARAMETERS);
+  expect(created).toEqual(["offscreen.html"]);
+  expect(fake.offscreen.created).toHaveLength(2);
+});

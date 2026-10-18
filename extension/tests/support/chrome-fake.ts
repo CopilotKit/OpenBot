@@ -51,7 +51,20 @@ export type ChromeFake = {
     executed: chrome.scripting.ScriptInjection<unknown[], unknown>[];
     refuseFrames?: number[];
   };
-  offscreen: { open: boolean; created: chrome.offscreen.CreateParameters[] };
+  offscreen: {
+    /** Whether the document exists: true from createDocument until closeDocument, across restartServiceWorker. */
+    open: boolean;
+    created: chrome.offscreen.CreateParameters[];
+    /**
+     * Test hooks, not part of chrome.offscreen: they run when createDocument opened a document or closeDocument closed
+     * it, with `open` already updated and before the call resolves, so a test can play the document's own side (its
+     * port connecting, then going down). Like the document, they survive restartServiceWorker.
+     */
+    onDocumentCreated: FakeHook<
+      [parameters: chrome.offscreen.CreateParameters]
+    >;
+    onDocumentClosed: FakeHook<[]>;
+  };
   tabCapture: { calls: { targetTabId?: number }[]; answer: string | Error };
   debugger: {
     attached: chrome.debugger.Debuggee[];
@@ -111,6 +124,29 @@ export type ChromeFake = {
 };
 
 const DEFAULT_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop";
+
+type FakeHook<Args extends unknown[]> = {
+  addListener(listener: (...args: Args) => void): void;
+  removeListener(listener: (...args: Args) => void): void;
+};
+
+/** A test-side hook: unlike a chrome event it is typed, unrecorded in `calls`, and kept across restartServiceWorker. */
+function createHook<Args extends unknown[]>(): FakeHook<Args> & {
+  dispatch(...args: Args): void;
+} {
+  const listeners = new Set<(...args: Args) => void>();
+  return {
+    addListener: (listener) => {
+      listeners.add(listener);
+    },
+    removeListener: (listener) => {
+      listeners.delete(listener);
+    },
+    dispatch: (...args) => {
+      for (const listener of [...listeners]) listener(...args);
+    },
+  };
+}
 
 type FakeEvent = {
   addListener(listener: Listener): void;
@@ -286,6 +322,10 @@ export function installChromeFake(
     return pair;
   };
 
+  const documentCreated =
+    createHook<[parameters: chrome.offscreen.CreateParameters]>();
+  const documentClosed = createHook<[]>();
+
   const fake: ChromeFake = {
     uninstall() {
       Reflect.deleteProperty(globalThis, "chrome");
@@ -330,7 +370,12 @@ export function installChromeFake(
     sendFromPage: (message, sender) => sendMessageFrom(message, sender),
     permissions: { granted: new Set(), requests: [], answer: true },
     scripting: { registered: [], executed: [] },
-    offscreen: { open: false, created: [] },
+    offscreen: {
+      open: false,
+      created: [],
+      onDocumentCreated: documentCreated,
+      onDocumentClosed: documentClosed,
+    },
     tabCapture: { calls: [], answer: "stream-id" },
     debugger: {
       attached: [],
@@ -653,6 +698,8 @@ export function installChromeFake(
         );
       },
     },
+    // Chrome's errors, word for word: OffscreenCreateDocumentFunction::Run and OffscreenCloseDocumentFunction::Run in
+    // Chromium's extensions/browser/api/offscreen/offscreen_api.cc.
     offscreen: {
       async createDocument(parameters: chrome.offscreen.CreateParameters) {
         calls.push("offscreen.createDocument");
@@ -660,12 +707,18 @@ export function installChromeFake(
           throw new Error("Only a single offscreen document may be created.");
         fake.offscreen.open = true;
         fake.offscreen.created.push(parameters);
+        documentCreated.dispatch(parameters);
       },
       async closeDocument() {
         calls.push("offscreen.closeDocument");
         if (!fake.offscreen.open)
           throw new Error("No current offscreen document.");
         fake.offscreen.open = false;
+        documentClosed.dispatch();
+      },
+      async hasDocument() {
+        calls.push("offscreen.hasDocument");
+        return fake.offscreen.open;
       },
     },
     tabCapture: {
