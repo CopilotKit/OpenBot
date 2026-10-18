@@ -373,7 +373,7 @@ type Live = {
 type StopMode =
   | { kind: "person" } // Stop: every step, then POST stop
   | { kind: "openbot" } // stopped in OpenBot: no POST stop, the refused steps dropped
-  | { kind: "signed-out"; reason: SignedOutReason } // everything kept for the person
+  | { kind: "signed-out"; reason: SignedOutReason; forgot: boolean } // kept for the person (only this recording when the connection was not forgotten)
   | { kind: "disconnect" } // the person's Disconnect: discarded right after
   | { kind: "restart-failed"; error: string }; // Start over could not open the new recording
 
@@ -1408,10 +1408,14 @@ export function installRecording(
       error,
     });
     if (signedOut)
+      // A sign-out that forgot nothing (the person connected again) leaves their other drains to the new connection.
       await markWaiting(
         (drain) =>
           drain.userId === current.userId &&
-          drain.openbotUrl === current.openbotUrl,
+          drain.openbotUrl === current.openbotUrl &&
+          (mode.kind !== "signed-out" ||
+            mode.forgot ||
+            drain.demonstrationId === demonstrationId),
         signedOut,
       );
     if (offscreenDone.has(demonstrationId)) await documentDone(demonstrationId);
@@ -1536,10 +1540,11 @@ export function installRecording(
     userId: string,
     openbotUrl: string,
   ): Promise<void> {
-    await forgetConnection(reason, token);
+    const forgot = await forgetConnection(reason, token);
     if (live && live.token === token && state.phase === "recording")
-      await stopRecording({ kind: "signed-out", reason });
-    else
+      // The live recording used this token, which is dead: it stops (and marks the person's other drains waiting).
+      await stopRecording({ kind: "signed-out", reason, forgot });
+    else if (forgot)
       await markWaiting(
         (drain) => drain.userId === userId && drain.openbotUrl === openbotUrl,
         reason,

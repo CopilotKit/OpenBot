@@ -1952,6 +1952,61 @@ test("a sign-out the document reports as a reconnect lands keeps no drain waitin
   expect(drains().filter((drain) => drain.kept !== undefined)).toEqual([]);
 });
 
+test("a stale sign-out answered to a stop retry after the person connected again keeps no drain waiting", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  openbot.down = true;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect(drains()).toMatchObject([{ demonstrationId: id, stopPending: true }]);
+  openbot.down = false;
+  const held = gate();
+  openbot.holds.stop = held.promise;
+  await advance(5_000);
+  await until(
+    () => requests().includes(`POST ${demoPath(id, "/stop")}`),
+    "the retry's stop is in flight",
+  );
+  // Ada connects again while the old token's answer is held, then OpenBot says the old token is gone.
+  connect(ada, "obr_two");
+  openbot.revoked.add("obr_one");
+  held.open();
+  await settle();
+  expect(storedConnection()?.token).toBe("obr_two");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(drains().filter((drain) => drain.kept !== undefined)).toEqual([]);
+});
+
+test("a stale sign-out answered while sending what was kept, after the person connected again, keeps no drain waiting", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({
+    type: "offscreen.signed-out",
+    reason: "revoked",
+    token: "obr_one",
+  });
+  await until(
+    () => drains()[0]?.kept?.waitingForReconnect === true,
+    "kept for Ada",
+  );
+  fake.storage.local.delete("notice");
+  const held = gate();
+  openbot.holds.stop = held.promise;
+  connect(ada, "obr_two");
+  const connected = handlers.connected();
+  await until(
+    () => requests().includes(`POST ${demoPath(id, "/stop")}`),
+    "the kept stop is in flight",
+  );
+  connect(ada, "obr_three");
+  openbot.revoked.add("obr_two");
+  held.open();
+  await connected;
+  await settle();
+  expect(storedConnection()?.token).toBe("obr_three");
+  expect(fake.storage.local.get("notice")).toBeUndefined();
+  expect(drains().filter((drain) => drain.kept !== undefined)).toEqual([]);
+});
+
 test("a sign-out the document reports without a token is refused, logged, and changes nothing", async () => {
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const logged = spyOn(console, "error").mockImplementation(() => {});
