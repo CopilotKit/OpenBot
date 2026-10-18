@@ -101,7 +101,7 @@ test("maps 422 to skipped, 503 to unavailable and 401 RECORDER_SIGNED_OUT to sig
 
 test("maps every other answer and a network failure to failed", async () => {
   answer = () => Response.json({ error: "Too many." }, { status: 429 });
-  expect(await transcribe()).toEqual({ failed: "Too many." });
+  expect(await transcribe()).toEqual({ failed: "Too many.", status: 429 });
 
   answer = () => new Response("nope", { status: 401 });
   const plain = await transcribe();
@@ -115,4 +115,22 @@ test("maps every other answer and a network failure to failed", async () => {
     token: "tok",
   }).transcribe(slice());
   expect(down).toHaveProperty("failed");
+});
+
+test("a 503 from the sign-in server is a failed slice with its status, not unavailable", async () => {
+  answer = () =>
+    Response.json(
+      { error: "Try again.", code: "RECORDER_AUTHORITY_UNAVAILABLE" },
+      { status: 503 },
+    );
+  expect(await transcribe()).toEqual({ failed: "Try again.", status: 503 });
+});
+
+test("a network failure is failed with no status", async () => {
+  const down = await createTranscriber({
+    openbotUrl: "http://127.0.0.1:1",
+    token: "tok",
+  }).transcribe(slice());
+  expect(down).toHaveProperty("failed");
+  expect(down).not.toHaveProperty("status");
 });

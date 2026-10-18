@@ -15,7 +15,7 @@ export type TranscribeResult =
   | { skipped: "no-speech" }
   | { unavailable: string }
   | { signedOut: true }
-  | { failed: string };
+  | { failed: string; status?: number };
 
 async function errorOf(response: Response): Promise<OpenBotError> {
   let body: { error: string; code?: string } | null = null;
@@ -77,8 +77,14 @@ export function createTranscriber(options: {
       const error = await errorOf(response);
       if (error.signedOut) return { signedOut: true };
       if (response.status === 422) return { skipped: "no-speech" };
-      if (response.status === 503) return { unavailable: error.message };
-      return { failed: error.message };
+      if (response.status === 503) {
+        // The sign-in server being briefly unreachable is retried, not "not set up".
+        if (error.body?.code === "RECORDER_AUTHORITY_UNAVAILABLE") {
+          return { failed: error.message, status: 503 };
+        }
+        return { unavailable: error.message };
+      }
+      return { failed: error.message, status: response.status };
     },
   };
 }
