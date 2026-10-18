@@ -212,6 +212,7 @@ export type RecorderEvent =
     }
   | { type: "step" }
   | { type: "notice" }
+  | { type: "notice-answered" }
   | { type: "follow"; tabId: number; url: string }
   | { type: "page"; tabId: number; url: string }
   | { type: "capture"; capture: Partial<CaptureStatus> }
@@ -226,7 +227,12 @@ export type RecorderEvent =
       error?: string;
     }
   | { type: "restart"; demonstrationId: string; startedAt: number }
-  | { type: "drains"; draining: number; kept?: RecorderState["kept"] }
+  | {
+      type: "drains";
+      draining: number;
+      kept?: RecorderState["kept"];
+      streamed?: number;
+    }
   | {
       type: "error";
       error: string;
@@ -247,7 +253,11 @@ export function reduceRecorder(
   state: RecorderState,
   event: RecorderEvent,
 ): RecorderState {
-  const kept = { draining: state.draining, kept: state.kept };
+  const kept = {
+    draining: state.draining,
+    kept: state.kept,
+    streamed: state.streamed,
+  };
   switch (event.type) {
     case "record":
       return defined({
@@ -269,12 +279,15 @@ export function reduceRecorder(
         startedAt: event.startedAt,
         steps: 0,
         noticeShown: false,
+        noticeOpen: false,
         capture: event.capture,
       };
     case "step":
       return { ...state, steps: state.steps + 1 };
     case "notice":
-      return { ...state, noticeShown: true };
+      return { ...state, noticeShown: true, noticeOpen: true };
+    case "notice-answered":
+      return { ...state, noticeOpen: false };
     case "follow":
       if (state.tabIds.includes(event.tabId)) return state;
       return {
@@ -298,6 +311,7 @@ export function reduceRecorder(
       return {
         ...state,
         phase: "stopping",
+        noticeOpen: false,
         stopping: defined({
           since: event.since,
           stage: "draining" as const,
@@ -329,9 +343,15 @@ export function reduceRecorder(
         startedAt: event.startedAt,
         steps: 0,
         noticeShown: false,
+        noticeOpen: false,
       };
     case "drains":
-      return defined({ ...state, draining: event.draining, kept: event.kept });
+      return defined({
+        ...state,
+        draining: event.draining,
+        kept: event.kept,
+        streamed: event.streamed,
+      });
     case "error":
       return defined({
         ...IDLE_STATE,
@@ -350,6 +370,13 @@ export function reduceRecorder(
     case "clear-error":
       return defined({ ...state, error: undefined });
   }
+}
+
+/** How many stopped recordings Intelligence already has every event of, still kept only for OpenBot and not kept for
+ * a retry: the popup does not say they are sending to Intelligence. */
+function streamedCount(drains: DrainRecord[]): number | undefined {
+  const count = drains.filter((drain) => drain.streamed && !drain.kept).length;
+  return count > 0 ? count : undefined;
 }
 
 /** What the popup shows about stopped recordings whose events are kept (Decision 19). */
@@ -523,6 +550,7 @@ export function installRecording(
       type: "drains",
       draining: drains.length,
       kept: keptSummary(drains),
+      streamed: streamedCount(drains),
     });
   }
 
@@ -963,6 +991,7 @@ export function installRecording(
       if (!found && !active) offscreenDone.delete(demonstrationId);
       return found;
     });
+    let removed = false;
     if (drain && !drain.stopPending && !drain.discarding) {
       // A discarded recording's bodies are deleted with the rest of it, never sent.
       const removable = drain.discard
@@ -979,8 +1008,18 @@ export function installRecording(
         );
         offscreenDone.delete(demonstrationId);
         deleted.delete(demonstrationId);
+        removed = true;
       }
     }
+    // Intelligence has every event of a drain that stays: only OpenBot keeps it now, which the popup tells apart.
+    if (drain && !removed && !drain.streamed)
+      await updateDrains((drains) =>
+        drains.map((entry) =>
+          entry.demonstrationId === demonstrationId
+            ? { ...entry, streamed: true }
+            : entry,
+        ),
+      );
     await maybeCloseDocument();
   }
 
@@ -1937,6 +1976,8 @@ export function installRecording(
   async function noticeChoice(
     choice: "stop" | "restart" | "continue",
   ): Promise<PageResponse> {
+    // Answered, in a tab or in the popup: it is down everywhere.
+    dispatch({ type: "notice-answered" });
     postToContentPorts(
       state.tabIds,
       { type: "background.notice", show: false, steps: state.steps },
@@ -2325,6 +2366,7 @@ export function installRecording(
         ...state,
         draining: drains.length,
         kept: keptSummary(drains),
+        streamed: streamedCount(drains),
       }),
       connection: connection
         ? {

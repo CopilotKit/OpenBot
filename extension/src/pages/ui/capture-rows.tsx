@@ -246,7 +246,10 @@ export function CaptureRows({
             {describe(SCREEN_STATUS[capture.screen], capture.screenReason)}
           </ItemDescription>
         </ItemContent>
-        {capture.screen === "off" && capture.screenReason && onRecordScreen ? (
+        {/* Off for a stated reason, or failed (a service-worker restart ends the stream): a fresh stream id may work. */}
+        {((capture.screen === "off" && capture.screenReason) ||
+          capture.screen === "failed") &&
+        onRecordScreen ? (
           <ItemActions>
             <Button size="sm" onClick={onRecordScreen}>
               Record screen

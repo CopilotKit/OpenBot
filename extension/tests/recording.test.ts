@@ -1636,6 +1636,69 @@ test("the 50-step notice goes once to every followed tab's top frame and network
   expect((await state()).phase).toBe("recording");
 });
 
+/** Records on tab 7 (a chrome:// page, so it starts with no first step) until its 50th step opens the notice. */
+async function recordUntilNotice(top?: FakePort) {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const port = top ?? contentPort(7, 0);
+  const clicks = Array.from({ length: 49 }, (_, i) => click(`B${i}`));
+  await sendSteps(port, clicks, 49);
+  await settle();
+  expect((await state()).noticeOpen).toBe(false);
+  await sendSteps(port, [click("B49")], 50);
+  await until(async () => (await state()).noticeOpen, "the notice is open");
+  return port;
+}
+
+const pageStateNoticeOpen = async () =>
+  ((await page({ type: "page.state" })) as PageStateResponse).state.noticeOpen;
+
+test("the 50-step notice is open in the state the popup reads, and Keep going on the page closes it", async () => {
+  const top = await recordUntilNotice();
+  expect(await pageStateNoticeOpen()).toBe(true);
+  top.postMessage({ type: "content.notice", choice: "continue" });
+  await until(
+    async () => !(await state()).noticeOpen,
+    "Keep going on the page closes it",
+  );
+  expect(await pageStateNoticeOpen()).toBe(false);
+  // Once per recording: it stays closed for the rest of this one.
+  expect((await state()).noticeShown).toBe(true);
+  await sendSteps(top, [click("B50")], 51);
+  await settle();
+  expect((await state()).noticeOpen).toBe(false);
+});
+
+test("Keep going in the popup closes the 50-step notice", async () => {
+  await recordUntilNotice();
+  expect(await page({ type: "page.notice", choice: "continue" })).toEqual({
+    ok: true,
+  });
+  expect((await state()).noticeOpen).toBe(false);
+  expect(await pageStateNoticeOpen()).toBe(false);
+  expect((await state()).phase).toBe("recording");
+});
+
+test("Stop closes the 50-step notice, and the next recording to reach 50 steps opens it again", async () => {
+  const top = await recordUntilNotice();
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect(await state()).toMatchObject({ phase: "idle", noticeOpen: false });
+  expect(await pageStateNoticeOpen()).toBe(false);
+  await recordUntilNotice(top);
+  expect(await pageStateNoticeOpen()).toBe(true);
+});
+
+test("Start over closes the 50-step notice for the new recording", async () => {
+  await recordUntilNotice();
+  expect(await page({ type: "page.restart" })).toEqual({ ok: true });
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: "demo-2",
+    noticeShown: false,
+    noticeOpen: false,
+  });
+});
+
 test("a recording stopped in OpenBot stops here too and still drains", async () => {
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const content = contentPort(7);
@@ -2313,6 +2376,41 @@ test("Stop sends every queued step before telling OpenBot, and waits for OpenBot
   );
   expect(drains()[0]?.stopPending).toBeUndefined();
   expect(await storedSteps(demoId)).toEqual([]);
+});
+
+test("a stopped recording Intelligence has all of, waiting only for OpenBot to answer its stop, is counted as streamed", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  openbot.down = true;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const pageState = async () =>
+    ((await page({ type: "page.state" })) as PageStateResponse).state;
+  expect(await pageState()).toMatchObject({
+    phase: "idle",
+    error: STOP_PENDING,
+    draining: 1,
+  });
+  // Still streaming to Intelligence: nothing says otherwise.
+  expect((await pageState()).streamed).toBeUndefined();
+  expect(drains()[0]?.streamed).toBeUndefined();
+  doc?.postMessage({ type: "offscreen.done", demonstrationId: demoId });
+  await until(() => drains()[0]?.streamed === true, "the drain is streamed");
+  expect(drains()).toMatchObject([
+    { demonstrationId: demoId, stopPending: true, streamed: true },
+  ]);
+  expect((await state()).streamed).toBe(1);
+  expect(await pageState()).toMatchObject({
+    draining: 1,
+    streamed: 1,
+    error: STOP_PENDING,
+  });
+  // Once OpenBot has the stop the drain goes, and nothing is counted.
+  openbot.down = false;
+  await advance(5_000);
+  await until(() => drains().length === 0, "the drain goes");
+  expect(await pageState()).toMatchObject({ draining: 0 });
+  expect((await pageState()).streamed).toBeUndefined();
+  expect((await state()).streamed).toBeUndefined();
 });
 
 test("content events wait while the offscreen port is down, and only the oldest beyond 2,000 are dropped, counted", async () => {

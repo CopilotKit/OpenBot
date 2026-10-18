@@ -37,6 +37,9 @@ export type DrainRecord = {
   stopPending?: boolean;
   /** Start over: delete this demonstration once its outbox has drained. */
   discard: boolean;
+  /** The offscreen document reported it done (Intelligence has every event of it) while it stays for OpenBot: its stop
+   * has not reached OpenBot, or its network bodies are still owed. */
+  streamed?: boolean;
   /** The person chose to discard it (Discard kept events, Disconnect): nothing of it is ever sent, and a restart that
    * interrupted the clearing finishes it. */
   discarding?: boolean;

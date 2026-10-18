@@ -73,19 +73,7 @@ export function RecordingView({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  // The service worker keeps noticeShown for the rest of the recording, so a choice made here hides the card itself
-  // (for this recording only: the next one to reach 50 steps shows it again).
-  const [answered, setAnswered] = useState<{ demonstrationId?: string }>();
   const stopping = state.phase === "stopping" || state.phase === "starting";
-  const showNotice =
-    state.steps >= 50 &&
-    state.noticeShown &&
-    !stopping &&
-    answered?.demonstrationId !== state.demonstrationId;
-  const answer = (choice: "stop" | "restart" | "continue") => {
-    setAnswered({ demonstrationId: state.demonstrationId });
-    actions.onNotice(choice);
-  };
   return (
     <>
       <div className="mt-6">
@@ -105,7 +93,9 @@ export function RecordingView({
               </ItemDescription>
             </ItemContent>
           </Item>
-          {showNotice ? (
+          {/* The service worker says while it is open: any choice, in a tab or here, Stop and Start over close it, and
+              its buttons wait while a choice is being sent, as the card stays until the next state says so. */}
+          {state.noticeOpen ? (
             <>
               <Separator />
               <Item size="sm">
@@ -117,20 +107,26 @@ export function RecordingView({
                   </ItemDescription>
                 </ItemContent>
                 <ItemFooter className="justify-end">
-                  <Button size="sm" onClick={() => answer("stop")}>
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => actions.onNotice("stop")}
+                  >
                     Stop
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => answer("restart")}
+                    disabled={busy}
+                    onClick={() => actions.onNotice("restart")}
                   >
                     Start over
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => answer("continue")}
+                    disabled={busy}
+                    onClick={() => actions.onNotice("continue")}
                   >
                     Keep going
                   </Button>
@@ -204,10 +200,11 @@ export function AfterStop({
 }) {
   const [asking, setAsking] = useState(false);
   const { lastStopped, kept } = state;
-  // Every stopped recording is a drain until it is sent; kept ones wait for a retry, and ones kept for a person who
-  // signed out send nothing until they connect again (the kept row below says so).
+  // Every stopped recording is a drain until it is sent; kept ones wait for a retry, ones kept for a person who
+  // signed out send nothing until they connect again (the kept row below says so), and streamed ones only wait for
+  // OpenBot, Intelligence having all of them (a pending stop says so in its own sentence).
   const keptRecordings = kept?.recordings ?? 0;
-  const streaming = state.draining > keptRecordings;
+  const streaming = state.draining - (state.streamed ?? 0) > keptRecordings;
   const retrying = keptRecordings > (kept?.waitingFor?.recordings ?? 0);
   const sending = connected && state.draining > 0 && (streaming || retrying);
   // While it is still sending, the Learning capture row below says the same thing.

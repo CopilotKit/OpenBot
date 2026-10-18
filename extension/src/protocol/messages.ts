@@ -41,9 +41,15 @@ export type RecorderState = {
   startedAt?: number;
   steps: number;
   noticeShown: boolean;
+  /** The 50-step notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Start over or
+   * the end of the recording. The popup shows its card from this. */
+  noticeOpen: boolean;
   capture: CaptureStatus;
   lastStopped?: { demonstrationId: string; botId: string; openbotUrl: string };
   draining: number; // stopped recordings still sending
+  /** Of `draining`, the recordings Intelligence already has every event of, kept only for OpenBot (their stop, or their
+   * network bodies) and not kept for a retry (`kept`); absent when none. */
+  streamed?: number;
   openRecording?: { demonstrationId: string }; // Record was refused: this person has one open for the Bot
   learning?: LearningSpaceState; // the picked Bot's Learning space at Record, then what the passes found (Decision 10)
   topUrls: Record<string, string>; // followed tab id -> its top frame's current URL, for sub-frame steps (Decision 17)
@@ -69,6 +75,7 @@ export const IDLE_STATE: RecorderState = {
   tabIds: [],
   steps: 0,
   noticeShown: false,
+  noticeOpen: false,
   draining: 0,
   topUrls: {},
   capture: { intelligence: "off", network: "off", screen: "off", voice: "off" },

@@ -89,12 +89,15 @@ function setup(
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
     microphone?: "granted" | "prompt" | "denied";
     lastBotId?: string;
+    /** What the service worker does with a message before it answers, for the next page.state to show. */
+    onAsk?: (message: PageToBackground) => void;
   } = {},
 ) {
   const sent: PageToBackground[] = [];
   let prepareCalls = 0;
   const ask = async (message: PageToBackground): Promise<PageResponse> => {
     sent.push(message);
+    options.onAsk?.(message);
     const fixed = options.answers?.[message.type];
     if (fixed) return fixed;
     // Chrome copies every message as JSON, so each answer is a new object, as the polling popup sees it.
@@ -547,11 +550,54 @@ test("Stop and Start over send page.stop and page.restart", async () => {
   );
 });
 
-test("at 50 steps with the notice shown the popup repeats its three choices, and Keep going hides the card", async () => {
-  // The controller keeps noticeShown for the rest of the recording, so the state the popup reads does not change.
-  const { findByText, getByRole, queryByText, sent } = setup(
-    recording({ steps: 50, noticeShown: true }),
+/** The controller closes the notice on any choice (`page.notice`), as the next page.state then says. */
+const closesNotice =
+  (response: PageStateResponse) => (message: PageToBackground) => {
+    if (message.type === "page.notice") response.state.noticeOpen = false;
+  };
+
+test("the 50-step card shows only while the controller says the notice is open", async () => {
+  const closed = setup(
+    recording({ steps: 50, noticeShown: true, noticeOpen: false }),
   );
+  await closed.findByText("1:05 · 50 steps");
+  expect(closed.queryByText("You have recorded 50 steps")).toBeNull();
+  expect(closed.queryByRole("button", { name: "Keep going" })).toBeNull();
+  closed.unmount();
+  const open = setup(
+    recording({ steps: 50, noticeShown: true, noticeOpen: true }),
+  );
+  await open.findByText("You have recorded 50 steps");
+  expect(open.getByRole("button", { name: "Keep going" })).toBeTruthy();
+});
+
+test("Keep going on the page takes the card out of the popup at the next page.state", async () => {
+  const response = recording({
+    steps: 50,
+    noticeShown: true,
+    noticeOpen: true,
+  });
+  const { findByText, getByRole, queryByText, sent } = setup(response);
+  await findByText("You have recorded 50 steps");
+  // The person answers the overlay in the tab: the controller closes the notice, and the popup's poll sees it.
+  response.state.noticeOpen = false;
+  await waitFor(
+    () => expect(queryByText("You have recorded 50 steps")).toBeNull(),
+    { timeout: 3000 },
+  );
+  expect(sent.some((m) => m.type === "page.notice")).toBe(false);
+  expect(getByRole("button", { name: "Stop" })).toBeTruthy();
+});
+
+test("at 50 steps with the notice open the popup repeats its three choices, and Keep going hides the card", async () => {
+  const response = recording({
+    steps: 50,
+    noticeShown: true,
+    noticeOpen: true,
+  });
+  const { findByText, getByRole, queryByText, sent } = setup(response, {
+    onAsk: closesNotice(response),
+  });
   await findByText("You have recorded 50 steps");
   fireEvent.click(getByRole("button", { name: "Keep going" }));
   await waitFor(() =>
@@ -570,8 +616,14 @@ test("the 50-step card's Stop and Start over hide it too", async () => {
     ["Stop", "stop"],
     ["Start over", "restart"],
   ] as const) {
+    const response = recording({
+      steps: 52,
+      noticeShown: true,
+      noticeOpen: true,
+    });
     const { findByText, getAllByRole, queryByText, sent, unmount } = setup(
-      recording({ steps: 52, noticeShown: true }),
+      response,
+      { onAsk: closesNotice(response) },
     );
     const card = (await findByText("You have recorded 52 steps")).closest(
       "[data-slot=item]",
@@ -593,15 +645,25 @@ test("the 50-step card's Stop and Start over hide it too", async () => {
 });
 
 test("Keep going hides the card for that recording only: the next one to reach 50 steps shows it again", async () => {
-  const response = recording({ steps: 50, noticeShown: true });
-  const { findByText, getByRole, queryByText } = setup(response);
+  const response = recording({
+    steps: 50,
+    noticeShown: true,
+    noticeOpen: true,
+  });
+  const { findByText, getByRole, queryByText } = setup(response, {
+    onAsk: closesNotice(response),
+  });
   await findByText("You have recorded 50 steps");
   fireEvent.click(getByRole("button", { name: "Keep going" }));
   await waitFor(() =>
     expect(queryByText("You have recorded 50 steps")).toBeNull(),
   );
-  // The popup polls page.state while a recording runs: the next answer is another recording.
-  Object.assign(response.state, { demonstrationId: "d8", steps: 51 });
+  // The popup polls page.state while a recording runs: the next answer is another recording whose notice opened.
+  Object.assign(response.state, {
+    demonstrationId: "d8",
+    steps: 51,
+    noticeOpen: true,
+  });
   await findByText("You have recorded 51 steps", {}, { timeout: 3000 });
 });
 
@@ -616,6 +678,21 @@ test("Record screen shows when the screen is off with a reason and sends page.sc
     }),
   );
   fireEvent.click(await findByRole("button", { name: "Record screen" }));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.screen")).toBe(true),
+  );
+});
+
+test("Record screen shows after the screen failed, as a service-worker restart leaves it, and sends page.screen", async () => {
+  const reason =
+    "The screen recording stopped when Chrome restarted the Recorder in the background.";
+  const { findByRole, getByText, sent } = setup(
+    recording({
+      capture: { ...CAPTURE, screen: "failed", screenReason: reason },
+    }),
+  );
+  fireEvent.click(await findByRole("button", { name: "Record screen" }));
+  expect(getByText(`Could not record the screen. ${reason}`)).toBeTruthy();
   await waitFor(() =>
     expect(sent.some((m) => m.type === "page.screen")).toBe(true),
   );
@@ -1104,6 +1181,30 @@ test("after a Start over that could not open the new recording, the popup shows 
   expect(queryByText("Review it in OpenBot to draft the Skill.")).toBeNull();
   expect(queryByRole("link")).toBeNull();
   expect(getByRole("button", { name: "Record" })).toBeTruthy();
+});
+
+test("after stop, a pending stop says it is sending only while Intelligence is still sent the recording", async () => {
+  const pending = {
+    ...STOPPED,
+    capture: AFTER_STOP_CAPTURE,
+    error: STOP_PENDING,
+    draining: 1,
+  };
+  // Still streaming: the sending lines stay beside the stop sentence.
+  const streaming = setup(stateResponse({ state: pending }));
+  await streaming.findByText(STOP_PENDING);
+  expect(streaming.getByText(SENDING)).toBeTruthy();
+  expect(
+    streaming.getByText("Sending the rest of this recording to Intelligence"),
+  ).toBeTruthy();
+  streaming.unmount();
+  // Intelligence has all of it and only OpenBot's answer to the stop is owed: the stop sentence says so, alone.
+  const waiting = setup(stateResponse({ state: { ...pending, streamed: 1 } }));
+  await waiting.findByText(STOP_PENDING);
+  expect(waiting.queryByText(SENDING)).toBeNull();
+  expect(waiting.queryByText(/Sending the rest/)).toBeNull();
+  expect(waiting.queryByText("Learning capture")).toBeNull();
+  expect(waiting.queryByText("Saved")).toBeNull();
 });
 
 test("a pending stop shows its sentence and no Record button when its Bot is the only one", async () => {
