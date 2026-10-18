@@ -143,7 +143,7 @@ export function RecordForm({
               type="button"
               variant="link"
               size="sm"
-              className="self-start px-0"
+              className="-ml-px self-start px-0 has-data-[icon=inline-start]:pl-0"
               onClick={onAllowMicrophone}
             >
               <IconMicrophone data-icon="inline-start" />
