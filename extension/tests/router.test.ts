@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import * as connection from "../src/background/connection";
+import type { NetworkCaptureDeps } from "../src/background/network";
+import { installRecording } from "../src/background/recording";
+import { recoverInterruptedRecording } from "../src/background/recovery";
 import { installRouter, type RouterHandlers } from "../src/background/router";
 import type {
   ExternalToBackground,
   PageToBackground,
+  StreamSession,
 } from "../src/protocol/messages";
-import { PORT_CONTENT, PORT_OFFSCREEN } from "../src/protocol/messages";
+import {
+  IDLE_STATE,
+  PORT_CONTENT,
+  PORT_OFFSCREEN,
+} from "../src/protocol/messages";
+import { openRecorderDatabase } from "../src/shared/database";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
 let fake: ChromeFake;
@@ -398,4 +409,173 @@ test("a port with an unknown name is disconnected", async () => {
   expect(far.onDisconnect.called).toBe(true);
   expect(seen.content).toEqual([]);
   expect(seen.offscreen).toEqual([]);
+});
+
+test("importing the service worker's index registers each listener once and closes storage.local to content scripts", async () => {
+  const globals = globalThis as unknown as {
+    indexedDB: IDBFactory;
+    IDBKeyRange: typeof FakeIDBKeyRange;
+  };
+  const saved = {
+    indexedDB: globals.indexedDB,
+    IDBKeyRange: globals.IDBKeyRange,
+  };
+  globals.indexedDB = new IDBFactory();
+  globals.IDBKeyRange = FakeIDBKeyRange;
+  try {
+    await import(`../src/background/index?once-${Math.random()}`);
+    for (const name of [
+      "runtime.onMessage.addListener",
+      "runtime.onMessageExternal.addListener",
+      "runtime.onConnect.addListener",
+      "runtime.onStartup.addListener",
+    ])
+      expect(fake.calls.filter((call) => call === name)).toHaveLength(1);
+    await Bun.sleep(0);
+    expect(fake.storage.accessLevel).toBe("TRUSTED_CONTEXTS");
+  } finally {
+    globals.indexedDB = saved.indexedDB;
+    globals.IDBKeyRange = saved.IDBKeyRange;
+  }
+});
+
+test("a recorder.page-network event the fallback accepts reaches the network capture, not the offscreen document", async () => {
+  const globals = globalThis as unknown as {
+    indexedDB: IDBFactory;
+    IDBKeyRange: typeof FakeIDBKeyRange;
+  };
+  const saved = {
+    indexedDB: globals.indexedDB,
+    IDBKeyRange: globals.IDBKeyRange,
+  };
+  globals.indexedDB = new IDBFactory();
+  globals.IDBKeyRange = FakeIDBKeyRange;
+  const dbName = `router-test-${Math.random()}`;
+  const demonstrationId = "demo-9";
+  const trajectoryId = "00000000-0000-4000-8000-000000000009";
+  const startedAt = 1_800_000_000_000;
+  const event: CapturedEvent = {
+    type: "CUSTOM",
+    name: "network",
+    timestamp: 1,
+    value: { url: "https://crm.example.test/api" },
+  };
+  const recorded: CapturedEvent[] = [];
+  const asked: CapturedEvent[] = [];
+  let networkDeps: NetworkCaptureDeps | undefined;
+  let document: ReturnType<ChromeFake["connectFrom"]> | undefined;
+  try {
+    fake.storage.local.set("connection", {
+      openbotUrl: "http://127.0.0.1:9",
+      token: "obr_one",
+      connectionId: "c-1",
+      user: { id: "p1", name: "Ada", email: "ada@example.test" },
+      via: "web",
+      connectedAt: startedAt,
+    });
+    fake.storage.local.set("activeRecording", {
+      demonstrationId,
+      botId: "bot-1",
+      title: "Update deal",
+      openbotUrl: "http://127.0.0.1:9",
+      userId: "p1",
+      userName: "Ada",
+      trajectoryIds: [trajectoryId],
+      startedAt,
+      discard: false,
+    });
+    fake.storage.session.set("recorder", {
+      ...IDLE_STATE,
+      phase: "recording",
+      demonstrationId,
+      botId: "bot-1",
+      title: "Update deal",
+      tabIds: [7],
+      topUrls: { "7": "https://crm.example.test/" },
+      startedAt,
+      steps: 1,
+      capture: {
+        intelligence: "streaming",
+        network: "page",
+        screen: "off",
+        voice: "off",
+      },
+    });
+    fake.storage.session.set("stream", {
+      demonstrationId,
+      title: "Update deal",
+      botId: "bot-1",
+      openbotUrl: "http://127.0.0.1:9",
+      token: "obr_one",
+      trajectoryId,
+      startedAt,
+      allowedIntelligenceUrls: null,
+      version: "0.3.0",
+      media: { tabStreamId: null, microphone: false },
+    } satisfies StreamSession);
+    fake.offscreen.open = true;
+    const handlers = installRecording({
+      createNetworkCapture: (deps) => {
+        networkDeps = deps;
+        return {
+          start: async () => "page",
+          addTab: async () => {},
+          onCommitted: async () => {},
+          resume: async () => "page",
+          recordPageEvent: async (accepted) => {
+            recorded.push(accepted);
+          },
+          stop: async () => {},
+        };
+      },
+      createPageFallback: () => ({
+        start: async () => false,
+        addTab: async () => {},
+        onCommitted: async () => {},
+        stop: async () => {},
+        active: () => false,
+      }),
+      acceptPageNetworkEvent: (received) => {
+        asked.push(received);
+        return { event: received, step: null };
+      },
+      recoverNetworkBodies: async () => {},
+      readPolicy: async () => ({
+        openbotUrl: null,
+        openbotUrlInvalid: false,
+        allowedIntelligenceUrls: null,
+      }),
+      hasHostPermission: async () => true,
+      openDatabase: () => openRecorderDatabase(dbName),
+    });
+    installRouter(handlers);
+    document = fake.connectFrom(PORT_OFFSCREEN, {
+      id: chrome.runtime.id,
+      url: chrome.runtime.getURL("offscreen.html"),
+    });
+    document.postMessage({ type: "offscreen.ready" });
+    await recoverInterruptedRecording();
+    expect(networkDeps).toBeDefined();
+
+    const answer = await fake.sendExternal(
+      { type: "recorder.page-network", event },
+      {
+        tab: { id: 7 } as chrome.tabs.Tab,
+        url: "https://crm.example.test/",
+        origin: "https://crm.example.test",
+      },
+    );
+    expect(answer).toEqual({ ok: true });
+    expect(asked).toEqual([event]);
+    expect(recorded).toEqual([event]);
+    expect(
+      (document.messages as { type: string }[]).filter(
+        (message) => message.type === "offscreen.event",
+      ),
+    ).toEqual([]);
+  } finally {
+    document?.disconnect();
+    globals.indexedDB = saved.indexedDB;
+    globals.IDBKeyRange = saved.IDBKeyRange;
+  }
 });
