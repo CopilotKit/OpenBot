@@ -15,11 +15,15 @@ describe("microphoneState", () => {
   let saved: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    saved = Object.getOwnPropertyDescriptor(globalThis.navigator, "permissions");
+    saved = Object.getOwnPropertyDescriptor(
+      globalThis.navigator,
+      "permissions",
+    );
   });
 
   afterEach(() => {
-    if (saved) Object.defineProperty(globalThis.navigator, "permissions", saved);
+    if (saved)
+      Object.defineProperty(globalThis.navigator, "permissions", saved);
     else Reflect.deleteProperty(globalThis.navigator, "permissions");
   });
 
