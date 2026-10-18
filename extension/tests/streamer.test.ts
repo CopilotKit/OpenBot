@@ -238,6 +238,8 @@ type Harness = {
   registered: string[];
   registerFailures: number;
   onTrajectory: string[];
+  /** Each registered rollover with the recording it belongs to. */
+  rollovers: { trajectoryId: string; demonstrationId: string }[];
   closed: string[];
   closeGate: Promise<void> | null;
   last(): StreamerStatus;
@@ -290,6 +292,7 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
     registered: [],
     registerFailures: 0,
     onTrajectory: [],
+    rollovers: [],
     closed: [],
     closeGate: null,
     trajectoryId: crypto.randomUUID(),
@@ -341,8 +344,10 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
         sequencer,
         status: (status: StreamerStatus) =>
           h.statuses.push({ at: clock.now(), status }),
-        onTrajectory: (trajectoryId: string) =>
-          h.onTrajectory.push(trajectoryId),
+        onTrajectory: (trajectoryId: string, demonstrationId: string) => {
+          h.onTrajectory.push(trajectoryId);
+          h.rollovers.push({ trajectoryId, demonstrationId });
+        },
         onSignedOut: (reason: string) => h.signedOut.push(reason),
         onKept: (kept: KeptReport) => h.kept.push(kept),
         randomUUID: () => crypto.randomUUID(),
@@ -1424,6 +1429,41 @@ describe("streamer", () => {
     expect(h.last().events.rejected).toBe(0);
   });
 
+  test("a rollover registered after Start over is reported for the recording it belongs to", async () => {
+    const h = await setup();
+    h.registerFailures = 1;
+    const second = crypto.randomUUID();
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    // started, outcome and three clicks fill the first trajectory; the fourth click rolls over.
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(
+      () => h.registerFailures === 0,
+      "the first registration refused",
+    );
+    expect(h.rollovers).toEqual([]);
+    const next = crypto.randomUUID();
+    const rotating = s.rotate({
+      demonstrationId: "demo-2",
+      trajectoryId: next,
+      title: "Try again",
+    });
+    await until(() => h.stored(next).length === 2, "the new recording streams");
+
+    await h.clock.advance(1_000);
+    await until(() => h.rollovers.length === 1, "the rollover registered");
+    expect(h.rollovers).toEqual([
+      { trajectoryId: second, demonstrationId: "demo-1" },
+    ]);
+    await rotating;
+    expect(h.closed).toEqual([h.trajectoryId, second]);
+    const rolled = h.stored(second);
+    expect(clicks(rolled)).toEqual([3]);
+    expect(payloadOf(rolled.at(-1) ?? rolled[0])).toMatchObject({
+      workflow: "File the weekly report",
+      phase: "failed",
+    });
+  });
+
   test("stop queues the outcome last, keeps draining with no deadline and closes each trajectory when empty", async () => {
     const h = await setup();
     const s = await h.start();
@@ -1508,6 +1548,59 @@ describe("streamer", () => {
     });
     expect(clicks(old)).toEqual([0]);
     expect(clicks(fresh)).toEqual([1]);
+  });
+
+  test("a recording that stops while its events are kept reports them again, outcome included, for the stopped recording", async () => {
+    const h = await setup();
+    h.gateway.refuseNextJoin("trajectories_unavailable");
+    const s = await h.start();
+    s.push(click(0));
+    await until(() => h.last().intelligence === "parked", "parked");
+    await until(async () => (await h.pending(h.trajectoryId)) === 3, "kept");
+    expect(h.kept).toHaveLength(1);
+
+    await s.stop("succeeded");
+    expect(await h.pending(h.trajectoryId)).toBe(4);
+    expect(h.kept).toHaveLength(2);
+    expect(h.kept[1]).toEqual({
+      reason: GATEWAY_OFF,
+      parked: true,
+      events: 4,
+      demonstrationId: "demo-1",
+      trajectoryId: h.trajectoryId,
+    });
+  });
+
+  test("Start over reports the replaced recording's kept events again, outcome included", async () => {
+    const h = await setup();
+    h.gateway.refuseNextJoin("trajectories_unavailable");
+    const s = await h.start();
+    await until(() => h.last().intelligence === "parked", "parked");
+    await until(async () => (await h.pending(h.trajectoryId)) === 2, "kept");
+    expect(h.kept).toHaveLength(1);
+
+    const next = crypto.randomUUID();
+    let rotated = false;
+    void s
+      .rotate({
+        demonstrationId: "demo-2",
+        trajectoryId: next,
+        title: "Try again",
+      })
+      .then(() => {
+        rotated = true;
+      });
+    await until(() => h.stored(next).length === 2, "the new recording streams");
+    expect(h.kept).toHaveLength(2);
+    expect(h.kept[1]).toEqual({
+      reason: GATEWAY_OFF,
+      parked: true,
+      events: 3,
+      demonstrationId: "demo-1",
+      trajectoryId: h.trajectoryId,
+    });
+    expect(await h.pending(h.trajectoryId)).toBe(3);
+    expect(rotated).toBe(false);
   });
 
   test("events still in the outbox are sent after the offscreen document restarts", async () => {

@@ -57,11 +57,12 @@ export type StreamerDeps = {
   outbox: Outbox;
   sequencer: { next(): number; flush(): Promise<void> };
   status(update: StreamerStatus): void;
-  /** Rollover registered another trajectory. */
-  onTrajectory(trajectoryId: string): void;
+  /** Rollover registered another trajectory of `demonstrationId`: after Start over that can be the replaced recording. */
+  onTrajectory(trajectoryId: string, demonstrationId: string): void;
   /** Forwarded as offscreen.signed-out { reason }. */
   onSignedOut(reason: "revoked" | "removed" | "organization"): void;
-  /** A trajectory stopped streaming with its events kept (a stop (hold) or stop (park) row); called on each transition. */
+  /** A trajectory stopped streaming with its events kept (a stop (hold) or stop (park) row); called on each transition,
+   * and again for every trajectory still kept when its recording stops or is replaced by Start over. */
   onKept(kept: KeptReport): void;
   randomUUID(): string;
   /** Default 300_000: a stop (hold) tries again every 5 minutes. In the e2e variant the controller passes session.e2eHoldRetryMs. */
@@ -570,6 +571,16 @@ export async function createStreamer(
     }
   };
 
+  const reportKept = (lane: Lane, kept: Kept) => {
+    deps.onKept({
+      reason: kept.reason,
+      parked: kept.parked,
+      events: lane.pending,
+      demonstrationId: lane.meta.demonstrationId,
+      trajectoryId: lane.id,
+    });
+  };
+
   const keep = (lane: Lane, kept: Kept) => {
     const before = lane.kept;
     lane.kept = kept;
@@ -579,15 +590,19 @@ export async function createStreamer(
       before.parked !== kept.parked ||
       before.reason !== kept.reason
     ) {
-      deps.onKept({
-        reason: kept.reason,
-        parked: kept.parked,
-        events: lane.pending,
-        demonstrationId: lane.meta.demonstrationId,
-        trajectoryId: lane.id,
-      });
+      reportKept(lane, kept);
     }
     emitStatus();
+  };
+
+  /**
+   * A recording that stops or is replaced with trajectories already held or parked reports them again: the transition
+   * was reported while it still recorded, when the controller posts only a status, so this is its first offscreen.kept.
+   */
+  const reportStillKept = (demonstration: string) => {
+    for (const lane of lanesOf(demonstration)) {
+      if (lane.kept && !lane.meta.closed) reportKept(lane, lane.kept);
+    }
   };
 
   const hold = (lane: Lane, reason: string) => {
@@ -777,7 +792,7 @@ export async function createStreamer(
       old.meta.registered = true;
       await persist(old);
       next.awaitingRegistration = false;
-      deps.onTrajectory(next.id);
+      deps.onTrajectory(next.id, next.meta.demonstrationId);
       void connect(next);
       maybeClose(old);
     }
@@ -1357,6 +1372,7 @@ export async function createStreamer(
         }
         old.meta.stopped = true;
         await persist(old);
+        reportStillKept(old.meta.demonstrationId);
         demonstrationId = next.demonstrationId;
         const lane = makeLane(
           next.trajectoryId,
@@ -1389,6 +1405,7 @@ export async function createStreamer(
         }
         lane.meta.stopped = true;
         await persist(lane);
+        reportStillKept(demonstrationId);
         maybeClose(lane);
         return {
           trajectoryIds: lanesOf(demonstrationId).map((own) => own.id),
