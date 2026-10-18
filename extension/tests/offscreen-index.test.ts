@@ -593,6 +593,41 @@ describe("offscreen controller", () => {
     expect(h.media.stops).toBe(1);
   });
 
+  test("stop still stops the screen and voice, and reports stopped and done, when the streamer never started", async () => {
+    const h = await setup();
+    await h.open(h.clock, {
+      openOutbox: async () => {
+        throw new Error("IndexedDB could not be opened");
+      },
+    });
+    const session = h.session();
+    h.post({ type: "offscreen.start", session });
+    await until(() => h.media.sessions.length === 1, "the media starting");
+    // Let the failed streamer start settle before Stop arrives.
+    await sleep(100);
+
+    h.post({ type: "offscreen.stop", outcome: "succeeded" });
+    await until(
+      () => h.received("offscreen.done").length === 1,
+      "offscreen.done",
+    );
+    expect(h.media.stops).toBe(1);
+    expect(h.received("offscreen.stopped")).toEqual([
+      {
+        type: "offscreen.stopped",
+        demonstrationId: "demo-1",
+        trajectoryIds: [],
+      },
+    ]);
+    expect(h.received("offscreen.done")).toEqual([
+      { type: "offscreen.done", demonstrationId: "demo-1" },
+    ]);
+    const types = h.latest().map((message) => message.type);
+    expect(types.indexOf("offscreen.stopped")).toBeLessThan(
+      types.indexOf("offscreen.done"),
+    );
+  });
+
   test("a new Record's media starts at once, even while the last Stop still drains voice", async () => {
     const h = await setup();
     h.media.stopGate = makeGate();

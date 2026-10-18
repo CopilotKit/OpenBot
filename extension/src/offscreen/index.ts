@@ -664,18 +664,32 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
     const stream = target.stream;
     const streamer = stream?.streamer;
-    if (!stream || !streamer) {
-      console.error(
-        "Recorder: Stop arrived for a recording whose streamer never started",
-      );
-      return;
-    }
     const media = await target.media;
     try {
       // Recorders stop and voice drains, so the last transcript is queued before the outcome.
       await media?.stop();
     } catch (error) {
       console.error("Recorder: screen and voice did not stop cleanly", error);
+    }
+    if (!stream || !streamer) {
+      // The streamer never started (its storage failed to open): nothing was sent, but the recording still ends.
+      console.error(
+        "Recorder: Stop arrived for a recording whose streamer never started",
+      );
+      target.ending = true;
+      const demonstrationId = target.demonstrationId;
+      target.stopped = { trajectoryIds: [] };
+      post({ type: "offscreen.stopped", demonstrationId, trajectoryIds: [] });
+      void Promise.resolve(media?.finished()).then(
+        () => post({ type: "offscreen.done", demonstrationId }),
+        (error) => {
+          console.error(
+            "Recorder: a stopped recording could not finish sending",
+            error,
+          );
+        },
+      );
+      return;
     }
     target.ending = true;
     const demonstrationId = target.demonstrationId;
