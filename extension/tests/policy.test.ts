@@ -2,7 +2,11 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
-import { handleExternalConnect } from "../src/background/connection";
+import {
+  currentConnection,
+  handleExternalConnect,
+  installConnection,
+} from "../src/background/connection";
 import { PASS_HINTS } from "../src/offscreen/grant";
 import { openOutbox } from "../src/offscreen/outbox";
 import {
@@ -16,6 +20,7 @@ import {
   type RecorderPolicy,
   readPolicy,
 } from "../src/shared/policy";
+import { readLocal, writeLocal } from "../src/shared/storage";
 import { type ChromeFake, installChromeFake } from "./support/chrome-fake";
 
 let fake: ChromeFake;
@@ -226,4 +231,61 @@ test("an invalid policy refuses every connect with policy-invalid", async () => 
       { readPolicy, openTab: async () => 1 },
     ),
   ).toEqual({ ok: false, error: "policy-invalid" });
+});
+
+async function storeConnection(openbotUrl: string) {
+  await writeLocal("connection", {
+    openbotUrl,
+    token: "obr_fixture",
+    connectionId: "c1",
+    user: { id: "u1", name: "Ada", email: "ada@example.test" },
+    via: "web",
+    connectedAt: 1,
+  });
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+test("a policy change to another origin forgets the stored connection and says the Recorder moved", async () => {
+  await storeConnection("https://openbot.example.test");
+  installConnection({ readPolicy });
+  await settle();
+  expect(await currentConnection()).not.toBeNull();
+
+  fake.storage.setManaged({ OpenBotUrl: "https://moved.example.test" });
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toMatchObject({
+    kind: "policy-moved",
+    origin: "https://moved.example.test",
+  });
+});
+
+test("a policy that pinned another origin while the browser was closed is reconciled at start", async () => {
+  await storeConnection("https://openbot.example.test");
+  fake.storage.setManaged({ OpenBotUrl: "https://moved.example.test" });
+  installConnection({ readPolicy });
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toMatchObject({
+    kind: "policy-moved",
+    origin: "https://moved.example.test",
+  });
+});
+
+test("an invalid policy forgets the connection with an empty origin, and a matching policy keeps it", async () => {
+  await storeConnection("https://openbot.example.test");
+  installConnection({ readPolicy });
+  fake.storage.setManaged({ OpenBotUrl: "https://openbot.example.test" });
+  await settle();
+  expect(await currentConnection()).not.toBeNull();
+  expect(await readLocal("notice")).toBeUndefined();
+
+  fake.storage.setManaged({ OpenBotUrl: "http://openbot.example.test" });
+  await settle();
+  expect(await currentConnection()).toBeNull();
+  expect(await readLocal("notice")).toMatchObject({
+    kind: "policy-moved",
+    origin: "",
+  });
 });

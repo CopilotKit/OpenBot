@@ -11,7 +11,11 @@ import type {
 } from "../protocol/messages";
 import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
-import { type RecorderPolicy, readPolicy } from "../shared/policy";
+import {
+  onPolicyChanged,
+  type RecorderPolicy,
+  readPolicy,
+} from "../shared/policy";
 import {
   type ConnectionRecord,
   installIdFor,
@@ -79,7 +83,8 @@ export function installConnection(deps?: Partial<ConnectionDeps>): void {
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === KEEP_ALIVE_ALARM) void keepAlive();
   });
-  void reconcilePolicy();
+  void reconcilePolicy(resolved.readPolicy);
+  onPolicyChanged(() => void reconcilePolicy(resolved.readPolicy));
   void scheduleKeepAlive();
 }
 
@@ -376,8 +381,29 @@ function sameOrigin(raw: string, origin: string): boolean {
   return checked.ok && checked.origin === origin;
 }
 
-/** Compares the stored connection with the policy once (Task 22 makes it real); called by installConnection at every start. */
-export async function reconcilePolicy(): Promise<void> {}
+/** Compares the stored connection with the policy: a policy that pins another origin, or is invalid, forgets the
+ * connection and leaves a `policy-moved` notice (its origin empty for an invalid policy). Called at every start and
+ * on every managed-storage change. The token check keeps a reconnect that lands meanwhile. */
+export async function reconcilePolicy(
+  read: () => Promise<RecorderPolicy> = readPolicy,
+): Promise<void> {
+  const policy = await read();
+  const connection = await currentConnection();
+  if (!connection) return;
+  const moved = policy.openbotUrlInvalid
+    ? ""
+    : policy.openbotUrl !== null &&
+        !sameOrigin(policy.openbotUrl, connection.openbotUrl)
+      ? policy.openbotUrl
+      : null;
+  if (moved === null) return;
+  if (await forgetConnection("disconnected", connection.token))
+    await writeLocal("notice", {
+      kind: "policy-moved",
+      at: Date.now(),
+      origin: moved,
+    });
+}
 
 /** A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always
  * a loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked. */
