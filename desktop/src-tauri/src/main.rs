@@ -13,8 +13,8 @@ mod test_support;
 
 use openbot_desktop_lib::{
     acquire, deployment, deployment_release, engine, env as openbot_env, harness, host_access,
-    install, preparation, problem::Problem, provider, pull_metrics, quiet, stack, supervise,
-    telemetry, tray, windows as win,
+    install, preparation, problem::Problem, provider, pull_metrics, quiet, recorder_install, stack,
+    supervise, telemetry, tray, windows as win,
 };
 
 const QUIT_CLEANUP_NOTICE_FILE: &str = ".openbot-quit-cleanup-notice";
@@ -3741,7 +3741,104 @@ fn quit_menu_accelerator() -> Option<&'static str> {
     Some(QUIT_MENU_ACCELERATOR)
 }
 
+/// The Recorder host install's real side effects on this computer.
+struct RecorderInstallWriter;
+
+impl recorder_install::InstallWriter for RecorderInstallWriter {
+    fn write_file(&mut self, path: &Path, contents: &str) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, contents)
+    }
+
+    // Output is captured, never inherited: `reg.exe` prints a success line, and the install command's
+    // own output is only the manifest paths.
+    fn run(&mut self, argv: &[String]) -> std::io::Result<()> {
+        let (program, arguments) = argv
+            .split_first()
+            .ok_or_else(|| std::io::Error::other("an empty command"))?;
+        let output = quiet::command(program)
+            .args(arguments)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(std::io::Error::other(format!(
+            "{program} exited with {}: {}",
+            output.status,
+            quiet::said(&output.stderr)
+        )))
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+}
+
+fn recorder_os() -> recorder_install::Os {
+    if cfg!(windows) {
+        recorder_install::Os::Windows
+    } else if cfg!(target_os = "macos") {
+        recorder_install::Os::Mac
+    } else {
+        recorder_install::Os::Linux
+    }
+}
+
+/// The person's home folder, read as `stack.rs` reads it.
+fn recorder_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Lets each browser's Recorder find this app: one host manifest per browser present for this user.
+fn install_recorder_host_for_this_user() -> Result<Vec<PathBuf>, Problem> {
+    let current_exe = std::env::current_exe().map_err(|error| {
+        Problem::with(
+            "OpenBot Desktop could not set up the Recorder.",
+            error.to_string(),
+        )
+    })?;
+    let stable = recorder_install::stable_host_path(
+        recorder_os(),
+        &current_exe,
+        std::env::var_os("APPIMAGE").as_deref().map(Path::new),
+    )?;
+    let home = recorder_home()
+        .ok_or_else(|| Problem::plain("OpenBot Desktop could not find your home folder."))?;
+    recorder_install::install(
+        &stable,
+        &home,
+        std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
+        recorder_os(),
+        &mut RecorderInstallWriter,
+    )
+}
+
 fn main() {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // The same install the app's setup runs, as a command, so it can be tested and run by hand.
+    if args.get(1).is_some_and(|a| a == "--install-recorder-host") {
+        std::process::exit(match install_recorder_host_for_this_user() {
+            Ok(paths) => {
+                for p in paths {
+                    println!("{}", p.display());
+                }
+                0
+            }
+            Err(problem) => {
+                eprintln!("{}", problem.said);
+                if let Some(detail) = problem.detail {
+                    eprintln!("{detail}");
+                }
+                1
+            }
+        });
+    }
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
         // second stack. Without this both copies bind the same ports and the loser reports a
@@ -3828,6 +3925,9 @@ fn main() {
             )));
 
             remember_setup_url(app.handle())?;
+
+            // Once per launch, on its own thread: setup never waits on it, and a failure is logged.
+            recorder_install::spawn_recorder_host_install(install_recorder_host_for_this_user);
 
             // The status menu lets somebody open the window, stop the stack, or quit the app.
             use tauri::menu::{Menu, MenuItem};
