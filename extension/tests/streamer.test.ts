@@ -30,6 +30,7 @@ import {
   type StreamerSession,
   type StreamerStatus,
 } from "../src/offscreen/streamer";
+import { OpenBotError } from "../src/shared/openbot-client";
 import { type FakeGateway, startFakeGateway } from "./support/fake-gateway";
 
 // The table's sentences, pinned here as the person reads them.
@@ -237,6 +238,12 @@ type Harness = {
   signedOut: string[];
   registered: string[];
   registerFailures: number;
+  /** Every registration attempt, refused or not. */
+  registerCalls: string[];
+  /** Errors the next registration attempts throw, in order. */
+  registerScript: Error[];
+  /** Holds every registration attempt until it resolves. */
+  registerGate: Promise<void> | null;
   onTrajectory: string[];
   /** Each registered rollover with the recording it belongs to. */
   rollovers: { trajectoryId: string; demonstrationId: string }[];
@@ -291,6 +298,9 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
     signedOut: [],
     registered: [],
     registerFailures: 0,
+    registerCalls: [],
+    registerScript: [],
+    registerGate: null,
     onTrajectory: [],
     rollovers: [],
     closed: [],
@@ -329,6 +339,10 @@ async function setup(options: { eventCap?: number } = {}): Promise<Harness> {
           };
         },
         async registerTrajectory(trajectoryId: string) {
+          h.registerCalls.push(trajectoryId);
+          if (h.registerGate) await h.registerGate;
+          const scripted = h.registerScript.shift();
+          if (scripted) throw scripted;
           if (h.registerFailures > 0) {
             h.registerFailures -= 1;
             throw new Error("OpenBot is unreachable");
@@ -421,6 +435,14 @@ const busyPass = () =>
     code: "CONNECTION_FAILED",
     message: "Could not connect to Intelligence",
   });
+
+/** OpenBot's answer to a request, as `openbotJson` throws it: with its refusal sentence when it sent one. */
+const openbotAnswer = (status: number, sentence?: string) =>
+  new OpenBotError(
+    status,
+    sentence ?? `OpenBot answered ${status}.`,
+    sentence === undefined ? null : { error: sentence },
+  );
 
 async function streaming(h: Harness) {
   await until(() => h.last().intelligence === "streaming", "streaming");
@@ -1462,6 +1484,170 @@ describe("streamer", () => {
       workflow: "File the weekly report",
       phase: "failed",
     });
+  });
+
+  test("a rollover OpenBot refuses is parked with its events kept, never registered again, and the rest of the recording streams", async () => {
+    const h = await setup();
+    const refusal = "This recording is no longer open.";
+    const second = crypto.randomUUID();
+    const third = crypto.randomUUID();
+    const ids = [second, third];
+    h.registerScript = [openbotAnswer(409, refusal)];
+    const gate = makeGate();
+    h.registerGate = gate.promise;
+    const s = await h.start(
+      {},
+      { rolloverAt: 5, randomUUID: () => ids.shift() ?? crypto.randomUUID() },
+    );
+    // started, outcome and three clicks fill the first trajectory; the fourth click rolls over.
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(
+      async () => (await h.pending(second)) === 2,
+      "the rollover's events queued",
+    );
+    gate.release();
+    await until(() => h.kept.length === 1, "the refused rollover kept");
+    expect(h.kept[0]).toEqual({
+      reason: refusal,
+      parked: true,
+      events: 2,
+      demonstrationId: "demo-1",
+      trajectoryId: second,
+    });
+    await until(() => h.last().intelligence === "parked", "parked");
+    expect(h.last().reason).toBe(refusal);
+
+    for (let step = 0; step < 10; step++) await h.clock.advance(MINUTE);
+    expect(h.registerCalls).toEqual([second]);
+    expect(h.grants).not.toContain(second);
+    expect(h.kept).toHaveLength(1);
+    expect(await h.pending(second)).toBe(2);
+    // The first trajectory still sends everything it holds.
+    await until(
+      async () => (await h.pending(h.trajectoryId)) === 0,
+      "the first trajectory sent",
+    );
+    const first = h.stored(h.trajectoryId);
+    expect(clicks(first)).toEqual([0, 1, 2]);
+    expect(first.at(-1)?.name).toBe("recording.continued");
+
+    // The parked trajectory fills up and rolls over; OpenBot registers the next one, and it streams.
+    for (let i = 4; i < 8; i++) s.push(click(i));
+    await until(() => h.rollovers.length === 1, "the next rollover registered");
+    expect(h.rollovers).toEqual([
+      { trajectoryId: third, demonstrationId: "demo-1" },
+    ]);
+    await until(
+      () => clicks(h.stored(third)).length === 1,
+      "the third trajectory streams",
+    );
+    expect(clicks(h.stored(third))).toEqual([7]);
+    expect(h.registerCalls).toEqual([second, third]);
+    // recording.continues, clicks 3 to 6 and recording.continued stay kept.
+    expect(await h.pending(second)).toBe(6);
+
+    await s.stop("succeeded");
+    await until(() => h.closed.includes(third), "the third trajectory closed");
+    // The first trajectory stays open in OpenBot, so the parked rollover can still register at the next browser start.
+    expect(h.closed).toEqual([third]);
+    expect(h.kept).toHaveLength(2);
+    expect(h.kept[1]).toEqual({
+      reason: refusal,
+      parked: true,
+      events: 6,
+      demonstrationId: "demo-1",
+      trajectoryId: second,
+    });
+    await h.clock.advance(10 * MINUTE);
+    expect(await h.pending(second)).toBe(6);
+    expect(h.registerCalls).toEqual([second, third]);
+  });
+
+  test("a refused rollover with no sentence from OpenBot is kept with a fixed one, and registers again after a restart", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [openbotAnswer(404)];
+    const gate = makeGate();
+    h.registerGate = gate.promise;
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(
+      async () => (await h.pending(second)) === 2,
+      "the rollover's events queued",
+    );
+    gate.release();
+    await until(() => h.kept.length === 1, "the refused rollover kept");
+    expect(h.kept[0]).toEqual({
+      reason: "OpenBot refused this part of the recording.",
+      parked: true,
+      events: 2,
+      demonstrationId: "demo-1",
+      trajectoryId: second,
+    });
+    await s.stop("succeeded");
+    expect(await h.pending(second)).toBe(3);
+
+    // The next browser start recovers the recording: OpenBot registers the rollover now, and nothing kept was lost.
+    h.outbox = await openOutbox(h.dbName);
+    const recovered = await h.start({ resume: true, recover: true });
+    await recovered.drained();
+    expect(h.registered).toEqual([second]);
+    expect(h.registerCalls).toEqual([second, second]);
+    const rolled = h.stored(second);
+    expect(rolled.map((entry) => entry.name)).toEqual([
+      "recording.continues",
+      "click",
+      "outcome",
+    ]);
+    expect(clicks(rolled)).toEqual([3]);
+    expect(h.closed).toEqual([h.trajectoryId, second]);
+  });
+
+  test("a signed-out answer to a rollover's registration signs out instead of parking, and keeps its events", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [
+      new OpenBotError(401, "Connect this browser to OpenBot again.", {
+        error: "Connect this browser to OpenBot again.",
+        code: RECORDER_SIGNED_OUT,
+        reason: "removed",
+      }),
+    ];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.signedOut.length === 1, "signed out");
+    expect(h.signedOut).toEqual(["removed"]);
+    await until(async () => (await h.pending(second)) === 2, "kept");
+    await h.clock.advance(10 * MINUTE);
+    expect(h.registerCalls).toEqual([second]);
+    expect(h.kept).toEqual([]);
+    expect(h.last().intelligence).toBe("off");
+    expect(await h.pending(second)).toBe(2);
+  });
+
+  test("a rollover registration answered 5xx, 408 or 429 keeps retrying with the back-off", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [
+      openbotAnswer(503, "OpenBot is restarting."),
+      openbotAnswer(429),
+      openbotAnswer(408),
+      openbotAnswer(500),
+    ];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.registerCalls.length === 1, "the first attempt");
+    expect(h.rollovers).toEqual([]);
+    for (let step = 0; step < 10 && h.rollovers.length === 0; step++) {
+      await h.clock.advance(MINUTE);
+    }
+    await until(() => h.rollovers.length === 1, "the rollover registered");
+    expect(h.registerCalls).toEqual([second, second, second, second, second]);
+    expect(h.kept).toEqual([]);
+    await until(
+      () => clicks(h.stored(second)).length === 1,
+      "the rollover streams",
+    );
   });
 
   test("stop queues the outcome last, keeps draining with no deadline and closes each trajectory when empty", async () => {

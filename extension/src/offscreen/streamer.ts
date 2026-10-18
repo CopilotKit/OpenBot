@@ -13,6 +13,7 @@ import {
   trimEvent,
 } from "@openbot/shared/recorder-masking";
 import type { CaptureStatus } from "../protocol/messages";
+import { OpenBotError } from "../shared/openbot-client";
 import { isAllowedGatewayUrl } from "../shared/origin";
 import { GrantError, type GrantVerdict, PASS_HINTS } from "./grant";
 import {
@@ -51,6 +52,8 @@ type Timers = {
 
 export type StreamerDeps = {
   fetchGrant(trajectoryId: string): Promise<TrajectoryGrant>;
+  /** Rejects with OpenBot's answer as an `OpenBotError`: a 4xx other than 408 and 429 parks the rolled-over trajectory, a
+   * signed-out 401 signs out, and anything else (a network failure, a 5xx, 408, 429) is retried. */
   registerTrajectory(trajectoryId: string): Promise<void>;
   closeTrajectory(trajectoryId: string): Promise<void>;
   allowedGatewayUrls: string[] | null;
@@ -141,6 +144,7 @@ const messagesRefusedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence ended the capture session (${reason}).`;
+const REGISTRATION_REFUSED = "OpenBot refused this part of the recording.";
 const checkOriginSentence = () => {
   const id =
     typeof chrome !== "undefined" && chrome.runtime?.id
@@ -359,6 +363,31 @@ function regrant(row: RegrantRow, detail = "unknown"): Failure {
     default:
       return { kind: "regrant", row, reason: BUSY, holdAt: 3, showFrom: 2 };
   }
+}
+
+const SIGNED_OUT_REASONS = ["revoked", "removed", "organization"] as const;
+
+type RegistrationFailure =
+  | { kind: "retry" }
+  | { kind: "refused"; reason: string }
+  | { kind: "signed-out"; reason: (typeof SIGNED_OUT_REASONS)[number] };
+
+/** A network failure, a 5xx, 408 or 429 can clear; any other 4xx is OpenBot's answer, which a retry cannot change. */
+function registrationFailure(error: unknown): RegistrationFailure {
+  if (!(error instanceof OpenBotError)) return { kind: "retry" };
+  if (error.signedOut) {
+    const reason =
+      SIGNED_OUT_REASONS.find((known) => known === error.body?.reason) ??
+      "revoked";
+    return { kind: "signed-out", reason };
+  }
+  const { status } = error;
+  if (status < 400 || status >= 500 || status === 408 || status === 429) {
+    return { kind: "retry" };
+  }
+  const sentence =
+    typeof error.body?.error === "string" ? error.body.error.trim() : "";
+  return { kind: "refused", reason: sentence || REGISTRATION_REFUSED };
 }
 
 const reasonOf = (payload: unknown): string =>
@@ -756,7 +785,10 @@ export async function createStreamer(
     await run();
   };
 
-  /** Registers rolled-over trajectories with OpenBot one at a time, in the order they link, each retried until it succeeds. */
+  /**
+   * Registers rolled-over trajectories with OpenBot one at a time, in the order they link, each retried until it succeeds
+   * or OpenBot refuses it.
+   */
   const register = (old: Lane, next: Lane) => {
     next.awaitingRegistration = true;
     registrations.push({ old, next });
@@ -772,6 +804,24 @@ export async function createStreamer(
       try {
         await deps.registerTrajectory(next.id);
       } catch (error) {
+        const failure = registrationFailure(error);
+        if (failure.kind === "signed-out") {
+          signOut(failure.reason);
+          return;
+        }
+        if (failure.kind === "refused") {
+          // Parked: the trajectory never takes a pass, its events stay kept until the person discards them, and a
+          // recovering streamer asks again at the next browser start. The old trajectory waits open for that.
+          console.error(
+            "Recorder: OpenBot refused to register the next trajectory",
+            error,
+          );
+          registrationAttempt = 0;
+          registrations.shift();
+          if (halted()) return;
+          keep(next, { reason: failure.reason, parked: true });
+          continue;
+        }
         registrationAttempt += 1;
         console.error(
           "Recorder: OpenBot did not register the next trajectory yet",
