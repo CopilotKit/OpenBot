@@ -6,18 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
-  type Demonstration,
+  deleteDemonstrationMutationOptions,
+  draftDemonstrationMutationOptions,
+  publishDemonstrationMutationOptions,
+  scheduleDemonstrationMutationOptions,
+  startDemonstrationMutationOptions,
+  stopDemonstrationMutationOptions,
+} from "@/lib/demonstrations/mutations";
+import {
   type DemonstrationDraft,
   type DemonstrationRoutine,
-  deleteDemonstration,
+  type DemonstrationSummary,
   demonstrationKeys,
   demonstrationsQueryOptions,
-  draftDemonstration,
-  publishDemonstration,
-  scheduleDemonstration,
-  startDemonstration,
-  stopDemonstration,
-} from "@/lib/demonstrations";
+} from "@/lib/demonstrations/queries";
 import {
   grantPlugin,
   invalidatePlugins,
@@ -27,7 +29,7 @@ import { routineKeys } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 
 /** Seconds left before the server stops a recording, ticking once a second. */
-function useSecondsLeft(expiresAt: string | undefined) {
+function useSecondsLeft(expiresAt: string | null | undefined) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!expiresAt) return;
@@ -53,7 +55,7 @@ function ScheduleSkill({
   recording,
   onDone,
 }: {
-  recording: Demonstration;
+  recording: DemonstrationSummary;
   onDone: () => void;
 }) {
   const id = useId();
@@ -67,19 +69,9 @@ function ScheduleSkill({
     (channel) => channel.active && channel.agentIds.includes(recording.botId),
   );
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const schedule = useMutation({
-    mutationFn: () =>
-      scheduleDemonstration(recording.id, {
-        cron: cron === "custom" ? custom : cron,
-        timezone,
-        ...(channelId ? { channelId } : {}),
-        ...(inputs.trim() ? { inputs } : {}),
-      }),
-    onSuccess: async (routine) => {
-      setScheduled(routine);
-      await queryClient.invalidateQueries({ queryKey: routineKeys.all });
-    },
-  });
+  const schedule = useMutation(
+    scheduleDemonstrationMutationOptions(queryClient),
+  );
   if (scheduled)
     return (
       <p className="w-full text-xs">
@@ -98,7 +90,25 @@ function ScheduleSkill({
       className="grid w-full gap-2 rounded-md border p-3 text-xs"
       onSubmit={(event) => {
         event.preventDefault();
-        schedule.mutate();
+        schedule.mutate(
+          {
+            id: recording.id,
+            input: {
+              cron: cron === "custom" ? custom : cron,
+              timezone,
+              ...(channelId ? { channelId } : {}),
+              ...(inputs.trim() ? { inputs } : {}),
+            },
+          },
+          {
+            onSuccess: async (routine) => {
+              setScheduled(routine);
+              await queryClient.invalidateQueries({
+                queryKey: routineKeys.all,
+              });
+            },
+          },
+        );
       }}
     >
       <label htmlFor={`${id}-when`} className="grid gap-1">
@@ -217,36 +227,11 @@ export function DemonstrationRecorder({
         queryKey: demonstrationKeys.bot(botId),
       });
   }, [secondsLeft, botId]);
-  const start = useMutation({
-    mutationFn: () => startDemonstration(botId, title),
-    onSuccess: async () => {
-      await refresh();
-      onRecordingChange();
-    },
-  });
-  const stop = useMutation({
-    mutationFn: (recordingId: string) => stopDemonstration(recordingId),
-    onSuccess: async () => {
-      await refresh();
-      onRecordingChange();
-    },
-  });
-  const generate = useMutation({
-    mutationFn: draftDemonstration,
-    onSuccess: async (value) => {
-      setDraft(value);
-      setSavedSlug("");
-      setSaveError(null);
-      await refresh();
-    },
-  });
-  const remove = useMutation({
-    mutationFn: deleteDemonstration,
-    onSuccess: async () => {
-      await refresh();
-      onRecordingChange();
-    },
-  });
+  const start = useMutation(startDemonstrationMutationOptions(queryClient));
+  const stop = useMutation(stopDemonstrationMutationOptions(queryClient));
+  const generate = useMutation(draftDemonstrationMutationOptions(queryClient));
+  const remove = useMutation(deleteDemonstrationMutationOptions(queryClient));
+  const publish = useMutation(publishDemonstrationMutationOptions(queryClient));
   const save = useMutation(saveSkillMutationOptions(queryClient));
   return (
     <section className="mt-4 grid gap-3 rounded-lg border p-4 text-left">
@@ -261,7 +246,7 @@ export function DemonstrationRecorder({
       {active ? (
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm">
-            Recording {active.title} · {active.actions.length} steps
+            Recording {active.title} · {active.actionCount} steps
           </span>
           {secondsLeft !== null && (
             <span
@@ -280,7 +265,9 @@ export function DemonstrationRecorder({
           <Button
             size="sm"
             disabled={stop.isPending}
-            onClick={() => stop.mutate(active.id)}
+            onClick={() =>
+              stop.mutate(active.id, { onSuccess: onRecordingChange })
+            }
           >
             Stop recording
           </Button>
@@ -290,7 +277,7 @@ export function DemonstrationRecorder({
           className="flex flex-wrap items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            start.mutate();
+            start.mutate({ botId, title }, { onSuccess: onRecordingChange });
           }}
         >
           <label htmlFor={id} className="grid grow gap-1 text-xs">
@@ -341,7 +328,7 @@ export function DemonstrationRecorder({
             className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm"
           >
             <span>
-              {recording.title} · {recording.actions.length} steps
+              {recording.title} · {recording.actionCount} steps
               {recording.reachedTimeLimit && (
                 <span className="text-xs text-muted-foreground">
                   {" "}
@@ -375,8 +362,16 @@ export function DemonstrationRecorder({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!recording.actions.length || generate.isPending}
-                  onClick={() => generate.mutate(recording.id)}
+                  disabled={!recording.actionCount || generate.isPending}
+                  onClick={() =>
+                    generate.mutate(recording.id, {
+                      onSuccess: (value) => {
+                        setDraft(value);
+                        setSavedSlug("");
+                        setSaveError(null);
+                      },
+                    })
+                  }
                 >
                   Review skill draft
                 </Button>
@@ -385,7 +380,9 @@ export function DemonstrationRecorder({
                 size="sm"
                 variant="ghost"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate(recording.id)}
+                onClick={() =>
+                  remove.mutate(recording.id, { onSuccess: onRecordingChange })
+                }
               >
                 Delete
               </Button>
@@ -420,10 +417,10 @@ export function DemonstrationRecorder({
                   ref: values.slug,
                   agentId: botId,
                 });
-                await publishDemonstration(
-                  draft.sourceRecordingId,
-                  values.slug,
-                );
+                await publish.mutateAsync({
+                  id: draft.sourceRecordingId,
+                  slug: values.slug,
+                });
                 await invalidatePlugins(queryClient);
                 await refresh();
                 setSavedSlug(values.slug);
