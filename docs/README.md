@@ -9,6 +9,7 @@ Start with the root [README](../README.md), then use these references:
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
 - [Automatic Learning](automatic-learning.md): which Bots contribute conversations to a Learning container, and receive its published skills.
 - [Public-web research](web-research.md): search and page reading through Parallel, Exa or Firecrawl.
+- [Recorder company install](recorder-company-install.md): force-installing the OpenBot Recorder for a company, pinning its addresses by policy, and the Intelligence settings capture needs.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:
   - [Composio](plugins/composio.md): the broker, and so the one page here that is a catalogue of apps rather than a single connector.
   - [Google Drive](plugins/google-drive.md)
