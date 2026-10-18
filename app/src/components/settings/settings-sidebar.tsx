@@ -2,6 +2,7 @@ import {
   IconArrowLeft,
   IconBell,
   IconBrain,
+  IconBrowser,
   IconChecks,
   IconKey,
   IconLayoutGrid,
@@ -23,7 +24,7 @@ import {
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 
-const ITEMS: {
+export const SETTINGS_SIDEBAR_ITEMS: {
   /**
    * Whether this entry lights only on its own route.
    *
@@ -70,6 +71,12 @@ const ITEMS: {
     linkOptions: { to: "/settings/connected-accounts" },
   },
   {
+    /* The browsers signed in to the Recorder extension as you; each can be disconnected here. */
+    title: "Browsers",
+    icon: IconBrowser,
+    linkOptions: { to: "/settings/browsers" },
+  },
+  {
     /* Logins saved from a Bot's private sign-in form. */
     title: "Passwords",
     icon: IconKey,
@@ -110,7 +117,7 @@ export function SettingsSidebar({
          */}
         <SidebarGroup>
           <SidebarMenu className="gap-px">
-            {ITEMS.map((option) => (
+            {SETTINGS_SIDEBAR_ITEMS.map((option) => (
               <SidebarMenuItem key={option.title}>
                 <SidebarMenuButton
                   render={(props) => (
