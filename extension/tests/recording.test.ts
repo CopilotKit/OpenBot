@@ -96,6 +96,8 @@ type Call = {
   body: unknown;
 };
 type Answer = { status: number; body: object };
+/** The fake OpenBot's routes a test can hold, besides the create and the open-recording poll. */
+type HeldRoute = "trajectories";
 
 const demonstration = (
   id: string,
@@ -129,6 +131,8 @@ const openbot = {
   /** While set, the create and open-recording answers wait for it. */
   holdCreate: null as Promise<void> | null,
   holdOpen: null as Promise<void> | null,
+  /** While set, that route's answers wait for it. */
+  holds: {} as Partial<Record<HeldRoute, Promise<void>>>,
   me: { status: 200, body: {} as object } as Answer,
   bots: [
     {
@@ -161,6 +165,7 @@ function resetOpenBot() {
   openbot.stopped = new Set();
   openbot.holdCreate = null;
   openbot.holdOpen = null;
+  openbot.holds = {};
   openbot.me = { status: 200, body: meBody };
 }
 
@@ -225,13 +230,15 @@ beforeAll(() => {
       const rest = match[2];
       if (method === "DELETE" && rest === undefined)
         return new Response(null, { status: 204 });
-      if (method === "POST" && rest === "/trajectories")
+      if (method === "POST" && rest === "/trajectories") {
+        if (openbot.holds.trajectories) await openbot.holds.trajectories;
         return openbot.trajectoryStatus < 400
           ? new Response(null, { status: openbot.trajectoryStatus })
           : Response.json(
               { error: "Could not register the trajectory." },
               { status: openbot.trajectoryStatus },
             );
+      }
       if (method === "POST" && rest === "/stop") {
         openbot.stopped.add(id);
         return Response.json({
@@ -417,6 +424,52 @@ let handlers: ReturnType<typeof installRecording>;
 let demoId = "";
 let restoreVariant: (() => void) | null = null;
 
+/** The waits outside the fake OpenBot a test can hold: a double's answer, or the document saying ready. */
+type GateName = "host" | "policy" | "streamId" | "document";
+let gates: Partial<Record<GateName, Promise<void>>> = {};
+/** The gates something has reached while they were held. */
+let gatesHit = new Set<GateName>();
+async function pass(name: GateName) {
+  const held = gates[name];
+  if (!held) return;
+  gatesHit.add(name);
+  await held;
+}
+/** Holds one of the waits in `GateName` until the test opens it. */
+function hold(name: GateName) {
+  const held = gate();
+  gates[name] = held.promise;
+  return {
+    hit: () => gatesHit.has(name),
+    open: () => {
+      delete gates[name];
+      held.open();
+    },
+  };
+}
+/** Holds the first `chrome.storage` write that `matches` until the test opens it. */
+function holdStorage(
+  area: "local" | "session",
+  method: "set" | "remove",
+  matches: (argument: unknown) => boolean,
+) {
+  const storage = chrome.storage[area] as unknown as Record<
+    string,
+    (argument: unknown) => Promise<void>
+  >;
+  const original = storage[method] as (argument: unknown) => Promise<void>;
+  const held = gate();
+  let hit = false;
+  storage[method] = async (argument) => {
+    if (!hit && matches(argument)) {
+      hit = true;
+      await held.promise;
+    }
+    return original.call(storage, argument);
+  };
+  return { hit: () => hit, open: held.open };
+}
+
 function doubles(): Partial<RecordingDeps> {
   return {
     createNetworkCapture: (deps, options) => {
@@ -451,11 +504,19 @@ function doubles(): Partial<RecordingDeps> {
       accepted.push({ event, digests: [...digests] });
       return acceptAnswer;
     },
-    acquireTabStreamId: async (tabId) =>
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }),
+    acquireTabStreamId: async (tabId) => {
+      await pass("streamId");
+      return chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+    },
     recoverNetworkBodies: async () => {},
-    readPolicy: async () => policy,
-    hasHostPermission: async () => hostAccess,
+    readPolicy: async () => {
+      await pass("policy");
+      return policy;
+    },
+    hasHostPermission: async () => {
+      await pass("host");
+      return hostAccess;
+    },
     now: () => now,
     openDatabase: () => openRecorderDatabase(dbName),
     timers: fakeTimers,
@@ -579,7 +640,9 @@ beforeEach(() => {
   const close = offscreen.closeDocument;
   offscreen.createDocument = async (parameters) => {
     await create(parameters);
-    setTimeout(openDocument, 0);
+    setTimeout(() => {
+      void pass("document").then(openDocument);
+    }, 0);
   };
   offscreen.closeDocument = async () => {
     await close();
@@ -589,6 +652,8 @@ beforeEach(() => {
   doc = null;
   docDemo = "";
   holdStop = false;
+  gates = {};
+  gatesHit = new Set();
   docPoll = setInterval(answerAsDocument, 1);
   timers = [];
   now = 1_800_000_000_000;
@@ -1129,6 +1194,160 @@ test("Stop while Record still injects the content script waits for Record to fin
   }
 });
 
+/** Holds the first `chrome.scripting.executeScript` (Record's script injection) until the test opens it. */
+function holdFirstInjection() {
+  const scripting = chrome.scripting as unknown as {
+    executeScript: (details: unknown) => Promise<unknown>;
+  };
+  const executeScript = scripting.executeScript;
+  const held = gate();
+  let hit = false;
+  scripting.executeScript = async (details) => {
+    if (!hit) {
+      hit = true;
+      await held.promise;
+    }
+    return executeScript.call(scripting, details);
+  };
+  return { hit: () => hit, open: held.open };
+}
+
+const captureMessages = (port: FakePort) =>
+  port.messages.filter(
+    (message) => (message as { type?: string }).type === "background.capture",
+  );
+
+test("Start over while Record still injects the content script waits for Record, then gives the new recording one first step and the tab only its id", async () => {
+  fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
+  const content = contentPort(7);
+  const injection = holdFirstInjection();
+  const recording = page({
+    type: "page.record",
+    botId: "bot-1",
+    title: "T",
+    tabId: 7,
+    microphone: false,
+  });
+  await until(injection.hit, "the first injection is held");
+  const restarting = page({ type: "page.restart" });
+  await settle();
+  injection.open();
+  expect(await recording).toEqual({ ok: true });
+  expect(await restarting).toEqual({ ok: true });
+  await settle();
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: "demo-2",
+  });
+  // The new recording starts with the page the person is on, once.
+  expect((await storedSteps("demo-2")).map((row) => row.action)).toEqual([
+    { kind: "navigate", url: DEAL, transition: "other" },
+  ]);
+  // The tab hears of the first recording, then of the new one, and never of the first one after the switch.
+  expect(captureMessages(content)).toEqual([
+    { type: "background.capture", active: true, demonstrationId: "demo-1" },
+    { type: "background.capture", active: true, demonstrationId: "demo-2" },
+  ]);
+  expect(network.calls).toEqual([`start 7 ${DEAL}`]);
+});
+
+/** The waits of Record before its recording is live, and how a test holds each one. */
+const recordWaits: {
+  name: string;
+  hold(): { hit(): boolean; open(): void };
+}[] = [
+  { name: "the website-access check", hold: () => hold("host") },
+  {
+    name: "OpenBot's create",
+    hold: () => {
+      const held = gate();
+      openbot.holdCreate = held.promise;
+      return {
+        hit: () => requests().includes("POST /api/recorder/demonstrations"),
+        open: held.open,
+      };
+    },
+  },
+  {
+    name: "the trajectory's registration",
+    hold: () => {
+      const held = gate();
+      openbot.holds.trajectories = held.promise;
+      return {
+        hit: () => requests().some((r) => r.endsWith("/trajectories")),
+        open: held.open,
+      };
+    },
+  },
+  { name: "the policy", hold: () => hold("policy") },
+  { name: "the document saying ready", hold: () => hold("document") },
+  { name: "the tab stream id", hold: () => hold("streamId") },
+  {
+    name: "saving the stream session",
+    hold: () =>
+      holdStorage(
+        "session",
+        "set",
+        (items) => (items as { stream?: unknown }).stream !== undefined,
+      ),
+  },
+];
+
+for (const action of ["Stop", "Disconnect"] as const)
+  for (const wait of recordWaits)
+    test(`${action} while Record waits on ${wait.name} ends Record before anything records, and leaves nothing open`, async () => {
+      fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
+      const content = contentPort(7);
+      const held = wait.hold();
+      const recording = page({
+        type: "page.record",
+        botId: "bot-1",
+        title: "T",
+        tabId: 7,
+        microphone: false,
+      });
+      await until(held.hit, `Record waits on ${wait.name}`);
+      const stopping = page({
+        type: action === "Stop" ? "page.stop" : "page.disconnect",
+      });
+      await settle();
+      const afterAction = openbot.calls.length;
+      held.open();
+      expect(await recording).toEqual({
+        ok: false,
+        error: "Nothing is being recorded.",
+      });
+      expect(await stopping).toEqual({ ok: true });
+      await settle();
+      const after = await state();
+      expect(after.phase).toBe("idle");
+      expect(after.error).toBeUndefined();
+      expect(fake.storage.local.get("activeRecording")).toBeUndefined();
+      expect(fake.storage.session.get("stream")).toBeUndefined();
+      expect(drains()).toEqual([]);
+      // Nothing captures: no network capture, no script told to capture, and the document hears a stop after any start.
+      expect(network.calls).toEqual([]);
+      expect(captureMessages(content)).toEqual([]);
+      const toStartOrStop = toDocument().filter(
+        (message) =>
+          message.type === "offscreen.start" ||
+          message.type === "offscreen.stop",
+      );
+      expect(toStartOrStop.at(-1)?.type ?? "offscreen.stop").toBe(
+        "offscreen.stop",
+      );
+      // A recording OpenBot created for it is deleted, and nothing more is registered on it.
+      for (let n = 1; n <= openbot.nextDemo; n++)
+        expect(requests()).toContain(`DELETE ${demoPath(`demo-${n}`)}`);
+      expect(
+        openbot.calls
+          .slice(afterAction)
+          .filter((call) => call.path.endsWith("/trajectories")),
+      ).toEqual([]);
+      if (action === "Disconnect")
+        expect(fake.storage.local.get("connection")).toBeUndefined();
+    });
+
 test("the document closes only when every drain is done", async () => {
   const first = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   await page({ type: "page.stop" });
@@ -1571,6 +1790,121 @@ test("Disconnect while a Stop drains discards that recording too, and sends noth
   expect(requests()).not.toContain(`POST ${demoPath(id, "/stop")}`);
   expect(fake.storage.local.get("activeRecording")).toBeUndefined();
   expect(await state()).toMatchObject({ phase: "idle", draining: 0 });
+  expect((await state()).error).toBeUndefined();
+});
+
+test("the same person connecting again while a Stop drains still sends its steps and its stop, with the new token", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await sendSteps(contentPort(7), [click("One")], 1);
+  const before = openbot.calls.length;
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(async () => (await state()).phase === "stopping", "stopping");
+  connect(ada, "obr_two");
+  await settle();
+  doc?.postMessage({
+    type: "offscreen.stopped",
+    demonstrationId: id,
+    trajectoryIds: [],
+  });
+  expect(await stopping).toEqual({ ok: true });
+  const sent = openbot.calls.slice(before);
+  expect(sent.map((call) => `${call.method} ${call.path}`)).toEqual([
+    `POST ${demoPath(id, "/actions")}`,
+    `POST ${demoPath(id, "/stop")}`,
+  ]);
+  expect(sent.every((call) => call.auth === "Bearer obr_two")).toBe(true);
+  expect(await storedSteps(id)).toEqual([]);
+  expect(drains()).toMatchObject([{ demonstrationId: id }]);
+  expect(drains()[0]?.stopPending).toBeUndefined();
+  expect((await state()).error).toBeUndefined();
+});
+
+test("a sign-out while a Stop drains tells the person, and keeps the recording for them", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await sendSteps(contentPort(7), [click("One")], 1);
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(async () => (await state()).phase === "stopping", "stopping");
+  doc?.postMessage({ type: "offscreen.signed-out", reason: "organization" });
+  await until(
+    () => fake.storage.local.get("connection") === undefined,
+    "the connection is forgotten",
+  );
+  await settle();
+  doc?.postMessage({
+    type: "offscreen.stopped",
+    demonstrationId: id,
+    trajectoryIds: [],
+  });
+  expect(await stopping).toEqual({ ok: true });
+  const after = await state();
+  expect(after.error).toBe(ORGANIZATION_SIGNED_OUT);
+  expect(after.kept).toMatchObject({
+    recordings: 1,
+    waitingFor: { name: "Ada", recordings: 1 },
+  });
+  expect(drains()).toMatchObject([
+    {
+      demonstrationId: id,
+      stopPending: true,
+      kept: { waitingForReconnect: true, parked: true },
+    },
+  ]);
+  expect(await storedSteps(id)).toHaveLength(1);
+  expect(requests()).not.toContain(`POST ${demoPath(id, "/stop")}`);
+});
+
+test("Disconnect while a Stop waits on a silent document answers at once, and discards that recording", async () => {
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  const id = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  await sendSteps(contentPort(7), [click("One")], 1);
+  holdStop = true;
+  const stopping = page({ type: "page.stop" });
+  await until(
+    () => sentToDocument("offscreen.stop").length === 1,
+    "offscreen.stop",
+  );
+  let answered = false;
+  const disconnecting = page({ type: "page.disconnect" }).then((answer) => {
+    answered = true;
+    return answer;
+  });
+  // No clock moves: the stop's 120-second watchdog never fires.
+  await until(() => answered, "Disconnect answers without the document");
+  expect(await disconnecting).toEqual({ ok: true });
+  expect(await stopping).toEqual({ ok: true });
+  expect(drains()).toEqual([]);
+  expect(sentToDocument("offscreen.discard")).toEqual([
+    { type: "offscreen.discard", demonstrationIds: [id] },
+  ]);
+  expect(await storedSteps(id)).toEqual([]);
+  expect(await state()).toMatchObject({ phase: "idle", draining: 0 });
+});
+
+test("Disconnect clears a sentence that says everything is kept until you connect again, since nothing is kept any more", async () => {
+  // A stop OpenBot did not answer.
+  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  openbot.down = true;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  expect((await state()).error).toBe(STOP_PENDING);
+  openbot.down = false;
+  expect(await page({ type: "page.disconnect" })).toEqual({ ok: true });
+  expect(drains()).toEqual([]);
+  expect((await state()).error).toBeUndefined();
+  // A sign-out.
+  connect();
+  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  doc?.postMessage({ type: "offscreen.signed-out", reason: "revoked" });
+  await until(
+    async () => (await state()).error === SIGNED_OUT,
+    "the signed-out sentence",
+  );
+  expect(await page({ type: "page.disconnect" })).toEqual({ ok: true });
+  expect(drains()).toEqual([]);
   expect((await state()).error).toBeUndefined();
 });
 
