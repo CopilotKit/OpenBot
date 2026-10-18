@@ -1,3 +1,7 @@
+import type {
+  LearningSpaceState,
+  MediaRecord,
+} from "@openbot/shared/recorder-api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import type { SkillFormValues } from "@/lib/skills/form";
@@ -8,13 +12,7 @@ export type DemonstrationDraft = SkillFormValues & {
 };
 
 /** What the newest trajectory's last pass found about the Bot's Learning space, or null before the first pass. */
-export type DemonstrationLearningState =
-  | "assigned"
-  | "unassigned"
-  | "missing"
-  | "learning-off"
-  | "unverified"
-  | "unjoined";
+export type DemonstrationLearningState = LearningSpaceState["state"];
 
 /** A demonstration as the list reads it: the step count, never the steps. */
 export type DemonstrationSummary = {
@@ -27,7 +25,7 @@ export type DemonstrationSummary = {
   actionCount: number;
   learningState: DemonstrationLearningState | null;
   /** The completed screen, audio and network recordings. */
-  media: { id: string; kind: "screen" | "audio" | "network" }[];
+  media: { id: string; kind: MediaRecord["kind"] }[];
   draft: DemonstrationDraft | null;
   skillSlug: string | null;
   createdAt: string;

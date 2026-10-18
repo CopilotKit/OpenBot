@@ -1,9 +1,9 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { client } from "@/lib/client";
+import { routineKeys } from "@/lib/routines/queries";
 import {
   type DemonstrationDraft,
   type DemonstrationRoutine,
-  type DemonstrationSummary,
   demonstrationKeys,
 } from "./queries";
 
@@ -23,15 +23,16 @@ function invalidateDemonstrations(queryClient: QueryClient) {
 
 export function startDemonstrationMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: {
+    mutationFn: async (variables: {
       botId: string;
       title: string;
-    }): Promise<DemonstrationSummary> =>
-      client("/api/demonstrations", "demonstration", {
+    }): Promise<void> => {
+      await client("/api/demonstrations", {
         method: "POST",
         body: variables,
         fallback: "Could not start recording",
-      }),
+      });
+    },
     onSuccess: () => invalidateDemonstrations(queryClient),
   });
 }
@@ -100,6 +101,11 @@ export function scheduleDemonstrationMutationOptions(queryClient: QueryClient) {
         body: variables.input,
         fallback: "Could not schedule this skill",
       }),
-    onSuccess: () => invalidateDemonstrations(queryClient),
+    /** The routine list is server-derived too, and must refresh even if the caller unmounts first. */
+    onSuccess: () =>
+      Promise.all([
+        invalidateDemonstrations(queryClient),
+        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      ]),
   });
 }

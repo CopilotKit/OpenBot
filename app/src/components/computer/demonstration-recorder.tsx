@@ -25,7 +25,6 @@ import {
   invalidatePlugins,
   saveSkillMutationOptions,
 } from "@/lib/plugins/mutations";
-import { routineKeys } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 
 /** Seconds left before the server stops a recording, ticking once a second. */
@@ -101,12 +100,7 @@ function ScheduleSkill({
             },
           },
           {
-            onSuccess: async (routine) => {
-              setScheduled(routine);
-              await queryClient.invalidateQueries({
-                queryKey: routineKeys.all,
-              });
-            },
+            onSuccess: (routine) => setScheduled(routine),
           },
         );
       }}
