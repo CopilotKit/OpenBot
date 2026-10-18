@@ -346,6 +346,42 @@ describe("createTrajectoryRefusalAudit", () => {
     expect(rows[0]?.initiator).toEqual({ kind: "deployment" });
   });
 
+  test("anonymous callers write one row per reason a minute however many trajectory ids they invent", async () => {
+    const { rows, clock, sink } = audit();
+    const invent = (reason: Refusal["reason"]) => {
+      for (let i = 0; i < 50; i++) {
+        sink(
+          refusal({
+            userId: null,
+            reason,
+            trajectoryId: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+          }),
+        );
+      }
+    };
+
+    invent("not-open");
+    invent("signed-out");
+    await settle();
+    expect(rows).toHaveLength(2);
+
+    clock.now += 60_000;
+    invent("not-open");
+    await settle();
+    expect(rows).toHaveLength(3);
+  });
+
+  test("a known person still dedupes per trajectory id", async () => {
+    const { rows, sink } = audit();
+
+    sink(refusal({ trajectoryId: "a" }));
+    sink(refusal({ trajectoryId: "b" }));
+    sink(refusal({ trajectoryId: "a" }));
+    await settle();
+
+    expect(rows).toHaveLength(2);
+  });
+
   test("a store that cannot be written to is not fatal", async () => {
     const sink = createTrajectoryRefusalAudit({
       insert: async () => {

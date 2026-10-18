@@ -69,7 +69,7 @@ export function createTrajectoryConnectHook(deps: {
   resolveRecorder: RecorderResolver;
   sessionActorId: (request: Request) => Promise<string | null>;
   trajectoryOwner: TrajectoryOwner;
-  /** Writes recorder.trajectory_refused, at most once per (person, trajectory, reason) per minute on this replica. */
+  /** Writes recorder.trajectory_refused, at most once per (person, trajectory, reason) a minute on this replica, and once per reason a minute for callers with no person. */
   audit: (refusal: TrajectoryRefusal) => void;
 }): NonNullable<CopilotRuntimeHooks["onBeforeHandler"]> {
   return async ({ request, route }) => {
@@ -171,7 +171,7 @@ export function isTrajectoryConnectPath(
   }
 }
 
-/** Writes recorder.trajectory_refused at most once per (person, trajectory, reason) per minute on this replica. */
+/** Writes recorder.trajectory_refused at most once per (person, trajectory, reason) a minute on this replica, and once per reason a minute for callers with no person. */
 export function createTrajectoryRefusalAudit(
   auditStore: AuditStore | undefined,
   options: { now?: () => number } = {},
@@ -191,7 +191,10 @@ export function createTrajectoryRefusalAudit(
       0,
       TRAJECTORY_ID_AUDIT_CHARS,
     );
-    const key = `${refusal.userId ?? "none"}:${trajectoryId}:${refusal.reason}`;
+    // A caller nobody is signed in as can invent trajectory ids without limit, so theirs dedupe on the reason alone.
+    const key = refusal.userId
+      ? `${refusal.userId}:${trajectoryId}:${refusal.reason}`
+      : `none:${refusal.reason}`;
     if (written.has(key)) return;
     written.set(key, at);
 
