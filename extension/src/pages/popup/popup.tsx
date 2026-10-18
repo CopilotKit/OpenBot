@@ -54,6 +54,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
+  const [shownBotId, setShownBotId] = useState("");
 
   const refresh = useCallback(async () => {
     const answer = await ask<PageResponse>({ type: "page.state" });
@@ -192,7 +193,17 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
 
-  const shownError = error ?? state.error ?? null;
+  const refusedBotId = state.openRecording
+    ? (state.botId ?? lastBotId ?? undefined)
+    : undefined;
+  // The open-recording refusal is about one Bot: another picked Bot neither shows it nor offers the stop.
+  const refusalIsForAnotherBot =
+    refusedBotId !== undefined &&
+    shownBotId !== "" &&
+    shownBotId !== refusedBotId;
+  const shownError = refusalIsForAnotherBot
+    ? null
+    : (error ?? state.error ?? null);
   return (
     <Page
       title={connection.user.name}
@@ -206,7 +217,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           initialBotId={
             state.openRecording ? (state.botId ?? lastBotId) : lastBotId
           }
-          openRecording={state.openRecording !== undefined}
+          openRecordingBotId={refusedBotId}
+          onBotChange={setShownBotId}
           transcription={view.me?.capabilities.transcription ?? true}
           microphoneGranted={microphone}
           busy={busy}

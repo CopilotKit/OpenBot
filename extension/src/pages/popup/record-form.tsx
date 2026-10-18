@@ -3,7 +3,7 @@ import type {
   RecorderBot,
 } from "@openbot/shared/recorder-api";
 import { IconMicrophone } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +49,8 @@ export const TITLE_MAX = 120;
 export function RecordForm({
   bots,
   initialBotId,
-  openRecording,
+  openRecordingBotId,
+  onBotChange,
   transcription,
   microphoneGranted,
   busy,
@@ -58,7 +59,10 @@ export function RecordForm({
 }: {
   bots: RecorderBot[];
   initialBotId: string | null;
-  openRecording: boolean;
+  /** The Bot whose Record was refused because this person has one open for it. */
+  openRecordingBotId: string | undefined;
+  /** Told the Bot the form is showing, so the popup can tell whose refusal it is displaying. */
+  onBotChange: (botId: string) => void;
   transcription: boolean;
   microphoneGranted: boolean;
   busy: boolean;
@@ -77,6 +81,7 @@ export function RecordForm({
     ) ??
     bots[0]?.id ??
     "";
+  useEffect(() => onBotChange(botId), [botId, onBotChange]);
   const [title, setTitle] = useState("");
   const bot = bots.find((candidate) => candidate.id === botId);
   const sentence = bot ? learningSentence(bot.learning) : null;
@@ -153,7 +158,7 @@ export function RecordForm({
           <Button size="lg" type="submit" disabled={!ready}>
             Record
           </Button>
-          {openRecording ? (
+          {openRecordingBotId !== undefined && openRecordingBotId === botId ? (
             <Button
               size="sm"
               type="button"

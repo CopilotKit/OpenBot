@@ -385,7 +385,9 @@ test("a signed-out notice with kept recordings says they are kept and sent on re
 
 test("an error shows the server's sentence, and an open recording offers Stop the open recording with replaceOpen", async () => {
   const { findByLabelText, getByRole, findByText, sent } = setup(
-    stateResponse({ state: { openRecording: { demonstrationId: "d1" } } }),
+    stateResponse({
+      state: { openRecording: { demonstrationId: "d1" }, botId: "b1" },
+    }),
     {
       answers: {
         "page.record": {
@@ -451,4 +453,46 @@ test("an open recording offers Stop the open recording in a fresh popup that mad
       replaceOpen: true,
     }),
   );
+});
+
+test("Stop the open recording and the refusal belong to the Bot whose Record was refused, not to whichever Bot is picked", async () => {
+  const {
+    findByText,
+    findByLabelText,
+    findByRole,
+    getByRole,
+    queryByRole,
+    queryByText,
+    sent,
+  } = setup(
+    stateResponse({
+      state: {
+        openRecording: { demonstrationId: "d1" },
+        botId: "b2",
+        error: OPEN_ERROR,
+      } as Partial<RecorderState>,
+    }),
+  );
+  await findByText(OPEN_ERROR);
+  getByRole("button", { name: "Stop the open recording" });
+  await userEvent.type(
+    await findByLabelText("What are you about to do?"),
+    "Refund an order",
+  );
+
+  const user = userEvent.setup({ document });
+  await user.click(getByRole("combobox", { name: "Bot" }));
+  await user.click(await findByRole("option", { name: "Billing Bot" }));
+  await waitFor(() =>
+    expect(
+      queryByRole("button", { name: "Stop the open recording" }),
+    ).toBeNull(),
+  );
+  expect(queryByText(OPEN_ERROR)).toBeNull();
+  expect(sent.some((m) => m.type === "page.record")).toBe(false);
+
+  await user.click(getByRole("combobox", { name: "Bot" }));
+  await user.click(await findByRole("option", { name: "Support Bot" }));
+  await findByText(OPEN_ERROR);
+  getByRole("button", { name: "Stop the open recording" });
 });
