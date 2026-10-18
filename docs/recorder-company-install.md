@@ -1,6 +1,6 @@
 # Company install of the OpenBot Recorder
 
-The OpenBot Recorder is a Chrome and Edge extension that records a person doing a task in their own browser and sends it to OpenBot and to your Intelligence. This guide is for the IT team that installs it for everyone and pins it to your OpenBot. It has no store listing, so your team hosts the package.
+The OpenBot Recorder is a Chrome and Edge extension that records a person doing a task in their own browser and sends it to your Intelligence as a trajectory. OpenBot connects the browser and hands out each capture pass for the Bot the person picked; it keeps nothing the Recorder records. This guide is for the IT team that installs it for everyone and pins it to your OpenBot. It has no store listing, so your team hosts the package.
 
 ## Before you start: the Intelligence settings capture needs
 
@@ -77,8 +77,8 @@ For the Intelligence team:
 
 - No per-user erasure of trajectories.
 - No server-side redaction. The Recorder's masking in the browser is the only line of defence.
-- No general file store. Screen, audio and large bodies live in OpenBot's database.
-- No transcription. OpenBot's own dictation does it.
+- No general file store for screen recordings, audio or large bodies. OpenBot keeps none of them.
+- No transcription. OpenBot's dictation does not transcribe for the Recorder.
 - The ECS `CHECK_ORIGIN` gap described in the first section.
 
 ## Known issue under investigation
