@@ -16,12 +16,23 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import type { CaptureStatus } from "../../protocol/messages";
+import type { CaptureStatus, RecorderState } from "../../protocol/messages";
 import { learningSentence } from "../popup/record-form";
 
 const UNJOINED =
   "Learning did not see this recording: OpenBot could not choose its Learning space in time. It still saves to OpenBot.";
 const LEADING_STATUS = /^Learning capture is (?:paused|off):\s*/;
+const HELD_LINE =
+  "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.";
+const PARKED_LINE =
+  "Your events are kept in this browser. The Recorder tries again when the browser next starts.";
+
+/** A Task 11 reason without its leading "Learning capture is paused/off:", which the row's title already says, as a
+ * sentence of its own (the table's reasons go on in lower case after that phrase). */
+export function stripCaptureStatus(reason: string): string {
+  const line = reason.replace(LEADING_STATUS, "");
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}
 
 /** The sentence about a recording's Learning space; `unjoined` only arises from a pass, so only a recording shows it. */
 export function recordingLearningSentence(
@@ -54,56 +65,67 @@ function describe(status: string, reason: string | undefined) {
   return reason ? `${status}. ${reason}` : status;
 }
 
-/** Learning capture's title and description lines for the capture status and the recording's Learning space. */
-function learningLines(
-  capture: CaptureStatus,
-  learning: LearningSpaceState | undefined,
-): { title: string; lines: string[] } {
-  const reason = capture.intelligenceReason?.replace(LEADING_STATUS, "");
-  const sentence = recordingLearningSentence(learning);
-  const lines: string[] = [];
-  let title = "Learning capture";
-  if (capture.intelligence === "held") {
-    title = "Learning capture is paused";
-    if (reason) lines.push(reason);
-    lines.push(
-      "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.",
-    );
-  } else if (capture.intelligence === "parked") {
-    title = "Learning capture is off";
-    if (reason) lines.push(reason);
-    lines.push(
-      "Your events are kept in this browser. The Recorder tries again when the browser next starts.",
-    );
-  } else {
-    if (learning && NOT_IN_A_SPACE.has(learning.state)) {
-      title = "Not into a Learning space";
-    } else {
-      lines.push(describe(INTELLIGENCE_STATUS[capture.intelligence], reason));
-    }
-  }
-  if (sentence) lines.push(sentence);
-  const { rejected = 0, dropped = 0 } = capture.events ?? {};
-  if (rejected > 0) {
-    lines.push(
-      `${plural(rejected, "event was", "events were")} refused by Intelligence`,
-    );
-  }
-  if (dropped > 0) {
-    lines.push(`${plural(dropped, "event", "events")} could not be sent`);
-  }
-  return { title, lines };
+type RowText = { title: string; lines: string[] };
+
+/** A stop that keeps every event: the status as the title, then why, then when it tries again. */
+function keptText(parked: boolean, reason: string | undefined): RowText {
+  return {
+    title: parked ? "Learning capture is off" : "Learning capture is paused",
+    lines: [
+      ...(reason ? [stripCaptureStatus(reason)] : []),
+      parked ? PARKED_LINE : HELD_LINE,
+    ],
+  };
 }
 
-/** The Learning capture row, shared by the recording view and the after-stop view's still-sending list. */
-export function LearningCaptureRow({
-  capture,
-  learning,
-}: {
-  capture: CaptureStatus;
-  learning?: LearningSpaceState;
-}) {
-  const { title, lines } = learningLines(capture, learning);
+/** What the row says about the recording's Learning space, after the capture status, so neither hides the other. */
+function spaceLines(learning: LearningSpaceState | undefined): string[] {
+  const sentence = recordingLearningSentence(learning);
+  return [
+    ...(learning && NOT_IN_A_SPACE.has(learning.state)
+      ? ["Not into a Learning space"]
+      : []),
+    ...(sentence ? [sentence] : []),
+  ];
+}
+
+/** Learning capture's title and description lines for a running recording's capture status and Learning space. */
+function captureText(
+  capture: CaptureStatus,
+  learning: LearningSpaceState | undefined,
+): RowText {
+  const status =
+    capture.intelligence === "held" || capture.intelligence === "parked"
+      ? keptText(capture.intelligence === "parked", capture.intelligenceReason)
+      : {
+          title: "Learning capture",
+          lines: [
+            describe(
+              INTELLIGENCE_STATUS[capture.intelligence],
+              capture.intelligenceReason &&
+                stripCaptureStatus(capture.intelligenceReason),
+            ),
+          ],
+        };
+  const { rejected = 0, dropped = 0 } = capture.events ?? {};
+  return {
+    title: status.title,
+    lines: [
+      ...status.lines,
+      ...spaceLines(learning),
+      ...(rejected > 0
+        ? [
+            `${plural(rejected, "event was", "events were")} refused by Intelligence`,
+          ]
+        : []),
+      ...(dropped > 0
+        ? [`${plural(dropped, "event", "events")} could not be sent`]
+        : []),
+    ],
+  };
+}
+
+function LearningRow({ title, lines }: RowText) {
   return (
     <Item size="sm">
       <ItemMedia variant="icon">
@@ -118,6 +140,43 @@ export function LearningCaptureRow({
         ))}
       </ItemContent>
     </Item>
+  );
+}
+
+/** The Learning capture row of a running recording. */
+export function LearningCaptureRow({
+  capture,
+  learning,
+}: {
+  capture: CaptureStatus;
+  learning?: LearningSpaceState;
+}) {
+  return <LearningRow {...captureText(capture, learning)} />;
+}
+
+/**
+ * The Learning capture row after Stop, for what is still sending. A finished recording's capture status is back to
+ * idle (the service worker ignores the document's status once nothing records), so this reads the drains instead:
+ * events kept by a stop (held or parked), or else a recording that is still streaming.
+ */
+export function SendingLearningRow({
+  kept,
+  learning,
+}: {
+  kept: RecorderState["kept"];
+  learning?: LearningSpaceState;
+}) {
+  const status = kept
+    ? keptText(kept.parked, kept.reason)
+    : {
+        title: "Learning capture",
+        lines: ["Sending the rest of this recording to Intelligence"],
+      };
+  return (
+    <LearningRow
+      title={status.title}
+      lines={[...status.lines, ...spaceLines(learning)]}
+    />
   );
 }
 

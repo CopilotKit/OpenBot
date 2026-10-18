@@ -29,8 +29,9 @@ import { Separator } from "@/components/ui/separator";
 import type { RecorderState } from "../../protocol/messages";
 import {
   CaptureRows,
-  LearningCaptureRow,
   recordingLearningSentence,
+  SendingLearningRow,
+  stripCaptureStatus,
 } from "../ui/capture-rows";
 
 /** The sentence the service worker sets while OpenBot has not yet heard of a Stop. */
@@ -72,7 +73,19 @@ export function RecordingView({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  // The service worker keeps noticeShown for the rest of the recording, so a choice made here hides the card itself
+  // (for this recording only: the next one to reach 50 steps shows it again).
+  const [answered, setAnswered] = useState<{ demonstrationId?: string }>();
   const stopping = state.phase === "stopping" || state.phase === "starting";
+  const showNotice =
+    state.steps >= 50 &&
+    state.noticeShown &&
+    !stopping &&
+    answered?.demonstrationId !== state.demonstrationId;
+  const answer = (choice: "stop" | "restart" | "continue") => {
+    setAnswered({ demonstrationId: state.demonstrationId });
+    actions.onNotice(choice);
+  };
   return (
     <>
       <div className="mt-6">
@@ -92,7 +105,7 @@ export function RecordingView({
               </ItemDescription>
             </ItemContent>
           </Item>
-          {state.steps >= 50 && state.noticeShown && !stopping ? (
+          {showNotice ? (
             <>
               <Separator />
               <Item size="sm">
@@ -104,20 +117,20 @@ export function RecordingView({
                   </ItemDescription>
                 </ItemContent>
                 <ItemFooter className="justify-end">
-                  <Button size="sm" onClick={() => actions.onNotice("stop")}>
+                  <Button size="sm" onClick={() => answer("stop")}>
                     Stop
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => actions.onNotice("restart")}
+                    onClick={() => answer("restart")}
                   >
                     Start over
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => actions.onNotice("continue")}
+                    onClick={() => answer("continue")}
                   >
                     Keep going
                   </Button>
@@ -151,11 +164,22 @@ export function RecordingView({
   );
 }
 
+/** "<events> events from <recordings> recordings", or only the recordings when no event is counted, and its verb. */
+function keptCounts(kept: NonNullable<RecorderState["kept"]>) {
+  const recordings = plural(kept.recordings, "recording", "recordings");
+  return kept.events > 0
+    ? {
+        counts: `${plural(kept.events, "event", "events")} from ${recordings}`,
+        verb: kept.events === 1 ? "is" : "are",
+      }
+    : { counts: recordings, verb: kept.recordings === 1 ? "is" : "are" };
+}
+
 function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
-  const counts = `${plural(kept.events, "event", "events")} from ${plural(kept.recordings, "recording", "recordings")}`;
+  const { counts, verb } = keptCounts(kept);
   return kept.waitingFor
-    ? `${counts} by ${kept.waitingFor.name} are kept in this browser. Connect this browser to OpenBot again as ${kept.waitingFor.name} to send them.`
-    : `${counts} ${kept.events === 1 ? "is" : "are"} kept in this browser: ${kept.reason}`;
+    ? `${counts} by ${kept.waitingFor.name} ${verb} kept in this browser. Connect this browser to OpenBot again as ${kept.waitingFor.name} to send them.`
+    : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
 /** After Stop: where to review the recording, what is still sending, and any events kept in the browser. */
@@ -166,25 +190,33 @@ export function AfterStop({
   openTab,
 }: {
   state: RecorderState;
-  openbotUrl: string;
+  /** The connected OpenBot, for a stopped recording that does not name its own. */
+  openbotUrl?: string;
   onDiscard: () => void;
   openTab: (url: string) => void;
 }) {
   const [asking, setAsking] = useState(false);
   const { lastStopped, kept } = state;
-  const draining = state.draining > 0;
+  // Every stopped recording is a drain until it is sent; kept ones wait for a retry, and ones kept for a person who
+  // signed out send nothing until they connect again (the kept row below says so).
+  const keptRecordings = kept?.recordings ?? 0;
+  const streaming = state.draining > keptRecordings;
+  const retrying = keptRecordings > (kept?.waitingFor?.recordings ?? 0);
+  const sending = state.draining > 0 && (streaming || retrying);
   // While it is still sending, the Learning capture row below says the same thing.
   const sentence = recordingLearningSentence(
-    lastStopped && !draining ? state.learning : undefined,
+    lastStopped && !sending ? state.learning : undefined,
   );
-  if (!lastStopped && !kept && !draining) return null;
-  const reviewUrl = lastStopped
-    ? `${lastStopped.openbotUrl || openbotUrl}/bots/${lastStopped.botId}/demonstrations`
-    : null;
+  if (!lastStopped && !kept && !sending) return null;
+  const reviewBase = lastStopped?.openbotUrl || openbotUrl;
+  const reviewUrl =
+    lastStopped && reviewBase
+      ? `${reviewBase}/bots/${lastStopped.botId}/demonstrations`
+      : null;
   return (
     <div className="mb-6">
       <PageRows>
-        {lastStopped && reviewUrl ? (
+        {reviewUrl ? (
           <Item
             size="sm"
             render={
@@ -203,7 +235,7 @@ export function AfterStop({
             <ItemContent>
               <ItemTitle>Saved</ItemTitle>
               <ItemDescription className="line-clamp-none">
-                Saved. Review it in OpenBot to draft the Skill.
+                Review it in OpenBot to draft the Skill.
               </ItemDescription>
               {sentence ? (
                 <ItemDescription className="line-clamp-none">
@@ -216,30 +248,34 @@ export function AfterStop({
             </ItemActions>
           </Item>
         ) : null}
-        {draining ? (
+        {sending ? (
           <>
-            {lastStopped ? <Separator /> : null}
-            <Item size="sm">
-              <ItemMedia variant="icon">
-                <IconCloudUpload />
-              </ItemMedia>
-              <ItemContent>
-                <ItemDescription className="line-clamp-none">
-                  Sending the last of the recording to Intelligence and OpenBot.
-                  You can keep browsing.
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-            <Separator />
-            <LearningCaptureRow
-              capture={state.capture}
+            {reviewUrl ? <Separator /> : null}
+            {streaming ? (
+              <>
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconCloudUpload />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemDescription className="line-clamp-none">
+                      Sending the last of the recording to Intelligence and
+                      OpenBot. You can keep browsing.
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+                <Separator />
+              </>
+            ) : null}
+            <SendingLearningRow
+              kept={retrying ? kept : undefined}
               learning={state.learning}
             />
           </>
         ) : null}
         {kept ? (
           <>
-            {lastStopped || draining ? <Separator /> : null}
+            {reviewUrl || sending ? <Separator /> : null}
             <Item size="sm">
               <ItemMedia variant="icon">
                 <IconDatabaseOff />

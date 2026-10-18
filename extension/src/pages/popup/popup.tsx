@@ -121,6 +121,26 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     };
   }, [microphoneState]);
 
+  const dismiss = async () => {
+    await ask({ type: "page.notice.dismiss" });
+    await refresh();
+  };
+
+  const act = async (message: PageToBackground) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const answer = await ask(message);
+      if (!answer.ok) setError(answer.error);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const discardKept = () => act({ type: "page.kept.discard" });
+
   if (!view) {
     return (
       <Page title="OpenBot Recorder" width="popup">
@@ -139,11 +159,9 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         description="Open OpenBot, go to Settings, Browsers, and choose Connect this browser."
         width="popup"
       >
-        <Notices
-          notice={view.notice}
-          kept={state.kept}
-          onDismiss={() => dismiss()}
-        />
+        <Notices notice={view.notice} kept={state.kept} onDismiss={dismiss} />
+        {/* Signed out with recordings kept for the person (Decision 19): how to send them, or Discard. */}
+        <AfterStop state={state} onDiscard={discardKept} openTab={openTab} />
         {policy.invalid ? (
           <p className="mt-4 text-muted-foreground text-sm">
             Your organization's Recorder policy names an OpenBot address the
@@ -181,11 +199,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     );
   }
 
-  async function dismiss() {
-    await ask({ type: "page.notice.dismiss" });
-    await refresh();
-  }
-
   const record = async (botId: string, title: string, replaceOpen = false) => {
     setBusy(true);
     setError(null);
@@ -214,20 +227,11 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
 
-  const act = async (message: PageToBackground) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const answer = await ask(message);
-      if (!answer.ok) setError(answer.error);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+  // A stop OpenBot has not heard of yet holds back Record for the Bot it stopped, not for every Bot.
   const stopPending = isStopPending(state.error);
+  const recordableBots = stopPending
+    ? bots.filter((bot) => bot.id !== state.lastStopped?.botId)
+    : bots;
 
   const refusedBotId = state.openRecording
     ? (state.botId ?? lastBotId ?? undefined)
@@ -251,7 +255,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         <AfterStop
           state={state}
           openbotUrl={connection.openbotUrl}
-          onDiscard={() => act({ type: "page.kept.discard" })}
+          onDiscard={discardKept}
           openTab={openTab}
         />
       ) : (
@@ -266,9 +270,9 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           }}
         />
       )}
-      {state.phase === "idle" && !stopPending ? (
+      {state.phase === "idle" && (!stopPending || recordableBots.length > 0) ? (
         <RecordForm
-          bots={bots}
+          bots={recordableBots}
           initialBotId={
             state.openRecording ? (state.botId ?? lastBotId) : lastBotId
           }

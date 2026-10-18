@@ -10,7 +10,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { RecorderBot } from "@openbot/shared/recorder-api";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { PASS_HINTS } from "../src/offscreen/grant";
 import { Popup } from "../src/pages/popup/popup";
+import { stripCaptureStatus } from "../src/pages/ui/capture-rows";
 import {
   IDLE_STATE,
   type PageResponse,
@@ -95,7 +97,8 @@ function setup(
     sent.push(message);
     const fixed = options.answers?.[message.type];
     if (fixed) return fixed;
-    if (message.type === "page.state") return response;
+    // Chrome copies every message as JSON, so each answer is a new object, as the polling popup sees it.
+    if (message.type === "page.state") return structuredClone(response);
     if (message.type === "page.bots")
       return { ok: true, bots: options.bots ?? BOTS };
     if (message.type === "page.desktop.available")
@@ -511,6 +514,7 @@ const recording = (
     ...over,
     state: {
       phase: "recording",
+      demonstrationId: "d7",
       botId: "b1",
       title: "Refund an order",
       startedAt: Date.now() - 65_000,
@@ -543,8 +547,9 @@ test("Stop and Start over send page.stop and page.restart", async () => {
   );
 });
 
-test("at 50 steps with the notice shown the popup repeats its three choices", async () => {
-  const { findByText, getByRole, sent } = setup(
+test("at 50 steps with the notice shown the popup repeats its three choices, and Keep going hides the card", async () => {
+  // The controller keeps noticeShown for the rest of the recording, so the state the popup reads does not change.
+  const { findByText, getByRole, queryByText, sent } = setup(
     recording({ steps: 50, noticeShown: true }),
   );
   await findByText("You have recorded 50 steps");
@@ -554,6 +559,50 @@ test("at 50 steps with the notice shown the popup repeats its three choices", as
       choice: "continue",
     }),
   );
+  await waitFor(() =>
+    expect(queryByText("You have recorded 50 steps")).toBeNull(),
+  );
+  expect(getByRole("button", { name: "Stop" })).toBeTruthy();
+});
+
+test("the 50-step card's Stop and Start over hide it too", async () => {
+  for (const [name, choice] of [
+    ["Stop", "stop"],
+    ["Start over", "restart"],
+  ] as const) {
+    const { findByText, getAllByRole, queryByText, sent, unmount } = setup(
+      recording({ steps: 52, noticeShown: true }),
+    );
+    const card = (await findByText("You have recorded 52 steps")).closest(
+      "[data-slot=item]",
+    ) as HTMLElement;
+    const button = getAllByRole("button", { name }).find((candidate) =>
+      card.contains(candidate),
+    ) as HTMLElement;
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(sent.filter((m) => m.type === "page.notice").at(-1)).toMatchObject(
+        { choice },
+      ),
+    );
+    await waitFor(() =>
+      expect(queryByText("You have recorded 52 steps")).toBeNull(),
+    );
+    unmount();
+  }
+});
+
+test("Keep going hides the card for that recording only: the next one to reach 50 steps shows it again", async () => {
+  const response = recording({ steps: 50, noticeShown: true });
+  const { findByText, getByRole, queryByText } = setup(response);
+  await findByText("You have recorded 50 steps");
+  fireEvent.click(getByRole("button", { name: "Keep going" }));
+  await waitFor(() =>
+    expect(queryByText("You have recorded 50 steps")).toBeNull(),
+  );
+  // The popup polls page.state while a recording runs: the next answer is another recording.
+  Object.assign(response.state, { demonstrationId: "d8", steps: 51 });
+  await findByText("You have recorded 51 steps", {}, { timeout: 3000 });
 });
 
 test("Record screen shows when the screen is off with a reason and sends page.screen", async () => {
@@ -621,6 +670,96 @@ test("a recording outside a Learning space says Not into a Learning space with t
   ).toBeTruthy();
 });
 
+const BUSY_REASON =
+  "Intelligence is busy or unreachable. Retrying; nothing is lost.";
+const UNJOINED_SENTENCE =
+  "Learning did not see this recording: OpenBot could not choose its Learning space in time. It still saves to OpenBot.";
+const HELD_LINE =
+  "Your events are kept in this browser and sent when Intelligence accepts them; it tries again every 5 minutes.";
+const PARKED_LINE =
+  "Your events are kept in this browser. The Recorder tries again when the browser next starts.";
+
+test("outside a Learning space the Learning capture row still says its status and reason", async () => {
+  const { findByText, getByText } = setup(
+    recording({
+      learning: { state: "unassigned", containerId: null },
+      capture: {
+        ...CAPTURE,
+        intelligence: "retrying",
+        intelligenceReason: BUSY_REASON,
+      },
+    }),
+  );
+  await findByText(`Retrying. ${BUSY_REASON}`);
+  expect(getByText("Learning capture")).toBeTruthy();
+  expect(getByText("Not into a Learning space")).toBeTruthy();
+  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+});
+
+test("a held recording outside a Learning space keeps the pause, its reason and the kept line beside Not into a Learning space", async () => {
+  const { findByText, getByText } = setup(
+    recording({
+      learning: { state: "unjoined", containerId: null },
+      capture: {
+        ...CAPTURE,
+        intelligence: "held",
+        intelligenceReason: PASS_HINTS.IDENTITY_REQUIRED,
+      },
+    }),
+  );
+  await findByText("Learning capture is paused");
+  expect(
+    getByText("OpenBot could not tell Intelligence who you are."),
+  ).toBeTruthy();
+  expect(getByText(HELD_LINE)).toBeTruthy();
+  expect(getByText("Not into a Learning space")).toBeTruthy();
+  expect(getByText(UNJOINED_SENTENCE)).toBeTruthy();
+});
+
+test("a parked recording outside a Learning space says Not into a Learning space too", async () => {
+  const { findByText, getByText } = setup(
+    recording({
+      learning: { state: "missing", containerId: "c9" },
+      capture: {
+        ...CAPTURE,
+        intelligence: "parked",
+        intelligenceReason: PASS_HINTS.NOT_FOUND,
+      },
+    }),
+  );
+  await findByText("Learning capture is off");
+  expect(
+    getByText("This recording is no longer open in OpenBot."),
+  ).toBeTruthy();
+  expect(getByText(PARKED_LINE)).toBeTruthy();
+  expect(getByText("Not into a Learning space")).toBeTruthy();
+});
+
+test("a reason that goes on in lower case after its status reads as a sentence of its own", async () => {
+  const { findByText } = setup(
+    recording({
+      capture: {
+        ...CAPTURE,
+        intelligence: "parked",
+        intelligenceReason: PASS_HINTS.INTELLIGENCE_RUNTIME_REQUIRED,
+      },
+    }),
+  );
+  await findByText("This OpenBot is not connected to Intelligence.");
+});
+
+test("every pass sentence loses its status phrase and starts with a capital", () => {
+  for (const hint of Object.values(PASS_HINTS)) {
+    const line = stripCaptureStatus(hint);
+    expect(line).not.toMatch(/^Learning capture is/);
+    expect(line[0]).toBe(line[0]?.toUpperCase());
+    expect(hint.endsWith(line.slice(1))).toBe(true);
+  }
+  expect(
+    stripCaptureStatus("This browser was disconnected from OpenBot."),
+  ).toBe("This browser was disconnected from OpenBot.");
+});
+
 test("unjoined, learning-off and unverified each show their sentence while streaming", async () => {
   const unjoined = setup(
     recording({ learning: { state: "unjoined", containerId: null } }),
@@ -665,10 +804,13 @@ const STOPPED = {
     openbotUrl: "https://openbot.example.test",
   },
 };
+const SENDING =
+  "Sending the last of the recording to Intelligence and OpenBot. You can keep browsing.";
 
 test("after stop the saved line links to the Bot's Demonstrations page", async () => {
   const { findByRole, findByText } = setup(stateResponse({ state: STOPPED }));
-  await findByText("Saved. Review it in OpenBot to draft the Skill.");
+  await findByText("Saved");
+  await findByText("Review it in OpenBot to draft the Skill.");
   const link = await findByRole("link");
   expect(link.getAttribute("href")).toBe(
     "https://openbot.example.test/bots/b1/demonstrations",
@@ -681,43 +823,115 @@ test("after stop the saved line links to the Bot's Demonstrations page", async (
   );
 });
 
-test("after stop, draining shows the sending sentence and what is still sending", async () => {
-  const { findByText, getByText } = setup(
+test("after stop with nothing still sending, the saved line carries the recording's Learning sentence", async () => {
+  const { findByText, getByText, queryByText } = setup(
     stateResponse({
       state: {
         ...STOPPED,
+        learning: { state: "unjoined", containerId: null },
+        draining: 0,
+      },
+    }),
+  );
+  await findByText("Review it in OpenBot to draft the Skill.");
+  expect(getByText(UNJOINED_SENTENCE)).toBeTruthy();
+  expect(queryByText(SENDING)).toBeNull();
+});
+
+// What the controller sends after Stop: "finished" puts capture back to IDLE_STATE's, and offscreen.status is ignored
+// while idle, so only `draining` and `kept` (from the drains) say what is still sending.
+const AFTER_STOP_CAPTURE = IDLE_STATE.capture;
+
+test("after stop with nothing kept, what is still sending says it is sending, never Off", async () => {
+  const { findByText, getByText, queryByText } = setup(
+    stateResponse({
+      state: {
+        ...STOPPED,
+        capture: AFTER_STOP_CAPTURE,
         draining: 1,
-        capture: {
-          ...CAPTURE,
-          intelligence: "parked",
-          intelligenceReason:
-            "Learning capture is off: Intelligence refused the capture pass.",
+        learning: { state: "unassigned", containerId: null },
+      },
+    }),
+  );
+  await findByText(SENDING);
+  expect(getByText("Learning capture")).toBeTruthy();
+  expect(
+    getByText("Sending the rest of this recording to Intelligence"),
+  ).toBeTruthy();
+  expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(queryByText("Off")).toBeNull();
+  expect(queryByText(/Learning capture is (off|paused)/)).toBeNull();
+});
+
+test("after stop, a parked recording still to send says Learning capture is off, why, and that it tries at the next browser start", async () => {
+  const { findByText, getByText, queryByText } = setup(
+    stateResponse({
+      state: {
+        ...STOPPED,
+        capture: AFTER_STOP_CAPTURE,
+        draining: 1,
+        kept: {
+          recordings: 1,
+          events: 12,
+          reason: PASS_HINTS.INTELLIGENCE_RUNTIME_REQUIRED,
+          parked: true,
         },
         learning: { state: "unassigned", containerId: null },
       },
     }),
   );
-  await findByText(
-    "Sending the last of the recording to Intelligence and OpenBot. You can keep browsing.",
-  );
-  expect(getByText("Learning capture is off")).toBeTruthy();
-  expect(getByText(/when the browser next starts/)).toBeTruthy();
+  await findByText("Learning capture is off");
+  expect(
+    getByText("This OpenBot is not connected to Intelligence."),
+  ).toBeTruthy();
+  expect(getByText(PARKED_LINE)).toBeTruthy();
   expect(getByText(/this Bot has no Learning space/)).toBeTruthy();
+  expect(queryByText("Off")).toBeNull();
+  // Every drain is kept: nothing is streaming right now.
+  expect(queryByText(SENDING)).toBeNull();
+});
+
+test("after stop, a held recording still to send says Learning capture is paused, why, and that it tries every 5 minutes", async () => {
+  const { findByText, getByText, queryByText } = setup(
+    stateResponse({
+      state: {
+        ...STOPPED,
+        capture: AFTER_STOP_CAPTURE,
+        draining: 2,
+        kept: {
+          recordings: 1,
+          events: 40,
+          reason: PASS_HINTS.TRAJECTORIES_NOT_ENABLED,
+          parked: false,
+        },
+      },
+    }),
+  );
+  await findByText("Learning capture is paused");
+  expect(
+    getByText(
+      "Intelligence says this organization's licence does not include Product Trajectories, that its billing is blocked, or that it could not check right now.",
+    ),
+  ).toBeTruthy();
+  expect(getByText(HELD_LINE)).toBeTruthy();
+  expect(queryByText("Off")).toBeNull();
+  // One of the two drains is not kept, so it is still streaming.
+  expect(getByText(SENDING)).toBeTruthy();
 });
 
 const KEPT = {
   recordings: 2,
   events: 40,
-  reason: "Intelligence is not accepting events.",
+  reason: PASS_HINTS.REFUSED.replace("<status>", "503"),
   parked: false,
 };
 
 test("kept events are discarded only after the dialog confirms, and Cancel sends nothing", async () => {
   const { findByText, getByRole, queryByText, sent } = setup(
-    stateResponse({ state: { ...STOPPED, kept: KEPT } }),
+    stateResponse({ state: { ...STOPPED, kept: KEPT, draining: 2 } }),
   );
   await findByText(
-    "40 events from 2 recordings are kept in this browser: Intelligence is not accepting events.",
+    "40 events from 2 recordings are kept in this browser: Intelligence refused the capture pass (503).",
   );
   fireEvent.click(getByRole("button", { name: "Discard kept events" }));
   await findByText(
@@ -733,25 +947,126 @@ test("kept events are discarded only after the dialog confirms, and Cancel sends
   );
 });
 
-test("kept events waiting on a sign-out name the person and how to send them", async () => {
+test("the kept sentence leaves out the status phrase and starts its reason with a capital", async () => {
   const { findByText } = setup(
     stateResponse({
       state: {
-        kept: { ...KEPT, waitingFor: { name: "Ada Lovelace", recordings: 2 } },
+        kept: {
+          recordings: 1,
+          events: 1,
+          reason: PASS_HINTS.INTELLIGENCE_RUNTIME_REQUIRED,
+          parked: true,
+        },
+        draining: 1,
       },
     }),
+  );
+  await findByText(
+    "1 event from 1 recording is kept in this browser: This OpenBot is not connected to Intelligence.",
+  );
+});
+
+const WAITING = (recordings: number, events: number) => ({
+  recordings,
+  events,
+  reason: "This browser was disconnected from OpenBot.",
+  parked: true,
+  waitingFor: { name: "Ada Lovelace", recordings },
+});
+
+test("kept events waiting on a sign-out name the person and how to send them", async () => {
+  const { findByText } = setup(
+    stateResponse({ state: { kept: WAITING(2, 40), draining: 2 } }),
   );
   await findByText(
     "40 events from 2 recordings by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
   );
 });
 
-test("a pending stop shows its sentence and no Record button", async () => {
-  const sentence =
-    "Stopping: OpenBot did not answer yet. Your steps are kept in this browser and sent when it does.";
-  const { findByText, queryByRole } = setup(
-    stateResponse({ state: { ...STOPPED, botId: "b1", error: sentence } }),
+test("the waiting sentence agrees with one event, and leaves out an event count of 0", async () => {
+  const cases = [
+    [
+      WAITING(1, 1),
+      "1 event from 1 recording by Ada Lovelace is kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    ],
+    [
+      WAITING(1, 0),
+      "1 recording by Ada Lovelace is kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    ],
+    [
+      WAITING(2, 0),
+      "2 recordings by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+    ],
+  ] as const;
+  for (const [kept, sentence] of cases) {
+    const { findByText, unmount } = setup(
+      stateResponse({ state: { kept, draining: kept.recordings } }),
+    );
+    await findByText(sentence);
+    unmount();
+  }
+});
+
+test("signed out with recordings kept, the popup says how to send them and Discard asks before it sends page.kept.discard", async () => {
+  // What a sign-out leaves (reduceRecorder's "finished", then markWaiting): no connection, the notice, the drain kept.
+  const { findByText, findByRole, getByRole, queryByText, sent } = setup(
+    stateResponse({
+      ...NOT_CONNECTED,
+      notice: { kind: "signed-out", reason: "revoked", at: 1 },
+      state: {
+        ...STOPPED,
+        error:
+          "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
+        kept: WAITING(1, 12),
+        draining: 1,
+      },
+    }),
   );
-  await findByText(sentence);
+  await findByText("Connect the Recorder to OpenBot");
+  await findByText(
+    "12 events from 1 recording by Ada Lovelace are kept in this browser. Connect this browser to OpenBot again as Ada Lovelace to send them.",
+  );
+  expect((await findByRole("link")).getAttribute("href")).toBe(
+    "https://openbot.example.test/bots/b1/demonstrations",
+  );
+  // Nothing can send while signed out.
+  expect(queryByText(SENDING)).toBeNull();
+  fireEvent.click(getByRole("button", { name: "Discard kept events" }));
+  await findByText(/Discard them\?/);
+  expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
+  fireEvent.click(getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(queryByText(/Discard them\?/)).toBeNull());
+  expect(sent.some((m) => m.type === "page.kept.discard")).toBe(false);
+  fireEvent.click(getByRole("button", { name: "Discard kept events" }));
+  fireEvent.click(await findByText("Discard"));
+  await waitFor(() =>
+    expect(sent.some((m) => m.type === "page.kept.discard")).toBe(true),
+  );
+});
+
+const STOP_PENDING =
+  "Stopping: OpenBot did not answer yet. Your steps are kept in this browser and sent when it does.";
+
+test("a pending stop shows its sentence and no Record button when its Bot is the only one", async () => {
+  const { findByText, queryByRole } = setup(
+    stateResponse({ state: { ...STOPPED, botId: "b1", error: STOP_PENDING } }),
+    { bots: [BOTS[0] as RecorderBot] },
+  );
+  await findByText(STOP_PENDING);
   expect(queryByRole("button", { name: "Record" })).toBeNull();
+});
+
+test("a pending stop holds back Record only for its own Bot: another Bot still offers Record", async () => {
+  const { findByText, findByRole, getByRole, queryByRole } = setup(
+    stateResponse({ state: { ...STOPPED, botId: "b1", error: STOP_PENDING } }),
+    { lastBotId: "b1" },
+  );
+  await findByText(STOP_PENDING);
+  const picker = await findByRole("combobox", { name: "Bot" });
+  await waitFor(() => expect(picker.textContent).toContain("Support Bot"));
+  expect(getByRole("button", { name: "Record" })).toBeTruthy();
+  const user = userEvent.setup({ document });
+  await user.click(picker);
+  await findByRole("option", { name: "Support Bot" });
+  expect(queryByRole("option", { name: "Billing Bot" })).toBeNull();
 });
