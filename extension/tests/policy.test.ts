@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import type { TrajectoryGrant } from "@openbot/shared/recorder-api";
+import type { CapturedEvent } from "@openbot/shared/recorder-masking";
+import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import { handleExternalConnect } from "../src/background/connection";
+import { PASS_HINTS } from "../src/offscreen/grant";
+import { openOutbox } from "../src/offscreen/outbox";
+import {
+  createStreamer,
+  type Streamer,
+  type StreamerStatus,
+} from "../src/offscreen/streamer";
 import { isAllowedGatewayUrl } from "../src/shared/origin";
 import {
   onPolicyChanged,
@@ -85,23 +95,83 @@ test("an empty or wholly invalid allowed list refuses every gateway", async () =
   }
 });
 
-test("a pass pointing at an unlisted gateway is refused by the policy's list", async () => {
+test("a pass pointing at an unlisted gateway is refused by the policy's list the streamer is given", async () => {
   fake.storage.setManaged({
     AllowedIntelligenceUrls: ["wss://gw.example.test"],
   });
-  const { allowedIntelligenceUrls } = await readPolicy();
-  expect(
-    isAllowedGatewayUrl(
-      "wss://gw.example.test/client",
-      allowedIntelligenceUrls,
-    ),
-  ).toBe(true);
-  expect(
-    isAllowedGatewayUrl(
-      "wss://evil.example.test/client",
-      allowedIntelligenceUrls,
-    ),
-  ).toBe(false);
+  const globals = globalThis as unknown as {
+    indexedDB?: IDBFactory;
+    IDBKeyRange?: typeof FakeIDBKeyRange;
+  };
+  const saved = {
+    indexedDB: globals.indexedDB,
+    IDBKeyRange: globals.IDBKeyRange,
+  };
+  globals.indexedDB = new IDBFactory();
+  globals.IDBKeyRange = FakeIDBKeyRange;
+  let streamer: Streamer | null = null;
+  try {
+    const outbox = await openOutbox(`policy-test-${crypto.randomUUID()}`);
+    const statuses: StreamerStatus[] = [];
+    let sockets = 0;
+    let seq = 1;
+    const trajectoryId = crypto.randomUUID();
+    streamer = await createStreamer(
+      {
+        trajectoryId,
+        title: "File the weekly report",
+        demonstrationId: "demo-1",
+        version: "0.1.0",
+      },
+      {
+        async fetchGrant(id: string): Promise<TrajectoryGrant> {
+          return {
+            joinToken: "join-token",
+            realtime: {
+              clientUrl: "wss://evil.example.test/client",
+              topic: `trajectory:${id}`,
+            },
+          };
+        },
+        registerTrajectory: async () => {},
+        closeTrajectory: async () => {},
+        allowedGatewayUrls: (await readPolicy()).allowedIntelligenceUrls,
+        outbox,
+        sequencer: { next: () => seq++, flush: async () => {} },
+        status: (status) => statuses.push(status),
+        onTrajectory: () => {},
+        onSignedOut: () => {},
+        onKept: () => {},
+        randomUUID: () => crypto.randomUUID(),
+        socketFactory: () => {
+          sockets += 1;
+          throw new Error("no socket may open for a disallowed gateway");
+        },
+      },
+    );
+    streamer.push({
+      type: "CUSTOM",
+      name: "click",
+      value: { x: 1 },
+      timestamp: Date.now(),
+    } as CapturedEvent);
+    const deadline = Date.now() + 5000;
+    while (
+      !statuses.some(
+        (s) =>
+          s.intelligence === "parked" &&
+          s.reason === PASS_HINTS.GATEWAY_NOT_ALLOWED,
+      )
+    ) {
+      if (Date.now() > deadline) throw new Error("never parked");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(sockets).toBe(0);
+  } finally {
+    await streamer?.discard().catch(() => {});
+    globals.indexedDB = saved.indexedDB;
+    globals.IDBKeyRange = saved.IDBKeyRange;
+  }
 });
 
 test("onPolicyChanged reports the new policy on a managed change, ignores other areas, and unsubscribes", async () => {
@@ -143,7 +213,7 @@ test("a policy pinning another address refuses a connect from elsewhere through 
       },
     },
   );
-  expect(answer.ok).toBe(false);
+  expect(answer).toEqual({ ok: false, error: "pinned-elsewhere" });
   expect(opened).toEqual([]);
 });
 
