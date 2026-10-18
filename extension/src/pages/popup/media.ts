@@ -1,6 +1,12 @@
-// Feature off until Task 19 replaces it.
 export async function microphoneState(): Promise<
   "granted" | "prompt" | "denied"
 > {
-  return "denied";
+  try {
+    const status = await navigator.permissions.query({
+      name: "microphone" as PermissionName,
+    });
+    return status.state;
+  } catch {
+    return "denied";
+  }
 }
