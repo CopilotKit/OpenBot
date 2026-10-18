@@ -436,13 +436,28 @@ const busyPass = () =>
     message: "Could not connect to Intelligence",
   });
 
-/** OpenBot's answer to a request, as `openbotJson` throws it: with its refusal sentence when it sent one. */
+/** An answer to a request, as `openbotJson` throws it: OpenBot's JSON error body when given a sentence, else no body (a
+ * proxy's, a load balancer's or a sign-in page's answer). */
 const openbotAnswer = (status: number, sentence?: string) =>
   new OpenBotError(
     status,
     sentence ?? `OpenBot answered ${status}.`,
     sentence === undefined ? null : { error: sentence },
   );
+
+/** What the popup reads for a rollover OpenBot refused. */
+const rolloverRefused = (sentence?: string) =>
+  sentence === undefined
+    ? "Learning capture is off: OpenBot refused the next part of this recording."
+    : `Learning capture is off: OpenBot refused the next part of this recording (${sentence}).`;
+
+/** Connections to Intelligence that are open or opening. */
+const openSockets = (h: Harness) =>
+  h.sockets.filter(
+    (socket) =>
+      socket.readyState === WebSocket.CONNECTING ||
+      socket.readyState === WebSocket.OPEN,
+  ).length;
 
 async function streaming(h: Harness) {
   await until(() => h.last().intelligence === "streaming", "streaming");
@@ -1488,11 +1503,18 @@ describe("streamer", () => {
 
   test("a rollover OpenBot refuses is parked with its events kept, never registered again, and the rest of the recording streams", async () => {
     const h = await setup();
-    const refusal = "This recording is no longer open.";
+    const refusal = rolloverRefused(
+      "This recording has finished and takes no new trajectory",
+    );
     const second = crypto.randomUUID();
     const third = crypto.randomUUID();
     const ids = [second, third];
-    h.registerScript = [openbotAnswer(409, refusal)];
+    h.registerScript = [
+      openbotAnswer(
+        400,
+        "This recording has finished and takes no new trajectory.",
+      ),
+    ];
     const gate = makeGate();
     h.registerGate = gate.promise;
     const s = await h.start(
@@ -1543,6 +1565,8 @@ describe("streamer", () => {
     );
     expect(clicks(h.stored(third))).toEqual([7]);
     expect(h.registerCalls).toEqual([second, third]);
+    // The caught-up first trajectory left Intelligence: only the third holds a connection.
+    await until(() => openSockets(h) === 1, "one connection");
     // recording.continues, clicks 3 to 6 and recording.continued stay kept.
     expect(await h.pending(second)).toBe(6);
 
@@ -1563,10 +1587,12 @@ describe("streamer", () => {
     expect(h.registerCalls).toEqual([second, third]);
   });
 
-  test("a refused rollover with no sentence from OpenBot is kept with a fixed one, and registers again after a restart", async () => {
+  test("a rollover OpenBot cannot find is parked with OpenBot's sentence, and registers again after a restart", async () => {
     const h = await setup();
     const second = crypto.randomUUID();
-    h.registerScript = [openbotAnswer(404)];
+    h.registerScript = [
+      openbotAnswer(404, "This demonstration could not be found."),
+    ];
     const gate = makeGate();
     h.registerGate = gate.promise;
     const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
@@ -1578,7 +1604,7 @@ describe("streamer", () => {
     gate.release();
     await until(() => h.kept.length === 1, "the refused rollover kept");
     expect(h.kept[0]).toEqual({
-      reason: "OpenBot refused this part of the recording.",
+      reason: rolloverRefused("This demonstration could not be found"),
       parked: true,
       events: 2,
       demonstrationId: "demo-1",
@@ -1623,6 +1649,135 @@ describe("streamer", () => {
     expect(h.kept).toEqual([]);
     expect(h.last().intelligence).toBe("off");
     expect(await h.pending(second)).toBe(2);
+    // Signed out, a discard has no token to close anything with.
+    await s.discard();
+    expect(h.closed).toEqual([]);
+  });
+
+  test("an OpenBot refusal with a blank sentence is kept with the plain one", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [openbotAnswer(400, "  ")];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.kept.length === 1, "the refused rollover kept");
+    expect(h.kept[0]).toMatchObject({
+      reason: rolloverRefused(),
+      parked: true,
+      trajectoryId: second,
+    });
+  });
+
+  test("a rollover registration answered by anything but OpenBot's own refusal keeps retrying", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [
+      // A proxy's, a single sign-on page's or a load balancer's answer: no OpenBot body.
+      openbotAnswer(401),
+      openbotAnswer(403),
+      openbotAnswer(404),
+      openbotAnswer(400),
+      // OpenBot's 401 that is not its sign-out.
+      new OpenBotError(401, "Sign in again.", { error: "Sign in again." }),
+    ];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.registerCalls.length === 1, "the first attempt");
+    for (let step = 0; step < 10 && h.rollovers.length === 0; step++) {
+      await h.clock.advance(MINUTE);
+    }
+    await until(() => h.rollovers.length === 1, "the rollover registered");
+    expect(h.registerCalls).toEqual(Array(6).fill(second));
+    expect(h.kept).toEqual([]);
+    expect(h.signedOut).toEqual([]);
+    await until(
+      () => clicks(h.stored(second)).length === 1,
+      "the rollover streams",
+    );
+  });
+
+  test("a caught-up trajectory whose rollover OpenBot refused leaves Intelligence but stays open in OpenBot", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [
+      openbotAnswer(
+        400,
+        "This recording has finished and takes no new trajectory.",
+      ),
+    ];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.kept.length === 1, "the refused rollover kept");
+    await until(
+      async () => (await h.pending(h.trajectoryId)) === 0,
+      "the first trajectory sent",
+    );
+    expect(h.sockets.length).toBeGreaterThan(0);
+    await until(() => openSockets(h) === 0, "no connection to Intelligence");
+    const passes = h.grants.length;
+    await h.clock.advance(10 * MINUTE);
+    expect(openSockets(h)).toBe(0);
+    expect(h.grants).toHaveLength(passes);
+    expect(h.closed).toEqual([]);
+    expect(h.last().intelligence).toBe("parked");
+    expect(await h.pending(second)).toBe(2);
+  });
+
+  test("discard closes the recording's open trajectories in OpenBot, but not a rollover OpenBot never registered", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    h.registerScript = [
+      openbotAnswer(
+        400,
+        "This recording has finished and takes no new trajectory.",
+      ),
+    ];
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.kept.length === 1, "the refused rollover kept");
+    await until(
+      async () => (await h.pending(h.trajectoryId)) === 0,
+      "the first trajectory sent",
+    );
+    expect(h.closed).toEqual([]);
+
+    await s.discard();
+    expect(h.closed).toEqual([h.trajectoryId]);
+    expect(await h.pending(second)).toBe(0);
+    expect(await h.outbox.trajectories()).toEqual([]);
+  });
+
+  test("discard closes a rollover whose registration was still on its way", async () => {
+    const h = await setup();
+    const second = crypto.randomUUID();
+    const gate = makeGate();
+    h.registerGate = gate.promise;
+    const s = await h.start({}, { rolloverAt: 5, randomUUID: () => second });
+    for (let i = 0; i < 4; i++) s.push(click(i));
+    await until(() => h.registerCalls.length === 1, "the registration sent");
+
+    await s.discard();
+    expect(h.closed).toEqual([h.trajectoryId]);
+    gate.release();
+    await until(() => h.closed.length === 2, "the late rollover closed");
+    expect(h.closed).toEqual([h.trajectoryId, second]);
+    expect(h.rollovers).toEqual([]);
+  });
+
+  test("a discard still discards when OpenBot cannot close the trajectory", async () => {
+    const h = await setup();
+    const s = await h.start(
+      {},
+      {
+        closeTrajectory: async () => {
+          throw new Error("OpenBot is unreachable");
+        },
+      },
+    );
+    await started(h);
+    s.push(click(0));
+    await expect(s.discard()).resolves.toBeUndefined();
+    expect(await h.outbox.trajectories()).toEqual([]);
   });
 
   test("a rollover registration answered 5xx, 408 or 429 keeps retrying with the back-off", async () => {

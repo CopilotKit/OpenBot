@@ -52,8 +52,9 @@ type Timers = {
 
 export type StreamerDeps = {
   fetchGrant(trajectoryId: string): Promise<TrajectoryGrant>;
-  /** Rejects with OpenBot's answer as an `OpenBotError`: a 4xx other than 408 and 429 parks the rolled-over trajectory, a
-   * signed-out 401 signs out, and anything else (a network failure, a 5xx, 408, 429) is retried. */
+  /** Rejects with OpenBot's answer as an `OpenBotError`: only OpenBot's own refusal (a 400 or 404 with its JSON error body)
+   * parks the rolled-over trajectory, a signed-out 401 signs out, and anything else (a network failure, a 5xx, any other
+   * 4xx, or an answer without OpenBot's body, such as a proxy's or a sign-in page's) is retried. */
   registerTrajectory(trajectoryId: string): Promise<void>;
   closeTrajectory(trajectoryId: string): Promise<void>;
   allowedGatewayUrls: string[] | null;
@@ -144,7 +145,13 @@ const messagesRefusedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence refused the recorder's messages (${reason}).`;
 const sessionEndedSentence = (reason: string) =>
   `Learning capture is paused: Intelligence ended the capture session (${reason}).`;
-const REGISTRATION_REFUSED = "OpenBot refused this part of the recording.";
+/** A rollover OpenBot refused, with OpenBot's own sentence when it gave one (parked, so "off", as the popup titles it). */
+const registrationRefusedSentence = (sentence: string) => {
+  const detail = sentence.trim().replace(/\.+$/, "");
+  return detail
+    ? `Learning capture is off: OpenBot refused the next part of this recording (${detail}).`
+    : "Learning capture is off: OpenBot refused the next part of this recording.";
+};
 const checkOriginSentence = () => {
   const id =
     typeof chrome !== "undefined" && chrome.runtime?.id
@@ -213,6 +220,10 @@ type Lane = {
   /** The next attempt to close the trajectory in OpenBot. */
   closeTimer: unknown;
   awaitingRegistration: boolean;
+  /** OpenBot refused to register this rolled-over trajectory; a recovering streamer asks again at the next browser start. */
+  refused: boolean;
+  /** Caught up behind a refused successor: its connection is gone, but it stays open in OpenBot for that next attempt. */
+  released: boolean;
   closing: boolean;
   kept: Kept | null;
   retry: { attempts: number; since: number } | null;
@@ -372,7 +383,11 @@ type RegistrationFailure =
   | { kind: "refused"; reason: string }
   | { kind: "signed-out"; reason: (typeof SIGNED_OUT_REASONS)[number] };
 
-/** A network failure, a 5xx, 408 or 429 can clear; any other 4xx is OpenBot's answer, which a retry cannot change. */
+/**
+ * Only the registration route's own Refused (400) and NotFound (404), carrying OpenBot's JSON error body, are answers a
+ * retry cannot change. Anything that cannot be told from a transient condition (a network failure, a 5xx, any other
+ * 4xx, a 401 that is not OpenBot's sign-out, a proxy's or a sign-in page's answer with no OpenBot body) is retried.
+ */
 function registrationFailure(error: unknown): RegistrationFailure {
   if (!(error instanceof OpenBotError)) return { kind: "retry" };
   if (error.signedOut) {
@@ -381,13 +396,13 @@ function registrationFailure(error: unknown): RegistrationFailure {
       "revoked";
     return { kind: "signed-out", reason };
   }
-  const { status } = error;
-  if (status < 400 || status >= 500 || status === 408 || status === 429) {
-    return { kind: "retry" };
+  if (error.body !== null && (error.status === 400 || error.status === 404)) {
+    return {
+      kind: "refused",
+      reason: registrationRefusedSentence(error.body.error),
+    };
   }
-  const sentence =
-    typeof error.body?.error === "string" ? error.body.error.trim() : "";
-  return { kind: "refused", reason: sentence || REGISTRATION_REFUSED };
+  return { kind: "retry" };
 }
 
 const reasonOf = (payload: unknown): string =>
@@ -473,6 +488,8 @@ export async function createStreamer(
     timer: undefined,
     closeTimer: undefined,
     awaitingRegistration: false,
+    refused: false,
+    released: false,
     closing: false,
     kept: null,
     retry: null,
@@ -514,7 +531,7 @@ export async function createStreamer(
     intelligence: CaptureStatus["intelligence"];
     reason?: string;
   } | null => {
-    if (lane.meta.closed) return null;
+    if (lane.meta.closed || lane.released) return null;
     if (lane.kept) {
       return {
         intelligence: lane.kept.parked ? "parked" : "held",
@@ -749,9 +766,41 @@ export async function createStreamer(
     if (halted() || lane.meta.closed || lane.closing) return;
     if (!lane.meta.stopped || lane.pending > 0 || lane.meta.droppedPending > 0)
       return;
-    if (lane.meta.next !== undefined && !lane.meta.registered) return;
     if (lane.conn?.inflight) return;
+    if (lane.meta.next !== undefined && !lane.meta.registered) {
+      if (lanes.some((other) => other.id === lane.meta.next && other.refused))
+        release(lane);
+      return;
+    }
     void close(lane);
+  };
+
+  /**
+   * A caught-up trajectory whose successor OpenBot refused leaves Intelligence, so no more than two connections are ever
+   * open, but it stays open in OpenBot: a stopped recording registers the successor at the next browser start only while
+   * one of its trajectories is still open.
+   */
+  const release = (lane: Lane) => {
+    if (lane.conn) teardown(lane.conn);
+    lane.conn = null;
+    clear(lane.timer);
+    lane.timer = undefined;
+    lane.released = true;
+    emitStatus();
+  };
+
+  /** Discard closes the dropped recording's trajectories in OpenBot, once and best effort; signed out, it has no token. */
+  const closeDiscarded = async (lane: Lane) => {
+    if (signedOut) return;
+    try {
+      await deps.closeTrajectory(lane.id);
+      lane.meta.closed = true;
+    } catch (error) {
+      console.error(
+        "Recorder: OpenBot did not close a discarded trajectory",
+        error,
+      );
+    }
   };
 
   const close = async (lane: Lane) => {
@@ -811,7 +860,8 @@ export async function createStreamer(
         }
         if (failure.kind === "refused") {
           // Parked: the trajectory never takes a pass, its events stay kept until the person discards them, and a
-          // recovering streamer asks again at the next browser start. The old trajectory waits open for that.
+          // recovering streamer asks again at the next browser start. The old trajectory waits open in OpenBot for that,
+          // and leaves Intelligence once it has caught up.
           console.error(
             "Recorder: OpenBot refused to register the next trajectory",
             error,
@@ -819,7 +869,9 @@ export async function createStreamer(
           registrationAttempt = 0;
           registrations.shift();
           if (halted()) return;
+          next.refused = true;
           keep(next, { reason: failure.reason, parked: true });
+          maybeClose(old);
           continue;
         }
         registrationAttempt += 1;
@@ -838,6 +890,11 @@ export async function createStreamer(
       }
       registrationAttempt = 0;
       registrations.shift();
+      if (discarded) {
+        // OpenBot registered it after the person discarded the recording: close it as discard closed the others.
+        await closeDiscarded(next);
+        return;
+      }
       if (halted()) return;
       old.meta.registered = true;
       await persist(old);
@@ -1213,6 +1270,7 @@ export async function createStreamer(
       halted() ||
       lane.meta.closed ||
       lane.closing ||
+      lane.released ||
       lane.awaitingRegistration ||
       lane.conn
     )
@@ -1481,6 +1539,13 @@ export async function createStreamer(
       }
       await chain;
       for (const lane of lanes) await outbox.clear(lane.id);
+      // Left open, a trajectory would keep OpenBot serving passes and taking new trajectories for this recording. A
+      // rollover OpenBot never registered has nothing to close.
+      await Promise.all(
+        lanes
+          .filter((lane) => !lane.meta.closed && !lane.awaitingRegistration)
+          .map(closeDiscarded),
+      );
     },
   };
 }
