@@ -403,8 +403,13 @@ export function installRecording(
   let bots = new Map<string, RecorderBot>();
   const frameUrls = new Map<string, string>();
   let lastPollAt: number | undefined;
-  /** Start over is switching recordings: nothing uploads, takes a step or stops the recording until it is done. */
-  let restarting = false;
+  /** The recording Start over is leaving: while it is still the live one, nothing uploads, takes a step, polls OpenBot or
+   * stops it on a refusal. Once it has ended, a recording started after it is not held up by the Start over still
+   * waiting on OpenBot. */
+  let restartingFrom: Live | null = null;
+  /** Set while Start over saves and makes the switch to the new recording (nothing in it waits on OpenBot): a stop waits
+   * for it, so the document and the tabs always hear of the switch before they hear of the stop. */
+  let switching: Promise<void> | null = null;
   /** The recording whose capture the popup shows and the trajectories it streams to: a status about any other
    * trajectory (a recording Start over discarded, still draining) leaves that capture alone. */
   let shown: { demonstrationId: string; trajectoryIds: Set<string> } | null =
@@ -469,7 +474,7 @@ export function installRecording(
   const steps = deps.createStepUploader({
     // Start over drains the recording it leaves itself, before OpenBot hears of its stop.
     target: (): StepTarget | null =>
-      live && !restarting
+      live && live !== restartingFrom
         ? {
             openbotUrl: live.openbotUrl,
             token: live.token,
@@ -488,7 +493,12 @@ export function installRecording(
     // A refusal is about the recording its batch was for: one that is no longer live, or one Start over is leaving,
     // stops nothing.
     onRefused: async (_message, demonstrationId) => {
-      if (restarting || live?.demonstrationId !== demonstrationId) return;
+      if (
+        !live ||
+        live === restartingFrom ||
+        live.demonstrationId !== demonstrationId
+      )
+        return;
       void stopRecording({ kind: "openbot" }).catch(
         report("stopping a recording stopped in OpenBot"),
       );
@@ -498,7 +508,7 @@ export function installRecording(
 
   /** Adds a step to the live recording; navigate and gesture steps count toward the 50-step notice, network steps do not. */
   function addStep(action: DemonstrationAction): void {
-    if (!live || restarting) return;
+    if (!live || live === restartingFrom) return;
     steps.add(action);
     if (action.kind === "network") return;
     dispatch({ type: "step" });
@@ -1181,6 +1191,9 @@ export function installRecording(
   }
 
   async function stopRecording(mode: StopMode): Promise<void> {
+    // A stop that comes while Start over makes its switch waits for it, then stops the recording that is live. A Start
+    // over still waiting on OpenBot is not waited for: the stop wins, and that Start over finds the recording ended.
+    if (switching) await switching;
     if (state.phase !== "recording" || !live) return;
     const current = live;
     live = null;
@@ -1384,7 +1397,7 @@ export function installRecording(
 
   async function heartbeat(): Promise<void> {
     // Start over decides what happens to the recording it leaves, before and after the poll.
-    if (state.phase !== "recording" || !live || restarting) return;
+    if (state.phase !== "recording" || !live || live === restartingFrom) return;
     const at = deps.now();
     if (lastPollAt !== undefined && at - lastPollAt < POLL_EVERY_MS) return;
     lastPollAt = at;
@@ -1397,13 +1410,19 @@ export function installRecording(
       );
     } catch (error) {
       const reason = signedOutReason(error);
-      if (reason && !restarting)
+      if (reason && current !== restartingFrom)
         await handleSignedOut(reason, current.token, current.userId);
       // Any other failure waits for the next heartbeat.
       return;
     }
-    // An answer about a recording that is no longer live (Start over replaced it) decides nothing.
-    if (restarting || live !== current || state.phase !== "recording") return;
+    // An answer about a recording Start over is leaving, or one that is no longer live (Start over replaced it), decides
+    // nothing.
+    if (
+      current === restartingFrom ||
+      live !== current ||
+      state.phase !== "recording"
+    )
+      return;
     if (answer.demonstration?.id !== current.demonstrationId) {
       await stopRecording({ kind: "openbot" });
       return;
@@ -1415,30 +1434,29 @@ export function installRecording(
   // ---- Start over ----------------------------------------------------------------------------
 
   async function restart(): Promise<PageResponse> {
-    if (state.phase !== "recording" || !live || restarting)
+    if (state.phase !== "recording" || !live || live === restartingFrom)
       return { ok: false, error: SENTENCES.notRecording };
-    restarting = true;
-    let answer: PageResponse;
+    const current = live;
+    restartingFrom = current;
     try {
-      answer = await rotate(live);
+      return await rotate(current);
     } finally {
-      restarting = false;
+      if (restartingFrom === current) restartingFrom = null;
     }
-    // Taken in the same turn as the switch ends, so it is the new recording's first step.
-    if (answer.ok) {
-      const tabId = state.tabIds[0];
-      addFirstStep(tabId === undefined ? undefined : state.topUrls[tabId]);
-    }
-    return answer;
   }
 
   async function rotate(current: Live): Promise<PageResponse> {
-    const old = await readLocal("activeRecording");
-    if (!old) return { ok: false, error: SENTENCES.notRecording };
-    const target = { openbotUrl: current.openbotUrl, token: current.token };
     // Stop, a sign-out or Disconnect can end the recording while Start over waits on OpenBot: after every wait it checks
-    // the recording it leaves is still the live one, and once it is not, nothing switches.
-    const ended = () => state.phase !== "recording" || live !== current;
+    // the recording it leaves is still the live one, and once it is not, it lets go of it (a recording started next is
+    // not held up) and nothing switches.
+    const ended = (): boolean => {
+      if (state.phase === "recording" && live === current) return false;
+      if (restartingFrom === current) restartingFrom = null;
+      return true;
+    };
+    const old = await readLocal("activeRecording");
+    if (!old || ended()) return { ok: false, error: SENTENCES.notRecording };
+    const target = { openbotUrl: current.openbotUrl, token: current.token };
     // Its queued steps go before its stop, because OpenBot refuses steps for a stopped recording. The drain waits behind
     // an upload in flight and reports no refusal; whatever it cannot send is discarded with the recording.
     await steps
@@ -1475,6 +1493,8 @@ export function installRecording(
             method: "DELETE",
           },
         ).catch(report("deleting the recording that could not start"));
+      // A recording that ended meanwhile was stopped by whatever ended it; one started since is not this one's to stop.
+      if (ended()) return { ok: false, error: SENTENCES.notRecording };
       // The old recording is stopped in OpenBot and no new one exists: stop here too.
       const sentence = sentenceFor(error, SENTENCES.startFailed);
       await stopRecording({ kind: "restart-failed", error: sentence });
@@ -1488,6 +1508,29 @@ export function installRecording(
       }).catch(() => undefined);
       return { ok: false, error: SENTENCES.notRecording };
     }
+    // From here nothing waits on OpenBot. A stop that comes now waits for the switch (stopRecording), so it is never
+    // told to the document or the tabs before the switch is.
+    let switched = () => {};
+    switching = new Promise<void>((resolve) => {
+      switched = resolve;
+    });
+    try {
+      await switchTo(current, old, demonstrationId, trajectoryId);
+    } finally {
+      switching = null;
+      switched();
+    }
+    return { ok: true };
+  }
+
+  /** Saves the new recording as the active one and the old one as a discarded drain, then makes the switch in memory and
+   * tells the document and the tabs in one turn, with nothing awaited in between. */
+  async function switchTo(
+    current: Live,
+    old: DrainRecord,
+    demonstrationId: string,
+    trajectoryId: string,
+  ): Promise<void> {
     const startedAt = deps.now();
     const next: DrainRecord = {
       demonstrationId,
@@ -1500,8 +1543,6 @@ export function installRecording(
       startedAt,
       discard: false,
     };
-    live = { ...current, demonstrationId };
-    shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
     const drains = await serially(async () => {
       const previous = (await readLocal("activeRecording")) ?? old;
       const existing = (await readLocal("drains")) ?? [];
@@ -1515,7 +1556,6 @@ export function installRecording(
       await writeDrains(changed);
       return changed;
     });
-    postOffscreen({ type: "offscreen.rotate", demonstrationId, trajectoryId });
     const stream = await readSession("stream");
     if (stream)
       await writeSession("stream", {
@@ -1526,6 +1566,9 @@ export function installRecording(
       });
     // The discarded recording's queued steps go with it; the new one counts from zero.
     await steps.reset(old.demonstrationId);
+    live = { ...current, demonstrationId };
+    shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
+    postOffscreen({ type: "offscreen.rotate", demonstrationId, trajectoryId });
     dispatch({ type: "restart", demonstrationId, startedAt });
     publishDrains(drains);
     postToContentPorts(
@@ -1538,7 +1581,9 @@ export function installRecording(
       active: true,
       demonstrationId,
     });
-    return { ok: true };
+    // Taken in the same turn as the switch, so it is the new recording's first step.
+    const tabId = state.tabIds[0];
+    addFirstStep(tabId === undefined ? undefined : state.topUrls[tabId]);
   }
 
   // ---- The 50-step notice --------------------------------------------------------------------

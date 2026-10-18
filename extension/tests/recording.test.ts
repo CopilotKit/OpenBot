@@ -2001,6 +2001,171 @@ test("Disconnect while Start over waits for OpenBot ends the recording: the new 
   expect(fake.storage.local.get("connection")).toBeUndefined();
 });
 
+test("a recording started after Stop ended a Start over still waiting for OpenBot uploads its steps and polls OpenBot", async () => {
+  const held = await startOverHeldAtCreate();
+  const { old, content, create, restarted } = held;
+  // The held create keeps waiting; the next recording's create is answered at once.
+  openbot.holdCreate = null;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const next = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  expect(next).toBe("demo-2");
+  // Its first step (the page it starts on) and a click upload on the flush timer.
+  await sendSteps(content, [click("Next")], 2);
+  await advance(3_000);
+  await until(
+    () => requests().includes(`POST ${demoPath(next, "/actions")}`),
+    "the next recording's steps upload",
+  );
+  expect(
+    openbot.calls
+      .filter((call) => call.path === demoPath(next, "/actions"))
+      .map((call) => call.body),
+  ).toEqual([
+    {
+      fromIndex: 0,
+      actions: [
+        { kind: "navigate", url: DEAL, transition: "other" },
+        click("Next"),
+      ],
+    },
+  ]);
+  // Its heartbeat asks OpenBot and takes the answer.
+  openbot.open = () => ({
+    demonstration: demonstration(next, {
+      state: "unjoined",
+      containerId: null,
+    }),
+  });
+  doc?.postMessage({ type: "offscreen.heartbeat" });
+  await until(
+    async () => (await state()).learning?.state === "unjoined",
+    "the next recording's heartbeat",
+  );
+  // The stale create answers now: the recording it was for has ended, so the new demonstration is deleted and the next
+  // recording carries on untouched.
+  create.open();
+  expect(await restarted).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  await until(
+    () => requests().includes(`DELETE ${demoPath("demo-3")}`),
+    "the stale new recording is deleted in OpenBot",
+  );
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: next,
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(fake.storage.local.get("activeRecording")).toMatchObject({
+    demonstrationId: next,
+  });
+  expect(sentToDocument("offscreen.rotate")).toEqual([]);
+  expect(sentToDocument("offscreen.stop")).toEqual([
+    { type: "offscreen.stop", outcome: "succeeded" },
+  ]);
+  expect(requests()).not.toContain(`DELETE ${demoPath(next)}`);
+  expect(drains()).toMatchObject([{ demonstrationId: old, discard: false }]);
+  await sendSteps(content, [click("Later")], 3);
+  await uploader.flush();
+  expect(openbot.calls.at(-1)?.path).toBe(demoPath(next, "/actions"));
+  expect(openbot.batches.at(-1)).toMatchObject({
+    fromIndex: 2,
+    actions: [click("Later")],
+  });
+});
+
+test("a Start over whose create fails after Stop ended it leaves the recording started since alone", async () => {
+  const held = await startOverHeldAtCreate();
+  const { content, create, restarted } = held;
+  openbot.holdCreate = null;
+  expect(await page({ type: "page.stop" })).toEqual({ ok: true });
+  const next = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  // The held create is answered with a failure.
+  openbot.createAnswers.push({ status: 503, body: { error: "Busy." } });
+  create.open();
+  expect(await restarted).toEqual({
+    ok: false,
+    error: "Nothing is being recorded.",
+  });
+  await settle();
+  expect(await state()).toMatchObject({
+    phase: "recording",
+    demonstrationId: next,
+  });
+  expect((await state()).error).toBeUndefined();
+  expect(sentToDocument("offscreen.stop")).toEqual([
+    { type: "offscreen.stop", outcome: "succeeded" },
+  ]);
+  expect(fake.storage.local.get("activeRecording")).toMatchObject({
+    demonstrationId: next,
+  });
+  await sendSteps(content, [click("Next")], 2);
+  await uploader.flush();
+  expect(openbot.calls.at(-1)?.path).toBe(demoPath(next, "/actions"));
+});
+
+test("Stop pressed while Start over saves the switch stops the new recording after the document and the tabs were moved to it", async () => {
+  const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
+  const content = contentPort(7);
+  await sendSteps(content, [click()], 2);
+  // Hold the write that makes the new recording the active one.
+  const local = chrome.storage.local as unknown as {
+    set(items: Record<string, unknown>): Promise<void>;
+  };
+  const set = local.set;
+  const write = gate();
+  let holding = false;
+  local.set = async (items) => {
+    const active = items.activeRecording as DrainRecord | undefined;
+    if (active?.demonstrationId === "demo-2") {
+      holding = true;
+      await write.promise;
+    }
+    return set(items);
+  };
+  try {
+    const restarted = page({ type: "page.restart" });
+    await until(() => holding, "the switch's write is held");
+    const stopped = page({ type: "page.stop" });
+    await settle();
+    write.open();
+    await until(
+      async () => (await state()).phase === "idle",
+      "the recording stops",
+    );
+    expect(await stopped).toEqual({ ok: true });
+    await restarted;
+  } finally {
+    local.set = set;
+  }
+  // The document is moved to the new recording before it is told to stop, never after.
+  const messages = toDocument().map((message) => message.type);
+  const stopAt = messages.indexOf("offscreen.stop");
+  expect(stopAt).toBeGreaterThan(-1);
+  expect(messages.slice(stopAt + 1)).not.toContain("offscreen.rotate");
+  expect(messages.slice(stopAt + 1)).not.toContain("offscreen.start");
+  // The tabs' last word is to stop capturing.
+  const captures = content.messages.filter(
+    (message) => (message as { type?: string }).type === "background.capture",
+  );
+  expect(captures.at(-1)).toEqual({
+    type: "background.capture",
+    active: false,
+  });
+  expect((await state()).phase).toBe("idle");
+  expect(fake.storage.local.get("activeRecording")).toBeUndefined();
+  expect(fake.storage.session.get("stream")).toBeUndefined();
+  // Stop was about the recording that was live by then: the new one is stopped in OpenBot and kept, the old one is
+  // discarded.
+  expect((await state()).lastStopped?.demonstrationId).toBe("demo-2");
+  expect(requests()).toContain(`POST ${demoPath("demo-2", "/stop")}`);
+  expect(drains()).toMatchObject([
+    { demonstrationId: old, discard: true },
+    { demonstrationId: "demo-2", discard: false },
+  ]);
+});
+
 test("after Start over, a status about the old recording's trajectory leaves the new recording's capture alone", async () => {
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const oldTrajectory = registered(1) ?? "";
