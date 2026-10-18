@@ -212,6 +212,7 @@ import {
 } from "./proactive/restriction";
 import { createProactiveStore } from "./proactive/store";
 import { createProviderOAuthProxy } from "./provider-oauth";
+import { createRecorderExtension } from "./recorder/wiring";
 import { createRequestActor } from "./request-actor";
 import { createResponsibilityBindingStore } from "./responsibilities/bindings";
 import {
@@ -423,19 +424,23 @@ const identityProviderStore = createIdentityProviderStore(database);
  * store that receives those rows has to exist before anything can sign in.
  */
 const signInAuditStore = createAuditStore(database);
-const auth: AuthService | undefined = config.organizationAuthUrl
+// Its own const so the Recorder can re-check a stored session through `verifySessionQuietly`.
+const organizationAuth = config.organizationAuthUrl
   ? createOrganizationAuth({
       authorityUrl: config.organizationAuthUrl,
       materializeUser: organizationUserStore(database),
     })
-  : config.auth
+  : undefined;
+const auth: AuthService | undefined =
+  organizationAuth ??
+  (config.auth
     ? createAuth(
         config,
         database,
         (email) => peopleStore.isRevoked(email),
         signInAuditStore,
       )
-    : undefined;
+    : undefined);
 const { resolveRequestActor, identifyUser, identifyActor } = createRequestActor(
   {
     singleUser: config.singleUser,
@@ -1113,12 +1118,28 @@ const demonstrationStore = createDemonstrationStore(database);
 const demonstrationRecorder = createDemonstrationRecorder({
   store: demonstrationStore,
   // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  ownsBot: async (owner, bot) =>
-    (await pluginStore.agentOwner(bot)) === owner ||
-    (await agentProfileStore.get(await actorFor(owner), bot)) !== null,
+  // The Recorder extension holds the one copy of the rule; it is built just below, from this recorder.
+  ownsBot: (owner, bot) => recorderExtension.canRecordForBot(owner, bot),
   ownsSkill: async (owner, slug) =>
     (await pluginStore.skillOwner(slug)) === owner,
   routines: routineStore,
+});
+const recorderExtension = createRecorderExtension({
+  config,
+  database,
+  organizationAuth,
+  roleRepository,
+  peopleStore,
+  agentProfileStore,
+  pluginStore,
+  actorFor,
+  learningSettingsStore,
+  snapshots: learningProbeIntelligence,
+  demonstrations: {
+    store: demonstrationStore,
+    recorder: demonstrationRecorder,
+  },
+  auditStore: bootAuditStore,
 });
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,
@@ -2370,6 +2391,7 @@ const app = createApp(
       store: demonstrationStore,
       recorder: demonstrationRecorder,
     },
+    recorder: recorderExtension,
     delivery: {
       authenticated: {
         store: deliveryStore,

@@ -1,0 +1,125 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { createHash, randomUUID } from "node:crypto";
+import type { ExchangeResponse } from "@openbot/shared/recorder-api";
+import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
+import { eq, inArray } from "drizzle-orm";
+import { createApp } from "../src/app";
+import type { AuditEventInput } from "../src/audit";
+import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
+import { loadConfig } from "../src/config";
+import { createDatabase } from "../src/db/client";
+import { users } from "../src/db/schema/core";
+import { recorderConnections } from "../src/db/schema/recorder";
+import { createRecorderExtension } from "../src/recorder/wiring";
+import { TEST_POOL, testDatabaseUrl } from "./support/database";
+
+const database = createDatabase(testDatabaseUrl(), TEST_POOL);
+const other = `recorder-single-${randomUUID()}-other`;
+const ORIGIN = `chrome-extension://${RECORDER_EXTENSION_ID}`;
+const BOT = "mine";
+
+const config = loadConfig({
+  DATABASE_URL: "postgres://openbot:openbot@127.0.0.1:5432/openbot",
+  KEY_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  INTELLIGENCE_API_URL: "http://127.0.0.1:7100",
+  INTELLIGENCE_GATEWAY_WS_URL: "ws://127.0.0.1:7103",
+  INTELLIGENCE_API_KEY: "tenant-api-key",
+  COPILOTKIT_LICENSE_TOKEN: "license-token",
+  OPENBOT_SINGLE_USER: "true",
+});
+const auditStore = { insert: async (_event: AuditEventInput) => {} };
+const bot = { id: BOT, name: "Bot", hidden: false, deletedAt: null };
+const roleRepository = { rolesForUser: async () => ["admin" as const] };
+const recorder = createRecorderExtension({
+  config,
+  database,
+  organizationAuth: undefined,
+  roleRepository,
+  peopleStore: { isRevoked: async () => false },
+  agentProfileStore: {
+    list: async () => [bot],
+    get: async (_actor: unknown, id: string) => (id === BOT ? bot : null),
+  } as never,
+  pluginStore: { agentOwner: async () => null },
+  actorFor: async (id) => ({ id, role: "admin" }),
+  learningSettingsStore: { read: async () => ({}) as never },
+  snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
+  demonstrations: {} as never,
+  auditStore,
+});
+const app = createApp(
+  config,
+  undefined,
+  roleRepository,
+  ...(Array.from({ length: 9 }) as never[]),
+  auditStore,
+  ...(Array.from({ length: 21 }) as never[]),
+  { recorder },
+);
+
+const call = (path: string, init: RequestInit & { json?: unknown } = {}) => {
+  const { json, headers, ...rest } = init;
+  return app.request(`http://openbot.test${path}`, {
+    ...rest,
+    headers: {
+      ...(json === undefined ? {} : { "content-type": "application/json" }),
+      ...(headers as Record<string, string>),
+    },
+    ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+  });
+};
+
+beforeAll(async () => {
+  expect(config.singleUser).toBe(true);
+  await initializeDevActorUser(database, true);
+  await database
+    .insert(users)
+    .values({ id: other, email: `${other}@example.test`, name: "Other" });
+});
+afterAll(async () => {
+  await database
+    .delete(recorderConnections)
+    .where(eq(recorderConnections.userId, DEV_ACTOR.id));
+  await database.delete(users).where(inArray(users.id, [other]));
+  await database.$client.close();
+});
+
+test("in single-user mode a connect code, an exchange and the bearer all resolve to the one local person", async () => {
+  const minted = await call("/api/recorder/connect-codes", {
+    method: "POST",
+    json: { via: "web" },
+  });
+  expect(minted.status).toBe(201);
+  const { code } = (await minted.json()) as { code: string };
+  const exchanged = await call("/api/recorder/connections", {
+    method: "POST",
+    headers: { origin: ORIGIN },
+    json: { code, label: "Chrome on macOS", installId: "f".repeat(32) },
+  });
+  expect(exchanged.status).toBe(201);
+  const { token } = (await exchanged.json()) as ExchangeResponse;
+  const headers = { authorization: `Bearer ${token}` };
+  const me = await call("/api/recorder/me", { headers });
+  expect(me.status).toBe(200);
+  expect(((await me.json()) as { user: { id: string } }).user.id).toBe(
+    "dev-local-user",
+  );
+  expect((await call("/api/recorder/bots", { headers })).status).toBe(200);
+});
+
+test("a connection that belongs to another person is refused", async () => {
+  const token = `obr_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`;
+  await database.insert(recorderConnections).values({
+    id: randomUUID(),
+    userId: other,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    label: "Someone else",
+    via: "web",
+    extensionId: RECORDER_EXTENSION_ID,
+    installId: "9".repeat(32),
+  });
+  const refused = await call("/api/recorder/me", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(refused.status).toBe(401);
+});
