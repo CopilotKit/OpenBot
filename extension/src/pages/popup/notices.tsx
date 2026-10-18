@@ -18,7 +18,7 @@ const SIGNED_OUT = {
   default: "This browser was disconnected from OpenBot. Connect it again.",
 } as const;
 
-export function noticeSentence(notice: RecorderNotice): string {
+function noticeSentence(notice: RecorderNotice): string {
   switch (notice.kind) {
     case "interrupted":
       return "Your last recording stopped when the browser closed. Everything recorded until then goes to Intelligence.";

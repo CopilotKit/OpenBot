@@ -19,7 +19,7 @@ export class OpenBotError extends Error {
   }
 }
 
-export type OpenBotTarget = { openbotUrl: string; token?: string };
+type OpenBotTarget = { openbotUrl: string; token?: string };
 
 /** Sends the request with the bearer when there is one, never with cookies, and never follows a redirect. */
 export async function openbotRaw(
@@ -43,7 +43,7 @@ export async function openbotRaw(
   });
 }
 
-export async function readErrorBody(
+async function readErrorBody(
   response: Response,
 ): Promise<RecorderErrorBody | null> {
   try {

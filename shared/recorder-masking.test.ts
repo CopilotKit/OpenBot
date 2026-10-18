@@ -12,7 +12,6 @@ import {
   sanitiseForIntelligence,
   scrubText,
   scrubUrl,
-  sha256Hex,
   sha256HexSync,
   trimEvent,
 } from "./recorder-masking";
@@ -25,8 +24,8 @@ const at = (
   ...path: string[]
 ): Probe => path.reduce((node: Probe, key) => node?.[key], event?.value);
 
-const digestsOf = async (...values: string[]) =>
-  new Set(await Promise.all(values.map((v) => sha256Hex(normaliseSecret(v)))));
+const digestsOf = (...values: string[]) =>
+  new Set(values.map((v) => sha256HexSync(normaliseSecret(v))));
 
 test("credential headers keep their name and lose their value", () => {
   expect(
@@ -103,7 +102,7 @@ test("JSON bodies lose credential values at any depth and keep shape", () => {
 });
 
 test("a value typed into a sensitive field is scrubbed wherever it reappears, even 3 digits long", async () => {
-  const digests = await digestsOf("4111111111111111", "737");
+  const digests = digestsOf("4111111111111111", "737");
   expect(
     JSON.parse(
       maskBody(
@@ -123,7 +122,7 @@ test("a value typed into a sensitive field is scrubbed wherever it reappears, ev
 });
 
 test("numbers in JSON are matched against digests too", async () => {
-  const digests = await digestsOf("737");
+  const digests = digestsOf("737");
   expect(
     JSON.parse(
       maskBody('{"code":737,"qty":2}', "application/json", { digests }),
@@ -182,7 +181,7 @@ test("normaliseSecret trims, and reduces digits with spaces or dashes to digits"
 });
 
 test("a space-formatted secret typed into a sensitive field matches its digits-only form in a body", async () => {
-  const digests = await digestsOf("4111 1111 1111 1111");
+  const digests = digestsOf("4111 1111 1111 1111");
   expect(
     maskBody('{"x":"4111111111111111"}', "application/json", { digests }),
   ).toBe(`{"x":"${REDACTED}"}`);
@@ -384,13 +383,16 @@ test("sha256HexSync matches the platform's SHA-256, and needs no crypto.subtle",
   expect(sha256HexSync("abc")).toBe(
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   );
+  const platform737 = Buffer.from(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode("737")),
+  ).toString("hex");
   const subtle = Object.getOwnPropertyDescriptor(globalThis.crypto, "subtle");
   Object.defineProperty(globalThis.crypto, "subtle", {
     value: undefined,
     configurable: true,
   }); // an insecure http page
   try {
-    expect(await sha256Hex("737")).toBe(sha256HexSync("737"));
+    expect(sha256HexSync("737")).toBe(platform737);
   } finally {
     if (subtle) Object.defineProperty(globalThis.crypto, "subtle", subtle);
     // subtle is a getter on Crypto's prototype; deleting the own override restores it
@@ -474,7 +476,7 @@ test("a JSON body holding a 2 MiB data URI is masked in linear time", () => {
 });
 
 test("a 200,000-digit run is scrubbed in linear time when digests are present", async () => {
-  const digests = await digestsOf("737");
+  const digests = digestsOf("737");
   const text = "1".repeat(200_000);
   let out = "";
   expect(elapsedMs(() => (out = scrubText(text, { digests })))).toBeLessThan(
@@ -484,7 +486,7 @@ test("a 200,000-digit run is scrubbed in linear time when digests are present", 
 });
 
 test("a 2 MB run of one-digit groups is scrubbed in linear time when digests are present", async () => {
-  const digests = await digestsOf("737");
+  const digests = digestsOf("737");
   const text = "1 ".repeat(1_000_000);
   let out = "";
   expect(elapsedMs(() => (out = scrubText(text, { digests })))).toBeLessThan(
@@ -513,14 +515,14 @@ test("a card number beside an expiry, a security code or a quantity is still red
 });
 
 test("a card number beside an expiry is redacted when its digest is known too", async () => {
-  const digests = await digestsOf("4111 1111 1111 1111");
+  const digests = digestsOf("4111 1111 1111 1111");
   expect(scrubText("Card 4111 1111 1111 1111 12/28", { digests })).toBe(
     `Card ${REDACTED} 12/28`,
   );
 });
 
 test("a typed number that fails Luhn is found by its digest inside a longer run of digit groups", async () => {
-  const digests = await digestsOf("4111 1111 1111 1112", "123456");
+  const digests = digestsOf("4111 1111 1111 1112", "123456");
   expect(scrubText("Card 4111 1111 1111 1112 12/28", { digests })).toBe(
     `Card ${REDACTED} 12/28`,
   );
@@ -534,7 +536,7 @@ test("short numbers in a row are not mistaken for a card number", () => {
 });
 
 test("a secret beside punctuation or inside markup is still found by its digest", async () => {
-  const digests = await digestsOf("737", "hunter22");
+  const digests = digestsOf("737", "hunter22");
   expect(scrubText("Invalid code: 737.", { digests })).toBe(
     `Invalid code: ${REDACTED}.`,
   );
@@ -551,7 +553,7 @@ test("a secret beside punctuation or inside markup is still found by its digest"
 });
 
 test("a secret that contains a period still matches its digest", async () => {
-  const digests = await digestsOf("p.ss");
+  const digests = digestsOf("p.ss");
   expect(scrubText("password p.ss was rejected", { digests })).toBe(
     `password ${REDACTED} was rejected`,
   );

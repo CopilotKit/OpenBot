@@ -1,6 +1,4 @@
-export type OriginCheck =
-  | { ok: true; origin: string }
-  | { ok: false; reason: string };
+type OriginCheck = { ok: true; origin: string } | { ok: false; reason: string };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]"]);
 

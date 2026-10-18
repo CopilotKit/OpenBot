@@ -17,7 +17,7 @@ export type CapturedEvent = {
   timestamp: number;
   value: JsonValue;
 };
-export type MaskOptions = { digests?: ReadonlySet<string> };
+type MaskOptions = { digests?: ReadonlySet<string> };
 type Obj = { [key: string]: JsonValue };
 
 /** A 3-digit security code is a secret too, so digests of values this short still match. */
@@ -148,7 +148,7 @@ export function isCredentialKey(key: string): boolean {
   );
 }
 
-export function isCredentialHeader(name: string): boolean {
+function isCredentialHeader(name: string): boolean {
   return isCredentialKey(name) || CREDENTIAL_HEADERS.has(name.toLowerCase());
 }
 
@@ -239,10 +239,6 @@ export function sha256HexSync(value: string): string {
     for (let i = 0; i < 8; i++) h[i] = (word(h, i) + word(next, i)) >>> 0;
   }
   return Array.from(h, (part) => part.toString(16).padStart(8, "0")).join("");
-}
-
-export async function sha256Hex(value: string): Promise<string> {
-  return sha256HexSync(value);
 }
 
 const matchesDigest = (value: string, options?: MaskOptions): boolean => {

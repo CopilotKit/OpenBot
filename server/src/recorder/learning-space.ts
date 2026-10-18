@@ -8,7 +8,7 @@ export type LearningSpaceCheck = (
   signal?: AbortSignal,
 ) => Promise<LearningSpaceState>;
 
-export type LearningSpaceCheckDeps = {
+type LearningSpaceCheckDeps = {
   readSettings: () => Promise<LearningSettings>;
   /** The runtime key's client, for the skills read that proves a container exists. Always present: OpenBot does not start
    * without Intelligence (`server/src/config.ts`). */

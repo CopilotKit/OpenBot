@@ -136,7 +136,7 @@ function LearningRow({ title, lines }: RowText) {
 }
 
 /** The Learning capture row of a running recording. */
-export function LearningCaptureRow({
+function LearningCaptureRow({
   capture,
   learning,
 }: {

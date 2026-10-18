@@ -3,7 +3,7 @@ import type { OpenBotRole } from "./auth/roles";
 import type { IdentifyActor, IdentifyUser } from "./copilot";
 import type { RecorderResolver } from "./recorder/guard";
 
-export type RequestActor = { id: string; name: string; role: OpenBotRole };
+type RequestActor = { id: string; name: string; role: OpenBotRole };
 
 type SessionLike = {
   user: {

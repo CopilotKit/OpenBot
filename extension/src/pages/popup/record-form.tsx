@@ -37,7 +37,7 @@ export function learningSentence(learning: LearningSpaceState): string | null {
   return LEARNING_SENTENCES[learning.state] ?? null;
 }
 
-export const TITLE_MAX = 120;
+const TITLE_MAX = 120;
 
 /**
  * The Bot, the title and Record. Deviation from openbot-screen-layout: the Bot `Select` and the title `Input` sit

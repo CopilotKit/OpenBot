@@ -8,7 +8,7 @@ export const RECORDER_DATABASE_VERSION = 1;
  * Nothing else is kept in this browser: a recording's events wait here until Intelligence acknowledges them.
  */
 export const STORES = ["events", "meta"] as const;
-export type StoreName = (typeof STORES)[number];
+type StoreName = (typeof STORES)[number];
 
 /**
  * Opens (and on first use creates) the database; `name` lets tests use a fresh one per case. A later schema change

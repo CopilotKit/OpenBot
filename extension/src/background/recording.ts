@@ -84,7 +84,7 @@ export type RecordingDeps = {
 
 /** Called by the router after Task 8's handler answered: `connected` after a successful `page.connect.decide` (web or Desktop),
  * `disconnected` after `page.disconnect` (the person's own Disconnect). */
-export type ConnectionEvents = {
+type ConnectionEvents = {
   connected(): Promise<void>;
   disconnected(): Promise<void>;
 };
@@ -160,7 +160,7 @@ const CANCELLED = new Error("Record was cancelled before it started.");
 
 // ---- The state machine -------------------------------------------------------------------------
 
-export type RecorderEvent =
+type RecorderEvent =
   | {
       type: "record";
       botId: string;

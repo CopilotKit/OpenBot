@@ -32,7 +32,7 @@ import type { PageStateResponse } from "../../protocol/messages";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
 
-export type OptionsDeps = { ask: typeof askBackground };
+type OptionsDeps = { ask: typeof askBackground };
 
 const VIA = {
   web: "Connected from OpenBot in your browser",

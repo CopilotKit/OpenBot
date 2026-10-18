@@ -159,10 +159,10 @@ test("a page event is re-masked and marked as page captured", () => {
 });
 
 test("a digest match in a page body is redacted", async () => {
-  const { sha256Hex, normaliseSecret } = await import(
+  const { sha256HexSync, normaliseSecret } = await import(
     "@openbot/shared/recorder-masking"
   );
-  const digest = await sha256Hex(normaliseSecret("correct-horse-battery"));
+  const digest = sha256HexSync(normaliseSecret("correct-horse-battery"));
   const result = acceptPageNetworkEvent(
     event({
       response: {

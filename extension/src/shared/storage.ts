@@ -50,7 +50,7 @@ export type RecorderNotice =
       reason?: "revoked" | "removed" | "organization";
     }
   | { kind: "policy-moved"; at: number; origin: string };
-export type LocalState = {
+type LocalState = {
   /** Random per installed copy (each browser and profile has its own), written on install or first use (Decision 18). */
   installSecret?: string;
   connection?: ConnectionRecord;
@@ -68,7 +68,7 @@ export type PendingConnect = {
   requestedAt: number;
   tabId?: number;
 };
-export type SessionState = {
+type SessionState = {
   recorder: RecorderState;
   pendingConnect?: PendingConnect;
   stream?: StreamSession; // so a restarted service worker can resume the offscreen document

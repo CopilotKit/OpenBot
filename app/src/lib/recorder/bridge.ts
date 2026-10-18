@@ -18,7 +18,7 @@ export type DetectedRecorder = {
   installId?: string;
 };
 
-export type ConnectCodeAnswer =
+type ConnectCodeAnswer =
   | { ok: true; installId?: string; awaitingConfirmation?: boolean }
   | { ok: false; error: string };
 

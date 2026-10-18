@@ -191,7 +191,7 @@ function isGrant(value: unknown): value is TrajectoryGrant {
 }
 
 /** Where a pass is asked for: the connected OpenBot, the recorder bearer, and the recording's Bot. */
-export type GrantTarget = { openbotUrl: string; token: string; botId: string };
+type GrantTarget = { openbotUrl: string; token: string; botId: string };
 
 /** Asks the runtime's `trajectory/connect` for a one-time capture pass for the recording's Bot; throws a GrantError
  * carrying the row's verdict. */

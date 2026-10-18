@@ -31,7 +31,7 @@ import {
 import type { DesktopHandoff } from "./native-host";
 import { askDesktopForHandoff, desktopAvailable } from "./native-host";
 
-export type ConnectionDeps = {
+type ConnectionDeps = {
   askDesktop: () => Promise<DesktopHandoff | null>;
   desktopAvailable: () => Promise<boolean>;
   readPolicy: () => Promise<RecorderPolicy>;
@@ -384,7 +384,7 @@ function sameOrigin(raw: string, origin: string): boolean {
 /** Compares the stored connection with the policy: a policy that pins another origin, or is invalid, forgets the
  * connection and leaves a `policy-moved` notice (its origin empty for an invalid policy). Called at every start and
  * on every managed-storage change. The token check keeps a reconnect that lands meanwhile. */
-export async function reconcilePolicy(
+async function reconcilePolicy(
   read: () => Promise<RecorderPolicy> = readPolicy,
 ): Promise<void> {
   const policy = await read();

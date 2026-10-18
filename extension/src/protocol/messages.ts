@@ -77,7 +77,7 @@ const event = z
     value: z.unknown(),
   })
   .strict();
-export const contentToBackgroundSchema = z.discriminatedUnion("type", [
+const contentToBackgroundSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("content.hello"),
@@ -137,7 +137,7 @@ export type BackgroundToOffscreen =
 /** The one offscreen message the service worker parses: it signs a connection out, so it names the bearer the failing
  * pass used, and only that connection is signed out (a pass taken with an older token after the person connected again
  * signs out nothing). */
-export const offscreenSignedOutSchema = z
+const offscreenSignedOutSchema = z
   .object({
     type: z.literal("offscreen.signed-out"),
     reason: z.enum(["revoked", "removed", "organization"]),
@@ -175,7 +175,7 @@ export type OffscreenToBackground =
 /** The connect page's Connect or Cancel. `origin` is the one the page showed (its page.connect.pending answer), in the
  * form a pending connect stores (normaliseOpenBotOrigin's): the service worker refuses a decide whose origin is not the
  * pending connect's, so a connect tab only ever confirms the site it shows. */
-export const pageConnectDecideSchema = z
+const pageConnectDecideSchema = z
   .object({
     type: z.literal("page.connect.decide"),
     approve: z.boolean(),
@@ -186,7 +186,7 @@ export const pageConnectDecideSchema = z
     }),
   })
   .strict();
-export type PageConnectDecide = z.infer<typeof pageConnectDecideSchema>;
+type PageConnectDecide = z.infer<typeof pageConnectDecideSchema>;
 
 export type PageToBackground =
   | { type: "page.state" }
@@ -229,7 +229,7 @@ export type PageResponse =
   | { ok: true }
   | { ok: false; error: string };
 
-export const externalToBackgroundSchema = z.discriminatedUnion("type", [
+const externalToBackgroundSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("openbot.ping") }).strict(),
   z
     .object({

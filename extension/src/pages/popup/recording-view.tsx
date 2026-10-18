@@ -43,7 +43,7 @@ function elapsed(startedAt: number | undefined, now: number): string {
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export type RecordingActions = {
+type RecordingActions = {
   onStop: () => void;
   onRestart: () => void;
   onNotice: (choice: "stop" | "restart" | "continue") => void;

@@ -16,7 +16,7 @@ import {
 import type { RecorderRefusal, RecorderResolver } from "./guard";
 import type { LearningSpaceCheck } from "./learning-space";
 
-export type TrajectoryRefusal = {
+type TrajectoryRefusal = {
   reason:
     | "invalid-id"
     | "signed-out"

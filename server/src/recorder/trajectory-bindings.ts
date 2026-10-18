@@ -2,10 +2,6 @@ import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { recorderTrajectoryBindings } from "../db/schema/recorder";
 
-export type TrajectoryBindingStore = ReturnType<
-  typeof createTrajectoryBindingStore
->;
-
 /**
  * Which person and Bot each Recorder trajectory belongs to. The first capture pass for a trajectory binds it; every
  * later pass must name the same person and Bot. Nothing recorded is kept: the trajectory lives in Intelligence.

@@ -15,7 +15,7 @@ import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
 import { AfterStop, RecordingView } from "./recording-view";
 
-export type PopupDeps = {
+type PopupDeps = {
   prepare: typeof prepareRecording;
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;

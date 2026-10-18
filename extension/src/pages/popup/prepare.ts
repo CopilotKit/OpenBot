@@ -2,7 +2,7 @@ import { hasHostPermission } from "../../shared/host-access";
 
 export type Prepared = { ok: true } | { ok: false; reason: "permission" };
 
-export type PrepareDeps = {
+type PrepareDeps = {
   hasHostPermission: () => Promise<boolean>;
   openTab: (url: string) => Promise<void>;
 };

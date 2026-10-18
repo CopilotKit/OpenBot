@@ -24,10 +24,7 @@ import {
   type RecorderRefusalSink,
   type RecorderResolver,
 } from "./guard";
-import {
-  createLearningSpaceCheck,
-  type LearningSpaceCheck,
-} from "./learning-space";
+import { createLearningSpaceCheck } from "./learning-space";
 import { createRecorderRefusalAudit } from "./refusal-audit";
 import type { RecorderRouteDeps } from "./routes";
 import { createTrajectoryBindingStore } from "./trajectory-bindings";
@@ -83,7 +80,6 @@ export function createRecorderExtension(deps: {
 }): RecorderExtensionDeps & {
   /** Also the demonstration recorder's `ownsBot`, so there is one copy. */
   canRecordForBot(ownerUserId: string, botId: string): Promise<boolean>;
-  learningSpace: LearningSpaceCheck;
   /** The capture pass, for `mountCopilotRuntime`: its gate (an onBeforeHandler hook) and its Learning space selector. */
   trajectoryCapture: {
     gate: NonNullable<CopilotRuntimeHooks["onBeforeHandler"]>;
@@ -180,7 +176,6 @@ export function createRecorderExtension(deps: {
     resolve,
     onRefused: createRecorderRefusalAudit(deps.auditStore),
     canRecordForBot,
-    learningSpace,
     trajectoryCapture: {
       gate: createTrajectoryConnectHook({
         resolveRecorder: resolve,

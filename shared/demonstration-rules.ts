@@ -1,4 +1,4 @@
-export const DEMONSTRATION_KEYS = [
+const DEMONSTRATION_KEYS = [
   "Enter",
   "Tab",
   "Escape",
@@ -13,8 +13,8 @@ export const DEMONSTRATION_KEYS = [
   "PageDown",
   "PageUp",
 ] as const;
-export type DemonstrationKey = (typeof DEMONSTRATION_KEYS)[number];
-export function isDemonstrationKey(key: string): key is DemonstrationKey {
+type DemonstrationKey = (typeof DEMONSTRATION_KEYS)[number];
+function isDemonstrationKey(key: string): key is DemonstrationKey {
   return (DEMONSTRATION_KEYS as readonly string[]).includes(key);
 }
 
@@ -22,7 +22,7 @@ export function isDemonstrationKey(key: string): key is DemonstrationKey {
 export const SENSITIVE_FIELD =
   /password|secret|token|one.time|verification|credit.card|security.code|passcode|card.?(?:number|num|no)(?![a-z])|cardholder|card.?verification|(?:^|[^a-z])(?:cc-|(?:cvc|cvv|csc|pin|otp)(?![a-z]))/i;
 
-export type DemonstrationTarget = {
+type DemonstrationTarget = {
   role: string;
   name: string;
   sensitive: boolean;
@@ -99,21 +99,6 @@ export function safeDemonstrationUrl(raw: string): string {
     return `${url.origin}${path}`;
   } catch {
     return "about:blank";
-  }
-}
-
-export function isSafeDemonstrationUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      ["http:", "https:", "about:"].includes(url.protocol) &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash
-    );
-  } catch {
-    return false;
   }
 }
 

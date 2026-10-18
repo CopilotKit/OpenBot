@@ -45,7 +45,7 @@ type BrandedNavigator = Navigator & {
 };
 
 /** "<browser> on <platform>", from the user agent's client hints when the browser gives them. */
-export function defaultBrowserName(): string {
+function defaultBrowserName(): string {
   const data = (navigator as BrandedNavigator).userAgentData;
   const brand = data?.brands
     ?.map((entry) => entry.brand)
