@@ -9,7 +9,8 @@ export const RECORDER_DATABASE_VERSION = 1;
  *  voice   keyPath ["demonstrationId", "index"]    untranscribed voice slices
  *  steps   keyPath ["demonstrationId", "index"]    steps not yet acknowledged by OpenBot
  *  bodies  keyPath ["mediaId", "line"]             network body lines not yet uploaded, value { mediaId, line, text };
- *          meta "media:<demonstrationId>:network" -> mediaId and "bodies-next:<mediaId>" -> the next line number
+ *          meta "media:<demonstrationId>:network" -> mediaId, "bodies-next:<mediaId>" -> the next line number and
+ *          "bodies-progress:<mediaId>" -> { chunks, offset, inflight?, completed? }, how far OpenBot has taken the media
  * The step uploader also keeps meta "steps-next:<demonstrationId>" -> the next step index for that recording
  * (see stepsNextKey); deleteDemonstrationData removes it with the rest of the demonstration.
  */
@@ -173,6 +174,7 @@ export async function deleteDemonstrationData(
         t.objectStore("media").delete(pairRange(mediaId));
         t.objectStore("bodies").delete(pairRange(mediaId));
         meta.delete(`bodies-next:${mediaId}`);
+        meta.delete(`bodies-progress:${mediaId}`);
       }
       meta.delete(linkRange);
       meta.delete(stepsNextKey(demonstrationId));

@@ -197,6 +197,31 @@ describe("recorder database", () => {
     db.close();
   });
 
+  test("deleteDemonstrationData forgets the network body upload progress of that demonstration's media only", async () => {
+    const db = await openRecorderDatabase(freshName());
+    await tx(db, ["meta"], "readwrite", (t) => {
+      const meta = t.objectStore("meta");
+      meta.put("net-1", "media:demo-1:network");
+      meta.put("net-2", "media:demo-2:network");
+      meta.put({ chunks: 2, offset: 0 }, "bodies-progress:net-1");
+      meta.put(
+        { chunks: 3, offset: 4, completed: true },
+        "bodies-progress:net-2",
+      );
+    });
+
+    await deleteDemonstrationData(db, "demo-1");
+
+    const keys = await tx(db, ["meta"], "readonly", (t) =>
+      requestToPromise(t.objectStore("meta").getAllKeys()),
+    );
+    expect(keys.sort()).toEqual([
+      "bodies-progress:net-2",
+      "media:demo-2:network",
+    ]);
+    db.close();
+  });
+
   test("tx resolves when the caller handled a request error", async () => {
     const db = await openRecorderDatabase(freshName());
     await tx(db, ["steps"], "readwrite", (t) => {
