@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { RECORDER_EXTENSION_ID } from "../../shared/recorder-extension";
+import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 
 const root = join(import.meta.dir, "..", "..");
 const guide = readFileSync(

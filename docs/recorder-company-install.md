@@ -24,7 +24,7 @@ Every copy of the Recorder, in Chrome and in Edge, unpacked or installed by poli
 
 There is no store listing, so your team hosts the package. Chrome installs an extension from outside the Chrome Web Store by policy only on managed computers:
 
-- Windows computers joined to an Active Directory or Azure AD domain, or enrolled in Chrome Browser Cloud Management. Edge limits forced installs of self-hosted extensions on Windows the same way.
+- Windows computers joined to an Active Directory or Azure AD domain, or enrolled in Chrome Browser Cloud Management. Edge force-installs an extension from outside the Microsoft Edge Add-ons website only on Windows joined to a Microsoft Active Directory domain, and on macOS managed through MDM or joined to a domain through MCX.
 - macOS with the policy delivered as an MDM configuration profile.
 - Linux with the policy file under `/etc/opt/chrome/policies/managed/`.
 
@@ -92,3 +92,4 @@ In testing against Intelligence main (48b9528da), a self-hosted Intelligence who
 - [Install extensions (developer.chrome.com)](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)
 - [Host extensions on Linux (developer.chrome.com)](https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux)
 - [Use group policies to manage Microsoft Edge extensions (Microsoft Learn)](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-manage-extensions-policies)
+- [Microsoft Edge policy ExtensionInstallForcelist (Microsoft Learn)](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/extensioninstallforcelist)
