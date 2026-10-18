@@ -921,7 +921,9 @@ export function installRecording(
     message: Extract<PageToBackground, { type: "page.record" }>,
   ): Promise<PageResponse> {
     if (state.phase !== "idle") return { ok: false, error: SENTENCES.busy };
-    const open = state.openRecording;
+    // The open recording belongs to the Bot whose Record was refused: replaceOpen may stop it only for that Bot.
+    const open =
+      state.botId === message.botId ? state.openRecording : undefined;
     dispatch({
       type: "record",
       botId: message.botId,

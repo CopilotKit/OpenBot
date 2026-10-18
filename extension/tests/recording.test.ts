@@ -1752,6 +1752,41 @@ test("an open recording elsewhere is offered for stopping, and replaceOpen stops
   expect((await state()).openRecording).toBeUndefined();
 });
 
+test("replaceOpen for a different Bot than the refused one stops nothing and records normally", async () => {
+  openbot.createAnswers.push({
+    status: 409,
+    body: {
+      error: "You already have an open recording.",
+      code: RECORDER_OPEN_RECORDING,
+      demonstrationId: "demo-b2",
+    },
+  });
+  fake.tabs.set(7, { id: 7, url: DEAL } as chrome.tabs.Tab);
+  await page({
+    type: "page.record",
+    botId: "b2",
+    title: "T",
+    tabId: 7,
+    microphone: false,
+  });
+  expect((await state()).openRecording).toEqual({ demonstrationId: "demo-b2" });
+  const before = openbot.calls.length;
+  const other = await page({
+    type: "page.record",
+    botId: "b1",
+    title: "T",
+    tabId: 7,
+    microphone: false,
+    replaceOpen: true,
+  });
+  expect(other).toEqual({ ok: true });
+  expect(requests().slice(before)).toEqual([
+    "POST /api/recorder/demonstrations",
+    `POST ${demoPath("demo-1", "/trajectories")}`,
+  ]);
+  expect(requests().slice(before).join("\n")).not.toContain("demo-b2");
+});
+
 test("Start over stops the old recording, records into a new one and deletes the old one only after its events drained", async () => {
   const old = await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   await sendSteps(contentPort(7), [click()], 2);
