@@ -1,19 +1,14 @@
 import { hasHostPermission } from "../../shared/host-access";
-import { microphoneState } from "./media";
 
-export type Prepared =
-  | { ok: true; microphone: boolean }
-  | { ok: false; reason: "permission" };
+export type Prepared = { ok: true } | { ok: false; reason: "permission" };
 
 export type PrepareDeps = {
   hasHostPermission: () => Promise<boolean>;
-  microphoneState: () => Promise<"granted" | "prompt" | "denied">;
   openTab: (url: string) => Promise<void>;
 };
 
 const defaults: PrepareDeps = {
   hasHostPermission,
-  microphoneState,
   openTab: async (url) => {
     await chrome.tabs.create({ url: chrome.runtime.getURL(url) });
   },
@@ -32,5 +27,5 @@ export async function prepareRecording(
     await d.openTab("access.html");
     return { ok: false, reason: "permission" };
   }
-  return { ok: true, microphone: (await d.microphoneState()) === "granted" };
+  return { ok: true };
 }

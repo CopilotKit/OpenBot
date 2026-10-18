@@ -7,7 +7,6 @@ const PERMISSIONS: chrome.runtime.ManifestPermission[] = [
   "unlimitedStorage",
   "alarms",
   "offscreen",
-  "tabCapture",
   "debugger",
   "scripting",
   "webNavigation",

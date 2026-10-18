@@ -81,7 +81,6 @@ import {
 } from "./offscreen-document";
 import type { RouterHandlers } from "./router";
 import { createStepUploader, type StepTarget } from "./steps";
-import { acquireTabStreamId } from "./tab-capture";
 
 type Timers = {
   set(fn: () => void, ms: number): unknown;
@@ -92,7 +91,6 @@ export type RecordingDeps = {
   createNetworkCapture: typeof createNetworkCapture;
   createPageFallback: typeof createPageFallback;
   acceptPageNetworkEvent: typeof acceptPageNetworkEvent;
-  acquireTabStreamId: typeof acquireTabStreamId;
   recoverNetworkBodies: typeof recoverNetworkBodies;
   readPolicy: typeof readPolicy;
   hasHostPermission: typeof hasHostPermission;
@@ -164,15 +162,10 @@ const SENTENCES = {
     "You already have an open recording for this Bot, maybe in another browser.",
   startFailed: "The recording could not start. Try again.",
   documentFailed: "The Recorder could not start recording. Try again.",
-  screenOnWebsite: "The screen is recorded once this tab opens a website.",
-  screenFromPopup:
-    "Open the Recorder on the tab you are recording, then choose Record screen.",
   stopPending:
     "Stopping: OpenBot did not answer yet. Your steps are kept in this browser and sent when it does.",
   stoppedInOpenBot:
     "This recording was stopped in OpenBot. Everything until then was saved.",
-  screenRestarted:
-    "The screen recording stopped when Chrome restarted the Recorder in the background.",
   signedOut:
     "This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser until you connect again.",
   organizationSignedOut:
@@ -415,7 +408,6 @@ const defaultDeps: RecordingDeps = {
   createNetworkCapture,
   createPageFallback,
   acceptPageNetworkEvent,
-  acquireTabStreamId,
   recoverNetworkBodies,
   readPolicy,
   hasHostPermission,
@@ -852,7 +844,7 @@ export function installRecording(
     try {
       port.postMessage({
         type: "offscreen.resume",
-        session: { ...stream, media: { ...stream.media, tabStreamId: null } },
+        session: stream,
       } satisfies BackgroundToOffscreen);
     } finally {
       releaseEvents();
@@ -1107,14 +1099,6 @@ export function installRecording(
     return { ok: false, error };
   }
 
-  async function takeStreamId(tabId: number): Promise<string | null> {
-    try {
-      return await deps.acquireTabStreamId(tabId);
-    } catch {
-      return null;
-    }
-  }
-
   const networkDeps: NetworkCaptureDeps = {
     context: () =>
       live
@@ -1223,9 +1207,8 @@ export function installRecording(
       return refuse(SENTENCES.tabClosed);
     }
     // Chrome withholds the URL of a page the Recorder may not read (chrome:// pages included): such a tab starts with
-    // the screen off and the network waiting, and topUrls holds "" until its first top-frame commit.
+    // the network waiting, and topUrls holds "" until its first top-frame commit.
     const url = tab.url;
-    const recordable = isRecordablePage(url);
     let demonstrationId: string | undefined;
     let documentStarted = false;
     let injected = false;
@@ -1286,7 +1269,6 @@ export function installRecording(
         startedAt,
         allowedIntelligenceUrls: policy.allowedIntelligenceUrls,
         version: chrome.runtime.getManifest().version,
-        media: { tabStreamId: null, microphone: message.microphone },
       };
       if (import.meta.env.RECORDER_VARIANT === "e2e") {
         const items = await chrome.storage.local.get(
@@ -1298,12 +1280,9 @@ export function installRecording(
       }
       shown = { demonstrationId, trajectoryIds: new Set([trajectoryId]) };
       const port = await openDocument();
-      // THEN, with nothing awaited in between: a tab stream id works once and expires within seconds, so it is taken
-      // last and the document consumes it first thing.
-      const tabStreamId = recordable ? await takeStreamId(tabId) : null;
       port.postMessage({
         type: "offscreen.start",
-        session: { ...session, media: { ...session.media, tabStreamId } },
+        session,
       } satisfies BackgroundToOffscreen);
       documentStarted = true;
       releaseEvents();
@@ -1330,17 +1309,7 @@ export function installRecording(
         tabId,
         topUrl: url ?? "",
         startedAt,
-        capture: defined({
-          intelligence: "connecting" as const,
-          network: "off" as const,
-          screen: "off" as const,
-          screenReason: !recordable
-            ? SENTENCES.screenOnWebsite
-            : tabStreamId === null
-              ? SENTENCES.screenFromPopup
-              : undefined,
-          voice: "off" as const,
-        }),
+        capture: { intelligence: "connecting", network: "off" },
       });
       injected = true;
       // A page the Recorder may not read refuses the script; its first commit to a website injects it.
@@ -1510,7 +1479,7 @@ export function installRecording(
           : ("succeeded" as const),
       stoppedFrom,
     });
-    // Media and voice drain and the final outcome is queued before OpenBot hears of the stop. A recording kept for
+    // The final outcome is queued before OpenBot hears of the stop. A recording kept for
     // its person, or discarded (a Disconnect is under way), waits only for a reconnecting document to hear of it. A
     // resumed stop past the document's part (telling-openbot) tells it nothing again.
     if (resumed?.stage !== "telling-openbot") {
@@ -1991,43 +1960,6 @@ export function installRecording(
     return { ok: true };
   }
 
-  // ---- Screen --------------------------------------------------------------------------------
-
-  async function startScreen(tabId: number): Promise<boolean> {
-    const tabStreamId = await takeStreamId(tabId);
-    // A stop that came while the stream id was taken already told the document to stop: no screen starts after it.
-    if (state.phase !== "recording") return false;
-    if (
-      tabStreamId &&
-      postOffscreen({ type: "offscreen.screen", tabStreamId })
-    ) {
-      dispatch({
-        type: "capture",
-        capture: { screen: "off", screenReason: undefined },
-      });
-      return true;
-    }
-    dispatch({
-      type: "capture",
-      capture: { screen: "off", screenReason: SENTENCES.screenFromPopup },
-    });
-    return false;
-  }
-
-  async function recordScreen(): Promise<PageResponse> {
-    const tabId = state.tabIds[0];
-    if (state.phase !== "recording" || tabId === undefined)
-      return { ok: false, error: SENTENCES.notRecording };
-    if (await startScreen(tabId)) return { ok: true };
-    return {
-      ok: false,
-      error:
-        state.phase === "recording"
-          ? SENTENCES.screenFromPopup
-          : SENTENCES.notRecording,
-    };
-  }
-
   // ---- Kept events, Disconnect and reconnecting ----------------------------------------------
 
   /** The person's own discard: the drains are marked first (so a restart that interrupts the clearing finishes it and
@@ -2253,17 +2185,7 @@ export function installRecording(
     dispatch({ type: "capture", capture: { network: mode } });
     // A live document reconnects its port and re-sends its status itself.
     if ((await hasOffscreenDocument()) || state.phase !== "recording") return;
-    if (!(await resumeDocument())) return;
-    // The stream went with the old document. A screen that was off for a stated reason was not recording.
-    const { screen, screenReason } = state.capture;
-    if (
-      state.phase === "recording" &&
-      (screen === "recording" || (screen === "off" && !screenReason))
-    )
-      dispatch({
-        type: "capture",
-        capture: { screen: "failed", screenReason: SENTENCES.screenRestarted },
-      });
+    await resumeDocument();
   }
 
   /** A live recording whose connection went while the service worker was away (a sign-out the popup or the keep-alive
@@ -2513,14 +2435,6 @@ export function installRecording(
     void network
       ?.onCommitted(tabId, frameId, url)
       .catch(report("following a navigation"));
-    if (
-      frameId === 0 &&
-      tabId === state.tabIds[0] &&
-      isRecordablePage(url) &&
-      state.capture.screen === "off" &&
-      state.capture.screenReason === SENTENCES.screenOnWebsite
-    )
-      void startScreen(tabId).catch(report("starting the screen"));
   }
 
   function onCreatedTarget(
@@ -2581,8 +2495,6 @@ export function installRecording(
         case "page.notice.dismiss":
           await removeLocal("notice");
           return { ok: true };
-        case "page.screen":
-          return recordScreen();
         case "page.kept.discard":
           return discardKept();
         default:

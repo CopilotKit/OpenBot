@@ -27,10 +27,6 @@ export type CaptureStatus = {
   events?: { sent: number; pending: number; rejected: number; dropped: number };
   network: "off" | "waiting" | "debugger" | "page" | "stopped";
   networkReason?: string;
-  screen: "off" | "recording" | "failed";
-  screenReason?: string;
-  voice: "off" | "recording" | "unavailable" | "failed";
-  voiceReason?: string;
 };
 export type RecorderState = {
   phase: "idle" | "starting" | "recording" | "stopping";
@@ -78,7 +74,7 @@ export const IDLE_STATE: RecorderState = {
   noticeOpen: false,
   draining: 0,
   topUrls: {},
-  capture: { intelligence: "off", network: "off", screen: "off", voice: "off" },
+  capture: { intelligence: "off", network: "off" },
 };
 
 const event = z
@@ -132,15 +128,13 @@ export type StreamSession = {
   startedAt: number;
   allowedIntelligenceUrls: string[] | null;
   version: string;
-  media: { tabStreamId: string | null; microphone: boolean };
   /** e2e variant only: the service worker copies storage.local.RECORDER_E2E_HOLD_RETRY_MS here (an offscreen document can use
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
   e2eHoldRetryMs?: number;
 };
 export type BackgroundToOffscreen =
-  | { type: "offscreen.start"; session: StreamSession } // media first (consumes tabStreamId), then the streamer
-  | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox, no tab stream
-  | { type: "offscreen.screen"; tabStreamId: string } // screen capture starting late (first real site, or the popup's Record screen)
+  | { type: "offscreen.start"; session: StreamSession }
+  | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
   | { type: "offscreen.event"; event: CapturedEvent }
   | { type: "offscreen.rotate"; demonstrationId: string; trajectoryId: string } // "Start over"
   | {
@@ -185,9 +179,9 @@ export type OffscreenToBackground =
       type: "offscreen.stopped";
       demonstrationId: string;
       trajectoryIds: string[];
-    } // final outcome queued, after the last transcript
+    } // final outcome queued
   | { type: "offscreen.rotated"; previousDemonstrationId: string } // the discarded recording's events are drained and its trajectory closed
-  | { type: "offscreen.done"; demonstrationId: string } // every event sent, every trajectory closed, every upload complete
+  | { type: "offscreen.done"; demonstrationId: string } // every event sent, every trajectory closed
   | {
       type: "offscreen.kept";
       demonstrationId: string;
@@ -222,14 +216,12 @@ export type PageToBackground =
       botId: string;
       title: string;
       tabId: number;
-      microphone: boolean;
       replaceOpen?: boolean;
     }
   | { type: "page.stop" }
   | { type: "page.restart" }
   | { type: "page.notice"; choice: "stop" | "restart" | "continue" }
   | { type: "page.notice.dismiss" }
-  | { type: "page.screen" }
   | { type: "page.connect.pending" }
   | PageConnectDecide
   | { type: "page.disconnect" }

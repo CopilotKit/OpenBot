@@ -10,7 +10,6 @@ import {
   createOffscreenController,
   type OffscreenControllerDeps,
 } from "../src/offscreen/index";
-import type { MediaSinks } from "../src/offscreen/media";
 import {
   type OutboxEvent,
   openOutbox,
@@ -96,15 +95,6 @@ function virtualClock(start = CLOCK_START) {
 }
 type Clock = ReturnType<typeof virtualClock>;
 
-type Gate = { promise: Promise<void>; release(): void };
-function makeGate(): Gate {
-  let release = () => {};
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
-}
-
 /** OpenBot's routes the offscreen document calls, served on the fake gateway's own origin. */
 type OpenBot = {
   passes: {
@@ -149,25 +139,6 @@ const signedOutPass = (reason: "revoked" | "removed" | "organization") => () =>
     { status: 401 },
   );
 
-type MediaDouble = {
-  sessions: StreamSession[];
-  sinks: MediaSinks[];
-  screens: string[];
-  rotated: string[];
-  stops: number;
-  onStart: ((sinks: MediaSinks) => void) | null;
-  onStop: ((sinks: MediaSinks) => void) | null;
-  /** Holds every media.stop() (voice still draining) until released. */
-  stopGate: Gate | null;
-  finish: Gate | null;
-  recovered: {
-    drain: DrainRecord;
-    target: { openbotUrl: string; token: string };
-  }[];
-  onRecover: ((drain: DrainRecord, sinks: MediaSinks) => void) | null;
-  discarded: string[];
-};
-
 type ServiceWorkerPort = {
   port: chrome.runtime.Port;
   messages: OffscreenToBackground[];
@@ -183,9 +154,8 @@ type Harness = {
   openbot: OpenBot;
   dbName: string;
   clock: Clock;
-  /** "getUserMedia <tab stream id>" and "fetch <path>", in the order they happened. */
+  /** "fetch <path>", in the order they happened. */
   log: string[];
-  media: MediaDouble;
   ports: ServiceWorkerPort[];
   demonstrations: Set<string>;
   /** Registers the service worker's onConnect listener, as a (re)started worker does. */
@@ -270,27 +240,12 @@ async function setup(): Promise<Harness> {
   gateway = await startFakeGateway({ extraRoutes: route });
   const started = gateway;
 
-  const media: MediaDouble = {
-    sessions: [],
-    sinks: [],
-    screens: [],
-    rotated: [],
-    stops: 0,
-    onStart: null,
-    onStop: null,
-    stopGate: null,
-    finish: null,
-    recovered: [],
-    onRecover: null,
-    discarded: [],
-  };
   const h: Harness = {
     gateway: started,
     openbot,
     dbName: `offscreen-index-test-${Date.now()}-${dbCounter++}`,
     clock: virtualClock(),
     log: [],
-    media,
     ports: [],
     demonstrations: new Set(),
     listen() {
@@ -317,35 +272,6 @@ async function setup(): Promise<Harness> {
     async open(clock = h.clock, extra = {}) {
       const before = h.ports.length;
       createOffscreenController({
-        startMedia: async (session, sinks) => {
-          // getUserMedia is asynchronous: nothing may reach the network while it runs.
-          await sleep(20);
-          h.log.push(`getUserMedia ${session.media.tabStreamId}`);
-          media.sessions.push(session);
-          media.sinks.push(sinks);
-          media.onStart?.(sinks);
-          return {
-            screen: async (tabStreamId) => {
-              media.screens.push(tabStreamId);
-            },
-            rotate: async ({ demonstrationId }) => {
-              media.rotated.push(demonstrationId);
-            },
-            stop: async () => {
-              media.stops += 1;
-              await media.stopGate?.promise;
-              media.onStop?.(sinks);
-            },
-            finished: () => media.finish?.promise ?? Promise.resolve(),
-          };
-        },
-        recoverMedia: async (drain, target, sinks) => {
-          media.recovered.push({ drain, target });
-          media.onRecover?.(drain, sinks);
-        },
-        discardMedia: async (demonstrationId) => {
-          media.discarded.push(demonstrationId);
-        },
         openOutbox: () => openOutbox(h.dbName),
         connectPort: () => chrome.runtime.connect({ name: PORT_OFFSCREEN }),
         now: clock.now,
@@ -388,7 +314,6 @@ async function setup(): Promise<Harness> {
         startedAt: 1_700_000_000_000,
         allowedIntelligenceUrls: null,
         version: "0.1.0",
-        media: { tabStreamId: "tab-stream-1", microphone: true },
         ...overrides,
       };
     },
@@ -429,12 +354,6 @@ const click = (i: number): CapturedEvent => ({
   name: "click",
   timestamp: 1_700_000_000_000 + i,
   value: { i },
-});
-const transcript = (text: string): CapturedEvent => ({
-  type: "CUSTOM",
-  name: "transcript",
-  timestamp: 1_700_000_100_000,
-  value: { text },
 });
 
 const outcomes = (h: Harness, trajectoryId: string) =>
@@ -536,37 +455,33 @@ afterEach(async () => {
 });
 
 describe("offscreen controller", () => {
-  test("start consumes the tab stream id before any network call", async () => {
+  test("start sends events that arrive before its streamer exists after the recording's first events, in order", async () => {
     const h = await setup();
     h.trackFetch();
-    h.media.onStart = (sinks) => sinks.emit(transcript("before the streamer"));
     await h.open();
     const session = h.session();
     h.post({ type: "offscreen.start", session });
-    // Arrives while media starts: held until the streamer exists, then sent in order.
+    // Arrives while the streamer is created: held until it exists, then sent in order.
     h.post({ type: "offscreen.event", event: click(1) });
+    h.post({ type: "offscreen.event", event: click(2) });
 
     await until(
       () => h.names(session.trajectoryId).length === 4,
       "the first events",
     );
-    expect(h.log[0]).toBe("getUserMedia tab-stream-1");
-    expect(h.log.length).toBeGreaterThan(1);
-    expect(h.log.slice(1).every((entry) => entry.startsWith("fetch "))).toBe(
-      true,
+    expect(h.log[0]).toBe(
+      `fetch /api/copilotkit/trajectory/${session.trajectoryId}/connect`,
     );
     expect(h.names(session.trajectoryId)).toEqual([
       "recording.started",
       "outcome",
       "click",
-      "transcript",
+      "click",
     ]);
   });
 
-  test("stop drains voice, then queues the outcome, then reports stopped, then done after the drain and uploads", async () => {
+  test("stop queues the outcome, then reports stopped, then done after the drain", async () => {
     const h = await setup();
-    h.media.onStop = (sinks) => sinks.emit(transcript("the last words"));
-    h.media.finish = makeGate();
     await h.open();
     const session = h.session();
     const t = session.trajectoryId;
@@ -590,8 +505,8 @@ describe("offscreen controller", () => {
         .map(([, name]) => name);
       return true;
     }, "offscreen.stopped");
-    // Stopped is reported only once the outcome is queued, after the last transcript.
-    expect(queuedWhenStopped.slice(-2)).toEqual(["transcript", "outcome"]);
+    // Stopped is reported only once the outcome is queued, after every event.
+    expect(queuedWhenStopped.slice(-2)).toEqual(["click", "outcome"]);
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
@@ -609,18 +524,12 @@ describe("offscreen controller", () => {
       "outcome",
       "click",
       "click",
-      "transcript",
       "outcome",
     ]);
     expect(outcomes(h, t).at(-1)).toMatchObject({ phase: "succeeded" });
     expect(h.openbot.closed).toEqual([
       { demonstrationId: "demo-1", trajectoryId: t },
     ]);
-    // Drained and closed, but the uploads are still going: no done yet.
-    await sleep(50);
-    expect(h.received("offscreen.done")).toEqual([]);
-
-    h.media.finish.release();
     await until(
       () => h.received("offscreen.done").length === 1,
       "offscreen.done",
@@ -632,10 +541,9 @@ describe("offscreen controller", () => {
     expect(h.received("offscreen.done")).toEqual([
       { type: "offscreen.done", demonstrationId: "demo-1" },
     ]);
-    expect(h.media.stops).toBe(1);
   });
 
-  test("stop still stops the screen and voice, and reports stopped and done, when the streamer never started", async () => {
+  test("stop reports stopped and done when the streamer never started", async () => {
     const h = await setup();
     await h.open(h.clock, {
       openOutbox: async () => {
@@ -644,7 +552,6 @@ describe("offscreen controller", () => {
     });
     const session = h.session();
     h.post({ type: "offscreen.start", session });
-    await until(() => h.media.sessions.length === 1, "the media starting");
     // Let the failed streamer start settle before Stop arrives.
     await sleep(100);
 
@@ -653,7 +560,6 @@ describe("offscreen controller", () => {
       () => h.received("offscreen.done").length === 1,
       "offscreen.done",
     );
-    expect(h.media.stops).toBe(1);
     expect(h.received("offscreen.stopped")).toEqual([
       {
         type: "offscreen.stopped",
@@ -668,39 +574,6 @@ describe("offscreen controller", () => {
     expect(types.indexOf("offscreen.stopped")).toBeLessThan(
       types.indexOf("offscreen.done"),
     );
-  });
-
-  test("a new Record's media starts at once, even while the last Stop still drains voice", async () => {
-    const h = await setup();
-    h.media.stopGate = makeGate();
-    await h.open();
-    const first = h.session();
-    h.post({ type: "offscreen.start", session: first });
-    await streaming(h, first.trajectoryId);
-    h.post({ type: "offscreen.stop", outcome: "succeeded" });
-    await until(() => h.media.stops === 1, "the first recording stopping");
-
-    const second = h.session({
-      demonstrationId: "demo-2",
-      media: { tabStreamId: "tab-stream-2", microphone: false },
-    });
-    h.post({ type: "offscreen.start", session: second });
-    await until(
-      () => h.media.sessions.length === 2,
-      "the second recording's media",
-    );
-    expect(h.log).toContain("getUserMedia tab-stream-2");
-    expect(h.received("offscreen.stopped")).toEqual([]);
-
-    h.media.stopGate.release();
-    await until(
-      () => h.received("offscreen.stopped").length === 1,
-      "the first recording stopped",
-    );
-    await streaming(h, second.trajectoryId);
-    expect(outcomes(h, first.trajectoryId).at(-1)).toMatchObject({
-      phase: "succeeded",
-    });
   });
 
   test("resume restarts the streamer over the existing outbox", async () => {
@@ -737,10 +610,6 @@ describe("offscreen controller", () => {
       "click",
       "click",
     ]);
-    expect(h.media.sessions.at(-1)?.media).toEqual({
-      tabStreamId: null,
-      microphone: true,
-    });
   });
 
   test("a second stop for an already stopped demonstration only re-posts stopped", async () => {
@@ -772,7 +641,6 @@ describe("offscreen controller", () => {
         trajectoryIds: [t],
       },
     ]);
-    expect(h.media.stops).toBe(1);
     expect(outcomes(h, t).map((value) => value.phase)).toEqual([
       "started",
       "succeeded",
@@ -891,9 +759,6 @@ describe("offscreen controller", () => {
       "outcome",
     ]);
     expect(outcomes(h, t).at(-1)).toMatchObject({ phase: "succeeded" });
-    expect(
-      h.media.recovered.map((entry) => entry.drain.demonstrationId),
-    ).toEqual(["demo-1"]);
   });
 
   test("every pass names the recording's Bot, for the live recording and for a recovered one", async () => {
@@ -945,10 +810,6 @@ describe("offscreen controller", () => {
     );
 
     h.openbot.refuse = null;
-    h.media.onRecover = (drain, sinks) => {
-      if (drain.demonstrationId === "demo-interrupted")
-        sinks.emit(transcript("buffered voice"));
-    };
     await h.open(virtualClock(NEXT_START));
     const atDone = new Map<string, string[]>();
     const recovering = h.ports.at(-1);
@@ -976,7 +837,6 @@ describe("offscreen controller", () => {
       "outcome",
       "click",
       "click",
-      "transcript",
       "outcome",
     ];
     // Everything had reached Intelligence before each done was posted.
@@ -1140,17 +1000,18 @@ describe("offscreen controller", () => {
 
   test("recover leaves a recording this document already streams to its own streamer", async () => {
     const h = await setup();
-    h.media.finish = makeGate();
     await h.open();
     const session = h.session();
     const t = session.trajectoryId;
     h.post({ type: "offscreen.start", session });
     await streaming(h, t);
+    // Its last batch waits for Intelligence's answer, so it is still sending when the recover arrives.
+    h.gateway.delayNextAck(200);
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
     await until(() => h.received("offscreen.stopped").length === 1, "stopped");
     const passes = h.openbot.passes.length;
 
-    // The person connected again while its uploads still ran: the service worker posts every drain they own.
+    // The person connected again while it still sent: the service worker posts every drain they own.
     h.post({
       type: "offscreen.recover",
       openbotUrl: session.openbotUrl,
@@ -1158,12 +1019,9 @@ describe("offscreen controller", () => {
       allowedIntelligenceUrls: null,
       drains: [h.drain(session)],
     });
-    await sleep(100);
-    h.media.finish.release();
     await until(() => h.received("offscreen.done").length === 1, "done");
     await sleep(50);
 
-    expect(h.media.recovered).toEqual([]);
     expect(h.openbot.passes).toHaveLength(passes);
     expect(outcomes(h, t).map((value) => value.phase)).toEqual([
       "started",
@@ -1203,7 +1061,6 @@ describe("offscreen controller", () => {
     await h.clock.advance(30 * MINUTE);
     // Nothing was cleared on its own: the kept events wait for the person.
     expect(await h.pending(t)).toHaveLength(4);
-    expect(h.media.discarded).toEqual([]);
 
     h.post({ type: "offscreen.discard", demonstrationIds: ["demo-1"] });
     await until(() => h.received("offscreen.done").length === 1, "done");
@@ -1214,7 +1071,6 @@ describe("offscreen controller", () => {
     const outbox = await openOutbox(h.dbName);
     expect(await outbox.getMeta(trajectoryMetaKey(t))).toBeUndefined();
     expect(await outbox.trajectories()).not.toContain(t);
-    expect(h.media.discarded).toEqual(["demo-1"]);
   });
 
   test("discarding a replaced recording's kept events leaves the recording that replaced it streaming", async () => {
@@ -1255,7 +1111,6 @@ describe("offscreen controller", () => {
       "done for the discarded recording",
     );
     expect(await h.pending(first.trajectoryId)).toEqual([]);
-    expect(h.media.discarded).toEqual(["demo-1"]);
 
     h.post({ type: "offscreen.event", event: click(2) });
     await until(
@@ -1278,7 +1133,7 @@ describe("offscreen controller", () => {
     ]);
   });
 
-  test("a signed-out pass stops sending and keeps the outbox, media chunks and voice slices, and a recover with a new token sends them", async () => {
+  test("a signed-out pass stops sending and keeps the outbox, and a recover with a new token sends it", async () => {
     const h = await setup();
     h.openbot.passScript.push(signedOutPass("removed"));
     await h.open();
@@ -1305,8 +1160,6 @@ describe("offscreen controller", () => {
     expect(h.openbot.passes).toHaveLength(1);
     expect(h.names(t)).toEqual([]);
     expect(await h.pending(t)).toHaveLength(5);
-    expect(h.media.discarded).toEqual([]);
-    expect(h.media.stops).toBe(0);
     expect(h.received("offscreen.signed-out")).toHaveLength(1);
 
     // The service worker stops the recording it was signed out of; it waits for its person.
@@ -1339,9 +1192,6 @@ describe("offscreen controller", () => {
       h.openbot.passes.slice(1).map(() => "Bearer obr_second"),
     );
     expect(h.openbot.passes.length).toBeGreaterThan(1);
-    expect(h.media.recovered.map((entry) => entry.target)).toEqual([
-      { openbotUrl: session.openbotUrl, token: "obr_second" },
-    ]);
   });
 
   test("a sign-out stops every recording sent with its token, and is posted once", async () => {
@@ -1425,23 +1275,22 @@ describe("offscreen controller", () => {
 
   test("a disconnected port is reconnected and the last status re-sent", async () => {
     const h = await setup();
-    h.media.finish = makeGate();
     await h.open();
     const session = h.session();
     const t = session.trajectoryId;
     h.post({ type: "offscreen.start", session });
     await streaming(h, t);
+    // The outcome's batch waits for Intelligence's answer, so done comes after the restart below.
+    h.gateway.delayNextAck(150);
     h.post({ type: "offscreen.stop", outcome: "succeeded" });
     await until(() => h.received("offscreen.stopped").length === 1, "stopped");
+
+    // The service worker restarts while the last batch is answered: done cannot be delivered yet.
+    fake.restartServiceWorker();
     await until(
       () => h.openbot.closed.some((entry) => entry.trajectoryId === t),
       "the trajectory closed",
     );
-    const lastStatus = h.received("offscreen.status").at(-1);
-
-    // The service worker restarts while the uploads finish: done cannot be delivered yet.
-    fake.restartServiceWorker();
-    h.media.finish.release();
     await sleep(30);
     const connects = () =>
       fake.calls.filter((call) => call === "runtime.connect").length;
@@ -1460,10 +1309,12 @@ describe("offscreen controller", () => {
     );
     const resent = h.ports[1].messages;
     expect(resent[0]).toEqual({ type: "offscreen.ready" });
+    // The status it last had: the recording finished sending while the port was down.
     expect(resent[1]).toEqual({
       type: "offscreen.status",
       capture: expect.objectContaining({
-        intelligence: lastStatus?.capture.intelligence,
+        intelligence: "off",
+        events: { sent: 3, pending: 0, rejected: 0, dropped: 0 },
       }),
       trajectoryId: t,
     });
@@ -1486,28 +1337,6 @@ describe("offscreen controller", () => {
       trajectoryId: t,
       capture: { intelligence: "connecting" },
     });
-
-    // Media reports through the same status message, for the live trajectory.
-    h.media.sinks[0].status({ voice: "recording" });
-    h.post({ type: "offscreen.screen", tabStreamId: "tab-stream-2" });
-    await until(
-      () =>
-        h
-          .received("offscreen.status")
-          .some((status) => status.capture.voice === "recording"),
-      "the media status",
-    );
-    expect(
-      h
-        .received("offscreen.status")
-        .find((status) => status.capture.voice === "recording"),
-    ).toEqual({
-      type: "offscreen.status",
-      capture: { voice: "recording" },
-      trajectoryId: t,
-    });
-    await until(() => h.media.screens.length === 1, "the late screen");
-    expect(h.media.screens).toEqual(["tab-stream-2"]);
 
     // A long recording rolls over: the new trajectory is reported with its recording.
     for (let i = 0; i < 3; i++)
@@ -1551,7 +1380,6 @@ describe("offscreen controller", () => {
           .some((done) => done.demonstrationId === "demo-1"),
       "done for the replaced recording",
     );
-    expect(h.media.rotated).toEqual(["demo-2"]);
     expect(outcomes(h, rolled.trajectoryId).at(-1)).toMatchObject({
       phase: "failed",
     });

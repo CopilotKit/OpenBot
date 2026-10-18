@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
 import {
+  type NavigationDetails,
   navigateStep,
   navigationEvent,
-  type NavigationDetails,
 } from "../src/background/navigation";
 
 const commit = (over: Partial<NavigationDetails> = {}): NavigationDetails => ({

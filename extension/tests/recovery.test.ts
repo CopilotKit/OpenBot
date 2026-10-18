@@ -284,8 +284,6 @@ function doubles(): Partial<RecordingDeps> {
       active: () => false,
     }),
     acceptPageNetworkEvent: () => null,
-    acquireTabStreamId: async (tabId) =>
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }),
     recoverNetworkBodies: async (drain, target) => {
       bodies.push({ demonstrationId: drain.demonstrationId, target });
       const failure = bodiesAnswer(drain.demonstrationId);
@@ -358,7 +356,6 @@ async function startRecording(tabId = 7) {
     botId: "bot-1",
     title: "Update deal",
     tabId,
-    microphone: false,
   });
   expect(answer).toEqual({ ok: true });
   return `demo-${openbot.nextDemo}`;

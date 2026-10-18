@@ -55,7 +55,6 @@ export type RecordingActions = {
   onStop: () => void;
   onRestart: () => void;
   onNotice: (choice: "stop" | "restart" | "continue") => void;
-  onRecordScreen: () => void;
 };
 
 /** What the popup shows while a recording runs: time, steps, the capture rows, and Stop or Start over. */
@@ -138,11 +137,7 @@ export function RecordingView({
       </div>
       {state.phase === "starting" ? null : (
         <div className="mt-6">
-          <CaptureRows
-            capture={state.capture}
-            learning={state.learning}
-            onRecordScreen={actions.onRecordScreen}
-          />
+          <CaptureRows capture={state.capture} learning={state.learning} />
         </div>
       )}
       <div className="mt-6 flex flex-col gap-2">

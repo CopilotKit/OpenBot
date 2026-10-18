@@ -1,4 +1,4 @@
-// The one offscreen document: it records the tab's screen and the microphone and streams events to Intelligence
+// The one offscreen document: it holds the IndexedDB outbox and the socket that streams events to Intelligence
 // (Task 11), so a service worker that sleeps loses nothing.
 const OFFSCREEN_PATH = "offscreen.html";
 
@@ -18,9 +18,12 @@ export function ensureOffscreenDocument(): Promise<void> {
     if (await hasOffscreenDocument()) return;
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
-      reasons: ["USER_MEDIA"],
+      // Chrome names no offscreen reason for a socket or an IndexedDB outbox, and only AUDIO_PLAYBACK limits a document's
+      // lifetime (https://developer.chrome.com/docs/extensions/reference/api/offscreen#type-Reason). LOCAL_STORAGE,
+      // durable storage in the document, is the nearest reason to what it does.
+      reasons: ["LOCAL_STORAGE"],
       justification:
-        "Records the tab's screen and the microphone, and sends the recording to Intelligence.",
+        "Keeps the recording in this browser and sends it to Intelligence.",
     });
   })().finally(() => {
     creating = null;

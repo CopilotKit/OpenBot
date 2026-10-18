@@ -83,11 +83,8 @@ function setup(
   options: {
     bots?: RecorderBot[];
     desktop?: boolean;
-    prepared?:
-      | { ok: true; microphone: boolean }
-      | { ok: false; reason: "permission" };
+    prepared?: { ok: true } | { ok: false; reason: "permission" };
     answers?: Partial<Record<PageToBackground["type"], PageResponse>>;
-    microphone?: "granted" | "prompt" | "denied";
     lastBotId?: string;
     /** What the service worker does with a message before it answers, for the next page.state to show. */
     onAsk?: (message: PageToBackground) => void;
@@ -114,10 +111,9 @@ function setup(
         ask: ask as never,
         prepare: async () => {
           prepareCalls += 1;
-          return options.prepared ?? { ok: true, microphone: true };
+          return options.prepared ?? { ok: true };
         },
         activeTabId: async () => 7,
-        microphoneState: async () => options.microphone ?? "granted",
         lastBotId: async () => options.lastBotId,
       }}
     />,
@@ -197,7 +193,7 @@ test("connected and idle shows the person, the host, the form copy and Record di
   expect(getByText("openbot.example.test")).toBeTruthy();
   expect(
     getByText(
-      "Records this tab's screen, your voice, clicks, typing and the network calls behind each page. Passwords and secrets stay in your browser.",
+      "Records your clicks, typing, the pages you open and the network calls behind them. Passwords and secrets stay in your browser.",
     ),
   ).toBeTruthy();
   expect(
@@ -216,10 +212,9 @@ test("Record is disabled without a Bot even with a title", async () => {
   ).toBe(true);
 });
 
-test("Record prepares, then sends page.record with the Bot, title, tab and microphone and no stream id", async () => {
+test("Record prepares, then sends page.record with the Bot, title and tab", async () => {
   const { findByLabelText, getByRole, sent, prepareCalls } = setup(
     stateResponse(),
-    { prepared: { ok: true, microphone: false } },
   );
   await userEvent.type(
     await findByLabelText("What are you about to do?"),
@@ -237,7 +232,6 @@ test("Record prepares, then sends page.record with the Bot, title, tab and micro
       botId: "b1",
       title: "Refund an order",
       tabId: 7,
-      microphone: false,
     }),
   );
   expect(prepareCalls()).toBe(1);
@@ -308,33 +302,11 @@ for (const [kind, sentence] of SENTENCES) {
   });
 }
 
-test("the no-transcription line appears only when the OpenBot cannot transcribe", async () => {
-  const line =
-    "This OpenBot does not transcribe voice. The screen recording still keeps the sound.";
-  const off = setup(
-    stateResponse({
-      me: {
-        user: { id: "u1", name: "Ada", email: "a@example.test" },
-        connectionId: "k1",
-        capabilities: { transcription: false },
-      } as PageStateResponse["me"],
-    }),
-  );
-  await off.findByText(line);
-  cleanup();
-  const on = setup(stateResponse());
-  await on.findByText("Ada Lovelace");
-  expect(on.queryByText(line)).toBeNull();
-});
-
-test("Allow microphone shows only while the microphone is not granted and opens microphone.html", async () => {
-  const granted = setup(stateResponse(), { microphone: "granted" });
-  await granted.findByText("Ada Lovelace");
-  expect(granted.queryByText("Allow microphone")).toBeNull();
-  cleanup();
-  const prompt = setup(stateResponse(), { microphone: "prompt" });
-  fireEvent.click(await prompt.findByText("Allow microphone"));
-  await waitFor(() => expect(fake.opened.join()).toContain("microphone.html"));
+test("the popup asks for nothing about the screen or the microphone", async () => {
+  const { findByText, container, queryByRole } = setup(stateResponse());
+  await findByText("Ada Lovelace");
+  expect(container.textContent).not.toMatch(/microphone|screen|voice/i);
+  expect(queryByRole("button", { name: "Allow microphone" })).toBeNull();
 });
 
 test("each notice renders its sentence and dismisses", async () => {
@@ -455,7 +427,6 @@ test("an open recording offers Stop the open recording in a fresh popup that mad
       botId: "b2",
       title: "Refund an order",
       tabId: 7,
-      microphone: true,
       replaceOpen: true,
     }),
   );
@@ -506,8 +477,6 @@ test("Stop the open recording and the refusal belong to the Bot whose Record was
 const CAPTURE = {
   intelligence: "streaming",
   network: "debugger",
-  screen: "recording",
-  voice: "recording",
 } as const;
 const recording = (
   state: Partial<RecorderState> = {},
@@ -527,12 +496,16 @@ const recording = (
     },
   });
 
-test("the recording view shows the time, the step count and the four capture rows", async () => {
-  const { findByText, getByText, queryByRole } = setup(recording());
+test("the recording view shows the time, the step count and the Learning capture and Network rows only", async () => {
+  const { findByText, getByText, queryByText, queryByRole } = setup(
+    recording(),
+  );
   await findByText("1:05 · 12 steps");
-  for (const title of ["Learning capture", "Network", "Screen", "Voice"]) {
+  for (const title of ["Learning capture", "Network"]) {
     expect(getByText(title)).toBeTruthy();
   }
+  for (const title of ["Screen", "Voice"])
+    expect(queryByText(title)).toBeNull();
   expect(getByText("Streaming to Intelligence")).toBeTruthy();
   expect(queryByRole("button", { name: "Record" })).toBeNull();
   expect(queryByRole("button", { name: "Record screen" })).toBeNull();
@@ -665,37 +638,6 @@ test("Keep going hides the card for that recording only: the next one to reach 5
     noticeOpen: true,
   });
   await findByText("You have recorded 51 steps", {}, { timeout: 3000 });
-});
-
-test("Record screen shows when the screen is off with a reason and sends page.screen", async () => {
-  const { findByRole, sent } = setup(
-    recording({
-      capture: {
-        ...CAPTURE,
-        screen: "off",
-        screenReason: "Chrome would not share this tab.",
-      },
-    }),
-  );
-  fireEvent.click(await findByRole("button", { name: "Record screen" }));
-  await waitFor(() =>
-    expect(sent.some((m) => m.type === "page.screen")).toBe(true),
-  );
-});
-
-test("Record screen shows after the screen failed, as a service-worker restart leaves it, and sends page.screen", async () => {
-  const reason =
-    "The screen recording stopped when Chrome restarted the Recorder in the background.";
-  const { findByRole, getByText, sent } = setup(
-    recording({
-      capture: { ...CAPTURE, screen: "failed", screenReason: reason },
-    }),
-  );
-  fireEvent.click(await findByRole("button", { name: "Record screen" }));
-  expect(getByText(`Could not record the screen. ${reason}`)).toBeTruthy();
-  await waitFor(() =>
-    expect(sent.some((m) => m.type === "page.screen")).toBe(true),
-  );
 });
 
 test("held and parked capture say so, with the reason and the kept-events line", async () => {

@@ -497,13 +497,7 @@ let demoId = "";
 let restoreVariant: (() => void) | null = null;
 
 /** The waits outside the fake OpenBot a test can hold: a double's answer, or the document saying ready. */
-type GateName =
-  | "host"
-  | "policy"
-  | "streamId"
-  | "document"
-  | "networkStart"
-  | "networkStop";
+type GateName = "host" | "policy" | "document" | "networkStart" | "networkStop";
 /** Every step the recording controller queued, with the recording it was queued for. */
 let recordedSteps: { id: string; action: DemonstrationAction }[] = [];
 let gates: Partial<Record<GateName, Promise<void>>> = {};
@@ -591,10 +585,6 @@ function doubles(): Partial<RecordingDeps> {
       accepted.push({ event, digests: [...digests] });
       return acceptAnswer;
     },
-    acquireTabStreamId: async (tabId) => {
-      await pass("streamId");
-      return chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
-    },
     recoverNetworkBodies: async () => {},
     readPolicy: async () => {
       await pass("policy");
@@ -648,7 +638,6 @@ async function startRecording(input: {
   botId: string;
   title: string;
   tabId: number;
-  microphone?: boolean;
 }) {
   if (!fake.tabs.has(input.tabId))
     fake.tabs.set(input.tabId, {
@@ -657,7 +646,6 @@ async function startRecording(input: {
     } as chrome.tabs.Tab);
   const answer = await page({
     type: "page.record",
-    microphone: false,
     ...input,
   });
   expect(answer).toEqual({ ok: true });
@@ -809,8 +797,7 @@ function useVariant(value: string) {
 
 // ---- Record ------------------------------------------------------------------------------------
 
-test("Record starts the demonstration and trajectory, opens the document, then takes the tab stream id right before offscreen.start", async () => {
-  fake.tabCapture.answer = "stream-1";
+test("Record starts the demonstration and trajectory, opens the document, then sends offscreen.start once it is ready", async () => {
   await startRecording({ botId: "bot-1", title: "Update deal", tabId: 7 });
   expect(requests()).toEqual([
     "POST /api/recorder/demonstrations",
@@ -823,14 +810,11 @@ test("Record starts the demonstration and trajectory, opens the document, then t
   expect(openbot.calls.every((c) => c.auth === "Bearer obr_one")).toBe(true);
   const created = fake.calls.indexOf("offscreen.createDocument");
   const ready = fake.calls.indexOf("port:recorder:offscreen offscreen.ready");
-  const capture = fake.calls.indexOf("tabCapture.getMediaStreamId");
+  const started = fake.calls.indexOf("port:recorder:offscreen offscreen.start");
   expect(created).toBeGreaterThanOrEqual(0);
   expect(created).toBeLessThan(ready);
-  expect(ready).toBeLessThan(capture);
-  expect(fake.calls[capture + 1]).toBe(
-    "port:recorder:offscreen offscreen.start",
-  );
-  expect(fake.tabCapture.calls).toEqual([{ targetTabId: 7 }]);
+  expect(ready).toBeLessThan(started);
+  expect(fake.tabCapture.calls).toEqual([]);
   const start = sentToDocument("offscreen.start")[0];
   const trajectoryId = registered(1);
   expect(start).toMatchObject({
@@ -844,12 +828,14 @@ test("Record starts the demonstration and trajectory, opens the document, then t
       trajectoryId,
       version: "0.3.0",
       allowedIntelligenceUrls: null,
-      media: { tabStreamId: "stream-1", microphone: false },
     },
   });
+  expect(start?.type === "offscreen.start" && "media" in start.session).toBe(
+    false,
+  );
   expect(fake.offscreen.created[0]).toMatchObject({
     url: "offscreen.html",
-    reasons: ["USER_MEDIA"],
+    reasons: ["LOCAL_STORAGE"],
   });
   expect(fake.scripting.registered).toEqual([]); // nothing registered for every site (Decision 4)
   const injected = fake.scripting.executed.filter(
@@ -995,7 +981,6 @@ test("Record without website access is refused with the access sentence", async 
       botId: "bot-1",
       title: "T",
       tabId: 7,
-      microphone: false,
     }),
   ).toEqual({ ok: false, error: "Allow the Recorder to read websites first." });
   expect(openbot.calls).toEqual([]);
@@ -1013,7 +998,6 @@ test("Record without a connection is refused", async () => {
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect(answer.ok).toBe(false);
   expect(openbot.calls).toEqual([]);
@@ -1027,7 +1011,6 @@ test("Record while a recording runs is refused and changes nothing", async () =>
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect(answer).toEqual({
     ok: false,
@@ -1039,100 +1022,9 @@ test("Record while a recording runs is refused and changes nothing", async () =>
   });
 });
 
-test("Record on a chrome:// page starts without a screen and takes it when the tab reaches a website", async () => {
-  fake.tabs.set(7, { id: 7, url: "chrome://newtab/" } as chrome.tabs.Tab);
-  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  expect(fake.tabCapture.calls).toEqual([]);
-  expect((await state()).capture).toMatchObject({
-    screen: "off",
-    screenReason: expect.stringContaining("website"),
-  });
-  expect(sentToDocument("offscreen.start")[0]).toMatchObject({
-    session: { media: { tabStreamId: null } },
-  });
-  expect((await state()).steps).toBe(0); // no step for a page that is not a website
-  fake.webNavigation.commit({
-    tabId: 7,
-    frameId: 0,
-    url: "https://crm.example.test/",
-    transitionType: "typed",
-  });
-  await until(
-    () => sentToDocument("offscreen.screen").length === 1,
-    "the screen starts",
-  );
-  expect(toDocument().at(-1)).toMatchObject({
-    type: "offscreen.screen",
-    tabStreamId: expect.any(String),
-  });
-  expect(fake.tabCapture.calls).toEqual([{ targetTabId: 7 }]);
-  expect((await state()).capture.screenReason).toBeUndefined();
-});
-
-test("Record screen in the popup takes a fresh stream id", async () => {
-  fake.tabCapture.answer = "stream-1";
-  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  fake.tabCapture.answer = "stream-2";
-  expect(await page({ type: "page.screen" })).toEqual({ ok: true });
-  expect(toDocument().at(-1)).toEqual({
-    type: "offscreen.screen",
-    tabStreamId: "stream-2",
-  });
-  expect(fake.tabCapture.calls).toEqual([
-    { targetTabId: 7 },
-    { targetTabId: 7 },
-  ]);
-  fake.tabCapture.answer = new Error(
-    "Extension has not been invoked for the current page.",
-  );
-  const refused = await page({ type: "page.screen" });
-  expect(refused).toEqual({
-    ok: false,
-    error:
-      "Open the Recorder on the tab you are recording, then choose Record screen.",
-  });
-  expect((await state()).capture).toMatchObject({
-    screen: "off",
-    screenReason:
-      "Open the Recorder on the tab you are recording, then choose Record screen.",
-  });
-});
-
-test("Stop while Record screen takes its stream id leaves the screen off: the document hears no screen after its stop", async () => {
-  await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  const port = doc;
-  const tabCapture = chrome.tabCapture as unknown as {
-    getMediaStreamId: (options: unknown) => Promise<string>;
-  };
-  const getMediaStreamId = tabCapture.getMediaStreamId;
-  const streamId = gate();
-  let held = false;
-  tabCapture.getMediaStreamId = async (options) => {
-    held = true;
-    await streamId.promise;
-    return getMediaStreamId.call(tabCapture, options);
-  };
-  try {
-    const screen = page({ type: "page.screen" });
-    await until(() => held, "the stream id is held");
-    expect(await page({ type: "page.stop" })).toEqual({ ok: true });
-    expect(sentToDocument("offscreen.stop", port)).toHaveLength(1);
-    streamId.open();
-    expect(await screen).toEqual({
-      ok: false,
-      error: "Nothing is being recorded.",
-    });
-    await settle();
-    expect(sentToDocument("offscreen.screen", port)).toEqual([]);
-    expect((await state()).phase).toBe("idle");
-  } finally {
-    tabCapture.getMediaStreamId = getMediaStreamId;
-  }
-});
-
 // ---- Stop and the document --------------------------------------------------------------------
 
-test("Stop drains media and voice, then sends every step, then tells OpenBot", async () => {
+test("Stop queues the outcome, then sends every step, then tells OpenBot", async () => {
   openbot.stopLearning = { state: "assigned", containerId: "space-1" };
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
   const content = contentPort(7);
@@ -1268,7 +1160,6 @@ test("Stop while Record still injects the content script waits for Record to fin
       botId: "bot-1",
       title: "T",
       tabId: 7,
-      microphone: false,
     });
     await until(() => held, "the first injection is held");
     const stopping = page({ type: "page.stop" });
@@ -1319,7 +1210,6 @@ test("Start over while Record still injects the content script waits for Record,
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   await until(injection.hit, "the first injection is held");
   const restarting = page({ type: "page.restart" });
@@ -1374,7 +1264,6 @@ const recordWaits: {
   },
   { name: "the policy", hold: () => hold("policy") },
   { name: "the document saying ready", hold: () => hold("document") },
-  { name: "the tab stream id", hold: () => hold("streamId") },
   {
     name: "saving the stream session",
     hold: () =>
@@ -1397,7 +1286,6 @@ for (const action of ["Stop", "Disconnect"] as const)
         botId: "bot-1",
         title: "T",
         tabId: 7,
-        microphone: false,
       });
       await until(held.hit, `Record waits on ${wait.name}`);
       const stopping = page({
@@ -2451,20 +2339,15 @@ test("content events wait while the offscreen port is down, and only the oldest 
   expect(fake.storage.session.get("digests")).toEqual(["d".repeat(64)]);
 });
 
-test("a tab whose url Chrome withholds (a chrome:// page) starts with the screen off", async () => {
+test("a tab whose url Chrome withholds (a chrome:// page) starts with the network waiting", async () => {
   fake.tabs.set(7, { id: 7 } as chrome.tabs.Tab);
   await startRecording({ botId: "bot-1", title: "T", tabId: 7 });
-  expect(fake.tabCapture.calls).toEqual([]);
   expect(network.calls).toEqual(["start 7 "]);
   expect(await state()).toMatchObject({
     phase: "recording",
     topUrls: { "7": "" },
     steps: 0,
-    capture: {
-      screen: "off",
-      screenReason: "The screen is recorded once this tab opens a website.",
-      network: "waiting",
-    },
+    capture: { network: "waiting" },
   });
 });
 
@@ -2727,7 +2610,6 @@ test("a failure after the demonstration exists rolls everything back", async () 
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect(answer).toEqual({
     ok: false,
@@ -2752,7 +2634,6 @@ test("a failure after the demonstration exists rolls everything back", async () 
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect(later.ok).toBe(false);
   expect(requests().at(-1)).toBe(`DELETE ${demoPath("demo-2")}`);
@@ -2779,7 +2660,6 @@ test("an open recording elsewhere is offered for stopping, and replaceOpen stops
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect(refused).toEqual({
     ok: false,
@@ -2796,7 +2676,6 @@ test("an open recording elsewhere is offered for stopping, and replaceOpen stops
     botId: "bot-1",
     title: "T",
     tabId: 7,
-    microphone: false,
     replaceOpen: true,
   });
   expect(replaced).toEqual({ ok: true });
@@ -2827,7 +2706,6 @@ test("replaceOpen for a different Bot than the refused one stops nothing and rec
     botId: "b2",
     title: "T",
     tabId: 7,
-    microphone: false,
   });
   expect((await state()).openRecording).toEqual({ demonstrationId: "demo-b2" });
   const before = openbot.calls.length;
@@ -2836,7 +2714,6 @@ test("replaceOpen for a different Bot than the refused one stops nothing and rec
     botId: "b1",
     title: "T",
     tabId: 7,
-    microphone: false,
     replaceOpen: true,
   });
   expect(other).toEqual({ ok: true });
@@ -3391,11 +3268,11 @@ test("after Start over, a status about the old recording's trajectory leaves the
   });
   doc?.postMessage({
     type: "offscreen.status",
-    capture: { voice: "recording" },
+    capture: { events: { sent: 3, pending: 0, rejected: 0, dropped: 0 } },
     trajectoryId: newTrajectory,
   });
   await until(
-    async () => (await state()).capture.voice === "recording",
+    async () => (await state()).capture.events?.sent === 3,
     "the new recording's status",
   );
   expect((await state()).capture.intelligence).toBe("connecting");
@@ -3565,8 +3442,6 @@ test("the state machine's transitions need no timers", () => {
   const capture: RecorderState["capture"] = {
     intelligence: "connecting",
     network: "debugger",
-    screen: "off",
-    voice: "off",
   };
   let current = reduceRecorder(IDLE_STATE, {
     type: "record",
@@ -3622,7 +3497,7 @@ test("the state machine's transitions need no timers", () => {
 // The first action is held at one of its waits, the second is fired, the wait is let go, and once everything has
 // settled the invariants that matter are checked:
 // (i)   after a Stop, a Disconnect or a sign-out nothing captures: no network capture, the tab's last word is to stop
-//       capturing, and the document hears no start, rotate or screen after its last stop;
+//       capturing, and the document hears no start or rotate after its last stop;
 // (ii)  at most one recording is open in OpenBot, and none is left open that is not the live one, one whose stop is
 //       still owed to its person, or one a Disconnect discarded (Disconnect stops locally, without telling OpenBot);
 //       after a sign-out OpenBot takes no request with the token, so only the first half holds;
@@ -3677,7 +3552,6 @@ function fire(
         botId: "bot-1",
         title: "T",
         tabId: 7,
-        microphone: false,
       });
     case "Stop":
       return page({ type: "page.stop" });
@@ -3724,7 +3598,7 @@ const holdCreate = (): Held => {
 };
 const post = (rest: string) => (call: Call) =>
   call.method === "POST" && call.path.endsWith(rest);
-/** The document keeps a stop unanswered (its media and voice still draining) until the wait is let go. */
+/** The document keeps a stop unanswered (its outcome not yet queued) until the wait is let go. */
 const holdDocumentDrain = (): Held => {
   holdStop = true;
   return {
@@ -3985,9 +3859,7 @@ async function interleavingViolations(run: {
   );
   const lastCaptureAt = toDoc.findLastIndex(
     (message) =>
-      message.type === "offscreen.start" ||
-      message.type === "offscreen.rotate" ||
-      message.type === "offscreen.screen",
+      message.type === "offscreen.start" || message.type === "offscreen.rotate",
   );
   const discarded = new Set(
     toDoc.flatMap((message) =>

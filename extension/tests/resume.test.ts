@@ -49,8 +49,6 @@ const OFFSCREEN_SENDER = {
 const ada = { id: "p1", name: "Ada", email: "ada@example.test" };
 const DEAL = "https://crm.example.test/deals/42";
 const NEXT_DEAL = "https://crm.example.test/deals/43";
-const SCREEN_RESTARTED =
-  "The screen recording stopped when Chrome restarted the Recorder in the background.";
 const STOPPED_IN_OPENBOT =
   "This recording was stopped in OpenBot. Everything until then was saved.";
 const SIGNED_OUT =
@@ -291,8 +289,6 @@ function doubles(): Partial<RecordingDeps> {
         : event.value;
       return { event: { ...event, value }, step: null };
     },
-    acquireTabStreamId: async (tabId) =>
-      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }),
     recoverNetworkBodies: async () => {},
     readPolicy: async () => ({
       openbotUrl: null,
@@ -354,7 +350,6 @@ async function startRecording(tabId = 7) {
     botId: "bot-1",
     title: "Update deal",
     tabId,
-    microphone: false,
   });
   expect(answer).toEqual({ ok: true });
   return `demo-${openbot.nextDemo}`;
@@ -429,8 +424,6 @@ function seed(
     capture: {
       intelligence: "streaming",
       network: "debugger",
-      screen: "recording",
-      voice: "off",
     },
     ...recorder,
   });
@@ -444,7 +437,6 @@ function seed(
     startedAt: active.startedAt,
     allowedIntelligenceUrls: null,
     version: "0.3.0",
-    media: { tabStreamId: null, microphone: false },
   } satisfies StreamSession);
   fake.offscreen.open = options.document ?? true;
   docDemo = DEMO;
@@ -609,7 +601,7 @@ test("a service-worker restart during Stop finishes the stop: draining with no d
   expect(sentToDocument("offscreen.resume")).toEqual([
     {
       type: "offscreen.resume",
-      session: { ...stored, media: { tabStreamId: null, microphone: false } },
+      session: stored,
     },
   ]);
   expect(requests()).toEqual([
@@ -834,19 +826,10 @@ test("a service-worker restart in the middle of Record rolls it back, and Record
 
 // ---- A restart while recording ---------------------------------------------------------------
 
-test("a service-worker restart with no document resumes it with the stored session and marks the screen failed", async () => {
+test("a service-worker restart with no document resumes it with the stored session", async () => {
   startWorker();
   await startRecording(7);
   const stored = fake.storage.session.get("stream") as StreamSession;
-  doc?.postMessage({
-    type: "offscreen.status",
-    trajectoryId: stored.trajectoryId,
-    capture: { screen: "recording" },
-  });
-  await until(
-    async () => (await state()).capture.screen === "recording",
-    "the screen recording",
-  );
   await chrome.offscreen.closeDocument();
   await restartWorker();
   const mark = fake.calls.length;
@@ -856,13 +839,11 @@ test("a service-worker restart with no document resumes it with the stored sessi
   expect(toDocument()).toEqual([
     {
       type: "offscreen.resume",
-      session: { ...stored, media: { tabStreamId: null, microphone: false } },
+      session: stored,
     },
   ]);
   const after = await state();
   expect(after.phase).toBe("recording");
-  expect(after.capture.screen).toBe("failed");
-  expect(after.capture.screenReason).toBe(SCREEN_RESTARTED);
   expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
 });
 
@@ -880,7 +861,7 @@ test("a service-worker restart with no document resumes the live recording befor
   expect(toDocument()).toEqual([
     {
       type: "offscreen.resume",
-      session: { ...stored, media: { tabStreamId: null, microphone: false } },
+      session: stored,
     },
     { type: "offscreen.discard", demonstrationIds: ["demo-gone"] },
   ]);
@@ -926,9 +907,7 @@ test("a service-worker restart with the document alive posts nothing to it", asy
   expect(toDocument(port)).toEqual([]);
   expect(fake.calls.slice(mark)).not.toContain("offscreen.createDocument");
   expect(network.resumed).toEqual([[{ tabId: 7, url: DEAL }]]);
-  const after = await state();
-  expect(after.phase).toBe("recording");
-  expect(after.capture.screen).not.toBe("failed");
+  expect((await state()).phase).toBe("recording");
 });
 
 test("a service-worker restart restores followed tabs, digests and network capture", async () => {

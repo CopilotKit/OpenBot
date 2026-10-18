@@ -10,7 +10,6 @@ import type {
 import { readLocal } from "../../shared/storage";
 import { Page } from "../ui/page";
 import { ask as askBackground } from "../ui/runtime";
-import { microphoneState as defaultMicrophoneState } from "./media";
 import { Notices } from "./notices";
 import { prepareRecording } from "./prepare";
 import { RecordForm } from "./record-form";
@@ -20,7 +19,6 @@ export type PopupDeps = {
   prepare: typeof prepareRecording;
   ask: typeof askBackground;
   activeTabId: () => Promise<number>;
-  microphoneState: typeof defaultMicrophoneState;
   lastBotId: () => Promise<string | undefined>;
 };
 
@@ -51,7 +49,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const ask = deps?.ask ?? askBackground;
   const prepare = deps?.prepare ?? prepareRecording;
   const tabId = deps?.activeTabId ?? activeTabId;
-  const microphoneState = deps?.microphoneState ?? defaultMicrophoneState;
   // Read once when the popup opens, so the seam is fixed at mount.
   const [readLastBotId] = useState(
     () => deps?.lastBotId ?? (() => readLocal("lastBotId")),
@@ -59,7 +56,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   const [view, setView] = useState<PageStateResponse | null>(null);
   const [bots, setBots] = useState<RecorderBot[]>([]);
   const [desktop, setDesktop] = useState(false);
-  const [microphone, setMicrophone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
@@ -114,16 +110,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
       mounted = false;
     };
   }, [readLastBotId]);
-
-  useEffect(() => {
-    let mounted = true;
-    microphoneState().then((state) => {
-      if (mounted) setMicrophone(state === "granted");
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [microphoneState]);
 
   const dismiss = async () => {
     await ask({ type: "page.notice.dismiss" });
@@ -224,7 +210,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
         botId,
         title,
         tabId: await tabId(),
-        microphone: prepared.microphone,
         ...(replaceOpen ? { replaceOpen: true } : {}),
       });
       if (!answer.ok) setError(answer.error);
@@ -276,7 +261,6 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
             onStop: () => act({ type: "page.stop" }),
             onRestart: () => act({ type: "page.restart" }),
             onNotice: (choice) => act({ type: "page.notice", choice }),
-            onRecordScreen: () => act({ type: "page.screen" }),
           }}
         />
       )}
@@ -288,14 +272,9 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           }
           openRecordingBotId={refusedBotId}
           onBotChange={setShownBotId}
-          transcription={view.me?.capabilities.transcription ?? true}
-          microphoneGranted={microphone}
           busy={busy}
           onRecord={(botId, title, options) =>
             record(botId, title, options?.replaceOpen)
-          }
-          onAllowMicrophone={() =>
-            openTab(chrome.runtime.getURL("microphone.html"))
           }
         />
       ) : null}

@@ -63,7 +63,7 @@ After a change, use "Reload policies" in `chrome://policy`. A policy that names 
 - Force-installed copies do not show Chrome's "started debugging this browser" bar (Chromium `debugger_api.cc`).
 - People still click "Connect this browser" in OpenBot once to sign in.
 - The options page shows "Set by your organization".
-- What leaves the browser unmasked: the screen recording and the voice audio are kept as they are recorded (masking covers events, URLs, headers and bodies, not pixels or sound), and so are the words of a transcript apart from emails and tokens. Tell people not to show or say a secret while recording.
+- What the Recorder keeps: clicks, typing, the pages people open and the network calls behind them, masked in the browser before anything leaves it. It records no screen and no sound.
 
 ## What has been tested and what has not
 
@@ -77,8 +77,8 @@ For the Intelligence team:
 
 - No per-user erasure of trajectories.
 - No server-side redaction. The Recorder's masking in the browser is the only line of defence.
-- No general file store for screen recordings, audio or large bodies. OpenBot keeps none of them.
-- No transcription. OpenBot's dictation does not transcribe for the Recorder.
+- No general file store. A network body that does not fit in one event is cut to fit, and the rest is not kept anywhere. The Recorder records no screen or audio.
+- No transcription, so the Recorder does not capture voice.
 - The ECS `CHECK_ORIGIN` gap described in the first section.
 
 ## Known issue under investigation

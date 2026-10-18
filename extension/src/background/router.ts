@@ -46,7 +46,6 @@ const RECORDING_TYPES = new Set<string>([
   "page.restart",
   "page.notice",
   "page.notice.dismiss",
-  "page.screen",
   "page.kept.discard",
 ]);
 

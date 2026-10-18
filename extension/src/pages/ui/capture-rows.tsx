@@ -1,15 +1,8 @@
 import type { LearningSpaceState } from "@openbot/shared/recorder-api";
-import {
-  IconDeviceDesktop,
-  IconMicrophone,
-  IconNetwork,
-  IconSchool,
-} from "@tabler/icons-react";
+import { IconNetwork, IconSchool } from "@tabler/icons-react";
 import { PageRows } from "@/components/layout/page-parts";
-import { Button } from "@/components/ui/button";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemMedia,
@@ -197,28 +190,14 @@ const NETWORK_STATUS: Record<CaptureStatus["network"], string> = {
   page: "Capturing the page's own network calls",
   stopped: "Stopped",
 };
-const SCREEN_STATUS: Record<CaptureStatus["screen"], string> = {
-  off: "Off",
-  recording: "Recording this tab",
-  failed: "Could not record the screen",
-};
-const VOICE_STATUS: Record<CaptureStatus["voice"], string> = {
-  off: "Off",
-  recording: "Recording your voice",
-  unavailable: "Not available",
-  failed: "Could not record your voice",
-};
-
-/** Learning capture, Network, Screen and Voice: what the Recorder is keeping, and why anything is off. */
+/** Learning capture and Network: what the Recorder is keeping, and why anything is off. */
 export function CaptureRows({
   capture,
   learning,
-  onRecordScreen,
 }: {
   capture: CaptureStatus;
   /** The recording's Learning space, so "streaming" never hides one that could not be confirmed. */
   learning?: LearningSpaceState;
-  onRecordScreen?: () => void;
 }) {
   return (
     <PageRows>
@@ -232,40 +211,6 @@ export function CaptureRows({
           <ItemTitle>Network</ItemTitle>
           <ItemDescription className="line-clamp-none">
             {describe(NETWORK_STATUS[capture.network], capture.networkReason)}
-          </ItemDescription>
-        </ItemContent>
-      </Item>
-      <Separator />
-      <Item size="sm">
-        <ItemMedia variant="icon">
-          <IconDeviceDesktop />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>Screen</ItemTitle>
-          <ItemDescription className="line-clamp-none">
-            {describe(SCREEN_STATUS[capture.screen], capture.screenReason)}
-          </ItemDescription>
-        </ItemContent>
-        {/* Off for a stated reason, or failed (a service-worker restart ends the stream): a fresh stream id may work. */}
-        {((capture.screen === "off" && capture.screenReason) ||
-          capture.screen === "failed") &&
-        onRecordScreen ? (
-          <ItemActions>
-            <Button size="sm" onClick={onRecordScreen}>
-              Record screen
-            </Button>
-          </ItemActions>
-        ) : null}
-      </Item>
-      <Separator />
-      <Item size="sm">
-        <ItemMedia variant="icon">
-          <IconMicrophone />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>Voice</ItemTitle>
-          <ItemDescription className="line-clamp-none">
-            {describe(VOICE_STATUS[capture.voice], capture.voiceReason)}
           </ItemDescription>
         </ItemContent>
       </Item>

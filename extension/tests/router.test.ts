@@ -96,13 +96,11 @@ test("recording messages from the extension's own pages go to the recording hand
       botId: "b",
       title: "t",
       tabId: 1,
-      microphone: false,
     },
     { type: "page.stop" },
     { type: "page.restart" },
     { type: "page.notice", choice: "stop" },
     { type: "page.notice.dismiss" },
-    { type: "page.screen" },
     { type: "page.kept.discard" },
   ];
   for (const message of messages)
@@ -497,8 +495,6 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       capture: {
         intelligence: "streaming",
         network: "page",
-        screen: "off",
-        voice: "off",
       },
     });
     fake.storage.session.set("stream", {
@@ -511,7 +507,6 @@ test("a recorder.page-network event the fallback accepts reaches the network cap
       startedAt,
       allowedIntelligenceUrls: null,
       version: "0.3.0",
-      media: { tabStreamId: null, microphone: false },
     } satisfies StreamSession);
     fake.offscreen.open = true;
     const handlers = installRecording({

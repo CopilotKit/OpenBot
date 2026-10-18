@@ -2,7 +2,6 @@ import type {
   LearningSpaceState,
   RecorderBot,
 } from "@openbot/shared/recorder-api";
-import { IconMicrophone } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { PageSection } from "@/components/layout/page-parts";
 import { Button } from "@/components/ui/button";
@@ -51,11 +50,8 @@ export function RecordForm({
   initialBotId,
   openRecordingBotId,
   onBotChange,
-  transcription,
-  microphoneGranted,
   busy,
   onRecord,
-  onAllowMicrophone,
 }: {
   bots: RecorderBot[];
   initialBotId: string | null;
@@ -63,15 +59,12 @@ export function RecordForm({
   openRecordingBotId: string | undefined;
   /** Told the Bot the form is showing, so the popup can tell whose refusal it is displaying. */
   onBotChange: (botId: string) => void;
-  transcription: boolean;
-  microphoneGranted: boolean;
   busy: boolean;
   onRecord: (
     botId: string,
     title: string,
     options?: { replaceOpen: true },
   ) => void;
-  onAllowMicrophone: () => void;
 }) {
   const [picked, setPicked] = useState<string | null>(null);
   // Bots arrive after the form mounts: the pick wins, then the last used, then the first.
@@ -132,29 +125,10 @@ export function RecordForm({
               onChange={(event) => setTitle(event.target.value)}
             />
             <FieldDescription>
-              Records this tab's screen, your voice, clicks, typing and the
-              network calls behind each page. Passwords and secrets stay in your
-              browser.
+              Records your clicks, typing, the pages you open and the network
+              calls behind them. Passwords and secrets stay in your browser.
             </FieldDescription>
-            {transcription ? null : (
-              <FieldDescription>
-                This OpenBot does not transcribe voice. The screen recording
-                still keeps the sound.
-              </FieldDescription>
-            )}
           </Field>
-          {microphoneGranted ? null : (
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              className="-ml-px self-start px-0 has-data-[icon=inline-start]:pl-0"
-              onClick={onAllowMicrophone}
-            >
-              <IconMicrophone data-icon="inline-start" />
-              Allow microphone
-            </Button>
-          )}
           <Button size="lg" type="submit" disabled={!ready}>
             Record
           </Button>

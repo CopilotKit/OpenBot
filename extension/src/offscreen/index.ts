@@ -15,13 +15,6 @@ import { OpenBotError, openbotJson } from "../shared/openbot-client";
 import type { DrainRecord } from "../shared/storage";
 import { fetchGrant, GrantError } from "./grant";
 import {
-  discardMedia,
-  type MediaHandle,
-  type MediaSinks,
-  recoverMedia,
-  startMedia,
-} from "./media";
-import {
   type Outbox,
   openOutbox,
   type TrajectoryMeta,
@@ -44,9 +37,6 @@ type SignedOutReason = "revoked" | "removed" | "organization";
 type Target = { openbotUrl: string; token: string };
 
 export type OffscreenControllerDeps = {
-  startMedia: typeof startMedia;
-  recoverMedia: typeof recoverMedia;
-  discardMedia: typeof discardMedia;
   openOutbox: () => Promise<Outbox>;
   connectPort(): chrome.runtime.Port;
   /** Test seams: the clock and timers of the controller, its sequencer and its streamers, and where a trajectory rolls over. */
@@ -96,8 +86,6 @@ type Live = {
   /** The trajectory its status is reported for: the service worker shows only statuses of the recording's trajectories. */
   trajectoryId: string;
   capture: Partial<CaptureStatus>;
-  /** Started the moment the message arrives; null when screen and voice could not start. */
-  media: Promise<MediaHandle | null>;
   stream: Stream | null;
   /** While above 0 (its streamer is being created, or Start over is switching it), events wait in `waiting`. */
   holds: number;
@@ -108,9 +96,9 @@ type Live = {
 };
 
 /**
- * The offscreen document: records the screen and voice, streams captured events to Intelligence and answers the service
- * worker over its port. Media starts first at Record, because the tab stream id expires within seconds; every message
- * that ends a recording's work is posted again if the service worker restarted before it could be delivered.
+ * The offscreen document: streams captured events to Intelligence from its IndexedDB outbox and answers the service
+ * worker over its port; every message that ends a recording's work is posted again if the service worker restarted
+ * before it could be delivered.
  */
 export function createOffscreenController(deps: OffscreenControllerDeps): void {
   const timers = deps.timers ?? realTimers;
@@ -511,24 +499,8 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     for (const event of target.waiting.splice(0)) deliver(target, event);
   }
 
-  function liveSinks(target: Live): MediaSinks {
-    return {
-      // Media events go to the streamer as soon as it exists; before that they wait, in order, with the rest.
-      emit: (event) => {
-        const streamer = target.stream?.streamer;
-        if (streamer) streamer.push(event);
-        else deliver(target, event);
-      },
-      status: (capture) => postStatus(target, capture),
-      // Stop waits on media.finished(); the count itself is the media module's to show.
-      uploadsPending: () => {},
-    };
-  }
-
   async function begin(target: Live, resume: boolean): Promise<void> {
     const { session } = target;
-    // Media first: the streamer, and with it every network call, waits until it consumed the tab stream id.
-    await target.media;
     try {
       const existing = streaming(session.demonstrationId);
       if (existing) {
@@ -566,28 +538,12 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       demonstrationId: session.demonstrationId,
       trajectoryId: session.trajectoryId,
       capture: {},
-      media: Promise.resolve(null),
       stream: null,
       holds: 1,
       waiting: [],
       ending: false,
       stopped: null,
     };
-    // At once, never behind earlier work: the tab stream id expires within seconds.
-    target.media = deps
-      .startMedia(
-        resume
-          ? { ...session, media: { ...session.media, tabStreamId: null } }
-          : session,
-        liveSinks(target),
-      )
-      .catch((error) => {
-        console.error(
-          "Recorder: screen and voice recording could not start",
-          error,
-        );
-        return null;
-      });
     live = target;
     stopBeat();
     beat();
@@ -612,14 +568,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         return;
       }
       const previous = target.demonstrationId;
-      try {
-        await (await target.media)?.rotate({ demonstrationId });
-      } catch (error) {
-        console.error(
-          "Recorder: the replaced recording's screen and voice could not be dropped",
-          error,
-        );
-      }
       owners.set(trajectoryId, demonstrationId);
       stream.demonstrations.add(demonstrationId);
       // Switched before the streamer reports anything for it: the replaced recording's kept events are offscreen.kept.
@@ -637,7 +585,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
             type: "offscreen.rotated",
             previousDemonstrationId: previous,
           });
-          // Its media went with media.rotate and its trajectories are drained and closed: nothing is left of it.
+          // Its trajectories are drained and closed: nothing is left of it.
           post({ type: "offscreen.done", demonstrationId: previous });
         },
         (error) => {
@@ -669,13 +617,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
     const stream = target.stream;
     const streamer = stream?.streamer;
-    const media = await target.media;
-    try {
-      // Recorders stop and voice drains, so the last transcript is queued before the outcome.
-      await media?.stop();
-    } catch (error) {
-      console.error("Recorder: screen and voice did not stop cleanly", error);
-    }
     if (!stream || !streamer) {
       // The streamer never started (its storage failed to open): nothing was sent, but the recording still ends.
       console.error(
@@ -685,15 +626,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       const demonstrationId = target.demonstrationId;
       target.stopped = { trajectoryIds: [] };
       post({ type: "offscreen.stopped", demonstrationId, trajectoryIds: [] });
-      void Promise.resolve(media?.finished()).then(
-        () => post({ type: "offscreen.done", demonstrationId }),
-        (error) => {
-          console.error(
-            "Recorder: a stopped recording could not finish sending",
-            error,
-          );
-        },
-      );
+      post({ type: "offscreen.done", demonstrationId });
       return;
     }
     target.ending = true;
@@ -704,7 +637,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     );
     target.stopped = { trajectoryIds };
     post({ type: "offscreen.stopped", demonstrationId, trajectoryIds });
-    void Promise.all([streamer.drained(), media?.finished()]).then(
+    void streamer.drained().then(
       () => {
         finished(stream, demonstrationId);
         post({ type: "offscreen.done", demonstrationId });
@@ -724,32 +657,11 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     stream: Stream & { streamer: Streamer },
     drain: DrainRecord,
   ): Promise<void> {
-    let media = true;
-    try {
-      await deps.recoverMedia(
-        drain,
-        { ...stream.target },
-        {
-          emit: (event) => stream.streamer.push(event),
-          // Only the live recording reports a status.
-          status: () => {},
-          uploadsPending: () => {},
-        },
-      );
-    } catch (error) {
-      media = false;
-      console.error(
-        "Recorder: a recording's buffered screen or voice could not be recovered",
-        error,
-      );
-    }
-    // After every transcript, so the outcome is last; the streamer queues it only when none was queued.
+    // The streamer queues the interrupted outcome only when none was queued.
     await stream.streamer.stop("failed", { reason: "interrupted" });
     await stream.streamer.drained();
     finished(stream, drain.demonstrationId);
-    // A recording whose media is not finished is not done: the next recovery tries again.
-    if (media)
-      post({ type: "offscreen.done", demonstrationId: drain.demonstrationId });
+    post({ type: "offscreen.done", demonstrationId: drain.demonstrationId });
   }
 
   async function recover(
@@ -846,7 +758,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       await Promise.all(dropped.map((streamer) => streamer.discard()));
       for (const demonstrationId of demonstrationIds) {
         await clearOutbox(outbox, demonstrationId);
-        await deps.discardMedia(demonstrationId);
         // The service worker closes the document once nothing it holds is still sending.
         post({ type: "offscreen.done", demonstrationId });
       }
@@ -871,17 +782,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       case "offscreen.start":
       case "offscreen.resume":
         startLive(message.session, message.type === "offscreen.resume");
-        return;
-      case "offscreen.screen":
-        // Waits only for its recording's media, never behind other work: this stream id expires within seconds too.
-        void target?.media
-          .then((media) => media?.screen(message.tabStreamId))
-          .catch((error) => {
-            console.error(
-              "Recorder: the screen recording could not start",
-              error,
-            );
-          });
         return;
       case "offscreen.rotate":
         if (!target) {
@@ -923,9 +823,6 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
 // The extension's own offscreen document runs the controller once; tests import the factory without running it.
 if (globalThis.location?.protocol === "chrome-extension:") {
   createOffscreenController({
-    startMedia,
-    recoverMedia,
-    discardMedia,
     openOutbox: () => openOutbox(),
     connectPort: () => chrome.runtime.connect({ name: PORT_OFFSCREEN }),
   });

@@ -1,10 +1,9 @@
 export type BuildVariant = "release" | "e2e";
 // The highest floor of the APIs the Recorder uses: debugger flattened child sessions (sessionId) need 125.
-// The others sit lower: offscreen 109, externally_connectable 107, chrome.alarms (below the floor), tabCapture stream id from a service worker into an offscreen document 116,
+// The others sit lower: offscreen 109, externally_connectable 107, chrome.alarms (below the floor),
 // service-worker keep-alive by WebSocket 116 and by debugger 118, scripting world MAIN 95 and injectImmediately 102,
 // storage setAccessLevel 102, String.isWellFormed 111.
 // https://developer.chrome.com/docs/extensions/reference/api/debugger
-// https://developer.chrome.com/docs/extensions/reference/api/tabCapture
 // https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle
 // https://developer.chrome.com/docs/extensions/reference/api/scripting
 // https://developer.chrome.com/docs/extensions/reference/api/storage
@@ -17,7 +16,6 @@ export const PERMISSIONS = [
   "unlimitedStorage",
   "alarms",
   "offscreen",
-  "tabCapture",
   "debugger",
   "scripting",
   "webNavigation",

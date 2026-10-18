@@ -1,6 +1,6 @@
-import { type CapturedEvent, scrubUrl } from "@openbot/shared/recorder-masking";
-import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
 import { safeDemonstrationUrl } from "@openbot/shared/demonstration-rules";
+import type { DemonstrationAction } from "@openbot/shared/demonstration-schema";
+import { type CapturedEvent, scrubUrl } from "@openbot/shared/recorder-masking";
 
 export type NavigationDetails = {
   tabId: number;
