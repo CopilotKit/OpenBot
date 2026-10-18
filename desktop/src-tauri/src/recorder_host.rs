@@ -211,7 +211,8 @@ pub fn handle(
     }
 }
 
-/// The local OpenBot is on this computer, and the extension gives up on a handoff after 5 seconds.
+/// The local OpenBot is on this computer. The extension gives up on a handoff after 8 seconds: up to 3
+/// for the running-app check that comes first, and these 5.
 fn client() -> reqwest::Result<Client> {
     Client::builder()
         .timeout(Duration::from_secs(5))

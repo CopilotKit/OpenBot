@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, jest, test } from "bun:test";
 import {
   askDesktopForHandoff,
   desktopAvailable,
@@ -62,5 +62,46 @@ test("desktopAvailable is true only for available: true", async () => {
   ]) {
     fake.native.reply = () => reply;
     expect(await desktopAvailable()).toBe(false);
+  }
+});
+
+/** A host reply that lands after `ms` on the fake clock. */
+function answerAfter(ms: number, reply: object) {
+  return () =>
+    new Promise<object>((resolve) => setTimeout(() => resolve(reply), ms));
+}
+
+test("the ping waits out the Desktop host's 2 s running-app check, and gives up at 3 s", async () => {
+  jest.useFakeTimers();
+  try {
+    fake.native.reply = answerAfter(2_000, { available: true });
+    const slow = desktopAvailable();
+    jest.advanceTimersByTime(2_000);
+    expect(await slow).toBe(true);
+
+    fake.native.reply = answerAfter(3_001, { available: true });
+    const tooSlow = desktopAvailable();
+    jest.advanceTimersByTime(3_000);
+    expect(await tooSlow).toBe(false);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("a handoff waits out the host's running-app check and its own 5 s request to OpenBot, and gives up at 8 s", async () => {
+  jest.useFakeTimers();
+  try {
+    const handoff = { openbotUrl: "http://127.0.0.1:7478", code: "obc_abc" };
+    fake.native.reply = answerAfter(7_000, handoff);
+    const slow = askDesktopForHandoff();
+    jest.advanceTimersByTime(7_000);
+    expect(await slow).toEqual(handoff);
+
+    fake.native.reply = answerAfter(8_001, handoff);
+    const tooSlow = askDesktopForHandoff();
+    jest.advanceTimersByTime(8_000);
+    expect(await tooSlow).toBeNull();
+  } finally {
+    jest.useRealTimers();
   }
 });

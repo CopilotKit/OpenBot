@@ -24,13 +24,22 @@ async function ask(
   }
 }
 
+/** OpenBot Desktop's host answers a ping only after its running-app check, which waits up to 2 s on the local
+ * OpenBot's /api/capabilities (`server_capabilities_answer` in desktop/src-tauri/src/main.rs) on a slow machine. */
+const PING_TIMEOUT_MS = 3_000;
+/** A handoff runs the same running-app check, then the host's own request for a connect code, which it gives up on
+ * after 5 s (`client` in desktop/src-tauri/src/recorder_host.rs). */
+const HANDOFF_TIMEOUT_MS = PING_TIMEOUT_MS + 5_000;
+
 /** A ping that mints nothing. */
-export async function desktopAvailable(timeoutMs = 1000): Promise<boolean> {
+export async function desktopAvailable(
+  timeoutMs = PING_TIMEOUT_MS,
+): Promise<boolean> {
   return (await ask({ type: "ping" }, timeoutMs))?.available === true;
 }
 
 export async function askDesktopForHandoff(
-  timeoutMs = 5000,
+  timeoutMs = HANDOFF_TIMEOUT_MS,
 ): Promise<DesktopHandoff | null> {
   const reply = await ask({ type: "handoff" }, timeoutMs);
   if (
