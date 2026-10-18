@@ -24,7 +24,7 @@ Every copy of the Recorder, in Chrome and in Edge, unpacked or installed by poli
 
 There is no store listing, so your team hosts the package. Chrome installs an extension from outside the Chrome Web Store by policy only on managed computers:
 
-- Windows computers joined to an Active Directory or Azure AD domain, or enrolled in Chrome Browser Cloud Management. Edge force-installs an extension from outside the Microsoft Edge Add-ons website only on Windows joined to a Microsoft Active Directory domain, and on macOS managed through MDM or joined to a domain through MCX.
+- Windows computers joined to a Microsoft Active Directory domain. Google's help page says: "To automatically install an app or extension that's not in the Chrome Web Store, computers must be joined to a domain using Microsoft Active Directory." (Chrome's policy definition also lists Azure AD and Chrome Enterprise Core enrollment, but the help page does not, so plan on a domain-joined computer.) Edge force-installs an extension from outside the Microsoft Edge Add-ons website only on Windows joined to a Microsoft Active Directory domain, and on macOS managed through MDM or joined to a domain through MCX.
 - macOS with the policy delivered as an MDM configuration profile.
 - Linux with the policy file under `/etc/opt/chrome/policies/managed/`.
 
@@ -89,6 +89,7 @@ In testing against Intelligence main (48b9528da), a self-hosted Intelligence who
 
 - [Configuring policy for extensions (Chromium)](https://www.chromium.org/administrators/configuring-policy-for-extensions/)
 - [Set Chrome app and extension policies (Chrome Enterprise help)](https://support.google.com/chrome/a/answer/7532015)
+- [ExtensionInstallForcelist policy definition (Chromium source)](https://chromium.googlesource.com/chromium/src/+/main/components/policy/resources/templates/policy_definitions/Extensions/ExtensionInstallForcelist.yaml)
 - [Install extensions (developer.chrome.com)](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions)
 - [Host extensions on Linux (developer.chrome.com)](https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux)
 - [Use group policies to manage Microsoft Edge extensions (Microsoft Learn)](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-manage-extensions-policies)
