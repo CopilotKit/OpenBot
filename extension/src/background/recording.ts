@@ -716,18 +716,21 @@ export function installRecording(
   }
 
   /** The document is closed once nothing it holds is still sending: every drain is done, parked, or waiting for its
-   * person to connect again (a held drain keeps it open for its retries). */
+   * person to connect again (a held drain keeps it open for its retries). A recording Start over discarded is never
+   * kept, and waits for its person to connect again before it can be drained and deleted. */
   function maybeCloseDocument(): Promise<void> {
     return documentWork(async () => {
       if (state.phase !== "idle" || holdEvents) return;
       const drains = (await readLocal("drains")) ?? [];
+      const connection = await currentConnection();
       const busy = drains.some(
         (drain) =>
           !offscreenDone.has(drain.demonstrationId) &&
           !(
             drain.kept &&
             (drain.kept.parked || drain.kept.waitingForReconnect)
-          ),
+          ) &&
+          !(drain.discard && !(connection && ownedBy(drain, connection))),
       );
       if (busy || !(await hasOffscreenDocument())) return;
       if (state.phase !== "idle" || holdEvents) return;
@@ -1475,14 +1478,15 @@ export function installRecording(
 
   // ---- Signed out ----------------------------------------------------------------------------
 
-  /** Every drain of the person waits for them to connect this browser again; nothing is discarded (Decision 19). */
+  /** Every drain of the person waits for them to connect this browser again; nothing is discarded (Decision 19). A
+   * recording Start over discarded is not kept for them: it only waits to be deleted in OpenBot once they connect. */
   async function markWaiting(
     userId: string,
     reason: SignedOutReason,
   ): Promise<void> {
     await updateDrains((drains) =>
       drains.map((drain) =>
-        drain.userId !== userId
+        drain.userId !== userId || drain.discard
           ? drain
           : {
               ...drain,
