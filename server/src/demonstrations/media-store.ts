@@ -141,6 +141,10 @@ export function createDemonstrationMediaStore(
       return present(row, []);
     },
     async putChunk(ownerUserId, demonstrationId, mediaId, index, bytes) {
+      if (!Number.isInteger(index) || index < 0)
+        throw new DemonstrationMediaRefusedError(
+          "A part of the recording needs a whole number position from zero.",
+        );
       return database.transaction(async (transaction) => {
         const row = await owned(
           transaction,
@@ -211,6 +215,10 @@ export function createDemonstrationMediaStore(
             );
           return present(row, stored);
         }
+        if (stored.some((index) => index >= chunkCount))
+          throw new DemonstrationMediaConflictError(
+            "The recording has more parts than it says.",
+          );
         const held = new Set(stored);
         for (let index = 0; index < chunkCount; index++)
           if (!held.has(index))

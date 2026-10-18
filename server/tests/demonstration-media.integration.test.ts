@@ -165,6 +165,27 @@ test("complete with a gap is a conflict and the media stays open", async () => {
     (await media.complete(owner, demo.id, id, 3)).completedAt,
   ).not.toBeNull();
 });
+test("complete refuses a stored chunk past the end and the media stays open", async () => {
+  const demo = await started("Stray");
+  const { id } = await media.create(owner, demo.id, screen);
+  await media.putChunk(owner, demo.id, id, 0, bytes(1));
+  await media.putChunk(owner, demo.id, id, 1, bytes(2));
+  await media.putChunk(owner, demo.id, id, 2, bytes(3));
+  await expect(media.complete(owner, demo.id, id, 2)).rejects.toMatchObject({
+    name: "DemonstrationMediaConflictError",
+    message: "The recording has more parts than it says.",
+  });
+  expect((await media.get(owner, demo.id, id)).completedAt).toBeNull();
+});
+test("a negative or non-integer chunk index is refused", async () => {
+  const demo = await started("Bad index");
+  const { id } = await media.create(owner, demo.id, screen);
+  for (const index of [-1, 1.5, Number.NaN])
+    await expect(
+      media.putChunk(owner, demo.id, id, index, bytes(1)),
+    ).rejects.toMatchObject({ name: "DemonstrationMediaRefusedError" });
+  expect(await storedChunks(id)).toEqual([]);
+});
 test("a chunk after complete is a conflict", async () => {
   const demo = await started("After complete");
   const { id } = await media.create(owner, demo.id, screen);
