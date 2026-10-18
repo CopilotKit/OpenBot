@@ -1,4 +1,16 @@
 {
   "type": "object",
-  "properties": {}
+  "properties": {
+    "OpenBotUrl": {
+      "title": "OpenBot address",
+      "description": "The HTTPS address of your organization's OpenBot. The Recorder connects only to this address.",
+      "type": "string"
+    },
+    "AllowedIntelligenceUrls": {
+      "title": "Allowed Intelligence addresses",
+      "description": "WSS addresses of your Intelligence realtime gateway. The Recorder refuses a capture pass that points anywhere else.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
 }
