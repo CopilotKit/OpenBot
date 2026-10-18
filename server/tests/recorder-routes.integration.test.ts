@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
+  type ExchangeResponse,
   LEARNING_SPACE_STATES,
   RECORDER_SIGNED_OUT,
-  type ExchangeResponse,
 } from "@openbot/shared/recorder-api";
 import { RECORDER_EXTENSION_ID } from "@openbot/shared/recorder-extension";
 import { inArray } from "drizzle-orm";
@@ -68,7 +68,6 @@ function build(extra: Record<string, string | undefined> = {}) {
     actorFor: async (id) => ({ id, role: "user" }),
     learningSettingsStore: { read: async () => ({}) as never },
     snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
-    demonstrations: {} as never,
     auditStore,
   });
   const app = createApp(
@@ -393,21 +392,22 @@ describe("using the bearer", () => {
     expect(await answer.json()).toEqual({ text: "hello from the fake" });
   });
 
-  test("demonstration routes need the bearer and answer no GET", async () => {
+  test("OpenBot takes no recording from the Recorder, not even with its bearer", async () => {
     const h = build();
     const made = await connect(h, "6".repeat(32));
-    for (const path of [
-      "/api/recorder/demonstrations",
-      "/api/recorder/demonstrations/x/media",
+    for (const [method, path] of [
+      ["POST", "/api/recorder/demonstrations"],
+      ["GET", "/api/recorder/demonstrations/open?botId=mine"],
+      ["POST", "/api/recorder/demonstrations/x/actions"],
+      ["POST", "/api/recorder/demonstrations/x/media"],
+      ["PUT", "/api/recorder/demonstrations/x/media/m/chunks/0"],
     ]) {
-      const anonymous = await call(h, path);
-      expect(anonymous.status).toBe(401);
-      expect(((await anonymous.json()) as { code: string }).code).toBe(
-        RECORDER_SIGNED_OUT,
-      );
-      expect(
-        (await call(h, path, { headers: bearer(made.token) })).status,
-      ).toBe(404);
+      const answer = await call(h, path, {
+        method,
+        headers: bearer(made.token),
+        ...(method === "GET" ? {} : { json: {} }),
+      });
+      expect([method, path, answer.status]).toEqual([method, path, 404]);
     }
   });
 });

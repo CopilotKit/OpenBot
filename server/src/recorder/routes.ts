@@ -1,7 +1,7 @@
 import {
   connectCodeRequestSchema,
-  exchangeRequestSchema,
   type ExchangeResponse,
+  exchangeRequestSchema,
   type RecorderBot,
   type RecorderConnectionsResponse,
   type RecorderMe,
@@ -16,13 +16,7 @@ import {
   recordAuditEvent,
 } from "../audit";
 import type { AppVariables, AuthenticatedActor } from "../auth/guards";
-import type { DemonstrationMediaStore } from "../demonstrations/media-store";
 import type { RecorderConnectionStore } from "./connections";
-import {
-  createRecorderDemonstrationRoutes,
-  type RecorderDemonstrationDeps,
-} from "./demonstration-routes";
-import { createRecorderMediaRoutes } from "./media-routes";
 import type { RecorderVariables } from "./variables";
 
 export type RecorderRouteDeps = {
@@ -38,8 +32,6 @@ export type RecorderRouteDeps = {
   sealOrganizationSession: (
     cookieHeader: string | undefined,
   ) => Promise<string | null>;
-  demonstrations: RecorderDemonstrationDeps;
-  media: DemonstrationMediaStore;
   auditStore?: AuditStore;
 };
 
@@ -246,17 +238,6 @@ export function createRecorderRoutes(deps: RecorderRouteDeps) {
 
   routes.get("/bots", deps.requireRecorder, async (context) =>
     context.json({ bots: await deps.listBots(context.var.actor) }),
-  );
-
-  // Hono 4.13.4's `/*` also matches `/demonstrations` itself, so one use guards both (a second would resolve every request twice).
-  routes.use("/demonstrations/*", deps.requireRecorder);
-  routes.route(
-    "/demonstrations/:id/media",
-    createRecorderMediaRoutes({ media: deps.media }),
-  );
-  routes.route(
-    "/demonstrations",
-    createRecorderDemonstrationRoutes(deps.demonstrations),
   );
 
   return routes;

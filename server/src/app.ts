@@ -80,13 +80,6 @@ import type { DemonstrationStore } from "./demonstrations/store";
 import { mountDesktopConnectionFailure } from "./desktop-connection-failure";
 import { createTranscriptionProvider } from "./dictation/provider";
 import { createDictationRoutes } from "./dictation/routes";
-import { createDemonstrationMediaReadRoutes } from "./demonstrations/media-read-routes";
-import {
-  createRequireRecorder,
-  createRequireUserOrRecorder,
-} from "./recorder/guard";
-import { createRecorderRoutes } from "./recorder/routes";
-import type { RecorderExtensionDeps } from "./recorder/wiring";
 import type { HostAccessBroker } from "./host-access/broker";
 import { createHostAccessRoutes } from "./host-access/routes";
 import { identityRoutes } from "./identity/routes";
@@ -122,6 +115,12 @@ import {
   type ModelProviderProxy,
   mountProviderOAuthProxy,
 } from "./provider-oauth";
+import {
+  createRequireRecorder,
+  createRequireUserOrRecorder,
+} from "./recorder/guard";
+import { createRecorderRoutes } from "./recorder/routes";
+import type { RecorderExtensionDeps } from "./recorder/wiring";
 import type { ResponsibilityBindingStore } from "./responsibilities/bindings";
 import type { ResponsibilityEngine } from "./responsibilities/engine";
 import { createGithubResponsibilityRoutes } from "./responsibilities/github";
@@ -1603,14 +1602,6 @@ export function createApp(
         requireUser,
         requireRecorder,
         auditStore,
-      }),
-    );
-    app.use("/api/demonstrations/:id/media/*", requireUser);
-    app.route(
-      "/api/demonstrations/:id/media",
-      createDemonstrationMediaReadRoutes({
-        media: coworker.recorder.media,
-        demonstrationOwner: coworker.recorder.demonstrationOwner,
       }),
     );
   }

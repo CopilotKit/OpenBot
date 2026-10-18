@@ -7,7 +7,6 @@ import type { DemonstrationStore } from "./store";
 import {
   DEMONSTRATION_MAX_DURATION_MS,
   DemonstrationRefusedError,
-  type DemonstrationSource,
 } from "./types";
 /** Only trusted computer output calls this; there is no public action-upload endpoint. */
 export function createDemonstrationRecorder(options: {
@@ -36,24 +35,12 @@ export function createDemonstrationRecorder(options: {
     return options.store.stop(ownerUserId, id);
   }
   return {
-    async start(
-      ownerUserId: string,
-      botId: string,
-      title: string,
-      source: DemonstrationSource = "computer",
-    ) {
+    async start(ownerUserId: string, botId: string, title: string) {
       if (!(await options.ownsBot(ownerUserId, botId)))
         throw new DemonstrationRefusedError(
           "Choose one of your Bots to record a demonstration.",
         );
-      const recording = await options.store.start(
-        ownerUserId,
-        botId,
-        title,
-        source,
-      );
-      // An extension recording has no time limit, so it has no timer.
-      if (source === "extension") return recording;
+      const recording = await options.store.start(ownerUserId, botId, title);
       /*
        * The server stops the recording at its limit even if nobody is watching. The store also
        * expires overdue recordings on every read, so a restart or another replica cannot extend one.

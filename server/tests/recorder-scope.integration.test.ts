@@ -67,10 +67,6 @@ const recorder = createRecorderExtension({
   actorFor: async (id) => ({ id, role: "user" }),
   learningSettingsStore: { read: async () => ({}) as never },
   snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
-  demonstrations: {
-    store: demonstrationStore,
-    recorder: demonstrationRecorder,
-  },
   auditStore,
 });
 
@@ -201,12 +197,7 @@ beforeAll(async () => {
   });
   expect(exchanged.status).toBe(201);
   token = ((await exchanged.json()) as ExchangeResponse).token;
-  const started = await demonstrationStore.start(
-    owner,
-    BOT,
-    "Seeded",
-    "computer",
-  );
+  const started = await demonstrationStore.start(owner, BOT, "Seeded");
   await demonstrationStore.stop(owner, started.id);
   stoppedId = started.id;
 });
@@ -241,8 +232,6 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
       ["GET", "/api/agents"],
       ["POST", "/api/agents", { name: "Sneaky" }],
       ["GET", "/api/approvals"],
-      ["GET", `/api/demonstrations/${stoppedId}/media`],
-      ["GET", `/api/demonstrations/${stoppedId}/media/m/content`],
     ];
     for (const [method, path, json] of routes) {
       const answer = await call(path, {
@@ -287,11 +276,7 @@ describe("a recorder bearer works only on the Recorder's own routes", () => {
   });
 
   test("no gate rule matches a recorder path", () => {
-    for (const path of [
-      "/api/recorder/me",
-      "/api/recorder/demonstrations/x/actions",
-      "/api/audio/transcriptions",
-    ]) {
+    for (const path of ["/api/recorder/me", "/api/recorder/bots"]) {
       expect(runtimeRun(path)).toBeNull();
       const matched = GATED_ROUTES.filter((rule) => rule.path.test(path));
       expect([path, matched.length]).toEqual([path, 0]);

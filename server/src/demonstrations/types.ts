@@ -1,10 +1,54 @@
-import {
-  type DemonstrationAction,
-  demonstrationActionSchema,
-} from "@openbot/shared/demonstration-schema";
+import { z } from "zod";
 
-export type { DemonstrationAction };
-export { demonstrationActionSchema };
+const target = z
+  .object({
+    role: z.string().min(1).max(40),
+    name: z.string().min(1).max(120),
+    sensitive: z.boolean(),
+  })
+  .strict();
+export const demonstrationActionSchema = z
+  .object({
+    kind: z.enum(["click", "type", "key", "scroll"]),
+    url: z
+      .string()
+      .max(2000)
+      .refine((value) => {
+        try {
+          const url = new URL(value);
+          return (
+            ["http:", "https:", "about:"].includes(url.protocol) &&
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash
+          );
+        } catch {
+          return false;
+        }
+      }),
+    target,
+    key: z
+      .enum([
+        "Enter",
+        "Tab",
+        "Escape",
+        "Backspace",
+        "Delete",
+        "ArrowDown",
+        "ArrowUp",
+        "ArrowLeft",
+        "ArrowRight",
+        "Home",
+        "End",
+        "PageDown",
+        "PageUp",
+      ])
+      .optional(),
+    deltaY: z.number().min(-2000).max(2000).optional(),
+  })
+  .strict();
+export type DemonstrationAction = z.infer<typeof demonstrationActionSchema>;
 /** A demonstration records at most ten minutes; the server stops it at this bound. */
 export const DEMONSTRATION_MAX_DURATION_MS = 10 * 60 * 1000;
 /** When a recording started at `createdAt` is stopped by the server. */
@@ -31,22 +75,6 @@ export type DemonstrationDraft = {
   requiredTools: string[];
   sourceRecordingId: string;
 };
-/** Where a recording is made: the Bot's own browser, or the person's browser through the Recorder extension. */
-export type DemonstrationSource = "computer" | "extension";
-/** A batch of steps began beyond the steps the server holds; `count` is how many it holds. */
-export class DemonstrationGapError extends Error {
-  constructor(readonly count: number) {
-    super("Steps arrived out of order.");
-    this.name = "DemonstrationGapError";
-  }
-}
-/** The person already has an open extension recording for this Bot. */
-export class DemonstrationOpenError extends Error {
-  constructor(readonly demonstrationId: string) {
-    super("You already have an open recording for this Bot.");
-    this.name = "DemonstrationOpenError";
-  }
-}
 export class DemonstrationRefusedError extends Error {
   constructor(message: string) {
     super(message);

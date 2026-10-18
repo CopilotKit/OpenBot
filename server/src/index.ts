@@ -1114,16 +1114,6 @@ const personalMemoryStore = createMemoryStore(database, {
     client: createIntelligenceClient(config.runtime.intelligence),
   }),
 });
-const demonstrationStore = createDemonstrationStore(database);
-const demonstrationRecorder = createDemonstrationRecorder({
-  store: demonstrationStore,
-  // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
-  // The Recorder extension holds the one copy of the rule; it is built just below, from this recorder.
-  ownsBot: (owner, bot) => recorderExtension.canRecordForBot(owner, bot),
-  ownsSkill: async (owner, slug) =>
-    (await pluginStore.skillOwner(slug)) === owner,
-  routines: routineStore,
-});
 const recorderExtension = createRecorderExtension({
   config,
   database,
@@ -1135,11 +1125,17 @@ const recorderExtension = createRecorderExtension({
   actorFor,
   learningSettingsStore,
   snapshots: learningProbeIntelligence,
-  demonstrations: {
-    store: demonstrationStore,
-    recorder: demonstrationRecorder,
-  },
   auditStore: bootAuditStore,
+});
+const demonstrationStore = createDemonstrationStore(database);
+const demonstrationRecorder = createDemonstrationRecorder({
+  store: demonstrationStore,
+  // Teaching a shared deployment Bot is allowed as well as an owned one; the skill is the owner's.
+  // The Recorder extension holds the one copy of the rule, so a Bot one can teach is a Bot one can record for.
+  ownsBot: recorderExtension.canRecordForBot,
+  ownsSkill: async (owner, slug) =>
+    (await pluginStore.skillOwner(slug)) === owner,
+  routines: routineStore,
 });
 const memoryIngestion = createMemoryIngestion({
   store: personalMemoryStore,

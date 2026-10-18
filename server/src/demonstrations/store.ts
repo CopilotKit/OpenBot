@@ -1,53 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { hasTarget } from "@openbot/shared/demonstration-schema";
-import type {
-  ExtensionDemonstration,
-  LearningSpaceState,
-} from "@openbot/shared/recorder-api";
-import { and, desc, eq, getTableColumns, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import {
-  demonstrationMedia,
-  demonstrationSteps,
-  demonstrations,
-  demonstrationTrajectories,
-} from "../db/schema/demonstrations";
+import { demonstrations } from "../db/schema/demonstrations";
 import { draftDemonstration } from "./draft";
 import {
   DEMONSTRATION_MAX_DURATION_MS,
-  type DemonstrationAction,
-  DemonstrationGapError,
   DemonstrationNotFoundError,
-  DemonstrationOpenError,
   DemonstrationRefusedError,
-  type DemonstrationSource,
   demonstrationExpiresAt,
   parseDemonstrationAction,
   reachedDemonstrationTimeLimit,
 } from "./types";
 
 type DemonstrationRow = typeof demonstrations.$inferSelect;
-/** How many recordings one page of the list holds. */
-export const DEMONSTRATION_PAGE_SIZE = 30;
 /** The ten-minute bound as a database interval, so expiry uses the database clock. */
 const limit = () =>
   sql`(${DEMONSTRATION_MAX_DURATION_MS}::integer * interval '1 millisecond')`;
-/**
- * A recording as the API returns it: its row plus when the server stops it (never, for an extension
- * recording) and how many steps it holds. An extension recording keeps its steps in
- * demonstration_steps while it records, so its count is the row's stepCount until Stop folds them in.
- */
+/** A recording as the API returns it: its row plus when the server stops it. */
 function present(row: DemonstrationRow) {
-  const extension = row.source === "extension";
   return {
     ...row,
-    actionCount:
-      extension && row.status === "recording"
-        ? row.stepCount
-        : row.actions.length,
-    expiresAt: extension ? null : demonstrationExpiresAt(row.createdAt),
-    maxDurationMs: extension ? null : DEMONSTRATION_MAX_DURATION_MS,
-    reachedTimeLimit: extension ? false : reachedDemonstrationTimeLimit(row),
+    expiresAt: demonstrationExpiresAt(row.createdAt),
+    maxDurationMs: DEMONSTRATION_MAX_DURATION_MS,
+    reachedTimeLimit: reachedDemonstrationTimeLimit(row),
   };
 }
 export function createDemonstrationStore(database: Database) {
@@ -67,7 +42,6 @@ export function createDemonstrationStore(database: Database) {
         and(
           eq(demonstrations.ownerUserId, ownerUserId),
           eq(demonstrations.status, "recording"),
-          eq(demonstrations.source, "computer"),
           sql`${demonstrations.createdAt} + ${limit()} <= now()`,
         ),
       );
@@ -86,71 +60,23 @@ export function createDemonstrationStore(database: Database) {
     if (!row) throw new DemonstrationNotFoundError();
     return present(row);
   }
-  /** This person's open extension recording for the Bot, if any. */
-  async function openExtension(ownerUserId: string, botId: string) {
-    const [row] = await database
-      .select()
-      .from(demonstrations)
-      .where(
-        and(
-          eq(demonstrations.ownerUserId, ownerUserId),
-          eq(demonstrations.botId, botId),
-          eq(demonstrations.status, "recording"),
-          eq(demonstrations.source, "extension"),
-        ),
-      );
-    return row ? present(row) : null;
-  }
   return {
     get,
     expireOverdue,
-    /**
-     * A page of this Bot's recordings as summaries, newest first: every column but the step list, with
-     * the step count, the newest trajectory's Learning state and the completed media computed in SQL, so
-     * a list never carries (or polls) a recording's whole step list. Only rows created before `before`
-     * when it is given.
-     */
-    async list(
-      ownerUserId: string,
-      botId: string,
-      { before }: { before?: Date } = {},
-    ) {
+    async list(ownerUserId: string, botId: string) {
       await expireOverdue(ownerUserId);
-      const { actions: _actions, ...columns } = getTableColumns(demonstrations);
-      // Qualified by hand: drizzle prints a single-table select's columns bare, and the subqueries have their own "id".
-      const outerId = sql.raw('"demonstrations"."id"');
       const rows = await database
-        .select({
-          ...columns,
-          actionCount: sql<number>`(case when ${demonstrations.source} = 'extension' and ${demonstrations.status} = 'recording' then ${demonstrations.stepCount} else jsonb_array_length(${demonstrations.actions}) end)::integer`,
-          learningState: sql<
-            LearningSpaceState["state"] | null
-          >`(select ${demonstrationTrajectories.learningState} from ${demonstrationTrajectories} where ${demonstrationTrajectories.demonstrationId} = ${outerId} order by ${demonstrationTrajectories.createdAt} desc limit 1)`,
-          media: sql<
-            { id: string; kind: "screen" | "audio" | "network" }[]
-          >`coalesce((select jsonb_agg(jsonb_build_object('id', ${demonstrationMedia.id}, 'kind', ${demonstrationMedia.kind}) order by ${demonstrationMedia.createdAt}) from ${demonstrationMedia} where ${demonstrationMedia.demonstrationId} = ${outerId} and ${demonstrationMedia.completedAt} is not null), '[]'::jsonb)`,
-        })
+        .select()
         .from(demonstrations)
         .where(
           and(
             eq(demonstrations.ownerUserId, ownerUserId),
             eq(demonstrations.botId, botId),
-            before ? lt(demonstrations.createdAt, before) : undefined,
           ),
         )
         .orderBy(desc(demonstrations.createdAt))
-        .limit(DEMONSTRATION_PAGE_SIZE);
-      return rows.map((row) => {
-        const extension = row.source === "extension";
-        return {
-          ...row,
-          expiresAt: extension ? null : demonstrationExpiresAt(row.createdAt),
-          maxDurationMs: extension ? null : DEMONSTRATION_MAX_DURATION_MS,
-          reachedTimeLimit: extension
-            ? false
-            : reachedDemonstrationTimeLimit(row),
-        };
-      });
+        .limit(30);
+      return rows.map(present);
     },
     async active(ownerUserId: string, botId: string) {
       await expireOverdue(ownerUserId);
@@ -162,18 +88,11 @@ export function createDemonstrationStore(database: Database) {
             eq(demonstrations.ownerUserId, ownerUserId),
             eq(demonstrations.botId, botId),
             eq(demonstrations.status, "recording"),
-            eq(demonstrations.source, "computer"),
           ),
         );
       return row ? present(row) : null;
     },
-    openExtension,
-    async start(
-      ownerUserId: string,
-      botId: string,
-      title: string,
-      source: DemonstrationSource = "computer",
-    ) {
+    async start(ownerUserId: string, botId: string, title: string) {
       const clean = title.trim();
       if (!clean || clean.length > 120)
         throw new DemonstrationRefusedError(
@@ -181,13 +100,9 @@ export function createDemonstrationStore(database: Database) {
         );
       const [row] = await database
         .insert(demonstrations)
-        .values({ id: randomUUID(), ownerUserId, botId, title: clean, source })
+        .values({ id: randomUUID(), ownerUserId, botId, title: clean })
         .onConflictDoNothing()
         .returning();
-      if (!row && source === "extension") {
-        const open = await openExtension(ownerUserId, botId);
-        if (open) throw new DemonstrationOpenError(open.id);
-      }
       if (!row)
         throw new DemonstrationRefusedError(
           "This Bot already has an active demonstration. Stop it before starting another.",
@@ -211,10 +126,6 @@ export function createDemonstrationStore(database: Database) {
           )
           .for("update");
         if (!row) throw new DemonstrationNotFoundError();
-        if (row.source !== "computer")
-          throw new DemonstrationRefusedError(
-            "This recording is being made in a browser, not in the Bot's computer.",
-          );
         if (row.status !== "recording") return "kept";
         if (row.overdue) {
           await transaction
@@ -230,7 +141,6 @@ export function createDemonstrationStore(database: Database) {
         if (
           action.kind === "type" &&
           last?.kind === "type" &&
-          hasTarget(last) &&
           last.url === action.url &&
           // Field by field: jsonb reorders object keys, so a stringified comparison never matched.
           last.target.role === action.target.role &&
@@ -260,267 +170,18 @@ export function createDemonstrationStore(database: Database) {
           "The demonstration reached 200 steps and has stopped. Review its draft.",
         );
     },
-    /**
-     * Stores the steps from `fromIndex` on, returning how many the recording holds. Steps it already
-     * holds are skipped, so a resent or overlapping batch is harmless; a batch that starts beyond them
-     * is a gap. Only the batch's own rows are written, however long the recording is.
-     */
-    async appendBatch(
-      ownerUserId: string,
-      id: string,
-      fromIndex: number,
-      actions: unknown[],
-    ) {
-      const parsed = actions.map(parseDemonstrationAction);
-      return database.transaction(async (transaction) => {
-        const [row] = await transaction
-          .select({
-            status: demonstrations.status,
-            source: demonstrations.source,
-            stepCount: demonstrations.stepCount,
-          })
-          .from(demonstrations)
-          .where(
-            and(
-              eq(demonstrations.id, id),
-              eq(demonstrations.ownerUserId, ownerUserId),
-            ),
-          )
-          .for("update");
-        if (!row) throw new DemonstrationNotFoundError();
-        if (row.source !== "extension" || row.status !== "recording")
-          throw new DemonstrationRefusedError(
-            "This recording is not taking steps from a browser.",
-          );
-        if (fromIndex > row.stepCount)
-          throw new DemonstrationGapError(row.stepCount);
-        const fresh = parsed.slice(row.stepCount - fromIndex);
-        if (fresh.length === 0) return row.stepCount;
-        const total = row.stepCount + fresh.length;
-        await transaction.insert(demonstrationSteps).values(
-          fresh.map((action, offset) => ({
-            demonstrationId: id,
-            index: row.stepCount + offset,
-            action,
-          })),
-        );
-        await transaction
-          .update(demonstrations)
-          .set({ stepCount: total })
-          .where(eq(demonstrations.id, id));
-        return total;
-      });
-    },
-    /**
-     * Binds a trajectory to this person's extension recording; one trajectory belongs to one recording.
-     * A recording that has finished (stopped, drafted or published) still accepts one while a trajectory is open.
-     */
-    async registerTrajectory(
-      ownerUserId: string,
-      id: string,
-      trajectoryId: string,
-    ) {
-      await database.transaction(async (transaction) => {
-        const [row] = await transaction
-          .select({
-            status: demonstrations.status,
-            source: demonstrations.source,
-          })
-          .from(demonstrations)
-          .where(
-            and(
-              eq(demonstrations.id, id),
-              eq(demonstrations.ownerUserId, ownerUserId),
-            ),
-          )
-          .for("update");
-        if (!row) throw new DemonstrationNotFoundError();
-        if (row.source !== "extension")
-          throw new DemonstrationRefusedError(
-            "This recording is not being made in a browser.",
-          );
-        if (row.status !== "recording") {
-          // A rollover the streamer began before Stop may still register while a trajectory is open.
-          const [unclosed] = await transaction
-            .select({ trajectoryId: demonstrationTrajectories.trajectoryId })
-            .from(demonstrationTrajectories)
-            .where(
-              and(
-                eq(demonstrationTrajectories.demonstrationId, id),
-                isNull(demonstrationTrajectories.closedAt),
-              ),
-            )
-            .limit(1);
-          if (!unclosed)
-            throw new DemonstrationRefusedError(
-              "This recording has finished and takes no new trajectory.",
-            );
-        }
-        await transaction
-          .insert(demonstrationTrajectories)
-          .values({ trajectoryId, demonstrationId: id, ownerUserId })
-          .onConflictDoNothing();
-        const [stored] = await transaction
-          .select({
-            demonstrationId: demonstrationTrajectories.demonstrationId,
-          })
-          .from(demonstrationTrajectories)
-          .where(eq(demonstrationTrajectories.trajectoryId, trajectoryId));
-        if (stored?.demonstrationId !== id)
-          throw new DemonstrationRefusedError(
-            "This trajectory belongs to another recording.",
-          );
-      });
-    },
-    /** An extension recording as the recorder routes answer it: no actions, plus what the newest trajectory's last pass found. */
-    async presentExtension(
-      ownerUserId: string,
-      id: string,
-    ): Promise<ExtensionDemonstration> {
-      const row = await get(ownerUserId, id);
-      if (row.source !== "extension") throw new DemonstrationNotFoundError();
-      const [newest] = await database
-        .select({
-          state: demonstrationTrajectories.learningState,
-          containerId: demonstrationTrajectories.learningContainerId,
-        })
-        .from(demonstrationTrajectories)
-        .where(eq(demonstrationTrajectories.demonstrationId, id))
-        .orderBy(desc(demonstrationTrajectories.createdAt))
-        .limit(1);
-      return {
-        id: row.id,
-        botId: row.botId,
-        title: row.title,
-        source: "extension",
-        status: row.status,
-        actionCount: row.actionCount,
-        learning: newest?.state
-          ? { state: newest.state, containerId: newest.containerId }
-          : null,
-      };
-    },
-    async closeTrajectory(
-      ownerUserId: string,
-      id: string,
-      trajectoryId: string,
-    ) {
-      await database
-        .update(demonstrationTrajectories)
-        .set({
-          closedAt: sql`coalesce(${demonstrationTrajectories.closedAt}, now())`,
-        })
-        .where(
-          and(
-            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
-            eq(demonstrationTrajectories.demonstrationId, id),
-            eq(demonstrationTrajectories.ownerUserId, ownerUserId),
-          ),
-        );
-    },
-    async trajectoryOwner(ownerUserId: string, trajectoryId: string) {
-      const [row] = await database
-        .select({
-          demonstrationId: demonstrations.id,
-          botId: demonstrations.botId,
-          status: demonstrations.status,
-          source: demonstrations.source,
-          closedAt: demonstrationTrajectories.closedAt,
-        })
-        .from(demonstrationTrajectories)
-        .innerJoin(
-          demonstrations,
-          eq(demonstrations.id, demonstrationTrajectories.demonstrationId),
-        )
-        .where(
-          and(
-            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
-            eq(demonstrationTrajectories.ownerUserId, ownerUserId),
-          ),
-        );
-      return row ?? null;
-    },
-    /**
-     * Records what a pass found. An `assigned` trajectory is kept against a later `unjoined`,
-     * `unverified` or `learning-off` (the earlier join's membership persists); only `missing` replaces it.
-     */
-    async setTrajectoryLearning(
-      trajectoryId: string,
-      learning: LearningSpaceState,
-    ) {
-      await database
-        .update(demonstrationTrajectories)
-        .set({
-          learningState: learning.state,
-          learningContainerId: learning.containerId,
-        })
-        .where(
-          and(
-            eq(demonstrationTrajectories.trajectoryId, trajectoryId),
-            // A null learning_state (no pass yet) makes the comparison null, so test for "not true", not NOT.
-            sql`(${demonstrationTrajectories.learningState} = 'assigned' AND ${learning.state} IN ('unjoined', 'unverified', 'learning-off')) IS NOT TRUE`,
-          ),
-        );
-    },
-    /** Deletes an extension recording; a cloud-browser recording is refused. */
-    async removeExtension(ownerUserId: string, id: string) {
-      const [row] = await database
-        .delete(demonstrations)
-        .where(
-          and(
-            eq(demonstrations.id, id),
-            eq(demonstrations.ownerUserId, ownerUserId),
-            eq(demonstrations.source, "extension"),
-          ),
-        )
-        .returning({ id: demonstrations.id });
-      if (row) return;
-      const [exists] = await database
-        .select({ id: demonstrations.id })
-        .from(demonstrations)
-        .where(
-          and(
-            eq(demonstrations.id, id),
-            eq(demonstrations.ownerUserId, ownerUserId),
-          ),
-        );
-      if (!exists) throw new DemonstrationNotFoundError();
-      throw new DemonstrationRefusedError(
-        "This recording was made in the Bot's computer, not in a browser.",
-      );
-    },
     async stop(ownerUserId: string, id: string) {
       await get(ownerUserId, id);
-      await database.transaction(async (transaction) => {
-        const [row] = await transaction
-          .select({ source: demonstrations.source })
-          .from(demonstrations)
-          .where(
-            and(
-              eq(demonstrations.id, id),
-              eq(demonstrations.ownerUserId, ownerUserId),
-              eq(demonstrations.status, "recording"),
-            ),
-          )
-          .for("update");
-        if (!row) return;
-        const folded =
-          row.source === "extension"
-            ? {
-                actions: sql<
-                  DemonstrationAction[]
-                >`(select coalesce(jsonb_agg(${demonstrationSteps.action} order by ${demonstrationSteps.index}), '[]'::jsonb) from ${demonstrationSteps} where ${demonstrationSteps.demonstrationId} = ${id})`,
-              }
-            : {};
-        await transaction
-          .update(demonstrations)
-          .set({ status: "stopped", finishedAt: new Date(), ...folded })
-          .where(eq(demonstrations.id, id));
-        if (row.source === "extension")
-          await transaction
-            .delete(demonstrationSteps)
-            .where(eq(demonstrationSteps.demonstrationId, id));
-      });
+      await database
+        .update(demonstrations)
+        .set({ status: "stopped", finishedAt: new Date() })
+        .where(
+          and(
+            eq(demonstrations.id, id),
+            eq(demonstrations.ownerUserId, ownerUserId),
+            eq(demonstrations.status, "recording"),
+          ),
+        );
       return get(ownerUserId, id);
     },
     async draft(ownerUserId: string, id: string) {

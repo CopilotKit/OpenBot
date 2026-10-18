@@ -167,7 +167,6 @@ beforeAll(() => {
     actorFor: async (id) => ({ id, role: "user" }),
     learningSettingsStore: { read: async () => ({}) as never },
     snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
-    demonstrations: {} as never,
     auditStore,
   });
   app = createApp(

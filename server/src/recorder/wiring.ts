@@ -10,18 +10,15 @@ import type { DeploymentConfig } from "../config";
 import { decryptSecret, encryptSecret } from "../credentials";
 import type { Database } from "../db/client";
 import { users } from "../db/schema";
-import { demonstrations } from "../db/schema/demonstrations";
-import { createDemonstrationMediaStore } from "../demonstrations/media-store";
 import type { PeopleStore } from "../people/store";
 import type { PluginStore } from "../plugins/store";
-import { allowedExtensionIds } from "./extension-origins";
 import { createRecorderConnectionStore } from "./connections";
-import type { RecorderDemonstrationDeps } from "./demonstration-routes";
+import { allowedExtensionIds } from "./extension-origins";
 import {
   createRecorderResolver,
   type RecorderMode,
-  type RecorderResolver,
   type RecorderRefusalSink,
+  type RecorderResolver,
 } from "./guard";
 import {
   createLearningSpaceCheck,
@@ -37,8 +34,6 @@ export type RecorderExtensionDeps = Omit<
 > & {
   resolve: RecorderResolver;
   onRefused: RecorderRefusalSink;
-  /** The demonstration's owner, or null when it does not exist (a direct query on the database the wiring holds). */
-  demonstrationOwner: (demonstrationId: string) => Promise<string | null>;
 };
 
 /** The value of one cookie in a Cookie header, or undefined. */
@@ -74,7 +69,6 @@ export function createRecorderExtension(deps: {
   learningSettingsStore: { read(): Promise<LearningSettings> };
   /** The client the existing Learning container probe uses. */
   snapshots: Pick<CopilotKitIntelligence, "getLearnedSkillsSnapshot">;
-  demonstrations: RecorderDemonstrationDeps;
   auditStore: AuditStore;
 }): RecorderExtensionDeps & {
   /** Also the demonstration recorder's `ownsBot`, so there is one copy. */
@@ -83,7 +77,6 @@ export function createRecorderExtension(deps: {
 } {
   const { config, database, organizationAuth } = deps;
   const connections = createRecorderConnectionStore(database);
-  const media = createDemonstrationMediaStore(database);
 
   const canRecordForBot = async (ownerUserId: string, botId: string) =>
     (await deps.pluginStore.agentOwner(botId)) === ownerUserId ||
@@ -138,15 +131,6 @@ export function createRecorderExtension(deps: {
     probeTimeoutMs: 3_000,
   });
 
-  const demonstrationOwner = async (id: string) =>
-    (
-      await database
-        .select({ owner: demonstrations.ownerUserId })
-        .from(demonstrations)
-        .where(eq(demonstrations.id, id))
-        .limit(1)
-    )[0]?.owner ?? null;
-
   // The Learning checks run at once, not one after another: each is bounded by its 3 s probe and cached per container for 60 s.
   const listBots: RecorderExtensionDeps["listBots"] = async (actor) => {
     const profiles = (
@@ -168,7 +152,6 @@ export function createRecorderExtension(deps: {
 
   return {
     connections,
-    media,
     allowedExtensionIds: () => allowedExtensionIds(config),
     listBots,
     user: async (userId) => {
@@ -179,10 +162,8 @@ export function createRecorderExtension(deps: {
     },
     capabilities: () => ({ transcription: Boolean(config.transcription) }),
     sealOrganizationSession,
-    demonstrations: deps.demonstrations,
     resolve,
     onRefused: createRecorderRefusalAudit(deps.auditStore),
-    demonstrationOwner,
     canRecordForBot,
     learningSpace,
   };

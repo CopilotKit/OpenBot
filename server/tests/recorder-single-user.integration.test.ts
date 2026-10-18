@@ -45,7 +45,6 @@ const recorder = createRecorderExtension({
   actorFor: async (id) => ({ id, role: "admin" }),
   learningSettingsStore: { read: async () => ({}) as never },
   snapshots: { getLearnedSkillsSnapshot: async () => ({}) as never },
-  demonstrations: {} as never,
   auditStore,
 });
 const app = createApp(
