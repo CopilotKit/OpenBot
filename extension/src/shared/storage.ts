@@ -37,6 +37,9 @@ export type DrainRecord = {
   stopPending?: boolean;
   /** Start over: delete this demonstration once its outbox has drained. */
   discard: boolean;
+  /** The person chose to discard it (Discard kept events, Disconnect): nothing of it is ever sent, and a restart that
+   * interrupted the clearing finishes it. */
+  discarding?: boolean;
   /** Set while its events are kept after a stop (hold) or stop (park) row, or while it waits for its person to connect
    * again; cleared on offscreen.done. */
   kept?: KeptEvents;

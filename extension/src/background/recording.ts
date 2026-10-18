@@ -955,7 +955,7 @@ export function installRecording(
       if (!found && !active) offscreenDone.delete(demonstrationId);
       return found;
     });
-    if (drain && !drain.stopPending) {
+    if (drain && !drain.stopPending && !drain.discarding) {
       // A discarded recording's bodies are deleted with the rest of it, never sent.
       const removable = drain.discard
         ? await deleteOnOpenBot(drain)
@@ -1612,6 +1612,7 @@ export function installRecording(
     const pending = ((await readLocal("drains")) ?? []).filter(
       (drain) =>
         drain.stopPending &&
+        !drain.discarding &&
         !drain.kept?.waitingForReconnect &&
         ownedBy(drain, connection),
     );
@@ -1655,7 +1656,7 @@ export function installRecording(
   ): Promise<void> {
     await updateDrains((drains) =>
       drains.map((drain) =>
-        !belongs(drain) || drain.discard
+        !belongs(drain) || drain.discard || drain.discarding
           ? drain
           : {
               ...drain,
@@ -1974,25 +1975,39 @@ export function installRecording(
 
   // ---- Kept events, Disconnect and reconnecting ----------------------------------------------
 
-  /** The person's own discard: the document clears their outbox and media, and the queued steps go here. */
+  /** The person's own discard: the drains are marked first (so a restart that interrupts the clearing finishes it and
+   * never sends them), then the document clears their outbox and media, and the queued steps go here. */
   async function discardDrains(demonstrationIds: string[]): Promise<void> {
     if (demonstrationIds.length === 0) return;
+    await updateDrains((drains) =>
+      drains.map((drain) =>
+        demonstrationIds.includes(drain.demonstrationId)
+          ? { ...drain, discarding: true }
+          : drain,
+      ),
+    );
+    await finishDiscards();
+  }
+
+  /** Clears every drain the person chose to discard, whoever is connected: nothing of it is sent to OpenBot. */
+  async function finishDiscards(): Promise<void> {
+    const marked = ((await readLocal("drains")) ?? [])
+      .filter((drain) => drain.discarding)
+      .map((drain) => drain.demonstrationId);
+    if (marked.length === 0) return;
     const port = await openDocument();
     try {
       port.postMessage({
         type: "offscreen.discard",
-        demonstrationIds,
+        demonstrationIds: marked,
       } satisfies BackgroundToOffscreen);
     } finally {
       releaseEvents();
     }
     const database = await db();
-    for (const id of demonstrationIds)
-      await deleteDemonstrationData(database, id);
+    for (const id of marked) await deleteDemonstrationData(database, id);
     await updateDrains((drains) =>
-      drains.filter(
-        (drain) => !demonstrationIds.includes(drain.demonstrationId),
-      ),
+      drains.filter((drain) => !marked.includes(drain.demonstrationId)),
     );
   }
 
@@ -2011,6 +2026,7 @@ export function installRecording(
    * OpenBot, keep waiting: they are never sent under someone else's connection, and recovery marks them waiting for their
    * person. */
   async function sendDrains(options: { recovering: boolean }): Promise<void> {
+    await finishDiscards();
     const connection = await currentConnection();
     if (options.recovering)
       await markWaiting(
@@ -2028,7 +2044,9 @@ export function installRecording(
         return rest;
       }),
     );
-    const own = drains.filter((drain) => ownedBy(drain, connection));
+    const own = drains.filter(
+      (drain) => ownedBy(drain, connection) && !drain.discarding,
+    );
     if (own.length === 0) return;
     for (const drain of own) {
       const target = { openbotUrl: drain.openbotUrl, token: connection.token };
@@ -2058,8 +2076,8 @@ export function installRecording(
     }
     const port = await openDocument();
     try {
-      const fresh = ((await readLocal("drains")) ?? []).filter((drain) =>
-        ownedBy(drain, connection),
+      const fresh = ((await readLocal("drains")) ?? []).filter(
+        (drain) => ownedBy(drain, connection) && !drain.discarding,
       );
       port.postMessage({
         type: "offscreen.recover",
@@ -2217,6 +2235,7 @@ export function installRecording(
       !connection ||
       !drain ||
       !ownedBy(drain, connection) ||
+      drain.discarding ||
       drain.kept?.waitingForReconnect
     )
       return;

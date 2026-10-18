@@ -971,3 +971,62 @@ test("after a browser restart with nobody connected, the interrupted recording w
     [undefined, undefined],
   ]);
 });
+
+// ---- A recording the person discarded is never sent -------------------------------------------
+
+/** A drain whose discard the person chose and a restart interrupted before it finished clearing it. */
+async function storeDiscardingDrain(id: string) {
+  const drain: DrainRecord = {
+    demonstrationId: id,
+    botId: "bot-1",
+    title: "Ada's",
+    openbotUrl: origin,
+    userId: ada.id,
+    userName: ada.name,
+    trajectoryIds: [`t-${id}`],
+    startedAt: now - 60_000,
+    stopPending: true,
+    discard: false,
+    discarding: true,
+  };
+  fake.storage.local.set("drains", [drain]);
+  await queueSteps(id, [click("Approve")]);
+  await queueBodies(id, 2);
+}
+
+async function expectDiscardFinished(id: string) {
+  await until(() => drains().length === 0, "the discarded drain cleared");
+  expect(requests()).toEqual([]);
+  expect(bodies).toEqual([]);
+  expect(sentToDocument("offscreen.recover")).toEqual([]);
+  expect(sentToDocument("offscreen.discard")).toEqual([
+    { type: "offscreen.discard", demonstrationIds: [id] },
+  ]);
+  expect(await storedSteps(id)).toHaveLength(0);
+  expect(await storedBodies(id)).toBe(0);
+}
+
+test("a browser start finishes a discard the restart interrupted and sends nothing of that recording", async () => {
+  await restartBrowser();
+  await storeDiscardingDrain("demo-gone");
+  startWorker();
+  await recoverInterruptedRecording();
+  await expectDiscardFinished("demo-gone");
+});
+
+test("a reconnect finishes a discard the restart interrupted and sends nothing of that recording", async () => {
+  await restartBrowser();
+  await storeDiscardingDrain("demo-gone");
+  startWorker();
+  await handlers.connected();
+  await expectDiscardFinished("demo-gone");
+});
+
+test("a discard the restart interrupted is finished even when nobody is connected", async () => {
+  await restartBrowser();
+  await storeDiscardingDrain("demo-gone");
+  fake.storage.local.delete("connection");
+  startWorker();
+  await recoverInterruptedRecording();
+  await expectDiscardFinished("demo-gone");
+});
