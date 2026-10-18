@@ -43,7 +43,7 @@ export async function openbotRaw(
   });
 }
 
-async function readErrorBody(
+export async function readErrorBody(
   response: Response,
 ): Promise<RecorderErrorBody | null> {
   try {

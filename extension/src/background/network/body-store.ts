@@ -14,6 +14,7 @@ import {
   OpenBotError,
   openbotJson,
   openbotRaw,
+  readErrorBody,
 } from "../../shared/openbot-client";
 import type { DrainRecord } from "../../shared/storage";
 import type { RecordingContext } from "./index";
@@ -57,8 +58,14 @@ const CHUNK_TIMEOUT_MS = 30_000;
 const NETWORK_MIME = "application/x-ndjson";
 
 /** Where a media's upload stands: `chunks` acknowledged so far, `offset` bytes of the first stored line already
- * acknowledged, and the length of a chunk taken but not yet acknowledged (so a resend has the same index and bytes). */
-type Progress = { chunks: number; offset: number; inflight?: number };
+ * acknowledged, the length of a chunk taken but not yet acknowledged (so a resend has the same index and bytes), and
+ * whether OpenBot took the media's `complete` (so recovery can tell a completion still owed from one already sent). */
+type Progress = {
+  chunks: number;
+  offset: number;
+  inflight?: number;
+  completed?: boolean;
+};
 const linkKey = (demonstrationId: string) => `media:${demonstrationId}:network`;
 const nextKey = (mediaId: string) => `bodies-next:${mediaId}`;
 const progressKey = (mediaId: string) => `bodies-progress:${mediaId}`;
@@ -215,12 +222,15 @@ async function putChunk(
       signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
     },
   );
-  if (!response.ok)
+  if (!response.ok) {
+    const body = await readErrorBody(response);
     throw new OpenBotError(
       response.status,
-      `OpenBot answered ${response.status} for a network body chunk.`,
-      null,
+      body?.error ??
+        `OpenBot answered ${response.status} for a network body chunk.`,
+      body,
     );
+  }
 }
 
 /** Uploads a media's pending bytes in numbered chunks, deleting each chunk's lines once OpenBot acknowledged it.
@@ -246,15 +256,21 @@ async function completeMedia(
   target: Target,
   mediaId: string,
 ): Promise<void> {
-  const { chunks } = await readProgress(db, mediaId);
+  const progress = await readProgress(db, mediaId);
   await openbotJson<{ media: MediaRecord }>(
     target,
     recorderPaths.mediaComplete(target.demonstrationId, mediaId),
     {
-      body: { chunkCount: chunks },
+      body: { chunkCount: progress.chunks },
       signal: AbortSignal.timeout(MEDIA_TIMEOUT_MS),
     },
   );
+  await tx(db, ["meta"], "readwrite", (t) => {
+    t.objectStore("meta").put(
+      { ...progress, completed: true } satisfies Progress,
+      progressKey(mediaId),
+    );
+  });
 }
 
 async function linkedMedia(
@@ -287,7 +303,8 @@ export function createBodyStore(
   target: () => RecordingContext | null,
   deps: Deps = {},
 ): BodyStore {
-  const openDb = deps.db ?? (() => openRecorderDatabase());
+  let opened: Promise<IDBDatabase> | null = null;
+  const openDb = deps.db ?? (() => (opened ??= openRecorderDatabase()));
   const timers: Timers = deps.timers ?? {
     set: (fn, ms) => setTimeout(fn, ms),
     clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
@@ -445,7 +462,8 @@ export function createBodyStore(
 }
 
 /** After a browser restart: uploads the network body lines a drained recording still has in IndexedDB, in line order
- * and none twice, and completes its media. A no-op (no request) when nothing is buffered for it. */
+ * and none twice, and completes its media; with every line already acknowledged it sends only the `complete` still
+ * owed. A no-op (no request) when nothing is buffered for it and its media is completed or never took a chunk. */
 export async function recoverNetworkBodies(
   drain: DrainRecord,
   target: { openbotUrl: string; token: string },
@@ -457,7 +475,9 @@ export async function recoverNetworkBodies(
     const mediaId = await linkedMedia(db, drain.demonstrationId);
     if (!mediaId) return;
     const rows = await readRows(db, mediaId, 1);
-    if (rows.length === 0) return;
+    const progress = await readProgress(db, mediaId);
+    if (rows.length === 0 && (progress.chunks === 0 || progress.completed))
+      return;
     const full = { ...target, demonstrationId: drain.demonstrationId };
     await uploadPending(db, full, mediaId, true);
     await completeMedia(db, full, mediaId);

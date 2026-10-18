@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   networkBodyRef,
   RECORDER_MEDIA_CHUNK_BYTES,
   RECORDER_NETWORK_BODY_MAX_BYTES,
+  RECORDER_SIGNED_OUT,
 } from "@openbot/shared/recorder-api";
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from "fake-indexeddb";
 import {
@@ -11,7 +12,9 @@ import {
   recoverNetworkBodies,
 } from "../src/background/network/body-store";
 import type { RecordingContext } from "../src/background/network/index";
+import * as database from "../src/shared/database";
 import { openRecorderDatabase, requestToPromise } from "../src/shared/database";
+import { OpenBotError } from "../src/shared/openbot-client";
 import type { DrainRecord } from "../src/shared/storage";
 
 type IndexedDbGlobals = {
@@ -331,6 +334,91 @@ describe("body store", () => {
     await recoverNetworkBodies(drain, target, { db: async () => db });
     expect(puts).toHaveLength(1);
     expect(completes).toHaveLength(1);
+  });
+
+  test("a chunk upload refused as signed out rejects recovery with a signed-out OpenBotError, and the lines stay", async () => {
+    putAnswers = [
+      Response.json(
+        {
+          error: "This Recorder was signed out.",
+          code: RECORDER_SIGNED_OUT,
+          reason: "revoked",
+        },
+        { status: 401 },
+      ),
+    ];
+    const store = makeStore();
+    await store.add(record(0));
+    const failure = await recoverNetworkBodies(
+      { demonstrationId: context.demonstrationId } as DrainRecord,
+      { openbotUrl: context.openbotUrl, token: "tok" },
+      { db: async () => db },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OpenBotError);
+    expect((failure as OpenBotError).signedOut).toBe(true);
+    expect((failure as OpenBotError).body?.reason).toBe("revoked");
+    expect((failure as OpenBotError).message).toBe(
+      "This Recorder was signed out.",
+    );
+    expect(completes).toHaveLength(0);
+    expect(await storedLines()).toEqual([0]);
+  });
+
+  test("recoverNetworkBodies completes a media whose lines were all acknowledged before the crash, then does nothing", async () => {
+    const store = makeStore();
+    for (let n = 0; n < 4; n++) await store.add(record(n, 300 * 1024));
+    await store.flush();
+    expect(puts).toHaveLength(3);
+    expect(await storedLines()).toEqual([]);
+    expect(completes).toHaveLength(0);
+    const drain = { demonstrationId: context.demonstrationId } as DrainRecord;
+    const target = { openbotUrl: context.openbotUrl, token: "tok2" };
+    await recoverNetworkBodies(drain, target, { db: async () => db });
+    expect(puts).toHaveLength(3);
+    expect(completes).toEqual([
+      { mediaId: puts[0]?.mediaId ?? "", body: { chunkCount: 3 } },
+    ]);
+    await recoverNetworkBodies(drain, target, { db: async () => db });
+    expect(puts).toHaveLength(3);
+    expect(completes).toHaveLength(1);
+  });
+
+  test("recoverNetworkBodies sends nothing for a media close already completed", async () => {
+    const store = makeStore();
+    await store.add(record(0));
+    await store.close();
+    expect(completes).toHaveLength(1);
+    await recoverNetworkBodies(
+      { demonstrationId: context.demonstrationId } as DrainRecord,
+      { openbotUrl: context.openbotUrl, token: "tok" },
+      { db: async () => db },
+    );
+    expect(puts).toHaveLength(1);
+    expect(completes).toHaveLength(1);
+  });
+
+  test("the default opener opens the Recorder database once however many adds there are", async () => {
+    const opens = spyOn(database, "openRecorderDatabase");
+    try {
+      const store = createBodyStore(() => context, { timers: fakeTimers });
+      for (let n = 0; n < 5; n++) await store.add(record(n));
+      await store.flush();
+      expect(lines(puts).map((r) => r.requestId)).toEqual([
+        "r0",
+        "r1",
+        "r2",
+        "r3",
+        "r4",
+      ]);
+      expect(opens).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const result of opens.mock.results)
+        (await (result.value as Promise<IDBDatabase>)).close();
+      opens.mockRestore();
+    }
   });
 
   test("recoverNetworkBodies sends nothing for a recording that never kept a body", async () => {
